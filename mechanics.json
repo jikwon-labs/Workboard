@@ -1,0 +1,337 @@
+{
+ "version": 1,
+ "values": [
+  {
+   "name": "priority urgent color",
+   "group": "priority",
+   "value": "#f50000",
+   "source": "web chunk init_chunk_H5N2FMGG (main2-6000abb682.js)"
+  },
+  {
+   "name": "priority high color",
+   "group": "priority",
+   "value": "#ffcc00",
+   "source": "web chunk init_chunk_H5N2FMGG (main2-6000abb682.js)"
+  },
+  {
+   "name": "priority normal color",
+   "group": "priority",
+   "value": "#6fddff",
+   "source": "web chunk init_chunk_H5N2FMGG (main2-6000abb682.js)"
+  },
+  {
+   "name": "priority low color",
+   "group": "priority",
+   "value": "#d8d8d8",
+   "source": "web chunk init_chunk_H5N2FMGG (main2-6000abb682.js)"
+  },
+  {
+   "name": "priority levels",
+   "group": "priority",
+   "value": 4,
+   "source": "web chunk init_chunk_H5N2FMGG (main2-6000abb682.js)"
+  },
+  {
+   "name": "default status 1",
+   "group": "statuses",
+   "value": "to do",
+   "source": "web chunk init_chunk_BL5SK4JQ (common30-16a6bbbf3b.js)"
+  },
+  {
+   "name": "default status 2",
+   "group": "statuses",
+   "value": "in progress",
+   "source": "web chunk init_chunk_BL5SK4JQ (common30-16a6bbbf3b.js)"
+  },
+  {
+   "name": "default status 3",
+   "group": "statuses",
+   "value": "complete",
+   "source": "web chunk init_chunk_BL5SK4JQ (common30-16a6bbbf3b.js)"
+  },
+  {
+   "name": "open status color",
+   "group": "statuses",
+   "value": "#87909e",
+   "source": "web chunk init_chunk_75VRJ7JF (main3-b7eea52838.js)"
+  },
+  {
+   "name": "complete status color",
+   "group": "statuses",
+   "value": "#299764",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "in progress status color",
+   "group": "statuses",
+   "value": "#0880ea",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "primary color",
+   "group": "theme",
+   "value": "#202020",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "sidebar background",
+   "group": "theme",
+   "value": "#f9f9f9",
+   "source": "styles-HCC7SJPR.css --cu-grey100"
+  },
+  {
+   "name": "text color",
+   "group": "theme",
+   "value": "#202020",
+   "source": "styles-HCC7SJPR.css --cu-grey1100"
+  },
+  {
+   "name": "overlay opacity",
+   "group": "theme",
+   "value": 0.6,
+   "source": "styles-HCC7SJPR.css --cu-background-overlay"
+  },
+  {
+   "name": "command search shortcut",
+   "group": "controls",
+   "value": "Cmd+K",
+   "estimated": true
+  },
+  {
+   "name": "new task shortcut",
+   "group": "controls",
+   "value": "Cmd+N",
+   "source": "main.js menu accelerator CommandOrControl+N"
+  },
+  {
+   "name": "calendar week start",
+   "group": "views",
+   "value": "Sunday",
+   "source": "selector Gn$2 week_start_day default 0 (common17-7c804e7eda.js)"
+  },
+  {
+   "name": "show closed tasks by default",
+   "group": "views",
+   "value": false,
+   "estimated": true,
+   "note": "dashboard cards use show_closed:false (common34); list/board default not found"
+  },
+  {
+   "name": "views",
+   "group": "views",
+   "value": "List, Board, Calendar, Gantt, Table",
+   "estimated": true
+  },
+  {
+   "name": "due group cap",
+   "group": "grouping",
+   "value": 7,
+   "unit": "days",
+   "source": "B$4 in common11-dc5fdf6036.js, used by A$1"
+  },
+  {
+   "name": "overdue grouping",
+   "group": "grouping",
+   "value": "all past days -> one Overdue group",
+   "source": "function A$1 (common11-dc5fdf6036.js)"
+  },
+  {
+   "name": "closed tasks due group",
+   "group": "grouping",
+   "value": "Done",
+   "source": "function A$1 (common11-dc5fdf6036.js)"
+  },
+  {
+   "name": "my work sections",
+   "group": "home",
+   "value": "Today, Overdue, Next, Unscheduled, Done",
+   "source": "inbox chunk (common11-dc5fdf6036.js)"
+  },
+  {
+   "name": "native launcher",
+   "group": "program",
+   "value": "starts Electron only; no task logic",
+   "source": "entry 0x100000460, sub_1000004c0 0x1000004c0 (MacOS/ClickUp)"
+  },
+  {
+   "name": "header height",
+   "group": "layout",
+   "value": 40,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "search width share",
+   "group": "layout",
+   "value": 0.2,
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "search min width",
+   "group": "layout",
+   "value": 176,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "search max width",
+   "group": "layout",
+   "value": 360,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "rail width",
+   "group": "layout",
+   "value": 52,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "rail icon box",
+   "group": "layout",
+   "value": 32,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "rail gradient top",
+   "group": "layout",
+   "value": "#000000",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "rail gradient bottom",
+   "group": "layout",
+   "value": "#000000",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "panel gap",
+   "group": "layout",
+   "value": 6,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "card radius",
+   "group": "layout",
+   "value": 8,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "tray height",
+   "group": "layout",
+   "value": 37,
+   "unit": "px",
+   "source": "styles-HCC7SJPR.css app-loading-placeholder (ClickUp 4 shell)"
+  },
+  {
+   "name": "app background",
+   "group": "layout",
+   "value": "#ffffff",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "rail items",
+   "group": "layout",
+   "value": "Home, Planner, AI, Teams, More; Invite at the bottom",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "chat sections",
+   "group": "chat",
+   "value": "Channels, Direct Messages",
+   "source": "sidebar labels qe/m$7 (common47-a9e55d522c.js, main6-7ebd5444c6.js)"
+  },
+  {
+   "name": "chat rail position",
+   "group": "chat",
+   "value": "Channels and Direct Messages in the Home sidebar",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "chat threads",
+   "group": "chat",
+   "value": true,
+   "source": "\"Reply in thread\" label in chat bundles"
+  },
+  {
+   "name": "chat reactions",
+   "group": "chat",
+   "value": true,
+   "source": "\"Add reaction\" label in chat bundles"
+  },
+  {
+   "name": "quick reactions",
+   "group": "chat",
+   "value": "thumbs up, check, eyes, party",
+   "estimated": true
+  },
+  {
+   "name": "sidebar width",
+   "group": "layout",
+   "value": 255,
+   "unit": "px",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "sidebar row radius",
+   "group": "layout",
+   "value": 7,
+   "unit": "px",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "list row height",
+   "group": "layout",
+   "value": 36,
+   "unit": "px",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "open status pill",
+   "group": "statuses",
+   "value": "rgba(0,0,0,0.06) with dark text",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "board tab icon color",
+   "group": "layout",
+   "value": "#3e63dd",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "calendar tab icon color",
+   "group": "layout",
+   "value": "#f76808",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "gantt tab icon color",
+   "group": "layout",
+   "value": "#e5484d",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "table tab icon color",
+   "group": "layout",
+   "value": "#30a46c",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "task window inset",
+   "group": "layout",
+   "value": 24,
+   "unit": "px",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  },
+  {
+   "name": "group pill background",
+   "group": "layout",
+   "value": "#f0f1fe",
+   "source": "measured from the running ClickUp (debugging port, Nov 13 2026)"
+  }
+ ]
+}

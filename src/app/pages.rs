@@ -1,0 +1,717 @@
+// The newer layout pieces: the icon rail on the far left, the task tray at
+// the bottom of the work card, and the rail's pages (Planner, Teams, Docs,
+// Dashboards, Timesheets). Layout values come from MECHANICS.md.
+
+use super::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Section {
+    Home,
+    Chat,
+    Planner,
+    Teams,
+    Docs,
+    Dashboards,
+    Timesheets,
+    People,
+    Posts,
+    Meetings,
+    Goals,
+    Forms,
+    Whiteboards,
+    Ai,
+}
+
+fn week_start(d: NaiveDate) -> NaiveDate {
+    d - Duration::days(d.weekday().num_days_from_sunday() as i64)
+}
+
+fn ts_date(ts: i64) -> NaiveDate {
+    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today)
+}
+
+fn day_start_ts(d: NaiveDate) -> i64 {
+    d.and_hms_opt(9, 0, 0)
+        .and_then(|x| x.and_local_timezone(chrono::Local).single())
+        .map(|x| x.timestamp())
+        .unwrap_or_else(now_ts)
+}
+
+fn page_title(ui: &mut Ui, t: &Theme, title: &str, sub: &str) {
+    ui.label(RichText::new(title).size(20.0).strong());
+    if !sub.is_empty() {
+        ui.label(RichText::new(sub).color(t.text2));
+    }
+    ui.add_space(10.0);
+}
+
+fn bar_row(ui: &mut Ui, t: &Theme, label: &str, value: f32, max: f32, color: Color32, right: String) {
+    let w = ui.available_width();
+    let (r, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
+    let p = ui.painter();
+    p.text(r.left_center(), Align2::LEFT_CENTER, label, FontId::proportional(12.5), t.text);
+    let bar = Rect::from_min_max(pos2(r.left() + 120.0, r.center().y - 5.0), pos2(r.right() - 60.0, r.center().y + 5.0));
+    p.rect_filled(bar, 5.0, t.hover);
+    if max > 0.0 && value > 0.0 {
+        let f = (value / max).clamp(0.0, 1.0);
+        p.rect_filled(Rect::from_min_size(bar.min, vec2((bar.width() * f).max(6.0), bar.height())), 5.0, color);
+    }
+    p.text(r.right_center(), Align2::RIGHT_CENTER, right, FontId::proportional(12.0), t.text2);
+}
+
+fn card<R>(ui: &mut Ui, t: &Theme, w: f32, title: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::Frame::new()
+        .fill(t.card)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(w - 34.0);
+                ui.label(RichText::new(title).size(14.5).strong());
+                ui.add_space(6.0);
+                add(ui)
+            })
+            .inner
+        })
+        .inner
+}
+
+impl App {
+    // ---------------------------------------------------------------- tray
+
+    pub(super) fn tray(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        egui::TopBottomPanel::bottom("tray")
+            .exact_height(37.0)
+            .show_separator_line(true)
+            .frame(egui::Frame::new().fill(t.tray).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: 7, se: 7 }).inner_margin(egui::Margin::same(8)))
+            .show_inside(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let ids = self.recent.clone();
+                    if ids.is_empty() {
+                        ui.label(RichText::new("Opened tasks stay here for quick access").small().color(t.text3));
+                    }
+                    let mut remove = None;
+                    for (i, id) in ids.iter().enumerate() {
+                        let Some(task) = self.task(*id) else { continue };
+                        let w = if i == 1 { 180.0 } else { 128.0 };
+                        let (r, resp) = ui.allocate_exact_size(vec2(w, 21.0), Sense::click());
+                        ui.painter().rect_filled(r, 5.0, if resp.hovered() { t.border } else { t.hover });
+                        let st = self.data.status_of(task);
+                        paint_status_circle(ui.painter(), r.left_center() + vec2(10.0, 0.0), 5.0, &st);
+                        let chars = ((w - 40.0) / 6.5) as usize;
+                        ui.painter().text(r.left_center() + vec2(20.0, 0.0), Align2::LEFT_CENTER, truncate(&task.name, chars), FontId::proportional(11.5), t.text);
+                        let xr = Rect::from_center_size(r.right_center() - vec2(9.0, 0.0), vec2(14.0, 14.0));
+                        let x = ui.interact(xr, ui.id().with(("trayx", id)), Sense::click());
+                        if resp.hovered() || x.hovered() {
+                            ui.painter().text(xr.center(), Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(9.0), t.text3);
+                        }
+                        if x.clicked() {
+                            remove = Some(*id);
+                        } else if resp.clicked() {
+                            self.actions.push(Action::Open(*id));
+                        }
+                    }
+                    if let Some(id) = remove {
+                        self.recent.retain(|r| *r != id);
+                    }
+                });
+            });
+    }
+
+    // ---------------------------------------------------------------- planner
+
+    pub(super) fn planner(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let me = self.data.me;
+        // Labs: start the week on Monday
+        let monday = self.data.extra.labs.iter().any(|l| l == "week_monday");
+        let wd = self.planner_week.weekday().num_days_from_sunday();
+        if monday && wd == 0 {
+            self.planner_week += Duration::days(1);
+        } else if !monday && wd == 1 {
+            self.planner_week -= Duration::days(1);
+        }
+        let week = self.planner_week;
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Planner").size(20.0).strong());
+                ui.add_space(16.0);
+                if ui.button("Today").clicked() {
+                    self.planner_week = week_start(today()) + Duration::days(if monday { 1 } else { 0 });
+                }
+                if ui.button("<").clicked() {
+                    self.planner_week = week - Duration::days(7);
+                }
+                if ui.button(">").clicked() {
+                    self.planner_week = week + Duration::days(7);
+                }
+                let end = week + Duration::days(6);
+                ui.label(RichText::new(format!("{} - {}", week.format("%b %-d"), end.format("%b %-d, %Y"))).size(15.0));
+            });
+            ui.add_space(10.0);
+            let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x)).cloned().collect();
+            let avail = ui.available_rect_before_wrap();
+            let left_w = 260.0;
+            let mut dropped: Option<(u64, Option<NaiveDate>)> = None;
+            ui.horizontal_top(|ui| {
+                // unscheduled list
+                ui.vertical(|ui| {
+                    ui.set_width(left_w);
+                    ui.set_min_height(avail.height() - 10.0);
+                    let frame = egui::Frame::new().fill(t.column_bg).corner_radius(10).inner_margin(egui::Margin::same(10));
+                    let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
+                        ui.set_width(left_w - 20.0);
+                        ui.set_min_height(avail.height() - 40.0);
+                        ui.label(RichText::new("To schedule").strong());
+                        ui.label(RichText::new("Your tasks without a due date. Drag one onto a day.").small().color(t.text3));
+                        ui.add_space(6.0);
+                        for task in mine.iter().filter(|x| x.due.is_none()) {
+                            let resp = ui.dnd_drag_source(egui::Id::new(("plan", task.id)), task.id, |ui| self.plan_chip(ui, task, left_w - 20.0));
+                            if resp.response.clicked() {
+                                self.actions.push(Action::Open(task.id));
+                            }
+                        }
+                    });
+                    if let Some(p) = payload {
+                        dropped = Some((*p, None));
+                    }
+                });
+                // week columns
+                let col_w = ((ui.available_width() - 7.0 * 22.0) / 7.0).max(100.0);
+                for i in 0..7 {
+                    let d = week + Duration::days(i);
+                    ui.vertical(|ui| {
+                        ui.set_width(col_w);
+                        let is_today = d == today();
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(d.format("%a").to_string()).color(t.text3));
+                            let n = RichText::new(d.day().to_string()).strong();
+                            ui.label(if is_today { n.color(t.danger) } else { n });
+                        });
+                        let frame = egui::Frame::new()
+                            .fill(if is_today { t.selected_bg.gamma_multiply(0.5) } else { t.bg })
+                            .stroke(Stroke::new(1.0, t.border))
+                            .corner_radius(8)
+                            .inner_margin(egui::Margin::same(6));
+                        let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
+                            ui.set_width(col_w - 12.0);
+                            ui.set_min_height(avail.height() - 60.0);
+                            // overdue tasks from before this week are shown on today's column
+                            let carried = |x: &&Task| is_today && x.due.map(|dd| dd < week).unwrap_or(false);
+                            for task in mine.iter().filter(|x| x.due == Some(d) || carried(x)) {
+                                let resp = ui.dnd_drag_source(egui::Id::new(("plan", task.id)), task.id, |ui| self.plan_chip(ui, task, col_w - 12.0));
+                                if resp.response.clicked() {
+                                    self.actions.push(Action::Open(task.id));
+                                }
+                            }
+                        });
+                        if let Some(p) = payload {
+                            dropped = Some((*p, Some(d)));
+                        }
+                    });
+                }
+            });
+            if let Some((id, due)) = dropped {
+                if let Some(mut task) = self.task(id).cloned() {
+                    task.due = due;
+                    self.actions.push(Action::Replace(task));
+                }
+            }
+        });
+    }
+
+    fn plan_chip(&self, ui: &mut Ui, task: &Task, w: f32) {
+        let t = self.t();
+        let st = self.data.status_of(task);
+        egui::Frame::new()
+            .fill(t.card)
+            .stroke(Stroke::new(1.0, t.border))
+            .corner_radius(6)
+            .inner_margin(egui::Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_width(w - 18.0);
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                    paint_status_circle(ui.painter(), r.center(), 5.5, &st);
+                    ui.add(egui::Label::new(RichText::new(&task.name).size(12.5)).truncate());
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.data.list_name(task.list_id)).small().color(t.text3));
+                    if task.priority > 0 {
+                        let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                        paint_flag(ui.painter(), r.left_center() + vec2(2.0, 0.0), priority_color(task.priority, &t), 10.0);
+                    }
+                    if let Some(d) = task.due {
+                        if d < today() {
+                            ui.label(RichText::new("Overdue").small().color(t.danger));
+                        }
+                    }
+                });
+            });
+        ui.add_space(4.0);
+    }
+
+    // ---------------------------------------------------------------- teams
+
+    pub(super) fn teams_workload(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let td = today();
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Teams").size(20.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("\u{1F464} Manage people").clicked() {
+                            self.people_open = true;
+                        }
+                    });
+                });
+                ui.label(RichText::new("What everyone is working on").color(t.text2));
+                ui.add_space(12.0);
+                let members = self.data.members.clone();
+                let max_open = members
+                    .iter()
+                    .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).count())
+                    .max()
+                    .unwrap_or(1)
+                    .max(1);
+                let w = ui.available_width();
+                let cols = ((w / 330.0).floor() as usize).max(1);
+                let cw = (w - 12.0 * (cols as f32 - 1.0)) / cols as f32;
+                for row in members.chunks(cols) {
+                    ui.horizontal_top(|ui| {
+                        for m in row {
+                            let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).cloned().collect();
+                            let active = open.iter().filter(|x| self.data.status_of(x).kind == StatusKind::Custom).count();
+                            let overdue = open.iter().filter(|x| x.due.map(|d| d < td).unwrap_or(false)).count();
+                            let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x)).count();
+                            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_width(cw - 30.0);
+                                    ui.horizontal(|ui| {
+                                        let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
+                                        paint_avatar(ui.painter(), r.center(), 15.0, m, t.card);
+                                        ui.vertical(|ui| {
+                                            let name = if m.id == self.data.me { format!("{} (you)", m.name) } else { m.name.clone() };
+                                            ui.label(RichText::new(name).strong());
+                                            ui.label(RichText::new(format!("{} open  \u{2022}  {} in progress  \u{2022}  {} done", open.len(), active, done)).small().color(t.text2));
+                                        });
+                                    });
+                                    ui.add_space(4.0);
+                                    let (r, _) = ui.allocate_exact_size(vec2(cw - 30.0, 8.0), Sense::hover());
+                                    ui.painter().rect_filled(r, 4.0, t.hover);
+                                    let f = open.len() as f32 / max_open as f32;
+                                    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * f, r.height())), 4.0, rgb(m.color));
+                                    if overdue > 0 {
+                                        ui.label(RichText::new(format!("{} overdue", overdue)).small().color(t.danger));
+                                    }
+                                    ui.add_space(4.0);
+                                    for task in open.iter().take(5) {
+                                        let (r, resp) = ui.allocate_exact_size(vec2(cw - 30.0, 26.0), Sense::click());
+                                        if resp.hovered() {
+                                            ui.painter().rect_filled(r, 5.0, t.hover);
+                                        }
+                                        let st = self.data.status_of(task);
+                                        paint_status_circle(ui.painter(), r.left_center() + vec2(10.0, 0.0), 5.5, &st);
+                                        ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 64.0, r.bottom()))).text(r.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(12.5), t.text);
+                                        if let Some(d) = task.due {
+                                            ui.painter().text(r.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, fmt_date(d), FontId::proportional(11.5), date_color(d, false, &t));
+                                        }
+                                        if resp.clicked() {
+                                            self.actions.push(Action::Open(task.id));
+                                        }
+                                    }
+                                    if open.len() > 5 {
+                                        ui.label(RichText::new(format!("+{} more", open.len() - 5)).small().color(t.text3));
+                                    }
+                                    if open.is_empty() {
+                                        ui.label(RichText::new("No open tasks").small().color(t.text3));
+                                    }
+                                });
+                            });
+                        }
+                    });
+                    ui.add_space(12.0);
+                }
+            });
+        });
+    }
+
+    // ---------------------------------------------------------------- docs
+
+    pub(super) fn docs(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        egui::SidePanel::left("docs_list")
+            .exact_width(250.0)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(t.sidebar).corner_radius(egui::CornerRadius { nw: 8, ne: 0, sw: 0, se: 0 }).inner_margin(egui::Margin::symmetric(10, 12)))
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Docs").size(16.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if primary_button(ui, &t, "+ Doc").clicked() {
+                            let id = self.data.new_id();
+                            let now = now_ts();
+                            self.data.docs.insert(0, Doc { id, space: None, owner: self.data.me, private: false, archived: false, meeting_note: false, title: "Untitled".into(), body: String::new(), created: now, updated: now });
+                            self.doc_open = Some(id);
+                            self.dirty = true;
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+                let docs: Vec<(u64, String, i64)> = self.data.docs.iter().map(|d| (d.id, d.title.clone(), d.updated)).collect();
+                for (id, title, updated) in docs {
+                    let sel = self.doc_open == Some(id);
+                    let w = ui.available_width();
+                    let (r, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
+                    if sel {
+                        ui.painter().rect_filled(r, 6.0, t.selected_bg);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(r, 6.0, t.hover);
+                    }
+                    ui.painter().text(r.left_center() + vec2(12.0, 0.0), Align2::CENTER_CENTER, "\u{1F4C4}", FontId::proportional(13.0), t.text2);
+                    ui.painter().with_clip_rect(r).text(r.left_top() + vec2(26.0, 13.0), Align2::LEFT_CENTER, &title, FontId::proportional(13.0), if sel { t.selected_text } else { t.text });
+                    ui.painter().text(r.left_top() + vec2(26.0, 29.0), Align2::LEFT_CENTER, fmt_ago(updated), FontId::proportional(10.5), t.text3);
+                    if resp.clicked() {
+                        self.doc_open = Some(id);
+                    }
+                }
+            });
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(48, 24))).show_inside(ui, |ui| {
+            let Some(id) = self.doc_open.or_else(|| self.data.docs.first().map(|d| d.id)) else {
+                ui.add_space(60.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("No docs yet").size(16.0).color(t.text2));
+                    ui.label(RichText::new("Create one with + Doc").color(t.text3));
+                });
+                return;
+            };
+            let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else {
+                self.doc_open = None;
+                return;
+            };
+            let mut delete = false;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("Last updated {}", fmt_ago(self.data.docs[idx].updated))).small().color(t.text3));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                        delete = true;
+                    }
+                });
+            });
+            let doc = &mut self.data.docs[idx];
+            let r1 = ui.add(egui::TextEdit::singleline(&mut doc.title).font(FontId::proportional(30.0)).frame(false).desired_width(f32::INFINITY));
+            ui.add_space(8.0);
+            let r2 = egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut doc.body).frame(false).hint_text("Start writing...").font(FontId::proportional(15.0)).desired_width(f32::INFINITY).desired_rows(24))
+                })
+                .inner;
+            if r1.changed() || r2.changed() {
+                doc.updated = now_ts();
+                self.dirty = true;
+            }
+            if delete {
+                let d = self.data.docs[idx].clone();
+                let tid = self.data.new_id();
+                self.data.extra.trash.push(TrashItem { id: tid, kind: "Doc".into(), title: d.title.clone(), deleted: now_ts(), payload: serde_json::to_string(&d).unwrap_or_default() });
+                self.data.docs.remove(idx);
+                self.doc_open = None;
+                self.dirty = true;
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------- dashboards
+
+    pub(super) fn dashboard_content(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let td = today();
+        let now = now_ts();
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let dashes = self.data.extra.dashboards.clone();
+                    let cur = self.dash_open.and_then(|id| dashes.iter().find(|d| d.id == id)).map(|d| d.name.clone()).unwrap_or_else(|| "Workspace overview".into());
+                    ui.label(RichText::new(&cur).size(20.0));
+                    egui::ComboBox::from_id_salt("dash_pick").selected_text("Switch").show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.dash_open, None, "Workspace overview");
+                        for d in &dashes {
+                            ui.selectable_value(&mut self.dash_open, Some(d.id), &d.name);
+                        }
+                    });
+                    if let Some(di) = self.dash_open.and_then(|id| self.data.extra.dashboards.iter().position(|d| d.id == id)) {
+                        let spaces: Vec<(u64, String)> = self.data.spaces.iter().map(|s| (s.id, s.name.clone())).collect();
+                        let cur_space = self.data.extra.dashboards[di].space.and_then(|sid| spaces.iter().find(|s| s.0 == sid)).map(|s| s.1.clone()).unwrap_or_else(|| "All Spaces".into());
+                        let mut sp = self.data.extra.dashboards[di].space;
+                        egui::ComboBox::from_id_salt("dash_space").selected_text(cur_space).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut sp, None, "All Spaces");
+                            for (id, n) in &spaces {
+                                ui.selectable_value(&mut sp, Some(*id), n);
+                            }
+                        });
+                        if sp != self.data.extra.dashboards[di].space {
+                            self.data.extra.dashboards[di].space = sp;
+                            self.dirty = true;
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                            self.data.extra.dashboards.remove(di);
+                            self.dash_open = None;
+                            self.dirty = true;
+                        }
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if primary_button(ui, &t, "+ Dashboard").clicked() {
+                            self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() });
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+                let space_lists: Option<Vec<u64>> = self.dash_open.and_then(|id| self.data.extra.dashboards.iter().find(|d| d.id == id)).and_then(|d| d.space).and_then(|sid| self.data.lists_in(Location::Space(sid)));
+                let top: Vec<&Task> = self.data.tasks.iter().filter(|x| x.parent.is_none()).filter(|x| space_lists.as_ref().map(|l| l.contains(&x.list_id)).unwrap_or(true)).collect();
+                let open = top.iter().filter(|x| !self.data.is_closed(x)).count();
+                let closed = top.len() - open;
+                let overdue: Vec<&&Task> = top.iter().filter(|x| !self.data.is_closed(x) && x.due.map(|d| d < td).unwrap_or(false)).collect();
+                let w = ui.available_width();
+                // stat tiles
+                ui.horizontal(|ui| {
+                    let tw = (w - 36.0) / 4.0;
+                    for (label, v, c) in [
+                        ("Total tasks", top.len(), t.text),
+                        ("Open", open, rgb([0x5f, 0x55, 0xee])),
+                        ("Overdue", overdue.len(), t.danger),
+                        ("Completed", closed, rgb([0x00, 0x88, 0x44])),
+                    ] {
+                        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(tw - 30.0);
+                                ui.label(RichText::new(label).color(t.text2));
+                                ui.label(RichText::new(v.to_string()).size(28.0).strong().color(c));
+                            });
+                        });
+                    }
+                });
+                ui.add_space(12.0);
+                let half = (w - 12.0) / 2.0;
+                ui.horizontal_top(|ui| {
+                    card(ui, &t, half, "Tasks by status", |ui| {
+                        let mut sts: Vec<Status> = vec![];
+                        for s in &self.data.spaces {
+                            for st in &s.statuses {
+                                if !sts.iter().any(|x| x.name == st.name) {
+                                    sts.push(st.clone());
+                                }
+                            }
+                        }
+                        let counts: Vec<usize> = sts.iter().map(|st| top.iter().filter(|x| self.data.status_of(x).name == st.name).count()).collect();
+                        let max = counts.iter().copied().max().unwrap_or(1) as f32;
+                        for (st, n) in sts.iter().zip(counts) {
+                            bar_row(ui, &t, &st.name.to_uppercase(), n as f32, max, rgb(st.color), n.to_string());
+                        }
+                    });
+                    ui.add_space(12.0);
+                    card(ui, &t, half, "Tasks by priority", |ui| {
+                        let counts: Vec<usize> = (0..5u8).map(|p| top.iter().filter(|x| x.priority == p && !self.data.is_closed(x)).count()).collect();
+                        let max = counts.iter().copied().max().unwrap_or(1) as f32;
+                        for p in [1u8, 2, 3, 4, 0] {
+                            bar_row(ui, &t, PRIORITIES[p as usize].label, counts[p as usize] as f32, max, priority_color(p, &t), counts[p as usize].to_string());
+                        }
+                    });
+                });
+                ui.add_space(12.0);
+                ui.horizontal_top(|ui| {
+                    card(ui, &t, half, "Workload by assignee", |ui| {
+                        let counts: Vec<(String, usize, Color32)> = self
+                            .data
+                            .members
+                            .iter()
+                            .map(|m| (m.name.clone(), top.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).count(), rgb(m.color)))
+                            .collect();
+                        let max = counts.iter().map(|c| c.1).max().unwrap_or(1) as f32;
+                        for (name, n, c) in counts {
+                            bar_row(ui, &t, &name, n as f32, max, c, format!("{} open", n));
+                        }
+                    });
+                    ui.add_space(12.0);
+                    card(ui, &t, half, "Time tracked this week", |ui| {
+                        let ws = week_start(td);
+                        let mut per_day = [0i64; 7];
+                        for task in &self.data.tasks {
+                            for e in &task.time_entries {
+                                let d = ts_date(e.start);
+                                let i = (d - ws).num_days();
+                                if (0..7).contains(&i) {
+                                    per_day[i as usize] += e.end - e.start;
+                                }
+                            }
+                            if let Some(st) = task.timer_started {
+                                let i = (ts_date(st) - ws).num_days();
+                                if (0..7).contains(&i) {
+                                    per_day[i as usize] += now - st;
+                                }
+                            }
+                        }
+                        let max = per_day.iter().copied().max().unwrap_or(1).max(1) as f32;
+                        for (i, secs) in per_day.iter().enumerate() {
+                            let d = ws + Duration::days(i as i64);
+                            bar_row(ui, &t, &d.format("%a %-d").to_string(), *secs as f32, max, t.primary, if *secs > 0 { fmt_duration(*secs) } else { "-".into() });
+                        }
+                    });
+                });
+                ui.add_space(12.0);
+                card(ui, &t, w, "Overdue tasks", |ui| {
+                    if overdue.is_empty() {
+                        ui.label(RichText::new("Nothing is overdue").color(t.text3));
+                    }
+                    for task in overdue {
+                        let (r, resp) = ui.allocate_exact_size(vec2(w - 34.0, 28.0), Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, 5.0, t.hover);
+                        }
+                        let st = self.data.status_of(task);
+                        paint_status_circle(ui.painter(), r.left_center() + vec2(10.0, 0.0), 6.0, &st);
+                        ui.painter().text(r.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
+                        if let Some(d) = task.due {
+                            ui.painter().text(r.right_center() - vec2(6.0, 0.0), Align2::RIGHT_CENTER, fmt_date(d), FontId::proportional(12.0), t.danger);
+                        }
+                        if resp.clicked() {
+                            self.actions.push(Action::Open(task.id));
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    // ---------------------------------------------------------------- timesheets
+
+    pub(super) fn timesheets(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let ws = self.sheet_week;
+        let now = now_ts();
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Timesheets").size(20.0).strong());
+                    ui.add_space(16.0);
+                    if ui.button("This week").clicked() {
+                        self.sheet_week = week_start(today());
+                    }
+                    if ui.button("<").clicked() {
+                        self.sheet_week = ws - Duration::days(7);
+                    }
+                    if ui.button(">").clicked() {
+                        self.sheet_week = ws + Duration::days(7);
+                    }
+                    ui.label(RichText::new(format!("{} - {}", ws.format("%b %-d"), (ws + Duration::days(6)).format("%b %-d, %Y"))).size(15.0));
+                });
+                ui.add_space(12.0);
+                // rows: tasks with time in this week
+                let mut rows: Vec<(u64, String, [i64; 7])> = vec![];
+                for task in &self.data.tasks {
+                    let mut per = [0i64; 7];
+                    let mut any = false;
+                    for e in &task.time_entries {
+                        let i = (ts_date(e.start) - ws).num_days();
+                        if (0..7).contains(&i) {
+                            per[i as usize] += e.end - e.start;
+                            any = true;
+                        }
+                    }
+                    if let Some(st) = task.timer_started {
+                        let i = (ts_date(st) - ws).num_days();
+                        if (0..7).contains(&i) {
+                            per[i as usize] += now - st;
+                            any = true;
+                        }
+                    }
+                    if any {
+                        rows.push((task.id, task.name.clone(), per));
+                    }
+                }
+                let w = ui.available_width();
+                let name_w = (w - 8.0 * 90.0).max(220.0);
+                let col = 90.0;
+                let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+                ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "Task", FontId::proportional(12.0), t.text3);
+                for i in 0..7 {
+                    let d = ws + Duration::days(i);
+                    let x = hr.left() + name_w + col * i as f32;
+                    let c = if d == today() { t.danger } else { t.text3 };
+                    ui.painter().text(pos2(x + col / 2.0, hr.center().y), Align2::CENTER_CENTER, d.format("%a %-d").to_string(), FontId::proportional(12.0), c);
+                }
+                ui.painter().text(pos2(hr.left() + name_w + col * 7.0 + col / 2.0, hr.center().y), Align2::CENTER_CENTER, "Total", FontId::proportional(12.0), t.text3);
+                ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+                let mut totals = [0i64; 7];
+                for (id, name, per) in &rows {
+                    let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
+                    if resp.hovered() {
+                        ui.painter().rect_filled(r, 0.0, t.hover);
+                    }
+                    ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.left() + name_w - 8.0, r.bottom()))).text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, name, FontId::proportional(13.0), t.text);
+                    let mut sum = 0;
+                    for i in 0..7 {
+                        totals[i] += per[i];
+                        sum += per[i];
+                        if per[i] > 0 {
+                            let x = r.left() + name_w + col * i as f32;
+                            ui.painter().text(pos2(x + col / 2.0, r.center().y), Align2::CENTER_CENTER, fmt_duration(per[i]), FontId::proportional(12.5), t.text);
+                        }
+                    }
+                    ui.painter().text(pos2(r.left() + name_w + col * 7.0 + col / 2.0, r.center().y), Align2::CENTER_CENTER, fmt_duration(sum), FontId::proportional(12.5), t.text);
+                    ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
+                    if resp.clicked() {
+                        self.actions.push(Action::Open(*id));
+                    }
+                }
+                if rows.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("No time tracked this week. Start a timer from any task.").color(t.text3));
+                }
+                let (fr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
+                ui.painter().text(fr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "Total", FontId::proportional(13.0), t.text);
+                let mut all = 0;
+                for (i, v) in totals.iter().enumerate() {
+                    all += v;
+                    let x = fr.left() + name_w + col * i as f32;
+                    ui.painter().text(pos2(x + col / 2.0, fr.center().y), Align2::CENTER_CENTER, if *v > 0 { fmt_duration(*v) } else { "-".into() }, FontId::proportional(12.5), t.text2);
+                }
+                ui.painter().text(pos2(fr.left() + name_w + col * 7.0 + col / 2.0, fr.center().y), Align2::CENTER_CENTER, fmt_duration(all), FontId::proportional(13.0), t.text);
+                ui.add_space(16.0);
+                // manual entry
+                ui.label(RichText::new("Add time").strong());
+                let id = ui.id().with("manual_time");
+                let (mut task_id, mut day, mut mins): (u64, i64, u32) = ui.data(|d| d.get_temp(id)).unwrap_or((0, (today() - ws).num_days().clamp(0, 6), 30));
+                ui.horizontal(|ui| {
+                    let tasks: Vec<(u64, String)> = self.data.tasks.iter().map(|x| (x.id, x.name.clone())).collect();
+                    if task_id == 0 {
+                        task_id = tasks.first().map(|x| x.0).unwrap_or(0);
+                    }
+                    let cur = tasks.iter().find(|x| x.0 == task_id).map(|x| x.1.clone()).unwrap_or_default();
+                    egui::ComboBox::from_id_salt("ts_task").selected_text(truncate(&cur, 30)).width(240.0).show_ui(ui, |ui| {
+                        for (tid, name) in &tasks {
+                            ui.selectable_value(&mut task_id, *tid, name);
+                        }
+                    });
+                    egui::ComboBox::from_id_salt("ts_day").selected_text((ws + Duration::days(day)).format("%a %-d").to_string()).show_ui(ui, |ui| {
+                        for i in 0..7 {
+                            ui.selectable_value(&mut day, i, (ws + Duration::days(i)).format("%a %-d").to_string());
+                        }
+                    });
+                    ui.add(egui::DragValue::new(&mut mins).range(1..=1440).speed(5).suffix(" min"));
+                    if primary_button(ui, &t, "Add").clicked() && task_id != 0 {
+                        let start = day_start_ts(ws + Duration::days(day));
+                        if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == task_id) {
+                            task.time_entries.push(TimeEntry { start, end: start + mins as i64 * 60 });
+                            self.dirty = true;
+                        }
+                    }
+                });
+                ui.data_mut(|d| d.insert_temp(id, (task_id, day, mins)));
+            });
+        });
+    }
+}

@@ -1,0 +1,1517 @@
+// Menus and dialogs measured from the person's ClickUp: workspace menu,
+// profile menu with personal tools, the sidebar Create menu, the rail More
+// menu, team invite, people and roles, settings, themes, notifications,
+// shortcuts, custom fields, automations, tag manager, templates, CSV import
+// and export, channel settings, share, trash, reminders and the notepad.
+// Online-only features (AI, Clips, Talk to Text, huddles) open a dialog that
+// says they come with the shared server.
+
+use super::*;
+use egui::Response;
+
+pub enum Modal {
+    Invite { emails: String, role: String },
+    WorkspaceSettings { name: String },
+    NewWorkspace { name: String },
+    Profile { name: String, email: String },
+    SetStatus { text: String },
+    Themes,
+    Shortcuts,
+    Help,
+    Labs,
+    Notifications,
+    ClickApps,
+    CustomFields { name: String, kind: String, opts: String },
+    Automations { status: String, action: String, value: String },
+    TagManager { from: String, to: String },
+    Templates,
+    Import { path: String, result: String },
+    ChannelSettings(u64),
+    Share { emails: String },
+    CustomizeNav,
+    CustomizeSidebar,
+    TrackTime { task: u64 },
+    Reminder { text: String, date: Option<NaiveDate>, time: String },
+    Trash,
+    Unavailable { title: String, body: String },
+    Bookmark { title: String, url: String },
+    SwitchUser,
+    NewDashboard { name: String },
+    /// Share the workspace through a folder, or join one.
+    Together { path: String, result: String },
+    WhoAmI { name: String, email: String },
+    Call { ch: u64, link: String },
+}
+
+pub const ROLES: [(&str, &str); 4] = [
+    ("Admin", "Can manage people, settings and all items."),
+    ("Member", "Can access all public items in your Workspace."),
+    ("Guest", "Can only access items shared with them."),
+    ("Owner", "Owns the Workspace."),
+];
+
+/// Personal tools as listed in the original's profile menu.
+pub const TOOLS: [(&str, &str, &str); 12] = [
+    ("create_task", "Create task", "\u{2611}"),
+    ("my_work", "My Work", "\u{1F4BC}"),
+    ("track_time", "Track Time", "\u{23F1}"),
+    ("notepad", "Notepad", "\u{1F4DD}"),
+    ("clip", "Record a Clip", "\u{1F3A5}"),
+    ("stt", "Talk to Text", "\u{1F3A4}"),
+    ("reminder", "Create Reminder", "\u{23F0}"),
+    ("doc", "Create Doc", "\u{1F4C4}"),
+    ("whiteboard", "Create Whiteboard", "\u{1F3A8}"),
+    ("people", "View People", "\u{1F465}"),
+    ("dashboard", "Create Dashboard", "\u{1F4CA}"),
+    ("notetaker", "AI Notetaker", "\u{1F4D3}"),
+];
+
+pub fn unavailable(what: &str) -> Modal {
+    Modal::Unavailable {
+        title: what.to_string(),
+        body: format!(
+            "{} needs an online service (AI, video or voice processing). It will work once the shared server is set up; everything else in this app already works on this computer.",
+            what
+        ),
+    }
+}
+
+fn menu_item(ui: &mut Ui, t: &Theme, icon: &str, label: &str, right: &str) -> Response {
+    let w = ui.available_width().max(200.0);
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 27.0), Sense::click());
+    name_it(&resp, label);
+    if resp.hovered() {
+        ui.painter().rect_filled(r, 6.0, t.hover);
+    }
+    ui.painter().text(r.left_center() + vec2(14.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
+    ui.painter().text(r.left_center() + vec2(32.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), t.text);
+    if !right.is_empty() {
+        ui.painter().text(r.right_center() - vec2(10.0, 0.0), Align2::RIGHT_CENTER, right, FontId::proportional(12.0), t.text3);
+    }
+    resp
+}
+
+fn menu_item2(ui: &mut Ui, t: &Theme, icon: &str, label: &str, sub: &str) -> Response {
+    let w = ui.available_width().max(200.0);
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 44.0), Sense::click());
+    name_it(&resp, label);
+    if resp.hovered() {
+        ui.painter().rect_filled(r, 6.0, t.hover);
+    }
+    ui.painter().text(r.left_top() + vec2(14.0, 14.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
+    ui.painter().text(r.left_top() + vec2(32.0, 14.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), t.text);
+    ui.painter().text(r.left_top() + vec2(32.0, 32.0), Align2::LEFT_CENTER, sub, FontId::proportional(12.0), t.text2);
+    resp
+}
+
+fn section_label(ui: &mut Ui, t: &Theme, s: &str) {
+    ui.add_space(4.0);
+    ui.label(RichText::new(s).size(12.5).color(t.text3));
+}
+
+impl App {
+    // ---------------------------------------------------------------- menus
+
+    pub(super) fn workspace_menu(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        ui.set_width(300.0);
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+            ui.painter().rect_filled(r, 8.0, rgb(self.data.extra.workspace_color));
+            let letter = self.data.workspace.chars().next().unwrap_or('W').to_uppercase().to_string();
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, letter, FontId::proportional(18.0), Color32::WHITE);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(&self.data.workspace).size(16.0));
+                let sub = if self.data.extra.shared.is_some() { "Shared with your team \u{2022} every feature included" } else { "On this computer \u{2022} every feature included" };
+                ui.label(RichText::new(sub).small().color(t.text2));
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 8.0) / 2.0;
+            if ui.add(egui::Button::new("\u{2699}  Settings").min_size(vec2(w, 28.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
+                self.modal = Some(Modal::WorkspaceSettings { name: self.data.workspace.clone() });
+                close_popup(ui);
+            }
+            if ui.add(egui::Button::new("\u{1F465}  People").min_size(vec2(w, 28.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
+                self.section = Section::People;
+                close_popup(ui);
+            }
+        });
+        ui.separator();
+        section_label(ui, &t, "Manage");
+        let items: [(&str, &str); 5] = [("\u{25A6}", "Apps"), ("\u{25A4}", "Templates"), ("\u{1F4DD}", "Custom Fields"), ("\u{2699}", "Automations"), ("\u{1F3F7}", "Tag Manager")];
+        for (icon, label) in items {
+            if menu_item(ui, &t, icon, label, "").clicked() {
+                self.modal = Some(match label {
+                    "Apps" => Modal::ClickApps,
+                    "Templates" => Modal::Templates,
+                    "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
+                    "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() },
+                    _ => Modal::TagManager { from: String::new(), to: String::new() },
+                });
+                close_popup(ui);
+            }
+        }
+        let label = if self.data.extra.shared.is_some() { "Work together (shared)" } else { "Work together" };
+        if menu_item(ui, &t, "\u{1F465}", label, "").clicked() {
+            self.modal = Some(Modal::Together { path: self.data.extra.shared.as_ref().map(|c| c.folder.clone()).unwrap_or_default(), result: String::new() });
+            close_popup(ui);
+        }
+        let others: Vec<WsEntry> = Data::workspaces().into_iter().filter(|w| w.file != self.ws_file).collect();
+        if !others.is_empty() || self.ws_file != "data.json" {
+            ui.separator();
+            section_label(ui, &t, "Switch Workspace");
+            let mut all = others;
+            if self.ws_file != "data.json" && !all.iter().any(|w| w.file == "data.json") {
+                all.insert(0, WsEntry { name: "My Workspace".into(), file: "data.json".into() });
+            }
+            for w in all {
+                if menu_item(ui, &t, "\u{1F3E2}", &w.name, "").clicked() {
+                    self.switch_workspace(&w.file);
+                    close_popup(ui);
+                }
+            }
+        }
+        ui.add_space(4.0);
+        if ui.add(egui::Button::new("+  Create Workspace").min_size(vec2(ui.available_width(), 30.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
+            self.modal = Some(Modal::NewWorkspace { name: String::new() });
+            close_popup(ui);
+        }
+    }
+
+    pub(super) fn switch_workspace(&mut self, file: &str) {
+        if self.persist {
+            self.data.save_file(&self.ws_file);
+        }
+        let d = if file == "data.json" { Some(Data::load()) } else { Data::load_file(file) };
+        if let Some(d) = d {
+            self.data = d;
+            self.ws_file = file.to_string();
+            self.loc = self.data.first_list().map(Location::List).unwrap_or(Location::Home);
+            self.section = Section::Home;
+            self.open_task = None;
+            self.chat_open = None;
+            self.recent.clear();
+            self.sync_rt = Default::default();
+        }
+    }
+
+    pub(super) fn avatar_menu(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        ui.set_width(270.0);
+        let me = self.data.me;
+        if let Some(m) = self.data.member(me).cloned() {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
+                paint_avatar(ui.painter(), r.center(), 16.0, &m, t.card);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&m.name).size(15.0));
+                    let muted = self.data.extra.muted_until > now_ts();
+                    let st = if !m.status_text.is_empty() { m.status_text.clone() } else if muted { "Notifications muted".into() } else { "Online".into() };
+                    ui.label(RichText::new(st).small().color(t.text2));
+                });
+            });
+        }
+        if ui.add(egui::Button::new(RichText::new("\u{263A}  Set status").color(t.text2)).min_size(vec2(ui.available_width(), 28.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
+            let cur = self.data.member(me).map(|m| m.status_text.clone()).unwrap_or_default();
+            self.modal = Some(Modal::SetStatus { text: cur });
+            close_popup(ui);
+        }
+        ui.menu_button("\u{1F515}  Mute notifications", |ui| {
+            for (label, secs) in [("For 1 hour", 3600), ("For 4 hours", 4 * 3600), ("Until tomorrow", 24 * 3600), ("Unmute", 0)] {
+                if ui.button(label).clicked() {
+                    self.data.extra.muted_until = if secs == 0 { 0 } else { now_ts() + secs };
+                    self.dirty = true;
+                    ui.close_menu();
+                }
+            }
+        });
+        ui.separator();
+        let rows: [(&str, &str); 7] = [("\u{2699}", "Settings"), ("\u{1F514}", "Notifications"), ("\u{1F3A8}", "Themes"), ("\u{2728}", "Labs"), ("\u{2318}", "Keyboard shortcuts"), ("\u{2B07}", "Download app"), ("\u{2753}", "Help")];
+        for (icon, label) in rows {
+            if menu_item(ui, &t, icon, label, "").clicked() {
+                self.modal = Some(match label {
+                    "Settings" => {
+                        let m = self.data.member(me).cloned().unwrap_or_default();
+                        Modal::Profile { name: m.name, email: m.email }
+                    }
+                    "Notifications" => Modal::Notifications,
+                    "Themes" => Modal::Themes,
+                    "Labs" => Modal::Labs,
+                    "Keyboard shortcuts" => Modal::Shortcuts,
+                    "Download app" => Modal::Unavailable { title: "Download".into(), body: "You're already using the desktop app on this computer.".into() },
+                    _ => Modal::Help,
+                });
+                close_popup(ui);
+            }
+        }
+        ui.separator();
+        section_label(ui, &t, "Personal Tools");
+        for (id, label, icon) in TOOLS {
+            ui.horizontal(|ui| {
+                let pinned = self.data.extra.pinned_tools.iter().any(|p| p == id);
+                let w = ui.available_width() - 30.0;
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 27.0), Sense::click());
+                name_it(&resp, label);
+                if resp.hovered() {
+                    ui.painter().rect_filled(r, 6.0, t.hover);
+                }
+                ui.painter().text(r.left_center() + vec2(14.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
+                ui.painter().text(r.left_center() + vec2(32.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), t.text);
+                if resp.clicked() {
+                    self.run_tool(id);
+                    close_popup(ui);
+                }
+                let pin = egui::Button::new(RichText::new("\u{1F4CC}").size(11.0).color(if pinned { t.text } else { t.border })).frame(false);
+                if ui.add(pin).on_hover_text(if pinned { "Unpin from the top bar" } else { "Pin to the top bar" }).clicked() {
+                    if pinned {
+                        self.data.extra.pinned_tools.retain(|p| p != id);
+                    } else {
+                        self.data.extra.pinned_tools.push(id.to_string());
+                    }
+                    self.dirty = true;
+                }
+            });
+        }
+        ui.separator();
+        if menu_item(ui, &t, "\u{1F5D1}", "Trash", "").clicked() {
+            self.modal = Some(Modal::Trash);
+            close_popup(ui);
+        }
+        if menu_item(ui, &t, "\u{21AA}", "Log out", "").on_hover_text("Switch to another person on this computer").clicked() {
+            self.modal = Some(Modal::SwitchUser);
+            close_popup(ui);
+        }
+    }
+
+    pub(super) fn run_tool(&mut self, id: &str) {
+        match id {
+            "create_task" => self.open_quick_add(None),
+            "my_work" => self.actions.push(Action::Go(Location::Home)),
+            "track_time" => {
+                let first = self.data.tasks.iter().find(|x| x.assignees.contains(&self.data.me)).or(self.data.tasks.first()).map(|x| x.id).unwrap_or(0);
+                self.modal = Some(Modal::TrackTime { task: first });
+            }
+            "notepad" => self.notepad_open = !self.notepad_open,
+            "clip" => self.modal = Some(unavailable("Record a Clip")),
+            "stt" => self.modal = Some(unavailable("Talk to Text")),
+            "reminder" => self.modal = Some(Modal::Reminder { text: String::new(), date: Some(today()), time: "09:00".into() }),
+            "doc" => self.new_doc(None),
+            "whiteboard" => self.new_whiteboard(),
+            "people" => self.section = Section::People,
+            "dashboard" => self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() }),
+            _ => self.modal = Some(unavailable("AI Notetaker")),
+        }
+    }
+
+    pub(super) fn new_doc(&mut self, space: Option<u64>) {
+        let id = self.data.new_id();
+        let now = now_ts();
+        self.data.docs.insert(0, Doc { id, space, owner: self.data.me, private: false, archived: false, meeting_note: false, title: "Untitled".into(), body: String::new(), created: now, updated: now });
+        self.doc_open = Some(id);
+        self.section = Section::Docs;
+        self.dirty = true;
+    }
+
+    pub(super) fn new_whiteboard(&mut self) {
+        let id = self.data.new_id();
+        let n = self.data.extra.whiteboards.len() + 1;
+        self.data.extra.whiteboards.push(Whiteboard { id, name: format!("Whiteboard {}", n), strokes: vec![], notes: vec![] });
+        self.wb_open = Some(id);
+        self.section = Section::Whiteboards;
+        self.dirty = true;
+    }
+
+    pub(super) fn new_form(&mut self) {
+        let id = self.data.new_id();
+        let list = self.default_list().unwrap_or(0);
+        self.data.extra.forms.push(Form {
+            id,
+            name: "New Form".into(),
+            list_id: list,
+            description: "Fill out this form to create a task.".into(),
+            fields: vec![FormField { label: "Title".into(), map: "name".into() }, FormField { label: "Details".into(), map: "description".into() }],
+        });
+        self.form_open = Some(id);
+        self.section = Section::Forms;
+        self.dirty = true;
+    }
+
+    /// The sidebar "+ Create" menu, in the original's order.
+    pub(super) fn create_menu(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        ui.set_width(400.0);
+        let r = ui.add(egui::TextEdit::singleline(&mut self.create_text).hint_text("Describe anything to create").desired_width(f32::INFINITY));
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.create_text.trim().is_empty() {
+            if let Some(list) = self.default_list() {
+                self.actions.push(Action::Add { list, name: self.create_text.clone(), status: None, priority: 0, assignees: vec![self.data.me], due: None, parent: None, open: true });
+            }
+            self.create_text.clear();
+            close_popup(ui);
+        }
+        ui.separator();
+        section_label(ui, &t, "Create");
+        if menu_item(ui, &t, "\u{2611}", "Task", "\u{2325}T").clicked() {
+            self.open_quick_add(None);
+            close_popup(ui);
+        }
+        if menu_item(ui, &t, "\u{27A4}", "Message", "\u{2318}G").clicked() {
+            self.new_message_open = true;
+            close_popup(ui);
+        }
+        ui.separator();
+        let space = self.current_space().or_else(|| self.data.spaces.first().map(|s| s.id));
+        if menu_item2(ui, &t, "\u{2630}", "List", "Track tasks, projects, people & more").clicked() {
+            if let Some(sid) = space {
+                self.actions.push(Action::NewList { space: sid, folder: None });
+            }
+            close_popup(ui);
+        }
+        if menu_item2(ui, &t, "#", "Channel", "Conversations on specific topics").clicked() {
+            self.new_channel = Some(String::new());
+            close_popup(ui);
+        }
+        if menu_item2(ui, &t, "\u{25CE}", "Space", "Organize work by team or department").clicked() {
+            self.actions.push(Action::NewSpace);
+            close_popup(ui);
+        }
+        ui.separator();
+        if menu_item(ui, &t, "\u{2728}", "Create with AI", "").clicked() {
+            self.modal = Some(unavailable("Create with AI"));
+            close_popup(ui);
+        }
+        if menu_item(ui, &t, "\u{2699}", "Super Agent", "Hot").clicked() {
+            self.modal = Some(unavailable("Super Agent"));
+            close_popup(ui);
+        }
+        ui.separator();
+        for (icon, label) in [("\u{1F4C4}", "Doc"), ("\u{1F496}", "Artifact"), ("\u{1F4CB}", "Form"), ("\u{1F4CA}", "Dashboard"), ("\u{1F3A8}", "Whiteboard"), ("\u{1F3A5}", "Clip")] {
+            if menu_item(ui, &t, icon, label, "").clicked() {
+                match label {
+                    "Doc" => self.new_doc(space),
+                    "Form" => self.new_form(),
+                    "Dashboard" => self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() }),
+                    "Whiteboard" => self.new_whiteboard(),
+                    "Artifact" => self.modal = Some(unavailable("Artifacts")),
+                    _ => self.modal = Some(unavailable("Clips")),
+                }
+                close_popup(ui);
+            }
+        }
+        ui.separator();
+        if menu_item(ui, &t, "\u{25A6}", "Customize your sidebar", "").clicked() {
+            self.modal = Some(Modal::CustomizeSidebar);
+            close_popup(ui);
+        }
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 8.0) / 2.0;
+            if ui.add(egui::Button::new("\u{2B07}  Import").min_size(vec2(w, 30.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
+                self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
+                close_popup(ui);
+            }
+            if ui.add(egui::Button::new("\u{2728}  Templates").min_size(vec2(w, 30.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
+                self.modal = Some(Modal::Templates);
+                close_popup(ui);
+            }
+        });
+    }
+
+    pub(super) fn current_space(&self) -> Option<u64> {
+        match self.loc {
+            Location::Space(id) => Some(id),
+            Location::List(id) => self.data.space_of_list(id).map(|s| s.id),
+            Location::Folder(fid) => self.data.spaces.iter().find(|s| s.folders.iter().any(|f| f.id == fid)).map(|s| s.id),
+            _ => None,
+        }
+    }
+
+    /// The rail's More menu: Spaces, Chat, Docs, Dashboards, Whiteboards,
+    /// Forms, Clips, Goals, Timesheets, Apps, Customize navigation.
+    pub(super) fn rail_more_menu(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        ui.set_width(220.0);
+        let items: [(&str, &str); 10] = [
+            ("\u{25CE}", "Spaces"),
+            ("\u{1F4AC}", "Chat"),
+            ("\u{1F4C4}", "Docs"),
+            ("\u{1F4CA}", "Dashboards"),
+            ("\u{1F3A8}", "Whiteboards"),
+            ("\u{1F4CB}", "Forms"),
+            ("\u{1F3A5}", "Clips"),
+            ("\u{1F3AF}", "Goals"),
+            ("\u{23F1}", "Timesheets"),
+            ("\u{25A6}", "Apps"),
+        ];
+        for (icon, label) in items {
+            let pinned = self.data.extra.rail_items.iter().any(|r| r == label);
+            ui.horizontal(|ui| {
+                let w = ui.available_width() - 28.0;
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                name_it(&resp, label);
+                if resp.hovered() {
+                    ui.painter().rect_filled(r, 6.0, t.hover);
+                }
+                ui.painter().text(r.left_center() + vec2(14.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
+                ui.painter().text(r.left_center() + vec2(32.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), t.text);
+                if resp.clicked() {
+                    self.open_app(label);
+                    close_popup(ui);
+                }
+                if ui.add(egui::Button::new(RichText::new("\u{1F4CC}").size(11.0).color(if pinned { t.text } else { t.border })).frame(false)).on_hover_text("Pin to the left bar").clicked() {
+                    if pinned {
+                        self.data.extra.rail_items.retain(|r| r != label);
+                    } else {
+                        self.data.extra.rail_items.push(label.to_string());
+                    }
+                    self.dirty = true;
+                }
+            });
+        }
+        ui.separator();
+        if menu_item(ui, &t, "\u{2699}", "Customize navigation", "").clicked() {
+            self.modal = Some(Modal::CustomizeNav);
+            close_popup(ui);
+        }
+    }
+
+    pub(super) fn open_app(&mut self, label: &str) {
+        self.open_task = None;
+        self.hub_filter = 0;
+        let temp = match label {
+            "Docs" => Some(Section::Docs),
+            "Dashboards" => Some(Section::Dashboards),
+            "Whiteboards" => Some(Section::Whiteboards),
+            "Forms" => Some(Section::Forms),
+            "Goals" => Some(Section::Goals),
+            "Timesheets" => Some(Section::Timesheets),
+            _ => None,
+        };
+        if temp.is_some() && !self.data.extra.rail_items.iter().any(|r| r == label) {
+            self.temp_app = temp;
+        }
+        match label {
+            "Spaces" => self.actions.push(Action::Go(Location::Everything)),
+            "Chat" => {
+                self.section = Section::Chat;
+            }
+            "Docs" => self.section = Section::Docs,
+            "Dashboards" => self.section = Section::Dashboards,
+            "Whiteboards" => self.section = Section::Whiteboards,
+            "Forms" => self.section = Section::Forms,
+            "Goals" => self.section = Section::Goals,
+            "Timesheets" => self.section = Section::Timesheets,
+            "Planner" => self.section = Section::Planner,
+            "Teams" => self.section = Section::Teams,
+            "Apps" => self.modal = Some(Modal::ClickApps),
+            "Clips" => self.modal = Some(unavailable("Clips")),
+            "AI" => self.section = Section::Ai,
+            _ => {}
+        }
+    }
+
+    // ---------------------------------------------------------------- dialogs
+
+    pub(super) fn modals(&mut self, ctx: &egui::Context) {
+        let Some(mut modal) = self.modal.take() else { return };
+        let t = self.t();
+        let mut open = true;
+        let mut close = false;
+        let title = match &modal {
+            Modal::Invite { .. } => "Invite people for free".to_string(),
+            Modal::WorkspaceSettings { .. } => "Workspace settings".into(),
+            Modal::NewWorkspace { .. } => "Create Workspace".into(),
+            Modal::Profile { .. } => "My Settings".into(),
+            Modal::SetStatus { .. } => "Set status".into(),
+            Modal::Themes => "Themes".into(),
+            Modal::Shortcuts => "Keyboard shortcuts".into(),
+            Modal::Help => "Help".into(),
+            Modal::Labs => "Labs".into(),
+            Modal::Notifications => "Notifications".into(),
+            Modal::ClickApps => "Apps".into(),
+            Modal::CustomFields { .. } => "Custom Fields".into(),
+            Modal::Automations { .. } => "Automations".into(),
+            Modal::TagManager { .. } => "Tag Manager".into(),
+            Modal::Templates => "Templates".into(),
+            Modal::Import { .. } => "Import and export".into(),
+            Modal::ChannelSettings(_) => "Channel Settings".into(),
+            Modal::Share { .. } => "Share".into(),
+            Modal::CustomizeNav => "Customize navigation".into(),
+            Modal::CustomizeSidebar => "Customize your sidebar".into(),
+            Modal::TrackTime { .. } => "Track Time".into(),
+            Modal::Reminder { .. } => "Create Reminder".into(),
+            Modal::Trash => "Trash".into(),
+            Modal::Unavailable { title, .. } => title.clone(),
+            Modal::Bookmark { .. } => "Add Bookmark".into(),
+            Modal::SwitchUser => "Switch person".into(),
+            Modal::NewDashboard { .. } => "Create Dashboard".into(),
+            Modal::Together { .. } => "Work together".into(),
+            Modal::WhoAmI { .. } => "Who are you?".into(),
+            Modal::Call { .. } => "Start a call".into(),
+        };
+        // dim backdrop
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("modal_dim")).order(egui::Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
+            let r = ui.allocate_rect(screen, Sense::click());
+            ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(90));
+            if r.clicked() {
+                close = true;
+            }
+        });
+        let win_id = egui::Id::new("modal_window");
+        egui::Window::new(RichText::new(&title).size(17.0))
+            .id(win_id)
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, [0.0, -20.0])
+            .min_width(460.0)
+            .max_width(620.0)
+            .frame(egui::Frame::new().fill(t.card).corner_radius(12).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(20)))
+            .show(ctx, |ui| {
+                ui.set_min_width(440.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&title).size(18.0).color(t.text));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+                        ui.painter().circle_filled(r.center(), 14.0, if resp.hovered() { t.border } else { t.hover });
+                        let c = r.center();
+                        ui.painter().line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], Stroke::new(1.5, t.text2));
+                        ui.painter().line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], Stroke::new(1.5, t.text2));
+                        if resp.on_hover_text("Close").clicked() {
+                            open = false;
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+                close |= self.modal_body(ui, &t, &mut modal);
+            });
+        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) {
+            close = true;
+        }
+        if open && !close && self.modal.is_none() {
+            self.modal = Some(modal);
+        }
+    }
+
+    /// Returns true when the dialog should close.
+    fn modal_body(&mut self, ui: &mut Ui, t: &Theme, modal: &mut Modal) -> bool {
+        let mut close = false;
+        match modal {
+            Modal::Together { path, result } => close = self.together_body(ui, t, path, result),
+            Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
+            Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
+            Modal::Invite { emails, role } => {
+                ui.label(RichText::new("Email").color(t.text2));
+                let r = ui.add(egui::TextEdit::singleline(emails).hint_text("Enter email, comma or space separated").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+                r.request_focus();
+                ui.add_space(8.0);
+                ui.label(RichText::new("Invite as").color(t.text2));
+                let desc = ROLES.iter().find(|r| r.0 == role.as_str()).map(|r| r.1).unwrap_or("");
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                    ui.painter().rect_filled(r, 8.0, t.hover);
+                    ui.painter().text(r.center(), Align2::CENTER_CENTER, "\u{1F464}", FontId::proportional(14.0), t.text2);
+                    ui.vertical(|ui| {
+                        egui::ComboBox::from_id_salt("invite_role").selected_text(role.clone()).show_ui(ui, |ui| {
+                            for (name, _) in ROLES.iter().take(3) {
+                                ui.selectable_value(role, name.to_string(), *name);
+                            }
+                        });
+                        ui.label(RichText::new(desc).small().color(t.text2));
+                    });
+                });
+                ui.add_space(8.0);
+                let shared = self.data.extra.shared.is_some();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(if shared { "This workspace is shared, so invited people can join it from the shared folder." } else { "To work with them, share this workspace in a folder first." }).small().color(t.text2));
+                    if ui.link(if shared { "Sharing" } else { "Work together" }).clicked() {
+                        self.modal = Some(Modal::Together { path: self.data.extra.shared.as_ref().map(|c| c.folder.clone()).unwrap_or_default(), result: String::new() });
+                    }
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let valid: Vec<String> = emails.split(|c: char| c == ',' || c.is_whitespace()).map(|s| s.trim().to_string()).filter(|s| s.contains('@') && s.contains('.')).collect();
+                        let send = ui.add_enabled(!valid.is_empty(), egui::Button::new(RichText::new("Send free invite").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 32.0)));
+                        if send.clicked() {
+                            self.invite_people(&valid, role);
+                            self.toast = Some((if self.data.extra.shared.is_some() { format!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { format!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            self.dirty = true;
+                            close = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            }
+            Modal::WorkspaceSettings { name } => {
+                ui.label("Workspace name");
+                ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                ui.add_space(6.0);
+                ui.label("Workspace color");
+                ui.horizontal_wrapped(|ui| {
+                    for c in STATUS_PALETTE.iter().skip(1) {
+                        let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                        ui.painter().rect_filled(r.shrink(2.0), 5.0, rgb(*c));
+                        if self.data.extra.workspace_color == *c {
+                            ui.painter().rect_stroke(r, 6.0, Stroke::new(2.0, t.text), egui::StrokeKind::Inside);
+                        }
+                        if resp.clicked() {
+                            self.data.extra.workspace_color = *c;
+                            self.dirty = true;
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label(RichText::new(format!("{} people \u{2022} {} spaces \u{2022} {} tasks", self.data.members.len(), self.data.spaces.len(), self.data.tasks.len())).color(t.text2));
+                ui.add_space(8.0);
+                if primary_button(ui, t, "Save").clicked() && !name.trim().is_empty() {
+                    self.data.workspace = name.trim().to_string();
+                    let mut list = Data::workspaces();
+                    if let Some(w) = list.iter_mut().find(|w| w.file == self.ws_file) {
+                        w.name = self.data.workspace.clone();
+                        Data::save_workspaces(&list);
+                    }
+                    self.dirty = true;
+                    close = true;
+                }
+            }
+            Modal::NewWorkspace { name } => {
+                ui.label("Name your Workspace");
+                let r = ui.add(egui::TextEdit::singleline(name).hint_text("e.g. Acme Inc.").desired_width(f32::INFINITY));
+                r.request_focus();
+                ui.label(RichText::new("You'll be its Owner. Switch between workspaces from the workspace menu.").small().color(t.text2));
+                ui.add_space(8.0);
+                if primary_button(ui, t, "Create Workspace").clicked() && !name.trim().is_empty() {
+                    let mut list = Data::workspaces();
+                    if list.is_empty() {
+                        list.push(WsEntry { name: self.data.workspace.clone(), file: self.ws_file.clone() });
+                    }
+                    let file = format!("workspace-{}.json", now_ts());
+                    let mut owner = self.data.member(self.data.me).cloned().unwrap_or_default();
+                    owner.id = 1;
+                    owner.role = "Owner".into();
+                    let d = Data::blank(name.trim(), owner);
+                    d.save_file(&file);
+                    list.push(WsEntry { name: name.trim().to_string(), file: file.clone() });
+                    Data::save_workspaces(&list);
+                    self.switch_workspace(&file);
+                    close = true;
+                }
+            }
+            Modal::Profile { name, email } => {
+                ui.label("Full name");
+                ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                ui.label("Email");
+                ui.add(egui::TextEdit::singleline(email).desired_width(f32::INFINITY));
+                ui.label("Avatar color");
+                let me = self.data.me;
+                ui.horizontal_wrapped(|ui| {
+                    for c in STATUS_PALETTE.iter().skip(1) {
+                        let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                        ui.painter().circle_filled(r.center(), 9.0, rgb(*c));
+                        if resp.clicked() {
+                            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
+                                m.color = *c;
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                if primary_button(ui, t, "Save changes").clicked() && !name.trim().is_empty() {
+                    if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
+                        m.name = name.trim().to_string();
+                        m.email = email.trim().to_string();
+                    }
+                    self.dirty = true;
+                    close = true;
+                }
+            }
+            Modal::SetStatus { text } => {
+                ui.add(egui::TextEdit::singleline(text).hint_text("What's your status?").desired_width(f32::INFINITY));
+                ui.horizontal_wrapped(|ui| {
+                    for s in ["\u{1F4C5} In a meeting", "\u{1F68C} Commuting", "\u{2639} Out sick", "\u{1F334} Vacationing", "\u{1F3E0} Working remotely"] {
+                        if ui.button(s).clicked() {
+                            *text = s.to_string();
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if primary_button(ui, t, "Save").clicked() {
+                        let me = self.data.me;
+                        if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
+                            m.status_text = text.trim().to_string();
+                        }
+                        self.dirty = true;
+                        close = true;
+                    }
+                    if ui.button("Clear status").clicked() {
+                        let me = self.data.me;
+                        if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
+                            m.status_text.clear();
+                        }
+                        self.dirty = true;
+                        close = true;
+                    }
+                });
+            }
+            Modal::Themes => {
+                ui.label("Appearance");
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(!self.data.dark, "\u{2600} Light").clicked() {
+                        self.data.dark = false;
+                        self.dirty = true;
+                    }
+                    if ui.selectable_label(self.data.dark, "\u{1F319} Dark").clicked() {
+                        self.data.dark = true;
+                        self.dirty = true;
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label("Theme color");
+                ui.horizontal_wrapped(|ui| {
+                    for (name, c) in theme::ACCENTS {
+                        let sel = self.data.extra.accent == name;
+                        let (r, resp) = ui.allocate_exact_size(vec2(64.0, 52.0), Sense::click());
+                        ui.painter().circle_filled(r.center_top() + vec2(0.0, 16.0), 13.0, rgb(c));
+                        if sel {
+                            ui.painter().circle_stroke(r.center_top() + vec2(0.0, 16.0), 16.0, Stroke::new(2.0, t.text));
+                        }
+                        ui.painter().text(r.center_bottom() - vec2(0.0, 8.0), Align2::CENTER_CENTER, name, FontId::proportional(11.5), t.text2);
+                        if resp.clicked() {
+                            self.data.extra.accent = name.to_string();
+                            self.dirty = true;
+                        }
+                    }
+                });
+            }
+            Modal::Shortcuts => {
+                egui::Grid::new("shortcuts").num_columns(2).spacing(vec2(30.0, 8.0)).show(ui, |ui| {
+                    for (k, d) in [
+                        ("\u{2318}J  /  \u{2318}K", "Search"),
+                        ("\u{2318}N  /  \u{2325}T", "Create task"),
+                        ("\u{2318}G", "New message"),
+                        ("\u{2318}[  /  \u{2318}]", "Back / forward"),
+                        ("Enter", "Send a message or save a new task"),
+                        ("Shift+Enter", "New line in a message"),
+                        ("Esc", "Close a window or menu"),
+                        ("Right-click", "Rename, delete, favorite, more"),
+                    ] {
+                        ui.label(RichText::new(k).monospace());
+                        ui.label(d);
+                        ui.end_row();
+                    }
+                });
+            }
+            Modal::Help => {
+                ui.label("This is your own copy of the work manager. Everything is saved on this computer.");
+                ui.add_space(6.0);
+                ui.label(RichText::new(format!("Saved in: {}", Data::dir().display())).small().color(t.text2));
+                ui.label(RichText::new("Tip: right-click spaces, lists and tasks for more options.").small().color(t.text2));
+            }
+            Modal::Labs => {
+                ui.label("Try features early. Turn them on or off at any time.");
+                ui.add_space(6.0);
+                for (id, label) in [("compact", "Compact list rows"), ("week_monday", "Start the week on Monday in the Planner"), ("confetti", "Celebrate when a task is completed")] {
+                    let mut on = self.data.extra.labs.iter().any(|l| l == id);
+                    if ui.checkbox(&mut on, label).changed() {
+                        if on {
+                            self.data.extra.labs.push(id.to_string());
+                        } else {
+                            self.data.extra.labs.retain(|l| l != id);
+                        }
+                        self.dirty = true;
+                    }
+                }
+            }
+            Modal::Notifications => {
+                ui.label("Show in your Inbox when...");
+                let n = &mut self.data.extra.notify;
+                let mut ch = false;
+                ch |= ui.checkbox(&mut n.comments, "Someone comments on my tasks").changed();
+                ch |= ui.checkbox(&mut n.mentions, "Someone @mentions me").changed();
+                ch |= ui.checkbox(&mut n.assigned, "A task is assigned to me").changed();
+                ch |= ui.checkbox(&mut n.reminders, "A reminder is due").changed();
+                ch |= ui.checkbox(&mut n.chat, "New chat messages (unread counts)").changed();
+                if ch {
+                    self.dirty = true;
+                }
+            }
+            Modal::ClickApps => {
+                ui.label("Turn features on or off for this Workspace.");
+                ui.add_space(6.0);
+                let a = &mut self.data.extra.apps;
+                let mut ch = false;
+                ch |= ui.checkbox(&mut a.priorities, "Priorities").changed();
+                ch |= ui.checkbox(&mut a.tags, "Tags").changed();
+                ch |= ui.checkbox(&mut a.time_tracking, "Time Tracking").changed();
+                ch |= ui.checkbox(&mut a.time_estimates, "Time Estimates").changed();
+                ch |= ui.checkbox(&mut a.custom_fields, "Custom Fields").changed();
+                ch |= ui.checkbox(&mut a.multiple_assignees, "Multiple Assignees").changed();
+                if ch {
+                    self.dirty = true;
+                }
+            }
+            Modal::CustomFields { name, kind, opts } => {
+                let mut remove = None;
+                for (i, f) in self.data.extra.fields.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&f.name).strong());
+                        ui.label(RichText::new(&f.kind).color(t.text2));
+                        if !f.options.is_empty() {
+                            ui.label(RichText::new(f.options.join(", ")).small().color(t.text3));
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    });
+                }
+                if let Some(i) = remove {
+                    let id = self.data.extra.fields[i].id;
+                    self.data.extra.fields.remove(i);
+                    for task in &mut self.data.tasks {
+                        task.custom.remove(&id);
+                    }
+                    self.dirty = true;
+                }
+                if self.data.extra.fields.is_empty() {
+                    ui.label(RichText::new("No custom fields yet. They show on every task and in the Table view.").color(t.text3));
+                }
+                ui.separator();
+                ui.label(RichText::new("New field").strong());
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(name).hint_text("Field name").desired_width(160.0));
+                    egui::ComboBox::from_id_salt("cf_kind").selected_text(kind.clone()).show_ui(ui, |ui| {
+                        for k in ["text", "number", "dropdown", "checkbox", "date"] {
+                            ui.selectable_value(kind, k.to_string(), k);
+                        }
+                    });
+                });
+                if kind == "dropdown" {
+                    ui.add(egui::TextEdit::singleline(opts).hint_text("Options, comma separated").desired_width(f32::INFINITY));
+                }
+                if primary_button(ui, t, "Add field").clicked() && !name.trim().is_empty() {
+                    let id = self.data.new_id();
+                    let options = if kind == "dropdown" { opts.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect() } else { vec![] };
+                    self.data.extra.fields.push(CustomField { id, name: name.trim().to_string(), kind: kind.clone(), options });
+                    name.clear();
+                    opts.clear();
+                    self.dirty = true;
+                }
+            }
+            Modal::Automations { status, action, value } => {
+                let mut remove = None;
+                let rules = self.data.extra.automations.clone();
+                for (i, a) in rules.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let mut en = a.enabled;
+                        if ui.checkbox(&mut en, "").changed() {
+                            self.data.extra.automations[i].enabled = en;
+                            self.dirty = true;
+                        }
+                        ui.label(format!("When status changes to {}, {}", a.trigger_status.to_uppercase(), self.describe_action(a)));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    });
+                }
+                if let Some(i) = remove {
+                    self.data.extra.automations.remove(i);
+                    self.dirty = true;
+                }
+                if rules.is_empty() {
+                    ui.label(RichText::new("No automations yet.").color(t.text3));
+                }
+                ui.separator();
+                ui.label(RichText::new("New automation").strong());
+                let mut names: Vec<String> = vec![];
+                for s in &self.data.spaces {
+                    for st in &s.statuses {
+                        if !names.contains(&st.name) {
+                            names.push(st.name.clone());
+                        }
+                    }
+                }
+                ui.horizontal(|ui| {
+                    ui.label("When status changes to");
+                    egui::ComboBox::from_id_salt("au_status").selected_text(status.to_uppercase()).show_ui(ui, |ui| {
+                        for n in &names {
+                            ui.selectable_value(status, n.clone(), n.to_uppercase());
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("then");
+                    egui::ComboBox::from_id_salt("au_action")
+                        .selected_text(match action.as_str() {
+                            "assign" => "assign to",
+                            "priority" => "set priority",
+                            "move" => "move to list",
+                            _ => "add a comment",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(action, "assign".to_string(), "assign to");
+                            ui.selectable_value(action, "priority".to_string(), "set priority");
+                            ui.selectable_value(action, "comment".to_string(), "add a comment");
+                            ui.selectable_value(action, "move".to_string(), "move to list");
+                        });
+                    match action.as_str() {
+                        "assign" => {
+                            let cur = value.parse::<u64>().ok().and_then(|id| self.data.member(id)).map(|m| m.name.clone()).unwrap_or_else(|| "choose".into());
+                            egui::ComboBox::from_id_salt("au_val").selected_text(cur).show_ui(ui, |ui| {
+                                for m in &self.data.members {
+                                    ui.selectable_value(value, m.id.to_string(), &m.name);
+                                }
+                            });
+                        }
+                        "priority" => {
+                            let cur = value.parse::<usize>().ok().filter(|p| *p < 5).map(|p| PRIORITIES[p].label).unwrap_or("choose");
+                            egui::ComboBox::from_id_salt("au_val").selected_text(cur).show_ui(ui, |ui| {
+                                for p in 0..5usize {
+                                    ui.selectable_value(value, p.to_string(), PRIORITIES[p].label);
+                                }
+                            });
+                        }
+                        "move" => {
+                            let cur = value.parse::<u64>().ok().map(|id| self.data.list_name(id)).unwrap_or_else(|| "choose".into());
+                            egui::ComboBox::from_id_salt("au_val").selected_text(cur).show_ui(ui, |ui| {
+                                for s in &self.data.spaces {
+                                    for l in s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())) {
+                                        ui.selectable_value(value, l.id.to_string(), format!("{} / {}", s.name, l.name));
+                                    }
+                                }
+                            });
+                        }
+                        _ => {
+                            ui.add(egui::TextEdit::singleline(value).hint_text("Comment text").desired_width(200.0));
+                        }
+                    }
+                });
+                if primary_button(ui, t, "Add automation").clicked() && !value.trim().is_empty() {
+                    let id = self.data.new_id();
+                    self.data.extra.automations.push(Automation { id, enabled: true, trigger_status: status.clone(), action: action.clone(), value: value.trim().to_string(), list: None });
+                    value.clear();
+                    self.dirty = true;
+                }
+            }
+            Modal::TagManager { from, to } => {
+                let mut counts: Vec<(String, usize)> = vec![];
+                for task in &self.data.tasks {
+                    for tag in &task.tags {
+                        match counts.iter_mut().find(|c| &c.0 == tag) {
+                            Some(c) => c.1 += 1,
+                            None => counts.push((tag.clone(), 1)),
+                        }
+                    }
+                }
+                counts.sort();
+                if counts.is_empty() {
+                    ui.label(RichText::new("No tags yet. Add tags from a task.").color(t.text3));
+                }
+                let mut delete = None;
+                for (tag, n) in &counts {
+                    ui.horizontal(|ui| {
+                        chip(ui, tag, tag_color(tag));
+                        ui.label(RichText::new(format!("{} tasks", n)).color(t.text2));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                                delete = Some(tag.clone());
+                            }
+                            if ui.add(egui::Button::new("Rename").frame(false)).clicked() {
+                                *from = tag.clone();
+                                *to = tag.clone();
+                            }
+                        });
+                    });
+                }
+                if let Some(tag) = delete {
+                    for task in &mut self.data.tasks {
+                        task.tags.retain(|x| x != &tag);
+                    }
+                    self.dirty = true;
+                }
+                if !from.is_empty() {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Rename \"{}\" to", from));
+                        ui.add(egui::TextEdit::singleline(to).desired_width(140.0));
+                        if primary_button(ui, t, "Save").clicked() && !to.trim().is_empty() {
+                            let nt = to.trim().to_lowercase();
+                            for task in &mut self.data.tasks {
+                                for tag in task.tags.iter_mut() {
+                                    if tag == from {
+                                        *tag = nt.clone();
+                                    }
+                                }
+                                task.tags.dedup();
+                            }
+                            from.clear();
+                            self.dirty = true;
+                        }
+                    });
+                }
+            }
+            Modal::Templates => {
+                let list = self.default_list();
+                if self.data.extra.templates.is_empty() {
+                    ui.label(RichText::new("No templates yet. Open a task, then \u{2026} \u{2192} Save as template.").color(t.text3));
+                }
+                let mut remove = None;
+                for (i, tp) in self.data.extra.templates.clone().iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&tp.name).strong());
+                        ui.label(RichText::new(format!("{} checklist items", tp.checklist.len())).small().color(t.text3));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                                remove = Some(i);
+                            }
+                            if ui.button("Use").clicked() {
+                                if let Some(l) = list {
+                                    self.actions.push(Action::Add { list: l, name: tp.task_name.clone(), status: None, priority: tp.priority, assignees: vec![], due: None, parent: None, open: true });
+                                    self.pending_template = Some(tp.clone());
+                                    close = true;
+                                }
+                            }
+                        });
+                    });
+                }
+                if let Some(i) = remove {
+                    self.data.extra.templates.remove(i);
+                    self.dirty = true;
+                }
+            }
+            Modal::Import { path, result } => {
+                ui.label("Import tasks from a CSV file (columns: name, status, priority, due date YYYY-MM-DD, assignee name). They go into the current list.");
+                ui.add(egui::TextEdit::singleline(path).hint_text("/Users/you/Downloads/tasks.csv").desired_width(f32::INFINITY));
+                ui.horizontal(|ui| {
+                    if primary_button(ui, t, "Import").clicked() {
+                        *result = self.import_csv(path.trim());
+                    }
+                    if ui.button("Export current tasks to CSV").clicked() {
+                        *result = self.export_csv();
+                    }
+                });
+                if !result.is_empty() {
+                    ui.label(RichText::new(result.clone()).color(t.text2));
+                }
+            }
+            Modal::ChannelSettings(cid) => {
+                let cid = *cid;
+                let Some(ci) = self.data.channels.iter().position(|c| c.id == cid) else { return true };
+                let is_channel = self.data.channels[ci].kind == ChannelKind::Channel;
+                if is_channel {
+                    ui.label("Name");
+                    if ui.add(egui::TextEdit::singleline(&mut self.data.channels[ci].name).desired_width(f32::INFINITY)).changed() {
+                        self.dirty = true;
+                    }
+                    ui.label("Topic");
+                    if ui.add(egui::TextEdit::singleline(&mut self.data.channels[ci].topic).desired_width(f32::INFINITY)).changed() {
+                        self.dirty = true;
+                    }
+                    ui.add_space(6.0);
+                    ui.label("Members");
+                    let members = self.data.members.clone();
+                    ui.horizontal_wrapped(|ui| {
+                        for m in &members {
+                            let mut on = self.data.channels[ci].members.contains(&m.id);
+                            if ui.checkbox(&mut on, &m.name).changed() {
+                                let c = &mut self.data.channels[ci];
+                                if on {
+                                    c.members.push(m.id);
+                                } else {
+                                    c.members.retain(|x| *x != m.id);
+                                }
+                                self.dirty = true;
+                            }
+                        }
+                    });
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Mark as read").clicked() {
+                        self.data.channels[ci].last_read = now_ts();
+                        self.dirty = true;
+                    }
+                    let label = if is_channel { "Delete channel" } else { "Close conversation" };
+                    if ui.add(egui::Button::new(RichText::new(label).color(t.danger))).clicked() {
+                        self.data.channels.remove(ci);
+                        if self.chat_open == Some(cid) {
+                            self.chat_open = None;
+                        }
+                        self.dirty = true;
+                        close = true;
+                    }
+                });
+            }
+            Modal::Share { emails } => {
+                let name = self.data.location_name(self.loc);
+                ui.label(format!("Share \"{}\" with people in your Workspace.", name));
+                ui.add_space(4.0);
+                for m in self.data.members.clone() {
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                        paint_avatar(ui.painter(), r.center(), 10.0, &m, t.card);
+                        ui.label(&m.name);
+                        ui.label(RichText::new(if m.invited { "Invited".to_string() } else { m.role.clone() }).small().color(t.text3));
+                    });
+                }
+                ui.separator();
+                ui.label("Invite by email");
+                ui.add(egui::TextEdit::singleline(emails).hint_text("name@company.com").desired_width(f32::INFINITY));
+                ui.horizontal(|ui| {
+                    if primary_button(ui, t, "Invite").clicked() && emails.contains('@') {
+                        self.modal = Some(Modal::Invite { emails: emails.clone(), role: "Member".into() });
+                        close = true;
+                    }
+                    if ui.button("\u{1F517} Copy link").clicked() {
+                        ui.ctx().copy_text(format!("workboard://{}/{}", self.data.workspace.replace(' ', "-"), name.replace(' ', "-")));
+                        self.toast = Some(("Link copied".into(), now_ts()));
+                    }
+                });
+            }
+            Modal::CustomizeNav => {
+                ui.label("Choose the apps pinned to the left bar.");
+                for label in ["Planner", "AI", "Teams", "Chat", "Docs", "Dashboards", "Whiteboards", "Forms", "Goals", "Timesheets"] {
+                    let mut on = self.data.extra.rail_items.iter().any(|r| r == label);
+                    if ui.checkbox(&mut on, label).changed() {
+                        if on {
+                            self.data.extra.rail_items.push(label.to_string());
+                        } else {
+                            self.data.extra.rail_items.retain(|r| r != label);
+                        }
+                        self.dirty = true;
+                    }
+                }
+            }
+            Modal::CustomizeSidebar => {
+                ui.label("Choose what shows in your sidebar.");
+                for label in ["Inbox", "Replies", "Assigned Comments", "Posts", "Skills", "Artifacts", "Meetings", "My Tasks", "AI Chats", "Favorites", "Channels", "Direct Messages"] {
+                    let mut on = !self.data.extra.hidden_nav.iter().any(|r| r == label);
+                    if ui.checkbox(&mut on, label).changed() {
+                        if on {
+                            self.data.extra.hidden_nav.retain(|r| r != label);
+                        } else {
+                            self.data.extra.hidden_nav.push(label.to_string());
+                        }
+                        self.dirty = true;
+                    }
+                }
+            }
+            Modal::TrackTime { task } => {
+                let tasks: Vec<(u64, String)> = self.data.tasks.iter().map(|x| (x.id, x.name.clone())).collect();
+                let cur = tasks.iter().find(|x| x.0 == *task).map(|x| x.1.clone()).unwrap_or_else(|| "Choose a task".into());
+                egui::ComboBox::from_id_salt("tt_task").selected_text(cur).width(380.0).show_ui(ui, |ui| {
+                    for (id, n) in &tasks {
+                        ui.selectable_value(task, *id, n);
+                    }
+                });
+                let now = now_ts();
+                let running = self.data.tasks.iter().find(|x| x.timer_started.is_some()).map(|x| (x.id, x.name.clone(), x.tracked_secs(now)));
+                if let Some((_, n, secs)) = &running {
+                    ui.label(format!("Running: {} \u{2022} {}", n, fmt_duration(*secs)));
+                    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+                }
+                ui.horizontal(|ui| {
+                    let is_running = running.as_ref().map(|r| r.0 == *task).unwrap_or(false);
+                    if primary_button(ui, t, if is_running { "\u{23F9} Stop timer" } else { "\u{25B6} Start timer" }).clicked() && *task != 0 {
+                        self.actions.push(Action::ToggleTimer(*task));
+                    }
+                    if ui.button("Open Timesheets").clicked() {
+                        self.section = Section::Timesheets;
+                        close = true;
+                    }
+                });
+            }
+            Modal::Reminder { text, date, time } => {
+                let r = ui.add(egui::TextEdit::singleline(text).hint_text("Remind me to...").desired_width(f32::INFINITY));
+                r.request_focus();
+                ui.horizontal(|ui| {
+                    let d_txt = date.map(fmt_date).unwrap_or_else(|| "\u{1F4C5} Date".into());
+                    let r = ui.button(d_txt);
+                    popup(ui, &r, ui.id().with("rem_date"), 380.0, |ui| date_menu(ui, t, ui.id().with("rem_cal"), date));
+                    ui.add(egui::TextEdit::singleline(time).hint_text("09:00").desired_width(60.0));
+                });
+                if primary_button(ui, t, "Create Reminder").clicked() && !text.trim().is_empty() {
+                    let d = date.unwrap_or_else(today);
+                    let (h, m) = time.split_once(':').map(|(h, m)| (h.trim().parse().unwrap_or(9), m.trim().parse().unwrap_or(0))).unwrap_or((9, 0));
+                    let ts = d.and_hms_opt(h.min(23), m.min(59), 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or_else(now_ts);
+                    let id = self.data.new_id();
+                    self.data.extra.reminders.push(Reminder { id, text: text.trim().to_string(), due_ts: ts, done: false, owner: self.data.me });
+                    self.dirty = true;
+                    self.toast = Some(("Reminder created".into(), now_ts()));
+                    close = true;
+                }
+            }
+            Modal::Trash => {
+                if self.data.extra.trash.is_empty() {
+                    ui.label(RichText::new("Trash is empty.").color(t.text3));
+                }
+                let mut restore = None;
+                let mut purge = None;
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for (i, item) in self.data.extra.trash.iter().enumerate().rev() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&item.kind).small().color(t.text3));
+                            ui.label(&item.title);
+                            ui.label(RichText::new(fmt_ago(item.deleted)).small().color(t.text3));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("Delete forever").color(t.danger)).frame(false)).clicked() {
+                                    purge = Some(i);
+                                }
+                                if ui.button("Restore").clicked() {
+                                    restore = Some(i);
+                                }
+                            });
+                        });
+                    }
+                });
+                if let Some(i) = restore {
+                    self.restore_trash(i);
+                }
+                if let Some(i) = purge {
+                    self.data.extra.trash.remove(i);
+                    self.dirty = true;
+                }
+            }
+            Modal::Unavailable { body, .. } => {
+                ui.label(body.as_str());
+                ui.add_space(8.0);
+                if primary_button(ui, t, "OK").clicked() {
+                    close = true;
+                }
+            }
+            Modal::Bookmark { title, url } => {
+                ui.add(egui::TextEdit::singleline(title).hint_text("Name").desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::singleline(url).hint_text("https://...").desired_width(f32::INFINITY));
+                if primary_button(ui, t, "Add Bookmark").clicked() && !url.trim().is_empty() {
+                    let id = self.data.new_id();
+                    let ttl = if title.trim().is_empty() { url.trim().to_string() } else { title.trim().to_string() };
+                    self.data.extra.bookmarks.push(Bookmark { id, title: ttl, url: url.trim().to_string() });
+                    self.dirty = true;
+                    close = true;
+                }
+            }
+            Modal::SwitchUser => {
+                ui.label("Who's using the app? Everyone on this computer shares the same Workspace.");
+                ui.add_space(4.0);
+                for m in self.data.members.clone() {
+                    let ring = t.card;
+                    let label = if m.id == self.data.me { format!("{} (current)", m.name) } else if m.invited { format!("{} (invited)", m.name) } else { m.name.clone() };
+                    if menu_row(ui, t, &label, m.id == self.data.me, |p, c| paint_avatar(p, c, 9.0, &m, ring)).clicked() {
+                        self.data.me = m.id;
+                        if let Some(mm) = self.data.members.iter_mut().find(|x| x.id == m.id) {
+                            mm.invited = false;
+                        }
+                        self.dirty = true;
+                        close = true;
+                    }
+                }
+            }
+            Modal::NewDashboard { name } => {
+                ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                let spaces: Vec<(u64, String)> = self.data.spaces.iter().map(|s| (s.id, s.name.clone())).collect();
+                ui.label(RichText::new("Shows the whole Workspace; pick a Space later from the Dashboards page.").small().color(t.text2));
+                let _ = spaces;
+                if primary_button(ui, t, "Create Dashboard").clicked() && !name.trim().is_empty() {
+                    let id = self.data.new_id();
+                    self.data.extra.dashboards.push(Dashboard { id, name: name.trim().to_string(), space: None });
+                    self.dash_open = Some(id);
+                    self.section = Section::Dashboards;
+                    self.dirty = true;
+                    close = true;
+                }
+            }
+        }
+        close
+    }
+
+    /// Adds invited people (skipping emails already in the Workspace); they join #general.
+    /// Returns how many were added.
+    pub(super) fn invite_people(&mut self, emails: &[String], role: &str) -> usize {
+        let mut added = 0;
+        for e in emails {
+            let e = e.trim();
+            if !(e.contains('@') && e.contains('.')) || self.data.members.iter().any(|m| m.email.eq_ignore_ascii_case(e)) {
+                continue;
+            }
+            let id = self.data.new_id();
+            let name = e.split('@').next().unwrap_or(e).replace(['.', '_'], " ");
+            let name = name
+                .split_whitespace()
+                .map(|w| {
+                    let mut c = w.chars();
+                    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let color = STATUS_PALETTE[1 + (id as usize % 13)];
+            self.data.members.push(Member { id, name, color, email: e.to_string(), role: role.to_string(), invited: true, status_text: String::new() });
+            if let Some(g) = self.data.channels.iter_mut().find(|c| c.kind == ChannelKind::Channel && c.name == "general") {
+                g.members.push(id);
+            }
+            added += 1;
+        }
+        if added > 0 {
+            self.dirty = true;
+        }
+        added
+    }
+
+    pub(super) fn describe_action(&self, a: &Automation) -> String {
+        match a.action.as_str() {
+            "assign" => format!("assign to {}", a.value.parse::<u64>().ok().and_then(|id| self.data.member(id)).map(|m| m.name.clone()).unwrap_or_default()),
+            "priority" => format!("set priority to {}", a.value.parse::<usize>().ok().filter(|p| *p < 5).map(|p| PRIORITIES[p].label).unwrap_or("")),
+            "move" => format!("move to {}", a.value.parse::<u64>().ok().map(|id| self.data.list_name(id)).unwrap_or_default()),
+            _ => format!("comment \"{}\"", a.value),
+        }
+    }
+
+    pub(super) fn import_csv(&mut self, path: &str) -> String {
+        let Ok(text) = std::fs::read_to_string(path) else { return format!("Couldn't read {}", path) };
+        let Some(list) = self.default_list() else { return "Open a list first".into() };
+        let statuses = self.data.statuses_for_list(list);
+        let mut n = 0;
+        for (i, line) in text.lines().enumerate() {
+            let cols: Vec<String> = line.split(',').map(|c| c.trim().trim_matches('"').to_string()).collect();
+            if cols.is_empty() || cols[0].is_empty() {
+                continue;
+            }
+            if i == 0 && cols[0].eq_ignore_ascii_case("name") {
+                continue;
+            }
+            let status = cols.get(1).and_then(|s| statuses.iter().find(|st| st.name.eq_ignore_ascii_case(s))).map(|s| s.name.clone());
+            let priority = cols.get(2).and_then(|p| PRIORITIES.iter().position(|d| d.label.eq_ignore_ascii_case(p))).unwrap_or(0) as u8;
+            let due = cols.get(3).and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+            let assignees = cols.get(4).and_then(|a| self.data.members.iter().find(|m| m.name.eq_ignore_ascii_case(a))).map(|m| vec![m.id]).unwrap_or_default();
+            self.actions.push(Action::Add { list, name: cols[0].clone(), status, priority, assignees, due, parent: None, open: false });
+            n += 1;
+        }
+        format!("Imported {} tasks into {}", n, self.data.list_name(list))
+    }
+
+    pub(super) fn export_csv(&self) -> String {
+        let mut out = String::from("name,status,priority,due,assignee,list\n");
+        for t in self.filtered() {
+            let who = t.assignees.first().and_then(|a| self.data.member(*a)).map(|m| m.name.clone()).unwrap_or_default();
+            out.push_str(&format!(
+                "\"{}\",{},{},{},{},\"{}\"\n",
+                t.name.replace('"', "'"),
+                t.status,
+                PRIORITIES[t.priority as usize].label,
+                t.due.map(|d| d.to_string()).unwrap_or_default(),
+                who,
+                self.data.list_name(t.list_id)
+            ));
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let path = PathBuf::from(home).join("Downloads").join(format!("tasks-{}.csv", today()));
+        match std::fs::write(&path, out) {
+            Ok(_) => format!("Saved {}", path.display()),
+            Err(e) => format!("Couldn't save: {}", e),
+        }
+    }
+
+    pub(super) fn restore_trash(&mut self, i: usize) {
+        let item = self.data.extra.trash.remove(i);
+        match item.kind.as_str() {
+            "Task" => {
+                if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {
+                    self.data.tasks.extend(tasks);
+                }
+            }
+            "Doc" => {
+                if let Ok(d) = serde_json::from_str::<Doc>(&item.payload) {
+                    self.data.docs.push(d);
+                }
+            }
+            "List" => {
+                if let Ok((sid, l, tasks)) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(&item.payload) {
+                    let idx = self.data.spaces.iter().position(|s| s.id == sid).unwrap_or(0);
+                    if let Some(s) = self.data.spaces.get_mut(idx) {
+                        s.lists.push(l);
+                    }
+                    self.data.tasks.extend(tasks);
+                }
+            }
+            _ => {}
+        }
+        self.dirty = true;
+    }
+
+    /// "New message" picker (sidebar + New message, Create > Message, Cmd+G).
+    pub(super) fn new_message_window(&mut self, ctx: &egui::Context) {
+        if !self.new_message_open {
+            return;
+        }
+        let t = self.t();
+        let mut open = true;
+        let me = self.data.me;
+        egui::Window::new("New message").open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
+            ui.set_min_width(320.0);
+            ui.label(RichText::new("To:").color(t.text2));
+            for m in self.data.members.clone() {
+                let ring = t.card;
+                let label = if m.id == me { format!("{} \u{2014} You", m.name) } else { m.name.clone() };
+                if menu_row(ui, &t, &label, false, |p, c| paint_avatar(p, c, 9.0, &m, ring)).clicked() {
+                    let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((m.id == me && c.members == vec![me]) || (m.id != me && c.members.contains(&m.id) && c.members.contains(&me)))).map(|c| c.id);
+                    let id = existing.unwrap_or_else(|| {
+                        let id = self.data.new_id();
+                        let members = if m.id == me { vec![me] } else { vec![me, m.id] };
+                        self.data.channels.push(Channel { id, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members, messages: vec![], last_read: now_ts() });
+                        self.dirty = true;
+                        id
+                    });
+                    self.section = Section::Chat;
+                    self.chat_open = Some(id);
+                    self.new_message_open = false;
+                }
+            }
+        });
+        if !open {
+            self.new_message_open = false;
+        }
+    }
+
+    /// Floating personal notepad.
+    pub(super) fn notepad(&mut self, ctx: &egui::Context) {
+        if !self.notepad_open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Notepad").open(&mut open).default_size([360.0, 420.0]).default_pos([ctx.screen_rect().right() - 400.0, 80.0]).show(ctx, |ui| {
+            if ui.add(egui::TextEdit::multiline(&mut self.data.extra.notepad).hint_text("Write anything. Only you can see this.").desired_width(f32::INFINITY).desired_rows(18)).changed() {
+                self.dirty = true;
+            }
+        });
+        if !open {
+            self.notepad_open = false;
+        }
+    }
+
+    /// A short message at the bottom of the window.
+    pub(super) fn toast_ui(&mut self, ctx: &egui::Context) {
+        let Some((msg, ts)) = self.toast.clone() else { return };
+        if now_ts() - ts > 5 {
+            self.toast = None;
+            return;
+        }
+        let t = self.t();
+        egui::Area::new(egui::Id::new("toast")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -24.0]).show(ctx, |ui| {
+            egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).corner_radius(8).inner_margin(egui::Margin::symmetric(16, 10)).show(ui, |ui| {
+                ui.label(RichText::new(msg).color(Color32::WHITE));
+            });
+        });
+        let _ = t;
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+}

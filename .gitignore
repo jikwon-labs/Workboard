@@ -1,0 +1,4 @@
+/target
+/shots
+*.tmp
+.DS_Store

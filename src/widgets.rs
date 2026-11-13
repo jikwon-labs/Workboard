@@ -1,0 +1,442 @@
+// Small painted widgets and the pickers used across views:
+// status circle, priority flag, avatars, pills, and the status, priority,
+// assignee and date pickers.
+
+use crate::model::*;
+use crate::theme::{rgb, Theme};
+use chrono::{Datelike, Duration, NaiveDate};
+use egui::{pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui};
+
+pub fn paint_status_circle(p: &egui::Painter, center: Pos2, r: f32, st: &Status) {
+    let c = rgb(st.color);
+    match st.kind {
+        StatusKind::Closed | StatusKind::Done => {
+            p.circle_filled(center, r, c);
+            // check mark
+            let a = center + vec2(-r * 0.45, 0.0);
+            let b = center + vec2(-r * 0.1, r * 0.38);
+            let d = center + vec2(r * 0.5, -r * 0.35);
+            p.line_segment([a, b], Stroke::new(1.6, Color32::WHITE));
+            p.line_segment([b, d], Stroke::new(1.6, Color32::WHITE));
+        }
+        StatusKind::Custom => {
+            p.circle_stroke(center, r, Stroke::new(1.5, c));
+            // half filled to show progress
+            let mut pts = vec![center];
+            for i in 0..=16 {
+                let a = std::f32::consts::PI * (-0.5 + i as f32 / 16.0);
+                pts.push(center + vec2(a.cos(), a.sin()) * (r - 2.5));
+            }
+            p.add(egui::Shape::convex_polygon(pts, c, Stroke::NONE));
+        }
+        StatusKind::Open => {
+            paint_dashed(p, center, r, c);
+        }
+    }
+}
+
+/// Names a custom-drawn control so screen readers (and the click tests) can find it.
+pub fn name_it(resp: &Response, label: &str) {
+    let l = label.to_string();
+    resp.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::Button, true, l.clone()));
+}
+
+pub fn paint_dashed(p: &egui::Painter, c: Pos2, r: f32, color: Color32) {
+    let n = 10;
+    for i in 0..n {
+        let a0 = std::f32::consts::TAU * (i as f32 / n as f32);
+        let a1 = a0 + std::f32::consts::TAU / n as f32 * 0.55;
+        p.line_segment([c + vec2(a0.cos(), a0.sin()) * r, c + vec2(a1.cos(), a1.sin()) * r], Stroke::new(1.5, color));
+    }
+}
+
+pub fn paint_flag(p: &egui::Painter, pos: Pos2, color: Color32, h: f32) {
+    let top = pos + vec2(0.0, -h * 0.5);
+    let bottom = pos + vec2(0.0, h * 0.5);
+    p.line_segment([top, bottom], Stroke::new(1.5, color));
+    let w = h * 0.7;
+    let pts = vec![top, top + vec2(w, h * 0.18), top + vec2(0.0, h * 0.4)];
+    p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+pub fn priority_color(pr: u8, t: &Theme) -> Color32 {
+    if pr == 0 {
+        t.text3
+    } else if pr == 4 && !t.dark {
+        Color32::from_rgb(0xb0, 0xb0, 0xb0)
+    } else {
+        rgb(PRIORITIES[pr.min(4) as usize].color)
+    }
+}
+
+pub fn paint_avatar(p: &egui::Painter, center: Pos2, r: f32, m: &Member, ring: Color32) {
+    p.circle_filled(center, r + 1.5, ring);
+    p.circle_filled(center, r, rgb(m.color));
+    p.text(
+        center,
+        Align2::CENTER_CENTER,
+        m.initials(),
+        FontId::proportional(r * 0.85),
+        Color32::WHITE,
+    );
+}
+
+/// Overlapping avatars; returns the width used.
+pub fn paint_avatars(p: &egui::Painter, left: Pos2, r: f32, ids: &[u64], data: &Data, ring: Color32) -> f32 {
+    let mut x = left.x + r;
+    let mut n = 0;
+    for id in ids.iter().take(3) {
+        if let Some(m) = data.member(*id) {
+            paint_avatar(p, pos2(x, left.y), r, m, ring);
+            x += r * 1.4;
+            n += 1;
+        }
+    }
+    if ids.len() > 3 {
+        p.text(pos2(x + 2.0, left.y), Align2::LEFT_CENTER, format!("+{}", ids.len() - 3), FontId::proportional(11.0), Color32::GRAY);
+        x += 18.0;
+    }
+    if n == 0 {
+        0.0
+    } else {
+        x - left.x
+    }
+}
+
+pub fn paint_empty_avatar(p: &egui::Painter, center: Pos2, r: f32, color: Color32) {
+    p.circle_stroke(center, r, Stroke::new(1.0, color));
+    // person glyph
+    p.circle_stroke(center + vec2(0.0, -r * 0.25), r * 0.28, Stroke::new(1.0, color));
+    p.line_segment([center + vec2(-r * 0.45, r * 0.5), center + vec2(r * 0.45, r * 0.5)], Stroke::new(1.0, color));
+}
+
+/// Status pill: open statuses are a light grey pill with dark text and a dashed
+/// circle; the others are filled with their colour and white text (as measured).
+pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
+    let open = st.kind == StatusKind::Open;
+    let dark = ui.visuals().dark_mode;
+    let (fill, fg) = if open {
+        (if dark { Color32::from_white_alpha(22) } else { Color32::from_black_alpha(15) }, if dark { Color32::from_rgb(230, 230, 230) } else { Color32::from_rgb(32, 32, 32) })
+    } else {
+        (rgb(st.color), Color32::WHITE)
+    };
+    let text = st.name.to_uppercase();
+    let galley = ui.painter().layout_no_wrap(text, FontId::proportional(12.0), fg);
+    let size = vec2(galley.size().x + 30.0, 22.0);
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+    let fill = if resp.hovered() { fill.gamma_multiply(0.9) } else { fill };
+    ui.painter().rect_filled(rect, 5.0, fill);
+    let c = rect.left_center() + vec2(11.0, 0.0);
+    match st.kind {
+        StatusKind::Open => paint_dashed(ui.painter(), c, 4.5, fg),
+        StatusKind::Custom => {
+            ui.painter().circle_stroke(c, 4.5, Stroke::new(1.4, fg));
+            ui.painter().circle_filled(c, 2.0, fg);
+        }
+        _ => {
+            ui.painter().circle_filled(c, 5.0, fg);
+            ui.painter().line_segment([c + vec2(-2.3, 0.0), c + vec2(-0.6, 1.8)], Stroke::new(1.3, fill));
+            ui.painter().line_segment([c + vec2(-0.6, 1.8), c + vec2(2.5, -1.8)], Stroke::new(1.3, fill));
+        }
+    }
+    ui.painter().galley(pos2(rect.left() + 20.0, rect.center().y - galley.size().y / 2.0), galley, fg);
+    resp
+}
+
+pub fn fmt_date(d: NaiveDate) -> String {
+    let t = today();
+    let diff = (d - t).num_days();
+    match diff {
+        0 => "Today".into(),
+        1 => "Tomorrow".into(),
+        -1 => "Yesterday".into(),
+        2..=6 => d.format("%a").to_string(),
+        _ => {
+            if d.year() == t.year() {
+                d.format("%b %-d").to_string()
+            } else {
+                d.format("%-m/%-d/%y").to_string()
+            }
+        }
+    }
+}
+
+pub fn date_color(d: NaiveDate, closed: bool, t: &Theme) -> Color32 {
+    if closed {
+        return t.text3;
+    }
+    let diff = (d - today()).num_days();
+    if diff < 0 {
+        t.danger
+    } else if diff == 0 {
+        Color32::from_rgb(0xe1, 0x6b, 0x16)
+    } else {
+        t.text2
+    }
+}
+
+pub fn fmt_duration(secs: i64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{}h {}m", h, m)
+    } else if m > 0 {
+        format!("{}m {}s", m, s)
+    } else {
+        format!("{}s", s)
+    }
+}
+
+pub fn fmt_ago(ts: i64) -> String {
+    let d = now_ts() - ts;
+    if d < 60 {
+        "just now".into()
+    } else if d < 3600 {
+        format!("{} mins ago", (d / 60).max(1))
+    } else if d < 86400 {
+        let h = d / 3600;
+        if h == 1 { "1 hour ago".into() } else { format!("{} hours ago", h) }
+    } else {
+        let dt = chrono::DateTime::from_timestamp(ts, 0)
+            .map(|x| x.with_timezone(&chrono::Local).format("%b %-d at %-I:%M %p").to_string())
+            .unwrap_or_default();
+        dt
+    }
+}
+
+/// Opens a popup below `resp` when it is clicked; shows `add` while open.
+pub fn popup<R>(ui: &Ui, resp: &Response, id: egui::Id, width: f32, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(id));
+    }
+    egui::popup_below_widget(ui, id, resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+        ui.set_min_width(width);
+        add(ui)
+    })
+}
+
+pub fn close_popup(ui: &Ui) {
+    ui.memory_mut(|m| m.close_popup());
+}
+
+/// A plain full-width menu row with an optional painted lead.
+pub fn menu_row(ui: &mut Ui, t: &Theme, label: &str, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2)) -> Response {
+    let w = ui.available_width().max(160.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    name_it(&resp, label);
+    if resp.hovered() || selected {
+        ui.painter().rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
+    }
+    lead(ui.painter(), rect.left_center() + vec2(14.0, 0.0));
+    ui.painter().text(rect.left_center() + vec2(30.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text);
+    resp
+}
+
+pub fn status_menu(ui: &mut Ui, t: &Theme, statuses: &[Status], current: &mut String) -> bool {
+    let mut changed = false;
+    ui.label(egui::RichText::new("Statuses").small().color(t.text3));
+    for st in statuses {
+        let sel = &st.name == current;
+        let r = menu_row(ui, t, &st.name.to_uppercase(), sel, |p, c| paint_status_circle(p, c, 6.0, st));
+        if r.clicked() {
+            if !sel {
+                *current = st.name.clone();
+                changed = true;
+            }
+            close_popup(ui);
+        }
+    }
+    changed
+}
+
+pub fn priority_menu(ui: &mut Ui, t: &Theme, current: &mut u8) -> bool {
+    let mut changed = false;
+    ui.label(egui::RichText::new("Task Priority").small().color(t.text3));
+    for pr in [1u8, 2, 3, 4] {
+        let col = priority_color(pr, t);
+        let r = menu_row(ui, t, PRIORITIES[pr as usize].label, *current == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0));
+        if r.clicked() {
+            *current = pr;
+            changed = true;
+            close_popup(ui);
+        }
+    }
+    ui.separator();
+    let r = menu_row(ui, t, "Clear", false, |p, c| {
+        p.text(c, Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), Color32::GRAY);
+    });
+    if r.clicked() {
+        if *current != 0 {
+            *current = 0;
+            changed = true;
+        }
+        close_popup(ui);
+    }
+    changed
+}
+
+pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>) -> bool {
+    let mut changed = false;
+    ui.label(egui::RichText::new("People").small().color(t.text3));
+    for m in &data.members {
+        let sel = current.contains(&m.id);
+        let label = if m.id == data.me { format!("{} (you)", m.name) } else { m.name.clone() };
+        let ring = t.card;
+        let r = menu_row(ui, t, &label, sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
+        if sel {
+            ui.painter().text(r.rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, "\u{2714}", FontId::proportional(12.0), t.selected_text);
+        }
+        if r.clicked() {
+            if sel {
+                current.retain(|x| *x != m.id);
+            } else if data.extra.apps.multiple_assignees {
+                current.push(m.id);
+            } else {
+                *current = vec![m.id];
+                close_popup(ui);
+            }
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Quick options plus a month calendar. Returns true when the date changed.
+pub fn date_menu(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<NaiveDate>) -> bool {
+    let mut changed = false;
+    let base = current.unwrap_or_else(today);
+    let mut month: NaiveDate = ui
+        .data(|d| d.get_temp(id))
+        .unwrap_or_else(|| NaiveDate::from_ymd_opt(base.year(), base.month(), 1).unwrap());
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(130.0);
+            let td = today();
+            let wd = td.weekday().num_days_from_monday() as i64;
+            let opts: [(&str, NaiveDate); 6] = [
+                ("Today", td),
+                ("Tomorrow", td + Duration::days(1)),
+                ("This weekend", td + Duration::days((5 - wd).max(0))),
+                ("Next week", td + Duration::days(7 - wd)),
+                ("2 weeks", td + Duration::days(14)),
+                ("4 weeks", td + Duration::days(28)),
+            ];
+            for (label, d) in opts {
+                let r = ui.add(egui::Button::new(label).frame(false).min_size(vec2(126.0, 24.0)));
+                if r.clicked() {
+                    *current = Some(d);
+                    changed = true;
+                    close_popup(ui);
+                }
+            }
+            if current.is_some() {
+                ui.separator();
+                if ui.add(egui::Button::new(egui::RichText::new("Clear").color(t.danger)).frame(false)).clicked() {
+                    *current = None;
+                    changed = true;
+                    close_popup(ui);
+                }
+            }
+        });
+        ui.separator();
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(month.format("%B %Y").to_string()).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button(">").clicked() {
+                        month = add_months(month, 1);
+                    }
+                    if ui.small_button("<").clicked() {
+                        month = add_months(month, -1);
+                    }
+                });
+            });
+            let cell = 28.0;
+            let (rect, _) = ui.allocate_exact_size(vec2(cell * 7.0, cell * 7.0), Sense::hover());
+            let p = ui.painter();
+            for (i, d) in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].iter().enumerate() {
+                p.text(rect.min + vec2(cell * (i as f32 + 0.5), cell * 0.5), Align2::CENTER_CENTER, *d, FontId::proportional(11.0), t.text3);
+            }
+            let start = month - Duration::days(month.weekday().num_days_from_sunday() as i64);
+            for i in 0..42 {
+                let d = start + Duration::days(i);
+                let r = Rect::from_min_size(rect.min + vec2(cell * (i % 7) as f32, cell * (1 + i / 7) as f32), vec2(cell, cell)).shrink(1.5);
+                let resp = ui.interact(r, id.with(i), Sense::click());
+                let sel = Some(d) == *current;
+                let is_today = d == today();
+                if sel {
+                    ui.painter().circle_filled(r.center(), cell * 0.42, t.primary);
+                } else if resp.hovered() {
+                    ui.painter().circle_filled(r.center(), cell * 0.42, t.hover);
+                }
+                let col = if sel {
+                    Color32::WHITE
+                } else if d.month() != month.month() {
+                    t.text3.gamma_multiply(0.6)
+                } else if is_today {
+                    t.danger
+                } else {
+                    t.text
+                };
+                ui.painter().text(r.center(), Align2::CENTER_CENTER, d.day().to_string(), FontId::proportional(12.0), col);
+                if resp.clicked() {
+                    *current = Some(d);
+                    changed = true;
+                    close_popup(ui);
+                }
+            }
+        });
+    });
+    ui.data_mut(|d| d.insert_temp(id, month));
+    changed
+}
+
+pub fn add_months(d: NaiveDate, n: i32) -> NaiveDate {
+    let total = d.year() * 12 + d.month0() as i32 + n;
+    NaiveDate::from_ymd_opt(total.div_euclid(12), total.rem_euclid(12) as u32 + 1, 1).unwrap()
+}
+
+/// Rounded primary button.
+pub fn primary_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).strong())
+            .fill(t.primary)
+            .corner_radius(6)
+            .min_size(vec2(0.0, 28.0)),
+    )
+}
+
+pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
+    let font = FontId::proportional(11.0);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
+    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 18.0), Sense::click());
+    ui.painter().rect_filled(rect, 4.0, color.gamma_multiply(0.16));
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    resp
+}
+
+pub fn tag_color(tag: &str) -> Color32 {
+    let mut h: u32 = 0;
+    for b in tag.bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as u32);
+    }
+    rgb(STATUS_PALETTE[1 + (h as usize % (STATUS_PALETTE.len() - 1))])
+}
+
+pub fn paint_triangle(p: &egui::Painter, center: Pos2, open: bool, color: Color32) {
+    let s = 4.0;
+    let pts = if open {
+        vec![center + vec2(-s, -s * 0.5), center + vec2(s, -s * 0.5), center + vec2(0.0, s * 0.6)]
+    } else {
+        vec![center + vec2(-s * 0.5, -s), center + vec2(s * 0.6, 0.0), center + vec2(-s * 0.5, s)]
+    };
+    p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+/// Place a widget over an exact rectangle without moving the layout cursor
+/// (unlike `Ui::put`, which pulls the following rows up to the rectangle).
+pub fn put_over(ui: &mut egui::Ui, rect: egui::Rect, w: impl egui::Widget) -> Response {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
+    child.add(w)
+}

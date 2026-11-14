@@ -222,13 +222,18 @@ impl App {
             self.modal = Some(Modal::SetStatus { text: cur });
             close_popup(ui);
         }
-        // a flyout to the right of the row (egui's sub menu drew over this menu)
+        // a flyout beside the row (egui's sub menu drew over this menu): to the
+        // right when it fits, otherwise to the left of the whole menu
         let mr = menu_item(ui, &t, "\u{1F515}", "Mute notifications", "\u{203A}");
         let fly = ui.id().with("mute_fly");
         let keep: bool = ui.data(|d| d.get_temp(fly)).unwrap_or(false);
+        let fly_w: f32 = ui.data(|d| d.get_temp(fly.with("w"))).unwrap_or(170.0);
+        let menu = ui.max_rect().expand(egui::Frame::popup(ui.style()).total_margin().left);
+        let on_right = menu.right() + 6.0 + fly_w <= ui.ctx().screen_rect().right();
+        let fly_x = if on_right { menu.right() + 6.0 } else { menu.left() - 6.0 - fly_w };
         let mut over = false;
         if mr.hovered() || keep {
-            let area = egui::Area::new(fly).order(egui::Order::Tooltip).fixed_pos(mr.rect.right_top() + vec2(6.0, -4.0)).show(ui.ctx(), |ui| {
+            let area = egui::Area::new(fly).order(egui::Order::Tooltip).fixed_pos(pos2(fly_x, mr.rect.top() - 4.0)).show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_width(150.0);
                     for (label, secs) in [("For 1 hour", 3600), ("For 4 hours", 4 * 3600), ("Until tomorrow", 24 * 3600), ("Unmute", 0)] {
@@ -241,9 +246,13 @@ impl App {
                     }
                 });
             });
-            over = area.response.rect.expand(4.0).contains(ui.ctx().pointer_hover_pos().unwrap_or_default());
+            let r = area.response.rect;
+            ui.data_mut(|d| d.insert_temp(fly.with("w"), r.width()));
+            over = r.expand(4.0).contains(ui.ctx().pointer_hover_pos().unwrap_or_default());
         }
-        let gap = ui.ctx().pointer_hover_pos().map_or(false, |p| p.y >= mr.rect.top() - 4.0 && p.y <= mr.rect.bottom() + 120.0 && p.x >= mr.rect.right() - 10.0 && p.x <= mr.rect.right() + 12.0);
+        // the strip the pointer crosses between the row and the flyout
+        let (gx0, gx1) = if on_right { (mr.rect.right() - 10.0, fly_x + 12.0) } else { (fly_x + fly_w - 12.0, mr.rect.left() + 10.0) };
+        let gap = ui.ctx().pointer_hover_pos().map_or(false, |p| p.y >= mr.rect.top() - 4.0 && p.y <= mr.rect.bottom() + 120.0 && p.x >= gx0 && p.x <= gx1);
         ui.data_mut(|d| d.insert_temp(fly, mr.hovered() || over || (keep && gap)));
         ui.separator();
         let rows: [(&str, &str); 7] = [("\u{2699}", "Settings"), ("\u{1F514}", "Notifications"), ("\u{1F3A8}", "Themes"), ("\u{2728}", "Labs"), ("\u{2318}", "Keyboard shortcuts"), ("\u{2B07}", "Download app"), ("\u{2753}", "Help")];
@@ -613,7 +622,7 @@ impl App {
                 close |= self.modal_body(ui, &t, &mut modal);
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
             close = true;
         }
         if open && !close && self.modal.is_none() {

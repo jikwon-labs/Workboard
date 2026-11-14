@@ -876,10 +876,7 @@ impl App {
                     if self.data.extra.apps.priorities {
                         let r = ui.button("Priority");
                         popup(ui, &r, pid.with("bp"), 160.0, |ui| {
-                            let mut p = 0u8;
-                            if priority_menu(ui, &t, &mut p) || p == 0 {
-                                pick_pr = Some(p);
-                            }
+                            pick_pr = priority_pick(ui, &t, 0);
                         });
                     }
                     if ui.button("Move").clicked() {
@@ -936,7 +933,7 @@ impl App {
                 });
             });
         });
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.modal.is_none() && self.open_task.is_none() && !ctx.memory(|m| m.any_popup_open()) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.modal.is_none() && self.open_task.is_none() && !self.menu_was_open {
             self.selected.clear();
         }
     }

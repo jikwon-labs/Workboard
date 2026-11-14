@@ -667,3 +667,227 @@ fn doc_slash_command_and_sub_page() {
     h.click("+  Add page");
     assert!(h.app.data.docs.iter().any(|d| d.parent == Some(id)));
 }
+
+// ---------------------------------------------------------------- round 2 bugs
+
+fn pri(h: &Ui1, name: &str) -> u8 {
+    h.app.data.tasks.iter().find(|t| t.name == name).unwrap().priority
+}
+
+#[test]
+fn bulk_priority_opening_the_menu_changes_nothing() {
+    let mut h = Ui1::new();
+    let a = "Write copy for landing page";
+    let b = "Set up analytics dashboard";
+    for t in h.app.data.tasks.iter_mut().filter(|t| t.name == a || t.name == b) {
+        t.priority = 2;
+    }
+    h.hover(h.find(&format!("Task {}", a)).unwrap());
+    h.click(&format!("Select {}", a));
+    h.click(&format!("Select {}", b));
+    assert!(h.has("2 tasks selected"));
+    h.click("Priority");
+    assert!(h.has("Clear"), "the priority menu is open");
+    h.settle();
+    assert_eq!((pri(&h, a), pri(&h, b)), (2, 2), "just opening the menu keeps the priority");
+    h.click("Urgent");
+    assert_eq!((pri(&h, a), pri(&h, b)), (1, 1));
+    h.click("Priority");
+    h.click("Clear");
+    assert_eq!((pri(&h, a), pri(&h, b)), (0, 0), "Clear still clears");
+}
+
+impl Ui1 {
+    fn rect(&self, name: &str) -> Rect {
+        self.tree.iter().rev().find(|(n, _)| n == name).map(|(_, r)| *r).unwrap_or_else(|| panic!("nothing named {:?}", name))
+    }
+}
+
+#[test]
+fn dots_menus_open_submenus_beside_the_parent() {
+    let mut h = Ui1::new();
+    // sidebar space "..." > Create new
+    h.hover(h.find("Team Space").unwrap());
+    h.click("Space options Team Space");
+    let parent = h.rect("Create new");
+    h.hover(parent.center());
+    let sub = h.rect("Folder");
+    assert!(sub.left() >= parent.right() - 2.0, "Create new opens to the right: parent {:?} sub {:?}", parent, sub);
+    assert!(h.has("Task statuses"), "the parent menu stays open");
+    h.key(egui::Key::Escape);
+
+    // list row "..." > Status
+    h.hover(h.find("Task Set up analytics dashboard").unwrap());
+    h.click("Task options Set up analytics dashboard");
+    let parent = h.rect("Status");
+    h.hover(parent.center());
+    let sub = h.rect("IN PROGRESS");
+    assert!(sub.left() >= parent.right() - 2.0, "Status opens to the right: parent {:?} sub {:?}", parent, sub);
+    h.click("IN PROGRESS");
+    let t = h.app.data.tasks.iter().find(|t| t.name == "Set up analytics dashboard").unwrap();
+    assert_eq!(t.status, "in progress", "picking from the submenu works");
+}
+
+#[test]
+fn profile_mute_flyout_does_not_cover_the_menu() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    let row = h.rect("Mute notifications");
+    h.hover(row.center());
+    let item = h.rect("For 1 hour");
+    let settings = h.rect("Settings");
+    assert!(item.right() <= settings.left() || item.left() >= settings.right(), "flyout {:?} sits beside the menu row {:?}", item, settings);
+    // walk the pointer from the row to the flyout; it must stay open
+    let to = item.center();
+    for i in 1..=8 {
+        let p = row.center() + (to - row.center()) * (i as f32 / 8.0);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+    }
+    h.settle();
+    h.click("For 1 hour");
+    assert!(h.app.data.extra.muted_until > now_ts(), "muted from the flyout");
+}
+
+#[test]
+fn date_picker_fits_its_content_and_shows_set_recurring() {
+    let mut h = Ui1::new();
+    let mut rows: Vec<(String, Rect)> = h.tree.iter().filter(|(n, _)| n.starts_with("Due date of ")).cloned().collect();
+    rows.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+    assert!(rows.len() >= 2);
+    for (name, _) in [rows.first().unwrap().clone(), rows.last().unwrap().clone()] {
+        h.click(&name);
+        let today = h.rect("Today");
+        let weekly = h.rect("Weekly");
+        assert!(weekly.bottom() <= 900.0 && weekly.top() >= 0.0, "{}: Set Recurring is on screen ({:?})", name, weekly);
+        assert!(weekly.top() - today.top() < 380.0, "{}: the menu is only as tall as its content ({:?} .. {:?})", name, today, weekly);
+        h.key(egui::Key::Escape);
+    }
+}
+
+#[test]
+fn escape_closes_the_task_menu_first_then_the_task() {
+    let mut h = Ui1::new();
+    h.click_left("Task Write copy for landing page", 120.0);
+    assert!(h.app.open_task.is_some());
+    h.click("\u{2026}");
+    assert!(h.has("Duplicate"), "the task window menu is open");
+    h.key(egui::Key::Escape);
+    assert!(!h.has("Duplicate"), "Escape closes the menu");
+    assert!(h.app.open_task.is_some(), "and leaves the task open");
+    h.key(egui::Key::Escape);
+    assert!(h.app.open_task.is_none(), "a second Escape closes the task");
+
+    // same for a row "..." menu with ticked rows: the selection stays
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Select Write copy for landing page");
+    h.click("Task options Write copy for landing page");
+    assert_eq!(h.app.selected.len(), 1);
+    assert!(h.has("Add subtask"), "the row menu is open");
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.selected.len(), 1, "Escape on the menu keeps the selection");
+}
+
+#[test]
+fn chat_drafts_stay_with_their_channel() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let a = h.app.chat_open.unwrap();
+    h.click("Message composer");
+    h.type_text("hello");
+    // move to another channel, write and send there
+    let b = h.app.data.channels.iter().find(|c| c.id != a).expect("seed has two channels").clone();
+    h.click_side(&b.name, false);
+    assert_eq!(h.app.chat_open, Some(b.id));
+    assert_eq!(h.app.chat_text, "", "the other channel starts empty");
+    h.click("Message composer");
+    h.type_text("first message");
+    h.key(egui::Key::Enter);
+    let sent = h.app.data.channels.iter().find(|c| c.id == b.id).unwrap().messages.last().unwrap().text.clone();
+    assert_eq!(sent, "first message");
+    // back to the first channel: the unsent text is still there
+    h.click_side("general", false);
+    assert_eq!(h.app.chat_text, "hello");
+}
+
+#[test]
+fn new_channel_field_comes_into_view_in_a_long_sidebar() {
+    for via_create in [true, false] {
+        let mut h = Ui1::new();
+        // a long sidebar: many lists in the first space
+        let base = h.app.data.spaces.iter().flat_map(|s| s.lists.iter()).next().cloned().or_else(|| h.app.data.spaces.iter().flat_map(|s| s.folders.iter().flat_map(|f| f.lists.iter())).next().cloned()).unwrap();
+        for i in 0..30 {
+            let mut l = base.clone();
+            l.id = h.app.data.new_id();
+            l.name = format!("Extra list {}", i);
+            h.app.data.spaces[0].lists.push(l);
+        }
+        h.settle();
+        if via_create {
+            h.click("Create");
+            h.click("Channel");
+        } else {
+            // the sidebar's own "Add Channel" row, scrolled to with the wheel
+            h.click_side("Add Channel", false);
+        }
+        assert!(h.app.new_channel.is_some());
+        for _ in 0..30 {
+            h.frame(vec![]); // let the scroll animation finish
+        }
+        let r = h.ctx.read_response(egui::Id::new("new_channel_input")).expect("the field is drawn").rect;
+        assert!(r.top() >= 40.0 && r.bottom() <= 880.0, "via_create={}: the field is on screen ({:?})", via_create, r);
+        h.type_text("design");
+        h.key(egui::Key::Enter);
+        assert!(h.app.data.channels.iter().any(|c| c.name == "design"));
+    }
+}
+
+#[test]
+fn search_hides_empty_group_headings() {
+    let mut h = Ui1::new();
+    assert!(!h.app.data.tasks.iter().any(|t| t.name.to_lowercase().contains("gen")), "seed check");
+    // distinct places on screen with this name
+    let count = |h: &Ui1, n: &str| {
+        let mut r: Vec<String> = h.tree.iter().filter(|(x, _)| x == n).map(|(_, r)| format!("{:?}", r)).collect();
+        r.sort();
+        r.dedup();
+        r.len()
+    };
+    h.click("Search");
+    h.type_text("a"); // matches tasks and locations
+    let tasks_with = count(&h, "Tasks");
+    assert!(h.has("Locations"));
+    h.app.palette = Some(String::new());
+    h.settle();
+    h.type_text("gen"); // only the #general channel
+    assert_eq!(h.app.palette.as_deref(), Some("gen"));
+    assert!(h.has("Channels"));
+    assert!(!h.has("Locations"), "no empty Locations heading");
+    assert_eq!(count(&h, "Tasks"), tasks_with - 1, "no empty Tasks heading (the Tasks tab stays)");
+}
+
+#[test]
+fn my_docs_badge_counts_docs_not_sub_pages() {
+    let mut h = Ui1::new();
+    let before = h.app.my_docs_count();
+    h.app.new_doc(None);
+    h.settle();
+    let id = h.app.doc_open.unwrap();
+    h.click("+  Add page");
+    assert!(h.app.data.docs.iter().any(|d| d.parent == Some(id)), "a sub page was made");
+    assert_eq!(h.app.my_docs_count(), before + 1, "the sub page is not counted");
+}
+
+#[test]
+fn shortcut_symbols_have_glyphs() {
+    if !std::path::Path::new("/System/Library/Fonts/SFNS.ttf").exists() {
+        return; // the system font is only on macOS
+    }
+    let ctx = egui::Context::default();
+    super::setup_fonts(&ctx);
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    for c in ['\u{2325}', '\u{2318}', '\u{21E7}'] {
+        for f in [FontId::monospace(13.0), FontId::proportional(13.0)] {
+            assert!(ctx.fonts(|x| x.has_glyph(&f, c)), "{:?} has a glyph in {:?}", c, f);
+        }
+    }
+}

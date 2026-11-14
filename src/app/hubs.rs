@@ -194,12 +194,18 @@ impl App {
 
     // ---------------------------------------------------------------- docs
 
+    /// The "My Docs" badge: top-level docs only, as the list shows them
+    /// (sub pages are counted with their doc).
+    pub(super) fn my_docs_count(&self) -> usize {
+        self.data.docs.iter().filter(|d| d.owner == self.data.me && !d.archived && d.parent.is_none()).count()
+    }
+
     pub(super) fn docs_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
         let counts = [
             None,
-            Some(self.data.docs.iter().filter(|d| d.owner == me && !d.archived).count()),
+            Some(self.my_docs_count()),
             None,
             None,
             None,

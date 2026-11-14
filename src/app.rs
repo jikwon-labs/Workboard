@@ -151,7 +151,41 @@ struct QuickAdd {
     assignees: Vec<u64>,
 }
 
+/// Unsent text per place: `swap` puts the current text away when the place
+/// changes and brings back what was written there before.
+#[derive(Default)]
+struct DraftBox {
+    on: Option<u64>,
+    saved: HashMap<u64, String>,
+}
+
+impl DraftBox {
+    fn swap(&mut self, now: Option<u64>, text: &mut String) {
+        if self.on == now {
+            return;
+        }
+        if let Some(old) = self.on {
+            if text.is_empty() {
+                self.saved.remove(&old);
+            } else {
+                self.saved.insert(old, std::mem::take(text));
+            }
+        }
+        *text = now.and_then(|id| self.saved.remove(&id)).unwrap_or_default();
+        self.on = now;
+    }
+}
+
+#[derive(Default)]
+struct Drafts {
+    chat: DraftBox,
+    thread: DraftBox,
+}
+
 pub struct App {
+    /// A popup or menu was open when this pass began (egui closes them on
+    /// Escape partway through the pass, so later checks see them gone).
+    menu_was_open: bool,
     data: Data,
     loc: Location,
     view: ViewKind,
@@ -243,9 +277,14 @@ pub struct App {
     post_f_author: Option<u64>,
     post_f_type: Option<String>,
     inbox_filter: u8,
+    /// The message being written in the open channel (`chat_open`).
     chat_text: String,
     thread_open: Option<u64>,
+    /// The reply being written in the open thread (`thread_open`).
     thread_text: String,
+    /// Unsent messages and replies of the channels and threads not on
+    /// screen, by channel / message id (kept until the app quits).
+    drafts: Drafts,
     new_channel: Option<String>,
     /// Tasks ticked for bulk editing.
     selected: HashSet<u64>,
@@ -411,8 +450,10 @@ impl App {
             chat_text: String::new(),
             thread_open: None,
             thread_text: String::new(),
+            drafts: Drafts::default(),
             new_channel: None,
             selected: HashSet::new(),
+            menu_was_open: false,
             filter: TaskFilter::default(),
             hidden_cols: ["Date created".to_string()].into_iter().collect(),
             sort_desc: false,
@@ -2231,7 +2272,7 @@ impl App {
                 });
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
             close = true;
         }
         // Cmd+1..4 set the priority, Cmd+0 clears it
@@ -2459,7 +2500,7 @@ impl App {
                         }
                     });
                 });
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.memory(|m| m.any_popup_open()) {
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
                     open = false;
                 }
             });
@@ -2520,7 +2561,6 @@ impl App {
                         }
                     }
                     if show(2) {
-                        ui.label(RichText::new("Locations").small().color(t.text3));
                         let mut locs: Vec<(Location, String)> = vec![];
                         for s in &self.data.spaces {
                             locs.push((Location::Space(s.id), s.name.clone()));
@@ -2534,7 +2574,12 @@ impl App {
                                 locs.push((Location::List(l.id), format!("{} / {}", s.name, l.name)));
                             }
                         }
-                        for (l, name) in locs.iter().filter(|(_, n)| ql.is_empty() || n.to_lowercase().contains(&ql)).take(if kind == 2 { 40 } else { 8 }) {
+                        let locs: Vec<&(Location, String)> = locs.iter().filter(|(_, n)| ql.is_empty() || n.to_lowercase().contains(&ql)).take(if kind == 2 { 40 } else { 8 }).collect();
+                        // like Docs and Channels: no heading over an empty group
+                        if !locs.is_empty() {
+                            ui.label(RichText::new("Locations").small().color(t.text3));
+                        }
+                        for (l, name) in locs {
                             if first.is_none() {
                                 first = Some(Action::Go(*l));
                             }
@@ -2546,8 +2591,11 @@ impl App {
                         ui.add_space(4.0);
                     }
                     if show(1) {
-                        ui.label(RichText::new("Tasks").small().color(t.text3));
-                        for task in self.data.tasks.iter().filter(|x| !x.archived && (ql.is_empty() || x.name.to_lowercase().contains(&ql) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 }) {
+                        let tasks: Vec<&Task> = self.data.tasks.iter().filter(|x| !x.archived && (ql.is_empty() || x.name.to_lowercase().contains(&ql) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 }).collect();
+                        if !tasks.is_empty() {
+                            ui.label(RichText::new("Tasks").small().color(t.text3));
+                        }
+                        for task in tasks {
                             if first.is_none() {
                                 first = Some(Action::Open(task.id));
                             }
@@ -2640,6 +2688,9 @@ impl App {
 
     /// One frame of the whole interface (everything except the native window buttons).
     pub(crate) fn ui_frame(&mut self, ctx: &egui::Context) {
+        self.menu_was_open = any_menu_was_open(ctx);
+        self.drafts.chat.swap(self.chat_open, &mut self.chat_text);
+        self.drafts.thread.swap(self.thread_open, &mut self.thread_text);
         if let Ok(p) = std::env::var("WORKBOARD_EVENT_LOG") {
             let evs: Vec<String> = ctx.input(|i| i.raw.events.iter().filter(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_))).map(|e| format!("{:?}", e)).collect());
             if !evs.is_empty() {
@@ -2929,13 +2980,16 @@ fn td_default() -> NaiveDate {
     today()
 }
 
-fn setup_fonts(ctx: &egui::Context) {
+pub(crate) fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     // The original uses the system UI font (-apple-system / Segoe UI); use it when present.
     for p in ["/System/Library/Fonts/SFNS.ttf", "C:\\Windows\\Fonts\\segoeui.ttf"] {
         if let Ok(bytes) = std::fs::read(p) {
             fonts.font_data.insert("system-ui".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
             fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "system-ui".into());
+            // a fallback for monospace text: the shortcut keys use symbols such
+            // as the Option key that the built-in monospace font does not have
+            fonts.families.entry(egui::FontFamily::Monospace).or_default().push("system-ui".into());
             break;
         }
     }

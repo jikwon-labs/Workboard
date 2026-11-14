@@ -1114,8 +1114,19 @@ impl App {
                             ui.horizontal(|ui| {
                                 ui.add_space(8.0);
                                 let r = ui.add(egui::TextEdit::singleline(&mut name).id(egui::Id::new("new_channel_input")).hint_text("channel-name").desired_width(170.0));
-                                // focus once when the field appears, not every frame
-                                focus_once(ui, &r);
+                                // focus once when the field appears, not every frame,
+                                // and bring it into view: it sits at the end of the
+                                // channel list, often below the bottom of the sidebar
+                                // (for a few passes: egui can discard the first one)
+                                let nr = ui.ctx().cumulative_pass_nr();
+                                let shown_id = r.id.with("appeared");
+                                if focus_once(ui, &r) {
+                                    ui.data_mut(|d| d.insert_temp(shown_id, nr));
+                                }
+                                let appeared: u64 = ui.data(|d| d.get_temp(shown_id)).unwrap_or(0);
+                                if nr <= appeared + 3 && !ui.clip_rect().contains_rect(r.rect) {
+                                    r.scroll_to_me(Some(Align::Center));
+                                }
                                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                     r.surrender_focus();
                                     keep = false;
@@ -1283,7 +1294,7 @@ impl App {
             }
             ui.painter().text(dots.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(13.0), t.text2);
         }
-        popup(ui, &dr, ui.id().with(("sdots_pop", s.id)), 210.0, |ui| self.space_menu(ui, sid));
+        click_menu(&dr, |ui| self.space_menu(ui, sid));
         r.context_menu(|ui| self.space_menu(ui, sid));
         if !expanded {
             return;
@@ -1376,7 +1387,7 @@ impl App {
             ui.painter().rect_filled(dots.expand2(vec2(6.0, 0.0)), 5.0, if dr.hovered() { t.border } else { t.hover });
             ui.painter().text(dots.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(13.0), t.text2);
         }
-        popup(ui, &dr, ui.id().with(("ldots_pop", l.id)), 210.0, |ui| self.list_menu(ui, lid));
+        click_menu(&dr, |ui| self.list_menu(ui, lid));
         // "+" next to it creates a task in this list
         let plus = Rect::from_center_size(r.rect.right_center() - vec2(36.0, 0.0), vec2(20.0, 20.0));
         let pr = ui.interact(plus, ui.id().with(("lplus", l.id)), Sense::click());
@@ -1966,6 +1977,7 @@ impl App {
         }
         // due date
         let dr = ui.interact(cols.due, id.with("du"), Sense::click());
+        name_it(&dr, &format!("Due date of {}", task.name));
         match task.due {
             Some(d) => {
                 ui.painter_at(cols.due).text(cols.due.left_center(), Align2::LEFT_CENTER, fmt_date(d), FontId::proportional(13.5), date_color(d, closed, &t));
@@ -2023,7 +2035,7 @@ impl App {
             }
             ui.painter().text(dots.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(14.0), t.text2);
         }
-        popup(ui, &dr, id.with("dots_pop"), 230.0, |ui| self.task_menu(ui, tid));
+        click_menu(&dr, |ui| self.task_menu(ui, tid));
         let ticked = self.row_checkbox(ui, rect, tid, resp.hovered());
         resp.context_menu(|ui| self.task_menu(ui, tid));
         if resp.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.shift) {

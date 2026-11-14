@@ -216,6 +216,57 @@ pub fn popup<R>(ui: &Ui, resp: &Response, id: egui::Id, width: f32, add: impl Fn
     })
 }
 
+/// Opens a real egui menu below `resp` when it is clicked, the same kind a
+/// right click opens: rows draw as menu rows and `ui.menu_button` inside
+/// opens a side submenu instead of a new dropdown over the parent.
+///
+/// egui only opens submenus to the right, so near the right edge of the
+/// window the menu is shifted left to leave room for one.
+pub fn click_menu(resp: &Response, add: impl FnOnce(&mut Ui)) {
+    const MENU_W: f32 = 230.0;
+    const SUB_ROOM: f32 = 240.0;
+    let ctx = &resp.ctx;
+    let bar_id = resp.id.with("__click_menu");
+    let mut st = egui::menu::BarState::load(ctx, bar_id);
+    let open = st.as_ref().is_some_and(|r| r.id == resp.id);
+    let pressed_outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.primary_down())
+        && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
+            !resp.rect.contains(p) && !st.as_ref().is_some_and(|r| r.menu_state.read().area_contains(p))
+        });
+    if open && (resp.clicked() || pressed_outside) {
+        **st = None;
+    } else if resp.clicked() {
+        let screen = ctx.screen_rect();
+        let margin = egui::Frame::menu(&ctx.style()).total_margin().left;
+        let mut pos = resp.rect.left_bottom() + vec2(-margin, ctx.style().spacing.menu_spacing);
+        let max_x = screen.right() - MENU_W - SUB_ROOM;
+        if pos.x > max_x {
+            pos.x = max_x.max(screen.left() + 4.0);
+        }
+        **st = Some(egui::menu::MenuRoot::new(pos, resp.id));
+    }
+    // (MenuRootManager::show returns None while the menu stays open, so
+    // read the state instead)
+    let shown = st.as_ref().is_some_and(|r| r.id == resp.id);
+    st.show(resp, add);
+    st.store(ctx, bar_id);
+    if shown {
+        let nr = ctx.cumulative_pass_nr();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(MENU_SHOWN), nr));
+    }
+}
+
+const MENU_SHOWN: &str = "__wb_click_menu_shown";
+
+/// True when a popup, a right-click menu or a `click_menu` was on screen in
+/// the previous pass. Call it at the start of a pass: egui closes those on
+/// Escape during the pass, so checking later sees them already gone.
+pub fn any_menu_was_open(ctx: &egui::Context) -> bool {
+    let nr = ctx.cumulative_pass_nr();
+    let last: Option<u64> = ctx.data(|d| d.get_temp(egui::Id::new(MENU_SHOWN)));
+    ctx.memory(|m| m.any_popup_open()) || ctx.is_context_menu_open() || last.is_some_and(|l| l + 1 >= nr)
+}
+
 pub fn close_popup(ui: &Ui) {
     ui.memory_mut(|m| m.close_popup());
 }
@@ -251,14 +302,26 @@ pub fn status_menu(ui: &mut Ui, t: &Theme, statuses: &[Status], current: &mut St
 }
 
 pub fn priority_menu(ui: &mut Ui, t: &Theme, current: &mut u8) -> bool {
-    let mut changed = false;
+    match priority_pick(ui, t, *current) {
+        Some(p) if p != *current => {
+            *current = p;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The priority list; returns the row the user clicked this frame (0 for
+/// Clear), even when it equals `current`. Bulk edit needs "Clear was
+/// clicked" separately from "the value changed".
+pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
+    let mut picked = None;
     ui.label(egui::RichText::new("Task Priority").small().color(t.text3));
     for pr in [1u8, 2, 3, 4] {
         let col = priority_color(pr, t);
-        let r = menu_row(ui, t, PRIORITIES[pr as usize].label, *current == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0));
+        let r = menu_row(ui, t, PRIORITIES[pr as usize].label, current == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0));
         if r.clicked() {
-            *current = pr;
-            changed = true;
+            picked = Some(pr);
             close_popup(ui);
         }
     }
@@ -267,13 +330,10 @@ pub fn priority_menu(ui: &mut Ui, t: &Theme, current: &mut u8) -> bool {
         p.text(c, Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), Color32::GRAY);
     });
     if r.clicked() {
-        if *current != 0 {
-            *current = 0;
-            changed = true;
-        }
+        picked = Some(0);
         close_popup(ui);
     }
-    changed
+    picked
 }
 
 pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>) -> bool {
@@ -318,7 +378,8 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
     let mut month: NaiveDate = ui
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| NaiveDate::from_ymd_opt(base.year(), base.month(), 1).unwrap());
-    ui.horizontal_top(|ui| {
+    let mut sep_x = 0.0;
+    let cols = ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(130.0);
             let td = today();
@@ -349,7 +410,11 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
                 }
             }
         });
-        ui.separator();
+        // a plain gap, with the line painted below once the height is known:
+        // ui.separator() here takes all the height left in the window and
+        // pushed the rows under this menu off screen
+        let gap = ui.allocate_exact_size(vec2(9.0, 0.0), Sense::hover()).0;
+        sep_x = gap.center().x;
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(month.format("%B %Y").to_string()).strong());
@@ -398,6 +463,7 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
             }
         });
     });
+    ui.painter().vline(sep_x, cols.response.rect.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
     ui.data_mut(|d| d.insert_temp(id, month));
     changed
 }
@@ -453,14 +519,17 @@ pub fn put_over(ui: &mut egui::Ui, rect: egui::Rect, w: impl egui::Widget) -> Re
 
 /// Gives a text field keyboard focus on the first frame it is shown, then
 /// leaves focus alone so the person can click elsewhere or press Escape.
-pub fn focus_once(ui: &Ui, r: &Response) {
+/// Returns true on the pass the field appeared (and got the focus).
+pub fn focus_once(ui: &Ui, r: &Response) -> bool {
     let id = r.id.with("focus_once");
     let nr = ui.ctx().cumulative_pass_nr();
     let last = ui.ctx().data(|d| d.get_temp::<u64>(id));
-    if last.map_or(true, |l| l + 2 < nr) {
+    let first = last.map_or(true, |l| l + 2 < nr);
+    if first {
         r.request_focus();
     }
     ui.ctx().data_mut(|d| d.insert_temp(id, nr));
+    first
 }
 
 /// Repeat choices for recurring tasks (stored value, label).

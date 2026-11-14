@@ -153,7 +153,7 @@ impl App {
                 ui.label(nl.to_string());
                 ui.label(nt.to_string());
                 let r = ui.button("\u{22EF}");
-                popup(ui, &r, ui.id().with(("sp_set", id)), 200.0, |ui| self.space_menu(ui, id));
+                click_menu(&r, |ui| self.space_menu(ui, id));
                 ui.label("");
                 ui.end_row();
             }

@@ -1,15 +1,20 @@
 #!/bin/bash
 # release 빌드 후 build/Workboard.app 번들을 만든다.
 # NOTARIZE=1 이면 Apple 공증까지 하고 배포용 build/Workboard-<버전>-arm64.zip 을 만든다.
+# ZIP=1 이면 공증 없이 zip 만 만든다(업데이트 시험용).
+# 자동 업데이트(Sparkle) 프레임워크를 Contents/Frameworks 에 넣는다. 업데이트를 올리는 건 scripts/publish-update.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # 버전은 Cargo.toml 한 곳에만 둔다. 빌드 번호는 커밋 수(늘기만 한다).
-VERSION="$(sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' Cargo.toml | head -1)"
+# Sparkle 은 빌드 번호(CFBundleVersion)로 새 버전인지 판단한다.
+# 시험할 때만 WB_VERSION / WB_BUILD 로 덮어쓴다.
+VERSION="${WB_VERSION:-$(sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' Cargo.toml | head -1)}"
 if [ -z "$VERSION" ]; then echo "Cargo.toml 에서 버전을 읽지 못했다" >&2; exit 1; fi
-BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+BUILD="${WB_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 
+scripts/fetch-sparkle.sh
 cargo build --release
 
 APP=build/Workboard.app
@@ -17,6 +22,12 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/workboard "$APP/Contents/MacOS/Workboard"
 if [ -f Resources/AppIcon.icns ]; then cp Resources/AppIcon.icns "$APP/Contents/Resources/"; fi
+
+# Sparkle: 앱이 실행 중에 불러 쓴다(src/updater.rs). 샌드박스 앱이 아니라 XPC 서비스는 필요 없어 뺀다.
+FW="$APP/Contents/Frameworks/Sparkle.framework"
+mkdir -p "$APP/Contents/Frameworks"
+ditto vendor/Sparkle/Sparkle.framework "$FW"
+rm -rf "$FW/Versions/B/XPCServices" "$FW/XPCServices"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -36,18 +47,43 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key><string>Workboard uses the microphone for huddles and Talk to Text.</string>
   <key>NSCameraUsageDescription</key><string>Workboard uses the camera for huddles and clips.</string>
+  <!-- Sparkle: 업데이트는 팀 서버(GET /updates/appcast.xml)에서 받는다. 하루 한 번 스스로 확인한다. -->
+  <key>SUPublicEDKey</key><string>DL5Ve/iIbEju0K4LeI9lffHyXPGWwExhA7/X0GZ8Y28=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <!-- 팀 서버는 Tailscale 안의 http 다(IP 주소, 짧은 이름, *.ts.net). 업데이트 파일은 EdDSA 서명으로 확인한다. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key><true/>
+    <key>NSExceptionDomains</key>
+    <dict>
+      <key>ts.net</key>
+      <dict>
+        <key>NSIncludesSubdomains</key><true/>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+      </dict>
+    </dict>
+  </dict>
 </dict>
 </plist>
 PLIST
 
 # 서명: Developer ID 인증서가 키체인에 있으면 그걸로, 없으면 임시(ad-hoc) 서명.
 ID="${SIGN_IDENTITY:-Developer ID Application: jikwon seo (K6599UJ4KM)}"
+# 안쪽부터 서명한다: Sparkle 의 실행 파일들 -> 프레임워크 -> 앱.
+SPARKLE_PARTS=("$FW/Versions/B/Autoupdate" "$FW/Versions/B/Updater.app" "$FW")
 if security find-identity -v -p codesigning | grep -qF "$ID"; then
+  for part in "${SPARKLE_PARTS[@]}"; do
+    codesign --force --options runtime --timestamp --sign "$ID" "$part"
+  done
   # 마이크·카메라 권한(entitlements)을 붙여 서명한다
   codesign --force --options runtime --timestamp --entitlements Resources/Workboard.entitlements --sign "$ID" "$APP"
   codesign --verify --strict --deep "$APP"
   SIGNED_WITH_ID=1
 else
+  for part in "${SPARKLE_PARTS[@]}"; do
+    codesign --force --sign - "$part" >/dev/null 2>&1 || true
+  done
   codesign --force --sign - "$APP" >/dev/null 2>&1 || true
   SIGNED_WITH_ID=0
 fi
@@ -67,4 +103,10 @@ if [ "${NOTARIZE:-0}" = 1 ]; then
   ditto -c -k --keepParent "$APP" "$ZIP"
   spctl -a -vv "$APP"
   echo "notarized $ZIP"
+fi
+if [ "${ZIP:-0}" = 1 ] && [ "${NOTARIZE:-0}" != 1 ]; then
+  ZIPFILE="build/Workboard-$VERSION-$(uname -m).zip"
+  rm -f "$ZIPFILE"
+  ditto -c -k --keepParent "$APP" "$ZIPFILE"
+  echo "zipped $ZIPFILE (not notarized)"
 fi

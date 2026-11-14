@@ -188,6 +188,14 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
     Ok((host, port, format!("ws://{}:{}{}", shown, port, path)))
 }
 
+/// Where the server publishes app updates for Sparkle (see the server's
+/// /updates route): http on the same host and port as the sync connection.
+pub fn updates_url(addr: &str) -> Result<String, String> {
+    let (host, port, _) = server_url(addr)?;
+    let shown = if host.contains(':') { format!("[{}]", host) } else { host };
+    Ok(format!("http://{}:{}/updates/appcast.xml", shown, port))
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
     Connecting,
@@ -454,6 +462,10 @@ mod tests {
     #[test]
     fn addresses_people_type_become_urls() {
         assert_eq!(server_url("macmini").unwrap().2, "ws://macmini:8787/ws");
+        assert_eq!(updates_url("macmini").unwrap(), "http://macmini:8787/updates/appcast.xml");
+        assert_eq!(updates_url("ws://mac-mini.tail1.ts.net:9000/ws").unwrap(), "http://mac-mini.tail1.ts.net:9000/updates/appcast.xml");
+        assert_eq!(updates_url("[::1]:8787").unwrap(), "http://[::1]:8787/updates/appcast.xml");
+        assert!(updates_url("").is_err());
         assert_eq!(server_url(" 100.1.2.3:9000 ").unwrap(), ("100.1.2.3".into(), 9000, "ws://100.1.2.3:9000/ws".into()));
         assert_eq!(server_url("ws://mac-mini.tail1.ts.net/").unwrap().2, "ws://mac-mini.tail1.ts.net:8787/ws");
         assert_eq!(server_url("http://h:1/ws").unwrap().2, "ws://h:1/ws");

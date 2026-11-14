@@ -10,6 +10,9 @@
 //                         daily-YYYYMMDD.json (30 kept), before-restore-*.json
 //   admin-request.json    a request from the `workboard-server` admin
 //   admin-result.json     commands, picked up within a second (see admin)
+//   updates/              app updates: appcast.xml and the Workboard-*.zip it
+//                         lists, served at /updates/<file> for Sparkle
+//                         (scripts/publish-update.sh puts them here)
 // Everything is written to a temporary file first and then renamed, at most
 // a second after a change, and once more when the server stops.
 //
@@ -21,7 +24,8 @@
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::response::IntoResponse;
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -38,6 +42,7 @@ use wb_net::{Msg, Person, Role, CODE_AUTH, CODE_DENIED};
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
 pub const BACKUP_DIR: &str = "backups";
+pub const UPDATES_DIR: &str = "updates";
 pub const REQUEST_FILE: &str = "admin-request.json";
 pub const RESULT_FILE: &str = "admin-result.json";
 pub const KEEP_HOURLY: usize = 48;
@@ -569,6 +574,30 @@ async fn ws_route(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>) -> impl Int
     ws.max_message_size(wb_net::MAX_MESSAGE).max_frame_size(wb_net::MAX_MESSAGE).on_upgrade(move |socket| connection(socket, hub))
 }
 
+/// The content type for a file the updates route may serve: a plain name
+/// (no folders, not hidden) of a kind Sparkle asks for. None for anything else.
+pub fn update_content_type(name: &str) -> Option<&'static str> {
+    if name.is_empty() || name.starts_with('.') || !name.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) {
+        return None;
+    }
+    Some(match name.rsplit_once('.')?.1 {
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "delta" => "application/octet-stream",
+        "html" => "text/html; charset=utf-8",
+        _ => return None,
+    })
+}
+
+/// App updates for Sparkle: GET /updates/appcast.xml and the files it lists.
+async fn update_route(axum::extract::Path(name): axum::extract::Path<String>, State(hub): State<Arc<Hub>>) -> Response {
+    let Some(kind) = update_content_type(&name) else { return StatusCode::NOT_FOUND.into_response() };
+    match tokio::fs::read(hub.home.join(UPDATES_DIR).join(&name)).await {
+        Ok(bytes) => ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "no-cache")], bytes).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 async fn health(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
     let g = hub.inner.lock().unwrap();
     let backups = backup_files(&hub.home.join(BACKUP_DIR), "hourly").last().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
@@ -724,7 +753,7 @@ pub async fn serve(listener: tokio::net::TcpListener, home: PathBuf, shutdown: i
             }
         })
     };
-    let app = Router::new().route(wb_net::PATH, get(ws_route)).route("/health", get(health)).with_state(hub.clone());
+    let app = Router::new().route(wb_net::PATH, get(ws_route)).route("/health", get(health)).route("/updates/{file}", get(update_route)).with_state(hub.clone());
     let res = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.await;
@@ -776,6 +805,16 @@ mod tests {
 
     fn dt(s: &str) -> chrono::NaiveDateTime {
         chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap()
+    }
+
+    #[test]
+    fn the_updates_route_serves_only_plain_update_files() {
+        assert_eq!(update_content_type("appcast.xml"), Some("application/xml"));
+        assert_eq!(update_content_type("Workboard-0.1.2-arm64.zip"), Some("application/zip"));
+        assert_eq!(update_content_type("Workboard12-11.delta"), Some("application/octet-stream"));
+        for bad in ["", ".appcast.xml", "../server.json", "a/b.zip", "workspace.json", "x.zip ", "%2e%2e.zip", "appcast"] {
+            assert_eq!(update_content_type(bad), None, "{:?}", bad);
+        }
     }
 
     #[test]

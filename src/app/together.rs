@@ -280,6 +280,11 @@ impl App {
                     }
                     self.sync_rt.reinvite = None;
                     self.sync_rt.role = Some(role);
+                    // the server that let us in also publishes app updates
+                    let server = self.sync_rt.joining.as_ref().map(|j| j.addr.clone()).or_else(|| self.data.extra.shared.as_ref().and_then(|c| c.server.clone()));
+                    if let Some(addr) = server {
+                        crate::updater::set_server(&addr);
+                    }
                     changed |= self.net_welcome(tag, snapshot, member);
                 }
                 NetEvent::Update { data, .. } => changed |= self.merge_in(&[data]),

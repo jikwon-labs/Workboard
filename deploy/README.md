@@ -52,3 +52,9 @@ computer of theirs at once) in Work together > People.
 
 Backups: `backups/` in the data folder, hourly (48 kept) and daily (30 kept).
 Health: `curl http://<tailscale address>:8787/health`
+
+## App updates
+
+The server also hands out Workboard updates to the apps signed in to it
+(`updates/` in the data folder, served at `/updates/<file>`). How to publish
+a version: [docs/release/README.md](../docs/release/README.md).

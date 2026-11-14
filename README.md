@@ -18,8 +18,9 @@ within a few seconds. Or run a Workboard server for the team (for example on a M
 through Tailscale): `cargo run --release -p workboard-server`, then in Work
 together type the server's address under "Or connect to your team's server".
 Calls open in the browser (Jitsi Meet or your own
-meeting link) with a Join button posted in chat. Archived docs are also saved
-as Markdown in the shared folder's `Docs archive`.
+meeting link) with a Join button posted in chat. The server also hands out
+app updates to the apps signed in to it (releasing: `docs/release/README.md`).
+Archived docs are also saved as Markdown in the shared folder's `Docs archive`.
 
 ## Tests
 

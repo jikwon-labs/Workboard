@@ -424,6 +424,42 @@ fn only_invited_people_get_in_and_only_admins_invite() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+fn http_get(port: u16, path: &str) -> (String, Vec<u8>) {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(format!("GET {} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", path).as_bytes()).unwrap();
+    let mut out = vec![];
+    s.read_to_end(&mut out).unwrap();
+    let split = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    (String::from_utf8_lossy(&out[..split]).to_string(), out[split + 4..].to_vec())
+}
+
+#[test]
+fn app_updates_are_served_from_the_updates_folder() {
+    let home = temp_home("updates");
+    let server = Server::start(&home, 0);
+    // nothing published yet
+    let (head, _) = http_get(server.port, "/updates/appcast.xml");
+    assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
+    std::fs::create_dir_all(home.join("updates")).unwrap();
+    std::fs::write(home.join("updates/appcast.xml"), "<rss/>").unwrap();
+    std::fs::write(home.join("updates/Workboard-9.9.9-arm64.zip"), [0u8, 1, 2, 255]).unwrap();
+    std::fs::write(home.join("server-secret.zip"), "no").unwrap();
+    let (head, body) = http_get(server.port, "/updates/appcast.xml");
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    assert!(head.to_lowercase().contains("content-type: application/xml"), "{}", head);
+    assert_eq!(body, b"<rss/>");
+    let (head, body) = http_get(server.port, "/updates/Workboard-9.9.9-arm64.zip");
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    assert_eq!(body, [0u8, 1, 2, 255]);
+    // nothing outside the folder, and not the team's data
+    for path in ["/updates/..%2Fserver-secret.zip", "/updates/../server-secret.zip", "/updates/%2e%2e%2fworkspace.json", "/updates/workspace.json"] {
+        let (head, _) = http_get(server.port, path);
+        assert!(head.starts_with("HTTP/1.1 404"), "{} -> {}", path, head);
+    }
+    server.stop();
+}
+
 #[test]
 fn health_and_admin_commands_answer() {
     let home = temp_home("health");

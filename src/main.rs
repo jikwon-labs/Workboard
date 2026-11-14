@@ -2,6 +2,7 @@ mod app;
 mod model;
 use wb_sync as sync;
 mod theme;
+mod updater;
 mod widgets;
 
 use std::path::PathBuf;

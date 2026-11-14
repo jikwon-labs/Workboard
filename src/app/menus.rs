@@ -262,11 +262,19 @@ impl App {
         let gap = ui.ctx().pointer_hover_pos().map_or(false, |p| p.y >= mr.rect.top() - 4.0 && p.y <= mr.rect.bottom() + 120.0 && p.x >= gx0 && p.x <= gx1);
         ui.data_mut(|d| d.insert_temp(fly, mr.hovered() || over || (keep && gap)));
         ui.separator();
-        let rows: [(&str, &str); 7] = [("\u{2699}", "Settings"), ("\u{1F514}", "Notifications"), ("\u{1F3A8}", "Themes"), ("\u{2728}", "Labs"), ("\u{2318}", "Keyboard shortcuts"), ("\u{2B07}", "Download app"), ("\u{2753}", "Help")];
+        let rows: [(&str, &str); 8] = [("\u{2699}", "Settings"), ("\u{1F514}", "Notifications"), ("\u{1F3A8}", "Themes"), ("\u{2728}", "Labs"), ("\u{2318}", "Keyboard shortcuts"), ("\u{2B07}", "Download app"), ("\u{21BB}", "Check for updates"), ("\u{2753}", "Help")];
         for (icon, label) in rows {
             if menu_item(ui, &t, icon, label, "").clicked() {
                 if label == "Settings" {
                     self.open_settings("My Settings");
+                    close_popup(ui);
+                    continue;
+                }
+                if label == "Check for updates" {
+                    // Sparkle shows its own window; only explain when it can't run
+                    if let Err(why) = crate::updater::check_now() {
+                        self.modal = Some(Modal::Unavailable { title: "Check for updates".into(), body: why.explain() });
+                    }
                     close_popup(ui);
                     continue;
                 }

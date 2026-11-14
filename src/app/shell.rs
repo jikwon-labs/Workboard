@@ -209,13 +209,6 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(0.0, 1.0), vec2(2.5, 2.5));
             line(vec2(-2.0, -7.5), vec2(2.0, -7.5));
         }
-        "install" => {
-            line(vec2(0.0, -7.0), vec2(0.0, 3.0));
-            line(vec2(-3.5, -0.5), vec2(0.0, 3.0));
-            line(vec2(3.5, -0.5), vec2(0.0, 3.0));
-            let pts = vec![c + vec2(-7.0, 2.0), c + vec2(-7.0, 7.0), c + vec2(7.0, 7.0), c + vec2(7.0, 2.0)];
-            p.add(egui::Shape::line(pts, s));
-        }
         "upgrade" => {
             let pts = vec![c + vec2(0.0, -8.0), c + vec2(7.0, -1.0), c + vec2(3.0, -1.0), c + vec2(3.0, 6.0), c + vec2(-3.0, 6.0), c + vec2(-3.0, -1.0), c + vec2(-7.0, -1.0)];
             p.add(egui::Shape::convex_polygon(pts, Color32::from_rgb(171, 140, 255), Stroke::NONE));
@@ -746,8 +739,8 @@ impl App {
                 p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, "More", FontId::proportional(11.0), white);
                 if self.force_menu.as_deref() == Some("more") { let pid = ui.id().with("more_pop"); ui.memory_mut(|m| m.open_popup(pid)); }
                 popup(ui, &resp, ui.id().with("more_pop"), 220.0, |ui| self.rail_more_menu(ui));
-                // bottom group: Install, Invite (every 56 px); Labs and Upgrade removed at the person's request
-                let bottom: [(&str, &str); 2] = [("Install", "\u{2B07}"), ("Invite", "")];
+                // bottom group: Invite (every 56 px); Labs, Upgrade and Install removed at the person's request
+                let bottom: [(&str, &str); 1] = [("Invite", "")];
                 let mut by = rect.bottom() - bottom.len() as f32 * 56.0 - 2.0;
                 for (label, icon) in bottom {
                     let ibox = Rect::from_center_size(pos2(cx, by + 16.0), vec2(32.0, 32.0));
@@ -765,10 +758,7 @@ impl App {
                     }
                     p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, label, FontId::proportional(11.0), white);
                     if resp.on_hover_text(label).clicked() {
-                        match label {
-                            "Install" => self.modal = Some(Modal::Unavailable { title: "Install".into(), body: "You're already using the desktop app on this computer. Mobile apps come with the shared server.".into() }),
-                            _ => self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() }),
-                        }
+                        self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                     }
                     by += 56.0;
                 }

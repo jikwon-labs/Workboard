@@ -587,8 +587,8 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
 #[test]
 fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
     let mut h = Ui1::new();
-    assert!(!h.has("Rail Labs") && !h.has("Rail Upgrade"));
-    assert!(h.has("Rail Install") && h.has("Rail Invite"));
+    assert!(!h.has("Rail Labs") && !h.has("Rail Upgrade") && !h.has("Rail Install"));
+    assert!(h.has("Rail Invite"));
     h.app.data.channels.clear();
     h.app.section = Section::Chat;
     h.app.chat_open = None;

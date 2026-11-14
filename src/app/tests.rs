@@ -447,6 +447,13 @@ fn workspaces_can_be_created_and_switched() {
     Data::save_workspaces(&[WsEntry { name: "My Workspace".into(), file: "data.json".into() }, WsEntry { name: "Side Biz".into(), file: "workspace-test.json".into() }]);
     a.switch_workspace("workspace-test.json");
     assert_eq!(a.data.workspace, "Side Biz");
+    // the switch menu says where each workspace lives, since names repeat
+    assert_eq!(a.workspace_place("data.json"), "This computer");
+    let mut team = Data::blank("My Workspace", a.data.member(a.data.me).cloned().unwrap());
+    team.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "d1".into(), tag: 3, server: Some("100.1.2.3".into()) });
+    team.save_file("workspace-team.json");
+    assert_eq!(a.workspace_place("workspace-team.json"), "Team server");
+    assert_eq!(a.workspace_place("workspace-test.json"), "This computer", "the open one is read from memory");
     // the next start opens the workspace that was open last
     let reopened = App::build(None, None);
     assert_eq!(reopened.data.workspace, "Side Biz");

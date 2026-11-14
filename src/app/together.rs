@@ -497,6 +497,7 @@ impl App {
             list.push(WsEntry { name: d.workspace.clone(), file: file.clone() });
             Data::save_workspaces(&list);
             Data::set_last_workspace(&file);
+            self.ws_places.clear();
             self.ws_file = file;
         }
         self.data = d;
@@ -515,6 +516,7 @@ impl App {
 
     pub(super) fn stop_sharing(&mut self) {
         self.leave_huddle();
+        self.ws_places.clear();
         if let Some(SharedCfg { server: Some(addr), device, .. }) = &self.data.extra.shared {
             forget_token(addr, device);
         }

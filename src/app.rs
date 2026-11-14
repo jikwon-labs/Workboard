@@ -249,6 +249,8 @@ pub struct App {
     toast: Option<(String, i64)>,
     sync_rt: together::SyncRt,
     huddle: huddle::HuddleRt,
+    /// Where each workspace file lives (team server, shared folder, this computer), read once.
+    ws_places: HashMap<String, &'static str>,
     create_text: String,
     new_message_open: bool,
     pending_template: Option<TaskTemplate>,
@@ -442,6 +444,7 @@ impl App {
             toast: None,
             sync_rt: Default::default(),
             huddle: Default::default(),
+            ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
             pending_template: None,

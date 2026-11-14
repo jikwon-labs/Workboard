@@ -521,3 +521,44 @@ fn restoring_a_backup_reaches_every_app() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
+    let home = temp_home("race");
+    let server = Server::start(&home, 0);
+    let mut theirs = workspace();
+    theirs["tasks"] = json!([{"id": 900, "name": "Their own task", "activity": []}]);
+    theirs["members"] = json!([{"id": 1, "name": "Other person"}]);
+    // both press Connect at the same moment
+    let mut a = App::connect(server.port, Some(workspace()));
+    let mut b = App::connect(server.port, Some(theirs));
+    let settled = |x: &App| matches!(x.status, Some(Status::Connected) | Some(Status::Refused(_)));
+    let until = Instant::now() + Duration::from_secs(15);
+    while !(settled(&a) && settled(&b)) && Instant::now() < until {
+        a.pump();
+        b.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let owners: Vec<&App> = [&a, &b].into_iter().filter(|x| x.status == Some(Status::Connected)).collect();
+    assert_eq!(owners.len(), 1, "exactly one sets the server up (a: {:?}, b: {:?})", a.status, b.status);
+    let (winner, loser) = if a.status == Some(Status::Connected) { (&mut a, &mut b) } else { (&mut b, &mut a) };
+    assert_eq!(winner.role, Some(Role::Owner));
+    let Some(Status::Refused(why)) = &loser.status else { unreachable!() };
+    assert!(why.contains("setting up this server") || why.contains("already has a workspace"), "{}", why);
+    let expected = task_names(&winner.data);
+    winner.wait("winner's copy on the server", |_| true);
+    // the team copy is the winner's workspace only
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let canon: Value = std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+        if !canon.is_null() {
+            assert_eq!(task_names(&canon), expected, "nothing from the other workspace got in");
+            break;
+        }
+        assert!(Instant::now() < until, "server never saved the workspace");
+        winner.pump();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

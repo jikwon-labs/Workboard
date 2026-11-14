@@ -157,7 +157,7 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 - 앱 흐름: 함께 쓰기 창의 "Or connect to your team's server" 에 주소를 넣고 Connect. 서버가 비어 있으면 지금 작업공간이 올라가고, 아니면 공유 폴더 Join 과 같이 새 작업공간으로 열리고 "Who are you?" 가 뜬다. 상태는 Connecting / Connected / Reconnecting(이유) / Disconnected. 끊기면 1, 2, 3, 4, 5초 간격으로 계속 다시 붙는다. 코드: `src/app/together.rs` 의 `connect_server`, `net_tick`, `net_welcome`.
 - 서버: `server/` (`workboard-server`). 저장은 `workspace.json`(정본)과 `server.json`(`rev`, 기기 id -> tag). 1초마다, 그리고 SIGTERM/Ctrl-C 로 멈출 때 저장한다. 기본 바인딩은 `tailscale ip -4` 결과, 없으면 127.0.0.1. `0.0.0.0`·`::` 는 거부한다. 옵션: `--bind`, `--port`(기본 8787), `--home`, 환경 변수 `WORKBOARD_SERVER_HOME`, `WORKBOARD_SERVER_BIND`.
 - 메시지 크기 한도 256MB(작업공간 전체를 한 메시지로 보내기 때문). 서버는 75+15초 동안 아무것도 못 들으면 연결을 끊고, 앱은 30초마다 ping 한다.
-- 알려진 한계: 빈 서버에 두 사람이 거의 동시에 처음 연결하면 둘 다 "올리는 쪽"이 되어 두 작업공간이 하나로 합쳐진다. 1단계에서는 그대로 둔다.
+- ~~알려진 한계: 빈 서버에 두 사람이 거의 동시에 처음 연결하면 두 작업공간이 하나로 합쳐진다.~~ 2단계부터 해결: 처음 등록(claim)은 한 번만 받는다. 동시에 두 사람이 시도하면 한 명만 owner 가 되고 다른 사람은 "Someone else is setting up this server right now" 로 거절된다(서버 통합 테스트 `two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge`).
 - 2단계 자리: `hello.token` 은 받기만 하고 검사하지 않는다. `/health` 는 아직 없다. launchd 를 쓸 때 부팅 직후 Tailscale 이 아직 안 올라와 있으면 Tailscale 주소 바인딩이 실패한다. 추측: KeepAlive 재시작으로 해결될 것이다. 2단계에서 확인한다.
 - 검증: `cargo test --workspace` 139개 통과(wb-sync 5, wb-net 2, 앱 127, 서버 통합 5). 손 검증은 Mac mini 에서 했다. 실제 서버 바이너리 + 임시 `WORKBOARD_HOME` 앱 두 개 + 세 번째 스크립트 클라이언트로 채팅·작업 추가·이름 변경이 두 앱에 1초 안에 들어오는 것, 서버를 껐을 때 "Reconnecting" 표시, 다시 켜면 스스로 붙는 것을 확인했다. GUI 클릭 입력은 이 세션에서 못 했고(화면 제어 도구 없음), 앱에서 보내는 쪽은 앱-서버 통합 테스트(`two_computers_work_through_a_server`)로 확인했다.
 
@@ -178,7 +178,7 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 - **백업.** 서버 폴더 `backups/` 에 매시간 `hourly-YYYYMMDD-HH.json`(48개), 매일 `daily-YYYYMMDD.json`(30개). 서버를 켠 뒤 1분 안에, 그 뒤로는 매분 확인해서 바뀐 게 있을 때만 새로 만든다. 멈출 때도 한 번 만든다.
 - **관리 명령(Mac mini 에서).** `workboard-server people`(멤버 id·역할·컴퓨터 수·열린 코드), `backups`, `restore <파일>`, `invite <멤버id> [--role admin|owner]`(owner 가 컴퓨터를 잃었을 때). `restore`·`invite` 는 서버 폴더의 `admin-request.json` 에 요청을 남기고 돌고 있는 서버가 1초 안에 처리한다(서버가 꺼져 있으면 다음 시작 때 처리). 되돌리기는 백업의 모든 항목을 "지금 바뀐 것"·"되살린 것"으로 표시해서 합치므로, 지운 것은 돌아오고 백업 뒤에 새로 만든 것은 남는다. 되돌리기 전 정본은 `backups/before-restore-*.json` 에 둔다.
 - **`GET /health`** -> `{"ok", "rev", "workspace", "devices", "connections", "latest_backup"}`. Tailscale 주소에서만 열린다.
-- **앱:** 다시 켜면 마지막에 열었던 작업공간을 연다(`last-workspace` 파일). 예전에는 늘 data.json 을 열어서, 합류한 팀 작업공간을 매번 다시 골라야 했다.
+- **앱:** 작업공간 전환 메뉴의 각 항목 오른쪽에 위치(Team server / Shared folder / This computer)를 보여 준다(이름이 같은 경우가 많아서). 다시 켜면 마지막에 열었던 작업공간을 연다(`last-workspace` 파일). 예전에는 늘 data.json 을 열어서, 합류한 팀 작업공간을 매번 다시 골라야 했다.
 - **검증:** `cargo test --workspace` 147개 통과(wb-sync 5, wb-net 3, 앱 127, 서버 단위 4, 서버 통합 8). 손 검증(실제 서버 + 실제 앱 창 클릭): 코드로 합류해 "Joined as Bora" 확인, 채팅이 Bora 이름으로 서버에 들어감, admin 으로 올리자 앱에 "Signed in as Bora (Admin)" 과 People 표시, 접속 끊기 즉시 "Not signed in", 새 코드로 다시 로그인, 서버 재시작 후 토큰으로 스스로 다시 붙음, 앱 재실행 시 팀 작업공간으로 열림, `/health`·`backups`·`restore` 동작.
 
 ## 3단계 구현 결과 (2026-11-15)

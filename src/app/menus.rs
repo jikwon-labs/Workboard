@@ -130,7 +130,11 @@ impl App {
             ui.painter().text(r.center(), Align2::CENTER_CENTER, letter, FontId::proportional(18.0), Color32::WHITE);
             ui.vertical(|ui| {
                 ui.label(RichText::new(&self.data.workspace).size(16.0));
-                let sub = if self.data.extra.shared.is_some() { "Shared with your team \u{2022} every feature included" } else { "On this computer \u{2022} every feature included" };
+                let sub = match &self.data.extra.shared {
+                    Some(c) if c.server.is_some() => "On your team's server \u{2022} every feature included",
+                    Some(_) => "Shared with your team \u{2022} every feature included",
+                    None => "On this computer \u{2022} every feature included",
+                };
                 ui.label(RichText::new(sub).small().color(t.text2));
             });
         });
@@ -175,7 +179,9 @@ impl App {
                 all.insert(0, WsEntry { name: "My Workspace".into(), file: "data.json".into() });
             }
             for w in all {
-                if menu_item(ui, &t, "\u{1F3E2}", &w.name, "").clicked() {
+                // workspaces often share a name ("My Workspace"): say where each one lives
+                let place = self.workspace_place(&w.file);
+                if menu_item(ui, &t, "\u{1F3E2}", &w.name, place).clicked() {
                     self.switch_workspace(&w.file);
                     close_popup(ui);
                 }
@@ -188,7 +194,33 @@ impl App {
         }
     }
 
+    /// Where a workspace file lives, for the switch menu.
+    pub(super) fn workspace_place(&mut self, file: &str) -> &'static str {
+        fn label(cfg: Option<&crate::sync::SharedCfg>) -> &'static str {
+            match cfg {
+                Some(c) if c.server.is_some() => "Team server",
+                Some(_) => "Shared folder",
+                None => "This computer",
+            }
+        }
+        if file == self.ws_file {
+            return label(self.data.extra.shared.as_ref());
+        }
+        if let Some(p) = self.ws_places.get(file) {
+            return p;
+        }
+        let path = if file == "data.json" { Data::path() } else { Data::dir().join(file) };
+        let cfg: Option<crate::sync::SharedCfg> = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| serde_json::from_value(v.get("extra")?.get("shared")?.clone()).ok());
+        let place = label(cfg.as_ref());
+        self.ws_places.insert(file.to_string(), place);
+        place
+    }
+
     pub(super) fn switch_workspace(&mut self, file: &str) {
+        self.ws_places.clear();
         if self.persist {
             self.data.save_file(&self.ws_file);
         }

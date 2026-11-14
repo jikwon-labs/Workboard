@@ -439,6 +439,11 @@ impl Hub {
             };
         }
         if let Some(member) = claim {
+            // only the very first claim wins: two people setting up the same
+            // empty server at once must not end up with their workspaces merged
+            if g.canon.is_none() && !g.saved.devices.is_empty() {
+                return Err("Someone else is setting up this server right now. Ask them for an invite code.".into());
+            }
             if g.canon.is_none() && g.saved.devices.is_empty() {
                 let (tag, token) = g.saved.add_device(device, member, tag);
                 g.saved.set_role(member, Role::Owner);

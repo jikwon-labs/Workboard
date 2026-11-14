@@ -334,6 +334,26 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
     true
 }
 
+/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
+pub(super) fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
+    let w = |s: &str| p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x;
+    if w(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let cand: String = chars[..mid].iter().collect::<String>().trim_end().to_string() + "\u{2026}";
+        if w(&cand) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    chars[..lo].iter().collect::<String>().trim_end().to_string() + "\u{2026}"
+}
+
 pub(super) struct Cols {
     pub assignee: Rect,
     pub due: Rect,
@@ -349,9 +369,26 @@ pub(super) struct Cols {
 
 /// Column rectangles from the right; hidden columns get an empty rect.
 pub(super) fn col_layout(row: Rect, hidden: &HashSet<String>, show_pr: bool) -> Cols {
+    // In a narrow window the name keeps MIN_BUILTIN px; the built-in columns
+    // that do not fit are dropped, least important first.
+    const MIN_BUILTIN: f32 = 220.0;
+    const BUILTIN: [(&str, f32); 6] = [("Assignee", 100.0), ("Due date", 100.0), ("Priority", 100.0), ("Status", 130.0), ("Comments", 90.0), ("Date created", 110.0)];
+    let mut budget = row.width() - 40.0 - MIN_BUILTIN;
+    let mut dropped: Vec<&str> = vec![];
+    for (name, w) in BUILTIN {
+        if hidden.contains(name) || (name == "Priority" && !show_pr) {
+            continue;
+        }
+        if w <= budget {
+            budget -= w;
+        } else {
+            budget = -1.0;
+            dropped.push(name);
+        }
+    }
     let mut x = row.right() - 40.0;
     let mut take = |name: &str, w: f32| {
-        let off = hidden.contains(name) || (name == "Priority" && !show_pr);
+        let off = hidden.contains(name) || (name == "Priority" && !show_pr) || dropped.contains(&name);
         if off {
             return Rect::from_min_max(pos2(row.right(), row.top()), pos2(row.right(), row.bottom()));
         }
@@ -818,6 +855,19 @@ impl App {
         }
     }
 
+    fn side_searching(&self) -> bool {
+        self.side_search.as_ref().is_some_and(|q| !q.trim().is_empty())
+    }
+
+    /// While the sidebar is searched, a space stays when its name or the name
+    /// of one of its folders, lists or docs matches.
+    fn space_matches_search(&self, s: &Space) -> bool {
+        self.matches_search(&s.name)
+            || s.folders.iter().any(|f| self.matches_search(&f.name) || f.lists.iter().any(|l| !l.archived && self.matches_search(&l.name)))
+            || s.lists.iter().any(|l| !l.archived && self.matches_search(&l.name))
+            || self.data.docs.iter().any(|d| d.space == Some(s.id) && d.parent.is_none() && self.matches_search(&d.title))
+    }
+
     pub(super) fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t();
         if self.sidebar_collapsed {
@@ -860,7 +910,10 @@ impl App {
                     }
                     if resp.on_hover_text(*tip).clicked() {
                         match i {
-                            0 => self.side_search = if self.side_search.is_some() { None } else { Some(String::new()) },
+                            0 => {
+                                self.side_search = if self.side_search.is_some() { None } else { Some(String::new()) };
+                                self.side_search_focus = self.side_search.is_some();
+                            }
                             1 => self.side_filter = if self.side_filter.is_some() { None } else { Some("") },
                             _ => self.sidebar_collapsed = true,
                         }
@@ -868,7 +921,7 @@ impl App {
                 }
                 if let Some(mut q) = self.side_search.take() {
                     let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search the sidebar").desired_width(f32::INFINITY));
-                    if q.is_empty() && !r.has_focus() && !r.lost_focus() {
+                    if std::mem::take(&mut self.side_search_focus) {
                         r.request_focus();
                     }
                     self.side_search = Some(q);
@@ -880,6 +933,7 @@ impl App {
                             let on = f == key;
                             let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(13.0), if on { Color32::WHITE } else { t.text2 });
                             let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 20.0, 24.0), Sense::click());
+                            name_it(&resp, &format!("Sidebar filter {}", label));
                             ui.painter().rect_filled(r, 12.0, if on { t.primary } else if resp.hovered() { t.hover } else { t.bg });
                             ui.painter().rect_stroke(r, 12.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                             ui.painter().galley(r.center() - g.size() / 2.0, g, if on { Color32::WHITE } else { t.text2 });
@@ -1028,7 +1082,9 @@ impl App {
                             }
                         }
 
-                        if !self.data.favorites.is_empty() && !self.hidden("Favorites") {
+                        // (while searching, the heading only shows with a match under it)
+                        let fav_match = self.data.favorites.iter().any(|f| self.matches_search(&self.data.location_name(*f)));
+                        if fav_match && !self.hidden("Favorites") {
                             self.side_header(ui, "Favorites", &[]);
                             for f in self.data.favorites.clone() {
                                 let name = self.data.location_name(f);
@@ -1085,6 +1141,9 @@ impl App {
                         }
                         let spaces: Vec<Space> = self.data.spaces.iter().filter(|s| s.private_owner.is_none() && !s.archived && !s.hidden).cloned().collect();
                         for s in &spaces {
+                            if !self.space_matches_search(s) {
+                                continue;
+                            }
                             self.space_rows(ui, s);
                         }
                         if self.add_row(ui, "New Space").clicked() {
@@ -1098,11 +1157,13 @@ impl App {
                         if hs[0].clicked() {
                             self.modal = Some(Modal::NewChannel { name: String::new(), private: false, add_list: false });
                         }
-                        let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone(), if muted { 0 } else { self.unread_count(c) })).collect();
-                        for (id, name, unread) in chans {
-                            if (filter == "unread" && unread == 0) || !self.matches_search(&name) {
+                        // the Unread filter uses the real count; muting only hides the badge
+                        let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone(), self.unread_count(c))).collect();
+                        for (id, name, real_unread) in chans {
+                            if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                                 continue;
                             }
+                            let unread = if muted { 0 } else { real_unread };
                             let sel = self.section == Section::Chat && self.chat_open == Some(id);
                             let sub = if name == "general" { Some(format!("- {}", ws)) } else { None };
                             let r = self.side_row(ui, 0.0, sel, |p, c| {
@@ -1176,14 +1237,15 @@ impl App {
                             .channels
                             .iter()
                             .filter(|c| c.kind == ChannelKind::Direct)
-                            .map(|c| (c.id, c.members.iter().find(|m| **m != me).and_then(|m| self.data.member(*m)).cloned(), if muted { 0 } else { self.unread_count(c) }))
+                            .map(|c| (c.id, c.members.iter().find(|m| **m != me).and_then(|m| self.data.member(*m)).cloned(), self.unread_count(c)))
                             .collect();
-                        for (id, other, unread) in dms {
+                        for (id, other, real_unread) in dms {
+                            let unread = if muted { 0 } else { real_unread };
                             let (name, sub) = match &other {
                                 Some(m) => (m.name.clone(), None),
                                 None => (self.data.member(me).map(|m| m.name.clone()).unwrap_or_default(), Some("\u{2014} You".to_string())),
                             };
-                            if (filter == "unread" && unread == 0) || !self.matches_search(&name) {
+                            if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                                 continue;
                             }
                             let sel = self.section == Section::Chat && self.chat_open == Some(id);
@@ -1281,7 +1343,9 @@ impl App {
         let loc = Location::Space(s.id);
         let color = rgb(s.color);
         let letter = Data::space_glyph(s);
-        let expanded = s.expanded;
+        // a search shows the matches inside collapsed spaces and folders too
+        let searching = self.side_searching();
+        let expanded = s.expanded || searching;
         let sel = self.section == Section::Home && self.loc == loc;
         let r = self.side_row(ui, 0.0, sel, |p, c| {
             let rr = Rect::from_center_size(c, vec2(19.0, 19.0));
@@ -1342,8 +1406,11 @@ impl App {
         }
         let tc = t.text2;
         for f in &s.folders {
+            if searching && !self.matches_search(&f.name) && !f.lists.iter().any(|l| !l.archived && self.matches_search(&l.name)) {
+                continue;
+            }
             let floc = Location::Folder(f.id);
-            let fexp = f.expanded;
+            let fexp = f.expanded || searching;
             let fsel = self.section == Section::Home && self.loc == floc;
             let fr = self.side_row(ui, 14.0, fsel, |p, c| {
                 let rr = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(14.0, 11.0));
@@ -1379,12 +1446,14 @@ impl App {
                 }
             });
             if fexp {
-                for l in f.lists.iter().filter(|l| !l.archived) {
+                let shown: Vec<&ListItem> = f.lists.iter().filter(|l| !l.archived && self.matches_search(&l.name)).collect();
+                for l in shown {
                     self.list_row(ui, 30.0, l);
                 }
             }
         }
-        for l in s.lists.iter().filter(|l| !l.archived) {
+        let shown: Vec<&ListItem> = s.lists.iter().filter(|l| !l.archived && self.matches_search(&l.name)).collect();
+        for l in shown {
             self.list_row(ui, 14.0, l);
         }
         let docs: Vec<(u64, String)> = self.data.docs.iter().filter(|d| d.space == Some(s.id) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
@@ -1484,6 +1553,43 @@ impl App {
                     l => crumbs.push((self.data.location_name(l), 3, None)),
                 }
                 let n = crumbs.len();
+                // the buttons on the right keep their room (their width is
+                // remembered from the last frame); crumb names share what is
+                // left and are cut with an ellipsis when it is not enough
+                let right_id = ui.id().with("crumb_right_w");
+                let right_w = ui.data(|d| d.get_temp::<f32>(right_id)).unwrap_or(360.0);
+                let sp = ui.spacing().item_spacing.x;
+                let font = FontId::proportional(15.0);
+                let mut widths: Vec<f32> = crumbs.iter().map(|(name, _, _)| ui.painter().layout_no_wrap(name.clone(), font.clone(), t.text).size().x).collect();
+                let room_for = |k: usize, ui: &Ui| {
+                    let fixed = k as f32 * (18.0 + 2.0 * sp) + (k.saturating_sub(1)) as f32 * (6.0 + sp) + (10.0 + sp) + 30.0 + if personal { 20.0 } else { 0.0 };
+                    ui.available_width() - right_w - fixed - 12.0
+                };
+                // too narrow for every level: keep only the last ones
+                let mut skip = 0;
+                while n - skip > 1 && room_for(n - skip, ui) < 48.0 * (n - skip) as f32 {
+                    skip += 1;
+                }
+                crumbs.drain(..skip);
+                widths.drain(..skip);
+                let n = crumbs.len();
+                let room = room_for(n, ui).max(40.0);
+                let cap = {
+                    // largest cap with sum(min(w, cap)) <= room
+                    let mut sorted = widths.clone();
+                    sorted.sort_by(f32::total_cmp);
+                    let mut left = room;
+                    let mut cap = f32::INFINITY;
+                    for (k, w) in sorted.iter().enumerate() {
+                        let share = left / (sorted.len() - k) as f32;
+                        if *w > share {
+                            cap = share;
+                            break;
+                        }
+                        left -= w;
+                    }
+                    cap
+                };
                 for (i, (name, kind, color)) in crumbs.iter().enumerate() {
                     let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
                     match kind {
@@ -1499,7 +1605,15 @@ impl App {
                         _ => {}
                     }
                     let last = i + 1 == n;
-                    ui.label(RichText::new(name).size(15.0).color(if last { t.text } else { t.text2 }));
+                    let text = RichText::new(name).size(15.0).color(if last { t.text } else { t.text2 });
+                    if widths[i] > cap {
+                        ui.scope(|ui| {
+                            ui.set_max_width(cap.max(20.0));
+                            ui.add(egui::Label::new(text).truncate());
+                        });
+                    } else {
+                        ui.label(text);
+                    }
                     if last && personal {
                         ui.label(RichText::new("\u{1F512}").size(12.0).color(t.text3)).on_hover_text("Private: only you can see this List");
                     }
@@ -1520,6 +1634,7 @@ impl App {
                         self.actions.push(Action::ToggleFavorite(self.loc));
                     }
                 }
+                let right_start = ui.max_rect().right();
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let hb = |ui: &mut Ui, text: &str| -> Response {
@@ -1587,6 +1702,8 @@ impl App {
                     if hb(ui, "\u{260E}").on_hover_text("Start a huddle").clicked() {
                         self.open_call_dialog();
                     }
+                    let used = right_start - ui.min_rect().left();
+                    ui.data_mut(|d| d.insert_temp(right_id, used));
                 });
             });
             // view tabs
@@ -1668,8 +1785,43 @@ impl App {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                if matches!(self.view, ViewKind::List | ViewKind::Board) {
-                    let r = pill(ui, &t, &format!("\u{2261}  Group: {}", self.group_by.label()), false, true);
+                // full chip labels, and whether they all fit in one row; if
+                // not (a narrow window) the chips show only their icon
+                let grouped = matches!(self.view, ViewKind::List | ViewKind::Board);
+                let group_label = format!("\u{2261}  Group: {}", self.group_by.label());
+                let alabel = match self.assignee_filter.and_then(|a| self.data.member(a)) {
+                    Some(m) => format!("\u{1F464}  {}", m.name),
+                    None => "\u{1F464}  Assignee".into(),
+                };
+                let nf = self.filter.count() + usize::from(!self.search.is_empty()) + usize::from(self.me_mode);
+                let flabel = if nf > 0 { format!("\u{2261}  Filter \u{00B7} {}", nf) } else { "\u{2261}  Filter".to_string() };
+                let sort_arrow = if self.sort_desc && self.sort_by != SortBy::Manual { " \u{2193}" } else { "" };
+                let slabel = format!("\u{21C5}  Sort: {}{}", self.sort_by.label(), sort_arrow);
+                let compact = {
+                    let pw = |s: &str| ui.painter().layout_no_wrap(s.to_string(), FontId::proportional(13.0), t.text).size().x + 20.0 + 6.0;
+                    let mut need = pw(&alabel) + pw("\u{2714}  Closed") + pw(&flabel) + pw(&slabel) + 90.0 + 32.0 + 32.0;
+                    if grouped {
+                        need += pw(&group_label) + pw("\u{2934}  Subtasks");
+                    }
+                    if self.view == ViewKind::List {
+                        need += pw("\u{25A5}  Columns");
+                    }
+                    if self.show_search {
+                        need += 186.0;
+                    }
+                    need > ui.available_width()
+                };
+                let chip = |ui: &mut Ui, full: &str, short: &str, active: bool, accent: bool| -> Response {
+                    if compact {
+                        let r = pill(ui, &t, short, active, accent);
+                        name_it(&r, full);
+                        r.on_hover_text(full)
+                    } else {
+                        pill(ui, &t, full, active, accent)
+                    }
+                };
+                if grouped {
+                    let r = chip(ui, &group_label, "\u{2261}", false, true);
                     popup(ui, &r, ui.id().with("group_pop"), 160.0, |ui| {
                         for g in [GroupBy::Status, GroupBy::Priority, GroupBy::Assignee, GroupBy::DueDate, GroupBy::None] {
                             if ui.selectable_label(self.group_by == g, g.label()).clicked() {
@@ -1678,14 +1830,14 @@ impl App {
                             }
                         }
                     });
-                    if pill(ui, &t, "\u{2934}  Subtasks", self.subtasks_open, false).on_hover_text("Show all subtasks").clicked() {
+                    if chip(ui, "\u{2934}  Subtasks", "\u{2934}", self.subtasks_open, false).on_hover_text("Show all subtasks").clicked() {
                         self.subtasks_open = !self.subtasks_open;
                     }
                 }
                 if self.view == ViewKind::List {
                     let n = self.hidden_cols.iter().filter(|c| c.as_str() != "Date created" && !parity::PROPERTIES.contains(&c.as_str())).count();
                     let extra = parity::PROPERTIES.iter().filter(|p| self.col_on(p)).count();
-                    let cr = pill(ui, &t, "\u{25A5}  Columns", n > 0 || extra > 0 || self.fields_open, false);
+                    let cr = chip(ui, "\u{25A5}  Columns", "\u{25A5}", n > 0 || extra > 0 || self.fields_open, false);
                     if cr.clicked() {
                         self.fields_open = !self.fields_open;
                     }
@@ -1706,15 +1858,18 @@ impl App {
                         ui.painter().rect_filled(sr.shrink(1.0), 6.0, t.hover);
                     }
                     ui.painter().text(sr.center(), Align2::CENTER_CENTER, "\u{1F50D}", FontId::proportional(12.0), t.text2);
+                    name_it(&sresp, "Search tasks");
                     if sresp.on_hover_text("Search tasks").clicked() {
                         self.show_search = !self.show_search;
+                        self.search_focus = self.show_search;
                         if !self.show_search {
                             self.search.clear();
                         }
                     }
                     if self.show_search {
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search tasks...").desired_width(180.0));
-                        if self.search.is_empty() && !r.has_focus() && !r.lost_focus() {
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search tasks...").desired_width(if compact { 110.0 } else { 180.0 }));
+                        name_field(&r, "Search tasks...");
+                        if std::mem::take(&mut self.search_focus) {
                             r.request_focus();
                         }
                     }
@@ -1729,11 +1884,7 @@ impl App {
                             self.me_mode = !self.me_mode;
                         }
                     }
-                    let alabel = match self.assignee_filter.and_then(|a| self.data.member(a)) {
-                        Some(m) => format!("\u{1F464}  {}", m.name),
-                        None => "\u{1F464}  Assignee".into(),
-                    };
-                    let ar = pill(ui, &t, &alabel, self.assignee_filter.is_some(), false);
+                    let ar = chip(ui, &alabel, "\u{1F464}", self.assignee_filter.is_some(), false);
                     let data = self.data.clone();
                     popup(ui, &ar, ui.id().with("asg_filter"), 200.0, |ui| {
                         if ui.selectable_label(self.assignee_filter.is_none(), "Everyone").clicked() {
@@ -1747,19 +1898,18 @@ impl App {
                             }
                         }
                     });
-                    if pill(ui, &t, "\u{2714}  Closed", self.show_closed, false).on_hover_text("Show closed tasks").clicked() {
+                    if chip(ui, "\u{2714}  Closed", "\u{2714}", self.show_closed, false).on_hover_text("Show closed tasks").clicked() {
                         self.show_closed = !self.show_closed;
                     }
-                    let nf = self.filter.count() + usize::from(!self.search.is_empty()) + usize::from(self.me_mode);
-                    let flabel = if nf > 0 { format!("\u{2261}  Filter \u{00B7} {}", nf) } else { "\u{2261}  Filter".to_string() };
-                    let fr = pill(ui, &t, &flabel, nf > 0 || self.filter_open, false);
+                    let fshort = if nf > 0 { format!("\u{2261} {}", nf) } else { "\u{2261}".to_string() };
+                    let fr = chip(ui, &flabel, &fshort, nf > 0 || self.filter_open, false);
                     if fr.clicked() {
                         self.filter_open = !self.filter_open;
                     }
                     if self.filter_open {
                         self.filter_panel(ui.ctx(), fr.rect.left_bottom() + vec2(0.0, 6.0), fr.rect);
                     }
-                    let sr = pill(ui, &t, &format!("\u{21C5}  Sort: {}{}", self.sort_by.label(), if self.sort_desc && self.sort_by != SortBy::Manual { " \u{2193}" } else { "" }), self.sort_by != SortBy::Manual, false);
+                    let sr = chip(ui, &slabel, &format!("\u{21C5}{}", sort_arrow), self.sort_by != SortBy::Manual, false);
                     popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
                         for s in [SortBy::Manual, SortBy::DueDate, SortBy::Priority, SortBy::Name, SortBy::Created] {
                             if ui.selectable_label(self.sort_by == s, s.label()).clicked() {
@@ -1800,7 +1950,7 @@ impl App {
         p.text(hr.left_center() + vec2(36.0, 0.0), Align2::LEFT_CENTER, "Name", FontId::proportional(13.0), t.text2);
         let show_pr = self.data.extra.apps.priorities;
         for (label, r) in [("Assignee", cols.assignee), ("Due date", cols.due), ("Priority", cols.priority), ("Status", cols.status), ("Comments", cols.comments), ("Date created", cols.created)] {
-            if (label == "Priority" && !show_pr) || !self.col_on(label) {
+            if (label == "Priority" && !show_pr) || !self.col_on(label) || r.width() <= 0.0 {
                 continue;
             }
             p.text(r.left_center(), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text2);
@@ -1810,7 +1960,8 @@ impl App {
         }
         let plus = Rect::from_center_size(pos2(hr.right() - 20.0, hr.center().y), vec2(16.0, 16.0));
         p.circle_filled(plus.center(), 8.0, t.text);
-        p.text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(13.0), Color32::WHITE);
+        // the background color reads on the circle in both themes
+        p.text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(13.0), t.bg);
         p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
         if ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click()).on_hover_text("Add a column (Custom Field)").clicked() {
             self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
@@ -2006,8 +2157,12 @@ impl App {
         }
         x += 26.0;
         let name_col = if closed { t.text3 } else { t.text };
-        let max_name = cols.left - x - 110.0;
-        let galley = ui.painter().layout_no_wrap(truncate(&task.name, ((max_name / 7.5) as usize).max(8)), FontId::proportional(14.0), name_col);
+        // the name takes the room up to the columns, minus the counts drawn
+        // after it; cut by measured width, not by a guessed character count
+        let after = if nsub > 0 { 34.0 } else { 0.0 } + if task.checklist.is_empty() { 0.0 } else { 42.0 } + 12.0;
+        let max_name = (cols.left - x - after).max(60.0);
+        let name = fit_text(ui.painter(), &task.name, &FontId::proportional(14.0), max_name);
+        let galley = ui.painter().layout_no_wrap(name, FontId::proportional(14.0), name_col);
         let gw = galley.size().x;
         ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, name_col);
         if closed {
@@ -2053,7 +2208,7 @@ impl App {
             }
             None => paint_calendar_icon(&ui.painter_at(cols.due), cols.due.left_center() + vec2(10.0, 0.0), icon_col),
         }
-        if task.recur.is_some() && self.col_on("Due date") {
+        if task.recur.is_some() && cols.due.width() > 0.0 {
             ui.painter_at(cols.due).text(cols.due.right_center() - vec2(10.0, 0.0), Align2::RIGHT_CENTER, "\u{1F501}", FontId::proportional(11.0), t.text3);
         }
         if let Some(true) = popup(ui, &dr, id.with("dup"), 380.0, |ui| dates_menu(ui, &t, id.with("dcal"), &mut edited.start, &mut edited.due, &mut edited.recur)) {
@@ -2076,11 +2231,11 @@ impl App {
         }
         // status pill column
         let sr = ui.interact(cols.status, id.with("stcol"), Sense::click());
-        if self.col_on("Status") {
+        if cols.status.width() > 0.0 {
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cols.status).layout(Layout::left_to_right(Align::Center)));
             status_pill(&mut child, &st, Sense::hover());
         }
-        if self.col_on("Date created") {
+        if cols.created.width() > 0.0 {
             let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today);
             ui.painter_at(cols.created).text(cols.created.left_center(), Align2::LEFT_CENTER, fmt_date(created), FontId::proportional(13.0), t.text2);
         }

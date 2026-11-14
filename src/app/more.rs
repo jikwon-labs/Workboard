@@ -1079,7 +1079,9 @@ impl App {
             ui.label(RichText::new("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.").color(t.text2));
             ui.label(RichText::new("They will be connected together with the shared server. Everything else works now.").color(t.text2));
             ui.add_space(16.0);
-            ui.add_enabled(false, egui::TextEdit::multiline(&mut String::new()).hint_text("Ask anything... (available with the server)").desired_rows(3).desired_width(600.0));
+            // read-only rather than disabled: a disabled field fades its hint
+            // to an unreadable grey on the dark theme
+            ui.add(egui::TextEdit::multiline(&mut String::new()).interactive(false).hint_text(RichText::new("Ask anything... (available with the server)").color(t.text3)).desired_rows(3).desired_width(600.0));
         });
     }
 

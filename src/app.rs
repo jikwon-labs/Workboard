@@ -239,6 +239,9 @@ pub struct App {
     nav_skip: bool,
     assignee_filter: Option<u64>,
     show_search: bool,
+    // focus the toolbar search box once, on the frame it opens
+    search_focus: bool,
+    side_search_focus: bool,
     subtasks_open: bool,
     modal: Option<Modal>,
     notepad_open: bool,
@@ -420,6 +423,8 @@ impl App {
             nav_skip: false,
             assignee_filter: None,
             show_search: false,
+            search_focus: false,
+            side_search_focus: false,
             subtasks_open: false,
             modal: start_modal,
             notepad_open: false,
@@ -2002,7 +2007,10 @@ impl App {
                     ui.add_space(6.0);
                     ui.add(egui::TextEdit::singleline(&mut task.name).font(FontId::proportional(30.0)).frame(false).desired_width(f32::INFINITY));
                     ui.add_space(10.0);
-                    let field_w = (ui.available_width() / 2.0 - 10.0).max(200.0);
+                    // a narrow window stacks the fields one per row instead of
+                    // two side by side (they ran under the comments column)
+                    let one_col = ui.available_width() < 560.0;
+                    let field_w = if one_col { (ui.available_width() - 10.0).max(200.0) } else { (ui.available_width() / 2.0 - 10.0).max(200.0) };
                     let apps = self.data.extra.apps.clone();
                     let fields = self.data.extra.fields.clone();
                     egui::Grid::new("fields").num_columns(4).spacing(vec2(12.0, 10.0)).min_col_width(90.0).show(ui, |ui| {
@@ -2025,6 +2033,9 @@ impl App {
                                 }
                             }
                         });
+                        if one_col {
+                            ui.end_row();
+                        }
                         // Assignees
                         ui.label(RichText::new("\u{1F464}  Assignees").color(t.text2));
                         let (ar, aresp) = ui.allocate_exact_size(vec2(field_w - 110.0, 26.0), Sense::click());
@@ -2059,10 +2070,15 @@ impl App {
                                 ui.label(RichText::new(format!("\u{1F501} {}", recur_label(&task.recur))).small().color(t.text2)).on_hover_text("Repeats when closed");
                             }
                         });
+                        if one_col {
+                            ui.end_row();
+                        }
                         // Priority
                         if !apps.priorities {
-                            ui.label("");
-                            ui.label("");
+                            if !one_col {
+                                ui.label("");
+                                ui.label("");
+                            }
                         } else {
                         ui.label(RichText::new("\u{2691}  Priority").color(t.text2));
                         let (pr, presp) = ui.allocate_exact_size(vec2(field_w - 110.0, 26.0), Sense::click());
@@ -2077,7 +2093,9 @@ impl App {
                         }
                         popup(ui, &presp, win_id.with("pr"), 180.0, |ui| priority_menu(ui, &t, &mut task.priority));
                         }
-                        ui.end_row();
+                        if !one_col || apps.priorities {
+                            ui.end_row();
+                        }
                         // Time estimate
                         if apps.time_estimates {
                         ui.label(RichText::new("\u{231B}  Time estimate").color(t.text2));
@@ -2091,14 +2109,19 @@ impl App {
                                 task.estimate_min = if est == 0 { None } else { Some(est) };
                             }
                         });
-                        } else {
+                        } else if !one_col {
                             ui.label("");
                             ui.label("");
                         }
+                        if one_col && apps.time_estimates {
+                            ui.end_row();
+                        }
                         // Track time
                         if !apps.time_tracking {
-                            ui.label("");
-                            ui.label("");
+                            if !one_col {
+                                ui.label("");
+                                ui.label("");
+                            }
                         } else {
                         ui.label(RichText::new("\u{23F1}  Track time").color(t.text2));
                         ui.horizontal(|ui| {
@@ -2114,7 +2137,9 @@ impl App {
                             }
                         });
                         }
-                        ui.end_row();
+                        if !one_col || apps.time_tracking {
+                            ui.end_row();
+                        }
                         // Tags
                         ui.label(RichText::new("\u{1F3F7}  Tags").color(t.text2));
                         ui.horizontal_wrapped(|ui| {
@@ -2175,11 +2200,11 @@ impl App {
                                         ui.add(egui::TextEdit::singleline(v).hint_text("Empty").desired_width(field_w - 120.0));
                                     }
                                 }
-                                if i % 2 == 1 {
+                                if one_col || i % 2 == 1 {
                                     ui.end_row();
                                 }
                             }
-                            if fields.len() % 2 == 1 {
+                            if !one_col && fields.len() % 2 == 1 {
                                 ui.end_row();
                             }
                         }
@@ -2376,7 +2401,7 @@ impl App {
                                     }
                                     ui.label(RichText::new(&who).strong());
                                     if a.post {
-                                        chip(ui, "Post", t.primary);
+                                        chip(ui, "Post", if t.dark { t.accent_text } else { t.primary });
                                     }
                                     ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
                                 });

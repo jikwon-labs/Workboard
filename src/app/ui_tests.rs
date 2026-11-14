@@ -11,13 +11,20 @@ struct Ui1 {
     app: App,
     time: f64,
     tree: Vec<(String, egui::Rect)>,
+    size: egui::Vec2,
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Ui1 {
     fn new() -> Self {
+        Self::sized(1440.0, 900.0)
+    }
+
+    // the smallest window the app allows is 900x560
+    fn sized(w: f32, h: f32) -> Self {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        let mut h = Ui1 { ctx, app: App::build(None, Some(Data::seed())), time: 0.0, tree: vec![] };
+        let mut h = Ui1 { ctx, app: App::build(None, Some(Data::seed())), time: 0.0, tree: vec![], size: vec2(w, h), shapes: vec![] };
         h.frame(vec![]);
         h.frame(vec![]);
         h
@@ -26,13 +33,14 @@ impl Ui1 {
     fn frame(&mut self, events: Vec<egui::Event>) {
         self.time += 0.05;
         let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
             time: Some(self.time),
             events,
             ..Default::default()
         };
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
+        self.shapes = out.shapes;
         if let Some(update) = out.platform_output.accesskit_update {
             self.tree.clear();
             for (_, node) in update.nodes {
@@ -63,11 +71,12 @@ impl Ui1 {
     fn scroll_into_view(&mut self, name: &str) {
         for _ in 0..40 {
             let Some(p) = self.find(name) else { return };
-            if p.y > 40.0 && p.y < 880.0 {
+            let bottom = self.size.y - 20.0;
+            if p.y > 40.0 && p.y < bottom {
                 return;
             }
-            let at = pos2(p.x, 450.0);
-            let dy = if p.y >= 880.0 { -120.0 } else { 120.0 };
+            let at = pos2(p.x, self.size.y / 2.0);
+            let dy = if p.y >= bottom { -120.0 } else { 120.0 };
             self.frame(vec![egui::Event::PointerMoved(at)]);
             self.frame(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, dy), modifiers: Default::default() }]);
             self.settle();
@@ -1376,4 +1385,328 @@ fn property_columns_never_squeeze_the_name_away() {
     let cols = super::shell::col_layout(row, &hidden, true);
     assert!(cols.extra.len() < parity::PROPERTIES.len(), "not every column fits in 1100px");
     assert!(cols.left >= 300.0, "the name keeps at least 300px ({})", cols.left);
+}
+
+// ---------------------------------------------------------------- round 3
+
+#[test]
+fn open_toolbar_search_does_not_steal_the_comment_box() {
+    let mut h = Ui1::new();
+    h.click("Search tasks");
+    assert!(h.app.show_search);
+    h.click_left("Task Write copy for landing page", 120.0);
+    let id = h.app.open_task.expect("task window opens");
+    h.click("Comment box");
+    h.type_text("zzleak");
+    h.settle();
+    assert_eq!(h.app.comment_text, "zzleak", "typing lands in the comment box");
+    assert!(h.app.search.is_empty(), "the toolbar search stays empty");
+    h.key(egui::Key::Escape);
+    h.key(egui::Key::Escape);
+    assert!(h.app.open_task.is_none() || h.app.open_task == Some(id));
+    assert!(h.app.search.is_empty(), "the list is not filtered by the comment text");
+}
+
+impl Ui1 {
+    // the one control with this name inside a screen region
+    fn rect_in(&self, name: &str, area: Rect) -> Rect {
+        self.tree.iter().rev().find(|(n, r)| n == name && area.contains(r.center())).map(|(_, r)| *r).unwrap_or_else(|| panic!("nothing named {:?} in {:?}", name, area))
+    }
+}
+
+#[test]
+fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    let page = Rect::from_min_max(pos2(320.0, 0.0), pos2(900.0, 560.0));
+    // columns: the name keeps its room, the property cells start after it
+    let row = h.rect("Task Write copy for landing page");
+    let due = h.rect("Due date of Write copy for landing page");
+    let cols = super::shell::col_layout(row, &h.app.hidden_cols, true);
+    assert!(cols.left - row.left() >= 220.0, "name column {} px wide", cols.left - row.left());
+    assert!(due.left() >= cols.left && cols.assignee.left() >= cols.left, "cells sit right of the name: due {:?}, left {}", due, cols.left);
+    for r in [cols.assignee, cols.due, cols.priority, cols.status, cols.comments, cols.created] {
+        assert!(r.width() == 0.0 || r.left() >= row.left() + 220.0, "a shown column {:?} covers the name", r);
+    }
+    // header: the breadcrumb (and its star) end before the buttons on the right
+    let star = h.rect_in("\u{2605}", page).union(h.tree.iter().find(|(n, _)| n == "\u{2606}").map(|(_, r)| *r).unwrap_or(Rect::NOTHING));
+    let crumb = h.rect_in("Website Redesign", page);
+    let huddle = h.rect("Huddle");
+    assert!(crumb.right() <= huddle.left() && star.right() <= huddle.left(), "crumb {:?} star {:?} huddle {:?}", crumb, star, huddle);
+    // toolbar: left chips end before the right ones start, with search closed and open
+    for open in [false, true] {
+        if open {
+            h.click("Search tasks");
+        }
+        let cols_chip = h.rect("\u{25A5}  Columns");
+        let sort = h.rect("\u{21C5}  Sort: Manual");
+        assert!(cols_chip.right() <= sort.left(), "search open {}: Columns {:?} Sort {:?}", open, cols_chip, sort);
+        if open {
+            let field = h.rect("Search tasks...");
+            assert!(field.left() >= cols_chip.right() && field.right() <= h.rect("Add Task").left(), "the search field fits: {:?}", field);
+        }
+    }
+    // the wide window still shows every label in full
+    let w = Ui1::new();
+    assert!(w.rect("\u{25A5}  Columns").width() > 60.0 && w.has("Team Space") && w.has("Projects"));
+}
+
+#[test]
+fn short_window_profile_menu_scrolls_to_trash_and_log_out() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.click("Profile menu");
+    h.settle();
+    let menu_top = h.rect("Settings").top();
+    // the menu does not run off the window: its bottom row is reached by
+    // scrolling inside the menu
+    for name in ["Trash", "Log out"] {
+        h.scroll_into_view(name);
+        let r = h.rect(name);
+        assert!(r.top() >= menu_top - 400.0 && r.bottom() <= 560.0, "{} is on screen after scrolling the menu: {:?}", name, r);
+    }
+    h.click("Log out");
+    assert!(matches!(h.app.modal, Some(Modal::SwitchUser)), "the bottom row of the menu works");
+    // in the tall window the menu still works as before
+    h.key(egui::Key::Escape);
+    let mut w = Ui1::new();
+    w.click("Profile menu");
+    w.click("Trash");
+    assert!(matches!(w.app.modal, Some(Modal::Trash)));
+}
+
+#[test]
+fn sidebar_search_filters_spaces_folders_and_lists() {
+    let mut h = Ui1::new();
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 5000.0));
+    let in_side = |h: &Ui1, name: &str| h.tree.iter().any(|(n, r)| n == name && side.contains(r.center()));
+    let spaces: Vec<Space> = h.app.data.spaces.iter().filter(|s| s.private_owner.is_none() && !s.archived && !s.hidden).cloned().collect();
+    assert!(spaces.len() >= 2);
+    for s in &spaces {
+        assert!(in_side(&h, &s.name), "{} shows before searching", s.name);
+    }
+    h.click("Search your sidebar");
+    h.type_text("zzz");
+    h.settle();
+    for s in &spaces {
+        assert!(!in_side(&h, &s.name), "no match: space {} is hidden", s.name);
+        for f in &s.folders {
+            assert!(!in_side(&h, &f.name), "no match: folder {} is hidden", f.name);
+        }
+        for l in &s.lists {
+            assert!(!in_side(&h, &l.name), "no match: list {} is hidden", l.name);
+        }
+    }
+    // part of one list's name: that list, its folder and space stay; other rows go
+    let (space, folder, list) = spaces.iter().find_map(|s| s.folders.iter().find_map(|f| f.lists.first().map(|l| (s.clone(), f.clone(), l.clone())))).expect("a list in a folder");
+    let q: String = list.name.to_lowercase().chars().take(5).collect();
+    h.app.side_search = Some(q.clone());
+    h.settle();
+    assert!(in_side(&h, &space.name) && in_side(&h, &folder.name) && in_side(&h, &list.name), "{:?}: the list, its folder and space show", q);
+    for s in spaces.iter().filter(|s| s.id != space.id) {
+        let inside = s.name.to_lowercase().contains(&q) || s.folders.iter().any(|f| f.name.to_lowercase().contains(&q) || f.lists.iter().any(|l| l.name.to_lowercase().contains(&q))) || s.lists.iter().any(|l| l.name.to_lowercase().contains(&q)) || h.app.data.docs.iter().any(|d| d.space == Some(s.id) && d.title.to_lowercase().contains(&q));
+        assert_eq!(in_side(&h, &s.name), inside, "space {} shows only with a match", s.name);
+    }
+    for l in space.lists.iter().chain(folder.lists.iter()).filter(|l| !l.name.to_lowercase().contains(&q)) {
+        assert!(!in_side(&h, &l.name) || h.app.data.favorites.contains(&Location::List(l.id)), "list {} without a match is hidden", l.name);
+    }
+    // an empty query shows everything again
+    h.app.side_search = Some(String::new());
+    h.settle();
+    for s in &spaces {
+        assert!(in_side(&h, &s.name));
+    }
+}
+
+#[test]
+fn unread_filter_still_lists_unread_chats_while_muted() {
+    let mut h = Ui1::new();
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 5000.0));
+    let me = h.app.data.me;
+    let dm = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.messages.iter().any(|m| m.ts > c.last_read && m.author != me)).expect("a DM with an unread message").clone();
+    let other = dm.members.iter().find(|m| **m != me).and_then(|m| h.app.data.member(*m)).unwrap().name.clone();
+    h.click("Profile menu");
+    h.hover(h.rect("Mute notifications").center());
+    h.click("For 4 hours");
+    assert!(h.app.data.extra.muted_until > now_ts());
+    h.click("Filter your sidebar");
+    h.click("Sidebar filter Unread");
+    assert_eq!(h.app.side_filter, Some("unread"));
+    assert!(h.tree.iter().any(|(n, r)| *n == other && side.contains(r.center())), "the unread DM with {} is listed while muted", other);
+    // a DM without unread messages is not
+    let read = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && !c.messages.iter().any(|m| m.ts > c.last_read && m.author != me));
+    if let Some(c) = read {
+        if let Some(n) = c.members.iter().find(|m| **m != me).and_then(|m| h.app.data.member(*m)).map(|m| m.name.clone()) {
+            assert!(!h.tree.iter().any(|(x, r)| *x == n && side.contains(r.center())), "read DM {} is filtered out", n);
+        }
+    }
+}
+
+impl Ui1 {
+    // every painted text with this exact content: (position, color)
+    fn painted_text(&self, text: &str) -> Vec<(Rect, Color32)> {
+        fn walk(shape: &egui::Shape, text: &str, out: &mut Vec<(Rect, Color32)>) {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, text, out)),
+                egui::Shape::Text(ts) if ts.galley.text() == text => {
+                    let c = ts.galley.job.sections.first().map(|s| s.format.color).unwrap_or(ts.fallback_color);
+                    let c = if c == Color32::PLACEHOLDER { ts.fallback_color } else { c };
+                    out.push((ts.visual_bounding_rect(), ts.override_text_color.unwrap_or(c)));
+                }
+                _ => {}
+            }
+        }
+        let mut out = vec![];
+        for s in &self.shapes {
+            walk(&s.shape, text, &mut out);
+        }
+        out
+    }
+
+    fn circle_fill_at(&self, p: Pos2) -> Option<Color32> {
+        self.shapes.iter().rev().find_map(|s| match &s.shape {
+            egui::Shape::Circle(c) if c.center.distance(p) < 3.0 && c.radius > 5.0 => Some(c.fill),
+            _ => None,
+        })
+    }
+}
+
+// WCAG contrast ratio of two colors
+fn contrast(a: Color32, b: Color32) -> f32 {
+    let lum = |c: Color32| {
+        let f = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+#[test]
+fn add_column_plus_and_reply_link_read_in_both_themes() {
+    for dark in [false, true] {
+        let mut h = Ui1::new();
+        h.app.data.dark = dark;
+        h.settle();
+        let t = h.app.t();
+        // the "+" at the right end of the list column header
+        let plus = h.painted_text("+").into_iter().find(|(r, _)| h.circle_fill_at(r.center()).is_some()).unwrap_or_else(|| panic!("dark {}: no + on a circle", dark));
+        let fill = h.circle_fill_at(plus.0.center()).unwrap();
+        assert_ne!(plus.1, fill, "dark {}: + is not drawn in the circle's color", dark);
+        assert!(contrast(plus.1, fill) >= 4.5, "dark {}: + on circle contrast {:.1}", dark, contrast(plus.1, fill));
+        // the "1 reply" link under a threaded message in #general
+        h.click("general");
+        let reply = h.painted_text("1 reply");
+        assert!(!reply.is_empty(), "dark {}: a thread link is shown", dark);
+        for (_, c) in reply {
+            assert!(contrast(c, t.bg) >= 4.5, "dark {}: 1 reply contrast {:.1}", dark, contrast(c, t.bg));
+        }
+    }
+}
+
+#[test]
+fn narrow_task_window_fields_stay_left_of_the_comments() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.click_left("Task Write copy for landing page", 60.0);
+    assert!(h.app.open_task.is_some());
+    let panel = h.rect("Comments").left() - 12.0;
+    for name in ["Start", "0 min", "\u{23F1}  Track time", "\u{2691}  Priority", "\u{1F464}  Assignees", "\u{231B}  Time estimate"] {
+        let r = h.rect(name);
+        assert!(r.right() <= panel, "{:?} {:?} runs into the comments column (from x {})", name, r, panel);
+    }
+    // the wide window keeps two fields per row
+    let mut w = Ui1::new();
+    w.click_left("Task Write copy for landing page", 120.0);
+    let (st, asg) = (w.rect("\u{25CE}  Status"), w.rect("\u{1F464}  Assignees"));
+    assert!((st.center().y - asg.center().y).abs() < 4.0, "Status and Assignees share a row: {:?} {:?}", st, asg);
+}
+
+#[test]
+fn sidebar_search_hides_the_favorites_heading_without_a_match() {
+    let mut h = Ui1::new();
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 5000.0));
+    let heading = |h: &Ui1| h.painted_text("Favorites").iter().any(|(r, _)| side.contains(r.center()));
+    if h.app.data.favorites.is_empty() {
+        h.app.data.favorites.push(Location::List(h.app.data.spaces[0].folders[0].lists[0].id));
+        h.settle();
+    }
+    assert!(heading(&h), "Favorites shows before searching");
+    let fav = h.app.data.location_name(h.app.data.favorites[0]);
+    h.app.side_search = Some("zzz".into());
+    h.settle();
+    assert!(!heading(&h), "no favorite matches: no heading");
+    h.app.side_search = Some(fav.to_lowercase());
+    h.settle();
+    assert!(heading(&h), "a matching favorite keeps the heading");
+}
+
+#[test]
+fn task_names_use_the_room_up_to_the_columns() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    let row = h.rect("Task Write copy for landing page");
+    let cols = super::shell::col_layout(row, &h.app.hidden_cols, true);
+    assert!(h.painted_text("Write copy for landing page").iter().any(|(r, _)| row.contains(r.center())), "the whole name fits at 900 px");
+    // a long name is cut with an ellipsis just before the first column
+    let long = "Prepare the quarterly marketing report with charts for every channel and region";
+    let id = h.app.data.tasks.iter().find(|t| t.name == "Write copy for landing page").unwrap().id;
+    h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap().name = long.into();
+    h.settle();
+    let row = h.rect(&format!("Task {}", long));
+    let mut found = None;
+    for s in &h.shapes {
+        if let egui::Shape::Text(ts) = &s.shape {
+            let txt = ts.galley.text();
+            if txt.ends_with('\u{2026}') && long.starts_with(txt.trim_end_matches('\u{2026}')) && row.contains(ts.visual_bounding_rect().center()) {
+                found = Some(ts.visual_bounding_rect());
+            }
+        }
+    }
+    let r = found.expect("the long name is shown cut with an ellipsis");
+    assert!(r.right() <= cols.left, "the cut name {:?} ends before the columns at {}", r, cols.left);
+    assert!(r.right() >= cols.left - 60.0, "the cut name {:?} uses the room up to the columns at {}", r, cols.left);
+}
+
+#[test]
+fn dark_theme_post_chip_and_ai_hint_read() {
+    let mut h = Ui1::new();
+    h.app.data.dark = true;
+    h.settle();
+    let t = h.app.t();
+    let bgs = [t.bg, t.card, t.column_bg];
+    let best = |c: Color32| bgs.iter().map(|b| contrast(c, *b)).fold(0.0f32, f32::max);
+    // a post in the task activity carries a "Post" chip
+    h.click_left("Task Write copy for landing page", 120.0);
+    h.click("Post");
+    h.click("Comment box");
+    h.type_text("Shipped");
+    h.click("Send Post");
+    let chips: Vec<_> = h.painted_text("Post");
+    assert!(!chips.is_empty());
+    for (r, c) in chips {
+        assert!(best(c) >= 3.0, "Post at {:?} contrast {:.1}", r, best(c));
+    }
+    h.key(egui::Key::Escape);
+    h.key(egui::Key::Escape);
+    // the AI page hint
+    h.click("Rail AI");
+    let hint = h.painted_text("Ask anything... (available with the server)");
+    assert!(!hint.is_empty(), "the hint is shown");
+    for (_, c) in hint {
+        assert!(best(c) >= 3.0, "AI hint contrast {:.1}", best(c));
+    }
+}
+
+#[test]
+fn narrow_task_window_has_no_blank_rows_when_fields_are_off() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.data.extra.apps.priorities = false;
+    h.app.data.extra.apps.time_tracking = false;
+    h.settle();
+    h.click_left("Task Write copy for landing page", 60.0);
+    let dates = h.rect("\u{1F4C5}  Dates");
+    let est = h.rect("\u{231B}  Time estimate");
+    let tags = h.rect("\u{1F3F7}  Tags");
+    let step = h.rect("\u{1F464}  Assignees").center().y - h.rect("\u{25CE}  Status").center().y;
+    assert!(est.center().y - dates.center().y < step * 1.5, "no gap after Dates: {:?} {:?} (row step {})", dates, est, step);
+    assert!(tags.center().y - est.center().y < step * 1.5, "no gap after Time estimate: {:?} {:?}", est, tags);
 }

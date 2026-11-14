@@ -584,10 +584,12 @@ impl App {
                         paint_avatars(ui.painter(), ui.cursor().left_center() + vec2(0.0, 9.0), 8.0, &m.replies.iter().map(|r| r.author).collect::<Vec<_>>(), &self.data, t.bg);
                         ui.add_space(30.0);
                         let label = if m.replies.len() == 1 { "1 reply".to_string() } else { format!("{} replies", m.replies.len()) };
-                        let g = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(13.0), t.primary);
+                        // a link color that reads on both themes (dark primary is a dim grey)
+                        let (link, link_hover) = if t.dark { (t.accent_text, t.text) } else { (t.primary, t.accent_text) };
+                        let g = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(13.0), link);
                         let (lr, lk) = ui.allocate_exact_size(g.size() + vec2(4.0, 4.0), Sense::click());
                         name_it(&lk, &label);
-                        let col = if lk.hovered() { t.accent_text } else { t.primary };
+                        let col = if lk.hovered() { link_hover } else { link };
                         ui.painter().galley(lr.min + vec2(2.0, 2.0), g, col);
                         if lk.hovered() {
                             ui.painter().hline(lr.x_range().shrink(2.0), lr.bottom() - 1.0, Stroke::new(1.0, col));

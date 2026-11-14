@@ -210,9 +210,32 @@ pub fn popup<R>(ui: &Ui, resp: &Response, id: egui::Id, width: f32, add: impl Fn
     if resp.clicked() {
         ui.memory_mut(|m| m.toggle_popup(id));
     }
+    // a menu taller than the window scrolls inside itself instead of running
+    // off the bottom (egui moves a shorter one up until it fits). Only menus
+    // that were too tall last frame get the scroll area, so ordinary menus
+    // are laid out exactly as before.
+    let screen = ui.ctx().screen_rect();
+    let room = (screen.bottom() - resp.rect.bottom() - 32.0).max(screen.height() * 0.6);
+    let tall_id = id.with("__tall");
+    let tall: f32 = ui.data(|d| d.get_temp(tall_id)).unwrap_or(0.0);
     egui::popup_below_widget(ui, id, resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
         ui.set_min_width(width);
-        add(ui)
+        if tall > room {
+            egui::ScrollArea::vertical().id_salt(id.with("scroll")).max_height(room).auto_shrink([true, true]).show(ui, |ui| {
+                ui.set_min_width(width);
+                let r = add(ui);
+                let h = ui.min_rect().height();
+                ui.data_mut(|d| d.insert_temp(tall_id, h));
+                r
+            })
+            .inner
+        } else {
+            let top = ui.min_rect().top();
+            let r = add(ui);
+            let h = ui.min_rect().bottom() - top;
+            ui.data_mut(|d| d.insert_temp(tall_id, h));
+            r
+        }
     })
 }
 

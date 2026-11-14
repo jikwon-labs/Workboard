@@ -24,7 +24,7 @@ pub enum Modal {
     CustomFields { name: String, kind: String, opts: String },
     Automations { status: String, action: String, value: String },
     TagManager { from: String, to: String },
-    Templates,
+    Templates { name: String, desc: String, checklist: String, priority: u8 },
     Import { path: String, result: String },
     ChannelSettings(u64),
     Share { emails: String },
@@ -41,6 +41,10 @@ pub enum Modal {
     Together { path: String, result: String },
     WhoAmI { name: String, email: String },
     Call { ch: u64, link: String },
+    NewList { name: String, space: u64, folder: Option<u64>, private: bool },
+    NewSpace { name: String, color: [u8; 3] },
+    MoveTasks { ids: Vec<u64>, query: String },
+    MoveList { list: u64 },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -130,7 +134,7 @@ impl App {
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 8.0) / 2.0;
             if ui.add(egui::Button::new("\u{2699}  Settings").min_size(vec2(w, 28.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
-                self.modal = Some(Modal::WorkspaceSettings { name: self.data.workspace.clone() });
+                self.open_settings("General");
                 close_popup(ui);
             }
             if ui.add(egui::Button::new("\u{1F465}  People").min_size(vec2(w, 28.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
@@ -145,7 +149,7 @@ impl App {
             if menu_item(ui, &t, icon, label, "").clicked() {
                 self.modal = Some(match label {
                     "Apps" => Modal::ClickApps,
-                    "Templates" => Modal::Templates,
+                    "Templates" => Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 },
                     "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
                     "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() },
                     _ => Modal::TagManager { from: String::new(), to: String::new() },
@@ -218,19 +222,38 @@ impl App {
             self.modal = Some(Modal::SetStatus { text: cur });
             close_popup(ui);
         }
-        ui.menu_button("\u{1F515}  Mute notifications", |ui| {
-            for (label, secs) in [("For 1 hour", 3600), ("For 4 hours", 4 * 3600), ("Until tomorrow", 24 * 3600), ("Unmute", 0)] {
-                if ui.button(label).clicked() {
-                    self.data.extra.muted_until = if secs == 0 { 0 } else { now_ts() + secs };
-                    self.dirty = true;
-                    ui.close_menu();
-                }
-            }
-        });
+        // a flyout to the right of the row (egui's sub menu drew over this menu)
+        let mr = menu_item(ui, &t, "\u{1F515}", "Mute notifications", "\u{203A}");
+        let fly = ui.id().with("mute_fly");
+        let keep: bool = ui.data(|d| d.get_temp(fly)).unwrap_or(false);
+        let mut over = false;
+        if mr.hovered() || keep {
+            let area = egui::Area::new(fly).order(egui::Order::Tooltip).fixed_pos(mr.rect.right_top() + vec2(6.0, -4.0)).show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(150.0);
+                    for (label, secs) in [("For 1 hour", 3600), ("For 4 hours", 4 * 3600), ("Until tomorrow", 24 * 3600), ("Unmute", 0)] {
+                        if ui.add(egui::Button::new(label).frame(false).min_size(vec2(140.0, 26.0))).clicked() {
+                            self.data.extra.muted_until = if secs == 0 { 0 } else { now_ts() + secs };
+                            self.dirty = true;
+                            self.toast = Some((if secs == 0 { "Notifications on".into() } else { format!("Notifications muted {}", label.to_lowercase()) }, now_ts()));
+                            close_popup(ui);
+                        }
+                    }
+                });
+            });
+            over = area.response.rect.expand(4.0).contains(ui.ctx().pointer_hover_pos().unwrap_or_default());
+        }
+        let gap = ui.ctx().pointer_hover_pos().map_or(false, |p| p.y >= mr.rect.top() - 4.0 && p.y <= mr.rect.bottom() + 120.0 && p.x >= mr.rect.right() - 10.0 && p.x <= mr.rect.right() + 12.0);
+        ui.data_mut(|d| d.insert_temp(fly, mr.hovered() || over || (keep && gap)));
         ui.separator();
         let rows: [(&str, &str); 7] = [("\u{2699}", "Settings"), ("\u{1F514}", "Notifications"), ("\u{1F3A8}", "Themes"), ("\u{2728}", "Labs"), ("\u{2318}", "Keyboard shortcuts"), ("\u{2B07}", "Download app"), ("\u{2753}", "Help")];
         for (icon, label) in rows {
             if menu_item(ui, &t, icon, label, "").clicked() {
+                if label == "Settings" {
+                    self.open_settings("My Settings");
+                    close_popup(ui);
+                    continue;
+                }
                 self.modal = Some(match label {
                     "Settings" => {
                         let m = self.data.member(me).cloned().unwrap_or_default();
@@ -308,7 +331,7 @@ impl App {
     pub(super) fn new_doc(&mut self, space: Option<u64>) {
         let id = self.data.new_id();
         let now = now_ts();
-        self.data.docs.insert(0, Doc { id, space, owner: self.data.me, private: false, archived: false, meeting_note: false, title: "Untitled".into(), body: String::new(), created: now, updated: now });
+        self.data.docs.insert(0, Doc { id, space, owner: self.data.me, private: false, archived: false, meeting_note: false, parent: None, title: "Untitled".into(), body: String::new(), created: now, updated: now });
         self.doc_open = Some(id);
         self.section = Section::Docs;
         self.dirty = true;
@@ -363,9 +386,7 @@ impl App {
         ui.separator();
         let space = self.current_space().or_else(|| self.data.spaces.first().map(|s| s.id));
         if menu_item2(ui, &t, "\u{2630}", "List", "Track tasks, projects, people & more").clicked() {
-            if let Some(sid) = space {
-                self.actions.push(Action::NewList { space: sid, folder: None });
-            }
+            self.open_new_list(space, None);
             close_popup(ui);
         }
         if menu_item2(ui, &t, "#", "Channel", "Conversations on specific topics").clicked() {
@@ -373,7 +394,8 @@ impl App {
             close_popup(ui);
         }
         if menu_item2(ui, &t, "\u{25CE}", "Space", "Organize work by team or department").clicked() {
-            self.actions.push(Action::NewSpace);
+            let color = STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13];
+            self.modal = Some(Modal::NewSpace { name: String::new(), color });
             close_popup(ui);
         }
         ui.separator();
@@ -411,7 +433,7 @@ impl App {
                 close_popup(ui);
             }
             if ui.add(egui::Button::new("\u{2728}  Templates").min_size(vec2(w, 30.0)).stroke(Stroke::new(1.0, t.border))).clicked() {
-                self.modal = Some(Modal::Templates);
+                self.modal = Some(Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 });
                 close_popup(ui);
             }
         });
@@ -532,7 +554,7 @@ impl App {
             Modal::CustomFields { .. } => "Custom Fields".into(),
             Modal::Automations { .. } => "Automations".into(),
             Modal::TagManager { .. } => "Tag Manager".into(),
-            Modal::Templates => "Templates".into(),
+            Modal::Templates { .. } => "Templates".into(),
             Modal::Import { .. } => "Import and export".into(),
             Modal::ChannelSettings(_) => "Channel Settings".into(),
             Modal::Share { .. } => "Share".into(),
@@ -548,6 +570,10 @@ impl App {
             Modal::Together { .. } => "Work together".into(),
             Modal::WhoAmI { .. } => "Who are you?".into(),
             Modal::Call { .. } => "Start a call".into(),
+            Modal::NewList { .. } => "Create List".into(),
+            Modal::NewSpace { .. } => "Create a Space".into(),
+            Modal::MoveTasks { .. } => "Move to".into(),
+            Modal::MoveList { .. } => "Move List".into(),
         };
         // dim backdrop
         let screen = ctx.screen_rect();
@@ -596,12 +622,22 @@ impl App {
     }
 
     /// Returns true when the dialog should close.
-    fn modal_body(&mut self, ui: &mut Ui, t: &Theme, modal: &mut Modal) -> bool {
+    pub(super) fn modal_body(&mut self, ui: &mut Ui, t: &Theme, modal: &mut Modal) -> bool {
         let mut close = false;
         match modal {
             Modal::Together { path, result } => close = self.together_body(ui, t, path, result),
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
+            Modal::NewList { name, space, folder, .. } => close = self.new_list_body(ui, t, name, space, folder),
+            Modal::NewSpace { name, color } => close = self.new_space_body(ui, t, name, color),
+            Modal::MoveTasks { ids, query } => {
+                let ids = ids.clone();
+                close = self.move_tasks_body(ui, t, &ids, query);
+            }
+            Modal::MoveList { list } => {
+                let l = *list;
+                close = self.move_list_body(ui, t, l);
+            }
             Modal::Invite { emails, role } => {
                 ui.label(RichText::new("Email").color(t.text2));
                 let r = ui.add(egui::TextEdit::singleline(emails).hint_text("Enter email, comma or space separated").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
@@ -764,12 +800,19 @@ impl App {
             Modal::Themes => {
                 ui.label("Appearance");
                 ui.horizontal(|ui| {
-                    if ui.selectable_label(!self.data.dark, "\u{2600} Light").clicked() {
+                    let auto = self.data.extra.auto_theme;
+                    if ui.selectable_label(!auto && !self.data.dark, "\u{2600} Light").clicked() {
                         self.data.dark = false;
+                        self.data.extra.auto_theme = false;
                         self.dirty = true;
                     }
-                    if ui.selectable_label(self.data.dark, "\u{1F319} Dark").clicked() {
+                    if ui.selectable_label(!auto && self.data.dark, "\u{1F319} Dark").clicked() {
                         self.data.dark = true;
+                        self.data.extra.auto_theme = false;
+                        self.dirty = true;
+                    }
+                    if ui.selectable_label(auto, "\u{25D0} Auto").on_hover_text("Follow your computer's appearance").clicked() {
+                        self.data.extra.auto_theme = true;
                         self.dirty = true;
                     }
                 });
@@ -797,6 +840,13 @@ impl App {
                         ("\u{2318}J  /  \u{2318}K", "Search"),
                         ("\u{2318}N  /  \u{2325}T", "Create task"),
                         ("\u{2318}G", "New message"),
+                        ("T", "Create task"),
+                        ("R", "Create reminder"),
+                        ("N  /  P", "Open or close the notepad"),
+                        ("\u{2318}\\", "Show or hide the sidebar"),
+                        ("\u{2318}1 \u{2013} \u{2318}4  /  \u{2318}0", "Set or clear priority (open task)"),
+                        ("\u{2318}/\u{21E7} click", "Select several tasks"),
+                        ("/", "Commands in a Doc"),
                         ("\u{2318}[  /  \u{2318}]", "Back / forward"),
                         ("Enter", "Send a message or save a new task"),
                         ("Shift+Enter", "New line in a message"),
@@ -863,7 +913,11 @@ impl App {
                 for (i, f) in self.data.extra.fields.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&f.name).strong());
-                        ui.label(RichText::new(&f.kind).color(t.text2));
+                        let mut k = f.kind.clone();
+                        if let Some(c) = k.get_mut(0..1) {
+                            c.make_ascii_uppercase();
+                        }
+                        ui.label(RichText::new(k).color(t.text2));
                         if !f.options.is_empty() {
                             ui.label(RichText::new(f.options.join(", ")).small().color(t.text3));
                         }
@@ -883,20 +937,26 @@ impl App {
                     self.dirty = true;
                 }
                 if self.data.extra.fields.is_empty() {
-                    ui.label(RichText::new("No custom fields yet. They show on every task and in the Table view.").color(t.text3));
+                    ui.label(RichText::new("Add your own columns to tasks, like Budget, Client or Sprint. They show on every task and in the Table view.").color(t.text2));
                 }
+                ui.add_space(4.0);
                 ui.separator();
                 ui.label(RichText::new("New field").strong());
+                const KINDS: [(&str, &str, &str); 5] = [("text", "Text", "Any words"), ("number", "Number", "Amounts, counts, points"), ("dropdown", "Dropdown", "Pick one of your options"), ("checkbox", "Checkbox", "Done or not"), ("date", "Date", "A day on the calendar")];
+                let kind_label = KINDS.iter().find(|k| k.0 == kind.as_str()).map(|k| k.1).unwrap_or("Text");
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(name).hint_text("Field name").desired_width(160.0));
-                    egui::ComboBox::from_id_salt("cf_kind").selected_text(kind.clone()).show_ui(ui, |ui| {
-                        for k in ["text", "number", "dropdown", "checkbox", "date"] {
-                            ui.selectable_value(kind, k.to_string(), k);
+                    ui.add(egui::TextEdit::singleline(name).hint_text("Field name, e.g. Budget").desired_width(240.0).margin(egui::Margin::symmetric(8, 6)));
+                    egui::ComboBox::from_id_salt("cf_kind").selected_text(kind_label).width(150.0).show_ui(ui, |ui| {
+                        for (k, l, d) in KINDS {
+                            ui.selectable_value(kind, k.to_string(), l).on_hover_text(d);
                         }
                     });
                 });
+                if let Some(d) = KINDS.iter().find(|k| k.0 == kind.as_str()).map(|k| k.2) {
+                    ui.label(RichText::new(d).small().color(t.text3));
+                }
                 if kind == "dropdown" {
-                    ui.add(egui::TextEdit::singleline(opts).hint_text("Options, comma separated").desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(opts).hint_text("Options, comma separated: Low, Medium, High").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(8, 6)));
                 }
                 if primary_button(ui, t, "Add field").clicked() && !name.trim().is_empty() {
                     let id = self.data.new_id();
@@ -1061,34 +1121,83 @@ impl App {
                     });
                 }
             }
-            Modal::Templates => {
+            Modal::Templates { name, desc, checklist, priority } => {
                 let list = self.default_list();
-                if self.data.extra.templates.is_empty() {
-                    ui.label(RichText::new("No templates yet. Open a task, then \u{2026} \u{2192} Save as template.").color(t.text3));
-                }
+                ui.label(RichText::new("Start new tasks from a saved shape: name, description, checklist and priority.").color(t.text2));
+                ui.add_space(6.0);
                 let mut remove = None;
                 for (i, tp) in self.data.extra.templates.clone().iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&tp.name).strong());
-                        ui.label(RichText::new(format!("{} checklist items", tp.checklist.len())).small().color(t.text3));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
-                                remove = Some(i);
-                            }
-                            if ui.button("Use").clicked() {
-                                if let Some(l) = list {
-                                    self.actions.push(Action::Add { list: l, name: tp.task_name.clone(), status: None, priority: tp.priority, assignees: vec![], due: None, parent: None, open: true });
-                                    self.pending_template = Some(tp.clone());
-                                    close = true;
+                    egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&tp.name).strong());
+                                let mut bits = vec![];
+                                if !tp.checklist.is_empty() {
+                                    bits.push(if tp.checklist.len() == 1 { "1 checklist item".to_string() } else { format!("{} checklist items", tp.checklist.len()) });
                                 }
-                            }
+                                if tp.priority > 0 {
+                                    bits.push(format!("{} priority", PRIORITIES[tp.priority as usize].label));
+                                }
+                                if !tp.description.is_empty() {
+                                    bits.push(truncate(&tp.description, 40));
+                                }
+                                if !bits.is_empty() {
+                                    ui.label(RichText::new(bits.join(" \u{2022} ")).small().color(t.text3));
+                                }
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                                    remove = Some(i);
+                                }
+                                if primary_button(ui, t, "Use").on_hover_text("Create a task from this template").clicked() {
+                                    if let Some(l) = list {
+                                        self.actions.push(Action::Add { list: l, name: tp.task_name.clone(), status: None, priority: tp.priority, assignees: vec![], due: None, parent: None, open: true });
+                                        self.pending_template = Some(tp.clone());
+                                        close = true;
+                                    }
+                                }
+                            });
                         });
                     });
+                    ui.add_space(4.0);
                 }
                 if let Some(i) = remove {
                     self.data.extra.templates.remove(i);
                     self.dirty = true;
                 }
+                if self.data.extra.templates.is_empty() {
+                    ui.label(RichText::new("No templates yet. Make one below, or open a task and choose \u{2026} > Save as template.").color(t.text3));
+                }
+                ui.add_space(4.0);
+                ui.separator();
+                ui.label(RichText::new("New template").strong());
+                ui.add(egui::TextEdit::singleline(name).hint_text("Template name, e.g. Bug report").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(8, 6)));
+                ui.add(egui::TextEdit::multiline(desc).hint_text("Description (optional)").desired_rows(2).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(8, 6)));
+                ui.add(egui::TextEdit::multiline(checklist).hint_text("Checklist, one item per line (optional)").desired_rows(3).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(8, 6)));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Priority").color(t.text2));
+                    let cur = if *priority > 0 { PRIORITIES[*priority as usize].label } else { "None" };
+                    egui::ComboBox::from_id_salt("tp_pr").selected_text(cur).show_ui(ui, |ui| {
+                        ui.selectable_value(priority, 0, "None");
+                        for p in 1..PRIORITIES.len() {
+                            ui.selectable_value(priority, p as u8, PRIORITIES[p].label);
+                        }
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let ok = !name.trim().is_empty();
+                        let b = ui.add_enabled(ok, egui::Button::new(RichText::new("Create template").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 30.0)));
+                        if b.clicked() {
+                            let id = self.data.new_id();
+                            let items: Vec<String> = checklist.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+                            self.data.extra.templates.push(TaskTemplate { id, name: name.trim().to_string(), task_name: name.trim().to_string(), description: desc.trim().to_string(), checklist: items, tags: vec![], priority: *priority });
+                            name.clear();
+                            desc.clear();
+                            checklist.clear();
+                            *priority = 0;
+                            self.dirty = true;
+                        }
+                    });
+                });
             }
             Modal::Import { path, result } => {
                 ui.label("Import tasks from a CSV file (columns: name, status, priority, due date YYYY-MM-DD, assignee name). They go into the current list.");
@@ -1451,6 +1560,15 @@ impl App {
     /// "New message" picker (sidebar + New message, Create > Message, Cmd+G).
     pub(super) fn new_message_window(&mut self, ctx: &egui::Context) {
         if !self.new_message_open {
+            ctx.data_mut(|d| d.remove::<(Section, Location)>(egui::Id::new("new_message_at")));
+            return;
+        }
+        // moving to another page closes it, as does Escape
+        let here = (self.section, self.loc);
+        let at = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(egui::Id::new("new_message_at"), || here));
+        if at != here || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.new_message_open = false;
+            ctx.data_mut(|d| d.remove::<(Section, Location)>(egui::Id::new("new_message_at")));
             return;
         }
         let t = self.t();

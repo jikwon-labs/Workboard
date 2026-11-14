@@ -230,3 +230,24 @@ child Ui that does not move the layout).
 - Docs: Archive moves a doc to Archived and saves a Markdown copy in
   `<shared folder>/Docs archive` (or ~/Documents/Workboard Docs archive when
   not shared); Export saves a copy any time.
+
+## No example content
+
+A first start opens an empty "My Workspace" (one Team Space with one List,
+#general, the computer's user as Owner). Workspaces saved by earlier versions
+have the example people, spaces, tasks, docs, chat and other items taken out
+once on load (a copy of the file is kept as data-before-cleanup-<time>.json);
+anything the person made, and lists or channels holding it, stays. The
+example data now exists only for the automated tests.
+
+## Real on-screen click pass (2026-11-14)
+
+Driven with real mouse and keyboard events on a separate data folder
+(`WORKBOARD_HOME`): Create > Task, open task, comment, subtask, complete,
+Workspace menu > Templates (create and Use), #general message with Enter and
+by clicking the box edge, Start a call. Found and fixed: a list whose tasks
+are all done said "No tasks here yet" (now "All tasks here are done" with a
+Show closed button); "1 checklist items"; clicking the message box outside
+the text line didn't focus it. Ctrl+Option+Cmd+S saves a picture of the
+window as snapshot.png next to the data file; `WORKBOARD_EVENT_LOG=<file>`
+logs input events for debugging.

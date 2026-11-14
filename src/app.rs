@@ -11,10 +11,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 mod chat;
+mod docs;
 mod hubs;
 mod menus;
 mod more;
 mod pages;
+mod parity;
+mod settings;
 mod shell;
 mod together;
 #[cfg(test)]
@@ -23,6 +26,7 @@ mod tests;
 mod ui_tests;
 pub use menus::Modal;
 pub use pages::Section;
+use parity::TaskFilter;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ViewKind {
@@ -177,6 +181,8 @@ pub struct App {
     screenshot: Option<PathBuf>,
     frames: u32,
     shot_sent: bool,
+    /// Ctrl+Option+Cmd+S: save a picture of the window next to the data file.
+    snap_pending: bool,
     actions: Vec<Action>,
     home_collapsed: HashSet<&'static str>,
     section: Section,
@@ -241,6 +247,18 @@ pub struct App {
     thread_open: Option<u64>,
     thread_text: String,
     new_channel: Option<String>,
+    /// Tasks ticked for bulk editing.
+    selected: HashSet<u64>,
+    filter: TaskFilter,
+    hidden_cols: HashSet<String>,
+    sort_desc: bool,
+    cal_week: bool,
+    /// Gantt scale: 0 days, 1 weeks, 2 months.
+    gantt_zoom: u8,
+    gantt_jump: bool,
+    doc_preview: bool,
+    settings_tab: u8,
+    settings_state: Option<Modal>,
 }
 
 impl App {
@@ -255,7 +273,7 @@ impl App {
         let data = match data {
             Some(d) => d,
             None if persist => Data::load(),
-            None => Data::seed(),
+            None => Data::fresh(),
         };
         let loc = data.first_list().map(Location::List).unwrap_or(Location::Home);
         let t = today();
@@ -315,6 +333,7 @@ impl App {
             screenshot,
             frames: 0,
             shot_sent: false,
+            snap_pending: false,
             actions: vec![],
             home_collapsed: ["Done"].into_iter().collect(),
             section: match arg("--section").as_deref() {
@@ -393,6 +412,16 @@ impl App {
             thread_open: None,
             thread_text: String::new(),
             new_channel: None,
+            selected: HashSet::new(),
+            filter: TaskFilter::default(),
+            hidden_cols: ["Date created".to_string()].into_iter().collect(),
+            sort_desc: false,
+            cal_week: false,
+            gantt_zoom: 0,
+            gantt_jump: true,
+            doc_preview: false,
+            settings_tab: 0,
+            settings_state: None,
         }
     }
 
@@ -430,7 +459,8 @@ impl App {
             .filter(|t| !self.me_mode || t.assignees.contains(&self.data.me))
             .filter(|t| self.data.space_of_list(t.list_id).and_then(|s| s.private_owner).map(|o| o == self.data.me).unwrap_or(true))
             .filter(|t| self.assignee_filter.map(|a| t.assignees.contains(&a)).unwrap_or(true))
-            .filter(|t| self.show_closed || !self.data.is_closed(t))
+            .filter(|t| self.show_closed || self.filter.archived || !self.data.is_closed(t))
+            .filter(|t| self.filter.matches(t, &self.data))
             .collect();
         self.sort(&mut v);
         v
@@ -443,6 +473,9 @@ impl App {
             SortBy::Priority => v.sort_by_key(|t| (if t.priority == 0 { 9 } else { t.priority }, t.order)),
             SortBy::Name => v.sort_by_key(|t| t.name.to_lowercase()),
             SortBy::Created => v.sort_by_key(|t| std::cmp::Reverse(t.created)),
+        }
+        if self.sort_desc && self.sort_by != SortBy::Manual {
+            v.reverse();
         }
     }
 
@@ -680,6 +713,7 @@ impl App {
                             Self::log(&mut new, me, format!("Automation ran: {}", self.describe_action(&a)));
                         }
                     }
+                    self.roll_recurring(&old, &mut new);
                     new.updated = now_ts();
                     self.data.tasks[idx] = new;
                     self.dirty = true;
@@ -712,6 +746,8 @@ impl App {
                     updated: now,
                     order,
                     custom: Default::default(),
+                    recur: None,
+                    archived: false,
                 });
                 if let Some(tp) = self.pending_template.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
@@ -755,6 +791,10 @@ impl App {
                     return;
                 }
                 self.section = Section::Home;
+                if matches!(l, Location::Space(_)) && self.loc != l && !self.data.extra.hidden_views.iter().any(|h| h == "Overview") {
+                    // spaces open on their Overview, as in the original
+                    self.view = ViewKind::Overview;
+                }
                 self.loc = l;
                 self.open_task = None;
                 self.collapsed.clear();
@@ -1018,6 +1058,9 @@ impl App {
                     Section::Whiteboards => {
                         egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.whiteboards_hub(ui));
                     }
+                    Section::Settings => {
+                        egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.settings_page(ui));
+                    }
                     Section::Ai => {
                         egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.ai_page(ui));
                     }
@@ -1047,37 +1090,84 @@ impl App {
     fn calendar_view(&mut self, ui: &mut Ui) {
         let t = self.t();
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
+        let td = today();
+        // the week view keeps its own anchor (any day inside the shown week)
+        let week_anchor: NaiveDate = ui.data(|d| d.get_temp(egui::Id::new("cal_week_anchor"))).unwrap_or(td);
+        let mut week_anchor = week_anchor;
         ui.horizontal(|ui| {
             if ui.button("Today").clicked() {
-                let td = today();
                 self.cal_month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
+                week_anchor = td;
             }
             if ui.button("<").clicked() {
-                self.cal_month = add_months(self.cal_month, -1);
+                if self.cal_week {
+                    week_anchor -= Duration::days(7);
+                } else {
+                    self.cal_month = add_months(self.cal_month, -1);
+                }
             }
             if ui.button(">").clicked() {
-                self.cal_month = add_months(self.cal_month, 1);
+                if self.cal_week {
+                    week_anchor += Duration::days(7);
+                } else {
+                    self.cal_month = add_months(self.cal_month, 1);
+                }
             }
-            ui.label(RichText::new(self.cal_month.format("%B %Y").to_string()).size(17.0).strong());
+            let title = if self.cal_week {
+                let ws = week_anchor - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64);
+                format!("{} \u{2013} {}", ws.format("%b %-d"), (ws + Duration::days(6)).format("%b %-d, %Y"))
+            } else {
+                self.cal_month.format("%B %Y").to_string()
+            };
+            ui.label(RichText::new(title).size(17.0).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.selectable_label(!self.cal_week, "Month").clicked() {
+                    self.cal_week = false;
+                    self.cal_month = NaiveDate::from_ymd_opt(week_anchor.year(), week_anchor.month(), 1).unwrap();
+                }
+                if ui.selectable_label(self.cal_week, "Week").clicked() {
+                    self.cal_week = true;
+                }
+            });
         });
+        ui.data_mut(|d| d.insert_temp(egui::Id::new("cal_week_anchor"), week_anchor));
         ui.add_space(6.0);
-        let avail = ui.available_rect_before_wrap();
+        let full = ui.available_rect_before_wrap();
+        let side_w = 230.0;
+        let avail = Rect::from_min_max(full.min, pos2(full.right() - side_w - 10.0, full.bottom()));
+        let side = Rect::from_min_max(pos2(full.right() - side_w, full.top()), full.max);
         let cw = avail.width() / 7.0;
         let head = 26.0;
-        let ch = ((avail.height() - head - 34.0) / 6.0).max(96.0);
-        let (area, _) = ui.allocate_exact_size(vec2(avail.width(), head + ch * 6.0), Sense::hover());
+        let rows = if self.cal_week { 1 } else { 6 };
+        let ch = if self.cal_week { (avail.height() - head - 10.0).max(200.0) } else { ((avail.height() - head - 34.0) / 6.0).max(96.0) };
+        let area = Rect::from_min_size(avail.min, vec2(avail.width(), head + ch * rows as f32));
+        ui.allocate_rect(full, Sense::hover());
         let p = ui.painter().clone();
         for (i, d) in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].iter().enumerate() {
             p.text(pos2(area.left() + cw * i as f32 + 8.0, area.top() + head / 2.0), Align2::LEFT_CENTER, *d, FontId::proportional(12.0), t.text3);
         }
-        let start = self.cal_month - Duration::days(self.cal_month.weekday().num_days_from_sunday() as i64);
-        let td = today();
-        for i in 0..42i64 {
+        let start = if self.cal_week {
+            week_anchor - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64)
+        } else {
+            self.cal_month - Duration::days(self.cal_month.weekday().num_days_from_sunday() as i64)
+        };
+        // a task dragged from the Unscheduled panel or another day
+        let dragging = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx());
+        let released = ui.input(|i| i.pointer.any_released());
+        let mut drop_on: Option<NaiveDate> = None;
+        for i in 0..(rows * 7) as i64 {
             let d = start + Duration::days(i);
             let cell = Rect::from_min_size(pos2(area.left() + cw * (i % 7) as f32, area.top() + head + ch * (i / 7) as f32), vec2(cw, ch));
-            let in_month = d.month() == self.cal_month.month();
+            let in_month = self.cal_week || d.month() == self.cal_month.month();
             if !in_month {
                 p.rect_filled(cell, 0.0, t.column_bg);
+            }
+            let hov = ui.rect_contains_pointer(cell);
+            if dragging && hov {
+                p.rect_filled(cell, 0.0, t.selected_bg);
+                if released {
+                    drop_on = Some(d);
+                }
             }
             p.rect_stroke(cell, 0.0, Stroke::new(0.5, t.border), egui::StrokeKind::Inside);
             let num_pos = cell.left_top() + vec2(10.0, 12.0);
@@ -1087,9 +1177,7 @@ impl App {
             } else {
                 p.text(num_pos, Align2::LEFT_CENTER, d.day().to_string(), FontId::proportional(12.0), if in_month { t.text } else { t.text3 });
             }
-            // add on hover
-            let hov = ui.rect_contains_pointer(cell);
-            if hov {
+            if hov && !dragging {
                 let br = Rect::from_center_size(cell.right_top() + vec2(-14.0, 12.0), vec2(20.0, 20.0));
                 let b = ui.interact(br, ui.id().with(("caladd", i)), Sense::click());
                 p.rect_filled(br, 4.0, if b.hovered() { t.selected_bg } else { t.hover });
@@ -1106,21 +1194,79 @@ impl App {
                     break;
                 }
                 let r = Rect::from_min_size(cell.left_top() + vec2(4.0, 26.0 + 22.0 * k as f32), vec2(cw - 8.0, 20.0));
-                let resp = ui.interact(r, ui.id().with(("calt", task.id)), Sense::click());
+                let resp = ui.interact(r, ui.id().with(("calt", task.id)), Sense::click_and_drag());
+                if resp.drag_started() {
+                    egui::DragAndDrop::set_payload(ui.ctx(), task.id);
+                }
                 let st = self.data.status_of(task);
                 let col = rgb(st.color);
                 p.rect_filled(r, 4.0, if resp.hovered() { col.gamma_multiply(0.30) } else { col.gamma_multiply(0.16) });
                 p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
                 let max_chars = ((cw - 24.0) / 6.5) as usize;
                 p.with_clip_rect(r).text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, truncate(&task.name, max_chars.max(4)), FontId::proportional(12.0), t.text);
+                let tid = task.id;
+                resp.context_menu(|ui| self.task_menu(ui, tid));
                 if resp.clicked() {
                     self.actions.push(Action::Open(task.id));
                 }
             }
         }
-        let undated = tasks.iter().filter(|x| x.due.is_none()).count();
-        if undated > 0 {
-            ui.label(RichText::new(format!("{} tasks without a due date are not shown", undated)).small().color(t.text3));
+        // Unscheduled / Overdue panel
+        p.rect_filled(side, 8.0, t.column_bg);
+        let mut side_ui = ui.new_child(egui::UiBuilder::new().max_rect(side.shrink(10.0)).layout(Layout::top_down(Align::Min)));
+        let tab: u8 = side_ui.data(|d| d.get_temp(egui::Id::new("cal_side_tab"))).unwrap_or(0);
+        let unscheduled: Vec<&Task> = tasks.iter().filter(|x| x.due.is_none()).collect();
+        let overdue: Vec<&Task> = tasks.iter().filter(|x| x.due.map_or(false, |d| d < td) && !self.data.is_closed(x)).collect();
+        let mut new_tab = tab;
+        side_ui.horizontal(|ui| {
+            if ui.selectable_label(tab == 0, format!("{} Unscheduled", unscheduled.len())).clicked() {
+                new_tab = 0;
+            }
+            if ui.selectable_label(tab == 1, format!("{} Overdue", overdue.len())).clicked() {
+                new_tab = 1;
+            }
+        });
+        side_ui.data_mut(|d| d.insert_temp(egui::Id::new("cal_side_tab"), new_tab));
+        side_ui.label(RichText::new("Drag a task onto a day to schedule it.").small().color(t.text3));
+        side_ui.add_space(4.0);
+        let list = if tab == 0 { unscheduled } else { overdue };
+        egui::ScrollArea::vertical().id_salt("cal_side").auto_shrink([false, false]).show(&mut side_ui, |ui| {
+            for task in list {
+                let w = ui.available_width();
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click_and_drag());
+                if resp.drag_started() {
+                    egui::DragAndDrop::set_payload(ui.ctx(), task.id);
+                }
+                ui.painter().rect_filled(r, 6.0, if resp.hovered() { t.hover } else { t.card });
+                ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                let st = self.data.status_of(task);
+                paint_status_circle(ui.painter(), r.left_center() + vec2(14.0, 0.0), 6.0, &st);
+                ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(12.5), t.text);
+                if resp.clicked() {
+                    self.actions.push(Action::Open(task.id));
+                }
+                ui.add_space(4.0);
+            }
+        });
+        if dragging {
+            if let Some(pos) = ui.ctx().pointer_hover_pos() {
+                egui::Area::new(egui::Id::new("cal_drag_ghost")).order(egui::Order::Tooltip).fixed_pos(pos + vec2(10.0, 6.0)).show(ui.ctx(), |ui| {
+                    ui.label(RichText::new("\u{1F4C5} Drop on a day").small());
+                });
+            }
+        }
+        if let Some(d) = drop_on {
+            if let Some(id) = egui::DragAndDrop::take_payload::<u64>(ui.ctx()) {
+                if let Some(mut task) = self.task(*id).cloned() {
+                    task.due = Some(d);
+                    if task.start.map_or(false, |s| s > d) {
+                        task.start = Some(d);
+                    }
+                    self.actions.push(Action::Replace(task));
+                }
+            }
+        } else if released && dragging {
+            egui::DragAndDrop::clear_payload(ui.ctx());
         }
     }
 
@@ -1130,12 +1276,58 @@ impl App {
         let t = self.t();
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let td = today();
-        let start = td - Duration::days(td.weekday().num_days_from_monday() as i64 + 7);
-        let days = 56i64;
-        let cw = 30.0;
+        // scale: day columns get narrower as you zoom out
+        let cw = match self.gantt_zoom {
+            0 => 30.0,
+            1 => 12.0,
+            _ => 4.0,
+        };
+        let days: i64 = match self.gantt_zoom {
+            0 => 70,
+            1 => 182,
+            _ => 548,
+        };
+        let back = match self.gantt_zoom {
+            0 => 14,
+            1 => 35,
+            _ => 120,
+        };
+        let start = td - Duration::days(td.weekday().num_days_from_monday() as i64 + back);
         let rh = 34.0;
         let name_w = 260.0;
         let head = 44.0;
+        ui.horizontal(|ui| {
+            if ui.button("Today").clicked() {
+                self.gantt_jump = true;
+            }
+            ui.separator();
+            for (z, label) in [(0u8, "Day"), (1, "Week"), (2, "Month")] {
+                if ui.selectable_label(self.gantt_zoom == z, label).clicked() && self.gantt_zoom != z {
+                    self.gantt_zoom = z;
+                    self.gantt_jump = true;
+                }
+            }
+            if ui.small_button("\u{2212}").on_hover_text("Zoom out").clicked() && self.gantt_zoom < 2 {
+                self.gantt_zoom += 1;
+                self.gantt_jump = true;
+            }
+            if ui.small_button("+").on_hover_text("Zoom in").clicked() && self.gantt_zoom > 0 {
+                self.gantt_zoom -= 1;
+                self.gantt_jump = true;
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("Export CSV").on_hover_text("Save the tasks in this view as a CSV file").clicked() {
+                    self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
+                }
+                let undated = tasks.iter().filter(|x| x.start.is_none() && x.due.is_none()).count();
+                if undated > 0 {
+                    ui.label(RichText::new(format!("{} without dates", undated)).small().color(t.text3));
+                }
+            });
+        });
+        ui.add_space(4.0);
+        // fill the view so the horizontal scrollbar sits at the bottom, not under the last row
+        let rows_h = (head + rh * (tasks.len() + 1) as f32).max(ui.available_height() - 24.0);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -1155,33 +1347,57 @@ impl App {
                         paint_status_circle(ui.painter(), r.left_center() + vec2(14.0, 0.0), 6.5, &st);
                         ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(30.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
                         ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
+                        let tid = task.id;
+                        resp.context_menu(|ui| self.task_menu(ui, tid));
                         if resp.clicked() {
                             self.actions.push(Action::Open(task.id));
                         }
                     }
+                    let (r, resp) = ui.allocate_exact_size(vec2(name_w, rh), Sense::click());
+                    if resp.hovered() {
+                        ui.painter().rect_filled(r, 0.0, t.hover);
+                    }
+                    ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, "+ Add Task", FontId::proportional(13.0), t.text3);
+                    if resp.clicked() {
+                        self.open_quick_add(None);
+                    }
                 });
+                // the divider only runs as far as the rows (it used to run to the bottom)
                 let vr = ui.available_rect_before_wrap();
-                ui.painter().vline(vr.left(), vr.y_range(), Stroke::new(1.0, t.border));
-                egui::ScrollArea::horizontal().id_salt("gantt_h").auto_shrink([false, true]).show(ui, |ui| {
-                    let total_h = head + rh * tasks.len() as f32;
-                    let (area, _) = ui.allocate_exact_size(vec2(cw * days as f32, total_h.max(200.0)), Sense::hover());
+                ui.painter().vline(vr.left(), vr.top()..=vr.top() + rows_h, Stroke::new(1.0, t.border));
+                let jump = std::mem::take(&mut self.gantt_jump);
+                let mut sa = egui::ScrollArea::horizontal().id_salt(("gantt_h", self.gantt_zoom)).auto_shrink([false, true]);
+                if jump {
+                    let today_x = cw * (td - start).num_days() as f32;
+                    sa = sa.horizontal_scroll_offset((today_x - vr.width() * 0.3).max(0.0));
+                }
+                sa.show(ui, |ui| {
+                    let total_h = rows_h;
+                    let (area, _) = ui.allocate_exact_size(vec2(cw * days as f32, total_h), Sense::hover());
                     let p = ui.painter().clone();
                     for i in 0..days {
                         let d = start + Duration::days(i);
                         let x = area.left() + cw * i as f32;
                         let col_r = Rect::from_min_size(pos2(x, area.top() + head), vec2(cw, total_h - head));
-                        if d.weekday().num_days_from_monday() >= 5 {
+                        if self.gantt_zoom == 0 && d.weekday().num_days_from_monday() >= 5 {
                             p.rect_filled(col_r, 0.0, t.column_bg);
                         }
-                        if d.weekday().num_days_from_monday() == 0 {
+                        let tick = match self.gantt_zoom {
+                            0 | 1 => d.weekday().num_days_from_monday() == 0,
+                            _ => d.day() == 1,
+                        };
+                        if tick {
                             p.vline(x, area.top()..=area.top() + total_h, Stroke::new(0.5, t.border));
-                            p.text(pos2(x + 4.0, area.top() + 12.0), Align2::LEFT_CENTER, d.format("%b %-d").to_string(), FontId::proportional(11.5), t.text2);
+                            let label = if self.gantt_zoom == 2 { d.format("%b %Y").to_string() } else { d.format("%b %-d").to_string() };
+                            p.text(pos2(x + 4.0, area.top() + 12.0), Align2::LEFT_CENTER, label, FontId::proportional(11.5), t.text2);
                         }
-                        let dc = if d == td { Color32::WHITE } else { t.text3 };
-                        if d == td {
-                            p.circle_filled(pos2(x + cw / 2.0, area.top() + 31.0), 9.0, t.danger);
+                        if self.gantt_zoom == 0 {
+                            let dc = if d == td { Color32::WHITE } else { t.text3 };
+                            if d == td {
+                                p.circle_filled(pos2(x + cw / 2.0, area.top() + 31.0), 9.0, t.danger);
+                            }
+                            p.text(pos2(x + cw / 2.0, area.top() + 31.0), Align2::CENTER_CENTER, d.day().to_string(), FontId::proportional(11.0), dc);
                         }
-                        p.text(pos2(x + cw / 2.0, area.top() + 31.0), Align2::CENTER_CENTER, d.day().to_string(), FontId::proportional(11.0), dc);
                     }
                     p.hline(area.x_range(), area.top() + head, Stroke::new(1.0, t.border));
                     let today_x = area.left() + cw * (td - start).num_days() as f32 + cw / 2.0;
@@ -1195,16 +1411,37 @@ impl App {
                             (Some(s), None) => (s, s),
                             _ => continue,
                         };
-                        let x0 = area.left() + cw * (s - start).num_days() as f32 + 2.0;
-                        let x1 = area.left() + cw * ((e - start).num_days() + 1) as f32 - 2.0;
-                        let r = Rect::from_min_max(pos2(x0, y + 7.0), pos2(x1.max(x0 + 10.0), y + rh - 7.0));
-                        let resp = ui.interact(r, ui.id().with(("bar", task.id)), Sense::click());
+                        let x0 = area.left() + cw * (s - start).num_days() as f32 + 1.0;
+                        let x1 = area.left() + cw * ((e - start).num_days() + 1) as f32 - 1.0;
+                        let mut r = Rect::from_min_max(pos2(x0, y + 7.0), pos2(x1.max(x0 + 8.0), y + rh - 7.0));
+                        // drag a bar to move its dates
+                        let resp = ui.interact(r, ui.id().with(("bar", task.id)), Sense::click_and_drag());
+                        let acc_id = resp.id.with("acc");
+                        if resp.dragged() {
+                            let dx = resp.drag_delta().x;
+                            ui.data_mut(|d| *d.get_temp_mut_or_default::<f32>(acc_id) += dx);
+                        }
+                        let acc: f32 = ui.data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
+                        if resp.drag_stopped() {
+                            ui.data_mut(|d| d.remove::<f32>(acc_id));
+                        }
+                        let shift_days = (acc / cw).round() as i64;
+                        if resp.dragged() {
+                            r = r.translate(vec2(shift_days as f32 * cw, 0.0));
+                        }
                         let col = rgb(self.data.status_of(task).color);
-                        p.rect_filled(r, 5.0, if resp.hovered() { col } else { col.gamma_multiply(0.85) });
+                        p.rect_filled(r, 5.0, if resp.hovered() || resp.dragged() { col } else { col.gamma_multiply(0.85) });
                         if r.width() > 60.0 {
                             p.with_clip_rect(r).text(r.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(11.5), Color32::WHITE);
+                        } else {
+                            p.text(r.right_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(11.5), t.text2);
                         }
-                        if resp.clicked() {
+                        if resp.drag_stopped() && shift_days != 0 {
+                            let mut e2 = task.clone();
+                            e2.start = e2.start.map(|d| d + Duration::days(shift_days));
+                            e2.due = e2.due.map(|d| d + Duration::days(shift_days));
+                            self.actions.push(Action::Replace(e2));
+                        } else if resp.clicked() {
                             self.actions.push(Action::Open(task.id));
                         }
                     }
@@ -1219,8 +1456,8 @@ impl App {
         let t = self.t();
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let now = now_ts();
-        let widths = [300.0, 130.0, 110.0, 110.0, 110.0, 150.0, 100.0, 110.0];
-        let heads = ["Name", "Status", "Assignee", "Due date", "Priority", "Tags", "Time tracked", "Date created"];
+        let widths = [44.0, 300.0, 130.0, 110.0, 110.0, 110.0, 150.0, 100.0, 110.0];
+        let heads = ["#", "Name", "Status", "Assignee", "Due date", "Priority", "Tags", "Time tracked", "Date created"];
         egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
             let total: f32 = widths.iter().sum();
             let (hr, _) = ui.allocate_exact_size(vec2(total, 30.0), Sense::hover());
@@ -1231,9 +1468,12 @@ impl App {
                 x += widths[i];
             }
             ui.painter().rect_filled(Rect::from_min_size(hr.left_bottom() - vec2(0.0, 1.0), vec2(total, 1.0)), 0.0, t.border);
-            for task in &tasks {
+            for (n, task) in tasks.iter().enumerate() {
                 let (rr, resp) = ui.allocate_exact_size(vec2(total, 34.0), Sense::click());
                 let id = ui.id().with(("trow", task.id));
+                if self.selected.contains(&task.id) {
+                    ui.painter().rect_filled(rr, 0.0, t.selected_bg);
+                }
                 if resp.hovered() {
                     ui.painter().rect_filled(rr, 0.0, t.hover);
                 }
@@ -1249,6 +1489,16 @@ impl App {
                 let closed = matches!(st.kind, StatusKind::Closed | StatusKind::Done);
                 let mut edited = task.clone();
                 let mut changed = false;
+                // row number, or the selection box on hover
+                let on = self.selected.contains(&task.id);
+                if resp.hovered() || on || !self.selected.is_empty() || ui.rect_contains_pointer(cells[0]) {
+                    // row_checkbox centres the box 2px right of the rect's left edge
+                    let cell = Rect::from_min_size(pos2(cells[0].center().x - 2.0, cells[0].top()), vec2(1.0, cells[0].height()));
+                    self.row_checkbox(ui, cell, task.id, true);
+                } else {
+                    ui.painter().text(cells[0].center(), Align2::CENTER_CENTER, (n + 1).to_string(), FontId::proportional(12.0), t.text3);
+                }
+                let cells: Vec<Rect> = cells[1..].to_vec();
                 ui.painter().with_clip_rect(cells[0].shrink(2.0)).text(cells[0].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
                 // status
                 let sr = ui.interact(cells[1], id.with("s"), Sense::click());
@@ -1298,10 +1548,19 @@ impl App {
                 }
                 let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or(td_default());
                 ui.painter().text(cells[7].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_date(created), FontId::proportional(13.0), t.text2);
+                let tid = task.id;
+                resp.context_menu(|ui| self.task_menu(ui, tid));
+                let in_box = resp.interact_pointer_pos().map_or(false, |p| p.x < rr.left() + 44.0);
                 if changed {
                     self.actions.push(Action::Replace(edited));
-                } else if resp.clicked() {
-                    self.actions.push(Action::Open(task.id));
+                } else if resp.clicked() && !in_box {
+                    if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
+                        if !self.selected.remove(&tid) {
+                            self.selected.insert(tid);
+                        }
+                    } else {
+                        self.actions.push(Action::Open(task.id));
+                    }
                 }
             }
             let (r, resp) = ui.allocate_exact_size(vec2(total, 32.0), Sense::click());
@@ -1422,12 +1681,35 @@ impl App {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
             let (title, sub) = match mode {
                 1 => ("Replies", "Comments from others on tasks and chat replies"),
-                2 => ("Assigned Comments", "Comments that mention you"),
+                2 => ("Assigned Comments", "Comments that @mention someone for them to act on"),
                 _ => ("Inbox", "Recent activity across your workspace"),
             };
             ui.label(RichText::new(title).size(20.0).strong());
             ui.label(RichText::new(sub).color(t.text2));
             ui.add_space(8.0);
+            // tabs: Unread / Read for Replies, Assigned to me / Delegated by me for comments
+            let tab_id = egui::Id::new(("inbox_tab", mode));
+            let mut tab: u8 = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
+            if mode != 0 {
+                ui.horizontal(|ui| {
+                    let labels = if mode == 1 { ["Unread", "Read"] } else { ["Assigned to me", "Delegated by me"] };
+                    for (i, l) in labels.iter().enumerate() {
+                        if ui.selectable_label(tab == i as u8, *l).clicked() {
+                            tab = i as u8;
+                        }
+                    }
+                    if mode == 1 && tab == 0 {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Mark all as read").clicked() {
+                                self.data.extra.replies_seen = now_ts();
+                                self.dirty = true;
+                            }
+                        });
+                    }
+                });
+                ui.data_mut(|d| d.insert_temp(tab_id, tab));
+            }
+            let seen = self.data.extra.replies_seen;
             if mode == 0 {
                 self.reminders_block(ui);
                 if ui.button("\u{23F0}  Create Reminder").clicked() {
@@ -1440,9 +1722,11 @@ impl App {
             let my_name = self.data.member(me).map(|m| format!("@{}", m.name)).unwrap_or_default();
             for task in &self.data.tasks {
                 for a in &task.activity {
-                    let keep = match mode {
-                        1 => a.comment && a.author != me,
-                        2 => a.comment && !my_name.is_empty() && a.text.contains(&my_name),
+                    let keep = match (mode, tab) {
+                        (1, 0) => a.comment && a.author != me && a.ts > seen,
+                        (1, _) => a.comment && a.author != me && a.ts <= seen,
+                        (2, 0) => a.comment && !my_name.is_empty() && a.text.contains(&my_name),
+                        (2, _) => a.comment && a.author == me && a.text.contains('@'),
                         _ => true,
                     };
                     if keep {
@@ -1515,8 +1799,25 @@ impl App {
                 // header
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(18, 10)).show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        // previous / next task in the current view
+                        let (prev, next) = self.neighbours(tid);
+                        if ui.add_enabled(prev.is_some(), egui::Button::new("\u{2191}").frame(false)).on_hover_text("Previous task").clicked() {
+                            if let Some(p) = prev {
+                                self.actions.push(Action::Open(p));
+                            }
+                        }
+                        if ui.add_enabled(next.is_some(), egui::Button::new("\u{2193}").frame(false)).on_hover_text("Next task").clicked() {
+                            if let Some(n) = next {
+                                self.actions.push(Action::Open(n));
+                            }
+                        }
                         let path = self.data.list_path(task.list_id).join("  /  ");
-                        ui.label(RichText::new(path).color(t.text2));
+                        if ui.add(egui::Button::new(RichText::new(path).color(t.text2)).frame(false)).on_hover_text("Move to another List").clicked() {
+                            self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
+                        }
+                        if task.archived {
+                            ui.label(RichText::new("Archived").small().color(t.danger));
+                        }
                         if let Some(pid) = task.parent {
                             if let Some(p) = self.task(pid) {
                                 ui.label(RichText::new("/").color(t.text3));
@@ -1530,7 +1831,36 @@ impl App {
                                 close = true;
                             }
                             let r = ui.add(egui::Button::new(RichText::new("\u{2026}").size(16.0)).frame(false));
+                            if ui.add(egui::Button::new(RichText::new("ID").size(12.0)).frame(false)).on_hover_text("Copy task ID").clicked() {
+                                ui.ctx().copy_text(tid.to_string());
+                                self.toast = Some(("Task ID copied".into(), now_ts()));
+                            }
                             popup(ui, &r, win_id.with("more"), 200.0, |ui| {
+                                if ui.button("Move to...").clicked() {
+                                    self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
+                                    close_popup(ui);
+                                }
+                                if ui.button("Duplicate").clicked() {
+                                    if let Some(n) = self.duplicate_task(tid) {
+                                        self.actions.push(Action::Open(n));
+                                    }
+                                    close_popup(ui);
+                                }
+                                if ui.button("Remind me").clicked() {
+                                    self.modal = Some(Modal::Reminder { text: task.name.clone(), date: Some(today() + Duration::days(1)), time: "09:00".into() });
+                                    close_popup(ui);
+                                }
+                                if ui.button("Copy ID").clicked() {
+                                    ui.ctx().copy_text(tid.to_string());
+                                    self.toast = Some(("Task ID copied".into(), now_ts()));
+                                    close_popup(ui);
+                                }
+                                if ui.button(if task.archived { "Unarchive" } else { "Archive" }).clicked() {
+                                    let a = !task.archived;
+                                    self.set_archived(&[tid], a);
+                                    close_popup(ui);
+                                }
+                                ui.separator();
                                 if ui.button("Save as template").clicked() {
                                     let id = self.data.new_id();
                                     self.data.extra.templates.push(TaskTemplate { id, name: task.name.clone(), task_name: task.name.clone(), description: task.description.clone(), checklist: task.checklist.iter().map(|c| c.text.clone()).collect(), tags: task.tags.clone(), priority: task.priority });
@@ -1617,7 +1947,10 @@ impl App {
                         ui.horizontal(|ui| {
                             let s_txt = task.start.map(fmt_date).unwrap_or_else(|| "Start".into());
                             let r = ui.add(egui::Button::new(RichText::new(s_txt).color(if task.start.is_some() { t.text } else { t.text3 })).frame(false));
-                            popup(ui, &r, win_id.with("sd"), 380.0, |ui| date_menu(ui, &t, win_id.with("sdc"), &mut task.start));
+                            if r.clicked() {
+                                ui.data_mut(|d| d.insert_temp(win_id.with("dates").with("which"), 0u8));
+                            }
+                            popup(ui, &r, win_id.with("sd"), 380.0, |ui| dates_menu(ui, &t, win_id.with("dates"), &mut task.start, &mut task.due, &mut task.recur));
                             ui.label(RichText::new("\u{2192}").color(t.text3));
                             let closed = statuses.iter().find(|s| s.name == task.status).map(|s| matches!(s.kind, StatusKind::Closed | StatusKind::Done)).unwrap_or(false);
                             let (d_txt, d_col) = match task.due {
@@ -1625,7 +1958,10 @@ impl App {
                                 None => ("Due".into(), t.text3),
                             };
                             let r = ui.add(egui::Button::new(RichText::new(d_txt).color(d_col)).frame(false));
-                            popup(ui, &r, win_id.with("dd"), 380.0, |ui| date_menu(ui, &t, win_id.with("ddc"), &mut task.due));
+                            popup(ui, &r, win_id.with("dd"), 380.0, |ui| dates_menu(ui, &t, win_id.with("dates2"), &mut task.start, &mut task.due, &mut task.recur));
+                            if task.recur.is_some() {
+                                ui.label(RichText::new(format!("\u{1F501} {}", recur_label(&task.recur))).small().color(t.text2)).on_hover_text("Repeats when closed");
+                            }
                         });
                         // Priority
                         if !apps.priorities {
@@ -1898,6 +2234,14 @@ impl App {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) {
             close = true;
         }
+        // Cmd+1..4 set the priority, Cmd+0 clears it
+        if self.data.extra.apps.priorities {
+            for (k, p) in [(egui::Key::Num1, 1u8), (egui::Key::Num2, 2), (egui::Key::Num3, 3), (egui::Key::Num4, 4), (egui::Key::Num0, 0)] {
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, k)) {
+                    task.priority = p;
+                }
+            }
+        }
         if task_changed(&orig, &task) {
             self.actions.push(Action::Replace(task));
         }
@@ -2129,53 +2473,155 @@ impl App {
         if let Some(mut q) = self.palette.take() {
             let mut open = true;
             egui::Window::new("search_palette").title_bar(false).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 60.0]).fixed_size([620.0, 420.0]).show(ctx, |ui| {
-                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search tasks, lists and spaces...").font(FontId::proportional(16.0)).desired_width(f32::INFINITY));
+                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search, or jump to a task, list, doc or channel...").font(FontId::proportional(16.0)).desired_width(f32::INFINITY));
                 r.request_focus();
+                // kind chips, as in the original's search
+                let kid = egui::Id::new("palette_kind");
+                let mut kind: u8 = ui.data(|d| d.get_temp(kid)).unwrap_or(0);
+                ui.horizontal(|ui| {
+                    for (i, label) in ["All", "Tasks", "Lists", "Docs", "Channels", "Messages"].iter().enumerate() {
+                        if ui.selectable_label(kind == i as u8, *label).clicked() {
+                            kind = i as u8;
+                        }
+                    }
+                });
+                ui.data_mut(|d| d.insert_temp(kid, kind));
                 ui.separator();
                 let ql = q.to_lowercase();
                 let mut first: Option<Action> = None;
-                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                    ui.label(RichText::new("Locations").small().color(t.text3));
-                    let mut locs: Vec<(Location, String)> = vec![];
-                    for s in &self.data.spaces {
-                        locs.push((Location::Space(s.id), s.name.clone()));
-                        for f in &s.folders {
-                            locs.push((Location::Folder(f.id), format!("{} / {}", s.name, f.name)));
-                            for l in &f.lists {
-                                locs.push((Location::List(l.id), format!("{} / {} / {}", s.name, f.name, l.name)));
+                let mut open_doc: Option<u64> = None;
+                let mut open_chat: Option<u64> = None;
+                let show = |k: u8| kind == 0 || kind == k;
+                egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+                    if ql.is_empty() && kind == 0 {
+                        let items = self.recent_items(None);
+                        if !items.is_empty() {
+                            ui.label(RichText::new("Recent").small().color(t.text3));
+                            for (k, id, name, place) in items.into_iter().take(8) {
+                                ui.horizontal(|ui| {
+                                    let glyph = match k.as_str() {
+                                        "task" => "\u{2611}",
+                                        "doc" => "\u{1F4C4}",
+                                        _ => "\u{2630}",
+                                    };
+                                    ui.label(RichText::new(glyph).color(t.text3));
+                                    if ui.add(egui::Button::new(&name).frame(false)).clicked() {
+                                        match k.as_str() {
+                                            "task" => self.actions.push(Action::Open(id)),
+                                            "doc" => open_doc = Some(id),
+                                            _ => self.actions.push(Action::Go(Location::List(id))),
+                                        }
+                                        open = false;
+                                    }
+                                    ui.label(RichText::new(place).small().color(t.text3));
+                                });
+                            }
+                            ui.add_space(4.0);
+                        }
+                    }
+                    if show(2) {
+                        ui.label(RichText::new("Locations").small().color(t.text3));
+                        let mut locs: Vec<(Location, String)> = vec![];
+                        for s in &self.data.spaces {
+                            locs.push((Location::Space(s.id), s.name.clone()));
+                            for f in &s.folders {
+                                locs.push((Location::Folder(f.id), format!("{} / {}", s.name, f.name)));
+                                for l in &f.lists {
+                                    locs.push((Location::List(l.id), format!("{} / {} / {}", s.name, f.name, l.name)));
+                                }
+                            }
+                            for l in &s.lists {
+                                locs.push((Location::List(l.id), format!("{} / {}", s.name, l.name)));
                             }
                         }
-                        for l in &s.lists {
-                            locs.push((Location::List(l.id), format!("{} / {}", s.name, l.name)));
-                        }
-                    }
-                    for (l, name) in locs.iter().filter(|(_, n)| ql.is_empty() || n.to_lowercase().contains(&ql)).take(8) {
-                        if first.is_none() {
-                            first = Some(Action::Go(*l));
-                        }
-                        if ui.add(egui::Button::new(name).frame(false)).clicked() {
-                            self.actions.push(Action::Go(*l));
-                            open = false;
-                        }
-                    }
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("Tasks").small().color(t.text3));
-                    for task in self.data.tasks.iter().filter(|x| ql.is_empty() || x.name.to_lowercase().contains(&ql)).take(20) {
-                        if first.is_none() {
-                            first = Some(Action::Open(task.id));
-                        }
-                        ui.horizontal(|ui| {
-                            let st = self.data.status_of(task);
-                            let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                            paint_status_circle(ui.painter(), r.center(), 6.0, &st);
-                            if ui.add(egui::Button::new(&task.name).frame(false)).clicked() {
-                                self.actions.push(Action::Open(task.id));
+                        for (l, name) in locs.iter().filter(|(_, n)| ql.is_empty() || n.to_lowercase().contains(&ql)).take(if kind == 2 { 40 } else { 8 }) {
+                            if first.is_none() {
+                                first = Some(Action::Go(*l));
+                            }
+                            if ui.add(egui::Button::new(name).frame(false)).clicked() {
+                                self.actions.push(Action::Go(*l));
                                 open = false;
                             }
-                            ui.label(RichText::new(self.data.list_name(task.list_id)).small().color(t.text3));
-                        });
+                        }
+                        ui.add_space(4.0);
+                    }
+                    if show(1) {
+                        ui.label(RichText::new("Tasks").small().color(t.text3));
+                        for task in self.data.tasks.iter().filter(|x| !x.archived && (ql.is_empty() || x.name.to_lowercase().contains(&ql) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 }) {
+                            if first.is_none() {
+                                first = Some(Action::Open(task.id));
+                            }
+                            ui.horizontal(|ui| {
+                                let st = self.data.status_of(task);
+                                let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                                paint_status_circle(ui.painter(), r.center(), 6.0, &st);
+                                if ui.add(egui::Button::new(&task.name).frame(false)).clicked() {
+                                    self.actions.push(Action::Open(task.id));
+                                    open = false;
+                                }
+                                ui.label(RichText::new(self.data.list_name(task.list_id)).small().color(t.text3));
+                            });
+                        }
+                        ui.add_space(4.0);
+                    }
+                    if show(3) {
+                        let docs: Vec<(u64, String)> = self.data.docs.iter().filter(|d| !d.archived && (ql.is_empty() || d.title.to_lowercase().contains(&ql) || (ql.len() > 2 && d.body.to_lowercase().contains(&ql)))).map(|d| (d.id, d.title.clone())).take(20).collect();
+                        if !docs.is_empty() {
+                            ui.label(RichText::new("Docs").small().color(t.text3));
+                            for (id, title) in docs {
+                                if ui.add(egui::Button::new(format!("\u{1F4C4}  {}", title)).frame(false)).clicked() {
+                                    open_doc = Some(id);
+                                    open = false;
+                                }
+                            }
+                            ui.add_space(4.0);
+                        }
+                    }
+                    if show(4) {
+                        let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (ql.is_empty() || c.name.to_lowercase().contains(&ql))).map(|c| (c.id, c.name.clone())).take(20).collect();
+                        if !chans.is_empty() {
+                            ui.label(RichText::new("Channels").small().color(t.text3));
+                            for (id, name) in chans {
+                                if ui.add(egui::Button::new(format!("#  {}", name)).frame(false)).clicked() {
+                                    open_chat = Some(id);
+                                    open = false;
+                                }
+                            }
+                            ui.add_space(4.0);
+                        }
+                    }
+                    if show(5) && ql.len() > 1 {
+                        let mut hits: Vec<(u64, String, String)> = vec![];
+                        for c in &self.data.channels {
+                            for m in &c.messages {
+                                if m.text.to_lowercase().contains(&ql) {
+                                    hits.push((c.id, if c.name.is_empty() { "Direct message".into() } else { format!("#{}", c.name) }, m.text.clone()));
+                                }
+                            }
+                        }
+                        if !hits.is_empty() {
+                            ui.label(RichText::new("Messages").small().color(t.text3));
+                            for (cid, where_, text) in hits.into_iter().take(20) {
+                                ui.horizontal(|ui| {
+                                    if ui.add(egui::Button::new(truncate(&text, 60)).frame(false)).clicked() {
+                                        open_chat = Some(cid);
+                                        open = false;
+                                    }
+                                    ui.label(RichText::new(where_).small().color(t.text3));
+                                });
+                            }
+                        }
                     }
                 });
+                if let Some(id) = open_doc {
+                    self.doc_open = Some(id);
+                    self.section = Section::Docs;
+                }
+                if let Some(id) = open_chat {
+                    self.section = Section::Chat;
+                    self.chat_open = Some(id);
+                    self.thread_open = None;
+                }
                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     if let Some(a) = first {
                         self.actions.push(a);
@@ -2194,6 +2640,22 @@ impl App {
 
     /// One frame of the whole interface (everything except the native window buttons).
     pub(crate) fn ui_frame(&mut self, ctx: &egui::Context) {
+        if let Ok(p) = std::env::var("WORKBOARD_EVENT_LOG") {
+            let evs: Vec<String> = ctx.input(|i| i.raw.events.iter().filter(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_))).map(|e| format!("{:?}", e)).collect());
+            if !evs.is_empty() {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+                    for e in evs {
+                        let _ = writeln!(f, "{}", e);
+                    }
+                }
+            }
+        }
+        if self.data.extra.auto_theme {
+            if let Some(sys) = ctx.input(|i| i.raw.system_theme) {
+                self.data.dark = sys == egui::Theme::Dark;
+            }
+        }
         let t = self.t();
         theme::apply(ctx, &t);
         // shortcuts
@@ -2206,6 +2668,7 @@ impl App {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::G)) {
             self.new_message_open = true;
         }
+        self.single_key_shortcuts(ctx);
         self.top_bar(ctx);
         self.rail(ctx);
         self.content(ctx);
@@ -2214,9 +2677,11 @@ impl App {
         self.modals(ctx);
         self.notepad(ctx);
         self.new_message_window(ctx);
+        self.bulk_bar(ctx);
         self.toast_ui(ctx);
         self.apply_actions();
         self.track_history();
+        self.note_recent();
         if self.dirty {
             self.sync_note_change();
         }
@@ -2238,7 +2703,47 @@ impl App {
         self.handle_screenshot(ctx);
     }
 
+    fn handle_snapshot(&mut self, ctx: &egui::Context) {
+        // also on request: a `snap-request` file next to the data file (used when
+        // trying the app with a separate WORKBOARD_HOME folder)
+        let mut pressed = ctx.input(|i| i.modifiers.ctrl && i.modifiers.alt && i.modifiers.mac_cmd && i.key_pressed(egui::Key::S));
+        if std::env::var("WORKBOARD_HOME").map_or(false, |v| !v.is_empty()) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(300));
+            let req = Data::dir().join("snap-request");
+            if req.exists() {
+                let _ = std::fs::remove_file(&req);
+                pressed = true;
+            }
+        }
+        if pressed && !self.snap_pending {
+            self.snap_pending = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            return;
+        }
+        if !self.snap_pending {
+            return;
+        }
+        ctx.request_repaint();
+        let img = ctx.input(|i| i.raw.events.iter().find_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }));
+        if let Some(img) = img {
+            self.snap_pending = false;
+            let [w, h] = img.size;
+            let mut buf = Vec::with_capacity(w * h * 4);
+            for p in &img.pixels {
+                buf.extend_from_slice(&[p.r(), p.g(), p.b(), 255]);
+            }
+            let path = Data::dir().join("snapshot.png");
+            if let Some(im) = image::RgbaImage::from_raw(w as u32, h as u32, buf) {
+                let _ = std::fs::create_dir_all(Data::dir());
+                let _ = im.save(&path);
+            }
+        }
+    }
+
     fn handle_screenshot(&mut self, ctx: &egui::Context) {
+        if self.screenshot.is_none() {
+            self.handle_snapshot(ctx);
+        }
         let Some(path) = self.screenshot.clone() else { return };
         self.frames += 1;
         ctx.request_repaint();
@@ -2394,6 +2899,7 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.description != b.description
         || a.tags != b.tags
         || a.estimate_min != b.estimate_min
+        || a.recur != b.recur
         || a.activity.len() != b.activity.len()
         || a.checklist.len() != b.checklist.len()
         || a.custom.iter().filter(|(_, v)| !v.is_empty()).ne(b.custom.iter().filter(|(_, v)| !v.is_empty()))

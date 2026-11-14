@@ -533,3 +533,209 @@ fn archiving_a_doc_saves_a_markdown_copy() {
     assert!(!a.data.docs[0].archived, "Unarchive brings it back");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn example_content_is_removed_but_own_work_stays() {
+    let mut d = Data::seed();
+    d.extra.demo_removed = false;
+    // things the person made themselves
+    let web = d.spaces[0].folders[0].lists[0].id;
+    let mine = d.new_id() + 5000;
+    d.tasks.push(Task { id: mine, name: "My real task".into(), list_id: web, assignees: vec![1, 2], ..d.tasks[0].clone() });
+    let gen = d.channels.iter().position(|c| c.name == "general").unwrap();
+    let mut m = d.channels[gen].messages[0].clone();
+    m.id = mine + 2;
+    m.author = 1;
+    m.text = "real message".into();
+    m.replies.clear();
+    d.channels[gen].messages.push(m);
+    d.remove_demo();
+
+    assert_eq!(d.members.len(), 1, "example people are gone");
+    assert_eq!(d.members[0].id, d.me);
+    assert_eq!(d.tasks.len(), 1);
+    assert_eq!(d.tasks[0].name, "My real task");
+    assert_eq!(d.tasks[0].assignees, vec![1], "removed people are unassigned");
+    assert!(d.list_name(web) == "Website Redesign", "a list holding my task stays");
+    assert_eq!(d.spaces.len(), 1, "example spaces without my work are gone");
+    assert!(d.docs.is_empty());
+    let ch: Vec<_> = d.channels.iter().map(|c| (c.name.clone(), c.messages.len())).collect();
+    assert_eq!(ch, vec![("general".to_string(), 1)], "only my message is left");
+    assert!(d.extra.goals.is_empty() && d.extra.whiteboards.is_empty() && d.extra.dashboards.is_empty() && d.extra.teams.is_empty());
+    assert!(d.extra.demo_removed);
+}
+
+#[test]
+fn pure_example_workspace_becomes_empty() {
+    let mut d = Data::seed();
+    d.extra.demo_removed = false;
+    d.remove_demo();
+    assert!(d.tasks.is_empty() && d.docs.is_empty());
+    assert_eq!(d.members.len(), 1);
+    assert_eq!(d.spaces.len(), 1, "a fresh Team Space to start in");
+    assert!(d.first_list().is_some());
+    let old: Data = serde_json::from_str(r#"{"workspace":"W","spaces":[],"tasks":[],"members":[],"me":1,"next_id":1,"favorites":[]}"#).unwrap();
+    assert!(!old.extra.demo_removed, "files from before the cleanup get cleaned");
+    assert!(Data::fresh().tasks.is_empty());
+}
+
+// ---------------------------------------------------------------- parity features
+
+fn other_list(a: &App, not: u64) -> u64 {
+    list_ids(a).into_iter().find(|l| *l != not).unwrap()
+}
+
+#[test]
+fn move_task_takes_subtasks_and_keeps_a_valid_status() {
+    let mut a = app();
+    let from = list_ids(&a)[0];
+    let to = other_list(&a, from);
+    let id = add_task(&mut a, from, "Movable");
+    a.apply(Action::Add { list: from, name: "Child".into(), status: None, priority: 0, assignees: vec![], due: None, parent: Some(id), open: false });
+    // a status the target list does not have falls back to its first status
+    a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().status = "made up".into();
+    a.move_tasks(&[id], to);
+    let t = a.task(id).unwrap();
+    assert_eq!(t.list_id, to);
+    assert_eq!(t.status, "to do");
+    assert!(t.activity.iter().any(|x| x.text.starts_with("moved this task to")));
+    let child = a.data.tasks.iter().find(|t| t.name == "Child").unwrap();
+    assert_eq!(child.list_id, to, "subtasks move with their task");
+}
+
+#[test]
+fn duplicate_task_copies_subtasks_under_the_copy() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Original");
+    a.apply(Action::Add { list, name: "Step".into(), status: None, priority: 0, assignees: vec![], due: None, parent: Some(id), open: false });
+    let copy = a.duplicate_task(id).unwrap();
+    assert_eq!(a.task(copy).unwrap().name, "Original (copy)");
+    assert_eq!(a.subtasks(copy).len(), 1);
+    assert_eq!(a.subtasks(id).len(), 1, "the original keeps its subtask");
+}
+
+#[test]
+fn archived_tasks_leave_views_until_the_archived_filter() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    a.loc = Location::List(list);
+    let id = add_task(&mut a, list, "Old work");
+    a.set_archived(&[id], true);
+    assert!(!a.filtered().iter().any(|t| t.id == id));
+    a.filter.archived = true;
+    assert!(a.filtered().iter().any(|t| t.id == id));
+    a.filter.archived = false;
+    a.set_archived(&[id], false);
+    assert!(a.filtered().iter().any(|t| t.id == id));
+}
+
+#[test]
+fn closing_a_recurring_task_reopens_it_with_the_next_date() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Weekly report");
+    let due = today();
+    let mut t = a.task(id).unwrap().clone();
+    t.due = Some(due);
+    t.recur = Some("weekly".into());
+    t.checklist = vec![CheckItem { text: "send".into(), done: true }];
+    a.apply(Action::Replace(t));
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let t = a.task(id).unwrap();
+    assert_eq!(t.status, "to do");
+    assert_eq!(t.due, Some(due + Duration::days(7)));
+    assert!(!t.checklist[0].done);
+    assert_eq!(next_recur(NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(), "monthly"), NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
+}
+
+#[test]
+fn filter_conditions_status_priority_due_and_sort_direction() {
+    let mut a = app();
+    a.loc = Location::Everything;
+    let all = a.filtered().len();
+    a.filter.priorities = vec![1];
+    assert!(a.filtered().iter().all(|t| t.priority == 1));
+    a.filter = Default::default();
+    a.filter.statuses = vec!["in progress".into()];
+    assert!(!a.filtered().is_empty());
+    assert!(a.filtered().iter().all(|t| t.status == "in progress"));
+    a.filter = Default::default();
+    a.filter.due = 1;
+    assert!(a.filtered().iter().all(|t| t.due.map_or(false, |d| d < today())));
+    a.filter.due = 5;
+    assert!(a.filtered().iter().all(|t| t.due.is_none()));
+    a.filter = Default::default();
+    assert_eq!(a.filtered().len(), all);
+    a.sort_by = SortBy::Name;
+    let asc: Vec<u64> = a.filtered().iter().map(|t| t.id).collect();
+    a.sort_desc = true;
+    let mut desc: Vec<u64> = a.filtered().iter().map(|t| t.id).collect();
+    desc.reverse();
+    assert_eq!(asc, desc);
+}
+
+#[test]
+fn lists_move_and_duplicate_with_their_tasks() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let n = a.data.tasks.iter().filter(|t| t.list_id == list && t.parent.is_none()).count();
+    let target = a.data.spaces.iter().find(|s| a.data.space_of_list(list).map(|x| x.id) != Some(s.id)).unwrap().id;
+    a.move_list(list, target, None);
+    assert_eq!(a.data.space_of_list(list).unwrap().id, target);
+    let copy = a.duplicate_list(list).unwrap();
+    assert_eq!(a.data.list_name(copy), format!("{} (copy)", a.data.list_name(list)));
+    assert_eq!(a.data.tasks.iter().filter(|t| t.list_id == copy && t.parent.is_none()).count(), n);
+}
+
+#[test]
+fn new_list_from_the_personal_list_goes_to_a_visible_space() {
+    let mut a = app();
+    let pl = a.create_personal_list();
+    a.loc = Location::List(pl);
+    a.open_new_list(a.current_space(), None);
+    let Some(Modal::NewList { space, .. }) = a.modal.take() else { panic!("Create List dialog") };
+    assert!(a.data.spaces.iter().any(|s| s.id == space && s.private_owner.is_none()));
+    let id = a.create_list(space, None, "Launch").unwrap();
+    assert_eq!(a.data.list_name(id), "Launch");
+    assert_eq!(a.loc, Location::List(id));
+}
+
+#[test]
+fn doc_pages_nest_and_stay_out_of_the_doc_list() {
+    let mut a = app();
+    a.new_doc(None);
+    let root = a.doc_open.unwrap();
+    let page = a.add_page(root);
+    let sub = a.add_page(page);
+    assert_eq!(a.doc_root(sub), root);
+    assert_eq!(a.data.docs.iter().filter(|d| d.parent.is_none() && (d.id == page || d.id == sub)).count(), 0);
+}
+
+#[test]
+fn doc_formatting_adds_markdown_at_the_cursor() {
+    let mut s = String::from("Hello\nworld");
+    super::docs::apply_block(&mut s, 7, 7, "Heading 2");
+    assert_eq!(s, "Hello\n## world");
+    super::docs::apply_block(&mut s, 7, 7, "Checklist");
+    assert_eq!(s, "Hello\n- [ ] world", "a new block replaces the old prefix");
+    let mut b = String::from("make bold");
+    super::docs::apply_block(&mut b, 5, 9, "Bold");
+    assert_eq!(b, "make **bold**");
+}
+
+#[test]
+fn recent_items_remember_tasks_lists_and_docs() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    a.loc = Location::List(list);
+    a.note_recent();
+    let id = add_task(&mut a, list, "Seen");
+    a.apply(Action::Open(id));
+    a.note_recent();
+    let items = a.recent_items(None);
+    assert_eq!(items[0].1, id);
+    assert!(items.iter().any(|i| i.0 == "list" && i.1 == list));
+}

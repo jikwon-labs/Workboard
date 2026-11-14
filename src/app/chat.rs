@@ -327,6 +327,7 @@ impl App {
                         });
                     }
                     let mut last_day: Option<NaiveDate> = None;
+                    let mut prev: Option<(u64, i64)> = None;
                     for m in &shown {
                         let d = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today);
                         if last_day != Some(d) {
@@ -345,8 +346,11 @@ impl App {
                             ui.painter().rect_filled(pill, 11.0, t.bg);
                             ui.painter().rect_stroke(pill, 11.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                             ui.painter().galley(pill.center() - g.size() / 2.0, g, t.text2);
+                            prev = None;
                         }
-                        self.message_row(ui, cid, m, true, &mut acts);
+                        let compact = prev.map_or(false, |(a, ts)| a == m.author && m.ts - ts < 300) && m.post_title.is_none() && m.call.is_none();
+                        self.message_row_c(ui, cid, m, true, compact, &mut acts);
+                        prev = Some((m.author, m.ts));
                     }
                 });
             });
@@ -395,12 +399,25 @@ impl App {
                 }
             }
         });
-        egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::symmetric(12, 8)).fill(t.card).show(ui, |ui| {
+        let text_id = egui::Id::new("chat_composer_text");
+        let bg_id = egui::Id::new("chat_composer_bg");
+        let frame_resp = egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::symmetric(12, 8)).fill(t.card).show(ui, |ui| {
+            // a click anywhere on the box (not on its buttons) puts the cursor in the message
+            let last: Option<Rect> = ui.ctx().data(|d| d.get_temp(bg_id));
+            if let Some(r) = last {
+                let bg = ui.interact(r, bg_id, Sense::click());
+                if bg.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+                }
+                if bg.clicked() {
+                    ui.memory_mut(|m| m.request_focus(text_id));
+                }
+            }
             if self.composer_mode == 1 {
                 ui.add(egui::TextEdit::singleline(&mut self.post_title).hint_text("Title").font(FontId::proportional(15.0)).frame(false).desired_width(f32::INFINITY));
             }
             let hint = if self.composer_mode == 1 { "Share an announcement...".to_string() } else { format!("Write to {}, press 'space' for AI, '/' for commands", target) };
-            let r = ui.add(egui::TextEdit::multiline(&mut self.chat_text).hint_text(hint).frame(false).desired_rows(1).desired_width(f32::INFINITY));
+            let r = ui.add(egui::TextEdit::multiline(&mut self.chat_text).id(text_id).hint_text(hint).frame(false).desired_rows(1).desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer"));
             let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
             ui.horizontal(|ui| {
@@ -430,6 +447,7 @@ impl App {
                 });
             });
         });
+        ui.ctx().data_mut(|d| d.insert_temp(bg_id, frame_resp.response.rect));
         out
     }
 
@@ -458,17 +476,31 @@ impl App {
     }
 
     fn message_row(&self, ui: &mut Ui, cid: u64, m: &Message, top_level: bool, acts: &mut Vec<ChatAction>) {
+        self.message_row_c(ui, cid, m, top_level, false, acts)
+    }
+
+    /// `compact`: a follow-up from the same person a moment later, shown
+    /// without the avatar and name (as the original groups messages).
+    fn message_row_c(&self, ui: &mut Ui, cid: u64, m: &Message, top_level: bool, compact: bool, acts: &mut Vec<ChatAction>) {
         let t = self.t();
         let w = ui.available_width();
         let start = ui.cursor().min;
+        // the hover background goes underneath the message, not over it
+        let bg = ui.painter().add(egui::Shape::Noop);
         let inner = ui.horizontal_top(|ui| {
             ui.set_width(w);
-            let (ar, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
-            if let Some(au) = self.data.member(m.author) {
+            let (ar, _) = ui.allocate_exact_size(vec2(36.0, if compact { 18.0 } else { 36.0 }), Sense::hover());
+            if compact {
+                if ui.rect_contains_pointer(ar.expand2(vec2(0.0, 6.0)).union(Rect::from_min_size(ar.min, vec2(w, 22.0)))) {
+                    let time = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).format("%-I:%M").to_string()).unwrap_or_default();
+                    ui.painter().text(ar.center(), Align2::CENTER_CENTER, time, FontId::proportional(10.5), t.text3);
+                }
+            } else if let Some(au) = self.data.member(m.author) {
                 paint_avatar(ui.painter(), ar.center(), 15.0, au, t.bg);
             }
             ui.vertical(|ui| {
                 ui.set_width(w - 50.0);
+                if !compact {
                 ui.horizontal(|ui| {
                     let name = self.data.member(m.author).map(|x| x.name.clone()).unwrap_or_else(|| "Someone".into());
                     ui.label(RichText::new(name).strong());
@@ -481,6 +513,7 @@ impl App {
                         ui.label(RichText::new("\u{1F4CC} Pinned").small().color(t.text3));
                     }
                 });
+                }
                 if let Some(pt) = &m.post_title {
                     ui.label(RichText::new(format!("\u{1F4E2} {}", pt)).size(16.0).color(t.text));
                 }
@@ -565,11 +598,11 @@ impl App {
                 }
             });
         });
-        let rect = Rect::from_min_max(start, pos2(start.x + w, inner.response.rect.bottom() + 4.0));
-        ui.add_space(8.0);
+        let rect = Rect::from_min_max(start, pos2(start.x + w, inner.response.rect.bottom() + if compact { 1.0 } else { 4.0 }));
+        ui.add_space(if compact { 2.0 } else { 8.0 });
         // hover toolbar
         if ui.rect_contains_pointer(rect) {
-            ui.painter().rect_filled(rect.expand2(vec2(6.0, 2.0)), 6.0, t.hover.gamma_multiply(0.6));
+            ui.painter().set(bg, egui::Shape::rect_filled(rect.expand2(vec2(6.0, 2.0)), 6.0, t.hover));
             let n = QUICK_REACTIONS.len() + if top_level { 4 } else { 1 };
             let bw = 30.0;
             let bar = Rect::from_min_size(pos2(rect.right() - bw * n as f32 - 8.0, rect.top() - 10.0), vec2(bw * n as f32 + 4.0, 28.0));

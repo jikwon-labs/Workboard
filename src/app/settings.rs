@@ -1,0 +1,162 @@
+// The Settings page: one full page with a section list on the left (Admin,
+// Features, Personal), as in the original. Each section shows the same
+// controls the matching dialog has, so behaviour stays in one place.
+
+use super::*;
+
+/// (group, label) in the order the left list shows them.
+pub const SETTINGS: [(&str, &str); 14] = [
+    ("Admin", "General"),
+    ("Admin", "People"),
+    ("Admin", "Spaces"),
+    ("Admin", "Trash"),
+    ("Features", "Apps"),
+    ("Features", "Custom Fields"),
+    ("Features", "Tag Manager"),
+    ("Features", "Templates"),
+    ("Features", "Automations"),
+    ("Features", "Work together"),
+    ("Personal", "My Settings"),
+    ("Personal", "Notifications"),
+    ("Personal", "Themes"),
+    ("Personal", "Keyboard shortcuts"),
+];
+
+impl App {
+    pub(super) fn open_settings(&mut self, label: &str) {
+        self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;
+        self.settings_state = None;
+        self.section = Section::Settings;
+    }
+
+    fn settings_modal_for(&self, label: &str) -> Option<Modal> {
+        Some(match label {
+            "General" => Modal::WorkspaceSettings { name: self.data.workspace.clone() },
+            "Trash" => Modal::Trash,
+            "Apps" => Modal::ClickApps,
+            "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
+            "Tag Manager" => Modal::TagManager { from: String::new(), to: String::new() },
+            "Templates" => Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 },
+            "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() },
+            "Work together" => Modal::Together { path: self.data.extra.shared.as_ref().map(|c| c.folder.clone()).unwrap_or_default(), result: String::new() },
+            "My Settings" => {
+                let m = self.data.member(self.data.me).cloned().unwrap_or_default();
+                Modal::Profile { name: m.name, email: m.email }
+            }
+            "Notifications" => Modal::Notifications,
+            "Themes" => Modal::Themes,
+            "Keyboard shortcuts" => Modal::Shortcuts,
+            _ => return None,
+        })
+    }
+
+    pub(super) fn settings_page(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let full = ui.available_rect_before_wrap();
+        let nav_w = 230.0;
+        let nav = Rect::from_min_max(full.min, pos2(full.left() + nav_w, full.bottom()));
+        let body = Rect::from_min_max(pos2(full.left() + nav_w, full.top()), full.max);
+        ui.painter().rect_filled(nav, 0.0, t.sidebar);
+        ui.painter().vline(nav.right(), nav.y_range(), Stroke::new(1.0, t.border));
+        let mut nui = ui.new_child(egui::UiBuilder::new().max_rect(nav.shrink(10.0)).layout(Layout::top_down(Align::Min)));
+        if nui.add(egui::Button::new(RichText::new("\u{2190}  Back to Workspace").color(t.text2)).frame(false)).clicked() {
+            self.section = Section::Home;
+        }
+        nui.add_space(6.0);
+        let ws = self.data.workspace.clone();
+        nui.label(RichText::new(ws).strong());
+        let mut last_group = "";
+        for (i, (group, label)) in SETTINGS.iter().enumerate() {
+            if *group != last_group {
+                last_group = group;
+                nui.add_space(8.0);
+                nui.label(RichText::new(*group).small().color(t.text3));
+            }
+            let sel = self.settings_tab as usize == i;
+            let w = nui.available_width();
+            let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+            name_it(&resp, &format!("Settings {}", label));
+            if sel {
+                nui.painter().rect_filled(r, 6.0, t.selected_bg);
+            } else if resp.hovered() {
+                nui.painter().rect_filled(r, 6.0, t.hover);
+            }
+            nui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, *label, FontId::proportional(13.5), if sel { t.selected_text } else { t.text });
+            if resp.clicked() && !sel {
+                self.settings_tab = i as u8;
+                self.settings_state = None;
+            }
+        }
+        let label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
+        let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(body.shrink2(vec2(32.0, 20.0))).layout(Layout::top_down(Align::Min)));
+        bui.label(RichText::new(label).size(22.0).strong());
+        bui.add_space(12.0);
+        match label {
+            "People" => {
+                self.people_page(&mut bui);
+                return;
+            }
+            "Spaces" => {
+                self.spaces_settings(&mut bui);
+                return;
+            }
+            _ => {}
+        }
+        egui::ScrollArea::vertical().id_salt("settings_body").auto_shrink([false, false]).show(&mut bui, |ui| {
+            ui.set_max_width(640.0);
+            let mut state = self.settings_state.take().or_else(|| self.settings_modal_for(label));
+            if let Some(m) = state.as_mut() {
+                let done = self.modal_body(ui, &t, m);
+                if done {
+                    // saved: start the section fresh
+                    state = None;
+                }
+            }
+            self.settings_state = state;
+        });
+    }
+
+    /// Spaces table: open, rename, colour, statuses, delete.
+    fn spaces_settings(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let spaces: Vec<(u64, String, [u8; 3], usize, usize)> = self
+            .open_spaces()
+            .iter()
+            .map(|s| {
+                let lists = self.data.lists_in(Location::Space(s.id)).unwrap_or_default();
+                let tasks = self.data.tasks.iter().filter(|t| lists.contains(&t.list_id)).count();
+                (s.id, s.name.clone(), s.color, lists.len(), tasks)
+            })
+            .collect();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{} Spaces", spaces.len())).color(t.text2));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary_button(ui, &t, "+ New Space").clicked() {
+                    self.modal = Some(Modal::NewSpace { name: String::new(), color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13] });
+                }
+            });
+        });
+        ui.add_space(8.0);
+        egui::Grid::new("spaces_table").num_columns(5).striped(true).spacing(vec2(24.0, 10.0)).show(ui, |ui| {
+            for h in ["Name", "Lists", "Tasks", "", ""] {
+                ui.label(RichText::new(h).small().color(t.text3));
+            }
+            ui.end_row();
+            for (id, name, color, nl, nt) in spaces {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                    ui.painter().rect_filled(r, 4.0, rgb(color));
+                    if ui.link(&name).clicked() {
+                        self.actions.push(Action::Go(Location::Space(id)));
+                    }
+                });
+                ui.label(nl.to_string());
+                ui.label(nt.to_string());
+                let r = ui.button("\u{22EF}");
+                popup(ui, &r, ui.id().with(("sp_set", id)), 200.0, |ui| self.space_menu(ui, id));
+                ui.label("");
+                ui.end_row();
+            }
+        });
+    }
+}

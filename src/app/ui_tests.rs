@@ -125,6 +125,28 @@ impl Ui1 {
         self.settle();
     }
 
+    // click the left-most (or right-most) control with this name, for names
+    // shown twice (sidebar and page)
+    fn click_side(&mut self, name: &str, rightmost: bool) {
+        let pick = |h: &Self| {
+            let mut hits: Vec<Rect> = h.tree.iter().filter(|(n, _)| n == name).map(|(_, r)| *r).collect();
+            hits.sort_by(|a, b| a.center().x.total_cmp(&b.center().x));
+            if rightmost { hits.last() } else { hits.first() }.copied().unwrap_or_else(|| panic!("nothing named {:?}", name))
+        };
+        for _ in 0..30 {
+            let r = pick(self);
+            if r.center().y > 40.0 && r.center().y < 880.0 {
+                break;
+            }
+            let dy = if r.center().y >= 880.0 { -120.0 } else { 120.0 };
+            self.frame(vec![egui::Event::PointerMoved(pos2(r.center().x, 450.0))]);
+            self.frame(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, dy), modifiers: Default::default() }]);
+            self.settle();
+        }
+        let r = pick(self);
+        self.click_at(r.center());
+    }
+
     fn hover(&mut self, pos: Pos2) {
         self.frame(vec![egui::Event::PointerMoved(pos)]);
         self.settle();
@@ -488,4 +510,160 @@ fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
     assert_eq!(h.app.data.channels.len(), 1);
     assert_eq!(h.app.data.channels[0].name, "general");
     assert_eq!(h.app.chat_open, Some(h.app.data.channels[0].id));
+}
+
+#[test]
+fn sidebar_add_channel_takes_enter_and_lets_go_on_escape() {
+    let mut h = Ui1::new();
+    let n = h.app.data.channels.len();
+    h.click_side("Add Channel", false);
+    assert!(h.app.new_channel.is_some());
+    h.type_text("dev team");
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.data.channels.len(), n + 1, "Enter creates the channel");
+    assert!(h.app.data.channels.iter().any(|c| c.name == "dev-team"));
+    assert!(h.app.new_channel.is_none());
+    // Escape leaves the field and typing goes elsewhere again
+    h.app.section = Section::Home;
+    h.settle();
+    h.click_side("Add Channel", false);
+    assert!(h.app.new_channel.is_some());
+    h.key(egui::Key::Escape);
+    assert!(h.app.new_channel.is_none(), "Escape closes the field");
+    assert!(h.ctx.memory(|m| m.focused().is_none()), "nothing keeps the keyboard");
+}
+
+#[test]
+fn new_message_window_closes_on_escape_and_when_moving_away() {
+    let mut h = Ui1::new();
+    h.app.new_message_open = true;
+    h.settle();
+    h.key(egui::Key::Escape);
+    assert!(!h.app.new_message_open);
+    h.app.new_message_open = true;
+    h.settle();
+    h.click("Inbox");
+    assert!(!h.app.new_message_open, "going to another page closes it");
+}
+
+#[test]
+fn create_list_opens_a_dialog_and_lands_in_a_visible_space() {
+    let mut h = Ui1::new();
+    h.click("My Tasks");
+    h.click("Personal List");
+    h.click("Create");
+    h.click("List");
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })), "Create List dialog");
+    h.type_text("Roadmap");
+    h.key(egui::Key::Enter);
+    let Location::List(id) = h.app.loc else { panic!("opened the new list") };
+    assert_eq!(h.app.data.list_name(id), "Roadmap");
+    assert!(h.app.data.space_of_list(id).unwrap().private_owner.is_none());
+}
+
+#[test]
+fn right_click_task_move_to_another_list() {
+    let mut h = Ui1::new();
+    h.right_click("Task Set up analytics dashboard", 60.0);
+    h.click("Move to...");
+    assert!(matches!(h.app.modal, Some(Modal::MoveTasks { .. })));
+    h.click("Team Space / Projects / Marketing");
+    let t = h.app.data.tasks.iter().find(|t| t.name == "Set up analytics dashboard").unwrap();
+    assert_eq!(h.app.data.list_name(t.list_id), "Marketing");
+}
+
+#[test]
+fn tick_two_rows_and_archive_them_from_the_bar() {
+    let mut h = Ui1::new();
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Select Write copy for landing page");
+    h.click("Select Set up analytics dashboard");
+    assert_eq!(h.app.selected.len(), 2);
+    assert!(h.has("2 tasks selected"));
+    h.click("Archive");
+    let archived = h.app.data.tasks.iter().filter(|t| t.archived).count();
+    assert_eq!(archived, 2);
+    assert!(h.app.selected.is_empty());
+}
+
+#[test]
+fn row_dots_menu_duplicates_a_task() {
+    let mut h = Ui1::new();
+    let n = h.app.data.tasks.len();
+    h.hover(h.find("Task Set up analytics dashboard").unwrap());
+    h.click("Task options Set up analytics dashboard");
+    h.click("Duplicate");
+    assert_eq!(h.app.data.tasks.len(), n + 1);
+    assert!(h.app.data.tasks.iter().any(|t| t.name == "Set up analytics dashboard (copy)"));
+}
+
+#[test]
+fn single_key_t_opens_create_task_and_cmd_backslash_hides_the_sidebar() {
+    let mut h = Ui1::new();
+    h.key(egui::Key::T);
+    assert!(h.app.quick_add.is_some());
+    h.app.quick_add = None;
+    h.settle();
+    let cmd = egui::Modifiers { command: true, mac_cmd: true, ..Default::default() };
+    h.frame(vec![egui::Event::Key { key: egui::Key::Backslash, physical_key: None, pressed: true, repeat: false, modifiers: cmd }]);
+    h.settle();
+    assert!(h.app.sidebar_collapsed);
+}
+
+#[test]
+fn list_dots_menu_moves_a_list() {
+    let mut h = Ui1::new();
+    h.hover(h.find("Marketing").unwrap());
+    h.click("List options Marketing");
+    h.click("Move...");
+    assert!(matches!(h.app.modal, Some(Modal::MoveList { .. })));
+    h.click_side("Side Projects", true);
+    let id = h.app.data.spaces.iter().flat_map(|s| s.folders.iter().flat_map(|f| f.lists.iter()).chain(s.lists.iter())).find(|l| l.name == "Marketing").unwrap().id;
+    assert_eq!(h.app.data.space_of_list(id).unwrap().name, "Side Projects");
+}
+
+#[test]
+fn settings_is_a_full_page_with_sections() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("\u{2699}  Settings");
+    assert_eq!(h.app.section, Section::Settings);
+    h.click("Settings Spaces");
+    assert!(h.has("Team Space"));
+    h.click("Settings Themes");
+    h.click("\u{25D0} Auto");
+    assert!(h.app.data.extra.auto_theme);
+    h.click("\u{2190}  Back to Workspace");
+    assert_eq!(h.app.section, Section::Home);
+}
+
+#[test]
+fn search_shows_recent_items_and_finds_docs() {
+    let mut h = Ui1::new();
+    h.click("Task Set up analytics dashboard");
+    h.key(egui::Key::Escape);
+    h.app.palette = Some(String::new());
+    h.settle();
+    assert!(h.has("Recent"));
+    h.click("Docs");
+    h.click("\u{1F4C4}  Project brief");
+    assert_eq!(h.app.section, Section::Docs);
+}
+
+#[test]
+fn doc_slash_command_and_sub_page() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    h.settle();
+    let id = h.app.doc_open.unwrap();
+    // the empty body has no visible name to click; put the cursor in it
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+    h.settle();
+    h.type_text("/");
+    h.settle();
+    h.click("Heading 1");
+    h.type_text("Plan");
+    assert_eq!(h.app.data.docs.iter().find(|d| d.id == id).unwrap().body, "# Plan");
+    h.click("+  Add page");
+    assert!(h.app.data.docs.iter().any(|d| d.parent == Some(id)));
 }

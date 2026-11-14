@@ -280,13 +280,15 @@ impl App {
             let pad = ((w - cw) / 2.0).max(0.0);
             ui.add_space(20.0);
             ui.horizontal_top(|ui| {
-                ui.add_space(pad - 50.0);
+                ui.add_space((pad - 50.0).max(0.0));
                 if let Some(m) = self.data.member(self.data.me).cloned() {
                     let (r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
                     paint_avatar(ui.painter(), r.center(), 15.0, &m, t.bg);
                 }
                 egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(16, 10)).show(ui, |ui| {
                     ui.set_width(cw - 34.0);
+                    // the frame sits in a horizontal row; stack its contents top to bottom
+                    ui.vertical(|ui| {
                     let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Channel:").color(t.text2));
@@ -339,6 +341,7 @@ impl App {
                                 self.dirty = true;
                             }
                         });
+                    });
                     });
                 });
             });
@@ -1089,28 +1092,37 @@ impl App {
             ui.horizontal_top(|ui| {
                 // Recent
                 self.ov_card(ui, cw, "Recent", |s, ui| {
-                    let recent = s.recent.clone();
-                    if recent.is_empty() {
-                        ui.label(RichText::new("Your recently opened items will appear here.").color(s.t().text2));
+                    let tt = s.t();
+                    let items = s.recent_items(Some(&lists));
+                    if items.is_empty() {
+                        ui.label(RichText::new("Your recently opened items will appear here.").color(tt.text2));
                     }
-                    for id in recent {
-                        if let Some(task) = s.task(id).cloned() {
-                            let st = s.data.status_of(&task);
-                            ui.horizontal(|ui| {
-                                let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                                paint_status_circle(ui.painter(), r.center(), 5.5, &st);
-                                if ui.link(&task.name).clicked() {
-                                    s.actions.push(Action::Open(task.id));
+                    for (kind, id, name, place) in items.into_iter().take(8) {
+                        ui.horizontal(|ui| {
+                            let glyph = match kind.as_str() {
+                                "task" => "\u{2611}",
+                                "doc" => "\u{1F4C4}",
+                                _ => "\u{2630}",
+                            };
+                            ui.label(RichText::new(glyph).color(tt.text3));
+                            if ui.link(&name).clicked() {
+                                match kind.as_str() {
+                                    "task" => s.actions.push(Action::Open(id)),
+                                    "doc" => {
+                                        s.doc_open = Some(id);
+                                        s.section = Section::Docs;
+                                    }
+                                    _ => s.actions.push(Action::Go(Location::List(id))),
                                 }
-                                ui.label(RichText::new(format!("\u{2022} in {}", s.data.list_name(task.list_id))).small().color(s.t().text3));
-                            });
-                        }
+                            }
+                            ui.label(RichText::new(format!("\u{2022} in {}", place)).small().color(tt.text3));
+                        });
                     }
                 });
                 // Docs
                 let space = self.current_space();
                 self.ov_card(ui, cw, "Docs", |s, ui| {
-                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| space.is_none() || d.space == space).map(|d| (d.id, d.title.clone())).collect();
+                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
                     if docs.is_empty() {
                         ui.label(RichText::new("There are no Docs in this location yet.").color(s.t().text2));
                     }

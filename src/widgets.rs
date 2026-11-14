@@ -304,6 +304,15 @@ pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>
 
 /// Quick options plus a month calendar. Returns true when the date changed.
 pub fn date_menu(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<NaiveDate>) -> bool {
+    date_menu_inner(ui, t, id, current, true)
+}
+
+fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<NaiveDate>, close: bool) -> bool {
+    let close_popup = |ui: &Ui| {
+        if close {
+            close_popup(ui)
+        }
+    };
     let mut changed = false;
     let base = current.unwrap_or_else(today);
     let mut month: NaiveDate = ui
@@ -314,13 +323,14 @@ pub fn date_menu(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Naiv
             ui.set_width(130.0);
             let td = today();
             let wd = td.weekday().num_days_from_monday() as i64;
-            let opts: [(&str, NaiveDate); 6] = [
+            let opts: [(&str, NaiveDate); 7] = [
                 ("Today", td),
                 ("Tomorrow", td + Duration::days(1)),
                 ("This weekend", td + Duration::days((5 - wd).max(0))),
                 ("Next week", td + Duration::days(7 - wd)),
                 ("2 weeks", td + Duration::days(14)),
                 ("4 weeks", td + Duration::days(28)),
+                ("8 weeks", td + Duration::days(56)),
             ];
             for (label, d) in opts {
                 let r = ui.add(egui::Button::new(label).frame(false).min_size(vec2(126.0, 24.0)));
@@ -439,4 +449,87 @@ pub fn paint_triangle(p: &egui::Painter, center: Pos2, open: bool, color: Color3
 pub fn put_over(ui: &mut egui::Ui, rect: egui::Rect, w: impl egui::Widget) -> Response {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
     child.add(w)
+}
+
+/// Gives a text field keyboard focus on the first frame it is shown, then
+/// leaves focus alone so the person can click elsewhere or press Escape.
+pub fn focus_once(ui: &Ui, r: &Response) {
+    let id = r.id.with("focus_once");
+    let nr = ui.ctx().cumulative_pass_nr();
+    let last = ui.ctx().data(|d| d.get_temp::<u64>(id));
+    if last.map_or(true, |l| l + 2 < nr) {
+        r.request_focus();
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(id, nr));
+}
+
+/// Repeat choices for recurring tasks (stored value, label).
+pub const RECUR: [(&str, &str); 5] = [("", "Never"), ("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"), ("yearly", "Yearly")];
+
+pub fn recur_label(r: &Option<String>) -> &'static str {
+    RECUR.iter().find(|x| Some(x.0) == r.as_deref()).map(|x| x.1).unwrap_or("Never")
+}
+
+/// The next date of a repeating task.
+pub fn next_recur(d: NaiveDate, r: &str) -> NaiveDate {
+    match r {
+        "daily" => d + Duration::days(1),
+        "weekly" => d + Duration::days(7),
+        "monthly" => d.checked_add_months(chrono::Months::new(1)).unwrap_or(d + Duration::days(30)),
+        "yearly" => d.checked_add_months(chrono::Months::new(12)).unwrap_or(d + Duration::days(365)),
+        _ => d,
+    }
+}
+
+/// Start date / Due date picker with a repeat choice, as in the original's
+/// date popup. Returns true when anything changed.
+pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<NaiveDate>, due: &mut Option<NaiveDate>, recur: &mut Option<String>) -> bool {
+    let mut which: u8 = ui.data(|d| d.get_temp(id.with("which"))).unwrap_or(1);
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        for (k, label, v) in [(0u8, "Start date", *start), (1u8, "Due date", *due)] {
+            let txt = match v {
+                Some(d) => format!("{}: {}", label, fmt_date(d)),
+                None => label.to_string(),
+            };
+            let sel = which == k;
+            let b = egui::Button::new(egui::RichText::new(txt).color(if sel { t.text } else { t.text2 }))
+                .fill(if sel { t.selected_bg } else { Color32::TRANSPARENT })
+                .stroke(Stroke::new(1.0, t.border))
+                .min_size(vec2(170.0, 28.0));
+            if ui.add(b).clicked() {
+                which = k;
+            }
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(id.with("which"), which));
+    ui.add_space(4.0);
+    // the calendar closes the popup on a pick; keep it open while choosing start
+    let target = if which == 0 { start } else { due };
+    let before = *target;
+    let mut tmp = before;
+    let picked = date_menu_inner(ui, t, id.with(which), &mut tmp, false);
+    if picked {
+        *target = tmp;
+        changed = true;
+        if which == 0 && tmp.is_some() {
+            // after the start date, pick the due date
+            ui.data_mut(|d| d.insert_temp(id.with("which"), 1u8));
+        } else {
+            close_popup(ui);
+        }
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("\u{1F501}  Set Recurring").color(t.text2));
+        // plain buttons: a combo box would close this popup
+        for (v, label) in RECUR {
+            let sel = recur.as_deref().unwrap_or("") == v;
+            if ui.selectable_label(sel, label).clicked() && !sel {
+                *recur = if v.is_empty() { None } else { Some(v.to_string()) };
+                changed = true;
+            }
+        }
+    });
+    changed
 }

@@ -20,6 +20,7 @@ pub enum Section {
     Forms,
     Whiteboards,
     Ai,
+    Settings,
 }
 
 fn week_start(d: NaiveDate) -> NaiveDate {
@@ -354,14 +355,14 @@ impl App {
                         if primary_button(ui, &t, "+ Doc").clicked() {
                             let id = self.data.new_id();
                             let now = now_ts();
-                            self.data.docs.insert(0, Doc { id, space: None, owner: self.data.me, private: false, archived: false, meeting_note: false, title: "Untitled".into(), body: String::new(), created: now, updated: now });
+                            self.data.docs.insert(0, Doc { id, space: None, owner: self.data.me, private: false, archived: false, meeting_note: false, parent: None, title: "Untitled".into(), body: String::new(), created: now, updated: now });
                             self.doc_open = Some(id);
                             self.dirty = true;
                         }
                     });
                 });
                 ui.add_space(8.0);
-                let docs: Vec<(u64, String, i64)> = self.data.docs.iter().map(|d| (d.id, d.title.clone(), d.updated)).collect();
+                let docs: Vec<(u64, String, i64)> = self.data.docs.iter().filter(|d| d.parent.is_none()).map(|d| (d.id, d.title.clone(), d.updated)).collect();
                 for (id, title, updated) in docs {
                     let sel = self.doc_open == Some(id);
                     let w = ui.available_width();

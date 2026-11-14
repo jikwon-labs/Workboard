@@ -182,6 +182,12 @@ pub struct Task {
     pub order: i64,
     #[serde(default)]
     pub custom: std::collections::BTreeMap<u64, String>,
+    /// Repeats when closed: daily, weekly, monthly or yearly.
+    #[serde(default)]
+    pub recur: Option<String>,
+    /// Archived tasks stay out of every view until unarchived.
+    #[serde(default)]
+    pub archived: bool,
 }
 
 impl Task {
@@ -207,6 +213,9 @@ pub struct Doc {
     pub archived: bool,
     #[serde(default)]
     pub meeting_note: bool,
+    /// The page this one sits under (sub pages), if any.
+    #[serde(default)]
+    pub parent: Option<u64>,
     pub title: String,
     pub body: String,
     pub created: i64,
@@ -491,8 +500,10 @@ pub struct Extra {
     /// Sidebar items the person hid.
     pub hidden_nav: Vec<String>,
     pub hidden_views: Vec<String>,
-    /// Theme colour: black, purple, blue, pink, violet, orange, teal.
+    /// Theme colour: black, purple, blue, pink, violet, indigo, orange, teal, bronze, mint.
     pub accent: String,
+    /// Follow the computer's light / dark setting.
+    pub auto_theme: bool,
     pub muted_until: i64,
     pub labs: Vec<String>,
     pub workspace_color: [u8; 3],
@@ -501,10 +512,18 @@ pub struct Extra {
     pub inbox_later: Vec<String>,
     /// Starred items: "doc:ID", "wb:ID", "form:ID", "dash:ID".
     pub starred: Vec<String>,
+    /// Recently opened items, newest first: "task:ID", "list:ID", "doc:ID".
+    pub recent: Vec<String>,
+    /// Replies older than this were read.
+    pub replies_seen: i64,
     /// The shared folder this workspace is kept in step through, if any.
     pub shared: Option<crate::sync::SharedCfg>,
     /// What changed when, for merging with teammates' copies.
     pub sync: crate::sync::SyncMeta,
+    /// The example content earlier versions started with has been taken out
+    /// (files from before this field existed read as false).
+    #[serde(default)]
+    pub demo_removed: bool,
 }
 
 impl Default for Extra {
@@ -529,6 +548,7 @@ impl Default for Extra {
             hidden_nav: vec![],
             hidden_views: vec![],
             accent: "black".into(),
+            auto_theme: false,
             muted_until: 0,
             labs: vec![],
             workspace_color: [48, 164, 108],
@@ -536,8 +556,11 @@ impl Default for Extra {
             inbox_cleared: vec![],
             inbox_later: vec![],
             starred: vec![],
+            recent: vec![],
+            replies_seen: 0,
             shared: None,
             sync: Default::default(),
+            demo_removed: false,
         }
     }
 }
@@ -634,10 +657,17 @@ impl Data {
         d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into() }], expanded: true, private_owner: None });
         let cid = d.new_id();
         d.channels.push(Channel { id: cid, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members: vec![owner.id], messages: vec![], last_read: now_ts() });
+        d.extra.demo_removed = true;
         d
     }
 
     pub fn path() -> PathBuf {
+        // a separate data folder (for trying things without touching real work)
+        if let Ok(dir) = std::env::var("WORKBOARD_HOME") {
+            if !dir.is_empty() {
+                return PathBuf::from(dir).join("data.json");
+            }
+        }
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".into());
@@ -665,6 +695,11 @@ impl Data {
                         }
                     }
                 }
+                if !d.extra.demo_removed {
+                    let _ = std::fs::write(Self::dir().join(format!("data-before-cleanup-{}.json", now_ts())), &s);
+                    d.remove_demo();
+                    d.save();
+                }
                 // every workspace has a #general channel to talk in
                 if !d.channels.iter().any(|c| c.kind == ChannelKind::Channel) {
                     let id = d.new_id();
@@ -674,7 +709,151 @@ impl Data {
                 return d;
             }
         }
-        Self::seed()
+        Self::fresh()
+    }
+
+    /// The empty workspace a first start opens with.
+    pub fn fresh() -> Self {
+        let user = std::env::var("USER").unwrap_or_default();
+        let name = if user.is_empty() { "Me".to_string() } else { user[..1].to_uppercase() + &user[1..] };
+        let owner = Member { id: 1, name, color: [0x5f, 0x55, 0xee], email: String::new(), role: "Owner".into(), ..Default::default() };
+        Self::blank("My Workspace", owner)
+    }
+
+    /// Take out the example content (people, spaces, tasks, docs, chat...)
+    /// that earlier versions started with, keeping everything the person made.
+    pub fn remove_demo(&mut self) {
+        use serde_json::Value;
+        use std::collections::HashSet;
+        fn label(v: &Value) -> Option<String> {
+            ["name", "title", "text"].iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(|x| x.to_string()))
+        }
+        fn collect(v: &Value, key: &str, out: &mut HashSet<(String, String)>) {
+            match v {
+                Value::Array(a) => {
+                    for x in a {
+                        if x.get("id").is_some() {
+                            if let Some(l) = label(x) {
+                                out.insert((key.to_string(), l));
+                            }
+                        }
+                        collect(x, key, out);
+                    }
+                }
+                Value::Object(o) => {
+                    for (k, x) in o {
+                        collect(x, k, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        // true when the item (or something inside it) must stay
+        fn filter(v: &mut Value, key: &str, demo: &HashSet<(String, String)>, keep: &HashSet<u64>) -> bool {
+            let mut stays = false;
+            match v {
+                Value::Array(a) => {
+                    a.retain_mut(|x| {
+                        let inner = filter(x, key, demo, keep);
+                        let Some(id) = x.get("id").and_then(|i| i.as_u64()) else { return true };
+                        let is_demo = id < 1000 && label(x).map_or(false, |l| demo.contains(&(key.to_string(), l)));
+                        let keep_it = !is_demo || inner || keep.contains(&id);
+                        stays |= keep_it;
+                        keep_it
+                    });
+                }
+                Value::Object(o) => {
+                    for (k, x) in o.iter_mut() {
+                        if x.is_array() {
+                            let had = x.as_array().map_or(false, |a| a.iter().any(|i| i.get("id").is_some()));
+                            let any = filter(x, k, demo, keep);
+                            stays |= had && any;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            stays
+        }
+        let mut seed = serde_json::to_value(Data::seed()).unwrap_or_default();
+        if let Some(e) = seed.get_mut("extra").and_then(|e| e.as_object_mut()) {
+            e.remove("sync");
+        }
+        let mut demo = HashSet::new();
+        collect(&seed, "", &mut demo);
+        let mut v = serde_json::to_value(&*self).unwrap_or_default();
+        // lists still holding the person's own tasks, and the person themself, stay
+        let mut keep: HashSet<u64> = HashSet::new();
+        keep.insert(self.me);
+        let demo_task = |t: &Task| t.id < 1000 && demo.contains(&("tasks".to_string(), t.name.clone()));
+        for t in &self.tasks {
+            if !demo_task(t) {
+                keep.insert(t.list_id);
+                for s in &self.spaces {
+                    if s.lists.iter().any(|l| l.id == t.list_id) {
+                        keep.insert(s.id);
+                    }
+                    for f in &s.folders {
+                        if f.lists.iter().any(|l| l.id == t.list_id) {
+                            keep.insert(f.id);
+                            keep.insert(s.id);
+                        }
+                    }
+                }
+            }
+        }
+        for d in &self.docs {
+            if !(d.id < 1000 && demo.contains(&("docs".to_string(), d.title.clone()))) {
+                if let Some(sp) = d.space {
+                    keep.insert(sp);
+                }
+            }
+        }
+        if let Some(o) = v.as_object_mut() {
+            for (k, x) in o.iter_mut() {
+                if k == "extra" {
+                    if let Some(e) = x.as_object_mut() {
+                        for (ek, ex) in e.iter_mut() {
+                            if ek != "sync" && ex.is_array() {
+                                filter(ex, ek, &demo, &keep);
+                            }
+                        }
+                    }
+                } else if x.is_array() {
+                    filter(x, k, &demo, &keep);
+                }
+            }
+        }
+        if let Ok(mut d) = serde_json::from_value::<Data>(v) {
+            let people: HashSet<u64> = d.members.iter().map(|m| m.id).collect();
+            for t in &mut d.tasks {
+                t.assignees.retain(|a| people.contains(a));
+            }
+            for c in &mut d.channels {
+                c.members.retain(|m| people.contains(m));
+            }
+            for m in &mut d.members {
+                if m.email.ends_with("@example.com") {
+                    m.email.clear();
+                }
+            }
+            let lists: HashSet<u64> = d.spaces.iter().flat_map(|s| s.lists.iter().map(|l| l.id).chain(s.folders.iter().flat_map(|f| f.lists.iter().map(|l| l.id)))).collect();
+            let spaces: HashSet<u64> = d.spaces.iter().map(|s| s.id).collect();
+            let folders: HashSet<u64> = d.spaces.iter().flat_map(|s| s.folders.iter().map(|f| f.id)).collect();
+            d.favorites.retain(|f| match f {
+                Location::List(id) => lists.contains(id),
+                Location::Space(id) => spaces.contains(id),
+                Location::Folder(id) => folders.contains(id),
+                _ => true,
+            });
+            if d.spaces.is_empty() {
+                let sid = d.new_id();
+                let lid = d.new_id();
+                d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into() }], expanded: true, private_owner: None });
+            }
+            d.extra.demo_removed = true;
+            *self = d;
+        }
     }
 
     pub fn save(&self) {
@@ -928,6 +1107,8 @@ impl Data {
                 updated: now,
                 order: i as i64,
                 custom: Default::default(),
+                recur: None,
+                archived: false,
             });
         }
         // Subtasks and a checklist on the first task.
@@ -955,6 +1136,8 @@ impl Data {
                 updated: now,
                 order: 100 + n as i64,
                 custom: Default::default(),
+                recur: None,
+                archived: false,
             });
         }
         d.tasks[0].description = "Refresh the homepage with a cleaner hero, clear call to action and a lighter grid.".into();
@@ -972,6 +1155,7 @@ impl Data {
             private: false,
             archived: false,
             meeting_note: false,
+            parent: None,
             title: "Project brief".into(),
             body: "Goals\n- Launch the new website\n- Grow the newsletter\n\nNotes\nKeep the design light and simple.".into(),
             created: now2 - 86400,

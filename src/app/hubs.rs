@@ -311,6 +311,7 @@ impl App {
                             5 => d.archived,
                             _ => !d.archived && (!d.private || d.owner == me),
                         })
+                        .filter(|d| d.parent.is_none())
                         .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                         .filter(|d| !mine_only || d.owner == me)
                         .cloned()
@@ -406,24 +407,16 @@ impl App {
         });
         let r = ui.available_rect_before_wrap();
         ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(80, 30)).show(ui, |ui| {
-                let d = &mut self.data.docs[idx];
-                let r1 = ui.add(egui::TextEdit::singleline(&mut d.title).font(FontId::proportional(32.0)).frame(false).desired_width(f32::INFINITY));
-                ui.add_space(10.0);
-                let r2 = ui.add(egui::TextEdit::multiline(&mut d.body).frame(false).hint_text("Start writing...").font(FontId::proportional(16.0)).desired_width(f32::INFINITY).desired_rows(30));
-                if r1.changed() || r2.changed() {
-                    d.updated = now_ts();
-                    self.dirty = true;
-                }
-            });
-        });
+        self.doc_body(ui, idx);
         if delete {
             let d = self.data.docs[idx].clone();
             let tid = self.data.new_id();
             self.data.extra.trash.push(TrashItem { id: tid, kind: "Doc".into(), title: d.title.clone(), deleted: now_ts(), payload: serde_json::to_string(&d).unwrap_or_default() });
             self.data.docs.remove(idx);
-            self.doc_open = None;
+            for x in self.data.docs.iter_mut().filter(|x| x.parent == Some(d.id)) {
+                x.parent = d.parent;
+            }
+            self.doc_open = d.parent;
             self.dirty = true;
         }
     }

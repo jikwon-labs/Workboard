@@ -34,14 +34,17 @@ pub struct Theme {
 }
 
 /// Theme colours offered in Themes (the original's theme classes, e.g. cu-black).
-pub const ACCENTS: [(&str, [u8; 3]); 7] = [
+pub const ACCENTS: [(&str, [u8; 3]); 10] = [
     ("black", [32, 32, 32]),
     ("purple", [96, 73, 231]),
     ("blue", [16, 144, 224]),
     ("pink", [233, 61, 130]),
     ("violet", [171, 74, 186]),
+    ("indigo", [74, 84, 196]),
     ("orange", [247, 104, 8]),
     ("teal", [18, 165, 148]),
+    ("bronze", [160, 117, 82]),
+    ("mint", [46, 178, 128]),
 ];
 
 pub fn theme_accent(dark: bool, accent: &str) -> Theme {
@@ -130,7 +133,12 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     v.window_fill = t.card;
     v.extreme_bg_color = if t.dark { Color32::from_rgb(28, 28, 28) } else { Color32::WHITE };
     v.faint_bg_color = t.sidebar;
-    v.override_text_color = Some(t.text);
+    // text colour through the widget styles (not override_text_color, which
+    // would also paint input placeholders as dark as typed text)
+    v.override_text_color = None;
+    v.widgets.noninteractive.fg_stroke.color = t.text;
+    v.widgets.active.fg_stroke.color = t.text;
+    v.widgets.open.fg_stroke.color = t.text;
     v.selection.bg_fill = if t.dark { t.primary } else { Color32::from_rgb(200, 215, 250) };
     v.selection.stroke = egui::Stroke::new(1.0, t.text);
     v.hyperlink_color = t.selected_text;

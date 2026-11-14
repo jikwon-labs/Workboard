@@ -1,16 +1,25 @@
-// Working with other people without a server: a shared folder that a sync
-// service keeps in step (see crate::sync), choosing who you are after
-// joining, calls that open in the browser with a Join button posted in chat,
-// and a Markdown archive for documents.
+// Working with other people: either a shared folder that a sync service
+// keeps in step, or a workboard-server the app stays connected to (see
+// crate::sync and wb_net). Also choosing who you are after joining, calls
+// that open in the browser with a Join button posted in chat, and a Markdown
+// archive for documents.
 
 use super::*;
 use crate::sync::{self, SharedCfg};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use wb_net::{Event as NetEvent, Status as NetStatus};
 
-/// How often teammates' copies are looked at, and how often ours is written.
+/// How often teammates' copies are looked at (folder), and how often ours is
+/// written (folder) or sent (server).
 const POLL_SECS: f64 = 2.0;
 const WRITE_SECS: f64 = 1.5;
+
+/// Connecting to a server for the first time from the dialog.
+pub struct Joining {
+    pub addr: String,
+    pub device: String,
+}
 
 #[derive(Default)]
 pub struct SyncRt {
@@ -18,6 +27,20 @@ pub struct SyncRt {
     seen: Vec<(PathBuf, SystemTime)>,
     last_write: f64,
     pending: bool,
+    /// The server connection, while this workspace uses a server.
+    pub(super) net: Option<wb_net::Client>,
+    pub(super) net_status: Option<NetStatus>,
+    pub(super) joining: Option<Joining>,
+}
+
+/// How the server connection is doing, in words.
+pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>) -> String {
+    match (net, s) {
+        (false, _) => "Disconnected".into(),
+        (true, None) | (true, Some(NetStatus::Connecting)) => "Connecting\u{2026}".into(),
+        (true, Some(NetStatus::Connected)) => "Connected".into(),
+        (true, Some(NetStatus::Reconnecting(why))) => format!("Reconnecting\u{2026} {}", why),
+    }
 }
 
 /// What the shared folder holds, for the dialog.
@@ -44,7 +67,7 @@ impl App {
         }
         let v = self.data_value();
         let mut meta = std::mem::take(&mut self.data.extra.sync);
-        sync::stamp(&v, &mut meta, now_ts());
+        sync::stamp(&v, &mut meta, chrono::Utc::now().timestamp_millis());
         self.data.extra.sync = meta;
         self.sync_rt.pending = true;
     }
@@ -52,6 +75,14 @@ impl App {
     pub(super) fn write_shared(&mut self) {
         let Some(cfg) = self.data.extra.shared.clone() else { return };
         let v = self.data_value();
+        if cfg.server.is_some() {
+            // sent when connected; after a reconnect the whole copy goes again anyway
+            if let Some(net) = &self.sync_rt.net {
+                net.push(sync::shareable(&v));
+            }
+            self.sync_rt.pending = false;
+            return;
+        }
         if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v).is_err() {
             self.toast = Some(("Couldn't write to the shared folder. Is it still there?".into(), now_ts()));
         }
@@ -72,9 +103,17 @@ impl App {
     /// Read teammates' copies and merge them in. Returns true when something new arrived.
     pub(super) fn sync_pull(&mut self) -> bool {
         let Some(cfg) = self.data.extra.shared.clone() else { return false };
+        if cfg.server.is_some() {
+            return self.net_tick(None);
+        }
         let files = sync::other_files(Path::new(&cfg.folder), &cfg.device);
         self.sync_rt.seen = files.clone();
         let others: Vec<serde_json::Value> = files.iter().filter_map(|(p, _)| sync::read_json(p)).collect();
+        self.merge_in(&others)
+    }
+
+    /// Merge the team's copies into ours. Returns true when something new arrived.
+    fn merge_in(&mut self, others: &[serde_json::Value]) -> bool {
         if others.is_empty() {
             return false;
         }
@@ -82,7 +121,7 @@ impl App {
         let count_new = |d: &Data| d.channels.iter().flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
         let before = count_new(&self.data);
         let mut v = self.data_value();
-        let changed = sync::merge(&mut v, &others);
+        let changed = sync::merge(&mut v, others);
         match serde_json::from_value::<Data>(v) {
             Ok(d) => self.data = d,
             Err(_) => return false,
@@ -98,12 +137,115 @@ impl App {
         changed
     }
 
+    /// The server connection: start it when needed and take in what arrived.
+    /// Returns true when the team's changes came in.
+    pub(super) fn net_tick(&mut self, ctx: Option<&egui::Context>) -> bool {
+        if self.sync_rt.net.is_none() {
+            let (addr, device, tag) = if let Some(j) = &self.sync_rt.joining {
+                (j.addr.clone(), j.device.clone(), None)
+            } else if let Some(SharedCfg { server: Some(addr), device, tag, .. }) = &self.data.extra.shared {
+                (addr.clone(), device.clone(), Some(*tag))
+            } else {
+                return false;
+            };
+            let wake: wb_net::Wake = match ctx {
+                Some(c) => {
+                    let c = c.clone();
+                    std::sync::Arc::new(move || c.request_repaint())
+                }
+                None => std::sync::Arc::new(|| {}),
+            };
+            self.sync_rt.net_status = None;
+            self.sync_rt.net = Some(wb_net::Client::start(&addr, device, tag, wake));
+        }
+        let events = self.sync_rt.net.as_ref().map(|n| n.events()).unwrap_or_default();
+        let mut changed = false;
+        for e in events {
+            match e {
+                NetEvent::Status(s) => self.sync_rt.net_status = Some(s),
+                NetEvent::Welcome { tag, snapshot, .. } => changed |= self.net_welcome(tag, snapshot),
+                NetEvent::Update { data, .. } => changed |= self.merge_in(&[data]),
+            }
+        }
+        changed
+    }
+
+    /// The server answered: finish joining, or catch up after a reconnect.
+    fn net_welcome(&mut self, tag: u16, snapshot: Option<serde_json::Value>) -> bool {
+        if let Some(j) = self.sync_rt.joining.take() {
+            let cfg = SharedCfg { folder: String::new(), device: j.device, tag, server: Some(j.addr) };
+            match snapshot {
+                None => {
+                    // an empty server: this workspace becomes the team's
+                    self.data.extra.shared = Some(cfg);
+                    self.data.extra.sync = Default::default();
+                    self.sync_note_change();
+                    self.write_shared();
+                    self.save_local();
+                    self.toast = Some(("Connected. This workspace is now on the server for your team.".into(), now_ts()));
+                    if matches!(self.modal, Some(Modal::Together { .. })) {
+                        self.modal = None;
+                    }
+                }
+                Some(base) => match self.join_from(base, cfg) {
+                    Ok(()) => {
+                        self.after_join();
+                        self.write_shared();
+                        self.modal = Some(Modal::WhoAmI { name: String::new(), email: String::new() });
+                    }
+                    Err(e) => {
+                        self.sync_rt.net = None;
+                        self.toast = Some((e, now_ts()));
+                    }
+                },
+            }
+            return true;
+        }
+        if let Some(cfg) = self.data.extra.shared.as_mut() {
+            if cfg.tag != tag {
+                cfg.tag = tag;
+                self.save_local();
+            }
+        }
+        let changed = match snapshot {
+            Some(s) => self.merge_in(&[s]),
+            None => false,
+        };
+        // after (re)connecting our whole copy goes up, with anything made offline
+        self.write_shared();
+        changed
+    }
+
+    /// Start connecting to a server from the dialog (shares this workspace
+    /// there if the server is empty, else joins the team's workspace).
+    pub(super) fn connect_server(&mut self, addr: &str) -> Result<(), String> {
+        wb_net::server_url(addr)?;
+        self.sync_rt.net = None;
+        self.sync_rt.net_status = None;
+        self.sync_rt.joining = Some(Joining { addr: addr.trim().to_string(), device: format!("{:08x}", sync::random_u64() as u32) });
+        Ok(())
+    }
+
     /// Once per frame: write our copy when it changed, look for teammates' changes.
     pub(super) fn sync_tick(&mut self, ctx: &egui::Context) {
-        if self.data.extra.shared.is_none() {
+        if self.sync_rt.joining.is_some() {
+            self.net_tick(Some(ctx));
             return;
         }
+        let Some(cfg) = self.data.extra.shared.clone() else { return };
         let now = ctx.input(|i| i.time);
+        if cfg.server.is_some() {
+            self.net_tick(Some(ctx));
+            if self.sync_rt.pending {
+                if now - self.sync_rt.last_write >= WRITE_SECS {
+                    self.sync_rt.last_write = now;
+                    self.write_shared();
+                } else {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(WRITE_SECS));
+                }
+            }
+            return;
+        }
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(POLL_SECS));
         if self.sync_rt.pending && now - self.sync_rt.last_write >= WRITE_SECS {
             self.sync_rt.last_write = now;
@@ -130,7 +272,7 @@ impl App {
         while used.contains(&tag) {
             tag = (tag + 1) % 1024;
         }
-        SharedCfg { folder: folder.to_string(), device: format!("{:08x}", sync::random_u64() as u32), tag }
+        SharedCfg { folder: folder.to_string(), device: format!("{:08x}", sync::random_u64() as u32), tag, server: None }
     }
 
     /// Share the open workspace in an (empty) folder.
@@ -156,6 +298,15 @@ impl App {
         let files = sync::other_files(Path::new(folder), "");
         let newest = files.iter().max_by_key(|(_, m)| *m).ok_or("No shared workspace in that folder yet.")?;
         let base = sync::read_json(&newest.0).ok_or("The shared workspace couldn't be read.")?;
+        self.join_from(base, Self::new_cfg(folder))?;
+        self.sync_rt = SyncRt::default();
+        self.sync_pull();
+        self.after_join();
+        Ok(())
+    }
+
+    /// Open the team's copy as a new workspace on this computer.
+    fn join_from(&mut self, base: serde_json::Value, cfg: SharedCfg) -> Result<(), String> {
         let mut d: Data = serde_json::from_value(base).map_err(|_| "The shared workspace couldn't be read.".to_string())?;
         // keep only the team's things; personal ones start empty
         d.favorites.clear();
@@ -165,7 +316,7 @@ impl App {
         d.extra.inbox_cleared.clear();
         d.extra.inbox_later.clear();
         d.extra.starred.clear();
-        d.extra.shared = Some(Self::new_cfg(folder));
+        d.extra.shared = Some(cfg);
         d.extra.sync.hashes.clear();
         d.me = 0;
         if self.persist {
@@ -180,8 +331,10 @@ impl App {
             self.ws_file = file;
         }
         self.data = d;
-        self.sync_rt = SyncRt::default();
-        self.sync_pull();
+        Ok(())
+    }
+
+    fn after_join(&mut self) {
         self.data.extra.sync.hashes = sync::fingerprints(&self.data_value());
         self.loc = self.data.first_list().map(Location::List).unwrap_or(Location::Home);
         self.section = Section::Home;
@@ -189,7 +342,6 @@ impl App {
         self.chat_open = None;
         self.recent.clear();
         self.save_local();
-        Ok(())
     }
 
     pub(super) fn stop_sharing(&mut self) {
@@ -244,8 +396,8 @@ impl App {
     /// Where archived documents are written as Markdown.
     pub(super) fn archive_dir(&self) -> PathBuf {
         match &self.data.extra.shared {
-            Some(cfg) => Path::new(&cfg.folder).join("Docs archive"),
-            None => {
+            Some(cfg) if cfg.server.is_none() && !cfg.folder.is_empty() => Path::new(&cfg.folder).join("Docs archive"),
+            _ => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                 Path::new(&home).join("Documents").join("Workboard Docs archive")
             }
@@ -285,9 +437,39 @@ impl App {
 
     // ------------------------------------------------------------ dialogs
 
-    pub(super) fn together_body(&mut self, ui: &mut Ui, t: &Theme, path: &mut String, result: &mut String) -> bool {
+    /// The Work together dialog, filled in with what this workspace uses.
+    pub(super) fn together_modal(&self) -> Modal {
+        let cfg = self.data.extra.shared.as_ref();
+        Modal::Together {
+            path: cfg.filter(|c| c.server.is_none()).map(|c| c.folder.clone()).unwrap_or_default(),
+            addr: cfg.and_then(|c| c.server.clone()).unwrap_or_default(),
+            result: String::new(),
+        }
+    }
+
+    pub(super) fn together_body(&mut self, ui: &mut Ui, t: &Theme, path: &mut String, addr: &mut String, result: &mut String) -> bool {
         let mut close = false;
-        if let Some(cfg) = self.data.extra.shared.clone() {
+        if let Some(SharedCfg { server: Some(server), .. }) = self.data.extra.shared.clone() {
+            ui.label(RichText::new("This workspace is on a server").size(15.0).strong());
+            ui.label(RichText::new(&server).color(t.text2));
+            let status = net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+            ui.label(RichText::new(format!("Status: {}", status)).color(if self.sync_rt.net_status == Some(NetStatus::Connected) { t.text } else { t.text2 }));
+            ui.add_space(8.0);
+            ui.label(RichText::new("Tasks, chat and docs show up for everyone within a second or two. While the server can't be reached you keep working here, and your changes go up when it's back.").small().color(t.text3));
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Reconnect now").clicked() {
+                    self.sync_rt.net = None;
+                    self.sync_rt.net_status = None;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button(RichText::new("Stop sharing").color(t.danger)).on_hover_text("Keep working on this computer only; your copy stays").clicked() {
+                        self.stop_sharing();
+                        close = true;
+                    }
+                });
+            });
+        } else if let Some(cfg) = self.data.extra.shared.clone() {
             ui.label(RichText::new("This workspace is shared").size(15.0).strong());
             ui.label(RichText::new(&cfg.folder).color(t.text2));
             let n = sync::other_files(Path::new(&cfg.folder), &cfg.device).len();
@@ -359,6 +541,35 @@ impl App {
                         }
                     });
                 }
+            });
+            ui.add_space(12.0);
+            ui.separator();
+            ui.add_space(4.0);
+            ui.label(RichText::new("Or connect to your team's server").strong());
+            ui.label(RichText::new("A Workboard server (for example a Mac mini your team reaches through Tailscale). Type its name or address. If the server is empty, this workspace goes up; otherwise you join the team's workspace.").color(t.text2));
+            ui.label(RichText::new("Server").color(t.text2));
+            let r = ui.add(egui::TextEdit::singleline(addr).hint_text("macmini or 100.101.102.103").desired_width(f32::INFINITY));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address"));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if self.sync_rt.joining.is_some() {
+                    let status = net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+                    ui.label(RichText::new(status).color(t.text2));
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if self.sync_rt.joining.is_some() {
+                        if ui.button("Cancel").clicked() {
+                            self.sync_rt.joining = None;
+                            self.sync_rt.net = None;
+                            self.sync_rt.net_status = None;
+                        }
+                    } else if primary_button(ui, t, "Connect").clicked() {
+                        result.clear();
+                        if let Err(e) = self.connect_server(addr) {
+                            *result = e;
+                        }
+                    }
+                });
             });
         }
         if !result.is_empty() {

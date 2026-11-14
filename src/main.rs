@@ -1,6 +1,6 @@
 mod app;
 mod model;
-mod sync;
+use wb_sync as sync;
 mod theme;
 mod widgets;
 

@@ -739,3 +739,125 @@ fn recent_items_remember_tasks_lists_and_docs() {
     assert_eq!(items[0].1, id);
     assert!(items.iter().any(|i| i.0 == "list" && i.1 == list));
 }
+
+/// A real workboard-server on a free local port, data in a temporary folder.
+struct TestServer {
+    port: u16,
+    home: std::path::PathBuf,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl TestServer {
+    fn start() -> TestServer {
+        let home = temp_folder("server");
+        let h = home.clone();
+        let (port_tx, port_rx) = std::sync::mpsc::channel();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                port_tx.send(listener.local_addr().unwrap().port()).unwrap();
+                workboard_server::serve(listener, h, async {
+                    let _ = stop_rx.await;
+                })
+                .await
+                .unwrap();
+            });
+        });
+        let port = port_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        TestServer { port, home, stop: Some(stop_tx), thread: Some(thread) }
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        if let Some(s) = self.stop.take() {
+            let _ = s.send(());
+        }
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        let _ = std::fs::remove_dir_all(&self.home);
+    }
+}
+
+/// Keep taking in what the server sends until `cond` holds.
+fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while std::time::Instant::now() < until {
+        a.net_tick(None);
+        if cond(a) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("timed out waiting for: {} ({:?})", what, a.sync_rt.net_status);
+}
+
+#[test]
+fn two_computers_work_through_a_server() {
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+
+    // the first app to connect brings its workspace to the empty server
+    let mut a = app();
+    a.connect_server(&addr).unwrap();
+    net_until(&mut a, "A shared on the server", |a| a.data.extra.shared.is_some());
+    let cfg = a.data.extra.shared.clone().unwrap();
+    assert_eq!(cfg.server.as_deref(), Some(addr.as_str()));
+    assert!(cfg.folder.is_empty());
+    // wait until the server has saved A's copy, so B finds it there
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file() && std::time::Instant::now() < until {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // someone else joins from their own computer
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.connect_server(&addr).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    assert_eq!(b.data.tasks.len(), a.data.tasks.len(), "the joiner gets the team's tasks");
+    assert!(matches!(b.modal, Some(Modal::WhoAmI { .. })), "the joiner picks who they are");
+    assert_ne!(b.data.extra.shared.as_ref().unwrap().tag, cfg.tag, "the server hands out different id tags");
+    b.become_member(None, "Bora", "bora@team.kr");
+    let bora = b.data.me;
+
+    // chat from B reaches A
+    let ch = b.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    b.apply_chat(vec![ChatAction::Send { ch, text: "hi through the server".into(), parent: None }]);
+    b.sync_note_change();
+    b.write_shared();
+    net_until(&mut a, "B's message at A", |a| a.data.channels.iter().find(|c| c.id == ch).is_some_and(|c| c.messages.last().is_some_and(|m| m.text == "hi through the server")));
+    assert!(a.data.member(bora).is_some(), "the new member shows up for A");
+
+    // a task from A reaches B
+    let list = a.data.first_list().unwrap();
+    a.apply(Action::Add { list, name: "Made by A".into(), status: None, priority: 0, assignees: vec![], due: None, parent: None, open: false });
+    a.sync_note_change();
+    a.write_shared();
+    net_until(&mut b, "A's task at B", |b| b.data.tasks.iter().any(|t| t.name == "Made by A"));
+
+    // stopping sharing ends the connection
+    a.stop_sharing();
+    assert!(a.sync_rt.net.is_none() && a.data.extra.shared.is_none());
+}
+
+#[test]
+fn a_bad_server_address_is_explained() {
+    let mut a = app();
+    assert!(a.connect_server("").is_err());
+    assert!(a.connect_server("wss://example").is_err());
+    assert!(a.sync_rt.joining.is_none());
+}
+
+#[test]
+fn old_shared_settings_still_load() {
+    let old = r#"{"folder":"/tmp/x","device":"abc","tag":7}"#;
+    let cfg: crate::sync::SharedCfg = serde_json::from_str(old).unwrap();
+    assert_eq!(cfg.server, None);
+    assert_eq!(cfg.folder, "/tmp/x");
+    assert!(!serde_json::to_string(&cfg).unwrap().contains("server"), "folder settings are saved as before");
+}

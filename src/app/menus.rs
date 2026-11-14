@@ -38,7 +38,8 @@ pub enum Modal {
     SwitchUser,
     NewDashboard { name: String },
     /// Share the workspace through a folder, or join one.
-    Together { path: String, result: String },
+    /// `path`: the shared folder typed in; `addr`: the server address typed in.
+    Together { path: String, addr: String, result: String },
     WhoAmI { name: String, email: String },
     Call { ch: u64, link: String },
     NewList { name: String, space: u64, folder: Option<u64>, private: bool },
@@ -161,7 +162,7 @@ impl App {
         }
         let label = if self.data.extra.shared.is_some() { "Work together (shared)" } else { "Work together" };
         if menu_item(ui, &t, "\u{1F465}", label, "").clicked() {
-            self.modal = Some(Modal::Together { path: self.data.extra.shared.as_ref().map(|c| c.folder.clone()).unwrap_or_default(), result: String::new() });
+            self.modal = Some(self.together_modal());
             close_popup(ui);
         }
         let others: Vec<WsEntry> = Data::workspaces().into_iter().filter(|w| w.file != self.ws_file).collect();
@@ -628,7 +629,7 @@ impl App {
     pub(super) fn modal_body(&mut self, ui: &mut Ui, t: &Theme, modal: &mut Modal) -> bool {
         let mut close = false;
         match modal {
-            Modal::Together { path, result } => close = self.together_body(ui, t, path, result),
+            Modal::Together { path, addr, result } => close = self.together_body(ui, t, path, addr, result),
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList { name, space, folder, .. } => close = self.new_list_body(ui, t, name, space, folder),
@@ -671,7 +672,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(if shared { "This workspace is shared, so invited people can join it from the shared folder." } else { "To work with them, share this workspace in a folder first." }).small().color(t.text2));
                     if ui.link(if shared { "Sharing" } else { "Work together" }).clicked() {
-                        self.modal = Some(Modal::Together { path: self.data.extra.shared.as_ref().map(|c| c.folder.clone()).unwrap_or_default(), result: String::new() });
+                        self.modal = Some(self.together_modal());
                     }
                 });
                 ui.add_space(4.0);

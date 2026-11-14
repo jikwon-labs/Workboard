@@ -507,6 +507,45 @@ fn click_work_together_opens_sharing() {
 }
 
 #[test]
+fn work_together_connects_to_a_server_and_shows_the_status() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("Work together");
+    assert!(h.has("Or connect to your team's server"));
+    h.click("Server address");
+    h.type_text("127.0.0.1:1");
+    h.settle();
+    h.click("Connect");
+    let j = h.app.sync_rt.joining.as_ref().expect("connecting");
+    assert_eq!(j.addr, "127.0.0.1:1");
+    assert!(h.has("Cancel"));
+    h.click("Cancel");
+    assert!(h.app.sync_rt.joining.is_none());
+    assert!(h.has("Connect"));
+
+    // a workspace on a server shows where and how the connection is doing
+    let tag = 5;
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag, server: Some("127.0.0.1:1".into()) });
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(h.has("This workspace is on a server"));
+    assert!(h.has("127.0.0.1:1"));
+    assert!(h.has("Status: Disconnected"));
+    // nothing listens on port 1, so the app keeps trying
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !matches!(h.app.sync_rt.net_status, Some(wb_net::Status::Reconnecting(_))) && std::time::Instant::now() < until {
+        h.app.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.settle();
+    assert!(h.tree.iter().any(|(n, _)| n.starts_with("Status: Reconnecting")), "shows that it is reconnecting");
+    h.click("Reconnect now");
+    assert!(h.app.sync_rt.net.is_none(), "starts over on the next frame");
+    h.click("Stop sharing");
+    assert!(h.app.data.extra.shared.is_none());
+}
+
+#[test]
 fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
     let mut h = Ui1::new();
     assert!(!h.has("Rail Labs") && !h.has("Rail Upgrade"));

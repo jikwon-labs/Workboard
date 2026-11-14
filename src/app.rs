@@ -359,7 +359,7 @@ impl App {
             Some("automations") => Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() }),
             Some("fields") => Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() }),
             Some("themes") => Some(Modal::Themes),
-            Some("together") => Some(Modal::Together { path: String::new(), result: String::new() }),
+            Some("together") => Some(Modal::Together { path: String::new(), addr: String::new(), result: String::new() }),
             Some("call") => Some(Modal::Call { ch: data.channels.first().map(|c| c.id).unwrap_or(0), link: String::new() }),
             Some("reminder") => Some(Modal::Reminder { text: String::new(), date: Some(today()), time: "09:00".into() }),
             _ => None,

@@ -102,7 +102,7 @@ impl App {
                         self.new_message_open = true;
                     }
                     if ui.add(egui::Button::new("\u{1F465}  Work together").stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(150.0, 34.0))).on_hover_text("Share this workspace so others can chat with you").clicked() {
-                        self.modal = Some(Modal::Together { path: self.data.extra.shared.as_ref().map(|c| c.folder.clone()).unwrap_or_default(), result: String::new() });
+                        self.modal = Some(self.together_modal());
                     }
                 });
             });

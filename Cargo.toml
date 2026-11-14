@@ -1,9 +1,15 @@
+[workspace]
+members = [".", "crates/wb-sync", "crates/wb-net", "server"]
+resolver = "2"
+
 [package]
 name = "workboard"
 version = "0.1.1"
 edition = "2021"
 
 [dependencies]
+wb-sync = { path = "crates/wb-sync" }
+wb-net = { path = "crates/wb-net" }
 eframe = "0.31"
 egui = "0.31"
 serde = { version = "1", features = ["derive"] }
@@ -12,6 +18,9 @@ chrono = { version = "0.4", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
+# tests run the real server; it is not part of the app build
+workboard-server = { path = "server" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
 accesskit = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies]

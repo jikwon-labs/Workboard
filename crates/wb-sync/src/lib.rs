@@ -1,6 +1,9 @@
-// Working together without a server: every person's app writes its own copy
+// Working together. Without a server, every person's app writes its own copy
 // of the workspace into one shared folder (kept in step by iCloud Drive,
-// Dropbox, Google Drive, Syncthing...) and reads everyone else's copies.
+// Dropbox, Google Drive, Syncthing...) and reads everyone else's copies. With
+// a server (workboard-server), the server keeps one copy for the team and
+// every app sends its copy there and gets the merged one back; the merging
+// below is the same in both cases.
 //
 // Copies are merged item by item. Every item with an `id` (task, list, doc,
 // channel, message, reply, member...) remembers when its own fields last
@@ -29,22 +32,29 @@ const APPEND_KEYS: &[&str] = &["activity"];
 
 pub const FILE_SUFFIX: &str = ".workboard.json";
 
-/// Where this person's workspace is shared.
+/// Where this person's workspace is shared: a server when `server` is set,
+/// else a folder.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SharedCfg {
+    /// The shared folder (empty when connected to a server).
+    #[serde(default)]
     pub folder: String,
     /// This computer's file in the folder: `<device>.workboard.json`.
     pub device: String,
     /// Every new id made here ends in this number (mod 1024), so ids made on
-    /// different computers never collide.
+    /// different computers never collide. A server hands this out.
     pub tag: u16,
+    /// The workboard-server address, as typed ("macmini", "100.1.2.3:8787").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
 }
 
 /// Change bookkeeping, saved with the workspace.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct SyncMeta {
-    /// id -> when its own fields last changed (seconds).
+    /// id -> when its own fields last changed (milliseconds; copies saved
+    /// before the server used seconds, which simply compare as older).
     pub stamps: BTreeMap<u64, i64>,
     /// id -> when it was deleted.
     pub tombs: BTreeMap<u64, i64>,
@@ -145,17 +155,20 @@ pub fn fingerprints(data: &Value) -> BTreeMap<u64, u64> {
 }
 
 /// Record what changed since the last save: new stamps for edited items,
-/// tombstones for removed ones, revivals for restored ones.
+/// tombstones for removed ones, revivals for restored ones. `now` is in
+/// milliseconds. A new stamp is always later than the item's last one, so a
+/// second edit made within the same moment still wins over the first.
 pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     let cur = fingerprints(data);
     for (id, h) in &cur {
+        let next = meta.stamps.get(id).map_or(now, |s| now.max(s + 1));
         match meta.hashes.get(id) {
             Some(old) if old == h => {}
             Some(_) => {
-                meta.stamps.insert(*id, now);
+                meta.stamps.insert(*id, next);
             }
             None => {
-                meta.stamps.insert(*id, now);
+                meta.stamps.insert(*id, next);
                 if let Some(t) = meta.tombs.get(id) {
                     if meta.revived.get(id).map_or(true, |r| r < t) {
                         meta.revived.insert(*id, now.max(*t + 1));
@@ -348,9 +361,9 @@ pub fn read_json(p: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// Write this computer's copy (personal notes and reminders left out).
-pub fn write_mine(folder: &Path, device: &str, data: &Value) -> std::io::Result<()> {
-    std::fs::create_dir_all(folder)?;
+/// The copy other people get: personal notes, reminders and this computer's
+/// fingerprints left out.
+pub fn shareable(data: &Value) -> Value {
     let mut v = data.clone();
     if let Some(e) = v.get_mut("extra").and_then(|e| e.as_object_mut()) {
         e.insert("notepad".into(), Value::String(String::new()));
@@ -362,6 +375,13 @@ pub fn write_mine(folder: &Path, device: &str, data: &Value) -> std::io::Result<
             s.insert("hashes".into(), Value::Object(Map::new()));
         }
     }
+    v
+}
+
+/// Write this computer's copy (personal notes and reminders left out).
+pub fn write_mine(folder: &Path, device: &str, data: &Value) -> std::io::Result<()> {
+    std::fs::create_dir_all(folder)?;
+    let v = shareable(data);
     let tmp = folder.join(format!(".{}.tmp", device));
     std::fs::write(&tmp, serde_json::to_string(&v).unwrap_or_default())?;
     std::fs::rename(&tmp, folder.join(format!("{}{}", device, FILE_SUFFIX)))
@@ -469,6 +489,23 @@ mod tests {
         b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
         merge(&mut a, &[b]);
         assert_eq!(a["tasks"][0]["activity"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_second_edit_in_the_same_moment_still_wins() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([{"id": 1, "name": "t"}]), json!([]), &ma);
+        stamp(&a.clone(), &mut ma, 10);
+        a["tasks"][0]["name"] = json!("first");
+        stamp(&a.clone(), &mut ma, 50);
+        a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+        // someone reads the first edit
+        let mut reader = a.clone();
+        a["tasks"][0]["name"] = json!("second");
+        stamp(&a.clone(), &mut ma, 50);
+        a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+        merge(&mut reader, &[a]);
+        assert_eq!(reader["tasks"][0]["name"], "second");
     }
 
     #[test]

@@ -14,7 +14,10 @@ and egui; everything runs on your own computer.
 Workspace menu > Work together: pick a folder that a sync app (iCloud Drive,
 Dropbox, Google Drive, OneDrive, Syncthing) shares with your teammates.
 Everyone points Workboard at the same folder; tasks, chat and docs merge
-within a few seconds. Calls open in the browser (Jitsi Meet or your own
+within a few seconds. Or run a Workboard server for the team (for example on a Mac mini reached
+through Tailscale): `cargo run --release -p workboard-server`, then in Work
+together type the server's address under "Or connect to your team's server".
+Calls open in the browser (Jitsi Meet or your own
 meeting link) with a Join button posted in chat. Archived docs are also saved
 as Markdown in the shared folder's `Docs archive`.
 

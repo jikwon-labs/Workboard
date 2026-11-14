@@ -45,6 +45,16 @@ livekit-server start by themselves. For a planned restart without being at
 the keyboard, use `sudo fdesetup authrestart`. (With FileVault off the same
 script also turns on automatic login.)
 
+## After a restart
+
+    deploy/check-after-boot.sh            check that everything is back
+    deploy/check-after-boot.sh --install  check once, 3 minutes after the next login
+
+Results go to `~/Library/Logs/workboard-boot-check.log` (Tailscale address,
+each LaunchAgent, workboard /health, LiveKit, Docker containers, the ngrok
+tunnel, the camera). The `--install` form runs a copy from `~/.local/bin`
+(background jobs can't read `~/Documents`) and removes itself after one run.
+
 ## Setting up and inviting
 
 1. The owner (whoever sets the team up) opens Workboard on their own Mac:

@@ -119,6 +119,7 @@ impl App {
     /// Spaces table: open, rename, colour, statuses, delete.
     fn spaces_settings(&mut self, ui: &mut Ui) {
         let t = self.t();
+        // every space that is not archived, hidden ones included
         let spaces: Vec<(u64, String, [u8; 3], usize, usize)> = self
             .open_spaces()
             .iter()
@@ -154,7 +155,55 @@ impl App {
                 ui.label(nt.to_string());
                 let r = ui.button("\u{22EF}");
                 click_menu(&r, |ui| self.space_menu(ui, id));
-                ui.label("");
+                let hidden = self.data.spaces.iter().find(|s| s.id == id).is_some_and(|s| s.hidden);
+                if hidden {
+                    let b = ui.button("Show in sidebar");
+                    name_it(&b, &format!("Show {}", name));
+                    if b.clicked() {
+                        if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == id) {
+                            s.hidden = false;
+                        }
+                        self.dirty = true;
+                    }
+                } else {
+                    ui.label("");
+                }
+                ui.end_row();
+            }
+        });
+        // archived spaces and lists, with Restore
+        let arch_spaces: Vec<(u64, String)> = self.data.spaces.iter().filter(|s| s.archived && s.private_owner.is_none()).map(|s| (s.id, s.name.clone())).collect();
+        let arch_lists: Vec<(u64, String)> = self
+            .data
+            .spaces
+            .iter()
+            .filter(|s| !s.archived)
+            .flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).filter(|l| l.archived).map(move |l| (l.id, format!("{} / {}", s.name, l.name))))
+            .collect();
+        ui.add_space(18.0);
+        ui.label(RichText::new("Archived").strong());
+        if arch_spaces.is_empty() && arch_lists.is_empty() {
+            ui.label(RichText::new("Nothing is archived. Archived Spaces and Lists show here so you can restore them.").color(t.text3));
+        }
+        egui::Grid::new("archived_table").num_columns(3).striped(true).spacing(vec2(24.0, 8.0)).show(ui, |ui| {
+            for (id, name) in arch_spaces {
+                ui.label(RichText::new("Space").small().color(t.text3));
+                ui.label(&name);
+                let b = ui.button("Restore");
+                name_it(&b, &format!("Restore {}", name));
+                if b.clicked() {
+                    self.set_space_archived(id, false);
+                }
+                ui.end_row();
+            }
+            for (id, name) in arch_lists {
+                ui.label(RichText::new("List").small().color(t.text3));
+                ui.label(&name);
+                let b = ui.button("Restore");
+                name_it(&b, &format!("Restore {}", name));
+                if b.clicked() {
+                    self.set_list_archived(id, false);
+                }
                 ui.end_row();
             }
         });

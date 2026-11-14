@@ -77,6 +77,8 @@ impl App {
         let n = self.data.docs.iter().filter(|d| d.parent == Some(parent)).count() + 1;
         self.data.docs.push(Doc { id, space, owner: self.data.me, private, archived: false, meeting_note: false, parent: Some(parent), title: format!("Page {}", n), body: String::new(), created: now, updated: now });
         self.doc_open = Some(id);
+        // a new page is for writing: open it in Edit, not the last page's View
+        self.doc_preview = false;
         self.dirty = true;
         id
     }
@@ -231,11 +233,88 @@ impl App {
                     return;
                 }
                 let d = &mut self.data.docs[idx];
-                let out = egui::TextEdit::multiline(&mut d.body).id(body_id).frame(false).hint_text("Start writing, or type '/' for commands").font(FontId::proportional(16.0)).desired_width(f32::INFINITY).desired_rows(24).show(ui);
+                let empty = d.body.is_empty();
+                let mut layouter = |ui: &Ui, s: &str, wrap: f32| ui.fonts(|f| f.layout_job(doc_layout_job(s, &t, wrap)));
+                let out = egui::TextEdit::multiline(&mut d.body).id(body_id).frame(false).hint_text("Start writing, or type '/' for commands").font(FontId::proportional(16.0)).desired_width(f32::INFINITY).desired_rows(if empty { 3 } else { 24 }).layouter(&mut layouter).show(ui);
+                name_field(&out.response, "Doc body");
                 if out.response.changed() {
                     d.updated = now_ts();
                     self.dirty = true;
                 }
+                // painted marks over the hidden Markdown markers: bullets,
+                // checkboxes (click to tick), quote bars and dividers
+                let click = if out.response.clicked() { ui.input(|i| i.pointer.interact_pos()) } else { None };
+                let mut tick: Option<usize> = None;
+                for (kind, start, _) in line_kinds(&d.body) {
+                    let at = out.galley_pos + out.galley.pos_from_cursor(&out.galley.from_ccursor(egui::text::CCursor::new(start))).min.to_vec2();
+                    let row = out.galley.pos_from_cursor(&out.galley.from_ccursor(egui::text::CCursor::new(start)));
+                    let h = row.height();
+                    let mid = at.y + h / 2.0;
+                    let p = ui.painter();
+                    match kind {
+                        LineKind::Bullet => {
+                            p.circle_filled(pos2(at.x + 5.0, mid), 2.6, t.text);
+                        }
+                        LineKind::Check(done) => {
+                            let bx = Rect::from_min_size(pos2(at.x + 2.0, mid - 7.5), vec2(15.0, 15.0));
+                            if done {
+                                p.rect_filled(bx, 3.0, t.primary);
+                                p.line_segment([bx.left_center() + vec2(3.5, 0.0), bx.center_bottom() + vec2(-1.0, -4.0)], Stroke::new(1.8, Color32::WHITE));
+                                p.line_segment([bx.center_bottom() + vec2(-1.0, -4.0), bx.right_top() + vec2(-3.5, 4.0)], Stroke::new(1.8, Color32::WHITE));
+                            } else {
+                                p.rect_stroke(bx, 3.0, Stroke::new(1.3, t.text3), egui::StrokeKind::Inside);
+                            }
+                            if click.is_some_and(|c| bx.expand(2.0).contains(c)) {
+                                tick = Some(start);
+                            }
+                        }
+                        LineKind::Quote => {
+                            p.rect_filled(Rect::from_min_size(pos2(at.x + 1.0, at.y + 1.0), vec2(3.0, h - 2.0)), 1.0, t.border);
+                        }
+                        LineKind::Divider => {
+                            p.hline(at.x..=out.response.rect.right(), mid, Stroke::new(1.0, t.border));
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(start) = tick {
+                    toggle_check_at(&mut d.body, start);
+                    d.updated = now_ts();
+                    self.dirty = true;
+                }
+                // a new, empty page offers how to start, as in the original
+                if empty {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new(RichText::new("Start writing").color(t.text2)).frame(false)).clicked() {
+                            set_cursor(ui.ctx(), body_id, 0);
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Add new").small().color(t.text3));
+                    let mut add_table = false;
+                    let mut add_sub = false;
+                    ui.horizontal(|ui| {
+                        if ui.button("\u{25A6}  Table").clicked() {
+                            add_table = true;
+                        }
+                        if ui.button("\u{1F4C4}  Subpage").clicked() {
+                            add_sub = true;
+                        }
+                    });
+                    if add_table {
+                        let d = &mut self.data.docs[idx];
+                        d.body.push_str(TABLE_TEMPLATE);
+                        d.updated = now_ts();
+                        self.dirty = true;
+                    }
+                    if add_sub {
+                        let pid = self.data.docs[idx].id;
+                        self.add_page(pid);
+                        return;
+                    }
+                }
+                let d = &mut self.data.docs[idx];
                 if let Some(cr) = out.cursor_range {
                     let (a, b) = (cr.primary.ccursor.index, cr.secondary.ccursor.index);
                     ui.data_mut(|m| {
@@ -331,6 +410,21 @@ impl App {
             };
             if line.trim() == "---" {
                 ui.separator();
+                continue;
+            }
+            if line.trim_start().starts_with('|') {
+                let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(|c| c.trim()).collect();
+                if cells.iter().all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':')) {
+                    continue; // the | --- | row under the header
+                }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for c in cells {
+                        let (r, _) = ui.allocate_exact_size(vec2(160.0, 30.0), Sense::hover());
+                        ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                        ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, c, FontId::proportional(14.0), t.text);
+                    }
+                });
                 continue;
             }
             if line.trim().is_empty() {
@@ -458,4 +552,172 @@ fn plain(ui: &mut Ui, s: &str, size: f32, strong: bool, italic: bool) {
         r = r.italics();
     }
     ui.label(r);
+}
+
+/// What a line of a Doc is, judged by its Markdown prefix.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum LineKind {
+    Plain,
+    Heading(u8),
+    Bullet,
+    Numbered,
+    Check(bool),
+    Quote,
+    Code,
+    Fence,
+    Divider,
+    Table,
+}
+
+/// Each line of `text` with its kind, its first character's index and the
+/// length (in characters) of its Markdown prefix.
+pub(super) fn line_kinds(text: &str) -> Vec<(LineKind, usize, usize)> {
+    let mut out = vec![];
+    let mut in_code = false;
+    let mut start = 0usize;
+    for line in text.split('\n') {
+        let n = line.chars().count();
+        let (kind, pre) = if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            (LineKind::Fence, n)
+        } else if in_code {
+            (LineKind::Code, 0)
+        } else if line.trim() == "---" {
+            (LineKind::Divider, n)
+        } else if line.starts_with("### ") {
+            (LineKind::Heading(3), 4)
+        } else if line.starts_with("## ") {
+            (LineKind::Heading(2), 3)
+        } else if line.starts_with("# ") {
+            (LineKind::Heading(1), 2)
+        } else if line.starts_with("- [ ] ") {
+            (LineKind::Check(false), 6)
+        } else if line.starts_with("- [x] ") || line.starts_with("- [X] ") {
+            (LineKind::Check(true), 6)
+        } else if line.starts_with("- ") || line.starts_with("* ") {
+            (LineKind::Bullet, 2)
+        } else if line.starts_with("> ") {
+            (LineKind::Quote, 2)
+        } else if line.trim_start().starts_with('|') {
+            (LineKind::Table, 0)
+        } else {
+            let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+            if digits > 0 && line[digits..].starts_with(". ") {
+                (LineKind::Numbered, digits + 2)
+            } else {
+                (LineKind::Plain, 0)
+            }
+        };
+        out.push((kind, start, pre));
+        start += n + 1;
+    }
+    out
+}
+
+/// Lays out Doc text with its formatting shown while editing: big headings,
+/// grey quotes, struck-through done items, code in monospace, **bold** and
+/// *italic*. Markdown markers stay in the text (the file format is
+/// unchanged) but are drawn faint, or hidden where a painted mark replaces
+/// them (bullets, checkboxes, quote bars).
+pub(super) fn doc_layout_job(text: &str, t: &Theme, wrap: f32) -> egui::text::LayoutJob {
+    use egui::text::{LayoutJob, TextFormat};
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap;
+    let kinds = line_kinds(text);
+    let lines: Vec<&str> = text.split('\n').collect();
+    for (i, line) in lines.iter().enumerate() {
+        let (kind, _, pre) = kinds[i];
+        let size = match kind {
+            LineKind::Heading(1) => 28.0,
+            LineKind::Heading(2) => 22.0,
+            LineKind::Heading(3) => 18.0,
+            _ => 16.0,
+        };
+        let base = TextFormat {
+            font_id: FontId::proportional(size),
+            color: match kind {
+                LineKind::Quote => t.text2,
+                LineKind::Check(true) => t.text3,
+                LineKind::Heading(_) => t.text,
+                _ => t.text,
+            },
+            italics: kind == LineKind::Quote,
+            strikethrough: if kind == LineKind::Check(true) { Stroke::new(1.0, t.text3) } else { Stroke::NONE },
+            ..Default::default()
+        };
+        let faint = TextFormat { font_id: FontId::proportional(size), color: t.text3.gamma_multiply(0.6), ..Default::default() };
+        let hidden = TextFormat { font_id: FontId::proportional(size), color: Color32::TRANSPARENT, ..Default::default() };
+        let mono = TextFormat { font_id: FontId::monospace(14.0), color: t.text, background: t.column_bg, ..Default::default() };
+        let pb = byte_at(line, pre);
+        match kind {
+            LineKind::Code | LineKind::Table => job.append(line, 0.0, mono),
+            LineKind::Fence => job.append(line, 0.0, TextFormat { font_id: FontId::monospace(12.0), color: t.text3, ..Default::default() }),
+            LineKind::Divider => job.append(line, 0.0, faint),
+            _ => {
+                let marker = match kind {
+                    LineKind::Bullet | LineKind::Check(_) | LineKind::Quote => hidden,
+                    LineKind::Numbered => base.clone(),
+                    _ => faint.clone(),
+                };
+                job.append(&line[..pb], 0.0, marker);
+                append_inline(&mut job, &line[pb..], &base, &faint, t);
+            }
+        }
+        if i + 1 < lines.len() {
+            job.append("\n", 0.0, base_plain(t));
+        }
+    }
+    job
+}
+
+fn base_plain(t: &Theme) -> egui::text::TextFormat {
+    egui::text::TextFormat { font_id: FontId::proportional(16.0), color: t.text, ..Default::default() }
+}
+
+/// Appends a line's text with **bold** and *italic* runs formatted and the
+/// asterisks drawn faint.
+fn append_inline(job: &mut egui::text::LayoutJob, s: &str, base: &egui::text::TextFormat, faint: &egui::text::TextFormat, t: &Theme) {
+    let strong = egui::text::TextFormat { color: if t.dark { Color32::WHITE } else { Color32::BLACK }, ..base.clone() };
+    let italic = egui::text::TextFormat { italics: true, ..base.clone() };
+    let mut rest = s;
+    while !rest.is_empty() {
+        if let Some(i) = rest.find("**") {
+            if let Some(j) = rest[i + 2..].find("**") {
+                if j > 0 {
+                    job.append(&rest[..i], 0.0, base.clone());
+                    job.append("**", 0.0, faint.clone());
+                    job.append(&rest[i + 2..i + 2 + j], 0.0, strong.clone());
+                    job.append("**", 0.0, faint.clone());
+                    rest = &rest[i + 4 + j..];
+                    continue;
+                }
+            }
+        }
+        if let Some(i) = rest.find('*') {
+            if let Some(j) = rest[i + 1..].find('*') {
+                if j > 0 {
+                    job.append(&rest[..i], 0.0, base.clone());
+                    job.append("*", 0.0, faint.clone());
+                    job.append(&rest[i + 1..i + 1 + j], 0.0, italic.clone());
+                    job.append("*", 0.0, faint.clone());
+                    rest = &rest[i + 2 + j..];
+                    continue;
+                }
+            }
+        }
+        job.append(rest, 0.0, base.clone());
+        break;
+    }
+}
+
+/// An empty three-column table, inserted by "Add new > Table".
+pub(super) const TABLE_TEMPLATE: &str = "| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n|  |  |  |";
+
+/// Ticks or unticks the checklist item on the line starting at character `start`.
+pub(super) fn toggle_check_at(body: &mut String, start: usize) {
+    let b = byte_at(body, start);
+    let line_end = body[b..].find('\n').map(|i| b + i).unwrap_or(body.len());
+    let line = &body[b..line_end];
+    let new = if line.starts_with("- [ ] ") { line.replacen("- [ ] ", "- [x] ", 1) } else if line.starts_with("- [x] ") || line.starts_with("- [X] ") { format!("- [ ] {}", &line[6..]) } else { return };
+    body.replace_range(b..line_end, &new);
 }

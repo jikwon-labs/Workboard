@@ -71,10 +71,27 @@ pub const PRIORITIES: [PriorityDef; 5] = [
     PriorityDef { label: "Low", color: [0xd8, 0xd8, 0xd8] },
 ];
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ListItem {
     pub id: u64,
     pub name: String,
+    /// List details shown on the Space Overview Lists card.
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+    #[serde(default)]
+    pub start: Option<NaiveDate>,
+    #[serde(default)]
+    pub end: Option<NaiveDate>,
+    #[serde(default)]
+    pub priority: u8,
+    #[serde(default)]
+    pub owner: Option<u64>,
+    /// Shown with List Info.
+    #[serde(default)]
+    pub description: String,
+    /// Archived lists leave the sidebar until restored (Settings > Spaces).
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -90,7 +107,7 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Space {
     pub id: u64,
     pub name: String,
@@ -103,6 +120,15 @@ pub struct Space {
     /// A private space that holds one person's Personal List (hidden from Spaces).
     #[serde(default)]
     pub private_owner: Option<u64>,
+    /// Archived spaces leave the sidebar and task views until restored.
+    #[serde(default)]
+    pub archived: bool,
+    /// Hidden from the sidebar only (Hide Space); shown again from Settings > Spaces.
+    #[serde(default)]
+    pub hidden: bool,
+    /// A symbol drawn in place of the first letter (Color & Icon); empty = letter.
+    #[serde(default)]
+    pub icon: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -145,12 +171,15 @@ pub struct CheckItem {
     pub done: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Activity {
     pub ts: i64,
     pub author: u64,
     pub text: String,
     pub comment: bool,
+    /// Written from the comment box's Post tab (shown as a post).
+    #[serde(default)]
+    pub post: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -188,6 +217,12 @@ pub struct Task {
     /// Archived tasks stay out of every view until unarchived.
     #[serde(default)]
     pub archived: bool,
+    /// When the task last moved into a done or closed status (Date done).
+    #[serde(default)]
+    pub done_at: Option<i64>,
+    /// When the task last moved into a closed status (Date closed).
+    #[serde(default)]
+    pub closed_at: Option<i64>,
 }
 
 impl Task {
@@ -254,13 +289,14 @@ pub struct Message {
     pub call: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ChannelKind {
+    #[default]
     Channel,
     Direct,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Channel {
     pub id: u64,
     pub name: String,
@@ -270,6 +306,12 @@ pub struct Channel {
     pub messages: Vec<Message>,
     #[serde(default)]
     pub last_read: i64,
+    /// Made with "Make Private" (stored only; everyone in this app can still see it).
+    #[serde(default)]
+    pub private: bool,
+    /// The List made with "Add a List" and tied to this channel.
+    #[serde(default)]
+    pub list: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -524,6 +566,9 @@ pub struct Extra {
     /// (files from before this field existed read as false).
     #[serde(default)]
     pub demo_removed: bool,
+    /// Space Overview cards turned off with Customize.
+    #[serde(default)]
+    pub hidden_cards: Vec<String>,
 }
 
 impl Default for Extra {
@@ -561,6 +606,7 @@ impl Default for Extra {
             shared: None,
             sync: Default::default(),
             demo_removed: false,
+            hidden_cards: vec![],
         }
     }
 }
@@ -654,9 +700,9 @@ impl Data {
         };
         let sid = d.new_id();
         let lid = d.new_id();
-        d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into() }], expanded: true, private_owner: None });
+        d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true, private_owner: None, ..Default::default() });
         let cid = d.new_id();
-        d.channels.push(Channel { id: cid, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members: vec![owner.id], messages: vec![], last_read: now_ts() });
+        d.channels.push(Channel { id: cid, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members: vec![owner.id], messages: vec![], last_read: now_ts(), ..Default::default() });
         d.extra.demo_removed = true;
         d
     }
@@ -704,7 +750,7 @@ impl Data {
                 if !d.channels.iter().any(|c| c.kind == ChannelKind::Channel) {
                     let id = d.new_id();
                     let members = d.members.iter().map(|m| m.id).collect();
-                    d.channels.insert(0, Channel { id, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts() });
+                    d.channels.insert(0, Channel { id, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
                 }
                 return d;
             }
@@ -849,7 +895,7 @@ impl Data {
             if d.spaces.is_empty() {
                 let sid = d.new_id();
                 let lid = d.new_id();
-                d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into() }], expanded: true, private_owner: None });
+                d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true, private_owner: None, ..Default::default() });
             }
             d.extra.demo_removed = true;
             *self = d;
@@ -878,6 +924,29 @@ impl Data {
             s.lists.iter().any(|l| l.id == list_id)
                 || s.folders.iter().any(|f| f.lists.iter().any(|l| l.id == list_id))
         })
+    }
+
+    /// True when the list, or the space it sits in, is archived.
+    pub fn list_archived(&self, id: u64) -> bool {
+        self.list_item(id).is_some_and(|l| l.archived) || self.space_of_list(id).is_some_and(|s| s.archived)
+    }
+
+    /// The letter or symbol drawn on a space's square.
+    pub fn space_glyph(s: &Space) -> String {
+        if s.icon.is_empty() {
+            s.name.chars().next().unwrap_or('S').to_uppercase().to_string()
+        } else {
+            s.icon.clone()
+        }
+    }
+
+    /// The list with this id, wherever it sits (space or folder).
+    pub fn list_item(&self, id: u64) -> Option<&ListItem> {
+        self.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter()))).find(|l| l.id == id)
+    }
+
+    pub fn list_item_mut(&mut self, id: u64) -> Option<&mut ListItem> {
+        self.spaces.iter_mut().flat_map(|s| s.lists.iter_mut().chain(s.folders.iter_mut().flat_map(|f| f.lists.iter_mut()))).find(|l| l.id == id)
     }
 
     pub fn list_name(&self, list_id: u64) -> String {
@@ -1045,14 +1114,15 @@ impl Data {
                 id: folder,
                 name: "Projects".into(),
                 lists: vec![
-                    ListItem { id: l_web, name: "Website Redesign".into() },
-                    ListItem { id: l_mkt, name: "Marketing".into() },
+                    ListItem { id: l_web, name: "Website Redesign".into(), ..Default::default() },
+                    ListItem { id: l_mkt, name: "Marketing".into(), ..Default::default() },
                 ],
                 expanded: true,
             }],
-            lists: vec![ListItem { id: l_personal, name: "Personal".into() }],
+            lists: vec![ListItem { id: l_personal, name: "Personal".into(), ..Default::default() }],
             expanded: true,
             private_owner: None,
+            ..Default::default()
         });
         d.spaces.push(Space {
             id: space2,
@@ -1060,9 +1130,10 @@ impl Data {
             color: [0xe1, 0x6b, 0x16],
             statuses: default_statuses(),
             folders: vec![],
-            lists: vec![ListItem { id: l_ideas, name: "Ideas".into() }],
+            lists: vec![ListItem { id: l_ideas, name: "Ideas".into(), ..Default::default() }],
             expanded: false,
             private_owner: None,
+            ..Default::default()
         });
         d.favorites.push(Location::List(l_web));
 
@@ -1099,7 +1170,7 @@ impl Data {
                 due,
                 tags: tags.into_iter().map(String::from).collect(),
                 checklist: vec![],
-                activity: vec![Activity { ts: now - 86400 * 3, author: 1, text: "created this task".into(), comment: false }],
+                activity: vec![Activity { ts: now - 86400 * 3, author: 1, text: "created this task".into(), comment: false, ..Default::default() }],
                 time_entries: vec![],
                 timer_started: None,
                 estimate_min: None,
@@ -1109,6 +1180,8 @@ impl Data {
                 custom: Default::default(),
                 recur: None,
                 archived: false,
+                done_at: None,
+                closed_at: None,
             });
         }
         // Subtasks and a checklist on the first task.
@@ -1138,6 +1211,8 @@ impl Data {
                 custom: Default::default(),
                 recur: None,
                 archived: false,
+                done_at: None,
+                closed_at: None,
             });
         }
         d.tasks[0].description = "Refresh the homepage with a cleaner hero, clear call to action and a lighter grid.".into();
@@ -1183,18 +1258,18 @@ impl Data {
         m1.replies.push(r1);
         let m2 = msg(&mut d, 3, "Reminder: newsletter draft is due Thursday.", 3600);
         let m3 = msg(&mut d, 4, "@Me can you check the beta feedback list when you have a minute?", 1200);
-        d.channels.push(Channel { id: c1, name: "general".into(), kind: ChannelKind::Channel, topic: "Company-wide announcements and chat".into(), members: vec![1, 2, 3, 4], messages: vec![m1, m2, m3], last_read: now2 - 1800 });
+        d.channels.push(Channel { id: c1, name: "general".into(), kind: ChannelKind::Channel, topic: "Company-wide announcements and chat".into(), members: vec![1, 2, 3, 4], messages: vec![m1, m2, m3], last_read: now2 - 1800, ..Default::default() });
         let c2 = d.new_id();
         let m4 = msg(&mut d, 2, "Should the hero image be a photo or an illustration?", 5400);
-        d.channels.push(Channel { id: c2, name: "website-redesign".into(), kind: ChannelKind::Channel, topic: "Everything about the new site".into(), members: vec![1, 2], messages: vec![m4], last_read: now2 });
+        d.channels.push(Channel { id: c2, name: "website-redesign".into(), kind: ChannelKind::Channel, topic: "Everything about the new site".into(), members: vec![1, 2], messages: vec![m4], last_read: now2, ..Default::default() });
         let c3 = d.new_id();
         let m5 = msg(&mut d, 2, "Hey, do you have a minute to talk about the launch date?", 600);
-        d.channels.push(Channel { id: c3, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 2], messages: vec![m5], last_read: 0 });
+        d.channels.push(Channel { id: c3, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 2], messages: vec![m5], last_read: 0, ..Default::default() });
         let c4 = d.new_id();
-        d.channels.push(Channel { id: c4, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 3], messages: vec![], last_read: now2 });
+        d.channels.push(Channel { id: c4, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 3], messages: vec![], last_read: now2, ..Default::default() });
         d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400 });
         d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800 });
-        d.tasks[0].activity.push(Activity { ts: now - 3600 * 5, author: 2, text: "Looks great so far, let's review on Friday.".into(), comment: true });
+        d.tasks[0].activity.push(Activity { ts: now - 3600 * 5, author: 2, text: "Looks great so far, let's review on Friday.".into(), comment: true, ..Default::default() });
         d
     }
 }

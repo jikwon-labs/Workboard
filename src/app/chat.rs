@@ -161,6 +161,7 @@ impl App {
                     ui.set_height(30.0);
                     let title = match channel.kind {
                         ChannelKind::Channel if channel.name == "general" => ws_name.clone(),
+                        ChannelKind::Channel if channel.private => format!("\u{1F512} {}", channel.name),
                         ChannelKind::Channel => format!("# {}", channel.name),
                         ChannelKind::Direct => self.channel_label(&channel),
                     };
@@ -197,7 +198,9 @@ impl App {
                     for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar)] {
                         if ui.add(egui::Button::new(RichText::new(label).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0))).clicked() {
                             self.view = v;
-                            self.actions.push(Action::Go(Location::Everything));
+                            // a channel made with "Add a List" opens its own List
+                            let to = channel.list.filter(|l| self.data.location_exists(Location::List(*l))).map(Location::List).unwrap_or(Location::Everything);
+                            self.actions.push(Action::Go(to));
                         }
                     }
                     let vr = ui.add(egui::Button::new(RichText::new("+  View").size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0)));
@@ -733,7 +736,7 @@ impl App {
                     let id = self.data.new_id();
                     let name = name.trim().to_lowercase().replace(' ', "-");
                     let members = self.data.members.iter().map(|m| m.id).collect();
-                    self.data.channels.push(Channel { id, name, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts() });
+                    self.data.channels.push(Channel { id, name, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
                     self.chat_open = Some(id);
                     self.thread_open = None;
                     self.dirty = true;
@@ -744,7 +747,7 @@ impl App {
                         Some(id) => id,
                         None => {
                             let id = self.data.new_id();
-                            self.data.channels.push(Channel { id, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![me, uid], messages: vec![], last_read: now_ts() });
+                            self.data.channels.push(Channel { id, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![me, uid], messages: vec![], last_read: now_ts(), ..Default::default() });
                             self.dirty = true;
                             id
                         }

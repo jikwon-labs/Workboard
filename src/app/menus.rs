@@ -45,6 +45,8 @@ pub enum Modal {
     NewSpace { name: String, color: [u8; 3] },
     MoveTasks { ids: Vec<u64>, query: String },
     MoveList { list: u64 },
+    NewChannel { name: String, private: bool, add_list: bool },
+    ListInfo { list: u64 },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -399,7 +401,7 @@ impl App {
             close_popup(ui);
         }
         if menu_item2(ui, &t, "#", "Channel", "Conversations on specific topics").clicked() {
-            self.new_channel = Some(String::new());
+            self.modal = Some(Modal::NewChannel { name: String::new(), private: false, add_list: false });
             close_popup(ui);
         }
         if menu_item2(ui, &t, "\u{25CE}", "Space", "Organize work by team or department").clicked() {
@@ -583,6 +585,8 @@ impl App {
             Modal::NewSpace { .. } => "Create a Space".into(),
             Modal::MoveTasks { .. } => "Move to".into(),
             Modal::MoveList { .. } => "Move List".into(),
+            Modal::NewChannel { .. } => "Create Channel".into(),
+            Modal::ListInfo { .. } => "List Info".into(),
         };
         // dim backdrop
         let screen = ctx.screen_rect();
@@ -602,22 +606,12 @@ impl App {
             .anchor(Align2::CENTER_CENTER, [0.0, -20.0])
             .min_width(460.0)
             .max_width(620.0)
-            .frame(egui::Frame::new().fill(t.card).corner_radius(12).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(20)))
+            .frame(dialog_frame(&t))
             .show(ctx, |ui| {
                 ui.set_min_width(440.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&title).size(18.0).color(t.text));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
-                        ui.painter().circle_filled(r.center(), 14.0, if resp.hovered() { t.border } else { t.hover });
-                        let c = r.center();
-                        ui.painter().line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], Stroke::new(1.5, t.text2));
-                        ui.painter().line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], Stroke::new(1.5, t.text2));
-                        if resp.on_hover_text("Close").clicked() {
-                            open = false;
-                        }
-                    });
-                });
+                if dialog_header(ui, &t, &title) {
+                    open = false;
+                }
                 ui.add_space(10.0);
                 close |= self.modal_body(ui, &t, &mut modal);
             });
@@ -639,6 +633,11 @@ impl App {
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList { name, space, folder, .. } => close = self.new_list_body(ui, t, name, space, folder),
             Modal::NewSpace { name, color } => close = self.new_space_body(ui, t, name, color),
+            Modal::NewChannel { name, private, add_list } => close = self.new_channel_body(ui, t, name, private, add_list),
+            Modal::ListInfo { list } => {
+                let l = *list;
+                close = self.list_info_body(ui, t, l);
+            }
             Modal::MoveTasks { ids, query } => {
                 let ids = ids.clone();
                 close = self.move_tasks_body(ui, t, &ids, query);
@@ -1569,7 +1568,11 @@ impl App {
     /// "New message" picker (sidebar + New message, Create > Message, Cmd+G).
     pub(super) fn new_message_window(&mut self, ctx: &egui::Context) {
         if !self.new_message_open {
-            ctx.data_mut(|d| d.remove::<(Section, Location)>(egui::Id::new("new_message_at")));
+            ctx.data_mut(|d| {
+                d.remove::<(Section, Location)>(egui::Id::new("new_message_at"));
+                d.remove::<String>(egui::Id::new("new_message_query"));
+                d.remove::<u8>(egui::Id::new("new_message_tab"));
+            });
             return;
         }
         // moving to another page closes it, as does Escape
@@ -1583,29 +1586,134 @@ impl App {
         let t = self.t();
         let mut open = true;
         let me = self.data.me;
-        egui::Window::new("New message").open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
-            ui.set_min_width(320.0);
-            ui.label(RichText::new("To:").color(t.text2));
-            for m in self.data.members.clone() {
-                let ring = t.card;
-                let label = if m.id == me { format!("{} \u{2014} You", m.name) } else { m.name.clone() };
-                if menu_row(ui, &t, &label, false, |p, c| paint_avatar(p, c, 9.0, &m, ring)).clicked() {
-                    let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((m.id == me && c.members == vec![me]) || (m.id != me && c.members.contains(&m.id) && c.members.contains(&me)))).map(|c| c.id);
-                    let id = existing.unwrap_or_else(|| {
-                        let id = self.data.new_id();
-                        let members = if m.id == me { vec![me] } else { vec![me, m.id] };
-                        self.data.channels.push(Channel { id, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members, messages: vec![], last_read: now_ts() });
-                        self.dirty = true;
-                        id
-                    });
-                    self.section = Section::Chat;
-                    self.chat_open = Some(id);
-                    self.new_message_open = false;
+        let q_id = egui::Id::new("new_message_query");
+        let tab_id = egui::Id::new("new_message_tab");
+        let mut q: String = ctx.data(|d| d.get_temp(q_id)).unwrap_or_default();
+        let mut tab: u8 = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
+        let mut go: Option<u64> = None;
+        let mut dm_with: Option<u64> = None;
+        let win_id = egui::Id::new("new_message_window");
+        egui::Window::new("New message dialog")
+            .id(win_id)
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_TOP, [0.0, 90.0])
+            .min_width(620.0)
+            .max_width(620.0)
+            .frame(dialog_frame(&t))
+            .show(ctx, |ui| {
+                if dialog_header(ui, &t, "New message") {
+                    open = false;
                 }
-            }
-        });
-        if !open {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("To:").color(t.text2));
+                    let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("People or Channels").desired_width(f32::INFINITY));
+                    name_field(&r, "People or Channels");
+                    focus_once(ui, &r);
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    for (i, label) in ["Recents", "People", "Channels"].iter().enumerate() {
+                        if ui.selectable_label(tab == i as u8, *label).clicked() {
+                            tab = i as u8;
+                        }
+                    }
+                });
+                ui.separator();
+                let ql = q.trim().to_lowercase();
+                let hit = |s: &str| ql.is_empty() || s.to_lowercase().contains(&ql);
+                let members = self.data.members.clone();
+                // people: an avatar row on Recents, a full list on People
+                if tab != 2 {
+                    ui.label(RichText::new("Direct Messages").small().color(t.text3));
+                    ui.horizontal_wrapped(|ui| {
+                        for m in members.iter().filter(|m| !m.invited && hit(&m.name)) {
+                            let label = if m.id == me { format!("{} (You)", m.name) } else { m.name.clone() };
+                            let (r, resp) = ui.allocate_exact_size(vec2(72.0, 64.0), Sense::click());
+                            name_it(&resp, &format!("Message {}", m.name));
+                            if resp.hovered() {
+                                ui.painter().rect_filled(r, 8.0, t.hover);
+                            }
+                            paint_avatar(ui.painter(), r.center_top() + vec2(0.0, 22.0), 16.0, m, t.card);
+                            let short = truncate(&label, 10);
+                            ui.painter().text(r.center_bottom() - vec2(0.0, 10.0), Align2::CENTER_CENTER, short, FontId::proportional(11.0), t.text2);
+                            if resp.clicked() {
+                                dm_with = Some(m.id);
+                            }
+                        }
+                    });
+                }
+                if tab == 1 {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("People").small().color(t.text3));
+                    for m in members.iter().filter(|m| hit(&m.name) || hit(&m.email)) {
+                        let label = if m.id == me { format!("{} \u{2014} You", m.name) } else { m.name.clone() };
+                        let ring = t.card;
+                        if menu_row(ui, &t, &label, false, |p, c| paint_avatar(p, c, 9.0, m, ring)).clicked() {
+                            dm_with = Some(m.id);
+                        }
+                    }
+                }
+                if tab != 1 {
+                    ui.add_space(4.0);
+                    let mut chans: Vec<(u64, String, i64)> = self
+                        .data
+                        .channels
+                        .iter()
+                        .filter(|c| c.kind == ChannelKind::Channel || tab == 0)
+                        .map(|c| (c.id, self.channel_label(c), c.messages.last().map(|m| m.ts).unwrap_or(c.last_read)))
+                        .filter(|c| hit(&c.1))
+                        .collect();
+                    if tab == 0 {
+                        chans.sort_by(|a, b| b.2.cmp(&a.2));
+                        chans.truncate(8);
+                    }
+                    ui.label(RichText::new(if tab == 0 { "Recents" } else { "Channels" }).small().color(t.text3));
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for (id, label, _) in &chans {
+                            if menu_row(ui, &t, label, false, |p, c| {
+                                p.text(c, Align2::CENTER_CENTER, if label.starts_with('#') { "#" } else { "@" }, FontId::proportional(13.0), t.text2);
+                            })
+                            .clicked()
+                            {
+                                go = Some(*id);
+                            }
+                        }
+                        if chans.is_empty() {
+                            ui.label(RichText::new("No matches").color(t.text3));
+                        }
+                    });
+                }
+            });
+        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
+        if let Some(uid) = dm_with {
+            let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((uid == me && c.members == vec![me]) || (uid != me && c.members.contains(&uid) && c.members.contains(&me)))).map(|c| c.id);
+            go = Some(existing.unwrap_or_else(|| {
+                let id = self.data.new_id();
+                let members = if uid == me { vec![me] } else { vec![me, uid] };
+                self.data.channels.push(Channel { id, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
+                self.dirty = true;
+                id
+            }));
+        }
+        if let Some(id) = go {
+            self.section = Section::Chat;
+            self.chat_open = Some(id);
+            open = false;
+        }
+        if open {
+            ctx.data_mut(|d| {
+                d.insert_temp(q_id, q);
+                d.insert_temp(tab_id, tab);
+            });
+        } else {
             self.new_message_open = false;
+            ctx.data_mut(|d| {
+                d.remove::<String>(q_id);
+                d.remove::<u8>(tab_id);
+            });
         }
     }
 

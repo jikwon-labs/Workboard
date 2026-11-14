@@ -6,12 +6,98 @@
 use super::*;
 use egui::Pos2;
 
+/// Space icons offered in Color & Icon ("" = the first letter of the name).
+pub const SPACE_ICONS: [&str; 12] = ["", "\u{2605}", "\u{25C6}", "\u{25CF}", "\u{25B2}", "\u{2665}", "\u{2691}", "\u{2714}", "\u{2600}", "\u{2699}", "\u{263A}", "\u{25A0}"];
+
 pub const DUE_FILTERS: [&str; 6] = ["Any time", "Overdue", "Today", "This week", "Next week", "No due date"];
 pub const COLUMNS: [&str; 6] = ["Assignee", "Due date", "Priority", "Status", "Comments", "Date created"];
+/// Properties that can be shown as extra columns (hidden at first), drawn
+/// from values every task already has.
+pub const PROPERTIES: [&str; 10] = ["Created by", "Date closed", "Date done", "Date updated", "Start date", "Time estimate", "Time tracked", "Tags", "Latest comment", "Subtasks"];
 
-/// Field conditions from the Filter panel (all must match).
+/// Width of an extra property column.
+pub fn prop_width(name: &str) -> f32 {
+    match name {
+        "Latest comment" => 180.0,
+        "Tags" => 140.0,
+        "Created by" => 120.0,
+        _ => 105.0,
+    }
+}
+
+/// A field a filter row can test.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FilterField {
+    Status,
+    Priority,
+    Assignee,
+    DueDate,
+    Tags,
+}
+
+impl FilterField {
+    pub const ALL: [FilterField; 5] = [FilterField::Status, FilterField::Priority, FilterField::Assignee, FilterField::DueDate, FilterField::Tags];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FilterField::Status => "Status",
+            FilterField::Priority => "Priority",
+            FilterField::Assignee => "Assignee",
+            FilterField::DueDate => "Due date",
+            FilterField::Tags => "Tags",
+        }
+    }
+}
+
+/// One "+ Add filter" row: field, is / is not, and the chosen values
+/// (status names, priority numbers, member ids or "none", a DUE_FILTERS
+/// index, tags). A row without a field or values does nothing.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct FilterRow {
+    pub field: Option<FilterField>,
+    pub not: bool,
+    pub values: Vec<String>,
+}
+
+impl FilterRow {
+    pub fn active(&self) -> bool {
+        self.field.is_some() && !self.values.is_empty()
+    }
+
+    pub fn matches(&self, t: &Task, data: &Data) -> bool {
+        let Some(f) = self.field else { return true };
+        if self.values.is_empty() {
+            return true;
+        }
+        let hit = match f {
+            FilterField::Status => self.values.iter().any(|v| *v == data.status_of(t).name),
+            FilterField::Priority => self.values.iter().any(|v| v.parse::<u8>().ok() == Some(t.priority)),
+            FilterField::Assignee => self.values.iter().any(|v| if v == "none" { t.assignees.is_empty() } else { v.parse::<u64>().is_ok_and(|id| t.assignees.contains(&id)) }),
+            FilterField::DueDate => self.values.iter().any(|v| due_matches(v.parse().unwrap_or(0), t, data)),
+            FilterField::Tags => self.values.iter().any(|v| t.tags.contains(v)),
+        };
+        hit != self.not
+    }
+}
+
+fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
+    let td = today();
+    let week_start = td - Duration::days(td.weekday().num_days_from_monday() as i64);
+    match due {
+        1 => t.due.map_or(false, |d| d < td) && !data.is_closed(t),
+        2 => t.due == Some(td),
+        3 => t.due.map_or(false, |d| d >= week_start && d < week_start + Duration::days(7)),
+        4 => t.due.map_or(false, |d| d >= week_start + Duration::days(7) && d < week_start + Duration::days(14)),
+        5 => t.due.is_none(),
+        _ => true,
+    }
+}
+
+/// Field conditions from the Filter panel (all must match): the rows of the
+/// condition builder, plus fixed fields kept for code that sets them directly.
 #[derive(Clone, Default, PartialEq)]
 pub struct TaskFilter {
+    pub rows: Vec<FilterRow>,
     pub statuses: Vec<String>,
     pub priorities: Vec<u8>,
     pub assignees: Vec<u64>,
@@ -23,11 +109,14 @@ pub struct TaskFilter {
 
 impl TaskFilter {
     pub fn count(&self) -> usize {
-        [!self.statuses.is_empty(), !self.priorities.is_empty(), !self.assignees.is_empty() || self.unassigned, !self.tags.is_empty(), self.due != 0, self.archived].iter().filter(|x| **x).count()
+        self.rows.iter().filter(|r| r.active()).count() + [!self.statuses.is_empty(), !self.priorities.is_empty(), !self.assignees.is_empty() || self.unassigned, !self.tags.is_empty(), self.due != 0, self.archived].iter().filter(|x| **x).count()
     }
 
     pub fn matches(&self, t: &Task, data: &Data) -> bool {
         if t.archived != self.archived {
+            return false;
+        }
+        if !self.rows.iter().all(|r| r.matches(t, data)) {
             return false;
         }
         if !self.statuses.is_empty() && !self.statuses.iter().any(|s| *s == data.status_of(t).name) {
@@ -42,16 +131,7 @@ impl TaskFilter {
         if !self.tags.is_empty() && !self.tags.iter().any(|g| t.tags.contains(g)) {
             return false;
         }
-        let td = today();
-        let week_start = td - Duration::days(td.weekday().num_days_from_monday() as i64);
-        match self.due {
-            1 => t.due.map_or(false, |d| d < td) && !data.is_closed(t),
-            2 => t.due == Some(td),
-            3 => t.due.map_or(false, |d| d >= week_start && d < week_start + Duration::days(7)),
-            4 => t.due.map_or(false, |d| d >= week_start + Duration::days(7) && d < week_start + Duration::days(14)),
-            5 => t.due.is_none(),
-            _ => true,
-        }
+        due_matches(self.due, t, data)
     }
 }
 
@@ -66,7 +146,7 @@ impl App {
 
     /// Spaces a new list can go in (not the hidden personal space).
     pub(super) fn open_spaces(&self) -> Vec<&Space> {
-        self.data.spaces.iter().filter(|s| s.private_owner.is_none()).collect()
+        self.data.spaces.iter().filter(|s| s.private_owner.is_none() && !s.archived).collect()
     }
 
     pub(super) fn open_new_list(&mut self, space: Option<u64>, folder: Option<u64>) {
@@ -80,7 +160,7 @@ impl App {
         let id = self.data.new_id();
         let s = self.data.spaces.iter_mut().find(|s| s.id == space)?;
         s.expanded = true;
-        let item = ListItem { id, name };
+        let item = ListItem { id, name, ..Default::default() };
         match folder.and_then(|fid| s.folders.iter_mut().find(|f| f.id == fid)) {
             Some(f) => {
                 f.expanded = true;
@@ -99,7 +179,7 @@ impl App {
         let id = self.data.new_id();
         let lid = self.data.new_id();
         let name = if name.trim().is_empty() { "Space".to_string() } else { name.trim().to_string() };
-        self.data.spaces.push(Space { id, name, color, statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into() }], expanded: true, private_owner: None });
+        self.data.spaces.push(Space { id, name, color, statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true, private_owner: None, ..Default::default() });
         self.section = Section::Home;
         self.loc = Location::Space(id);
         self.view = ViewKind::Overview;
@@ -195,6 +275,62 @@ impl App {
         close
     }
 
+    /// "Create Channel" (+ Create > Channel, the sidebar's Channels "+").
+    pub(super) fn new_channel_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String, private: &mut bool, add_list: &mut bool) -> bool {
+        let mut close = false;
+        ui.label(RichText::new("Channels are where your team communicates. They're best when organized around a topic, like #marketing.").color(t.text2));
+        ui.add_space(8.0);
+        ui.label(RichText::new("Name").color(t.text2));
+        let r = ui.add(egui::TextEdit::singleline(name).hint_text("e.g. design-team").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+        name_field(&r, "Channel name");
+        focus_once(ui, &r);
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(10.0);
+        for (on, label, help) in [(&mut *private, "Make Private", "Only invited people can find this channel."), (&mut *add_list, "Add a List", "Make a List with the same name, tied to this channel.")] {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(label).color(t.text));
+                    ui.label(RichText::new(help).small().color(t.text3));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    switch(ui, t, on, label);
+                });
+            });
+            ui.add_space(6.0);
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let ok = !name.trim().is_empty();
+                let b = ui.add_enabled(ok, egui::Button::new(RichText::new("Create").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(90.0, 32.0)));
+                if (b.clicked() || (enter && ok)) && ok {
+                    self.create_channel(name, *private, *add_list);
+                    close = true;
+                }
+            });
+        });
+        close
+    }
+
+    pub(super) fn create_channel(&mut self, name: &str, private: bool, add_list: bool) -> u64 {
+        let id = self.data.new_id();
+        let clean = name.trim().to_lowercase().replace(' ', "-");
+        let me = self.data.me;
+        let members = if private { vec![me] } else { self.data.members.iter().map(|m| m.id).collect() };
+        let list = if add_list {
+            let space = self.current_space().filter(|s| self.open_spaces().iter().any(|x| x.id == *s)).or_else(|| self.open_spaces().first().map(|s| s.id));
+            space.and_then(|s| self.create_list(s, None, name.trim()))
+        } else {
+            None
+        };
+        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), private, list });
+        self.section = Section::Chat;
+        self.chat_open = Some(id);
+        self.thread_open = None;
+        self.dirty = true;
+        id
+    }
+
     // ---------------------------------------------------------------- move / duplicate
 
     /// Moves tasks (and their subtasks) to another list; statuses that list
@@ -222,7 +358,7 @@ impl App {
                 t.status = statuses[0].name.clone();
             }
             if ids.contains(&t.id) {
-                t.activity.push(Activity { ts: now_ts(), author: me, text: format!("moved this task to {}", lname), comment: false });
+                t.activity.push(Activity { ts: now_ts(), author: me, text: format!("moved this task to {}", lname), comment: false, ..Default::default() });
                 // a moved subtask becomes a task of its own in the new list
                 if t.parent.map_or(false, |p| !all.contains(&p)) {
                     t.parent = None;
@@ -250,7 +386,7 @@ impl App {
             t.updated = now;
             t.timer_started = None;
             t.time_entries.clear();
-            t.activity = vec![Activity { ts: now, author: app.data.me, text: format!("duplicated this task from {}", src.name), comment: false }];
+            t.activity = vec![Activity { ts: now, author: app.data.me, text: format!("duplicated this task from {}", src.name), comment: false, ..Default::default() }];
             t.order = src.order;
             app.data.tasks.push(t);
             let subs: Vec<u64> = app.data.tasks.iter().filter(|x| x.parent == Some(id)).map(|x| x.id).collect();
@@ -268,7 +404,7 @@ impl App {
         let me = self.data.me;
         for t in self.data.tasks.iter_mut().filter(|t| ids.contains(&t.id)) {
             t.archived = archived;
-            t.activity.push(Activity { ts: now_ts(), author: me, text: if archived { "archived this task".into() } else { "unarchived this task".into() }, comment: false });
+            t.activity.push(Activity { ts: now_ts(), author: me, text: if archived { "archived this task".into() } else { "unarchived this task".into() }, comment: false, ..Default::default() });
         }
         if archived && self.open_task.map_or(false, |o| ids.contains(&o)) {
             self.open_task = None;
@@ -314,15 +450,17 @@ impl App {
     pub(super) fn duplicate_list(&mut self, list: u64) -> Option<u64> {
         let name = format!("{} (copy)", self.data.list_name(list));
         let nid = self.data.new_id();
+        // the copy keeps the list's details (colour, dates, priority, owner, description)
+        let src = self.data.list_item(list).cloned().unwrap_or_default();
         let mut placed = false;
         for s in &mut self.data.spaces {
             if let Some(i) = s.lists.iter().position(|l| l.id == list) {
-                s.lists.insert(i + 1, ListItem { id: nid, name: name.clone() });
+                s.lists.insert(i + 1, ListItem { id: nid, name: name.clone(), archived: false, ..src.clone() });
                 placed = true;
             }
             for f in &mut s.folders {
                 if let Some(i) = f.lists.iter().position(|l| l.id == list) {
-                    f.lists.insert(i + 1, ListItem { id: nid, name: name.clone() });
+                    f.lists.insert(i + 1, ListItem { id: nid, name: name.clone(), archived: false, ..src.clone() });
                     placed = true;
                 }
             }
@@ -596,13 +734,12 @@ impl App {
             self.toast = Some(("Link copied".into(), now_ts()));
             close_any(ui);
         }
-        ui.separator();
-        if ui.button("Create task").clicked() {
-            self.loc = loc;
-            self.section = Section::Home;
-            self.open_quick_add(None);
+        if ui.button("List Info").clicked() {
+            self.modal = Some(Modal::ListInfo { list: lid });
             close_any(ui);
         }
+        ui.separator();
+        ui.menu_button("Create new", |ui| self.list_create_menu(ui, lid));
         if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
             if ui.button("Task statuses").clicked() {
                 self.actions.push(Action::EditStatuses(sid));
@@ -630,10 +767,170 @@ impl App {
             }
             close_any(ui);
         }
+        if ui.button("Archive").clicked() {
+            self.set_list_archived(lid, true);
+            close_any(ui);
+        }
         if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
             self.actions.push(Action::AskDelete(Target::List(lid)));
             close_any(ui);
         }
+    }
+
+    /// The "+" on a sidebar list, and the list menu's "Create new".
+    pub(super) fn list_create_menu(&mut self, ui: &mut Ui, lid: u64) {
+        ui.set_min_width(200.0);
+        let sid = self.data.space_of_list(lid).map(|s| s.id);
+        let folder = self.data.spaces.iter().flat_map(|s| s.folders.iter()).find(|f| f.lists.iter().any(|l| l.id == lid)).map(|f| f.id);
+        ui.label(RichText::new("Create").small().color(self.t().text3));
+        for (icon, label) in [("\u{2611}", "Task"), ("\u{2630}", "List"), ("\u{1F4C4}", "Doc"), ("\u{1F4CA}", "Dashboard"), ("\u{1F3A8}", "Whiteboard"), ("\u{1F4CB}", "Form")] {
+            let b = ui.button(format!("{}  {}", icon, label));
+            name_it(&b, &format!("Create {}", label));
+            if b.clicked() {
+                match label {
+                    "Task" => {
+                        self.section = Section::Home;
+                        self.loc = Location::List(lid);
+                        self.open_quick_add(None);
+                    }
+                    "List" => self.open_new_list(sid, folder),
+                    "Doc" => self.new_doc(sid),
+                    "Dashboard" => self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() }),
+                    "Whiteboard" => self.new_whiteboard(),
+                    _ => {
+                        self.new_form();
+                        if let Some(f) = self.data.extra.forms.last_mut() {
+                            f.list_id = lid;
+                        }
+                    }
+                }
+                close_any(ui);
+            }
+        }
+    }
+
+    pub(super) fn set_list_archived(&mut self, lid: u64, archived: bool) {
+        let name = self.data.list_name(lid);
+        if let Some(l) = self.data.list_item_mut(lid) {
+            l.archived = archived;
+            self.dirty = true;
+        }
+        if archived && self.loc == Location::List(lid) {
+            self.loc = Location::Home;
+        }
+        let msg = if archived { format!("Archived \"{}\". Restore it from Settings > Spaces.", name) } else { format!("Restored \"{}\".", name) };
+        self.toast = Some((msg, now_ts()));
+    }
+
+    pub(super) fn set_space_archived(&mut self, sid: u64, archived: bool) {
+        let lists = self.data.lists_in(Location::Space(sid)).unwrap_or_default();
+        if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
+            s.archived = archived;
+            self.dirty = true;
+        }
+        let here = self.loc == Location::Space(sid) || matches!(self.loc, Location::List(l) if lists.contains(&l)) || matches!(self.loc, Location::Folder(f) if self.data.spaces.iter().any(|s| s.id == sid && s.folders.iter().any(|x| x.id == f)));
+        if archived && here {
+            self.loc = Location::Home;
+        }
+    }
+
+    /// A copy of the space: statuses, folders and lists, with their tasks.
+    pub(super) fn duplicate_space(&mut self, sid: u64) -> Option<u64> {
+        let src = self.data.spaces.iter().find(|s| s.id == sid)?.clone();
+        let nid = self.data.new_id();
+        let mut copy = Space { id: nid, name: format!("{} (copy)", src.name), color: src.color, statuses: src.statuses.clone(), folders: vec![], lists: vec![], expanded: true, private_owner: None, icon: src.icon.clone(), ..Default::default() };
+        let pos = self.data.spaces.iter().position(|s| s.id == sid).map(|i| i + 1).unwrap_or(self.data.spaces.len());
+        self.data.spaces.insert(pos, copy.clone());
+        // copy each list with duplicate_list (it lands next to the original), then move it over
+        let mut moved: Vec<(Option<usize>, ListItem)> = vec![];
+        let plain: Vec<u64> = src.lists.iter().filter(|l| !l.archived).map(|l| l.id).collect();
+        for l in plain {
+            if let Some(n) = self.duplicate_list(l) {
+                if let Some(item) = self.take_list(n) {
+                    moved.push((None, ListItem { name: self.data.list_name(l), ..item }));
+                }
+            }
+        }
+        for (fi, f) in src.folders.iter().enumerate() {
+            copy.folders.push(Folder { id: self.data.new_id(), name: f.name.clone(), lists: vec![], expanded: true });
+            for l in f.lists.iter().filter(|l| !l.archived) {
+                if let Some(n) = self.duplicate_list(l.id) {
+                    if let Some(item) = self.take_list(n) {
+                        moved.push((Some(fi), ListItem { name: l.name.clone(), ..item }));
+                    }
+                }
+            }
+        }
+        for (fi, item) in moved {
+            match fi {
+                Some(i) => copy.folders[i].lists.push(item),
+                None => copy.lists.push(item),
+            }
+        }
+        if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == nid) {
+            *s = copy;
+        }
+        self.dirty = true;
+        Some(nid)
+    }
+
+    /// List Info: where the list is, its task counts and a description.
+    pub(super) fn list_info_body(&mut self, ui: &mut Ui, t: &Theme, lid: u64) -> bool {
+        let Some(item) = self.data.list_item(lid).cloned() else { return true };
+        let path = self.data.list_path(lid).join(" / ");
+        let tops: Vec<&Task> = self.data.tasks.iter().filter(|x| x.list_id == lid && x.parent.is_none() && !x.archived).collect();
+        let closed = tops.iter().filter(|x| self.data.is_closed(x)).count();
+        let subs = self.data.tasks.iter().filter(|x| x.list_id == lid && x.parent.is_some() && !x.archived).count();
+        let archived = self.data.tasks.iter().filter(|x| x.list_id == lid && x.archived).count();
+        egui::Grid::new("list_info").num_columns(2).spacing(vec2(24.0, 8.0)).show(ui, |ui| {
+            for (k, v) in [
+                ("Name", item.name.clone()),
+                ("Location", path),
+                ("Tasks", format!("{} ({} open, {} closed)", tops.len(), tops.len() - closed, closed)),
+                ("Subtasks", subs.to_string()),
+                ("Archived tasks", archived.to_string()),
+            ] {
+                ui.label(RichText::new(k).color(t.text2));
+                ui.label(RichText::new(v).color(t.text));
+                ui.end_row();
+            }
+        });
+        ui.add_space(8.0);
+        ui.label(RichText::new("Description").color(t.text2));
+        let mut desc = item.description.clone();
+        let r = ui.add(egui::TextEdit::multiline(&mut desc).hint_text("What is this List for?").desired_rows(3).desired_width(f32::INFINITY));
+        name_field(&r, "List description");
+        if desc != item.description {
+            if let Some(l) = self.data.list_item_mut(lid) {
+                l.description = desc;
+            }
+            self.dirty = true;
+        }
+        ui.add_space(10.0);
+        let mut close = false;
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary_button(ui, t, "Done").clicked() {
+                    close = true;
+                }
+            });
+        });
+        close
+    }
+
+    /// Removes a list from wherever it sits and returns it.
+    fn take_list(&mut self, lid: u64) -> Option<ListItem> {
+        for s in &mut self.data.spaces {
+            if let Some(i) = s.lists.iter().position(|l| l.id == lid) {
+                return Some(s.lists.remove(i));
+            }
+            for f in &mut s.folders {
+                if let Some(i) = f.lists.iter().position(|l| l.id == lid) {
+                    return Some(f.lists.remove(i));
+                }
+            }
+        }
+        None
     }
 
     /// The space menu (right click, or the "..." button on a sidebar space).
@@ -669,14 +966,36 @@ impl App {
                 close_any(ui);
             }
         });
-        ui.menu_button("Color", |ui| {
+        ui.menu_button("Color & Icon", |ui| {
+            ui.label(RichText::new("Space color").small().color(t.text3));
             ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(170.0);
+                ui.set_max_width(190.0);
                 for c in STATUS_PALETTE.iter().skip(1) {
                     let (rr, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    name_it(&resp, &format!("Space color {:02x}{:02x}{:02x}", c[0], c[1], c[2]));
                     ui.painter().circle_filled(rr.center(), 8.0, rgb(*c));
                     if resp.clicked() {
                         self.actions.push(Action::SetSpaceColor(sid, *c));
+                        close_any(ui);
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("Icon").small().color(t.text3));
+            let color = self.data.spaces.iter().find(|s| s.id == sid).map(|s| s.color).unwrap_or([96, 73, 231]);
+            let letter = self.data.spaces.iter().find(|s| s.id == sid).map(|s| s.name.chars().next().unwrap_or('S').to_uppercase().to_string()).unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(190.0);
+                for ic in SPACE_ICONS {
+                    let (rr, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+                    name_it(&resp, &format!("Space icon {}", if ic.is_empty() { "letter" } else { ic }));
+                    ui.painter().rect_filled(rr.shrink(2.0), 5.0, rgb(color));
+                    ui.painter().text(rr.center(), Align2::CENTER_CENTER, if ic.is_empty() { letter.as_str() } else { ic }, FontId::proportional(11.0), Color32::WHITE);
+                    if resp.clicked() {
+                        if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
+                            s.icon = ic.to_string();
+                            self.dirty = true;
+                        }
                         close_any(ui);
                     }
                 }
@@ -695,6 +1014,29 @@ impl App {
             close_any(ui);
         }
         ui.separator();
+        if ui.button("Duplicate").clicked() {
+            if let Some(n) = self.duplicate_space(sid) {
+                self.actions.push(Action::Go(Location::Space(n)));
+                self.toast = Some(("Space duplicated".into(), now_ts()));
+            }
+            close_any(ui);
+        }
+        let hidden = self.data.spaces.iter().find(|s| s.id == sid).is_some_and(|s| s.hidden);
+        if ui.button(if hidden { "Show Space" } else { "Hide Space" }).clicked() {
+            if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
+                s.hidden = !hidden;
+                self.dirty = true;
+            }
+            if !hidden {
+                self.toast = Some(("Space hidden from the sidebar. Show it again from Settings > Spaces.".into(), now_ts()));
+            }
+            close_any(ui);
+        }
+        let archived = self.data.spaces.iter().find(|s| s.id == sid).is_some_and(|s| s.archived);
+        if ui.button(if archived { "Restore" } else { "Archive" }).clicked() {
+            self.set_space_archived(sid, !archived);
+            close_any(ui);
+        }
         if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
             self.actions.push(Action::AskDelete(Target::Space(sid)));
             close_any(ui);
@@ -707,115 +1049,235 @@ impl App {
         !self.hidden_cols.contains(c)
     }
 
-    pub(super) fn columns_panel(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        ui.label(RichText::new("Shown in this view").small().color(t.text3));
-        for c in COLUMNS {
-            let mut on = self.col_on(c);
-            if ui.checkbox(&mut on, c).changed() {
-                if on {
-                    self.hidden_cols.remove(c);
-                } else {
-                    self.hidden_cols.insert(c.to_string());
-                }
+    /// The text a property column shows for a task.
+    pub(super) fn prop_text(&self, t: &Task, name: &str) -> String {
+        let day = |ts: i64| chrono::DateTime::from_timestamp(ts, 0).map(|d| fmt_date(d.with_timezone(&chrono::Local).date_naive())).unwrap_or_default();
+        match name {
+            "Created by" => t.activity.first().and_then(|a| self.data.member(a.author)).map(|m| m.name.clone()).unwrap_or_default(),
+            "Date closed" => t.closed_at.map(day).unwrap_or_default(),
+            "Date done" => t.done_at.map(day).unwrap_or_default(),
+            "Date updated" => day(t.updated),
+            "Start date" => t.start.map(fmt_date).unwrap_or_default(),
+            "Time estimate" => t.estimate_min.map(|m| fmt_duration(m as i64 * 60)).unwrap_or_default(),
+            "Time tracked" => {
+                let s = t.tracked_secs(now_ts());
+                if s > 0 { fmt_duration(s) } else { String::new() }
             }
-        }
-        ui.separator();
-        if ui.button("+ Create new field").clicked() {
-            self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
-            close_popup(ui);
+            "Tags" => t.tags.join(", "),
+            "Latest comment" => t.activity.iter().rev().find(|a| a.comment).map(|a| a.text.replace('\n', " ")).unwrap_or_default(),
+            "Subtasks" => {
+                let n = self.data.tasks.iter().filter(|x| x.parent == Some(t.id) && !x.archived).count();
+                if n > 0 { n.to_string() } else { String::new() }
+            }
+            _ => String::new(),
         }
     }
 
-    pub(super) fn filter_panel(&mut self, ui: &mut Ui) {
+    /// The "Fields" panel on the right of a List: search, the fields shown,
+    /// and the properties that can be added.
+    pub(super) fn fields_panel(&mut self, ctx: &egui::Context, top: f32) {
         let t = self.t();
-        ui.set_width(300.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Filters").strong());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.small_button("Clear all").clicked() {
-                    self.filter = Default::default();
-                    self.search.clear();
-                    self.me_mode = false;
-                    self.assignee_filter = None;
+        let screen = ctx.screen_rect();
+        let rect = Rect::from_min_max(pos2(screen.right() - 320.0, top), pos2(screen.right() - 8.0, screen.bottom() - 8.0));
+        let q_id = egui::Id::new("fields_query");
+        let mut q: String = ctx.data(|d| d.get_temp(q_id)).unwrap_or_default();
+        let mut close = false;
+        egui::Area::new(egui::Id::new("fields_panel")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(40) }).show(ui, |ui| {
+                ui.set_width(rect.width() - 28.0);
+                ui.set_min_height(rect.height() - 28.0);
+                if dialog_header(ui, &t, "Fields") {
+                    close = true;
                 }
-            });
-        });
-        ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Task name or tag...").desired_width(f32::INFINITY));
-        ui.add_space(4.0);
-        ui.label(RichText::new("Status").small().color(t.text3));
-        ui.horizontal_wrapped(|ui| {
-            for st in self.location_statuses() {
-                let on = self.filter.statuses.contains(&st.name);
-                if ui.selectable_label(on, RichText::new(st.name.to_uppercase()).color(rgb(st.color))).clicked() {
-                    if on {
-                        self.filter.statuses.retain(|s| *s != st.name);
-                    } else {
-                        self.filter.statuses.push(st.name.clone());
-                    }
-                }
-            }
-        });
-        ui.label(RichText::new("Priority").small().color(t.text3));
-        ui.horizontal_wrapped(|ui| {
-            for pr in [1u8, 2, 3, 4, 0] {
-                let on = self.filter.priorities.contains(&pr);
-                let label = if pr == 0 { "None" } else { PRIORITIES[pr as usize].label };
-                if ui.selectable_label(on, label).clicked() {
-                    if on {
-                        self.filter.priorities.retain(|p| *p != pr);
-                    } else {
-                        self.filter.priorities.push(pr);
-                    }
-                }
-            }
-        });
-        ui.label(RichText::new("Assignee").small().color(t.text3));
-        ui.horizontal_wrapped(|ui| {
-            for m in self.data.members.clone() {
-                let on = self.filter.assignees.contains(&m.id);
-                if ui.selectable_label(on, &m.name).clicked() {
-                    if on {
-                        self.filter.assignees.retain(|a| *a != m.id);
-                    } else {
-                        self.filter.assignees.push(m.id);
-                    }
-                }
-            }
-            let on = self.filter.unassigned;
-            if ui.selectable_label(on, "Unassigned").clicked() {
-                self.filter.unassigned = !on;
-            }
-        });
-        ui.label(RichText::new("Due date").small().color(t.text3));
-        ui.horizontal_wrapped(|ui| {
-            for (i, label) in DUE_FILTERS.iter().enumerate() {
-                if ui.selectable_label(self.filter.due == i as u8, *label).clicked() {
-                    self.filter.due = i as u8;
-                }
-            }
-        });
-        let mut tags: Vec<String> = self.data.tasks.iter().flat_map(|t| t.tags.iter().cloned()).collect();
-        tags.sort();
-        tags.dedup();
-        if !tags.is_empty() {
-            ui.label(RichText::new("Tags").small().color(t.text3));
-            ui.horizontal_wrapped(|ui| {
-                for g in tags {
-                    let on = self.filter.tags.contains(&g);
-                    if ui.selectable_label(on, RichText::new(&g).color(tag_color(&g))).clicked() {
-                        if on {
-                            self.filter.tags.retain(|x| *x != g);
-                        } else {
-                            self.filter.tags.push(g.clone());
+                ui.add_space(6.0);
+                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search for new or existing fields").desired_width(f32::INFINITY));
+                name_field(&r, "Search fields");
+                ui.add_space(6.0);
+                let ql = q.trim().to_lowercase();
+                let hit = |n: &str| ql.is_empty() || n.to_lowercase().contains(&ql);
+                let all: Vec<&str> = COLUMNS.iter().chain(PROPERTIES.iter()).copied().collect();
+                // shown properties that the List has no room to draw
+                let fits: Vec<&str> = if self.list_width > 0.0 {
+                    super::shell::col_layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.list_width, 30.0)), &self.hidden_cols, self.data.extra.apps.priorities).extra.iter().map(|c| c.0).collect()
+                } else {
+                    PROPERTIES.to_vec()
+                };
+                egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(rect.height() - 160.0).show(ui, |ui| {
+                    for (title, shown) in [("Shown", true), ("Properties", false)] {
+                        let names: Vec<&str> = all.iter().copied().filter(|n| self.col_on(n) == shown && hit(n)).collect();
+                        ui.label(RichText::new(title).small().color(t.text3));
+                        if names.is_empty() {
+                            ui.label(RichText::new(if shown { "No fields shown" } else { "No more fields" }).small().color(t.text3));
                         }
+                        for n in names {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(n).color(t.text));
+                                if shown && PROPERTIES.contains(&n) && !fits.contains(&n) {
+                                    ui.label(RichText::new("no room").small().color(t.text3)).on_hover_text("The List is too narrow to show this column; widen the window or turn another field off.");
+                                }
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let mut on = shown;
+                                    if switch(ui, &t, &mut on, &format!("Field {}", n)).clicked() {
+                                        if on {
+                                            self.hidden_cols.remove(n);
+                                        } else {
+                                            self.hidden_cols.insert(n.to_string());
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                        ui.add_space(8.0);
                     }
+                });
+                ui.separator();
+                if ui.button("+ Create new field").clicked() {
+                    self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
+                    close = true;
                 }
             });
+        });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open && self.modal.is_none() {
+            close = true;
         }
-        ui.separator();
-        ui.checkbox(&mut self.filter.archived, "Show archived tasks only");
-        ui.checkbox(&mut self.me_mode, "Only my tasks");
+        if close {
+            self.fields_open = false;
+            ctx.data_mut(|d| d.remove::<String>(q_id));
+        } else {
+            ctx.data_mut(|d| d.insert_temp(q_id, q));
+        }
+    }
+
+    /// Choices for a filter row's values: (stored value, label).
+    fn filter_choices(&self, f: FilterField) -> Vec<(String, String)> {
+        match f {
+            FilterField::Status => self.location_statuses().into_iter().map(|s| (s.name.clone(), s.name.to_uppercase())).collect(),
+            FilterField::Priority => [1u8, 2, 3, 4, 0].iter().map(|p| (p.to_string(), if *p == 0 { "No priority".to_string() } else { PRIORITIES[*p as usize].label.to_string() })).collect(),
+            FilterField::Assignee => {
+                let mut v: Vec<(String, String)> = self.data.members.iter().map(|m| (m.id.to_string(), m.name.clone())).collect();
+                v.push(("none".into(), "Unassigned".into()));
+                v
+            }
+            FilterField::DueDate => DUE_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), l.to_string())).collect(),
+            FilterField::Tags => {
+                let mut tags: Vec<String> = self.data.tasks.iter().flat_map(|t| t.tags.iter().cloned()).collect();
+                tags.sort();
+                tags.dedup();
+                tags.into_iter().map(|g| (g.clone(), g)).collect()
+            }
+        }
+    }
+
+    /// The Filter panel: a search field and condition rows ("Select filter",
+    /// is / is not, values) joined with AND. Drawn as a panel, not a popup,
+    /// so the drop-downs in its rows can open.
+    pub(super) fn filter_panel(&mut self, ctx: &egui::Context, at: Pos2, pill: Rect) {
+        let t = self.t();
+        let mut close = false;
+        let area = egui::Area::new(egui::Id::new("filter_panel")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                ui.set_width(560.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Filters").strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Clear all").clicked() {
+                            self.filter = Default::default();
+                            self.search.clear();
+                            self.me_mode = false;
+                            self.assignee_filter = None;
+                        }
+                    });
+                });
+                let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Task name or tag...").desired_width(f32::INFINITY));
+                name_field(&r, "Filter search");
+                ui.add_space(6.0);
+                let mut drop: Option<usize> = None;
+                for i in 0..self.filter.rows.len() {
+                    let row = self.filter.rows[i].clone();
+                    let mut new = row.clone();
+                    ui.horizontal(|ui| {
+                        // a fixed-width lead so every row's drop-downs line up
+                        let (lr, _) = ui.allocate_exact_size(vec2(48.0, 20.0), Sense::hover());
+                        ui.painter().text(lr.left_center(), Align2::LEFT_CENTER, if i == 0 { "Where" } else { "And" }, FontId::proportional(14.0), t.text3);
+                        let fr = egui::ComboBox::from_id_salt(("filter_field", i)).width(130.0).selected_text(row.field.map(|f| f.label()).unwrap_or("Select filter")).show_ui(ui, |ui| {
+                            for f in FilterField::ALL {
+                                if ui.selectable_label(row.field == Some(f), f.label()).clicked() && row.field != Some(f) {
+                                    new.field = Some(f);
+                                    new.values.clear();
+                                }
+                            }
+                        });
+                        name_it(&fr.response, &format!("Filter {} field", i + 1));
+                        ui.add_enabled_ui(row.field.is_some(), |ui| {
+                            let or = egui::ComboBox::from_id_salt(("filter_op", i)).width(70.0).selected_text(if row.not { "is not" } else { "is" }).show_ui(ui, |ui| {
+                                if ui.selectable_label(!row.not, "is").clicked() {
+                                    new.not = false;
+                                }
+                                if ui.selectable_label(row.not, "is not").clicked() {
+                                    new.not = true;
+                                }
+                            });
+                            name_it(&or.response, &format!("Filter {} condition", i + 1));
+                            let choices = row.field.map(|f| self.filter_choices(f)).unwrap_or_default();
+                            let summary = if row.values.is_empty() {
+                                "Select option".to_string()
+                            } else {
+                                let names: Vec<String> = row.values.iter().filter_map(|v| choices.iter().find(|c| c.0 == *v).map(|c| c.1.clone())).collect();
+                                truncate(&names.join(", "), 24)
+                            };
+                            let single = row.field == Some(FilterField::DueDate);
+                            let vr = egui::ComboBox::from_id_salt(("filter_vals", i))
+                                .width(200.0)
+                                .selected_text(summary)
+                                .close_behavior(if single { egui::PopupCloseBehavior::CloseOnClick } else { egui::PopupCloseBehavior::CloseOnClickOutside })
+                                .show_ui(ui, |ui| {
+                                    for (v, label) in &choices {
+                                        let on = row.values.contains(v);
+                                        if ui.selectable_label(on, label).clicked() {
+                                            if single {
+                                                new.values = vec![v.clone()];
+                                            } else if on {
+                                                new.values.retain(|x| x != v);
+                                            } else {
+                                                new.values.push(v.clone());
+                                            }
+                                        }
+                                    }
+                                    if choices.is_empty() {
+                                        ui.label(RichText::new("Nothing to pick").color(t.text3));
+                                    }
+                                });
+                            name_it(&vr.response, &format!("Filter {} values", i + 1));
+                        });
+                        let x = ui.add(egui::Button::new("\u{2716}").frame(false));
+                        name_it(&x, &format!("Remove filter {}", i + 1));
+                        if x.clicked() {
+                            drop = Some(i);
+                        }
+                    });
+                    if new != row {
+                        self.filter.rows[i] = new;
+                    }
+                }
+                if let Some(i) = drop {
+                    self.filter.rows.remove(i);
+                }
+                if ui.add(egui::Button::new(RichText::new("+ Add filter").color(t.text2)).frame(false)).clicked() {
+                    self.filter.rows.push(FilterRow::default());
+                }
+                ui.separator();
+                ui.checkbox(&mut self.filter.archived, "Show archived tasks only");
+                ui.checkbox(&mut self.me_mode, "Only my tasks");
+            });
+        });
+        // close on Escape, or a press outside the panel and its drop-downs
+        let pressed_outside = ctx.input(|i| i.pointer.any_pressed()) && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !pill.contains(p)) && !self.menu_was_open && !ctx.memory(|m| m.any_popup_open());
+        if pressed_outside || (ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open) {
+            close = true;
+        }
+        if close {
+            self.filter_open = false;
+        }
     }
 
     // ---------------------------------------------------------------- bulk edit
@@ -984,7 +1446,7 @@ impl App {
             new.start = Some(s + shift);
         }
         new.status = first;
-        new.activity.push(Activity { ts: now_ts(), author: self.data.me, text: format!("completed a {} repeat; next due {}", r, fmt_date(next)), comment: false });
+        new.activity.push(Activity { ts: now_ts(), author: self.data.me, text: format!("completed a {} repeat; next due {}", r, fmt_date(next)), comment: false, ..Default::default() });
         for c in &mut new.checklist {
             c.done = false;
         }

@@ -602,3 +602,61 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<Naive
     });
     changed
 }
+
+/// The frame every dialog window uses (Create List, Create a Space, Create Task...).
+pub fn dialog_frame(t: &Theme) -> egui::Frame {
+    egui::Frame::new().fill(t.card).corner_radius(12).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(20))
+}
+
+/// Dialog heading: title on the left, round close button on the right.
+/// Returns true when the close button was clicked.
+pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
+    let mut close = false;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(title).size(18.0).color(t.text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+            name_it(&resp, "Close");
+            ui.painter().circle_filled(r.center(), 14.0, if resp.hovered() { t.border } else { t.hover });
+            let c = r.center();
+            ui.painter().line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], Stroke::new(1.5, t.text2));
+            ui.painter().line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], Stroke::new(1.5, t.text2));
+            if resp.on_hover_text("Close").clicked() {
+                close = true;
+            }
+        });
+    });
+    close
+}
+
+/// A small switch (on/off) with a label, named for tests and screen readers.
+pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(34.0, 20.0), Sense::click());
+    name_it(&resp, label);
+    if resp.clicked() {
+        *on = !*on;
+    }
+    let bg = if *on { t.primary } else { t.border };
+    ui.painter().rect_filled(r, 10.0, bg);
+    let x = if *on { r.right() - 10.0 } else { r.left() + 10.0 };
+    ui.painter().circle_filled(pos2(x, r.center().y), 7.0, Color32::WHITE);
+    resp
+}
+
+/// Names a text field by its hint so screen readers (and the click tests) can find it.
+pub fn name_field(resp: &Response, label: &str) {
+    let l = label.to_string();
+    resp.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, l.clone()));
+}
+
+/// A full-width faint "+ Add ..." row (Add subtask, Create checklist).
+pub fn add_line(ui: &mut Ui, t: &Theme, label: &str) -> Response {
+    let w = ui.available_width();
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+    name_it(&resp, label);
+    if resp.hovered() {
+        ui.painter().rect_filled(r, 6.0, t.hover);
+    }
+    ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text2);
+    resp
+}

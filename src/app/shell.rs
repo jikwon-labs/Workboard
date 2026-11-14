@@ -341,6 +341,8 @@ pub(super) struct Cols {
     pub status: Rect,
     pub comments: Rect,
     pub created: Rect,
+    /// Extra property columns that are shown (Created by, Tags...).
+    pub extra: Vec<(&'static str, Rect)>,
     /// Left edge of the leftmost shown column (the name ends before it).
     pub left: f32,
 }
@@ -362,7 +364,17 @@ pub(super) fn col_layout(row: Rect, hidden: &HashSet<String>, show_pr: bool) -> 
     let due = take("Due date", 100.0);
     let assignee = take("Assignee", 100.0);
     let created = take("Date created", 110.0);
-    Cols { assignee, due, priority, status, comments, created, left: x }
+    // extra property columns only while the name keeps room to read
+    const MIN_NAME: f32 = 300.0;
+    let mut extra = vec![];
+    for p in parity::PROPERTIES {
+        let w = parity::prop_width(p);
+        if !hidden.contains(p) && x - w >= row.left() + MIN_NAME {
+            x -= w;
+            extra.push((p, Rect::from_min_max(pos2(x, row.top()), pos2(x + w, row.bottom()))));
+        }
+    }
+    Cols { assignee, due, priority, status, comments, created, extra, left: x }
 }
 
 impl App {
@@ -946,8 +958,9 @@ impl App {
                                     });
                                 }
                                 "My Tasks" if self.my_tasks_open => {
+                                    // its three items stay open, as in the original
                                     if r.clicked() {
-                                        self.my_tasks_open = false;
+                                        self.actions.push(Action::Go(Location::MyTasks));
                                     }
                                     let me = self.data.me;
                                     let td = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && x.due.map(|d| d <= today()).unwrap_or(false) && !self.data.is_closed(x)).count();
@@ -1070,7 +1083,7 @@ impl App {
                                 self.actions.push(Action::Go(Location::Everything));
                             }
                         }
-                        let spaces: Vec<Space> = self.data.spaces.iter().filter(|s| s.private_owner.is_none()).cloned().collect();
+                        let spaces: Vec<Space> = self.data.spaces.iter().filter(|s| s.private_owner.is_none() && !s.archived && !s.hidden).cloned().collect();
                         for s in &spaces {
                             self.space_rows(ui, s);
                         }
@@ -1083,7 +1096,7 @@ impl App {
                     if (filter.is_empty() || filter == "unread") && !self.hidden("Channels") {
                         let hs = self.side_header(ui, "Channels", &[("+", "Create a Channel")]);
                         if hs[0].clicked() {
-                            self.new_channel = Some(String::new());
+                            self.modal = Some(Modal::NewChannel { name: String::new(), private: false, add_list: false });
                         }
                         let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone(), if muted { 0 } else { self.unread_count(c) })).collect();
                         for (id, name, unread) in chans {
@@ -1135,7 +1148,7 @@ impl App {
                                         let id = self.data.new_id();
                                         let clean = name.trim().to_lowercase().replace(' ', "-");
                                         let members = self.data.members.iter().map(|m| m.id).collect();
-                                        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts() });
+                                        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
                                         self.section = Section::Chat;
                                         self.chat_open = Some(id);
                                         self.dirty = true;
@@ -1206,6 +1219,34 @@ impl App {
             });
     }
 
+    pub(super) fn on_personal_list(&self) -> bool {
+        matches!(self.loc, Location::List(id) if Some(id) == self.personal_list_id())
+    }
+
+    /// The Personal List opens with Group: None, the Date created column and
+    /// only Board / List views; the earlier settings come back on leaving.
+    pub(super) fn personal_list_defaults(&mut self) {
+        let on = self.section == Section::Home && self.on_personal_list();
+        match (on, self.personal_saved) {
+            (true, None) => {
+                self.personal_saved = Some((self.group_by, self.hidden_cols.contains("Date created")));
+                self.group_by = GroupBy::None;
+                self.hidden_cols.remove("Date created");
+            }
+            (false, Some((g, hid))) => {
+                self.group_by = g;
+                if hid {
+                    self.hidden_cols.insert("Date created".into());
+                }
+                self.personal_saved = None;
+            }
+            _ => {}
+        }
+        if on && !matches!(self.view, ViewKind::Board | ViewKind::List) {
+            self.view = ViewKind::List;
+        }
+    }
+
     pub(super) fn personal_list_id(&self) -> Option<u64> {
         let me = self.data.me;
         self.data.spaces.iter().find(|s| s.private_owner == Some(me)).and_then(|s| s.lists.first()).map(|l| l.id)
@@ -1218,7 +1259,7 @@ impl App {
         let me = self.data.me;
         let sid = self.data.new_id();
         let lid = self.data.new_id();
-        self.data.spaces.push(Space { id: sid, name: "Personal".into(), color: [100, 100, 100], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "Personal List".into() }], expanded: true, private_owner: Some(me) });
+        self.data.spaces.push(Space { id: sid, name: "Personal".into(), color: [100, 100, 100], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "Personal List".into(), ..Default::default() }], expanded: true, private_owner: Some(me), ..Default::default() });
         self.dirty = true;
         lid
     }
@@ -1239,7 +1280,7 @@ impl App {
         let t = self.t();
         let loc = Location::Space(s.id);
         let color = rgb(s.color);
-        let letter = s.name.chars().next().unwrap_or('S').to_uppercase().to_string();
+        let letter = Data::space_glyph(s);
         let expanded = s.expanded;
         let sel = self.section == Section::Home && self.loc == loc;
         let r = self.side_row(ui, 0.0, sel, |p, c| {
@@ -1338,12 +1379,12 @@ impl App {
                 }
             });
             if fexp {
-                for l in &f.lists {
+                for l in f.lists.iter().filter(|l| !l.archived) {
                     self.list_row(ui, 30.0, l);
                 }
             }
         }
-        for l in &s.lists {
+        for l in s.lists.iter().filter(|l| !l.archived) {
             self.list_row(ui, 14.0, l);
         }
         let docs: Vec<(u64, String)> = self.data.docs.iter().filter(|d| d.space == Some(s.id) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
@@ -1396,11 +1437,8 @@ impl App {
             ui.painter().rect_filled(plus, 5.0, if pr.hovered() { t.border } else { t.hover });
             ui.painter().text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(15.0), t.text2);
         }
-        if pr.on_hover_text("Create task").clicked() {
-            self.section = Section::Home;
-            self.loc = loc;
-            self.open_quick_add(None);
-        }
+        // the same "Create" menu as the original's list "+"
+        click_menu(&pr, |ui| self.list_create_menu(ui, lid));
         r.context_menu(|ui| self.list_menu(ui, lid));
     }
 
@@ -1413,7 +1451,12 @@ impl App {
             ui.horizontal(|ui| {
                 ui.set_height(30.0);
                 let mut crumbs: Vec<(String, u8, Option<[u8; 3]>)> = vec![];
+                let personal = self.on_personal_list();
                 match self.loc {
+                    Location::List(_) if personal => {
+                        crumbs.push(("My Tasks".into(), 3, None));
+                        crumbs.push(("Personal List".into(), 2, None));
+                    }
                     Location::List(id) => {
                         if let Some(s) = self.data.space_of_list(id) {
                             crumbs.push((s.name.clone(), 0, Some(s.color)));
@@ -1446,7 +1489,8 @@ impl App {
                     match kind {
                         0 => {
                             ui.painter().rect_filled(r.shrink(1.0), 4.0, rgb(color.unwrap_or([96, 73, 231])));
-                            ui.painter().text(r.center(), Align2::CENTER_CENTER, name.chars().next().unwrap_or('S').to_uppercase().to_string(), FontId::proportional(10.0), Color32::WHITE);
+                            let glyph = self.data.spaces.iter().find(|s| &s.name == name && Some(s.color) == *color).map(Data::space_glyph).unwrap_or_else(|| name.chars().next().unwrap_or('S').to_uppercase().to_string());
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(10.0), Color32::WHITE);
                         }
                         1 => {
                             ui.painter().rect_stroke(Rect::from_center_size(r.center(), vec2(14.0, 11.0)), 2.0, Stroke::new(1.2, t.text2), egui::StrokeKind::Inside);
@@ -1456,6 +1500,9 @@ impl App {
                     }
                     let last = i + 1 == n;
                     ui.label(RichText::new(name).size(15.0).color(if last { t.text } else { t.text2 }));
+                    if last && personal {
+                        ui.label(RichText::new("\u{1F512}").size(12.0).color(t.text3)).on_hover_text("Private: only you can see this List");
+                    }
                     if last {
                         let (cr, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
                         let cv = cr.center();
@@ -1545,15 +1592,17 @@ impl App {
             // view tabs
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                // "Add Channel": a chat channel for this location
-                let ac = ui.add(egui::Button::new(RichText::new("Add Channel").size(13.5).color(t.text3)).stroke(Stroke::new(1.0, t.border)).corner_radius(6).min_size(vec2(0.0, 26.0)));
+                // "Add Channel": a chat channel for this location (not on the
+                // Personal List, as in the original)
+                let personal = self.on_personal_list();
+                let ac = if personal { ui.allocate_response(vec2(0.0, 0.0), Sense::hover()) } else { ui.add(egui::Button::new(RichText::new("Add Channel").size(13.5).color(t.text3)).stroke(Stroke::new(1.0, t.border)).corner_radius(6).min_size(vec2(0.0, 26.0))) };
                 if ac.clicked() {
                     let name = self.data.location_name(self.loc).to_lowercase().replace(' ', "-");
                     let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Channel && c.name == name).map(|c| c.id);
                     let id = existing.unwrap_or_else(|| {
                         let id = self.data.new_id();
                         let members = self.data.members.iter().map(|m| m.id).collect();
-                        self.data.channels.push(Channel { id, name: name.clone(), kind: ChannelKind::Channel, topic: format!("Conversations about {}", self.data.location_name(self.loc)), members, messages: vec![], last_read: now_ts() });
+                        self.data.channels.push(Channel { id, name: name.clone(), kind: ChannelKind::Channel, topic: format!("Conversations about {}", self.data.location_name(self.loc)), members, messages: vec![], last_read: now_ts(), ..Default::default() });
                         self.dirty = true;
                         id
                     });
@@ -1567,6 +1616,9 @@ impl App {
                 }
                 for v in ViewKind::ALL {
                     if (v == ViewKind::Overview && is_list) || (v != self.view && self.data.extra.hidden_views.iter().any(|h| h == v.label())) {
+                        continue;
+                    }
+                    if personal && !matches!(v, ViewKind::Board | ViewKind::List) {
                         continue;
                     }
                     let sel = self.view == v;
@@ -1631,9 +1683,15 @@ impl App {
                     }
                 }
                 if self.view == ViewKind::List {
-                    let n = self.hidden_cols.iter().filter(|c| c.as_str() != "Date created").count();
-                    let cr = pill(ui, &t, "\u{25A5}  Columns", n > 0, false);
-                    popup(ui, &cr, ui.id().with("cols_pop"), 200.0, |ui| self.columns_panel(ui));
+                    let n = self.hidden_cols.iter().filter(|c| c.as_str() != "Date created" && !parity::PROPERTIES.contains(&c.as_str())).count();
+                    let extra = parity::PROPERTIES.iter().filter(|p| self.col_on(p)).count();
+                    let cr = pill(ui, &t, "\u{25A5}  Columns", n > 0 || extra > 0 || self.fields_open, false);
+                    if cr.clicked() {
+                        self.fields_open = !self.fields_open;
+                    }
+                    if self.fields_open {
+                        self.fields_panel(ui.ctx(), cr.rect.bottom() + 6.0);
+                    }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
@@ -1694,8 +1752,13 @@ impl App {
                     }
                     let nf = self.filter.count() + usize::from(!self.search.is_empty()) + usize::from(self.me_mode);
                     let flabel = if nf > 0 { format!("\u{2261}  Filter \u{00B7} {}", nf) } else { "\u{2261}  Filter".to_string() };
-                    let fr = pill(ui, &t, &flabel, nf > 0, false);
-                    popup(ui, &fr, ui.id().with("filter_pop"), 300.0, |ui| self.filter_panel(ui));
+                    let fr = pill(ui, &t, &flabel, nf > 0 || self.filter_open, false);
+                    if fr.clicked() {
+                        self.filter_open = !self.filter_open;
+                    }
+                    if self.filter_open {
+                        self.filter_panel(ui.ctx(), fr.rect.left_bottom() + vec2(0.0, 6.0), fr.rect);
+                    }
                     let sr = pill(ui, &t, &format!("\u{21C5}  Sort: {}{}", self.sort_by.label(), if self.sort_desc && self.sort_by != SortBy::Manual { " \u{2193}" } else { "" }), self.sort_by != SortBy::Manual, false);
                     popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
                         for s in [SortBy::Manual, SortBy::DueDate, SortBy::Priority, SortBy::Name, SortBy::Created] {
@@ -1731,6 +1794,7 @@ impl App {
         // one column header row for the whole list
         let w = ui.available_width();
         let (hr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
+        self.list_width = w;
         let cols = col_layout(hr, &self.hidden_cols, self.data.extra.apps.priorities);
         let p = ui.painter();
         p.text(hr.left_center() + vec2(36.0, 0.0), Align2::LEFT_CENTER, "Name", FontId::proportional(13.0), t.text2);
@@ -1740,6 +1804,9 @@ impl App {
                 continue;
             }
             p.text(r.left_center(), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text2);
+        }
+        for (label, r) in &cols.extra {
+            p.with_clip_rect(*r).text(r.left_center(), Align2::LEFT_CENTER, *label, FontId::proportional(13.0), t.text2);
         }
         let plus = Rect::from_center_size(pos2(hr.right() - 20.0, hr.center().y), vec2(16.0, 16.0));
         p.circle_filled(plus.center(), 8.0, t.text);
@@ -1775,6 +1842,8 @@ impl App {
                                 self.open_quick_add(None);
                             }
                         });
+                    } else if self.on_personal_list() {
+                        // the inline "+ Add Task" row below is the empty state
                     } else {
                         ui.label(RichText::new("No tasks here yet").size(16.0).color(t.text2));
                         ui.add_space(6.0);
@@ -2015,6 +2084,26 @@ impl App {
             let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today);
             ui.painter_at(cols.created).text(cols.created.left_center(), Align2::LEFT_CENTER, fmt_date(created), FontId::proportional(13.0), t.text2);
         }
+        for (name, r) in &cols.extra {
+            let txt = self.prop_text(task, name);
+            if txt.is_empty() {
+                continue;
+            }
+            let p = ui.painter_at(r.shrink2(vec2(0.0, 2.0)));
+            if *name == "Tags" {
+                let mut x = r.left();
+                for tag in &task.tags {
+                    let g = p.layout_no_wrap(tag.clone(), FontId::proportional(11.0), tag_color(tag));
+                    let chip = Rect::from_min_size(pos2(x, r.center().y - 9.0), vec2(g.size().x + 12.0, 18.0));
+                    p.rect_filled(chip, 4.0, tag_color(tag).gamma_multiply(0.16));
+                    p.galley(chip.center() - g.size() / 2.0, g, tag_color(tag));
+                    x = chip.right() + 4.0;
+                }
+            } else {
+                let short = if *name == "Latest comment" { truncate_chars(&txt, 26) } else { txt };
+                p.text(r.left_center(), Align2::LEFT_CENTER, short, FontId::proportional(13.0), t.text2);
+            }
+        }
         if let Some(true) = popup(ui, &sr, id.with("stcolp"), 200.0, |ui| status_menu(ui, &t, &statuses, &mut edited.status)) {
             changed = true;
         }
@@ -2216,5 +2305,13 @@ impl App {
                 }
             });
         ui.add_space(6.0);
+    }
+}
+
+fn truncate_chars(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        format!("{}\u{2026}", s.chars().take(n).collect::<String>())
     }
 }

@@ -5,8 +5,8 @@
 #   deploy/install-livekit.sh            set up keys (first time), install, (re)start
 #   deploy/install-livekit.sh uninstall  stop and remove (keys stay)
 #
-# It listens only on this Mac's Tailscale address: 7880 (signalling),
-# 7881/tcp and 7882/udp (audio). The API key and secret are made here once
+# It listens only on this Mac's Tailscale address: 7880 (signalling) and
+# 7882/udp (audio and video). The API key and secret are made here once
 # and kept in the workboard-server data folder (never in the repo):
 #   livekit.yaml  livekit-server's config
 #   livekit.json  what workboard-server needs to hand out call tokens
@@ -51,10 +51,17 @@ cat > "$YAML" <<YML
 port: 7880
 bind_addresses: ["$IP"]
 rtc:
-  tcp_port: 7881
+  # no TCP fallback: it would listen on every network, and UDP always
+  # works inside Tailscale
+  tcp_port: 0
   udp_port: 7882
   use_external_ip: false
   node_ip: $IP
+  # only the Tailscale network (not the home LAN) for audio and video
+  ips:
+    includes:
+      - 100.64.0.0/10
+      - fd7a:115c:a1e0::/48
 keys:
   $KEY: $SECRET
 logging:

@@ -21,7 +21,9 @@ another port). Run the script again after pulling new code.
     deploy/install-livekit.sh
 
 Installs livekit-server as the LaunchAgent `com.jikwon-labs.livekit-server`
-on the Tailscale address: 7880 (signalling), 7881/tcp and 7882/udp (audio).
+on the Tailscale address only: 7880 (signalling) and 7882/udp (audio and
+video). No TCP fallback (it would listen on every network; UDP always works
+inside Tailscale), and the home LAN address isn't used.
 The first run makes an API key and secret and keeps them in the data folder
 (`livekit.yaml`, `livekit.json`, mode 600); workboard-server reads
 `livekit.json` to hand out call tokens. Log: `~/Library/Logs/livekit-server.log`.

@@ -164,7 +164,7 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 ## 2026-11-15 사용자 결정과 이후 진행
 
 - **손 검증 완료(실제 GUI).** Mac mini 에서 실제 서버(Tailscale 주소)와 실제 앱 창 두 개를 손쉬운 사용 기능으로 클릭해 확인했다: A 가 빈 서버에 연결 -> B 가 연결해 합류, "Who are you?" 에서 새 멤버로 들어감 -> B 채팅이 A 에, A 답장·새 작업이 B 에 바로 보임 -> 서버를 끈 동안 B 가 쓴 메시지가 서버를 다시 켜고 2.7초 뒤 A 에 들어옴.
-- **자동 실행: 했다.** `deploy/install-launchd.sh` 가 LaunchAgent `com.jikwon-labs.workboard-server` 를 설치한다(로그인하면 시작, 죽으면 10초 안에 다시 시작, Tailscale 주소 8787 에만 바인딩, 로그 `~/Library/Logs/workboard-server.log`). 이 Mac mini 에 설치해 돌고 있다. 강제 종료 후 재시작도 확인했다. 운영 방법은 `deploy/README.md`. 자동 로그인과 `pmset autorestart` 는 꺼져 있다(sudo 필요, 사용자가 정한다). 그래서 정전 후에는 사람이 로그인해야 서버가 다시 뜬다.
+- **자동 실행: 했다.** `deploy/install-launchd.sh` 가 LaunchAgent `com.jikwon-labs.workboard-server` 를 설치한다(로그인하면 시작, 죽으면 10초 안에 다시 시작, Tailscale 주소 8787 에만 바인딩, 로그 `~/Library/Logs/workboard-server.log`). 이 Mac mini 에 설치해 돌고 있다. 강제 종료 후 재시작도 확인했다. 운영 방법은 `deploy/README.md`. 전원 설정은 `deploy/setup-power.sh`(sudo, 사용자가 Terminal 에서 한 번 실행): 잠자기 끄기, `autorestart 1`. FileVault 는 켜 두기로 했다(2026-11-15) — macOS 는 FileVault 가 켜져 있으면 자동 로그인을 막으므로, 정전 뒤에는 Mac mini 가 스스로 켜지고 FileVault 화면에서 누군가 암호를 한 번 넣어야 서버가 뜬다. 계획된 재시작은 `sudo fdesetup authrestart`.
 - **초대와 권한(2단계 설계 변경).** 워크스페이스를 만든 사람(서버에 처음 올린 사람)이 관리 권한을 가진다. 그 사람이 앱 안에서 팀원을 초대하고, 팀원에게 권한(예: 관리자로 올리기)을 줄 수 있다. 위 2단계의 "서버 관리 명령으로 초대 코드 만들기"는 앱 안의 초대·권한 화면으로 바꾼다. 서버는 이 권한을 확인해서 관리자가 아닌 사람의 초대·권한 변경을 거절한다. 세부(역할 종류, 초대 코드 전달 방식)는 2단계 시작 때 정한다.
 - **백업 보관: 설계안대로(매시간 48개, 매일 30개).**
 

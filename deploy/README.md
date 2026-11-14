@@ -29,14 +29,19 @@ Stop and remove: `deploy/install-livekit.sh uninstall`.
 
 ## Keep the Mac mini reachable
 
-A LaunchAgent runs while the user is logged in. For a Mac mini that should
-come back by itself after a power cut (run these yourself; they need sudo):
+Run once in Terminal on the Mac mini (asks for your password):
 
-    sudo pmset -a sleep 0          # never sleep (already 0 on this Mac mini)
-    sudo pmset -a autorestart 1    # power back on after a power failure
+    deploy/setup-power.sh
 
-and turn on automatic login in System Settings > Users & Groups (FileVault
-must be off for automatic login).
+It turns off sleep and disk sleep, keeps wake-for-network on, and makes the
+Mac mini power on by itself when electricity comes back (`autorestart`).
+
+This Mac mini keeps FileVault on (decided 2026-11-15), so macOS won't log in
+automatically: after a power cut it powers on and waits at the FileVault
+screen until someone types the password; then workboard-server and
+livekit-server start by themselves. For a planned restart without being at
+the keyboard, use `sudo fdesetup authrestart`. (With FileVault off the same
+script also turns on automatic login.)
 
 ## Setting up and inviting
 

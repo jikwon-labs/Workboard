@@ -2,10 +2,13 @@
 // WebSocket) and the app's side of the connection, which runs on its own
 // thread so the window never waits for the network.
 //
-// Order of a connection: the app sends `hello`, the server answers `welcome`
-// with the team's copy, then the app sends `push` with its whole shared copy
-// whenever it changes and the server sends `update` to everyone when the
-// team's copy changed. Both sides answer `ping` with `pong`.
+// Order of a connection: the app sends `hello` (with its device token, or an
+// invite code, or a claim on an empty server), the server answers `welcome`
+// with the team's copy (and a new token when it issued one), then the app
+// sends `push` with its whole shared copy whenever it changes and the server
+// sends `update` to everyone when the team's copy changed. Both sides answer
+// `ping` with `pong`. Owners and admins also send the access requests
+// (`create_invite`, `set_role`, `revoke`, `access_list`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,6 +28,48 @@ pub const PING_SECS: u64 = 30;
 /// Nothing heard for this long (not even a pong) means the line is dead.
 pub const SILENT_SECS: u64 = 75;
 
+/// What someone may do on the server. The owner set the workspace up.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    #[default]
+    Member,
+    Admin,
+    Owner,
+}
+
+impl Role {
+    /// May invite people, change roles and remove access.
+    pub fn manages(self) -> bool {
+        self >= Role::Admin
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Role::Member => "Member",
+            Role::Admin => "Admin",
+            Role::Owner => "Owner",
+        }
+    }
+}
+
+/// One person's access, for owners and admins.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Person {
+    pub member: u64,
+    pub role: Role,
+    /// Computers signed in as this person.
+    pub devices: usize,
+    /// An invite code not used yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite: Option<String>,
+}
+
+/// Why the server said no to signing in. The app stops trying.
+pub const CODE_AUTH: &str = "auth";
+/// A request the person isn't allowed to make. The connection stays.
+pub const CODE_DENIED: &str = "denied";
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
@@ -32,9 +77,15 @@ pub enum Msg {
         device: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tag: Option<u16>,
-        /// For sign-in later (stage 2); not checked yet.
+        /// This device's token from an earlier welcome.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<String>,
+        /// A one-time invite code, when joining.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invite: Option<String>,
+        /// Setting up an empty server: who I am in the workspace I bring.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claim: Option<u64>,
     },
     Welcome {
         /// The id tag this device must use; the server keeps them unique.
@@ -42,6 +93,12 @@ pub enum Msg {
         /// The team's copy, or nothing when the server is still empty.
         snapshot: Option<Value>,
         rev: u64,
+        /// The member this device signs in as.
+        member: u64,
+        role: Role,
+        /// A new token to keep (after an invite or a claim).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
     },
     Push {
         data: Value,
@@ -52,8 +109,34 @@ pub enum Msg {
     },
     Ping,
     Pong,
+    /// Owner or admin: a one-time code that signs someone in as `member`.
+    CreateInvite {
+        member: u64,
+        #[serde(default)]
+        role: Role,
+    },
+    Invite {
+        member: u64,
+        code: String,
+    },
+    SetRole {
+        member: u64,
+        role: Role,
+    },
+    /// Sign out every computer of this member and cancel their invite.
+    Revoke {
+        member: u64,
+    },
+    AccessList,
+    Access {
+        people: Vec<Person>,
+        /// The asker's own role (it may have just changed).
+        role: Role,
+    },
     Error {
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
     },
 }
 
@@ -64,6 +147,10 @@ impl Msg {
 
     pub fn parse(s: &str) -> Option<Msg> {
         serde_json::from_str(s).ok()
+    }
+
+    pub fn error(message: &str, code: Option<&str>) -> Msg {
+        Msg::Error { message: message.to_string(), code: code.map(|c| c.to_string()) }
     }
 }
 
@@ -107,17 +194,35 @@ pub enum Status {
     Connected,
     /// Lost or couldn't reach the server; trying again. Holds why.
     Reconnecting(String),
+    /// The server won't let this computer in (no or bad invite, access
+    /// removed). Not trying again.
+    Refused(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Status(Status),
-    Welcome { tag: u16, snapshot: Option<Value>, rev: u64 },
+    Welcome { tag: u16, snapshot: Option<Value>, rev: u64, member: u64, role: Role, token: Option<String> },
     Update { data: Value, rev: u64 },
+    Invite { member: u64, code: String },
+    Access { people: Vec<Person>, role: Role },
+    /// A request was turned down; the connection stays.
+    Denied(String),
+}
+
+/// How this computer signs in.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SignIn {
+    pub device: String,
+    pub tag: Option<u16>,
+    pub token: Option<String>,
+    pub invite: Option<String>,
+    pub claim: Option<u64>,
 }
 
 enum Cmd {
     Push(Value),
+    Send(Msg),
     Stop,
 }
 
@@ -131,14 +236,14 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 impl Client {
     /// Start connecting in the background. `wake` is called after each event
-    /// so the window can redraw. Reconnects by itself until dropped.
-    pub fn start(addr: &str, device: String, tag: Option<u16>, wake: Wake) -> Client {
+    /// so the window can redraw. Reconnects by itself until dropped or refused.
+    pub fn start(addr: &str, sign_in: SignIn, wake: Wake) -> Client {
         let (tx, crx) = mpsc::channel();
         let (etx, rx) = mpsc::channel();
         let addr = addr.to_string();
         std::thread::Builder::new()
             .name("workboard-net".into())
-            .spawn(move || run(addr, device, tag, crx, etx, wake))
+            .spawn(move || run(addr, sign_in, crx, etx, wake))
             .expect("start network thread");
         Client { tx, rx }
     }
@@ -146,6 +251,11 @@ impl Client {
     /// Send our whole shared copy (sent once connected if not yet).
     pub fn push(&self, data: Value) {
         let _ = self.tx.send(Cmd::Push(data));
+    }
+
+    /// Send a request (access requests). Dropped when not connected.
+    pub fn send(&self, msg: Msg) {
+        let _ = self.tx.send(Cmd::Send(msg));
     }
 
     /// Everything that happened since the last call.
@@ -199,6 +309,7 @@ fn wait(crx: &Receiver<Cmd>, pending: &mut Option<Value>, secs: u64) -> bool {
     while Instant::now() < until {
         match crx.recv_timeout(Duration::from_millis(100)) {
             Ok(Cmd::Push(v)) => *pending = Some(v),
+            Ok(Cmd::Send(_)) => {}
             Ok(Cmd::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return false,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
@@ -209,9 +320,10 @@ fn wait(crx: &Receiver<Cmd>, pending: &mut Option<Value>, secs: u64) -> bool {
 enum End {
     Stop,
     Lost(String),
+    Refused(String),
 }
 
-fn run(addr: String, device: String, mut tag: Option<u16>, crx: Receiver<Cmd>, etx: Sender<Event>, wake: Wake) {
+fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>, wake: Wake) {
     let line = Line { tx: etx, wake };
     let mut pending: Option<Value> = None;
     let mut tries: u64 = 0;
@@ -219,7 +331,7 @@ fn run(addr: String, device: String, mut tag: Option<u16>, crx: Receiver<Cmd>, e
     loop {
         let end = match connect(&addr) {
             Ok(mut ws) => {
-                let end = session(&mut ws, &line, &crx, &device, &mut tag, &mut pending, &mut tries);
+                let end = session(&mut ws, &line, &crx, &mut sign_in, &mut pending, &mut tries);
                 let _ = ws.close(None);
                 let _ = ws.flush();
                 end
@@ -228,6 +340,16 @@ fn run(addr: String, device: String, mut tag: Option<u16>, crx: Receiver<Cmd>, e
         };
         match end {
             End::Stop => return,
+            End::Refused(why) => {
+                line.emit(Event::Status(Status::Refused(why)));
+                // stay until the app lets go, so it can read the status
+                while let Ok(c) = crx.recv() {
+                    if matches!(c, Cmd::Stop) {
+                        return;
+                    }
+                }
+                return;
+            }
             End::Lost(why) => {
                 if !line.emit(Event::Status(Status::Reconnecting(why))) {
                     return;
@@ -242,18 +364,21 @@ fn run(addr: String, device: String, mut tag: Option<u16>, crx: Receiver<Cmd>, e
     }
 }
 
-fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, device: &str, tag: &mut Option<u16>, pending: &mut Option<Value>, tries: &mut u64) -> End {
+fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign_in: &mut SignIn, pending: &mut Option<Value>, tries: &mut u64) -> End {
     let send = |ws: &mut WebSocket<TcpStream>, m: &Msg| ws.send(Message::text(m.to_json())).map_err(|e| e.to_string());
-    if let Err(e) = send(ws, &Msg::Hello { device: device.to_string(), tag: *tag, token: None }) {
+    let hello = Msg::Hello { device: sign_in.device.clone(), tag: sign_in.tag, token: sign_in.token.clone(), invite: sign_in.invite.clone(), claim: sign_in.claim };
+    if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
     }
     let mut welcomed = false;
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
     loop {
+        let mut outbox: Vec<Msg> = vec![];
         loop {
             match crx.try_recv() {
                 Ok(Cmd::Push(v)) => *pending = Some(v),
+                Ok(Cmd::Send(m)) => outbox.push(m),
                 Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => return End::Stop,
                 Err(TryRecvError::Empty) => break,
             }
@@ -261,6 +386,11 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, devi
         if welcomed {
             if let Some(v) = pending.take() {
                 if let Err(e) = send(ws, &Msg::Push { data: v }) {
+                    return End::Lost(e);
+                }
+            }
+            for m in outbox {
+                if let Err(e) = send(ws, &m) {
                     return End::Lost(e);
                 }
             }
@@ -274,37 +404,45 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, devi
         if last_heard.elapsed() >= Duration::from_secs(SILENT_SECS) {
             return End::Lost("The server stopped answering.".into());
         }
-        match ws.read() {
+        let emit = |e: Event| -> Result<(), End> { if line.emit(e) { Ok(()) } else { Err(End::Stop) } };
+        let res: Result<(), End> = match ws.read() {
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
                 match Msg::parse(t.as_str()) {
-                    Some(Msg::Welcome { tag: t, snapshot, rev }) => {
-                        *tag = Some(t);
+                    Some(Msg::Welcome { tag, snapshot, rev, member, role, token }) => {
+                        // sign in the same way next time
+                        sign_in.tag = Some(tag);
+                        if let Some(t) = &token {
+                            sign_in.token = Some(t.clone());
+                        }
+                        sign_in.invite = None;
+                        sign_in.claim = None;
                         welcomed = true;
                         *tries = 0;
-                        line.emit(Event::Status(Status::Connected));
-                        if !line.emit(Event::Welcome { tag: t, snapshot, rev }) {
-                            return End::Stop;
-                        }
+                        emit(Event::Status(Status::Connected)).and_then(|_| emit(Event::Welcome { tag, snapshot, rev, member, role, token }))
                     }
-                    Some(Msg::Update { data, rev }) => {
-                        if !line.emit(Event::Update { data, rev }) {
-                            return End::Stop;
-                        }
-                    }
-                    Some(Msg::Ping) => {
-                        if let Err(e) = send(ws, &Msg::Pong) {
-                            return End::Lost(e);
-                        }
-                    }
-                    Some(Msg::Error { message }) => return End::Lost(message),
-                    _ => {}
+                    Some(Msg::Update { data, rev }) => emit(Event::Update { data, rev }),
+                    Some(Msg::Invite { member, code }) => emit(Event::Invite { member, code }),
+                    Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),
+                    Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
+                    Some(Msg::Error { message, code }) => match code.as_deref() {
+                        Some(CODE_AUTH) => Err(End::Refused(message)),
+                        Some(CODE_DENIED) => emit(Event::Denied(message)),
+                        _ => Err(End::Lost(message)),
+                    },
+                    _ => Ok(()),
                 }
             }
-            Ok(Message::Close(_)) => return End::Lost("The server closed the connection.".into()),
-            Ok(_) => last_heard = Instant::now(),
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
-            Err(e) => return End::Lost(e.to_string()),
+            Ok(Message::Close(_)) => Err(End::Lost("The server closed the connection.".into())),
+            Ok(_) => {
+                last_heard = Instant::now();
+                Ok(())
+            }
+            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => Ok(()),
+            Err(e) => Err(End::Lost(e.to_string())),
+        };
+        if let Err(end) = res {
+            return end;
         }
     }
 }
@@ -327,9 +465,16 @@ mod tests {
 
     #[test]
     fn messages_round_trip_as_tagged_json() {
-        let m = Msg::Hello { device: "d1".into(), tag: Some(3), token: None };
+        let m = Msg::Hello { device: "d1".into(), tag: Some(3), token: None, invite: None, claim: None };
         assert_eq!(m.to_json(), r#"{"type":"hello","device":"d1","tag":3}"#);
-        assert_eq!(Msg::parse(r#"{"type":"hello","device":"d1"}"#), Some(Msg::Hello { device: "d1".into(), tag: None, token: None }));
+        assert_eq!(Msg::parse(r#"{"type":"hello","device":"d1"}"#), Some(Msg::Hello { device: "d1".into(), tag: None, token: None, invite: None, claim: None }));
         assert_eq!(Msg::parse(r#"{"type":"ping"}"#), Some(Msg::Ping));
+        assert_eq!(Msg::parse(r#"{"type":"set_role","member":5,"role":"admin"}"#), Some(Msg::SetRole { member: 5, role: Role::Admin }));
+    }
+
+    #[test]
+    fn roles_order_from_member_to_owner() {
+        assert!(Role::Owner.manages() && Role::Admin.manages() && !Role::Member.manages());
+        assert!(Role::Owner > Role::Admin && Role::Admin > Role::Member);
     }
 }

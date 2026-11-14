@@ -515,9 +515,13 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     h.click("Server address");
     h.type_text("127.0.0.1:1");
     h.settle();
+    h.click("Invite code entry");
+    h.type_text("abcd-efgh-jkmn");
+    h.settle();
     h.click("Connect");
     let j = h.app.sync_rt.joining.as_ref().expect("connecting");
     assert_eq!(j.addr, "127.0.0.1:1");
+    assert_eq!(j.invite, "abcd-efgh-jkmn");
     assert!(h.has("Cancel"));
     h.click("Cancel");
     assert!(h.app.sync_rt.joining.is_none());
@@ -539,6 +543,41 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     }
     h.settle();
     assert!(h.tree.iter().any(|(n, _)| n.starts_with("Status: Reconnecting")), "shows that it is reconnecting");
+    // owners and admins see everyone's access
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    let me = h.app.data.me;
+    let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().clone();
+    h.app.sync_rt.people = vec![
+        wb_net::Person { member: me, role: wb_net::Role::Owner, devices: 1, invite: None },
+        wb_net::Person { member: other.id, role: wb_net::Role::Member, devices: 0, invite: Some("ABCD-EFGH-JKMN".into()) },
+    ];
+    h.settle();
+    let my_name = h.app.data.member(me).unwrap().name.clone();
+    assert!(h.has(&format!("Signed in as {} (Owner)", my_name)));
+    assert!(h.has("People"));
+    assert!(h.has("Make admin") && h.has("Remove access") && h.has("New code"));
+    assert!(h.has(&format!("Code for {}: ABCD-EFGH-JKMN", other.name)));
+    h.click("Copy");
+    // an admin can't make a code for the owner
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.app.sync_rt.people[0].member = other.id;
+    h.app.sync_rt.people[1] = wb_net::Person { member: me, role: wb_net::Role::Admin, devices: 1, invite: None };
+    h.settle();
+    assert!(!h.has("Invite code") && !h.has("New code"), "no code button on the owner's row for an admin");
+    // a member sees no People list
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.settle();
+    assert!(!h.has("People") && !h.has("Make admin"));
+    // access removed: sign in again with a code
+    h.app.sync_rt.net_status = Some(wb_net::Status::Refused("Your access to this server was removed.".into()));
+    h.settle();
+    assert!(h.has("Sign in"));
+    h.click("Invite code entry");
+    h.type_text("NEWC-ODEX-XXXX");
+    h.settle();
+    h.click("Sign in");
+    assert_eq!(h.app.sync_rt.reinvite.as_deref(), Some("NEWC-ODEX-XXXX"));
     h.click("Reconnect now");
     assert!(h.app.sync_rt.net.is_none(), "starts over on the next frame");
     h.click("Stop sharing");

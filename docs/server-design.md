@@ -166,7 +166,20 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 - **손 검증 완료(실제 GUI).** Mac mini 에서 실제 서버(Tailscale 주소)와 실제 앱 창 두 개를 손쉬운 사용 기능으로 클릭해 확인했다: A 가 빈 서버에 연결 -> B 가 연결해 합류, "Who are you?" 에서 새 멤버로 들어감 -> B 채팅이 A 에, A 답장·새 작업이 B 에 바로 보임 -> 서버를 끈 동안 B 가 쓴 메시지가 서버를 다시 켜고 2.7초 뒤 A 에 들어옴.
 - **자동 실행: 했다.** `deploy/install-launchd.sh` 가 LaunchAgent `com.jikwon-labs.workboard-server` 를 설치한다(로그인하면 시작, 죽으면 10초 안에 다시 시작, Tailscale 주소 8787 에만 바인딩, 로그 `~/Library/Logs/workboard-server.log`). 이 Mac mini 에 설치해 돌고 있다. 강제 종료 후 재시작도 확인했다. 운영 방법은 `deploy/README.md`. 자동 로그인과 `pmset autorestart` 는 꺼져 있다(sudo 필요, 사용자가 정한다). 그래서 정전 후에는 사람이 로그인해야 서버가 다시 뜬다.
 - **초대와 권한(2단계 설계 변경).** 워크스페이스를 만든 사람(서버에 처음 올린 사람)이 관리 권한을 가진다. 그 사람이 앱 안에서 팀원을 초대하고, 팀원에게 권한(예: 관리자로 올리기)을 줄 수 있다. 위 2단계의 "서버 관리 명령으로 초대 코드 만들기"는 앱 안의 초대·권한 화면으로 바꾼다. 서버는 이 권한을 확인해서 관리자가 아닌 사람의 초대·권한 변경을 거절한다. 세부(역할 종류, 초대 코드 전달 방식)는 2단계 시작 때 정한다.
-- **백업 보관: 사용자에게 설명 후 결정 대기.**
+- **백업 보관: 설계안대로(매시간 48개, 매일 30개).**
+
+## 2단계 구현 결과 (2026-11-15)
+
+2단계(로그인·권한·백업·운영)는 끝났다. 3단계 세션은 이 절을 먼저 읽는다.
+
+- **로그인.** 빈 서버에 처음 연결한 앱(초대 코드 없이 Connect)이 작업공간을 올리고 그 사람이 **owner** 가 된다(`hello.claim` = 그 앱의 `me`). 그 뒤로는 **1회용 초대 코드**가 있어야 들어온다. 코드는 멤버 한 명에 묶여 있어서 "Who are you?" 를 거치지 않고 바로 그 사람으로 로그인한다. 서버는 기기 토큰을 발급하고, 앱은 다음부터 토큰으로 들어온다. 토큰이 틀리거나 접속이 끊겼으면 서버가 `error{code:"auth"}` 를 보내고, 앱은 다시 연결하기를 멈춘 뒤 "Not signed in" 과 코드 입력칸을 보여 준다.
+- **권한.** 역할은 owner / admin / member. owner·admin 은 함께 쓰기 창의 People 에서 코드 만들기(Invite code / New code), admin 으로 올리기·내리기, 접속 끊기(Remove access, 그 사람의 모든 컴퓨터를 즉시 로그아웃)를 한다. owner 는 바꾸거나 끊을 수 없다. owner 로 로그인하는 코드는 owner 만 만들 수 있고 owner 만 볼 수 있다(손 검증에서 admin 이 owner 코드를 만들 수 있던 구멍을 찾아 막았다). 접속을 끊으면 admin 권한도 함께 없어진다. 역할을 바꾸면 서버가 작업공간 멤버의 role 표시("Owner"/"Admin"/"Member")도 바꿔 모두에게 보낸다. 사람 추가 자체는 기존 Invite 화면(멤버 추가)을 그대로 쓰고, 그 다음 People 에서 코드를 준다.
+- **코드와 토큰.** 코드는 `XXXX-XXXX-XXXX`(헷갈리는 글자 뺌, 대소문자·대시 무시), 7일 뒤 만료, 한 번 쓰면 사라진다. 토큰은 32바이트 난수이고 서버에는 sha256 만 저장한다(`server.json`, 권한 600). 앱에서는 macOS 키체인(서비스 "Workboard server", 계정 `<주소>#<기기id>`)에 둔다. data.json 에는 넣지 않는다. `WORKBOARD_HOME` 으로 띄운 시험용 앱은 키체인 대신 그 폴더의 `server-tokens.json` 을 쓴다. 1단계 `server.json`(토큰 없음)은 rev 만 남기고 읽으므로, 1단계로 붙었던 기기는 다시 초대받아야 한다(실제 Mac mini 서버는 비어 있었다).
+- **백업.** 서버 폴더 `backups/` 에 매시간 `hourly-YYYYMMDD-HH.json`(48개), 매일 `daily-YYYYMMDD.json`(30개). 서버를 켠 뒤 1분 안에, 그 뒤로는 매분 확인해서 바뀐 게 있을 때만 새로 만든다. 멈출 때도 한 번 만든다.
+- **관리 명령(Mac mini 에서).** `workboard-server people`(멤버 id·역할·컴퓨터 수·열린 코드), `backups`, `restore <파일>`, `invite <멤버id> [--role admin|owner]`(owner 가 컴퓨터를 잃었을 때). `restore`·`invite` 는 서버 폴더의 `admin-request.json` 에 요청을 남기고 돌고 있는 서버가 1초 안에 처리한다(서버가 꺼져 있으면 다음 시작 때 처리). 되돌리기는 백업의 모든 항목을 "지금 바뀐 것"·"되살린 것"으로 표시해서 합치므로, 지운 것은 돌아오고 백업 뒤에 새로 만든 것은 남는다. 되돌리기 전 정본은 `backups/before-restore-*.json` 에 둔다.
+- **`GET /health`** -> `{"ok", "rev", "workspace", "devices", "connections", "latest_backup"}`. Tailscale 주소에서만 열린다.
+- **앱:** 다시 켜면 마지막에 열었던 작업공간을 연다(`last-workspace` 파일). 예전에는 늘 data.json 을 열어서, 합류한 팀 작업공간을 매번 다시 골라야 했다.
+- **검증:** `cargo test --workspace` 147개 통과(wb-sync 5, wb-net 3, 앱 127, 서버 단위 4, 서버 통합 8). 손 검증(실제 서버 + 실제 앱 창 클릭): 코드로 합류해 "Joined as Bora" 확인, 채팅이 Bora 이름으로 서버에 들어감, admin 으로 올리자 앱에 "Signed in as Bora (Admin)" 과 People 표시, 접속 끊기 즉시 "Not signed in", 새 코드로 다시 로그인, 서버 재시작 후 토큰으로 스스로 다시 붙음, 앱 재실행 시 팀 작업공간으로 열림, `/health`·`backups`·`restore` 동작.
 
 ## 이번 세션에서 해야 할 일 (1단계만)
 

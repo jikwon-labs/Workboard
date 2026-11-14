@@ -26,10 +26,29 @@ come back by itself after a power cut (run these yourself; they need sudo):
 and turn on automatic login in System Settings > Users & Groups (FileVault
 must be off for automatic login).
 
-## Teammates
+## Setting up and inviting
 
-1. Invite them to your tailnet (Tailscale admin console > Users > Invite, or
-   share just this machine: Machines > the Mac mini > Share).
-2. They install Tailscale and Workboard, then Work together > "Or connect to
-   your team's server" and type the Mac mini's Tailscale name or address
-   (`tailscale ip -4` on the Mac mini).
+1. The owner (whoever sets the team up) opens Workboard on their own Mac:
+   Work together > "Or connect to your team's server", types the Mac mini's
+   Tailscale address (`tailscale ip -4` on the Mac mini) and leaves the
+   invite code empty. Their workspace goes up and they become the owner.
+2. Invite each teammate to your tailnet (Tailscale admin console > Users >
+   Invite, or share just this machine: Machines > the Mac mini > Share).
+3. In Workboard, add them with Invite, then Work together > People >
+   Invite code. Give them the code (it works once, for 7 days).
+4. They install Tailscale and Workboard, then Work together > server address
+   + code > Connect. They are signed in as that person.
+
+Owners and admins can make someone admin, or Remove access (signs out every
+computer of theirs at once) in Work together > People.
+
+## On the Mac mini
+
+    ~/.local/bin/workboard-server people              who has access
+    ~/.local/bin/workboard-server backups             list backups
+    ~/.local/bin/workboard-server restore FILE        go back to a backup
+    ~/.local/bin/workboard-server invite ID --role owner
+                                                      new owner code (owner lost their computer)
+
+Backups: `backups/` in the data folder, hourly (48 kept) and daily (30 kept).
+Health: `curl http://<tailscale address>:8787/health`

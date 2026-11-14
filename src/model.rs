@@ -660,6 +660,18 @@ impl Data {
         std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
+    /// The workspace file open when the app last ran.
+    pub fn last_workspace() -> Option<String> {
+        let f = std::fs::read_to_string(Self::dir().join("last-workspace")).ok()?.trim().to_string();
+        // only a plain file name in the data folder
+        (!f.is_empty() && !f.contains('/') && !f.contains("..")).then_some(f)
+    }
+
+    pub fn set_last_workspace(file: &str) {
+        let _ = std::fs::create_dir_all(Self::dir());
+        let _ = std::fs::write(Self::dir().join("last-workspace"), file);
+    }
+
     pub fn save_workspaces(list: &[WsEntry]) {
         let _ = std::fs::create_dir_all(Self::dir());
         if let Ok(s) = serde_json::to_string_pretty(list) {

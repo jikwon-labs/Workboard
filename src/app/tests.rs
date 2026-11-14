@@ -447,6 +447,10 @@ fn workspaces_can_be_created_and_switched() {
     Data::save_workspaces(&[WsEntry { name: "My Workspace".into(), file: "data.json".into() }, WsEntry { name: "Side Biz".into(), file: "workspace-test.json".into() }]);
     a.switch_workspace("workspace-test.json");
     assert_eq!(a.data.workspace, "Side Biz");
+    // the next start opens the workspace that was open last
+    let reopened = App::build(None, None);
+    assert_eq!(reopened.data.workspace, "Side Biz");
+    assert_eq!(reopened.ws_file, "workspace-test.json");
     a.switch_workspace("data.json");
     assert_eq!(a.data.workspace, "My Workspace");
 }
@@ -803,7 +807,7 @@ fn two_computers_work_through_a_server() {
 
     // the first app to connect brings its workspace to the empty server
     let mut a = app();
-    a.connect_server(&addr).unwrap();
+    a.connect_server(&addr, "").unwrap();
     net_until(&mut a, "A shared on the server", |a| a.data.extra.shared.is_some());
     let cfg = a.data.extra.shared.clone().unwrap();
     assert_eq!(cfg.server.as_deref(), Some(addr.as_str()));
@@ -815,14 +819,31 @@ fn two_computers_work_through_a_server() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
-    // someone else joins from their own computer
+    // A is the owner and makes an invite code for Sam (already a member)
+    assert_eq!(a.sync_rt.role, Some(wb_net::Role::Owner));
+    net_until(&mut a, "A sees the people list", |a| a.sync_rt.people.iter().any(|p| p.member == 3));
+    a.access_request(wb_net::Msg::CreateInvite { member: 3, role: wb_net::Role::Member });
+    net_until(&mut a, "invite code", |a| a.sync_rt.people.iter().any(|p| p.member == 3 && p.invite.is_some()));
+    let code = a.sync_rt.people.iter().find(|p| p.member == 3).unwrap().invite.clone().unwrap();
+
+    // without a code nobody gets in
+    let mut x = App::build(None, Some(Data::blank("Nope", Member { id: 1, name: "X".into(), ..Default::default() })));
+    x.connect_server(&addr, "").unwrap();
+    net_until(&mut x, "refused", |x| matches!(x.sync_rt.net_status, Some(wb_net::Status::Refused(_))));
+    assert!(x.data.extra.shared.is_none(), "nothing changes for them");
+
+    // Sam joins from their own computer with the code
     let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
-    b.connect_server(&addr).unwrap();
+    b.connect_server(&addr, &code.to_lowercase()).unwrap();
     net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
     assert_eq!(b.data.tasks.len(), a.data.tasks.len(), "the joiner gets the team's tasks");
-    assert!(matches!(b.modal, Some(Modal::WhoAmI { .. })), "the joiner picks who they are");
+    assert_eq!(b.data.me, 3, "the code says who they are");
+    assert!(!matches!(b.modal, Some(Modal::WhoAmI { .. })), "no picking who you are on a server");
+    assert_eq!(b.sync_rt.role, Some(wb_net::Role::Member));
     assert_ne!(b.data.extra.shared.as_ref().unwrap().tag, cfg.tag, "the server hands out different id tags");
-    b.become_member(None, "Bora", "bora@team.kr");
+    let cfg_b = b.data.extra.shared.clone().unwrap();
+    let token = together::load_token(&addr, &cfg_b.device).expect("the token is kept");
+    assert!(!serde_json::to_string(&b.data).unwrap().contains(&token), "but not in data.json");
     let bora = b.data.me;
 
     // chat from B reaches A
@@ -840,16 +861,27 @@ fn two_computers_work_through_a_server() {
     a.write_shared();
     net_until(&mut b, "A's task at B", |b| b.data.tasks.iter().any(|t| t.name == "Made by A"));
 
-    // stopping sharing ends the connection
+    // the owner removes Sam's access: Sam is signed out and can sign in again with a new code
+    a.access_request(wb_net::Msg::Revoke { member: 3 });
+    net_until(&mut b, "B signed out", |b| matches!(b.sync_rt.net_status, Some(wb_net::Status::Refused(_))));
+    a.access_request(wb_net::Msg::CreateInvite { member: 3, role: wb_net::Role::Member });
+    net_until(&mut a, "new code", |a| a.sync_rt.people.iter().any(|p| p.member == 3 && p.invite.is_some()));
+    let code = a.sync_rt.people.iter().find(|p| p.member == 3).unwrap().invite.clone().unwrap();
+    b.sign_in_again(&code);
+    net_until(&mut b, "B back in", |b| b.sync_rt.net_status == Some(wb_net::Status::Connected));
+
+    // stopping sharing ends the connection and forgets the token
+    let dev = a.data.extra.shared.as_ref().unwrap().device.clone();
     a.stop_sharing();
     assert!(a.sync_rt.net.is_none() && a.data.extra.shared.is_none());
+    assert!(together::load_token(&addr, &dev).is_none());
 }
 
 #[test]
 fn a_bad_server_address_is_explained() {
     let mut a = app();
-    assert!(a.connect_server("").is_err());
-    assert!(a.connect_server("wss://example").is_err());
+    assert!(a.connect_server("", "").is_err());
+    assert!(a.connect_server("wss://example", "").is_err());
     assert!(a.sync_rt.joining.is_none());
 }
 

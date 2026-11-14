@@ -331,9 +331,18 @@ impl App {
     /// Builds the app state; `data` is used as-is (and never saved) when given.
     pub(crate) fn build(screenshot: Option<PathBuf>, data: Option<Data>) -> Self {
         let persist = screenshot.is_none() && data.is_none();
+        // reopen the workspace that was open last (a joined team workspace, say)
+        let last = if persist { Data::last_workspace().filter(|f| f != "data.json") } else { None };
+        let mut ws_file = "data.json".to_string();
         let data = match data {
             Some(d) => d,
-            None if persist => Data::load(),
+            None if persist => match last.as_deref().and_then(|f| Data::load_file(f).map(|d| (f, d))) {
+                Some((f, d)) => {
+                    ws_file = f.to_string();
+                    d
+                }
+                None => Data::load(),
+            },
             None => Data::fresh(),
         };
         let loc = data.first_list().map(Location::List).unwrap_or(Location::Home);
@@ -359,7 +368,7 @@ impl App {
             Some("automations") => Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() }),
             Some("fields") => Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() }),
             Some("themes") => Some(Modal::Themes),
-            Some("together") => Some(Modal::Together { path: String::new(), addr: String::new(), result: String::new() }),
+            Some("together") => Some(Modal::Together { path: String::new(), addr: String::new(), code: String::new(), result: String::new() }),
             Some("call") => Some(Modal::Call { ch: data.channels.first().map(|c| c.id).unwrap_or(0), link: String::new() }),
             Some("reminder") => Some(Modal::Reminder { text: String::new(), date: Some(today()), time: "09:00".into() }),
             _ => None,
@@ -447,7 +456,7 @@ impl App {
             post_channel: 0,
             post_title: String::new(),
             post_body: String::new(),
-            ws_file: "data.json".into(),
+            ws_file,
             side_filter: None,
             side_search: None,
             sidebar_collapsed: false,
@@ -3069,7 +3078,8 @@ impl App {
             self.sync_tick(ctx);
         }
         // a joined workspace needs to know who you are
-        if self.data.extra.shared.is_some() && self.data.member(self.data.me).is_none() && self.modal.is_none() {
+        // (on a server the invite code says who you are)
+        if self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_none()) && self.data.member(self.data.me).is_none() && self.modal.is_none() {
             self.modal = Some(Modal::WhoAmI { name: String::new(), email: String::new() });
         }
         self.handle_screenshot(ctx);

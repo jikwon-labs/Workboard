@@ -39,7 +39,8 @@ pub enum Modal {
     NewDashboard { name: String },
     /// Share the workspace through a folder, or join one.
     /// `path`: the shared folder typed in; `addr`: the server address typed in.
-    Together { path: String, addr: String, result: String },
+    /// `code`: an invite code typed in.
+    Together { path: String, addr: String, code: String, result: String },
     WhoAmI { name: String, email: String },
     Call { ch: u64, link: String },
     NewList { name: String, space: u64, folder: Option<u64>, private: bool },
@@ -195,6 +196,9 @@ impl App {
         if let Some(d) = d {
             self.data = d;
             self.ws_file = file.to_string();
+            if self.persist {
+                Data::set_last_workspace(file);
+            }
             self.loc = self.data.first_list().map(Location::List).unwrap_or(Location::Home);
             self.section = Section::Home;
             self.open_task = None;
@@ -629,7 +633,7 @@ impl App {
     pub(super) fn modal_body(&mut self, ui: &mut Ui, t: &Theme, modal: &mut Modal) -> bool {
         let mut close = false;
         match modal {
-            Modal::Together { path, addr, result } => close = self.together_body(ui, t, path, addr, result),
+            Modal::Together { path, addr, code, result } => close = self.together_body(ui, t, path, addr, code, result),
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList { name, space, folder, .. } => close = self.new_list_body(ui, t, name, space, folder),
@@ -669,8 +673,9 @@ impl App {
                 });
                 ui.add_space(8.0);
                 let shared = self.data.extra.shared.is_some();
+                let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(if shared { "This workspace is shared, so invited people can join it from the shared folder." } else { "To work with them, share this workspace in a folder first." }).small().color(t.text2));
+                    ui.label(RichText::new(if on_server { "This workspace is on a server: after inviting, give each person their invite code (Work together > People)." } else if shared { "This workspace is shared, so invited people can join it from the shared folder." } else { "To work with them, share this workspace in a folder first." }).small().color(t.text2));
                     if ui.link(if shared { "Sharing" } else { "Work together" }).clicked() {
                         self.modal = Some(self.together_modal());
                     }
@@ -683,7 +688,8 @@ impl App {
                         let send = ui.add_enabled(!valid.is_empty(), egui::Button::new(RichText::new("Send free invite").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 32.0)));
                         if send.clicked() {
                             self.invite_people(&valid, role);
-                            self.toast = Some((if self.data.extra.shared.is_some() { format!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { format!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                            self.toast = Some((if on_server { format!("Invited {} people. Get their invite codes in Work together > People.", valid.len()) } else if self.data.extra.shared.is_some() { format!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { format!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
                             self.dirty = true;
                             close = true;
                         }

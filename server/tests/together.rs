@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use wb_net::{Client, Event, Status};
+use wb_net::{Client, Event, Msg, Person, Role, SignIn, Status};
 use wb_sync::SyncMeta;
 
 struct Server {
@@ -80,7 +80,7 @@ fn now() -> i64 {
 
 fn workspace() -> Value {
     json!({
-        "workspace": "Team", "spaces": [], "members": [], "me": 1, "next_id": 1, "favorites": [], "docs": [],
+        "workspace": "Team", "spaces": [], "members": [{"id": 1, "name": "Ann", "role": "Owner"}, {"id": 2, "name": "Bo", "role": "Member"}, {"id": 3, "name": "Cy", "role": "Member"}], "me": 1, "next_id": 1, "favorites": [], "docs": [],
         "tasks": [{"id": 100, "name": "Plan", "activity": []}, {"id": 101, "name": "Ship", "activity": []}],
         "channels": [{"id": 10, "name": "general", "kind": "Channel", "topic": "", "members": [], "messages": [{"id": 11, "author": 1, "text": "hi", "ts": 1}], "last_read": 0}],
         "extra": {"sync": {}}
@@ -91,20 +91,69 @@ fn workspace() -> Value {
 struct App {
     data: Value,
     client: Client,
+    device: String,
     status: Option<Status>,
+    member: Option<u64>,
+    role: Option<Role>,
+    token: Option<String>,
+    invites: Vec<(u64, String)>,
+    people: Vec<Person>,
+    denied: Vec<String>,
 }
 
 impl App {
-    /// `data` is None for someone joining: they take whatever the server has.
+    /// The owner setting up an empty server with their workspace.
     fn connect(port: u16, data: Option<Value>) -> App {
-        let mut d = data.unwrap_or(Value::Null);
-        if !d.is_null() {
-            let mut meta = SyncMeta::default();
-            wb_sync::stamp(&d, &mut meta, now());
-            d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+        let mut d = data.unwrap();
+        let mut meta = SyncMeta::default();
+        wb_sync::stamp(&d, &mut meta, now());
+        d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+        let me = d["me"].as_u64();
+        Self::start(port, d, SignIn { claim: me, ..Default::default() })
+    }
+
+    /// Someone joining with an invite code: they take whatever the server has.
+    fn join(port: u16, code: &str) -> App {
+        Self::start(port, Value::Null, SignIn { invite: Some(code.to_string()), ..Default::default() })
+    }
+
+    fn start(port: u16, data: Value, mut sign_in: SignIn) -> App {
+        if sign_in.device.is_empty() {
+            sign_in.device = format!("dev{:x}", wb_sync::random_u64());
         }
-        let client = Client::start(&format!("127.0.0.1:{}", port), format!("dev{:x}", wb_sync::random_u64()), None, Arc::new(|| {}));
-        App { data: d, client, status: None }
+        let device = sign_in.device.clone();
+        let client = Client::start(&format!("127.0.0.1:{}", port), sign_in, Arc::new(|| {}));
+        App { data, client, device, status: None, member: None, role: None, token: None, invites: vec![], people: vec![], denied: vec![] }
+    }
+
+    /// Ask for an invite code for `member` and wait for it.
+    fn invite(&mut self, member: u64, role: Role) -> String {
+        self.client.send(Msg::CreateInvite { member, role });
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until {
+            self.pump();
+            if let Some(i) = self.invites.iter().position(|(m, _)| *m == member) {
+                return self.invites.remove(i).1;
+            }
+            if let Some(d) = self.denied.pop() {
+                panic!("invite denied: {}", d);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("no invite code came back");
+    }
+
+    /// Wait until `cond` holds for this app's connection details.
+    fn until(&mut self, what: &str, cond: impl Fn(&App) -> bool) {
+        let until = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < until {
+            self.pump();
+            if cond(self) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("timed out waiting for: {} (status {:?}, role {:?}, denied {:?})", what, self.status, self.role, self.denied);
     }
 
     fn meta(&self) -> SyncMeta {
@@ -142,7 +191,12 @@ impl App {
         for e in self.client.events() {
             match e {
                 Event::Status(s) => self.status = Some(s),
-                Event::Welcome { snapshot, .. } => {
+                Event::Welcome { snapshot, member, role, token, .. } => {
+                    self.member = Some(member);
+                    self.role = Some(role);
+                    if token.is_some() {
+                        self.token = token;
+                    }
                     if let Some(s) = snapshot {
                         self.take_in(s);
                     }
@@ -150,6 +204,12 @@ impl App {
                     self.push();
                 }
                 Event::Update { data, .. } => self.take_in(data),
+                Event::Invite { member, code } => self.invites.push((member, code)),
+                Event::Access { people, role } => {
+                    self.people = people;
+                    self.role = Some(role);
+                }
+                Event::Denied(why) => self.denied.push(why),
             }
         }
     }
@@ -193,12 +253,15 @@ fn say(text: &str, id: u64) -> impl FnOnce(&mut Value) + '_ {
     }
 }
 
-/// A shares a workspace on an empty server, B joins it.
+/// A sets up an empty server with a workspace, invites B, B joins.
 fn two_apps(port: u16) -> (App, App) {
     let mut a = App::connect(port, Some(workspace()));
-    a.wait_status(|s| *s == Status::Connected, "A connected");
-    let mut b = App::connect(port, None);
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(port, &code);
     b.wait("B gets the team's copy", |d| task_names(d) == ["Plan", "Ship"]);
+    assert_eq!(b.member, Some(2), "the code signs B in as member 2");
     (a, b)
 }
 
@@ -263,13 +326,15 @@ fn the_team_copy_survives_a_server_restart() {
     let (mut a, mut b) = two_apps(server.port);
     a.change(say("before the restart", 2002));
     b.wait("message at B", |d| texts(d).contains(&"before the restart".to_string()));
+    let (a_token, a_device) = (a.token.clone(), a.device.clone());
     drop(a);
     drop(b);
     server.stop();
     assert!(home.join(workboard_server::WORKSPACE_FILE).is_file(), "saved when the server stopped");
 
     let server = Server::start(&home, 0);
-    let mut c = App::connect(server.port, None);
+    // A's computer signs in again with its token
+    let mut c = App::start(server.port, Value::Null, SignIn { token: a_token, device: a_device, ..Default::default() });
     c.wait("the copy is still there", |d| texts(d).contains(&"before the restart".to_string()) && task_names(d) == ["Plan", "Ship"]);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
@@ -295,6 +360,127 @@ fn messages_written_while_disconnected_merge_after_reconnecting() {
     a.wait_status(|s| *s == Status::Connected, "A reconnects by itself");
     b.wait("A's offline message at B", |d| texts(d).contains(&"written offline by A".to_string()));
     a.wait("B's offline edit at A", |d| task_names(d)[0] == "Plan (offline B)");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn only_invited_people_get_in_and_only_admins_invite() {
+    let home = temp_home("access");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+
+    // no code, or a used code: refused, and the app stops trying
+    let mut x = App::start(port, Value::Null, SignIn::default());
+    x.wait_status(|s| matches!(s, Status::Refused(_)), "no code is refused");
+    let mut y = App::start(port, Value::Null, SignIn { claim: Some(9), ..Default::default() });
+    y.wait_status(|s| matches!(s, Status::Refused(_)), "claiming a server that has a workspace is refused");
+
+    // a member can't invite; after the owner makes them admin they can
+    b.client.send(Msg::CreateInvite { member: 3, role: Role::Member });
+    b.until("member denied", |b| !b.denied.is_empty());
+    b.denied.clear();
+    a.client.send(Msg::SetRole { member: 2, role: Role::Admin });
+    b.until("B learns it is admin", |b| b.role == Some(Role::Admin));
+    b.wait("B's name shows Admin", |d| d["members"][1]["role"] == "Admin");
+    let code = b.invite(3, Role::Member);
+    let mut c = App::join(port, &code);
+    c.wait("C joins", |d| task_names(d).len() == 2);
+    assert_eq!((c.member, c.role), (Some(3), Some(Role::Member)));
+    let mut z = App::join(port, &code);
+    z.wait_status(|s| matches!(s, Status::Refused(_)), "a code works once");
+
+    // nobody takes the owner's place or access
+    b.client.send(Msg::Revoke { member: 1 });
+    b.until("owner can't be removed", |b| b.denied.iter().any(|d| d.contains("owner")));
+    b.denied.clear();
+    b.client.send(Msg::CreateInvite { member: 1, role: Role::Member });
+    b.until("an admin can't make a code for the owner", |b| b.denied.iter().any(|d| d.contains("Only the owner")));
+    // and doesn't see one the owner made for their own second computer
+    let owner_code = a.invite(1, Role::Member);
+    a.until("the owner sees their code", |a| a.people.iter().any(|p| p.member == 1 && p.invite.as_deref() == Some(owner_code.as_str())));
+    b.client.send(Msg::AccessList);
+    b.until("B's list", |b| b.people.iter().any(|p| p.member == 1));
+    assert!(b.people.iter().all(|p| p.member != 1 || p.invite.is_none()), "the owner's code stays hidden from admins");
+
+    // the owner sees everyone and removes C: C is signed out at once and its token stops working
+    a.client.send(Msg::AccessList);
+    a.until("people list", |a| a.people.iter().any(|p| p.member == 3 && p.devices == 1));
+    let (c_token, c_device) = (c.token.clone(), c.device.clone());
+    assert!(c_token.is_some());
+    a.client.send(Msg::Revoke { member: 3 });
+    c.wait_status(|s| matches!(s, Status::Refused(_)), "C is signed out");
+    let mut c2 = App::start(port, Value::Null, SignIn { token: c_token, device: c_device, ..Default::default() });
+    c2.wait_status(|s| matches!(s, Status::Refused(_)), "C's token no longer works");
+    a.until("C gone from the list", |a| a.people.iter().any(|p| p.member == 3 && p.devices == 0));
+
+    // removing an admin's access also takes back admin rights
+    a.client.send(Msg::Revoke { member: 2 });
+    b.wait_status(|s| matches!(s, Status::Refused(_)), "B is signed out");
+    a.until("B is a plain member again", |a| a.people.iter().any(|p| p.member == 2 && p.role == Role::Member && p.devices == 0));
+    a.wait("B's role label is back to Member", |d| d["members"][1]["role"] == "Member");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn health_and_admin_commands_answer() {
+    let home = temp_home("health");
+    let server = Server::start(&home, 0);
+    let (_a, _b) = two_apps(server.port);
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.write_all(b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let body: Value = serde_json::from_str(out.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["workspace"], true);
+    assert_eq!(body["devices"], 2);
+    assert_eq!(body["connections"], 2);
+
+    // the owner lost their computer: a new owner code from the Mac mini itself
+    let res = workboard_server::admin_request(&home, &json!({"invite": 1, "role": "owner"}), Duration::from_secs(5)).unwrap().expect("answered");
+    assert_eq!(res["ok"], true, "{}", res);
+    let code = res["code"].as_str().unwrap().to_string();
+    let mut a2 = App::join(server.port, &code);
+    a2.until("signed in as owner again", |a| a.role == Some(Role::Owner) && a.member == Some(1));
+    // within a minute of having a workspace there is a backup
+    let until = Instant::now() + Duration::from_secs(5);
+    while workboard_server::backup_files(&home.join(workboard_server::BACKUP_DIR), "hourly").is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(workboard_server::backup_files(&home.join(workboard_server::BACKUP_DIR), "daily").len(), 1);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn restoring_a_backup_reaches_every_app() {
+    let home = temp_home("restore");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    // the backup taken now has both tasks
+    let backup_path = home.join("manual-backup.json");
+    let until = Instant::now() + Duration::from_secs(5);
+    while !home.join(workboard_server::WORKSPACE_FILE).is_file() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::fs::copy(home.join(workboard_server::WORKSPACE_FILE), &backup_path).unwrap();
+    // someone deletes a task by mistake
+    a.change(|d| {
+        d["tasks"].as_array_mut().unwrap().retain(|t| t["id"] != 101);
+    });
+    b.wait("delete reaches B", |d| task_names(d) == ["Plan"]);
+    let res = workboard_server::admin_request(&home, &json!({"restore": backup_path.to_string_lossy()}), Duration::from_secs(5)).unwrap().expect("answered");
+    assert_eq!(res["ok"], true, "{}", res);
+    a.wait("the task is back at A", |d| task_names(d) == ["Plan", "Ship"]);
+    b.wait("the task is back at B", |d| task_names(d) == ["Plan", "Ship"]);
+    // and it stays back after both send their copies again
+    a.change(say("after the restore", 2101));
+    b.wait("message after restore", |d| texts(d).contains(&"after the restore".to_string()));
+    assert_eq!(task_names(&b.data), ["Plan", "Ship"]);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

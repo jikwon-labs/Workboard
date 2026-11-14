@@ -8,7 +8,7 @@ use super::*;
 use crate::sync::{self, SharedCfg};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use wb_net::{Event as NetEvent, Status as NetStatus};
+use wb_net::{Event as NetEvent, Msg as NetMsg, Person, Role, SignIn, Status as NetStatus};
 
 /// How often teammates' copies are looked at (folder), and how often ours is
 /// written (folder) or sent (server).
@@ -19,6 +19,8 @@ const WRITE_SECS: f64 = 1.5;
 pub struct Joining {
     pub addr: String,
     pub device: String,
+    /// The invite code typed in; empty means "set up this empty server".
+    pub invite: String,
 }
 
 #[derive(Default)]
@@ -31,6 +33,104 @@ pub struct SyncRt {
     pub(super) net: Option<wb_net::Client>,
     pub(super) net_status: Option<NetStatus>,
     pub(super) joining: Option<Joining>,
+    /// This computer's role on the server, once signed in.
+    pub(super) role: Option<Role>,
+    /// Everyone's access (owners and admins only).
+    pub(super) people: Vec<Person>,
+    /// Sign in again with this invite code (after access was removed).
+    pub(super) reinvite: Option<String>,
+}
+
+// ---------------------------------------------------------------- tokens
+//
+// The token a server gives this computer lives in the macOS keychain (never
+// in data.json). When trying the app with a separate WORKBOARD_HOME folder it
+// lives in that folder instead, and tests keep it in memory.
+
+const KEYCHAIN_SERVICE: &str = "Workboard server";
+
+fn token_account(addr: &str, device: &str) -> String {
+    format!("{}#{}", addr.trim(), device)
+}
+
+#[cfg(test)]
+fn test_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    T.get_or_init(Default::default)
+}
+
+fn token_file() -> Option<PathBuf> {
+    let separate = std::env::var("WORKBOARD_HOME").is_ok_and(|v| !v.is_empty());
+    (separate || !cfg!(target_os = "macos")).then(|| Data::dir().join("server-tokens.json"))
+}
+
+fn read_token_file(p: &Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn write_token_file(p: &Path, m: &std::collections::BTreeMap<String, String>) {
+    let _ = std::fs::create_dir_all(p.parent().unwrap_or(Path::new(".")));
+    if std::fs::write(p, serde_json::to_string_pretty(m).unwrap_or_default()).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+pub(super) fn load_token(addr: &str, device: &str) -> Option<String> {
+    let key = token_account(addr, device);
+    #[cfg(test)]
+    return test_tokens().lock().unwrap().get(&key).cloned();
+    #[cfg(not(test))]
+    {
+        if let Some(p) = token_file() {
+            return read_token_file(&p).get(&key).cloned();
+        }
+        #[cfg(target_os = "macos")]
+        return security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &key).ok().and_then(|b| String::from_utf8(b).ok());
+        #[allow(unreachable_code)]
+        None
+    }
+}
+
+pub(super) fn save_token(addr: &str, device: &str, token: &str) {
+    let key = token_account(addr, device);
+    #[cfg(test)]
+    {
+        test_tokens().lock().unwrap().insert(key, token.to_string());
+    }
+    #[cfg(not(test))]
+    {
+        if let Some(p) = token_file() {
+            let mut m = read_token_file(&p);
+            m.insert(key, token.to_string());
+            write_token_file(&p, &m);
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        let _ = security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, &key, token.as_bytes());
+    }
+}
+
+pub(super) fn forget_token(addr: &str, device: &str) {
+    let key = token_account(addr, device);
+    #[cfg(test)]
+    {
+        test_tokens().lock().unwrap().remove(&key);
+    }
+    #[cfg(not(test))]
+    {
+        if let Some(p) = token_file() {
+            let mut m = read_token_file(&p);
+            m.remove(&key);
+            write_token_file(&p, &m);
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        let _ = security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, &key);
+    }
 }
 
 /// How the server connection is doing, in words.
@@ -40,6 +140,7 @@ pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>) -> String {
         (true, None) | (true, Some(NetStatus::Connecting)) => "Connecting\u{2026}".into(),
         (true, Some(NetStatus::Connected)) => "Connected".into(),
         (true, Some(NetStatus::Reconnecting(why))) => format!("Reconnecting\u{2026} {}", why),
+        (true, Some(NetStatus::Refused(why))) => format!("Not signed in. {}", why),
     }
 }
 
@@ -141,10 +242,15 @@ impl App {
     /// Returns true when the team's changes came in.
     pub(super) fn net_tick(&mut self, ctx: Option<&egui::Context>) -> bool {
         if self.sync_rt.net.is_none() {
-            let (addr, device, tag) = if let Some(j) = &self.sync_rt.joining {
-                (j.addr.clone(), j.device.clone(), None)
+            let (addr, sign_in) = if let Some(j) = &self.sync_rt.joining {
+                let invite = Some(j.invite.trim().to_string()).filter(|c| !c.is_empty());
+                // no code: set up an empty server as the person I am here
+                let claim = if invite.is_none() { Some(self.data.me) } else { None };
+                (j.addr.clone(), SignIn { device: j.device.clone(), invite, claim, ..Default::default() })
             } else if let Some(SharedCfg { server: Some(addr), device, tag, .. }) = &self.data.extra.shared {
-                (addr.clone(), device.clone(), Some(*tag))
+                let invite = self.sync_rt.reinvite.clone();
+                let token = if invite.is_some() { None } else { load_token(addr, device) };
+                (addr.clone(), SignIn { device: device.clone(), tag: Some(*tag), token, invite, claim: None })
             } else {
                 return false;
             };
@@ -156,22 +262,44 @@ impl App {
                 None => std::sync::Arc::new(|| {}),
             };
             self.sync_rt.net_status = None;
-            self.sync_rt.net = Some(wb_net::Client::start(&addr, device, tag, wake));
+            self.sync_rt.net = Some(wb_net::Client::start(&addr, sign_in, wake));
         }
         let events = self.sync_rt.net.as_ref().map(|n| n.events()).unwrap_or_default();
         let mut changed = false;
         for e in events {
             match e {
                 NetEvent::Status(s) => self.sync_rt.net_status = Some(s),
-                NetEvent::Welcome { tag, snapshot, .. } => changed |= self.net_welcome(tag, snapshot),
+                NetEvent::Welcome { tag, snapshot, member, role, token, .. } => {
+                    if let Some(t) = token {
+                        let (addr, device) = match (&self.sync_rt.joining, &self.data.extra.shared) {
+                            (Some(j), _) => (j.addr.clone(), j.device.clone()),
+                            (None, Some(c)) => (c.server.clone().unwrap_or_default(), c.device.clone()),
+                            _ => continue,
+                        };
+                        save_token(&addr, &device, &t);
+                    }
+                    self.sync_rt.reinvite = None;
+                    self.sync_rt.role = Some(role);
+                    changed |= self.net_welcome(tag, snapshot, member);
+                }
                 NetEvent::Update { data, .. } => changed |= self.merge_in(&[data]),
+                NetEvent::Invite { member, code } => {
+                    if let Some(p) = self.sync_rt.people.iter_mut().find(|p| p.member == member) {
+                        p.invite = Some(code);
+                    }
+                }
+                NetEvent::Access { people, role } => {
+                    self.sync_rt.people = people;
+                    self.sync_rt.role = Some(role);
+                }
+                NetEvent::Denied(why) => self.toast = Some((why, now_ts())),
             }
         }
         changed
     }
 
     /// The server answered: finish joining, or catch up after a reconnect.
-    fn net_welcome(&mut self, tag: u16, snapshot: Option<serde_json::Value>) -> bool {
+    fn net_welcome(&mut self, tag: u16, snapshot: Option<serde_json::Value>, member: u64) -> bool {
         if let Some(j) = self.sync_rt.joining.take() {
             let cfg = SharedCfg { folder: String::new(), device: j.device, tag, server: Some(j.addr) };
             match snapshot {
@@ -190,8 +318,16 @@ impl App {
                 Some(base) => match self.join_from(base, cfg) {
                     Ok(()) => {
                         self.after_join();
+                        // the invite code says who this is
+                        self.become_member(Some(member), "", "");
+                        self.sync_note_change();
                         self.write_shared();
-                        self.modal = Some(Modal::WhoAmI { name: String::new(), email: String::new() });
+                        self.save_local();
+                        let name = self.data.member(member).map(|m| m.name.clone()).unwrap_or_default();
+                        self.toast = Some((format!("Joined as {}.", name), now_ts()));
+                        if matches!(self.modal, Some(Modal::Together { .. })) {
+                            self.modal = None;
+                        }
                     }
                     Err(e) => {
                         self.sync_rt.net = None;
@@ -207,6 +343,11 @@ impl App {
                 self.save_local();
             }
         }
+        if self.data.me != member && self.data.member(member).is_some() {
+            // signed in again with an invite code for someone else
+            self.data.me = member;
+            self.save_local();
+        }
         let changed = match snapshot {
             Some(s) => self.merge_in(&[s]),
             None => false,
@@ -218,12 +359,30 @@ impl App {
 
     /// Start connecting to a server from the dialog (shares this workspace
     /// there if the server is empty, else joins the team's workspace).
-    pub(super) fn connect_server(&mut self, addr: &str) -> Result<(), String> {
+    pub(super) fn connect_server(&mut self, addr: &str, invite: &str) -> Result<(), String> {
         wb_net::server_url(addr)?;
         self.sync_rt.net = None;
         self.sync_rt.net_status = None;
-        self.sync_rt.joining = Some(Joining { addr: addr.trim().to_string(), device: format!("{:08x}", sync::random_u64() as u32) });
+        self.sync_rt.joining = Some(Joining { addr: addr.trim().to_string(), device: format!("{:08x}", sync::random_u64() as u32), invite: invite.trim().to_string() });
         Ok(())
+    }
+
+    /// Sign this computer in again with a new invite code.
+    pub(super) fn sign_in_again(&mut self, code: &str) {
+        if code.trim().is_empty() {
+            return;
+        }
+        self.sync_rt.reinvite = Some(code.trim().to_string());
+        self.sync_rt.net = None;
+        self.sync_rt.net_status = None;
+    }
+
+    /// Send an access request to the server (owners and admins).
+    pub(super) fn access_request(&mut self, msg: NetMsg) {
+        match &self.sync_rt.net {
+            Some(n) if self.sync_rt.net_status == Some(NetStatus::Connected) => n.send(msg),
+            _ => self.toast = Some(("Not connected to the server right now.".into(), now_ts())),
+        }
     }
 
     /// Once per frame: write our copy when it changed, look for teammates' changes.
@@ -328,6 +487,7 @@ impl App {
             let file = format!("workspace-{}.json", now_ts());
             list.push(WsEntry { name: d.workspace.clone(), file: file.clone() });
             Data::save_workspaces(&list);
+            Data::set_last_workspace(&file);
             self.ws_file = file;
         }
         self.data = d;
@@ -345,6 +505,9 @@ impl App {
     }
 
     pub(super) fn stop_sharing(&mut self) {
+        if let Some(SharedCfg { server: Some(addr), device, .. }) = &self.data.extra.shared {
+            forget_token(addr, device);
+        }
         self.data.extra.shared = None;
         self.data.extra.sync = Default::default();
         self.sync_rt = SyncRt::default();
@@ -437,25 +600,99 @@ impl App {
 
     // ------------------------------------------------------------ dialogs
 
+    /// Owners and admins: everyone's access, invite codes, roles.
+    fn people_section(&mut self, ui: &mut Ui, t: &Theme) {
+        ui.label(RichText::new("People").strong());
+        ui.label(RichText::new("Give each person their invite code (it works once, for 7 days). Add people first with Invite.").small().color(t.text3));
+        let me = self.data.me;
+        let my_role = self.sync_rt.role.unwrap_or_default();
+        let people = self.sync_rt.people.clone();
+        let mut req: Option<NetMsg> = None;
+        egui::ScrollArea::vertical().id_salt("people").max_height(220.0).show(ui, |ui| {
+            for p in &people {
+                let Some(m) = self.data.member(p.member) else { continue };
+                let name = m.name.clone();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&name).color(t.text));
+                    ui.label(RichText::new(p.role.label()).small().color(t.text2));
+                    ui.label(RichText::new(match p.devices { 0 => "not signed in".to_string(), 1 => "1 computer".to_string(), n => format!("{} computers", n) }).small().color(t.text3));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if p.role != Role::Owner && p.member != me {
+                            if ui.small_button(RichText::new("Remove access").color(t.danger)).on_hover_text(format!("Sign out {}'s computers", name)).clicked() {
+                                req = Some(NetMsg::Revoke { member: p.member });
+                            }
+                            if my_role.manages() {
+                                let (label, role) = if p.role == Role::Admin { ("Make member", Role::Member) } else { ("Make admin", Role::Admin) };
+                                if ui.small_button(label).clicked() {
+                                    req = Some(NetMsg::SetRole { member: p.member, role });
+                                }
+                            }
+                        }
+                        // a code for the owner signs in as the owner: only the owner makes one
+                        let may_invite = p.member != me && (p.role != Role::Owner || my_role == Role::Owner);
+                        if may_invite && ui.small_button(if p.invite.is_some() { "New code" } else { "Invite code" }).clicked() {
+                            req = Some(NetMsg::CreateInvite { member: p.member, role: Role::Member });
+                        }
+                    });
+                });
+                if let Some(code) = &p.invite {
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(format!("Code for {}: {}", name, code)).monospace().color(t.text));
+                        if ui.small_button("Copy").clicked() {
+                            ui.ctx().copy_text(code.clone());
+                            self.toast = Some(("Invite code copied".into(), now_ts()));
+                        }
+                    });
+                }
+            }
+        });
+        if let Some(m) = req {
+            self.access_request(m);
+        }
+    }
+
     /// The Work together dialog, filled in with what this workspace uses.
     pub(super) fn together_modal(&self) -> Modal {
         let cfg = self.data.extra.shared.as_ref();
         Modal::Together {
             path: cfg.filter(|c| c.server.is_none()).map(|c| c.folder.clone()).unwrap_or_default(),
             addr: cfg.and_then(|c| c.server.clone()).unwrap_or_default(),
+            code: String::new(),
             result: String::new(),
         }
     }
 
-    pub(super) fn together_body(&mut self, ui: &mut Ui, t: &Theme, path: &mut String, addr: &mut String, result: &mut String) -> bool {
+    pub(super) fn together_body(&mut self, ui: &mut Ui, t: &Theme, path: &mut String, addr: &mut String, code: &mut String, result: &mut String) -> bool {
         let mut close = false;
         if let Some(SharedCfg { server: Some(server), .. }) = self.data.extra.shared.clone() {
             ui.label(RichText::new("This workspace is on a server").size(15.0).strong());
             ui.label(RichText::new(&server).color(t.text2));
+            let connected = self.sync_rt.net_status == Some(NetStatus::Connected);
             let status = net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
-            ui.label(RichText::new(format!("Status: {}", status)).color(if self.sync_rt.net_status == Some(NetStatus::Connected) { t.text } else { t.text2 }));
+            ui.label(RichText::new(format!("Status: {}", status)).color(if connected { t.text } else { t.text2 }));
+            if let Some(role) = self.sync_rt.role.filter(|_| connected) {
+                let name = self.data.member(self.data.me).map(|m| m.name.clone()).unwrap_or_default();
+                ui.label(RichText::new(format!("Signed in as {} ({})", name, role.label())).color(t.text2));
+            }
+            if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
+                ui.add_space(6.0);
+                ui.label(RichText::new("Sign this computer in again with an invite code from the owner or an admin.").color(t.text2));
+                ui.horizontal(|ui| {
+                    let r = ui.add(egui::TextEdit::singleline(code).hint_text("XXXX-XXXX-XXXX").desired_width(220.0));
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Invite code entry"));
+                    if primary_button(ui, t, "Sign in").clicked() {
+                        self.sign_in_again(code);
+                        code.clear();
+                    }
+                });
+            }
             ui.add_space(8.0);
             ui.label(RichText::new("Tasks, chat and docs show up for everyone within a second or two. While the server can't be reached you keep working here, and your changes go up when it's back.").small().color(t.text3));
+            if connected && self.sync_rt.role.is_some_and(|r| r.manages()) {
+                ui.add_space(10.0);
+                self.people_section(ui, t);
+            }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button("Reconnect now").clicked() {
@@ -546,10 +783,13 @@ impl App {
             ui.separator();
             ui.add_space(4.0);
             ui.label(RichText::new("Or connect to your team's server").strong());
-            ui.label(RichText::new("A Workboard server (for example a Mac mini your team reaches through Tailscale). Type its name or address. If the server is empty, this workspace goes up; otherwise you join the team's workspace.").color(t.text2));
+            ui.label(RichText::new("A Workboard server (for example a Mac mini your team reaches through Tailscale). To join your team, type the invite code you were given. Setting up a new, empty server? Leave the code empty: this workspace goes up and you become its owner.").color(t.text2));
             ui.label(RichText::new("Server").color(t.text2));
             let r = ui.add(egui::TextEdit::singleline(addr).hint_text("macmini or 100.101.102.103").desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address"));
+            ui.label(RichText::new("Invite code").color(t.text2));
+            let r = ui.add(egui::TextEdit::singleline(code).hint_text("XXXX-XXXX-XXXX (empty for a new server)").desired_width(f32::INFINITY));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Invite code entry"));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if self.sync_rt.joining.is_some() {
@@ -565,7 +805,7 @@ impl App {
                         }
                     } else if primary_button(ui, t, "Connect").clicked() {
                         result.clear();
-                        if let Err(e) = self.connect_server(addr) {
+                        if let Err(e) = self.connect_server(addr, code) {
                             *result = e;
                         }
                     }

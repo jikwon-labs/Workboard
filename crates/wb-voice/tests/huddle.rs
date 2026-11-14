@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Role, SignIn, Status};
-use wb_voice::{Audio, Call, Event as VoiceEvent, Join, Person};
+use wb_voice::{Audio, Call, Event as VoiceEvent, Join, Person, Picture, Video, ME};
 
 const SECRET: &str = "test-secret-test-secret-test-secret-0123";
 
@@ -156,11 +156,22 @@ struct Talker {
     people: Vec<Person>,
     joined: bool,
     left: Option<Option<String>>,
+    pictures: std::collections::HashMap<String, Picture>,
 }
 
 impl Talker {
     fn new(join: Join, hz: f32) -> Talker {
-        Talker { call: Call::start(join, Audio::Tone(hz), Arc::new(|| {})), people: vec![], joined: false, left: None }
+        Self::with_video(join, hz, [128, 128, 128])
+    }
+
+    fn with_video(join: Join, hz: f32, color: [u8; 3]) -> Talker {
+        Talker { call: Call::start(join, Audio::Tone(hz), Video::Pattern(color), Arc::new(|| {})), people: vec![], joined: false, left: None, pictures: Default::default() }
+    }
+
+    /// The other person's latest picture.
+    fn their_picture(&self) -> Option<&Picture> {
+        let id = &self.other()?.identity;
+        self.pictures.get(id)
     }
 
     fn until(&mut self, what: &str, cond: impl Fn(&Talker) -> bool) {
@@ -171,6 +182,17 @@ impl Talker {
                     VoiceEvent::Joined => self.joined = true,
                     VoiceEvent::People(p) => self.people = p,
                     VoiceEvent::Left(why) => self.left = Some(why),
+                    VoiceEvent::Trouble(why) => panic!("trouble: {}", why),
+                }
+            }
+            for (id, p) in self.call.new_pictures() {
+                match p {
+                    Some(p) => {
+                        self.pictures.insert(id, p);
+                    }
+                    None => {
+                        self.pictures.remove(&id);
+                    }
                 }
             }
             if let Some(Some(why)) = &self.left {
@@ -221,8 +243,8 @@ fn two_people_hear_each_other_in_a_huddle() {
     cy.client.send(Msg::CallJoin { channel: 10 });
     cy.until("Cy is turned away", |c| c.denied.iter().any(|d| d.contains("not in that conversation")));
 
-    let mut a = Talker::new(ann.call_token(10), 440.0);
-    let mut b = Talker::new(bo.call_token(10), 660.0);
+    let mut a = Talker::with_video(ann.call_token(10), 440.0, [220, 30, 30]);
+    let mut b = Talker::with_video(bo.call_token(10), 660.0, [30, 40, 220]);
     a.until("Ann joined", |t| t.joined);
     b.until("Bo joined", |t| t.joined);
     a.until("Ann hears Bo", |t| t.other().is_some_and(|p| p.name == "Bo" && p.member() == Some(2) && p.heard > 0.02));
@@ -234,6 +256,30 @@ fn two_people_hear_each_other_in_a_huddle() {
     a.until("Ann sees Bo muted and silent", |t| t.other().is_some_and(|p| p.muted && p.heard < 0.005));
     b.call.set_muted(false);
     a.until("Bo unmuted and heard again", |t| t.other().is_some_and(|p| !p.muted && p.heard > 0.02));
+
+    // video: each turns the camera on (a colored test picture) and sees the other's
+    a.call.set_camera(true);
+    b.call.set_camera(true);
+    let reddish = |p: &Picture| {
+        let c = p.average();
+        c[0] > 150 && c[1] < 90 && c[2] < 90
+    };
+    let bluish = |p: &Picture| {
+        let c = p.average();
+        c[2] > 150 && c[0] < 90 && c[1] < 100
+    };
+    a.until("Ann sees herself", |t| t.pictures.get(ME).is_some_and(|p| reddish(p)));
+    b.until("Bo sees Ann's red picture", |t| t.other().is_some_and(|p| p.camera) && t.their_picture().is_some_and(|p| reddish(p) && p.width == 320 && p.height == 180));
+    a.until("Ann sees Bo's blue picture", |t| t.their_picture().is_some_and(|p| bluish(p)));
+    assert!(b.people.iter().find(|p| p.me).is_some_and(|p| p.camera));
+    // pictures keep coming (the bar moves)
+    let first = b.their_picture().unwrap().clone();
+    b.until("Ann's picture changes", |t| t.their_picture().is_some_and(|p| *p != first));
+
+    // Ann turns her camera off: her picture goes away for Bo
+    a.call.set_camera(false);
+    b.until("Ann's video is gone", |t| t.other().is_some_and(|p| !p.camera) && t.their_picture().is_none());
+    a.until("and her own preview too", |t| !t.pictures.contains_key(ME));
 
     // Bo leaves
     b.call.leave();

@@ -623,8 +623,8 @@ fn huddle_bar_shows_people_mute_and_leave() {
     h.app.huddle.channel = Some(ch);
     h.app.huddle.joined = true;
     h.app.huddle.people = vec![
-        wb_voice::Person { identity: format!("{}-dev1", me), name: String::new(), me: true, speaking: false, muted: false, heard: 0.0 },
-        wb_voice::Person { identity: format!("{}-dev2", other.id), name: String::new(), me: false, speaking: true, muted: false, heard: 0.3 },
+        wb_voice::Person { identity: format!("{}-dev1", me), name: String::new(), me: true, speaking: false, muted: false, heard: 0.0, camera: false },
+        wb_voice::Person { identity: format!("{}-dev2", other.id), name: String::new(), me: false, speaking: true, muted: false, heard: 0.3, camera: true },
     ];
     h.settle();
     assert!(h.has(&format!("{} (you), listening", my_name)));
@@ -634,6 +634,18 @@ fn huddle_bar_shows_people_mute_and_leave() {
     h.click("Mute");
     assert!(h.app.huddle.muted);
     assert!(h.has("Unmute"));
+    // video: the other person's picture shows with their name, the Video button toggles
+    let pic = wb_voice::Picture { width: 32, height: 18, rgba: vec![200u8; 32 * 18 * 4] };
+    h.app.huddle.pictures.insert(format!("{}-dev2", other.id), (pic.clone(), true));
+    h.settle();
+    assert!(h.has(&format!("Video of {}", other.name)));
+    h.click("Video");
+    assert!(h.app.huddle.camera);
+    h.app.huddle.pictures.insert(wb_voice::ME.to_string(), (pic, true));
+    h.settle();
+    assert!(h.has("Video of You") && h.has("Stop video"));
+    h.click("Stop video");
+    assert!(!h.app.huddle.camera);
     h.click("Leave");
     assert!(h.app.huddle.channel.is_none());
     assert!(!h.has("Unmute"));

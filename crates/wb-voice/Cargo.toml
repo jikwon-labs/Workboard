@@ -7,6 +7,8 @@ edition = "2021"
 livekit = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 futures-util = "0.3"
+nokhwa = { version = "0.10", features = ["input-avfoundation"] }
+
 
 [dev-dependencies]
 workboard-server = { path = "../../server" }

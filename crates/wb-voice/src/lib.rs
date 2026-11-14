@@ -7,6 +7,13 @@
 // else is played on its speakers (WebRTC's own audio device handling, with
 // echo cancellation). `Audio::Tone` sends a steady tone instead and measures
 // how loud the others arrive, without touching any audio device; tests use it.
+//
+// Video (stage 4) goes into the same room: `set_camera(true)` publishes the
+// camera (or a test pattern) and everyone's pictures arrive as RGBA through
+// `new_pictures` (see video.rs).
+
+pub mod video;
+pub use video::{Picture, Video};
 
 use futures_util::StreamExt;
 use livekit::options::TrackPublishOptions;
@@ -15,6 +22,10 @@ use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
+use livekit::webrtc::prelude::RtcVideoSource;
+use livekit::webrtc::video_source::native::NativeVideoSource;
+use livekit::webrtc::video_source::VideoResolution;
+use livekit::webrtc::video_stream::native::NativeVideoStream;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -46,6 +57,8 @@ pub struct Person {
     pub muted: bool,
     /// How loud their audio arrives here, 0..1 (only measured with Audio::Tone).
     pub heard: f32,
+    /// Sending video.
+    pub camera: bool,
 }
 
 impl Person {
@@ -61,12 +74,22 @@ pub enum Event {
     People(Vec<Person>),
     /// The call ended for this computer; holds why when it wasn't asked for.
     Left(Option<String>),
+    /// Something went wrong that doesn't end the call (the camera, say).
+    Trouble(String),
 }
 
 enum Cmd {
     Mute(bool),
+    Camera(bool),
     Leave,
 }
+
+/// Whose picture: a participant identity, or ME for your own camera.
+pub const ME: &str = "";
+
+/// The latest picture of everyone sending video, with a counter that moves
+/// when a new one arrives; a missing entry means no video.
+type Pictures = Arc<Mutex<HashMap<String, (u64, Picture)>>>;
 
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
@@ -74,12 +97,17 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 pub struct Call {
     tx: Sender<Cmd>,
     rx: Receiver<Event>,
+    pictures: Pictures,
+    seen: Mutex<HashMap<String, u64>>,
 }
 
 impl Call {
-    pub fn start(join: Join, audio: Audio, wake: Wake) -> Call {
+    /// Join a call; `video` is where pictures come from once the camera is turned on.
+    pub fn start(join: Join, audio: Audio, video: Video, wake: Wake) -> Call {
         let (tx, crx) = mpsc::channel();
         let (etx, rx) = mpsc::channel();
+        let pictures: Pictures = Default::default();
+        let pics = pictures.clone();
         std::thread::Builder::new()
             .name("workboard-voice".into())
             .spawn(move || {
@@ -91,12 +119,36 @@ impl Call {
                         return;
                     }
                 };
-                let why = rt.block_on(run(join, audio, crx, &etx, &wake));
+                let why = rt.block_on(run(join, audio, video, crx, &etx, &wake, pics));
                 let _ = etx.send(Event::Left(why));
                 wake();
             })
             .expect("start voice thread");
-        Call { tx, rx }
+        Call { tx, rx, pictures, seen: Default::default() }
+    }
+
+    pub fn set_camera(&self, on: bool) {
+        let _ = self.tx.send(Cmd::Camera(on));
+    }
+
+    /// Pictures that changed since the last call: (identity or ME, picture),
+    /// with None for someone whose video stopped.
+    pub fn new_pictures(&self) -> Vec<(String, Option<Picture>)> {
+        let pics = self.pictures.lock().unwrap();
+        let mut seen = self.seen.lock().unwrap();
+        let mut out = vec![];
+        for (id, (n, p)) in pics.iter() {
+            if seen.get(id) != Some(n) {
+                seen.insert(id.clone(), *n);
+                out.push((id.clone(), Some(p.clone())));
+            }
+        }
+        let gone: Vec<String> = seen.keys().filter(|k| !pics.contains_key(*k)).cloned().collect();
+        for id in gone {
+            seen.remove(&id);
+            out.push((id, None));
+        }
+        out
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -154,24 +206,49 @@ async fn measure(track: RemoteAudioTrack, identity: String, levels: Arc<Mutex<Ha
     }
 }
 
-fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String]) -> Vec<Person> {
+fn put_picture(pictures: &Pictures, id: &str, p: Picture) {
+    let mut g = pictures.lock().unwrap();
+    let n = g.get(id).map_or(1, |(n, _)| n + 1);
+    g.insert(id.to_string(), (n, p));
+}
+
+/// Turn received frames into pictures (at most video::FPS a second).
+async fn watch(track: RemoteVideoTrack, identity: String, pictures: Pictures) {
+    let mut stream = NativeVideoStream::new(track.rtc_track());
+    let gap = Duration::from_millis(1000 / video::FPS);
+    let mut last = std::time::Instant::now() - gap;
+    while let Some(frame) = stream.next().await {
+        if last.elapsed() < gap {
+            continue;
+        }
+        last = std::time::Instant::now();
+        let i420 = frame.buffer.to_i420();
+        put_picture(&pictures, &identity, video::i420_to_picture(&i420));
+    }
+    pictures.lock().unwrap().remove(&identity);
+}
+
+fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String], camera_on: bool) -> Vec<Person> {
     let me = room.local_participant();
     let mut out = vec![Person {
         identity: me.identity().to_string(),
         name: me.name(),
         me: true,
         speaking: speaking.contains(&me.identity().to_string()),
-        muted: me.track_publications().values().all(|p| p.is_muted()),
+        muted: me.track_publications().values().filter(|p| p.source() == TrackSource::Microphone).all(|p| p.is_muted()),
         heard: 0.0,
+        camera: camera_on,
     }];
     let mut others: Vec<RemoteParticipant> = room.remote_participants().into_values().collect();
     others.sort_by_key(|p| p.identity().to_string());
     for p in others {
         let id = p.identity().to_string();
         let pubs = p.track_publications();
+        let mics: Vec<_> = pubs.values().filter(|t| t.source() == TrackSource::Microphone).collect();
         out.push(Person {
+            camera: pubs.values().any(|t| t.source() == TrackSource::Camera && !t.is_muted()),
             speaking: speaking.contains(&id),
-            muted: pubs.is_empty() || pubs.values().all(|t| t.is_muted()),
+            muted: mics.is_empty() || mics.iter().all(|t| t.is_muted()),
             heard: levels.get(&id).copied().unwrap_or(0.0),
             name: p.name(),
             identity: id,
@@ -181,7 +258,7 @@ fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String]) -> Ve
     out
 }
 
-async fn run(join: Join, audio: Audio, crx: Receiver<Cmd>, etx: &Sender<Event>, wake: &Wake) -> Option<String> {
+async fn run(join: Join, audio: Audio, video: Video, crx: Receiver<Cmd>, etx: &Sender<Event>, wake: &Wake, pictures: Pictures) -> Option<String> {
     let emit = |e: Event| {
         let ok = etx.send(e).is_ok();
         wake();
@@ -219,6 +296,8 @@ async fn run(join: Join, audio: Audio, crx: Receiver<Cmd>, etx: &Sender<Event>, 
     emit(Event::Joined);
     let levels: Arc<Mutex<HashMap<String, f32>>> = Default::default();
     let mut speaking: Vec<String> = vec![];
+    // the camera while it's on: what's published and what feeds it
+    let mut camera: Option<(LocalTrackPublication, video::Feed)> = None;
     let mut last_people: Vec<Person> = vec![];
     let mut tick = tokio::time::interval(Duration::from_millis(200));
     let why = loop {
@@ -234,6 +313,17 @@ async fn run(join: Join, audio: Audio, crx: Receiver<Cmd>, etx: &Sender<Event>, 
                         tokio::spawn(measure(t, participant.identity().to_string(), levels.clone()));
                     }
                 }
+                Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(t), participant, .. }) => {
+                    tokio::spawn(watch(t, participant.identity().to_string(), pictures.clone()));
+                }
+                Some(RoomEvent::TrackUnsubscribed { track: RemoteTrack::Video(_), participant, .. }) | Some(RoomEvent::TrackUnpublished { participant, .. }) => {
+                    if !participant.track_publications().values().any(|t| t.source() == TrackSource::Camera && t.is_subscribed()) {
+                        pictures.lock().unwrap().remove(&participant.identity().to_string());
+                    }
+                }
+                Some(RoomEvent::ParticipantDisconnected(p)) => {
+                    pictures.lock().unwrap().remove(&p.identity().to_string());
+                }
                 Some(_) => {}
             },
             _ = tick.tick() => {
@@ -241,6 +331,37 @@ async fn run(join: Join, audio: Audio, crx: Receiver<Cmd>, etx: &Sender<Event>, 
                     match crx.try_recv() {
                         Ok(Cmd::Mute(true)) => publication.mute(),
                         Ok(Cmd::Mute(false)) => publication.unmute(),
+                        Ok(Cmd::Camera(true)) if camera.is_none() => {
+                            let source = NativeVideoSource::new(VideoResolution { width: video::SEND_WIDTH, height: video::SEND_WIDTH * 9 / 16 }, false);
+                            let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
+                            match room.local_participant().publish_track(LocalTrack::Video(track), TrackPublishOptions { source: TrackSource::Camera, ..Default::default() }).await {
+                                Ok(p) => {
+                                    let pics = pictures.clone();
+                                    let (etx2, wake2) = (etx.clone(), wake.clone());
+                                    let feed = video::start_feed(video, source, move |pic| match pic {
+                                        Some(pic) => put_picture(&pics, ME, pic),
+                                        None => {
+                                            pics.lock().unwrap().remove(ME);
+                                        }
+                                    }, move |why| {
+                                        let _ = etx2.send(Event::Trouble(why));
+                                        wake2();
+                                    });
+                                    camera = Some((p, feed));
+                                }
+                                Err(e) => {
+                                    emit(Event::Trouble(format!("Couldn't send your video: {}", e)));
+                                }
+                            }
+                        }
+                        Ok(Cmd::Camera(false)) => {
+                            if let Some((p, feed)) = camera.take() {
+                                drop(feed);
+                                let _ = room.local_participant().unpublish_track(&p.sid()).await;
+                                pictures.lock().unwrap().remove(ME);
+                            }
+                        }
+                        Ok(Cmd::Camera(_)) => {}
                         Ok(Cmd::Leave) | Err(mpsc::TryRecvError::Disconnected) => {
                             let _ = room.close().await;
                             return None;
@@ -248,9 +369,9 @@ async fn run(join: Join, audio: Audio, crx: Receiver<Cmd>, etx: &Sender<Event>, 
                         Err(mpsc::TryRecvError::Empty) => break,
                     }
                 }
-                let now = people(&room, &levels.lock().unwrap(), &speaking);
+                let now = people(&room, &levels.lock().unwrap(), &speaking, camera.is_some());
                 // levels drift a little all the time: compare them coarsely
-                let coarse = |v: &[Person]| v.iter().map(|p| (p.identity.clone(), p.speaking, p.muted, (p.heard * 20.0) as i32)).collect::<Vec<_>>();
+                let coarse = |v: &[Person]| v.iter().map(|p| (p.identity.clone(), p.speaking, p.muted, p.camera, (p.heard * 20.0) as i32)).collect::<Vec<_>>();
                 if coarse(&now) != coarse(&last_people) {
                     last_people = now.clone();
                     if !emit(Event::People(now)) {

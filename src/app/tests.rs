@@ -985,6 +985,16 @@ fn a_huddle_on_the_server_connects_two_computers() {
     let sam = a.huddle.people.iter().find(|p| !p.me).unwrap();
     assert_eq!(sam.member(), Some(3), "A sees Sam");
 
+    // A turns on video (a red test picture): B sees it, and A sees itself
+    a.set_huddle_camera(true);
+    let a_identity = b.huddle.people.iter().find(|p| !p.me).unwrap().identity.clone();
+    huddle_until(&mut a, &mut b, "B sees A's video", |a, b| {
+        let red = |p: &wb_voice::Picture| p.average()[0] > 150 && p.average()[1] < 100;
+        b.huddle.pictures.get(&a_identity).is_some_and(|(p, _)| red(p)) && a.huddle.pictures.get(wb_voice::ME).is_some_and(|(p, _)| red(p))
+    });
+    a.set_huddle_camera(false);
+    huddle_until(&mut a, &mut b, "A's video is gone at B", |a, b| !b.huddle.pictures.contains_key(&a_identity) && !a.huddle.pictures.contains_key(wb_voice::ME));
+
     // B mutes, then leaves
     b.set_huddle_muted(true);
     huddle_until(&mut a, &mut b, "A sees B muted", |a, _| a.huddle.people.iter().any(|p| !p.me && p.muted));

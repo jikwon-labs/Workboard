@@ -128,6 +128,16 @@ pub enum Msg {
         member: u64,
     },
     AccessList,
+    /// Join the voice huddle of a channel or DM.
+    CallJoin {
+        channel: u64,
+    },
+    /// Where and how to join it (a LiveKit server address and room token).
+    CallToken {
+        channel: u64,
+        url: String,
+        token: String,
+    },
     Access {
         people: Vec<Person>,
         /// The asker's own role (it may have just changed).
@@ -216,6 +226,7 @@ pub enum Event {
     Access { people: Vec<Person>, role: Role },
     /// A request was turned down; the connection stays.
     Denied(String),
+    CallToken { channel: u64, url: String, token: String },
 }
 
 /// How this computer signs in.
@@ -432,6 +443,7 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
                     Some(Msg::Update { data, rev }) => emit(Event::Update { data, rev }),
                     Some(Msg::Invite { member, code }) => emit(Event::Invite { member, code }),
                     Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),
+                    Some(Msg::CallToken { channel, url, token }) => emit(Event::CallToken { channel, url, token }),
                     Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
                     Some(Msg::Error { message, code }) => match code.as_deref() {
                         Some(CODE_AUTH) => Err(End::Refused(message)),

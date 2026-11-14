@@ -1,0 +1,7 @@
+# LiveKit's WebRTC library (wb-voice) uses Objective-C categories on macOS;
+# without -ObjC the linker drops them and the first call crashes.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-args=-ObjC"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-args=-ObjC"]

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/wb-sync", "crates/wb-net", "server"]
+members = [".", "crates/wb-sync", "crates/wb-net", "crates/wb-voice", "server"]
 resolver = "2"
 
 [package]
@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 wb-sync = { path = "crates/wb-sync" }
 wb-net = { path = "crates/wb-net" }
+wb-voice = { path = "crates/wb-voice" }
 eframe = "0.31"
 egui = "0.31"
 serde = { version = "1", features = ["derive"] }

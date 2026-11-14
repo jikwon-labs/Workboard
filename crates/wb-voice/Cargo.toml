@@ -1,0 +1,15 @@
+[package]
+name = "wb-voice"
+version = "0.1.1"
+edition = "2021"
+
+[dependencies]
+livekit = "0.11"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+workboard-server = { path = "../../server" }
+wb-net = { path = "../wb-net" }
+wb-sync = { path = "../wb-sync" }
+serde_json = "1"

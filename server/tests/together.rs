@@ -210,6 +210,7 @@ impl App {
                     self.role = Some(role);
                 }
                 Event::Denied(why) => self.denied.push(why),
+                Event::CallToken { .. } => {}
             }
         }
     }

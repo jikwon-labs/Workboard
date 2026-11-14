@@ -205,6 +205,7 @@ impl App {
             self.chat_open = None;
             self.recent.clear();
             self.sync_rt = Default::default();
+            self.leave_huddle();
         }
     }
 

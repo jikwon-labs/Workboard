@@ -63,5 +63,10 @@ cat > "$PLIST" <<PL
 PL
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+# bootout returns before the old one has stopped; bootstrap fails until it has
+for _ in $(seq 1 50); do
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+  sleep 0.2
+done
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "installed $LABEL: ws://$IP:$PORT/ws  (log: $LOG)"

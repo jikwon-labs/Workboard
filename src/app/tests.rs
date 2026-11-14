@@ -893,3 +893,117 @@ fn old_shared_settings_still_load() {
     assert_eq!(cfg.folder, "/tmp/x");
     assert!(!serde_json::to_string(&cfg).unwrap().contains("server"), "folder settings are saved as before");
 }
+
+/// A local livekit-server for huddle tests (None when it isn't installed).
+struct TestLiveKit(std::process::Child, u16);
+
+impl Drop for TestLiveKit {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+const LK_SECRET: &str = "app-test-secret-app-test-secret-0123456";
+
+fn test_livekit() -> Option<TestLiveKit> {
+    use std::process::{Command, Stdio};
+    let bin = ["livekit-server", "/opt/homebrew/bin/livekit-server", "/usr/local/bin/livekit-server"].into_iter().find(|b| Command::new(b).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success()))?;
+    let free = || std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let (port, rtc) = (free(), free());
+    let config = format!("port: {port}\nbind_addresses: [\"127.0.0.1\"]\nrtc:\n  tcp_port: {rtc}\n  udp_port: {rtc}\n  use_external_ip: false\n  node_ip: 127.0.0.1\nkeys:\n  appkey: {LK_SECRET}\nlogging:\n  level: warn\n");
+    let child = Command::new(bin).arg("--config-body").arg(config).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(std::time::Instant::now() < until, "livekit-server didn't start");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Some(TestLiveKit(child, port))
+}
+
+/// Keep both apps' connections and calls going until `cond` holds.
+fn huddle_until(a: &mut App, b: &mut App, what: &str, cond: impl Fn(&App, &App) -> bool) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(25);
+    while std::time::Instant::now() < until {
+        for x in [&mut *a, &mut *b] {
+            x.net_tick(None);
+            x.huddle_tick(None);
+        }
+        if cond(a, b) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    panic!("timed out waiting for: {} (A {:?} / B {:?})", what, a.huddle.people, b.huddle.people);
+}
+
+#[test]
+fn a_huddle_on_the_server_connects_two_computers() {
+    let Some(lk) = test_livekit() else {
+        eprintln!("skipped: livekit-server isn't installed");
+        return;
+    };
+    let server = TestServer::start();
+    // the server makes its folder when it starts serving; don't race it
+    std::fs::create_dir_all(&server.home).unwrap();
+    std::fs::write(server.home.join(workboard_server::LIVEKIT_FILE), serde_json::json!({"url": format!("ws://127.0.0.1:{}", lk.1), "key": "appkey", "secret": LK_SECRET}).to_string()).unwrap();
+    let addr = format!("127.0.0.1:{}", server.port);
+
+    // A sets the server up, Sam (member 3) joins with a code
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A on the server", |a| a.data.extra.shared.is_some() && a.sync_rt.people.iter().any(|p| p.member == 3));
+    a.access_request(wb_net::Msg::CreateInvite { member: 3, role: wb_net::Role::Member });
+    net_until(&mut a, "code", |a| a.sync_rt.people.iter().any(|p| p.member == 3 && p.invite.is_some()));
+    let code = a.sync_rt.people.iter().find(|p| p.member == 3).unwrap().invite.clone().unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.connect_server(&addr, &code).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    b.sync_note_change();
+    b.write_shared();
+    let ch = a.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    net_until(&mut a, "Sam is in #general on the server", |a| a.data.channels.iter().any(|c| c.id == ch && c.members.contains(&3)));
+
+    // A presses Huddle in #general: a huddle message goes out and A joins
+    a.section = Section::Chat;
+    a.chat_open = Some(ch);
+    a.open_call_dialog();
+    assert!(a.modal.is_none(), "no browser-call dialog on the server");
+    assert_eq!(a.huddle.channel, Some(ch));
+    a.sync_note_change();
+    a.write_shared();
+    let msg_is_huddle = |x: &App| x.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.last()).and_then(|m| m.call.as_deref()).and_then(huddle::huddle_channel) == Some(ch);
+    assert!(msg_is_huddle(&a));
+    net_until(&mut b, "B sees the huddle message", |b| msg_is_huddle(b));
+
+    // B presses Join on it; both hear each other (a tone in tests)
+    b.apply_chat(vec![ChatAction::JoinHuddle(ch)]);
+    huddle_until(&mut a, &mut b, "both in the huddle and heard", |a, b| {
+        let heard = |x: &App| x.huddle.people.len() == 2 && x.huddle.people.iter().any(|p| !p.me && p.heard > 0.02);
+        heard(a) && heard(b)
+    });
+    let sam = a.huddle.people.iter().find(|p| !p.me).unwrap();
+    assert_eq!(sam.member(), Some(3), "A sees Sam");
+
+    // B mutes, then leaves
+    b.set_huddle_muted(true);
+    huddle_until(&mut a, &mut b, "A sees B muted", |a, _| a.huddle.people.iter().any(|p| !p.me && p.muted));
+    b.leave_huddle();
+    assert!(b.huddle.channel.is_none() && b.huddle.call.is_none());
+    huddle_until(&mut a, &mut b, "A alone", |a, _| a.huddle.people.len() == 1);
+    a.stop_sharing();
+    assert!(a.huddle.channel.is_none(), "stopping sharing ends the huddle");
+}
+
+#[test]
+fn without_a_server_the_huddle_button_still_opens_a_browser_call() {
+    let mut a = app();
+    let ch = a.data.channels[0].id;
+    a.section = Section::Chat;
+    a.chat_open = Some(ch);
+    a.open_call_dialog();
+    assert!(matches!(a.modal, Some(Modal::Call { .. })));
+    assert!(a.huddle.channel.is_none());
+    a.join_huddle(ch);
+    assert!(a.huddle.channel.is_none(), "can't join an in-app huddle without the server");
+}

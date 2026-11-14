@@ -13,6 +13,7 @@ use std::path::PathBuf;
 mod chat;
 mod docs;
 mod hubs;
+mod huddle;
 mod menus;
 mod more;
 mod pages;
@@ -247,6 +248,7 @@ pub struct App {
     notepad_open: bool,
     toast: Option<(String, i64)>,
     sync_rt: together::SyncRt,
+    huddle: huddle::HuddleRt,
     create_text: String,
     new_message_open: bool,
     pending_template: Option<TaskTemplate>,
@@ -439,6 +441,7 @@ impl App {
             notepad_open: false,
             toast: None,
             sync_rt: Default::default(),
+            huddle: Default::default(),
             create_text: String::new(),
             new_message_open: false,
             pending_template: None,
@@ -3077,6 +3080,8 @@ impl App {
         if self.persist {
             self.sync_tick(ctx);
         }
+        self.huddle_tick(Some(ctx));
+        self.huddle_bar(ctx);
         // a joined workspace needs to know who you are
         // (on a server the invite code says who you are)
         if self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_none()) && self.data.member(self.data.me).is_none() && self.modal.is_none() {

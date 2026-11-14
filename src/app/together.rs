@@ -297,7 +297,11 @@ impl App {
                     self.sync_rt.people = people;
                     self.sync_rt.role = Some(role);
                 }
-                NetEvent::Denied(why) => self.toast = Some((why, now_ts())),
+                NetEvent::Denied(why) => {
+                    self.huddle_denied();
+                    self.toast = Some((why, now_ts()));
+                }
+                NetEvent::CallToken { channel, url, token } => self.huddle_token(channel, url, token),
             }
         }
         changed
@@ -510,6 +514,7 @@ impl App {
     }
 
     pub(super) fn stop_sharing(&mut self) {
+        self.leave_huddle();
         if let Some(SharedCfg { server: Some(addr), device, .. }) = &self.data.extra.shared {
             forget_token(addr, device);
         }
@@ -885,6 +890,11 @@ impl App {
         let ch = if self.section == Section::Chat { self.chat_open } else { None }
             .or_else(|| self.data.channels.iter().find(|c| c.kind == ChannelKind::Channel).map(|c| c.id))
             .unwrap_or(0);
+        // on the team's server: a voice huddle right here
+        if self.huddles_on_server() && ch != 0 {
+            self.start_huddle(ch);
+            return;
+        }
         self.modal = Some(Modal::Call { ch, link: String::new() });
     }
 }

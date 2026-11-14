@@ -181,6 +181,19 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 - **앱:** 다시 켜면 마지막에 열었던 작업공간을 연다(`last-workspace` 파일). 예전에는 늘 data.json 을 열어서, 합류한 팀 작업공간을 매번 다시 골라야 했다.
 - **검증:** `cargo test --workspace` 147개 통과(wb-sync 5, wb-net 3, 앱 127, 서버 단위 4, 서버 통합 8). 손 검증(실제 서버 + 실제 앱 창 클릭): 코드로 합류해 "Joined as Bora" 확인, 채팅이 Bora 이름으로 서버에 들어감, admin 으로 올리자 앱에 "Signed in as Bora (Admin)" 과 People 표시, 접속 끊기 즉시 "Not signed in", 새 코드로 다시 로그인, 서버 재시작 후 토큰으로 스스로 다시 붙음, 앱 재실행 시 팀 작업공간으로 열림, `/health`·`backups`·`restore` 동작.
 
+## 3단계 구현 결과 (2026-11-15)
+
+3단계(음성 Huddle)는 끝났다. 4단계(영상) 세션은 이 절을 먼저 읽는다.
+
+- **LiveKit 서버.** Mac mini 에 Homebrew `livekit`(1.13.11)을 설치했고, `deploy/install-livekit.sh` 가 LaunchAgent `com.jikwon-labs.livekit-server` 로 띄운다. Tailscale 주소에만 바인딩: 7880(시그널), 7881/tcp, 7882/udp(오디오, UDP 포트 하나로 묶음). API 키와 비밀은 스크립트가 처음 한 번 만들어서 서버 데이터 폴더에만 둔다(`livekit.yaml` 은 livekit-server 설정, `livekit.json` 은 workboard-server 가 토큰을 만들 때 읽음, 둘 다 권한 600). 레포에는 없다.
+- **입장 토큰.** 설계의 `POST /call-token` 대신, 이미 기기 토큰으로 로그인된 WebSocket 에 `call_join{channel}` -> `call_token{channel, url, token}` 을 더했다(인증을 따로 만들 필요가 없어서). 토큰은 HS256 JWT 를 직접 만든다(hmac + sha2, 6시간). 방 이름 `wb-<채널id>`, identity `<멤버id>-<기기id>`, name 은 멤버 이름. 채널의 members 목록이 비어 있지 않으면 그 안에 있는 사람만 받는다. `livekit.json` 이 없으면 "Voice huddles aren't set up" 으로 거절한다.
+- **`crates/wb-voice`.** LiveKit Rust SDK(`livekit` 0.11)로 방에 들어가 마이크를 보내고, 참가자·말하는 사람·음소거를 이벤트로 내보낸다. 별도 스레드 + 자체 tokio 런타임(앱 프레임 루프를 막지 않음). **SDK 확인 결과:** 0.11 의 `PlatformAudio` 가 WebRTC ADM 으로 마이크 입력과 스피커 출력을 직접 다룬다(에코 제거 포함). cpal 같은 것은 필요 없다. 테스트용 `Audio::Tone` 은 장치 대신 신호음을 보내고 받는 쪽 크기를 잰다.
+- **macOS 링크.** libwebrtc 가 Objective-C 카테고리를 쓰므로 `-ObjC` 링커 옵션이 필요하다. 없으면 첫 통화에서 `NSInvalidArgumentException` 으로 죽는다. 레포 `.cargo/config.toml` 에 넣었다. 앱 실행 파일은 약 37MB 로 커졌다.
+- **앱.** 서버에 연결돼 있으면 Huddle / Start SyncUp 버튼이 그 대화의 허들에 바로 들어가고 채팅에 "Started a huddle" 카드(Join 버튼)를 올린다(`call` 필드 = `workboard-huddle:<채널id>`). 아니면 예전처럼 Jitsi 브라우저 통화. 통화 중에는 입력칸 위에 막대: 대화 이름, 인원, 참가자(말하면 초록 테두리, 음소거면 빨간 표시), Mute/Unmute, Leave. 서버 연결을 끊거나 작업공간을 바꾸면 허들에서 나간다. 코드: `src/app/huddle.rs`.
+- **검증:** `cargo test --workspace` 152개 통과(wb-voice 통합 1, 앱 허들 2 포함). 실제 livekit-server 를 띄워 두 클라이언트가 서로의 신호음을 받는 것, 음소거하면 소리가 끊기는 것, 나가면 빠지는 것, 채널 밖 사람이 거절되는 것을 자동으로 확인한다(livekit-server 가 없으면 그 테스트는 건너뛴다). 손 검증(Mac mini, 실제 LiveKit + 실제 앱 창 클릭): A 가 Start SyncUp -> 허들 카드와 막대, B 가 Join -> 양쪽 "2 people", B 음소거 -> A 에 빨간 표시, B Leave -> A "Only you so far".
+- **확인 못 한 것:** 실제 목소리. 이 Mac mini 에는 마이크가 없고(입력은 아이폰 연속성 마이크뿐) 스피커로 튼 음성이 잡히지 않았다. 마이크가 있는 Mac(MacBook 등)에서 말하는 사람 표시와 실제 소리를 확인해야 한다. 공증된 .app 에서 처음 쓸 때 마이크 권한 창이 뜨는지도 아직 못 봤다(이 Mac 에는 Developer ID 인증서가 없다).
+- **운영 메모:** `launchctl bootout` 은 서비스가 다 내려가기 전에 돌아와서 바로 `bootstrap` 하면 실패한다(실제로 workboard-server 가 잠깐 내려갔다). 두 설치 스크립트가 이제 내려갈 때까지 기다린다.
+
 ## 이번 세션에서 해야 할 일 (1단계만)
 
 1. 위 "먼저 할 것"을 확인하고 보고한다.

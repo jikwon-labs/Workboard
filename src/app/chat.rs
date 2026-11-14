@@ -9,6 +9,7 @@ const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F
 
 pub(super) enum ChatAction {
     Open(u64),
+    JoinHuddle(u64),
     React { ch: u64, msg: u64, emoji: String },
     Thread(u64),
     CloseThread,
@@ -523,7 +524,28 @@ impl App {
                 if !m.text.is_empty() {
                     ui.add(egui::Label::new(self.mention_text(&m.text, 14.0)).wrap());
                 }
-                if let Some(link) = &m.call {
+                if let Some(ch) = m.call.as_deref().and_then(super::huddle::huddle_channel) {
+                    let here = self.huddle.channel == Some(ch);
+                    egui::Frame::new().fill(Color32::from_rgb(0x00, 0x88, 0x44).gamma_multiply(0.08)).stroke(Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
+                            ui.painter().circle_filled(r.center(), 15.0, Color32::from_rgb(0x00, 0x88, 0x44));
+                            super::shell::line_icon(ui.painter(), "phone", r.center(), Color32::WHITE);
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("Huddle").strong());
+                                ui.label(RichText::new(if here { "You're in it" } else { "Voice call in Workboard" }).small().color(t.text3));
+                            });
+                            ui.add_space(16.0);
+                            if !here {
+                                let join = ui.add(egui::Button::new(RichText::new("Join").color(Color32::WHITE)).fill(Color32::from_rgb(0x00, 0x88, 0x44)).corner_radius(6).min_size(vec2(64.0, 28.0)));
+                                name_it(&join, "Join huddle");
+                                if join.clicked() {
+                                    acts.push(ChatAction::JoinHuddle(ch));
+                                }
+                            }
+                        });
+                    });
+                } else if let Some(link) = &m.call {
                     egui::Frame::new().fill(Color32::from_rgb(0x00, 0x88, 0x44).gamma_multiply(0.08)).stroke(Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let (r, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
@@ -645,6 +667,7 @@ impl App {
         let me = self.data.me;
         for a in acts {
             match a {
+                ChatAction::JoinHuddle(ch) => self.join_huddle(ch),
                 ChatAction::Open(id) => {
                     self.chat_open = Some(id);
                     self.thread_open = None;

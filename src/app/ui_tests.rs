@@ -602,6 +602,44 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
 }
 
 #[test]
+fn huddle_bar_shows_people_mute_and_leave() {
+    let mut h = Ui1::new();
+    let ch = h.app.data.channels[0].id;
+    let me = h.app.data.me;
+    let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().clone();
+    let my_name = h.app.data.member(me).unwrap().name.clone();
+    // a huddle message in chat has a Join button
+    let id = h.app.data.new_id();
+    h.app.data.channels[0].messages.push(Message { id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(ch);
+    h.settle();
+    h.click("Join huddle");
+    assert!(h.app.huddle.channel.is_none(), "not on a server: no in-app huddle");
+    assert!(h.app.toast.as_ref().is_some_and(|t| t.0.contains("server")));
+
+    // in a huddle (on a server): the bar shows who is there and who is speaking
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+    h.app.huddle.channel = Some(ch);
+    h.app.huddle.joined = true;
+    h.app.huddle.people = vec![
+        wb_voice::Person { identity: format!("{}-dev1", me), name: String::new(), me: true, speaking: false, muted: false, heard: 0.0 },
+        wb_voice::Person { identity: format!("{}-dev2", other.id), name: String::new(), me: false, speaking: true, muted: false, heard: 0.3 },
+    ];
+    h.settle();
+    assert!(h.has(&format!("{} (you), listening", my_name)));
+    assert!(h.has(&format!("{}, speaking", other.name)));
+    assert!(h.has("2 people"));
+    assert!(!h.has("Join huddle"), "no Join button for the huddle you're in");
+    h.click("Mute");
+    assert!(h.app.huddle.muted);
+    assert!(h.has("Unmute"));
+    h.click("Leave");
+    assert!(h.app.huddle.channel.is_none());
+    assert!(!h.has("Unmute"));
+}
+
+#[test]
 fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
     let mut h = Ui1::new();
     assert!(!h.has("Rail Labs") && !h.has("Rail Upgrade") && !h.has("Rail Install"));

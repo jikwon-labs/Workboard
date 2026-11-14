@@ -15,6 +15,18 @@ another port). Run the script again after pulling new code.
 - Data: `~/Library/Application Support/WorkboardServer/` (`workspace.json`, `server.json`)
 - Stop and remove: `deploy/install-launchd.sh uninstall`
 
+## Voice huddles (LiveKit)
+
+    brew install livekit
+    deploy/install-livekit.sh
+
+Installs livekit-server as the LaunchAgent `com.jikwon-labs.livekit-server`
+on the Tailscale address: 7880 (signalling), 7881/tcp and 7882/udp (audio).
+The first run makes an API key and secret and keeps them in the data folder
+(`livekit.yaml`, `livekit.json`, mode 600); workboard-server reads
+`livekit.json` to hand out call tokens. Log: `~/Library/Logs/livekit-server.log`.
+Stop and remove: `deploy/install-livekit.sh uninstall`.
+
 ## Keep the Mac mini reachable
 
 A LaunchAgent runs while the user is logged in. For a Mac mini that should

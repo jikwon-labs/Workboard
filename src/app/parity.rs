@@ -2329,13 +2329,11 @@ impl App {
                 let ql = q.trim().to_lowercase();
                 let hit = |n: &str| ql.is_empty() || n.to_lowercase().contains(&ql);
                 let all: Vec<&str> = COLUMNS.iter().chain(PROPERTIES.iter()).copied().collect();
-                // shown properties that the List has no room to draw
-                let fits: Vec<&str> = if self.list_width > 0.0 {
-                    super::shell::col_layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.list_width, 30.0)), &self.hidden_cols, self.data.extra.apps.priorities).extra.iter().map(|c| c.0).collect()
-                } else {
-                    PROPERTIES.to_vec()
-                };
+                // shown properties and fields that the List has no room to
+                // draw, laid out the way the List does (custom field columns
+                // come before the properties and take their room)
                 let list_cols = self.list_cols(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.list_width.max(1.0), 30.0)));
+                let fits: Vec<&str> = if self.list_width > 0.0 { list_cols.extra.iter().map(|c| c.0).collect() } else { PROPERTIES.to_vec() };
                 let field_fits: Vec<u64> = if self.list_width > 0.0 { list_cols.fields.iter().map(|c| c.0).collect() } else { self.list_field_ids() };
                 let fields: Vec<(u64, String)> = self.list_field_ids().into_iter().filter_map(|id| self.data.extra.fields.iter().find(|f| f.id == id).map(|f| (id, f.name.clone()))).collect();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(rect.height() - 160.0).show(ui, |ui| {

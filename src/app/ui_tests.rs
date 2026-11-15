@@ -9303,3 +9303,541 @@ fn invite_note_wraps_inside_the_dialog() {
     assert!(note.width() <= 620.0, "note {} wide", note.width());
     assert!(note.right() <= close.right() + 1.0, "inside the dialog");
 }
+
+// ---- whiteboard ids, undo and note focus (r4-ui)
+
+/// A whiteboard on a team (a server that isn't connected), open on screen,
+/// with three strokes and two notes the team already knows.
+fn shared_board(h: &mut Ui1) -> u64 {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    let ids: Vec<u64> = (0..5).map(|_| h.app.data.new_id()).collect();
+    let wb = h
+        .app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap();
+    for (k, id) in ids[..3].iter().enumerate() {
+        wb.strokes.push(WbStroke {
+            id: *id,
+            color: [0, 0, 0],
+            width: 2.0,
+            points: vec![
+                [10.0, 10.0 + k as f32 * 20.0],
+                [60.0, 10.0 + k as f32 * 20.0],
+            ],
+        });
+    }
+    for (k, id) in ids[3..].iter().enumerate() {
+        wb.notes.push(Sticky {
+            id: *id,
+            pos: [300.0 + k as f32 * 200.0, 600.0],
+            text: format!("Known {}", k),
+            color: [0xf8, 0xae, 0x00],
+        });
+    }
+    h.app.dirty = true;
+    h.settle();
+    h.app.sync_note_change();
+    wid
+}
+
+fn board_of(h: &Ui1, wid: u64) -> Whiteboard {
+    h.app
+        .data
+        .extra
+        .whiteboards
+        .iter()
+        .find(|w| w.id == wid)
+        .cloned()
+        .unwrap()
+}
+
+/// A teammate's copy of `data` with one change of theirs: `change` runs on
+/// it and the change is stamped a moment later.
+fn teammate_copy(data: &Data, change: impl FnOnce(&mut Data)) -> serde_json::Value {
+    let mut d = data.clone();
+    change(&mut d);
+    let mut v = serde_json::to_value(&d).unwrap();
+    let mut meta = d.extra.sync.clone();
+    crate::sync::stamp(&v, &mut meta, chrono::Utc::now().timestamp_millis() + 5);
+    v["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    v
+}
+
+#[test]
+fn a_teammate_change_arriving_while_i_draw_keeps_every_stroke() {
+    let mut h = Ui1::new();
+    let wid = shared_board(&mut h);
+    let known: Vec<u64> = board_of(&h, wid).strokes.iter().map(|s| s.id).collect();
+    let before = h.app.data.clone();
+    // I start a stroke and keep the button down
+    h.app.wb_tool = 0;
+    let canvas = rect_of(&h, "Whiteboard canvas");
+    let from = canvas.center();
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    for i in 1..=6 {
+        h.frame(vec![egui::Event::PointerMoved(
+            from + vec2(10.0 * i as f32, 4.0 * i as f32),
+        )]);
+    }
+    assert!(
+        board_of(&h, wid).strokes.iter().all(|s| s.id != 0),
+        "the stroke being drawn has an id already"
+    );
+    // a teammate's new note merges in mid-stroke
+    let note_id = 1 << 40;
+    let team = teammate_copy(&before, |d| {
+        let w = d
+            .extra
+            .whiteboards
+            .iter_mut()
+            .find(|w| w.id == wid)
+            .unwrap();
+        w.notes.push(Sticky {
+            id: note_id,
+            pos: [600.0, 40.0],
+            text: "Theirs".into(),
+            color: [8, 128, 234],
+        });
+    });
+    h.app.merge_in(&[team], &[]);
+    // the stroke goes on and ends
+    let last = from + vec2(120.0, 50.0);
+    for i in 7..=12 {
+        h.frame(vec![egui::Event::PointerMoved(
+            from + vec2(10.0 * i as f32, 4.0 * i as f32),
+        )]);
+    }
+    h.frame(vec![egui::Event::PointerButton {
+        pos: last,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    let b = board_of(&h, wid);
+    for id in &known {
+        assert!(
+            b.strokes.iter().any(|s| s.id == *id),
+            "known stroke {} is kept: {:?}",
+            id,
+            b.strokes.iter().map(|s| s.id).collect::<Vec<_>>()
+        );
+        assert!(
+            !h.app.data.extra.sync.tombs.contains_key(id),
+            "and not marked deleted"
+        );
+    }
+    assert!(
+        b.notes.iter().any(|n| n.id == note_id),
+        "their note came in"
+    );
+    assert_eq!(b.strokes.len(), known.len() + 1);
+    let mine = b.strokes.iter().find(|s| !known.contains(&s.id)).unwrap();
+    assert!(mine.id != 0);
+    assert!(
+        mine.points.len() >= 12,
+        "every point went into my stroke: {}",
+        mine.points.len()
+    );
+    // and the next merge doesn't take them away either
+    let team = teammate_copy(&h.app.data, |_| {});
+    h.app.merge_in(&[team], &[]);
+    assert_eq!(board_of(&h, wid).strokes.len(), known.len() + 1);
+}
+
+#[test]
+fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
+    let mut h = Ui1::new();
+    let wid = shared_board(&mut h);
+    let known: Vec<u64> = board_of(&h, wid).strokes.iter().map(|s| s.id).collect();
+    let canvas = rect_of(&h, "Whiteboard canvas");
+    // I draw a stroke
+    h.app.wb_tool = 0;
+    drag_by(&mut h, canvas.center(), canvas.center() + vec2(60.0, 20.0));
+    let mine = board_of(&h, wid)
+        .strokes
+        .iter()
+        .find(|s| !known.contains(&s.id))
+        .unwrap()
+        .id;
+    // I add a note
+    h.app.wb_tool = 1;
+    let at = canvas.left_top() + vec2(120.0, 420.0);
+    h.click_at(at);
+    let b = board_of(&h, wid);
+    let my_note = b.notes.last().unwrap().id;
+    assert!(my_note != 0);
+    // a teammate adds a stroke and a note after mine (merged in at the end)
+    let (their_stroke, their_note) = (1 << 41, (1 << 41) + 1);
+    let team = teammate_copy(&h.app.data, |d| {
+        let w = d
+            .extra
+            .whiteboards
+            .iter_mut()
+            .find(|w| w.id == wid)
+            .unwrap();
+        w.strokes.push(WbStroke {
+            id: their_stroke,
+            color: [8, 128, 234],
+            width: 3.0,
+            points: vec![[500.0, 500.0], [520.0, 540.0]],
+        });
+        w.notes.push(Sticky {
+            id: their_note,
+            pos: [700.0, 40.0],
+            text: "Theirs".into(),
+            color: [8, 128, 234],
+        });
+    });
+    h.app.merge_in(&[team], &[]);
+    h.settle();
+    let b = board_of(&h, wid);
+    assert_eq!(b.strokes.last().unwrap().id, their_stroke);
+    assert_eq!(b.notes.last().unwrap().id, their_note);
+    // Undo takes back my note, then my stroke; theirs stay
+    h.click("Undo");
+    let b = board_of(&h, wid);
+    assert!(
+        !b.notes.iter().any(|n| n.id == my_note),
+        "my note is undone"
+    );
+    assert!(b.notes.iter().any(|n| n.id == their_note), "theirs stays");
+    h.click("Undo");
+    let b = board_of(&h, wid);
+    assert!(
+        !b.strokes.iter().any(|s| s.id == mine),
+        "my stroke is undone"
+    );
+    assert!(
+        b.strokes.iter().any(|s| s.id == their_stroke),
+        "theirs stays"
+    );
+    assert_eq!(b.strokes.len(), known.len() + 1);
+
+    // a note I moved, with a teammate's note merged in before it
+    let first = b.notes[0].id;
+    let at0 = b.notes[0].pos;
+    h.app.wb_tool = 2;
+    h.settle();
+    let view = h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    let grab = view.to_screen(canvas.min, [at0[0] + 80.0, at0[1] + 4.0]);
+    drag_by(&mut h, grab, grab + vec2(40.0, 30.0));
+    let moved = board_of(&h, wid)
+        .notes
+        .iter()
+        .find(|n| n.id == first)
+        .unwrap()
+        .pos;
+    assert!(moved != at0, "the note moved");
+    let front = (1 << 41) + 2;
+    let mut team = teammate_copy(&h.app.data, |d| {
+        let w = d
+            .extra
+            .whiteboards
+            .iter_mut()
+            .find(|w| w.id == wid)
+            .unwrap();
+        w.notes.insert(
+            0,
+            Sticky {
+                id: front,
+                pos: [900.0, 900.0],
+                text: "Front".into(),
+                color: [8, 128, 234],
+            },
+        );
+    });
+    // the merge keeps their order: the new note goes first
+    let _ = &mut team;
+    h.app.merge_in(&[team], &[]);
+    h.settle();
+    h.click("Undo");
+    let b = board_of(&h, wid);
+    assert_eq!(
+        b.notes.iter().find(|n| n.id == first).unwrap().pos,
+        at0,
+        "my moved note goes back"
+    );
+    assert_eq!(
+        b.notes.iter().find(|n| n.id == front).unwrap().pos,
+        [900.0, 900.0],
+        "theirs doesn't move"
+    );
+
+    // a stroke of mine a teammate already erased: Undo does nothing to the board
+    h.app.wb_tool = 0;
+    drag_by(
+        &mut h,
+        canvas.center() + vec2(0.0, 60.0),
+        canvas.center() + vec2(60.0, 80.0),
+    );
+    let gone = board_of(&h, wid).strokes.last().unwrap().id;
+    let team = teammate_copy(&h.app.data, |d| {
+        let w = d
+            .extra
+            .whiteboards
+            .iter_mut()
+            .find(|w| w.id == wid)
+            .unwrap();
+        w.strokes.retain(|s| s.id != gone);
+        let now = chrono::Utc::now().timestamp_millis() + 5;
+        d.extra.sync.tombs.insert(gone, now);
+    });
+    h.app.merge_in(&[team], &[]);
+    h.settle();
+    let before = board_of(&h, wid);
+    assert!(!before.strokes.iter().any(|s| s.id == gone));
+    h.click("Undo");
+    let after = board_of(&h, wid);
+    assert_eq!(
+        after.strokes.iter().map(|s| s.id).collect::<Vec<_>>(),
+        before.strokes.iter().map(|s| s.id).collect::<Vec<_>>(),
+        "nothing else is taken away"
+    );
+}
+
+#[test]
+fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    let wb = h
+        .app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap();
+    // one note at the top that scrolls away, two lower down
+    for (k, (text, pos)) in [
+        ("Top", [20.0, 0.0]),
+        ("Mid", [20.0, 300.0]),
+        ("Low", [240.0, 300.0]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        wb.notes.push(Sticky {
+            id: 7000 + k as u64,
+            pos,
+            text: text.into(),
+            color: [0xf8, 0xae, 0x00],
+        });
+    }
+    h.settle();
+    h.click("Low");
+    h.key(egui::Key::End);
+    h.type_text("A");
+    let text = |h: &Ui1, id: u64| {
+        board_of(h, wid)
+            .notes
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap()
+            .text
+            .clone()
+    };
+    assert_eq!(text(&h, 7002), "LowA");
+    // scroll the board up so the top note leaves the screen
+    let canvas = rect_of(&h, "Whiteboard canvas");
+    h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
+    for _ in 0..4 {
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -60.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    assert!(
+        h.app
+            .sweep
+            .wb_view
+            .get(&wid)
+            .is_some_and(|v| v.pan.y < -150.0),
+        "the board scrolled"
+    );
+    assert!(!h.has("Top"), "the top note is off screen");
+    h.type_text("B");
+    assert_eq!(
+        text(&h, 7002),
+        "LowAB",
+        "typing still goes to the same note"
+    );
+    assert_eq!(text(&h, 7001), "Mid");
+    assert_eq!(text(&h, 7000), "Top");
+}
+
+// ---- the status editor finishes its edits however it goes away (r4-ui)
+
+#[test]
+fn switching_the_status_editor_to_another_space_or_quitting_finishes_the_edits() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    let other = h.app.data.spaces[1].id;
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let other_list = h.app.data.lists_in(Location::Space(other)).unwrap()[0];
+    let in_list = |h: &Ui1, l: u64| {
+        h.app
+            .data
+            .tasks
+            .iter()
+            .filter(|t| t.list_id == l)
+            .map(|t| t.id)
+            .collect::<Vec<_>>()
+    };
+    let (a, b) = (in_list(&h, list)[0], in_list(&h, list)[1]);
+    let c = in_list(&h, other_list)[0];
+    for (t, st) in [(a, "in progress"), (b, "to do"), (c, "in progress")] {
+        h.app
+            .data
+            .tasks
+            .iter_mut()
+            .find(|x| x.id == t)
+            .unwrap()
+            .status = st.into();
+    }
+    h.app.data.extra.automations = vec![Automation {
+        id: 1,
+        enabled: true,
+        trigger_status: "to do".into(),
+        action: "priority".into(),
+        value: "1".into(),
+        list: Some(list),
+    }];
+    let status_ok = |h: &Ui1, si: usize, t: u64| {
+        let st = h.app.task(t).unwrap().status.clone();
+        h.app.data.spaces[si].statuses.iter().any(|s| s.name == st)
+    };
+    // in the first space: "to do" renamed, "in progress" emptied
+    h.app.apply(Action::EditStatuses(sid));
+    h.settle();
+    h.click("to do");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("backlog");
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.settle();
+    assert!(!status_ok(&h, 0, a), "mid-edit the name is empty");
+    // the other space's "Edit statuses" while the editor is open
+    h.app.toast = None;
+    h.app.apply(Action::EditStatuses(other));
+    h.settle();
+    assert_eq!(h.app.edit_statuses, Some(other));
+    assert!(status_ok(&h, 0, a), "the emptied name went back");
+    assert!(status_ok(&h, 0, b));
+    assert_eq!(h.app.task(b).unwrap().status, "backlog");
+    assert_eq!(
+        h.app.data.extra.automations[0].trigger_status, "backlog",
+        "the rename reached the automation"
+    );
+    assert!(h.app.toast.is_some());
+    // quitting with a name taken in the other space's editor
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("complete");
+    h.settle();
+    assert!(
+        !status_ok(&h, 1, c),
+        "mid-edit the task waits on a name no status has"
+    );
+    h.app.finish_before_quit();
+    assert!(h.app.edit_statuses.is_none());
+    let names: Vec<String> = h.app.data.spaces[1]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert!(
+        names.contains(&"in progress".to_string()),
+        "the taken name went back: {:?}",
+        names
+    );
+    assert!(status_ok(&h, 1, c));
+    assert_eq!(
+        names.iter().filter(|n| *n == "complete").count(),
+        1,
+        "no two statuses share a name"
+    );
+}
+
+// ---- the Columns panel's "no room" counts custom field columns (r4-ui)
+
+#[test]
+fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
+    let mut h = Ui1::new();
+    h.app.data.extra.apps.custom_fields = true;
+    let name = "Write copy for landing page";
+    let list = task_named(&h, name).list_id;
+    h.app.apply(Action::Go(Location::List(list)));
+    h.app.view = ViewKind::List;
+    h.app.hidden_cols.remove("Created by");
+    h.settle();
+    let w = h.app.list_width;
+    assert!(w > 0.0);
+    let row = Rect::from_min_size(pos2(0.0, 0.0), vec2(w, 30.0));
+    let prio = h.app.data.extra.apps.priorities;
+    // as many field columns as it takes to push "Created by" out
+    let mut n = 0;
+    while h
+        .app
+        .list_cols(row)
+        .extra
+        .iter()
+        .any(|c| c.0 == "Created by")
+    {
+        n += 1;
+        h.app.data.extra.fields.push(CustomField {
+            id: 9100 + n,
+            name: format!("F{}", n),
+            kind: "text".into(),
+            options: vec![],
+        });
+        assert!(n < 10);
+    }
+    assert!(
+        super::shell::col_layout(row, &h.app.hidden_cols, prio)
+            .extra
+            .iter()
+            .any(|c| c.0 == "Created by"),
+        "without the fields it would fit"
+    );
+    h.settle();
+    h.click("\u{25A5}  Columns");
+    let created = rect_of(&h, "Created by");
+    let marks: Vec<Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "no room")
+        .map(|(_, r)| *r)
+        .collect();
+    assert!(
+        marks
+            .iter()
+            .any(|r| (r.center().y - created.center().y).abs() < 6.0),
+        "\"no room\" beside Created by: {:?} {:?}",
+        created,
+        marks
+    );
+}

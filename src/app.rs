@@ -382,6 +382,10 @@ pub struct App {
     rename: Option<(Target, String)>,
     confirm_delete: Option<Target>,
     edit_statuses: Option<u64>,
+    /// The open status editor's bookkeeping: (space, the names tasks carry
+    /// for each status (None: added in the editor), the names automations
+    /// were last pointed at). See `commit_status_renames`.
+    status_edit: Option<(u64, Vec<Option<String>>, Vec<Option<String>>)>,
     palette: Option<String>,
     quick_add: Option<QuickAdd>,
     comment_text: String,
@@ -703,6 +707,7 @@ impl App {
             rename: None,
             confirm_delete: None,
             edit_statuses: None,
+            status_edit: None,
             palette: None,
             quick_add: None,
             comment_text: String::new(),
@@ -1941,7 +1946,13 @@ impl App {
                 }
                 self.dirty = true;
             }
-            Action::EditStatuses(sid) => self.edit_statuses = Some(sid),
+            Action::EditStatuses(sid) => {
+                // another space's editor: the open one's edits are done first
+                if self.edit_statuses != Some(sid) {
+                    self.finish_status_edit();
+                }
+                self.edit_statuses = Some(sid);
+            }
             Action::SetSpaceColor(sid, c) => {
                 if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
                     s.color = c;
@@ -2192,6 +2203,64 @@ impl App {
         let lists = self.data.lists_in(Location::Space(sid)).unwrap_or_default();
         self.retarget_automations_all(sid, &lists, &map);
         self.dirty = true;
+    }
+
+    /// The status editor's bookkeeping for space `si`: what was kept while
+    /// it is open, or (just opened, or the statuses changed under it) the
+    /// names the statuses have now.
+    fn status_edit_lists(&self, si: usize) -> (Vec<Option<String>>, Vec<Option<String>>) {
+        let sp = &self.data.spaces[si];
+        if let Some((_, orig, rules)) = self
+            .status_edit
+            .as_ref()
+            .filter(|e| e.0 == sp.id && e.1.len() == sp.statuses.len() && e.2.len() == e.1.len())
+        {
+            return (orig.clone(), rules.clone());
+        }
+        let orig: Vec<Option<String>> = sp.statuses.iter().map(|s| Some(s.name.clone())).collect();
+        (orig.clone(), orig)
+    }
+
+    /// The status editor is done with its space (closed, switched to another
+    /// space, or the app quits): renames reach tasks and automations, and a
+    /// name left empty or taken goes back, so no task is left on a status
+    /// that doesn't exist.
+    fn finish_status_edit(&mut self) {
+        let Some(sid) = self.edit_statuses.take() else {
+            self.status_edit = None;
+            return;
+        };
+        let kept = self.status_edit.take().filter(|e| e.0 == sid);
+        let kept = kept.or_else(|| {
+            let si = self.data.spaces.iter().position(|s| s.id == sid)?;
+            let (o, r) = self.status_edit_lists(si);
+            Some((sid, o, r))
+        });
+        self.settle_status_edit(kept);
+    }
+
+    /// Commits and settles one space's status edits (see `finish_status_edit`).
+    fn settle_status_edit(
+        &mut self,
+        edit: Option<(u64, Vec<Option<String>>, Vec<Option<String>>)>,
+    ) {
+        let Some((sid, mut orig, mut rules)) = edit else {
+            return;
+        };
+        let Some(si) = self.data.spaces.iter().position(|s| s.id == sid) else {
+            return;
+        };
+        if orig.len() != self.data.spaces[si].statuses.len() || rules.len() != orig.len() {
+            return;
+        }
+        self.commit_status_renames(si, &mut orig, &mut rules);
+        if self.settle_status_names(si, &orig) {
+            self.toast = Some((
+                tr("A status name that was empty or already used went back to its last name")
+                    .into(),
+                now_ts(),
+            ));
+        }
     }
 
     /// The status editor closes: a name still empty or taken goes back to
@@ -5989,28 +6058,16 @@ impl App {
             if let Some(si) = self.data.spaces.iter().position(|s| s.id == sid) {
                 let title = trf!("Statuses - {}", self.data.spaces[si].name);
                 let mut changed = false;
+                // the editor was switched to this space some other way: the
+                // other space's edits are done first
+                if self.status_edit.as_ref().is_some_and(|e| e.0 != sid) {
+                    let other = self.status_edit.take();
+                    self.settle_status_edit(other);
+                }
                 // the names tasks carry for each status (None: added here), so
-                // renames can be passed on to the tasks when an edit is done
-                let orig_id = egui::Id::new(("status_orig", sid));
-                let mut orig: Vec<Option<String>> = ctx
-                    .data(|d| d.get_temp(orig_id))
-                    .filter(|o: &Vec<Option<String>>| {
-                        o.len() == self.data.spaces[si].statuses.len()
-                    })
-                    .unwrap_or_else(|| {
-                        self.data.spaces[si]
-                            .statuses
-                            .iter()
-                            .map(|s| Some(s.name.clone()))
-                            .collect()
-                    });
-                // the names automations were last pointed at (see
-                // commit_status_renames)
-                let rules_id = egui::Id::new(("status_rules", sid));
-                let mut rules: Vec<Option<String>> = ctx
-                    .data(|d| d.get_temp(rules_id))
-                    .filter(|o: &Vec<Option<String>>| o.len() == orig.len())
-                    .unwrap_or_else(|| orig.clone());
+                // renames can be passed on to the tasks when an edit is done,
+                // and the names automations were last pointed at
+                let (mut orig, mut rules) = self.status_edit_lists(si);
                 let mut commit = false;
                 let mut removed: Option<(String, String, StatusKind)> = None;
                 egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
@@ -6078,7 +6135,7 @@ impl App {
                     self.commit_status_renames(si, &mut orig, &mut rules);
                     self.move_off_status_with(si, &old, &rule_old, kind, &orig);
                 }
-                if commit || !open {
+                if commit {
                     self.commit_status_renames(si, &mut orig, &mut rules);
                 } else if changed {
                     // tasks follow as names are typed, so closing the app
@@ -6086,22 +6143,10 @@ impl App {
                     // exists; automations wait for the rename to be done
                     self.follow_status_renames(si, &mut orig);
                 }
-                if !open && self.settle_status_names(si, &orig) {
-                    self.toast = Some((
-                        tr("A status name that was empty or already used went back to its last name")
-                            .into(),
-                        now_ts(),
-                    ));
+                self.status_edit = Some((sid, orig, rules));
+                if !open {
+                    self.finish_status_edit();
                 }
-                ctx.data_mut(|d| {
-                    if open {
-                        d.insert_temp(orig_id, orig);
-                        d.insert_temp(rules_id, rules);
-                    } else {
-                        d.remove::<Vec<Option<String>>>(orig_id);
-                        d.remove::<Vec<Option<String>>>(rules_id);
-                    }
-                });
                 if changed {
                     self.dirty = true;
                 }
@@ -6608,6 +6653,8 @@ impl App {
     /// right away (it may still be waiting out WRITE_SECS), a server gets it
     /// if the connection is up and else after the next start's welcome.
     fn finish_before_quit(&mut self) {
+        // a status editor still open: its edits are done like on closing it
+        self.finish_status_edit();
         self.data.stop_my_timers(now_ts());
         self.data.fix_activity_ids();
         if self.data.extra.shared.is_some() {

@@ -6076,6 +6076,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "lettre",
+ "ring",
  "serde",
  "serde_json",
  "sha1 0.10.7",

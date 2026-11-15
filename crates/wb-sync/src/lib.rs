@@ -62,6 +62,12 @@ pub const SHARED_VALUES: &[&str] = &["workspace", "extra.workspace_color", "extr
 /// settings of one key wins everywhere. An entry is taken away by leaving
 /// it out (its stamp stays as when that happened). `extra.slack_map`: Slack
 /// user id -> the member an Import from Slack brings them in as.
+///
+/// No `META_V` bump: no fingerprint or field stamp of anything older apps
+/// know changes. Older apps don't know these maps; they never merge or send
+/// them (the Mac app drops the field when it reads a file), and a copy of
+/// theirs that kept an entry's stamp but not the entry loses the tie to a
+/// copy with the entry, so they can't take entries away or overwrite them.
 pub const SHARED_MAPS: &[&str] = &["extra.slack_map"];
 
 /// The name of one entry of a shared map in `SyncMeta::values` and
@@ -4186,5 +4192,30 @@ mod tests {
         // joining takes the team's map
         let joined = with_team_things(&json!({"extra": {"slack_map": {"UZ": 1}}}), &a);
         assert_eq!(joined["extra"]["slack_map"], json!({"UA": 4, "UC": 5}));
+    }
+
+    #[test]
+    fn an_older_app_that_drops_the_map_takes_no_entry_away() {
+        let mut m = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &m);
+        save(&mut a, &mut m, 10);
+        a["extra"]["slack_map"] = json!({"UA": 2});
+        save(&mut a, &mut m, 20);
+        // an older app read the team's copy: it kept the stamps (all of
+        // `values`) but not the map it doesn't know, and its fingerprints
+        // are of the shared settings only
+        let mut old = a.clone();
+        old["extra"].as_object_mut().unwrap().remove("slack_map");
+        let mut om = meta_of(&old);
+        om.value_hashes
+            .retain(|p, _| SHARED_VALUES.contains(&p.as_str()));
+        assert_eq!(om.values.get("extra.slack_map/UA"), Some(&20));
+        old["extra"]["sync"] = serde_json::to_value(&om).unwrap();
+        let mut x = a.clone();
+        merge(&mut x, &[old.clone()]);
+        assert_eq!(slack_map(&x), json!({"UA": 2}));
+        let mut y = old.clone();
+        merge(&mut y, &[a.clone()]);
+        assert_eq!(slack_map(&y), json!({"UA": 2}));
     }
 }

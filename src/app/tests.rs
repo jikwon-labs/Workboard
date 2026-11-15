@@ -8600,3 +8600,93 @@ fn slack_matches_from_an_earlier_version_move_into_the_map_without_an_edit() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Slack matches set at about the same time on two computers connected to
+/// a team server: the server merges them entry by entry like a shared
+/// folder does, so both end with the later choice for one Slack person and
+/// both people's entries for two.
+#[test]
+fn concurrent_slack_matches_go_through_a_server() {
+    use super::slack::{plan, Assign};
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let (alex, sam, jordan) = (2, 3, 4);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| {
+        a.data.extra.shared.is_some()
+    });
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
+        && std::time::Instant::now() < until
+    {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    net_until(&mut a, "A sees the people list", |a| {
+        a.sync_rt.people.iter().any(|p| p.member == sam)
+    });
+    a.access_request(wb_net::Msg::CreateInvite {
+        member: sam,
+        role: wb_net::Role::Member,
+    });
+    net_until(&mut a, "invite code", |a| {
+        a.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == sam && p.invite.is_some())
+    });
+    let code = a
+        .sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == sam)
+        .and_then(|p| p.invite.clone())
+        .unwrap();
+    let mut b = App::build(
+        None,
+        Some(Data::blank(
+            "Theirs",
+            Member {
+                id: 1,
+                name: "B".into(),
+                ..Default::default()
+            },
+        )),
+    );
+    b.connect_server(&addr, &code).unwrap();
+    net_until(&mut b, "B joined", |b| {
+        b.data.extra.shared.is_some() && b.data.member(alex).is_some()
+    });
+
+    // A points UA at Jordan and UB at Jordan; B, a moment later, UA at Sam
+    // and UC at Jordan
+    let (u, c) = slack_moves(&[(1, "UA"), (2, "UB")]);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UA".into(), Assign::Member(jordan));
+    p.assign.insert("UB".into(), Assign::Member(jordan));
+    a.import_slack(&p);
+    a.sync_note_change();
+    a.write_shared();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let (u, c) = slack_moves(&[(1, "UA"), (3, "UC")]);
+    let mut p = plan(&b.data, u, c);
+    p.assign.insert("UA".into(), Assign::Member(sam));
+    p.assign.insert("UC".into(), Assign::Member(jordan));
+    b.import_slack(&p);
+    b.sync_note_change();
+    b.write_shared();
+    let want: std::collections::BTreeMap<String, u64> = [
+        ("UA".to_string(), sam),
+        ("UB".to_string(), jordan),
+        ("UC".to_string(), jordan),
+    ]
+    .into();
+    net_until(&mut a, "A has both people's matches", |a| {
+        a.data.extra.slack_map == want
+    });
+    net_until(&mut b, "B has both people's matches", |b| {
+        b.data.extra.slack_map == want
+    });
+    assert_eq!(slack_next(&a, "UA"), Some(Assign::Member(sam)));
+}

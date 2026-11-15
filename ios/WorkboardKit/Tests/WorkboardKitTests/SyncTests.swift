@@ -1033,4 +1033,28 @@ final class FieldMergeTests: XCTestCase {
         sum.absorb(d)
         XCTAssertNil(Sync.delta(since: sum, Sync.outgoing(a)))
     }
+
+    func testAnOlderAppThatDropsTheMapTakesNoEntryAway() {
+        var m = SyncMeta()
+        var a = ws([], [], m)
+        save(&a, &m, 10)
+        a.set("extra.slack_map", ["UA": 2])
+        save(&a, &m, 20)
+        // an older app kept the stamps but not the map, and fingerprints
+        // of the shared settings only
+        var old = a
+        var extra = old["extra"]!
+        extra["slack_map"] = nil
+        old["extra"] = extra
+        var om = SyncMeta(of: old)
+        om.valueHashes = om.valueHashes.filter { Sync.sharedValues.contains($0.key) }
+        XCTAssertEqual(om.values["extra.slack_map/UA"], 20)
+        old.set("extra.sync", om.json)
+        var x = a
+        Sync.merge(&x, [old])
+        XCTAssertEqual(slackMap(x), ["UA": 2])
+        var y = old
+        Sync.merge(&y, [a])
+        XCTAssertEqual(slackMap(y), ["UA": 2])
+    }
 }

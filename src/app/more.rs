@@ -564,12 +564,23 @@ impl App {
                                     t.bg,
                                 );
                             }
+                            // a comment on an archived task: say the task is archived
+                            let archived = match it.src {
+                                super::nav::InboxSrc::Task(id) => {
+                                    self.task(id).is_some_and(|x| !self.data.task_live(x))
+                                }
+                                _ => false,
+                            };
                             ui.painter().text(
                                 r.left_top() + vec2(48.0, 18.0),
                                 Align2::LEFT_CENTER,
-                                &tname,
+                                if archived {
+                                    trf!("{} (archived)", tname)
+                                } else {
+                                    tname.clone()
+                                },
                                 FontId::proportional(14.0),
-                                t.text,
+                                if archived { t.text2 } else { t.text },
                             );
                             let line = self
                                 .inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
@@ -3037,6 +3048,43 @@ pub const SEARCH_KINDS: [&str; 8] = [
 impl App {
     /// Everything the search box finds, grouped, best first. A pasted
     /// workboard:// link (Copy link) or a task number finds that item.
+    /// Archived tasks and Lists (Spaces, Folders) whose names match: search
+    /// leaves them out, so it says how many. Kind as in SEARCH_KINDS.
+    pub(super) fn archived_matches(&self, q: &str, kind: u8) -> usize {
+        let ql = q.trim().to_lowercase();
+        if ql.is_empty() || super::nav::parse_link(q).is_some() {
+            return 0;
+        }
+        let mine = |sp: &Space| sp.private_owner.is_none_or(|o| o == self.data.me);
+        let tasks = if kind == 0 || kind == 1 {
+            self.data
+                .tasks
+                .iter()
+                .filter(|t| !self.data.task_live(t))
+                .filter(|t| self.data.space_of_list(t.list_id).is_some_and(mine))
+                .filter(|t| t.name.to_lowercase().contains(&ql))
+                .count()
+        } else {
+            0
+        };
+        let lists = if kind == 0 || kind == 2 {
+            self.data
+                .spaces
+                .iter()
+                .filter(|sp| mine(sp))
+                .flat_map(|sp| {
+                    sp.lists
+                        .iter()
+                        .chain(sp.folders.iter().flat_map(|f| f.lists.iter()))
+                })
+                .filter(|l| self.data.list_archived(l.id) && l.name.to_lowercase().contains(&ql))
+                .count()
+        } else {
+            0
+        };
+        tasks + lists
+    }
+
     pub(super) fn search_rows(&self, q: &str, kind: u8) -> Vec<SearchRow> {
         let ql = q.trim().to_lowercase();
         let show = |k: u8| kind == 0 || kind == k;
@@ -3507,6 +3555,20 @@ impl App {
                         }
                         if rows.is_empty() && !q.trim().is_empty() {
                             ui.label(RichText::new(tr("No results")).color(t.text3));
+                        }
+                        // archived ones are left out: say so rather than drop them silently
+                        let arch = self.archived_matches(&q, kind);
+                        if arch > 0 {
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(if arch == 1 {
+                                    tr("1 archived match is not shown").to_string()
+                                } else {
+                                    trf!("{} archived matches are not shown", arch)
+                                })
+                                .small()
+                                .color(t.text3),
+                            );
                         }
                     });
                 if enter && chosen.is_none() {

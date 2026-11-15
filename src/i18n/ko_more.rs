@@ -155,4 +155,6 @@ pub const T: &[(&str, &str)] = &[
     ("This form has no List for its answers. Choose one under Edit.", "이 양식에는 답변을 넣을 목록이 없습니다. 편집에서 목록을 고르세요."),
     ("\"{}\" isn't a date. Write it as YYYY-MM-DD.", "\"{}\"은(는) 날짜가 아닙니다. YYYY-MM-DD 형식으로 적어 주세요."),
     ("No new comments, mentions or assignments.", "새 댓글, 멘션, 할당이 없습니다."),
+    ("1 archived match is not shown", "보관된 항목 1개는 결과에 넣지 않았습니다"),
+    ("{} archived matches are not shown", "보관된 항목 {}개는 결과에 넣지 않았습니다"),
 ];

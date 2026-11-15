@@ -950,7 +950,20 @@ impl App {
                     }
                 }
                 if shown == 0 {
-                    ui.label(RichText::new(tr("No tasks match")).color(t.text3));
+                    // nothing typed yet: say why there is nothing, not "no match"
+                    let text = if !q.is_empty() {
+                        tr("No tasks match")
+                    } else if self
+                        .data
+                        .tasks
+                        .iter()
+                        .any(|x| x.id != tid && !self.data.task_live(x))
+                    {
+                        tr("No other tasks to pick. Archived tasks are not offered here.")
+                    } else {
+                        tr("No other tasks to pick yet.")
+                    };
+                    ui.label(RichText::new(text).color(t.text3));
                 }
             });
         if let Some(oid) = picked {

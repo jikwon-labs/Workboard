@@ -270,4 +270,6 @@ pub const T: &[(&str, &str)] = &[
         "Only you see a private dashboard",
         "비공개 대시보드는 나만 볼 수 있습니다",
     ),
+    ("No other tasks to pick. Archived tasks are not offered here.", "고를 다른 작업이 없습니다. 보관된 작업은 여기에 나오지 않습니다."),
+    ("No other tasks to pick yet.", "아직 고를 다른 작업이 없습니다."),
 ];

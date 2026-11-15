@@ -8619,3 +8619,70 @@ fn form_list_picker_marks_an_archived_list_already_picked() {
     h.settle();
     assert!(!h.painted_text("Website Redesign (archived)").is_empty());
 }
+
+#[test]
+fn search_says_how_many_archived_matches_it_leaves_out() {
+    let mut h = archived_workspace();
+    h.app.palette = Some("Website".into());
+    h.settle();
+    assert!(!h.has("Team Space / Projects / Website Redesign"));
+    // the List and the archived task with that word in its name
+    let n = 1 + h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.name.to_lowercase().contains("website"))
+        .count();
+    let text = if n == 1 {
+        "1 archived match is not shown".to_string()
+    } else {
+        format!("{} archived matches are not shown", n)
+    };
+    assert!(h.has(&text), "{}", text);
+    // nothing archived: no such line
+    let mut h = Ui1::new();
+    h.app.palette = Some("Website".into());
+    h.settle();
+    assert!(!h.tree.iter().any(|(n, _)| n.contains("archived match")));
+}
+
+#[test]
+fn inbox_marks_comments_on_archived_tasks() {
+    let mut h = Ui1::new();
+    let tid = h.app.data.tasks[1].id;
+    let name = h.app.data.tasks[1].name.clone();
+    let ts = now_ts() - 30;
+    h.app.data.tasks[1].activity.push(Activity {
+        ts,
+        author: 2,
+        text: "Over to you".into(),
+        comment: true,
+        post: false,
+        ..Default::default()
+    });
+    h.app
+        .data
+        .extra
+        .inbox_later
+        .push(format!("{}:{}:2", tid, ts));
+    h.app.data.tasks[1].archived = true;
+    h.click("Inbox");
+    h.click("Inbox Later");
+    assert!(!h.painted_text(&format!("{} (archived)", name)).is_empty());
+}
+
+#[test]
+fn task_picker_with_nothing_typed_does_not_say_no_match() {
+    let mut h = archived_workspace();
+    let tid = h.app.data.tasks[0].id;
+    h.app.data.tasks[0].archived = false;
+    h.app.modal = Some(Modal::PickTask {
+        task: tid,
+        mode: TaskPick::Linked,
+        query: String::new(),
+    });
+    h.settle();
+    assert!(!h.has("No tasks match"));
+    assert!(h.has("No other tasks to pick. Archived tasks are not offered here."));
+}

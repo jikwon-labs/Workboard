@@ -35,6 +35,7 @@ mod slack;
 mod taskfields;
 #[cfg(test)]
 mod tests;
+mod timebar;
 mod together;
 #[cfg(test)]
 mod ui_tests;
@@ -1004,9 +1005,15 @@ impl App {
     }
 
     fn groups(&self, tasks: &[&Task], include_empty: bool) -> Vec<Group> {
+        self.groups_by(self.group_by, tasks, include_empty)
+    }
+
+    /// The groups `tasks` fall into under `by` (the Timeline's lanes use
+    /// their own choice, apart from the List's Group setting).
+    fn groups_by(&self, by: GroupBy, tasks: &[&Task], include_empty: bool) -> Vec<Group> {
         let t = self.t();
         let mut out: Vec<Group> = vec![];
-        match self.group_by {
+        match by {
             GroupBy::Status => {
                 for st in self.location_statuses() {
                     if !self.show_closed
@@ -2891,52 +2898,13 @@ impl App {
         let t = self.t();
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let td = today();
-        // scale: day columns get narrower as you zoom out
-        let cw = match self.gantt_zoom {
-            0 => 30.0,
-            1 => 12.0,
-            _ => 4.0,
-        };
-        let days: i64 = match self.gantt_zoom {
-            0 => 70,
-            1 => 182,
-            _ => 548,
-        };
-        let back = match self.gantt_zoom {
-            0 => 14,
-            1 => 35,
-            _ => 120,
-        };
-        let start = td - Duration::days(td.weekday().num_days_from_monday() as i64 + back);
+        let sc = timebar::DayScale::new(self.gantt_zoom, td);
+        let (start, cw) = (sc.start, sc.cw);
         let rh = 34.0;
         let name_w = 260.0;
         let head = 44.0;
         ui.horizontal(|ui| {
-            if ui.button(tr("Today")).clicked() {
-                self.gantt_jump = true;
-            }
-            ui.separator();
-            for (z, label) in [(0u8, "Day"), (1, "Week"), (2, "Month")] {
-                if ui
-                    .selectable_label(self.gantt_zoom == z, tr(label))
-                    .clicked()
-                    && self.gantt_zoom != z
-                {
-                    self.gantt_zoom = z;
-                    self.gantt_jump = true;
-                }
-            }
-            if ui
-                .small_button("\u{2212}")
-                .on_hover_text(tr("Zoom out"))
-                .clicked()
-                && self.gantt_zoom < 2
-            {
-                self.gantt_zoom += 1;
-                self.gantt_jump = true;
-            }
-            if ui.small_button("+").on_hover_text(tr("Zoom in")).clicked() && self.gantt_zoom > 0 {
-                self.gantt_zoom -= 1;
+            if timebar::zoom_buttons(ui, &mut self.gantt_zoom) {
                 self.gantt_jump = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -3095,258 +3063,75 @@ impl App {
                         .id_salt(("gantt_h", self.gantt_zoom))
                         .auto_shrink([false, true]);
                     if jump {
-                        let today_x = cw * (td - start).num_days() as f32;
-                        sa = sa.horizontal_scroll_offset((today_x - vr.width() * 0.3).max(0.0));
+                        sa = sa.horizontal_scroll_offset(sc.today_offset(td, vr.width()));
                     }
                     sa.show(ui, |ui| {
                         let total_h = rows_h;
                         let (area, _) =
-                            ui.allocate_exact_size(vec2(cw * days as f32, total_h), Sense::hover());
+                            ui.allocate_exact_size(vec2(sc.width(), total_h), Sense::hover());
                         let p = ui.painter().clone();
-                        for i in 0..days {
-                            let d = start + Duration::days(i);
-                            let x = area.left() + cw * i as f32;
-                            let col_r = Rect::from_min_size(
-                                pos2(x, area.top() + head),
-                                vec2(cw, total_h - head),
-                            );
-                            if self.gantt_zoom == 0 && d.weekday().num_days_from_monday() >= 5 {
-                                p.rect_filled(col_r, 0.0, t.column_bg);
-                            }
-                            let tick = match self.gantt_zoom {
-                                0 | 1 => d.weekday().num_days_from_monday() == 0,
-                                _ => d.day() == 1,
-                            };
-                            if tick {
-                                p.vline(
-                                    x,
-                                    area.top()..=area.top() + total_h,
-                                    Stroke::new(0.5, t.border),
-                                );
-                                let label = if self.gantt_zoom == 2 {
-                                    d.text("%b %Y")
-                                } else {
-                                    d.text("%b %-d")
-                                };
-                                p.text(
-                                    pos2(x + 4.0, area.top() + 12.0),
-                                    Align2::LEFT_CENTER,
-                                    label,
-                                    FontId::proportional(11.5),
-                                    t.text2,
-                                );
-                            }
-                            if self.gantt_zoom == 0 {
-                                let dc = if d == td { Color32::WHITE } else { t.text3 };
-                                if d == td {
-                                    p.circle_filled(
-                                        pos2(x + cw / 2.0, area.top() + 31.0),
-                                        9.0,
-                                        t.danger,
-                                    );
-                                }
-                                p.text(
-                                    pos2(x + cw / 2.0, area.top() + 31.0),
-                                    Align2::CENTER_CENTER,
-                                    d.day().to_string(),
-                                    FontId::proportional(11.0),
-                                    dc,
-                                );
-                            }
-                        }
-                        p.hline(
-                            area.x_range(),
-                            area.top() + head,
-                            Stroke::new(1.0, t.border),
-                        );
-                        let today_x = area.left() + cw * (td - start).num_days() as f32 + cw / 2.0;
-                        p.vline(
-                            today_x,
-                            area.top() + head..=area.top() + total_h,
-                            Stroke::new(1.5, t.danger),
-                        );
+                        timebar::paint_axis(&p, &t, area, head, &sc, td);
                         for (k, (task, _, _)) in rows.iter().enumerate() {
                             let y = area.top() + head + rh * k as f32;
                             p.hline(area.x_range(), y + rh, Stroke::new(0.5, t.border));
-                            let day_at = |x: f32| {
-                                start + Duration::days(((x - area.left()) / cw).floor() as i64)
-                            };
-                            let (s, e) = match (task.start, task.due) {
-                                (Some(s), Some(e)) => (s.min(e), e.max(s)),
-                                (None, Some(e)) => (e, e),
-                                (Some(s), None) => (s, s),
-                                _ => {
-                                    // no dates yet: click a day, or drag across days, to schedule it
-                                    let row = Rect::from_min_size(
-                                        pos2(area.left(), y),
-                                        vec2(area.width(), rh),
-                                    );
-                                    let resp = ui.interact(
-                                        row,
-                                        ui.id().with(("gsched", task.id)),
-                                        Sense::click_and_drag(),
-                                    );
-                                    name_it(&resp, &format!("Schedule {}", task.name));
-                                    let from_id = resp.id.with("from");
-                                    if resp.drag_started() {
-                                        if let Some(pp) = resp.interact_pointer_pos() {
-                                            ui.data_mut(|d| d.insert_temp(from_id, day_at(pp.x)));
-                                        }
-                                    }
-                                    let from: Option<NaiveDate> = ui.data(|d| d.get_temp(from_id));
-                                    let at = resp
-                                        .interact_pointer_pos()
-                                        .or(resp.hover_pos())
-                                        .map(|pp| day_at(pp.x));
-                                    if let Some(at) = at {
-                                        let (a0, a1) =
-                                            match (resp.dragged() || resp.drag_stopped(), from) {
-                                                (true, Some(f)) => (f.min(at), f.max(at)),
-                                                _ => (at, at),
-                                            };
-                                        let gx0 =
-                                            area.left() + cw * (a0 - start).num_days() as f32 + 1.0;
-                                        let gx1 = area.left()
-                                            + cw * ((a1 - start).num_days() + 1) as f32
-                                            - 1.0;
-                                        let ghost = Rect::from_min_max(
-                                            pos2(gx0, y + 7.0),
-                                            pos2(gx1.max(gx0 + 8.0), y + rh - 7.0),
-                                        );
-                                        p.rect_stroke(
-                                            ghost,
-                                            5.0,
-                                            Stroke::new(1.0_f32, t.text3),
-                                            egui::StrokeKind::Inside,
-                                        );
-                                        if resp.clicked() || resp.drag_stopped() {
-                                            let mut e2 = task.clone();
-                                            e2.start = if a0 < a1 { Some(a0) } else { None };
-                                            e2.due = Some(a1);
-                                            self.actions.push(Action::Replace(e2));
-                                        }
-                                    }
-                                    if resp.drag_stopped() {
-                                        ui.data_mut(|d| d.remove::<NaiveDate>(from_id));
-                                    }
-                                    continue;
-                                }
-                            };
-                            let x0 = area.left() + cw * (s - start).num_days() as f32 + 1.0;
-                            let x1 = area.left() + cw * ((e - start).num_days() + 1) as f32 - 1.0;
-                            let mut r = Rect::from_min_max(
-                                pos2(x0, y + 7.0),
-                                pos2(x1.max(x0 + 8.0), y + rh - 7.0),
-                            );
-                            // drag a bar to move its dates, or one of its ends to change one date
-                            let resp = ui.interact(
-                                r,
-                                ui.id().with(("bar", task.id)),
-                                Sense::click_and_drag(),
-                            );
-                            name_it(&resp, &format!("Bar {}", task.name));
-                            let edge_w = 6.0_f32.min(r.width() / 3.0);
-                            let lh = ui
-                                .interact(
-                                    Rect::from_min_max(r.min, pos2(r.left() + edge_w, r.bottom())),
-                                    ui.id().with(("barl", task.id)),
-                                    Sense::drag(),
-                                )
-                                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-                            let rhd = ui
-                                .interact(
-                                    Rect::from_min_max(pos2(r.right() - edge_w, r.top()), r.max),
-                                    ui.id().with(("barr", task.id)),
-                                    Sense::drag(),
-                                )
-                                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-                            name_it(&lh, &format!("Start of {}", task.name));
-                            name_it(&rhd, &format!("End of {}", task.name));
-                            let mut shifts = [0i64; 3];
-                            for (n, h) in [&resp, &lh, &rhd].into_iter().enumerate() {
-                                let acc_id = h.id.with("acc");
-                                if h.dragged() {
-                                    let dx = h.drag_delta().x;
-                                    ui.data_mut(|d| {
-                                        *d.get_temp_mut_or_default::<f32>(acc_id) += dx
-                                    });
-                                }
-                                let acc: f32 = ui.data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
-                                if h.drag_stopped() {
-                                    ui.data_mut(|d| d.remove::<f32>(acc_id));
-                                }
-                                shifts[n] = (acc / cw).round() as i64;
-                            }
-                            let [shift_days, shift_start, shift_end] = shifts;
-                            // an end can't be pulled past the other end
-                            let span = (e - s).num_days();
-                            let shift_start = shift_start.min(span);
-                            let shift_end = shift_end.max(-span);
-                            if resp.dragged() {
-                                r = r.translate(vec2(shift_days as f32 * cw, 0.0));
-                            }
-                            if lh.dragged() {
-                                r.min.x += shift_start as f32 * cw;
-                            }
-                            if rhd.dragged() {
-                                r.max.x += shift_end as f32 * cw;
-                            }
-                            let active =
-                                resp.hovered() || resp.dragged() || lh.dragged() || rhd.dragged();
-                            let col = rgb(self.data.status_of(task).color);
-                            p.rect_filled(
-                                r,
-                                5.0,
-                                if active {
-                                    col
-                                } else {
-                                    col.gamma_multiply(0.85)
-                                },
-                            );
-                            if lh.hovered() || rhd.hovered() || active {
-                                for hx in [r.left() + 3.0, r.right() - 3.0] {
-                                    p.vline(
-                                        hx,
-                                        r.top() + 5.0..=r.bottom() - 5.0,
-                                        Stroke::new(2.0_f32, Color32::from_white_alpha(200)),
-                                    );
-                                }
-                            }
-                            if r.width() > 60.0 {
-                                p.with_clip_rect(r).text(
-                                    r.left_center() + vec2(6.0, 0.0),
-                                    Align2::LEFT_CENTER,
-                                    &task.name,
-                                    FontId::proportional(11.5),
-                                    Color32::WHITE,
+                            let day_at = |x: f32| sc.day_at(area.left(), x);
+                            let Some((s, e)) = timebar::bar_range(task.start, task.due) else {
+                                // no dates yet: click a day, or drag across days, to schedule it
+                                let row = Rect::from_min_size(
+                                    pos2(area.left(), y),
+                                    vec2(area.width(), rh),
                                 );
-                            } else {
-                                p.text(
-                                    r.right_center() + vec2(6.0, 0.0),
-                                    Align2::LEFT_CENTER,
-                                    &task.name,
-                                    FontId::proportional(11.5),
-                                    t.text2,
+                                let resp = ui.interact(
+                                    row,
+                                    ui.id().with(("gsched", task.id)),
+                                    Sense::click_and_drag(),
                                 );
-                            }
-                            if resp.drag_stopped() && shift_days != 0 {
-                                let mut e2 = task.clone();
-                                e2.start = e2.start.map(|d| d + Duration::days(shift_days));
-                                e2.due = e2.due.map(|d| d + Duration::days(shift_days));
-                                self.actions.push(Action::Replace(e2));
-                            } else if lh.drag_stopped() && shift_start != 0 {
-                                let mut e2 = task.clone();
-                                e2.start = Some(s + Duration::days(shift_start));
-                                e2.due = Some(e);
-                                self.actions.push(Action::Replace(e2));
-                            } else if rhd.drag_stopped() && shift_end != 0 {
-                                let mut e2 = task.clone();
-                                e2.start = Some(s);
-                                e2.due = Some(e + Duration::days(shift_end));
-                                self.actions.push(Action::Replace(e2));
-                            } else if resp.clicked() {
-                                self.actions.push(Action::Open(task.id));
-                            }
+                                name_it(&resp, &format!("Schedule {}", task.name));
+                                let from_id = resp.id.with("from");
+                                if resp.drag_started() {
+                                    if let Some(pp) = resp.interact_pointer_pos() {
+                                        ui.data_mut(|d| d.insert_temp(from_id, day_at(pp.x)));
+                                    }
+                                }
+                                let from: Option<NaiveDate> = ui.data(|d| d.get_temp(from_id));
+                                let at = resp
+                                    .interact_pointer_pos()
+                                    .or(resp.hover_pos())
+                                    .map(|pp| day_at(pp.x));
+                                if let Some(at) = at {
+                                    let (a0, a1) =
+                                        match (resp.dragged() || resp.drag_stopped(), from) {
+                                            (true, Some(f)) => (f.min(at), f.max(at)),
+                                            _ => (at, at),
+                                        };
+                                    let gx0 =
+                                        area.left() + cw * (a0 - start).num_days() as f32 + 1.0;
+                                    let gx1 = area.left()
+                                        + cw * ((a1 - start).num_days() + 1) as f32
+                                        - 1.0;
+                                    let ghost = Rect::from_min_max(
+                                        pos2(gx0, y + 7.0),
+                                        pos2(gx1.max(gx0 + 8.0), y + rh - 7.0),
+                                    );
+                                    p.rect_stroke(
+                                        ghost,
+                                        5.0,
+                                        Stroke::new(1.0_f32, t.text3),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                    if resp.clicked() || resp.drag_stopped() {
+                                        let mut e2 = task.clone();
+                                        e2.start = if a0 < a1 { Some(a0) } else { None };
+                                        e2.due = Some(a1);
+                                        self.actions.push(Action::Replace(e2));
+                                    }
+                                }
+                                if resp.drag_stopped() {
+                                    ui.data_mut(|d| d.remove::<NaiveDate>(from_id));
+                                }
+                                continue;
+                            };
+                            self.date_bar(ui, &p, &sc, area.left(), y, rh, task, (s, e), "gantt");
                         }
                     });
                 });

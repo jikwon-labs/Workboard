@@ -550,8 +550,13 @@ struct Composer: View {
         Task {
             do {
                 let a = try await MediaUpload.prepare(item)
+                // a video's still goes up first, so it's there when the message is
+                var thumb: String?
+                if let still = a.still {
+                    thumb = try await FileAPI.upload(server: server, auth: auth, data: still, contentType: "image/jpeg")
+                }
                 let sha = try await FileAPI.upload(server: server, auth: auth, data: a.data, contentType: a.contentType)
-                f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.data.count, w: a.w, h: a.h, secs: a.secs)
+                f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.data.count, w: a.w, h: a.h, secs: a.secs, thumb: thumb)
                 f.preview = a.preview
             } catch let e as FileError {
                 f.error = e.explanation

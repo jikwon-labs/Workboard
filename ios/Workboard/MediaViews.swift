@@ -1,9 +1,11 @@
 // Pictures and videos in chat messages. Files come from the team server
 // (GET /files/<sha256> with this device's token, see WorkboardKit Files.swift)
 // and are kept in the caches folder. Pictures show in the message and open
-// large on a tap; a video shows as a tile that downloads it and plays it in
-// the system player. Sending: photos picked in the message box go up first
-// (PUT /files) and the message names them, the same shape the Mac app writes.
+// large on a tap; a video shows as a tile with its still (`thumb`, a small
+// JPEG, when the sender made one) and downloads the video only when it's
+// played, in the system player. Sending: photos picked in the message box go
+// up first (PUT /files) and the message names them, the same shape the Mac
+// app writes; a video goes with a still made here.
 
 import AVFoundation
 import AVKit
@@ -130,12 +132,19 @@ struct VideoTile: View {
     @State private var file = FileLoad()
     @State private var loading = false
     @State private var player: AVPlayer?
+    /// The still the sender made (only the small JPEG is fetched for it).
+    @State private var still: UIImage?
 
     var body: some View {
         let size = boxSize(attachment)
         Button(action: play) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black.opacity(0.85))
+                if let still {
+                    Image(uiImage: still).resizable().scaledToFill()
+                        .frame(width: size.width, height: size.height)
+                        .accessibilityIdentifier("videoStill")
+                }
                 VStack(spacing: 6) {
                     if loading {
                         ProgressView().tint(.white)
@@ -160,10 +169,17 @@ struct VideoTile: View {
                 }
             }
             .frame(width: size.width, height: size.height)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Video \(attachment.name)")
         .accessibilityIdentifier("video-\(attachment.file.prefix(12))")
+        .task(id: attachment.thumb) {
+            guard let t = attachment.thumb, still == nil else { return }
+            if let u = try? await FileAPI.download(server: client.settings.server, auth: client.fileAuth, sha: t, ext: "jpg") {
+                still = await Task.detached { UIImage(contentsOfFile: u.path) }.value
+            }
+        }
         .fullScreenCover(isPresented: Binding(get: { player != nil }, set: { if !$0 { player?.pause(); player = nil } })) {
             if let player {
                 NavigationStack {
@@ -264,6 +280,20 @@ enum MediaUpload {
         let h: Int
         let secs: Double
         let preview: UIImage?
+        /// A video's still as JPEG (sent as its own file, named by `thumb`).
+        var still: Data? = nil
+    }
+
+    /// A still from early in a video, no larger than FileAPI.stillSide, as
+    /// JPEG (the very first frame is often black, so a little way in).
+    static func still(_ asset: AVURLAsset, secs: Double) async -> Data? {
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        let side = CGFloat(FileAPI.stillSide)
+        gen.maximumSize = CGSize(width: side, height: side)
+        let at = CMTime(seconds: min(max(secs, 0) / 10, 1), preferredTimescale: 600)
+        guard let (cg, _) = try? await gen.image(at: at) else { return nil }
+        return UIImage(cgImage: cg).jpegData(compressionQuality: 0.75)
     }
 
     struct Unreadable: LocalizedError {
@@ -294,7 +324,9 @@ enum MediaUpload {
             }
             let ext = movie.url.pathExtension.lowercased()
             let type = ext == "mp4" || ext == "m4v" ? "video/mp4" : "video/quicktime"
-            return Prepared(data: data, name: "Video-\(stamp()).\(ext.isEmpty ? "mov" : ext)", contentType: type, isVideo: true, w: w, h: h, secs: secs.isFinite ? secs : 0, preview: nil)
+            let length = secs.isFinite ? secs : 0
+            let still = await still(asset, secs: length)
+            return Prepared(data: data, name: "Video-\(stamp()).\(ext.isEmpty ? "mov" : ext)", contentType: type, isVideo: true, w: w, h: h, secs: length, preview: still.flatMap(UIImage.init(data:)), still: still)
         }
         guard let raw = try await item.loadTransferable(type: Data.self), let image = UIImage(data: raw) else { throw Unreadable() }
         let maxSide: CGFloat = 4096

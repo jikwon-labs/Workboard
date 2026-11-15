@@ -3853,6 +3853,7 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         call: None,
         attachments: vec![],
         edited: None,
+        imported: None,
     }
 }
 
@@ -4411,6 +4412,7 @@ fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         call: None,
         attachments: vec![],
         edited: None,
+        imported: None,
     }
 }
 
@@ -5030,6 +5032,7 @@ fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
             call: None,
             attachments: vec![],
             edited: None,
+            imported: None,
             mentions: vec![],
         });
     let mut team = serde_json::to_value(&a.data).unwrap();
@@ -6807,12 +6810,19 @@ fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size()
     put('9', 1000, 40); // a workspace only on this computer: never goes
     std::fs::write(dir.join(format!("{}.mov", sha('a'))), b"x").unwrap();
     std::fs::write(dir.join(".uploads.json"), b"[]").unwrap();
+    std::fs::write(dir.join(".task-files.json"), b"[]").unwrap();
+    old_file(&dir.join(".task-files.json"), 3);
     let local: HashSet<String> = [sha('c'), sha('9')].into_iter().collect();
     let shared: HashSet<String> = [sha('e'), sha('f')].into_iter().collect();
     let keep: HashSet<String> = [sha('d')].into_iter().collect();
+    let space = |shared: bool, all: HashSet<String>| super::files::SpaceRefs {
+        shared,
+        all,
+        trash_only: HashSet::new(),
+    };
     let removed = clean_cache(
         &dir,
-        &[(false, local), (true, shared)],
+        &[space(false, local), space(true, shared)],
         &keep,
         std::time::SystemTime::now(),
         super::files::CACHE_GRACE,
@@ -6829,6 +6839,10 @@ fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size()
         "its link goes too"
     );
     assert!(dir.join(".uploads.json").is_file(), "the backlog stays");
+    assert!(
+        dir.join(".task-files.json").is_file(),
+        "and the task attachments on their way"
+    );
 }
 
 #[test]
@@ -6855,6 +6869,8 @@ fn the_shared_folder_drops_files_nobody_refers_to_once_they_are_a_month_old() {
             .to_string(),
     )
     .unwrap();
+    // a folder that has been cleaned up before (none named lately)
+    std::fs::write(files.join(super::files::FOLDER_NAMED), "{}").unwrap();
     let refs = folder_refs(&folder);
     let removed = clean_shared_folder(
         &files,
@@ -6900,13 +6916,12 @@ fn every_workspace_on_this_computer_counts_for_the_cache() {
         format!("{{ \"file\": \"{}\"", sha('d')),
     )
     .unwrap();
-    let mut spaces = super::files::workspaces_on_disk(&dir);
-    spaces.sort_by_key(|(_, s)| s.iter().min().cloned());
+    let spaces = super::files::workspaces_on_disk(&dir);
     let find = |c: char| {
         spaces
             .iter()
-            .find(|(_, s)| s.contains(&sha(c)))
-            .map(|(sh, _)| *sh)
+            .find(|s| s.all.contains(&sha(c)))
+            .map(|s| s.shared)
     };
     assert_eq!(find('a'), Some(false), "the Trash counts");
     assert_eq!(find('b'), Some(true));
@@ -6989,8 +7004,8 @@ fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
     let before = a.data.members.len();
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
     let plan = super::slack::plan(&a.data, users, channels);
-    assert_eq!(plan.matched.get("U1"), Some(&mia), "matched by email");
-    assert_eq!(plan.missing, vec!["U2".to_string()]);
+    assert_eq!(plan.matched("U1"), Some(mia), "matched by email");
+    assert_eq!(plan.unmatched(), vec!["U2".to_string()]);
     assert_eq!(plan.message_count(), 4, "the join notice isn't a message");
     let (chans, msgs) = a.import_slack(&plan);
     assert_eq!((chans, msgs), (2, 4));
@@ -7039,7 +7054,7 @@ fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
     // the same export again adds nothing
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
     let again = super::slack::plan(&a.data, users, channels);
-    assert!(again.missing.is_empty(), "Casper is a member now");
+    assert!(again.unmatched().is_empty(), "Casper is a member now");
     assert_eq!(a.import_slack(&again), (0, 0));
 }
 
@@ -7048,7 +7063,9 @@ fn people_not_added_from_slack_come_in_under_my_name() {
     let mut a = app();
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
     let mut plan = super::slack::plan(&a.data, users, channels);
-    plan.create_missing = false;
+    for id in plan.unmatched() {
+        plan.assign.insert(id, super::slack::Assign::Me);
+    }
     let before = a.data.members.len();
     a.import_slack(&plan);
     assert_eq!(a.data.members.len(), before);
@@ -7203,6 +7220,475 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
     b.sync_note_change();
     b.write_shared();
     net_until(&mut a, "A keeps it all", |a| a.task(task.id).is_some());
+}
+
+/// Write a Slack export folder from (file, JSON) pairs and read it.
+fn slack_from(
+    files: &[(&str, serde_json::Value)],
+) -> (
+    Vec<super::slack::SlackUser>,
+    Vec<super::slack::SlackChannel>,
+) {
+    let root = temp_folder("slack2");
+    for (p, v) in files {
+        let path = root.join(p);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, v.to_string()).unwrap();
+    }
+    let out = super::slack::read_export(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    out
+}
+
+#[test]
+fn a_private_slack_channel_never_pours_into_a_public_one_or_goes_to_everyone() {
+    use serde_json::json;
+    let mut a = app();
+    a.apply_chat(vec![super::chat::ChatAction::NewChannel("design".into())]);
+    let public = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .unwrap()
+        .id;
+    let (users, channels) = slack_from(&[
+        (
+            "users.json",
+            json!([{"id": "U9", "name": "zed", "real_name": "Zed Nobody", "profile": {}}]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "design", "members": ["U9"]}]),
+        ),
+        (
+            "groups.json",
+            json!([{"id": "G1", "name": "design", "members": ["U9"]}]),
+        ),
+        (
+            "design/2024-01-01.json",
+            json!([{"type": "message", "user": "U9", "text": "secret plans", "ts": "1704100000.000100"}]),
+        ),
+    ]);
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    // Zed comes in under my name: no member to share the private one with
+    plan.assign.insert("U9".into(), super::slack::Assign::Me);
+    let ((chans, _), alone) = a.import_slack_report(&plan);
+    assert_eq!(chans, 2);
+    assert_eq!(alone, vec!["design".to_string()], "and the dialog says so");
+    let private: Vec<&Channel> = a
+        .data
+        .channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Channel && c.private)
+        .collect();
+    assert_eq!(private.len(), 1, "a channel of its own");
+    assert_eq!(private[0].name, "design-private", "named apart");
+    assert_eq!(
+        private[0].members,
+        vec![a.data.me],
+        "only me, not every member"
+    );
+    let pubc = a.data.channels.iter().find(|c| c.id == public).unwrap();
+    assert!(!pubc.private);
+    assert_eq!(pubc.messages.len(), 1, "the public one gets its own copy");
+    // again: each lands in its own channel and nothing doubles
+    let (users, channels) = slack_from(&[
+        ("users.json", json!([])),
+        ("groups.json", json!([{"id": "G1", "name": "design"}])),
+        (
+            "design/2024-01-01.json",
+            json!([{"type": "message", "user": "U9", "text": "secret plans", "ts": "1704100000.000100"}]),
+        ),
+    ]);
+    let plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(a.import_slack(&plan), (0, 0));
+    assert_eq!(
+        a.data
+            .channels
+            .iter()
+            .filter(|c| c.name.starts_with("design"))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn imported_mentions_and_replies_are_not_news_in_anyones_inbox() {
+    use serde_json::json;
+    let mut a = app();
+    let me = a.data.me;
+    let my_name = a.data.member(me).unwrap().name.clone();
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .email = "me@example.com".into();
+    let sam = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    let badge = a.inbox_badge();
+    let (users, channels) = slack_from(&[
+        (
+            "users.json",
+            json!([
+                {"id": "UME", "name": "me", "real_name": "Whoever", "profile": {"email": "me@example.com"}},
+                {"id": "US", "name": "sam", "real_name": "Sam Lee", "profile": {}}
+            ]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "old-news", "members": ["UME", "US"]}]),
+        ),
+        (
+            "old-news/2024-01-01.json",
+            json!([
+                {"type": "message", "user": "US", "text": "hey <@UME>", "ts": "1704100000.000100"},
+                {"type": "message", "user": "UME", "text": "my thread", "ts": "1704100100.000100", "thread_ts": "1704100100.000100"},
+                {"type": "message", "user": "US", "text": "a reply", "ts": "1704100200.000100", "thread_ts": "1704100100.000100"}
+            ]),
+        ),
+    ]);
+    let plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(plan.matched("UME"), Some(me));
+    assert_eq!(plan.matched("US"), Some(sam));
+    a.import_slack(&plan);
+    let ch = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "old-news")
+        .unwrap()
+        .clone();
+    assert!(ch.messages.iter().all(|m| m.imported.is_some()));
+    let mention = ch.messages.iter().find(|m| m.author == sam).unwrap();
+    assert_eq!(mention.text, format!("hey @{}", my_name));
+    let rows: Vec<_> = a
+        .inbox_items()
+        .into_iter()
+        .filter(|i| matches!(i.src, super::nav::InboxSrc::Chat { ch: c, .. } if c == ch.id))
+        .collect();
+    assert_eq!(rows.len(), 2, "the mention and the reply are in the Inbox");
+    assert!(
+        rows.iter().all(|r| r.tab == 3 && r.imported),
+        "but already cleared"
+    );
+    assert_eq!(a.inbox_badge(), badge, "the badge doesn't move");
+    a.notify_rt.seeded = true;
+    let keys: Vec<String> = a
+        .notify_candidates(&crate::model::NotifySettings::everything())
+        .into_iter()
+        .map(|(_, n)| n.key)
+        .collect();
+    assert!(
+        rows.iter().all(|r| !keys.contains(&r.key)),
+        "never announced"
+    );
+    // another member who had seen this channel long ago: not unread for them
+    let mut seen = ch.clone();
+    seen.last_read = 0;
+    assert_eq!(a.unread_here(&seen), 0);
+    // a real reply written now in my thread still is news
+    let thread = ch.messages.iter().find(|m| m.author == me).unwrap().id;
+    let c = a.data.channels.iter_mut().find(|c| c.id == ch.id).unwrap();
+    let t = c.messages.iter_mut().find(|m| m.id == thread).unwrap();
+    let mut live = t.replies[0].clone();
+    live.id = 987_654;
+    live.imported = None;
+    live.ts = now_ts();
+    t.replies.push(live);
+    assert_eq!(a.inbox_badge(), badge + 1);
+}
+
+#[test]
+fn slack_people_are_not_merged_by_name_and_same_second_messages_all_come_in() {
+    use serde_json::json;
+    let mut a = app();
+    let alex = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    // two members called Sam Lee here
+    let sam2 = a.data.new_id();
+    a.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        email: String::new(),
+        role: "Member".into(),
+        invited: false,
+        status_text: String::new(),
+    });
+    let export = [
+        (
+            "users.json",
+            json!([
+                {"id": "UA1", "name": "alex", "real_name": "Alex Kim", "profile": {}},
+                {"id": "UA2", "name": "alexk", "real_name": "Alex Kim", "profile": {}},
+                {"id": "US", "name": "sam", "real_name": "Sam Lee", "profile": {}},
+                {"id": "UJ", "name": "jordan", "real_name": "Jordan Park", "profile": {}}
+            ]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "busy", "members": ["UA1", "UA2", "US", "UJ"]}]),
+        ),
+        (
+            "busy/2024-01-01.json",
+            json!([
+                {"type": "message", "user": "UJ", "text": "+1", "ts": "1704100000.000100"},
+                {"type": "message", "user": "UJ", "text": "+1", "ts": "1704100000.000200"},
+                {"type": "message", "user": "UA1", "text": "hi", "ts": "1704100001.000100"},
+                {"type": "message", "user": "UA2", "text": "hi", "ts": "1704100002.000100"},
+                {"type": "message", "user": "US", "text": "yo", "ts": "1704100003.000100"}
+            ]),
+        ),
+    ];
+    let (users, channels) = slack_from(&export);
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(
+        plan.matched("UA1"),
+        None,
+        "two Slack Alexes: neither matched"
+    );
+    assert_eq!(plan.matched("UA2"), None);
+    assert_eq!(plan.matched("US"), None, "two Sams here: can't tell which");
+    assert!(
+        plan.matched("UJ").is_some(),
+        "one name, one member: matched"
+    );
+    assert_eq!(plan.people, vec!["UJ", "UA1", "UA2", "US"]);
+    assert!(plan.shared_members().is_empty());
+    // someone points both Alexes at Alex: allowed, and said
+    plan.assign
+        .insert("UA1".into(), super::slack::Assign::Member(alex));
+    plan.assign
+        .insert("UA2".into(), super::slack::Assign::Member(alex));
+    assert_eq!(
+        plan.shared_members(),
+        vec![(alex, vec!["UA1".to_string(), "UA2".to_string()])]
+    );
+    plan.assign.insert("US".into(), super::slack::Assign::Me);
+    let members = a.data.members.len();
+    assert_eq!(a.import_slack(&plan), (1, 5), "both +1s in the same second");
+    assert_eq!(a.data.members.len(), members, "nobody new");
+    let busy = a.data.channels.iter().find(|c| c.name == "busy").unwrap();
+    let me = a.data.me;
+    assert!(busy
+        .messages
+        .iter()
+        .any(|m| m.author == me && m.text == "Sam Lee: yo"));
+    assert_eq!(busy.messages.iter().filter(|m| m.author == alex).count(), 2);
+    // the same export again adds nothing
+    let (users, channels) = slack_from(&export);
+    let mut again = super::slack::plan(&a.data, users, channels);
+    again
+        .assign
+        .insert("UA1".into(), super::slack::Assign::Member(alex));
+    again
+        .assign
+        .insert("UA2".into(), super::slack::Assign::Member(alex));
+    again.assign.insert("US".into(), super::slack::Assign::Me);
+    assert_eq!(a.import_slack(&again), (0, 0));
+}
+
+#[test]
+fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
+    let mut a = app();
+    // a server this computer isn't signed in to: it can't go up yet
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-task-restart".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    let tid = a.data.tasks[0].id;
+    a.add_task_file(tid, picture_file("restart.png", 20, 22));
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
+        a.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    a.files_tick(None);
+    let att = a.task_files[0].1.att.clone().unwrap();
+    let dir = a.files.dir().to_path_buf();
+    let saved = super::taskfields::read_task_files(&dir);
+    assert_eq!(saved.len(), 1, "written down");
+    assert_eq!((saved[0].task, &saved[0].att.file), (tid, &att.file));
+    // and one from another workspace on this computer
+    let mut other = saved[0].clone();
+    other.ws = "other.json".into();
+    other.task = 424_242;
+    let mut both = saved.clone();
+    both.push(other);
+    std::fs::write(
+        dir.join(super::taskfields::TASK_FILES),
+        serde_json::to_string(&both).unwrap(),
+    )
+    .unwrap();
+    // the app quits before it goes up; the next start (signed in this time,
+    // here: no server, so it is ready at once) attaches it to the task
+    let mut data = a.data.clone();
+    data.extra.shared = None;
+    drop(a);
+    let mut b = App::build(None, Some(data));
+    b.files = super::files::Files::new(dir.clone());
+    assert!(b.task(tid).unwrap().attachments.is_empty());
+    b.files_tick(None);
+    b.files_tick(None);
+    let t = b.task(tid).unwrap();
+    assert_eq!(t.attachments.len(), 1, "joined its task");
+    assert_eq!(t.attachments[0].file, att.file);
+    assert!(b.task_files.is_empty());
+    let left = super::taskfields::read_task_files(&dir);
+    assert_eq!(
+        left.len(),
+        1,
+        "the other workspace's one stays written down"
+    );
+    assert_eq!(left[0].ws, "other.json");
+}
+
+#[test]
+fn the_cache_never_drops_files_only_a_trash_refers_to_to_stay_under_its_size() {
+    use super::files::{clean_cache, SpaceRefs};
+    use std::collections::HashSet;
+    let dir = temp_folder("clean-trash");
+    std::fs::create_dir_all(&dir).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    for (c, days) in [('a', 50), ('b', 40), ('c', 30)] {
+        let p = dir.join(sha(c));
+        std::fs::write(&p, vec![0u8; 1000]).unwrap();
+        old_file(&p, days);
+    }
+    // a shared workspace: a (least recently used) only in its Trash, b in
+    // a message, c in another workspace's message but this one's Trash
+    let ws = serde_json::json!({
+        "extra": {"shared": {"device": "d", "tag": 1}, "trash": [
+            {"payload": serde_json::json!({"attachments": [{"file": sha('a'), "name": "a.png"}]}).to_string()},
+            {"payload": serde_json::json!({"attachments": [{"file": sha('c'), "name": "c.png"}]}).to_string()}
+        ]},
+        "channels": [{"messages": [{"attachments": [{"file": sha('b'), "name": "b.png"}]}]}]
+    });
+    let refs = SpaceRefs::of(&ws);
+    assert!(refs.shared);
+    assert_eq!(refs.all.len(), 3);
+    let only: HashSet<String> = [sha('a'), sha('c')].into_iter().collect();
+    assert_eq!(refs.trash_only, only);
+    let other = SpaceRefs {
+        shared: true,
+        all: [sha('c')].into_iter().collect(),
+        trash_only: HashSet::new(),
+    };
+    let removed = clean_cache(
+        &dir,
+        &[refs, other],
+        &HashSet::new(),
+        std::time::SystemTime::now(),
+        super::files::CACHE_GRACE,
+        1000,
+    );
+    // over the cap: the old Trash-only file stays; the others can be fetched
+    // again from where the live messages are
+    let mut removed = removed;
+    removed.sort();
+    assert_eq!(removed, vec![sha('b'), sha('c')]);
+    assert!(dir.join(sha('a')).is_file());
+}
+
+#[test]
+fn the_shared_folder_keeps_a_deleted_messages_file_while_it_was_named_lately() {
+    use super::files::{clean_shared_folder, FOLDER_GRACE, FOLDER_NAMED, FOLDER_NAMED_GRACE};
+    use std::collections::HashSet;
+    let folder = temp_folder("clean-named");
+    let files = folder.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    let day = std::time::Duration::from_secs(86_400);
+    let now = std::time::SystemTime::now();
+    for c in ['a', 'b'] {
+        let p = files.join(sha(c));
+        std::fs::write(&p, b"x").unwrap();
+        old_file(&p, 100);
+    }
+    let named: Option<HashSet<String>> = Some([sha('a')].into_iter().collect());
+    let nothing: Option<HashSet<String>> = Some(HashSet::new());
+    // the first clean up only starts watching
+    assert!(clean_shared_folder(&files, &named, now, FOLDER_GRACE).is_empty());
+    assert!(files.join(FOLDER_NAMED).is_file());
+    // a's message is deleted (to someone's Trash): it stays a while
+    let soon = now + day * 40;
+    assert!(clean_shared_folder(&files, &nothing, soon, FOLDER_GRACE).is_empty());
+    assert!(files.join(sha('a')).is_file());
+    let later = now + FOLDER_NAMED_GRACE + day;
+    let mut gone = clean_shared_folder(&files, &nothing, later, FOLDER_GRACE);
+    gone.sort();
+    assert_eq!(gone, vec![sha('a'), sha('b')]);
+    // a record cut short (or a sync conflict) deletes nothing and starts again
+    let p = files.join(sha('c'));
+    std::fs::write(&p, b"x").unwrap();
+    old_file(&p, 100);
+    std::fs::write(files.join(FOLDER_NAMED), "{\"cc").unwrap();
+    assert!(clean_shared_folder(&files, &nothing, later, FOLDER_GRACE).is_empty());
+    assert!(p.is_file());
+    let record: std::collections::BTreeMap<String, i64> =
+        serde_json::from_str(&std::fs::read_to_string(files.join(FOLDER_NAMED)).unwrap()).unwrap();
+    assert!(record.contains_key(&sha('c')), "rebuilt");
+}
+
+/// The short lowercase answers of the team server's file route (which the
+/// app shows as "The server said 500 can't write files") read in Korean
+/// too, so a new one without a translation is caught.
+#[test]
+fn server_file_answers_are_shown_in_the_interface_language() {
+    let src = include_str!("../../server/src/files.rs");
+    let src = src.split("#[cfg(test)]").next().unwrap();
+    let mut bodies = vec![];
+    for (i, _) in src.match_indices("StatusCode::") {
+        let rest = &src[i + "StatusCode::".len()..];
+        let name_end = rest
+            .find(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+            .unwrap_or(0);
+        let after = rest[name_end..].trim_start();
+        let Some(after) = after.strip_prefix(',') else {
+            continue;
+        };
+        let Some(lit) = after.trim_start().strip_prefix('"') else {
+            continue;
+        };
+        let body = lit.split('"').next().unwrap();
+        if !bodies.contains(&body) {
+            bodies.push(body);
+        }
+    }
+    assert!(bodies.len() >= 6, "found the answers: {:?}", bodies);
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown: Vec<(String, String)> = bodies
+        .iter()
+        .map(|b| {
+            let e = format!("The server said 500 {}", b);
+            (b.to_string(), App::error_text(&e))
+        })
+        .collect();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let english: Vec<&(String, String)> = shown
+        .iter()
+        .filter(|(_, ko)| ko.chars().any(|c| c.is_ascii_alphabetic()))
+        .collect();
+    assert!(english.is_empty(), "no Korean for: {:#?}", english);
+    // and in English the server's words stay as they are
+    assert_eq!(
+        App::error_text("The server said 500 can't write files"),
+        "The server said 500 can't write files"
+    );
 }
 
 #[test]

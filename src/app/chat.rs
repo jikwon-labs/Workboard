@@ -220,6 +220,8 @@ impl App {
             .iter()
             .filter(|m| {
                 m.author != self.data.me
+                    // imported history isn't new to anyone
+                    && m.imported.is_none()
                     && match seen {
                         Some(s) => !s.has(m.id) && (m.ts >= s.floor || m.ts > c.last_read),
                         None => m.ts > c.last_read,
@@ -1072,6 +1074,7 @@ impl App {
                         .filter(|m| !m.invited && m.id != me)
                         .cloned()
                         .collect();
+                    let mut picked = None;
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
                             ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
@@ -1083,10 +1086,14 @@ impl App {
                             .clicked()
                             {
                                 insert = Some(format!("@{} ", m.name));
+                                picked = Some(m.id);
                                 close_popup(ui);
                             }
                         }
                     });
+                    if let Some(id) = picked {
+                        self.chat_picked.push(id);
+                    }
                     let itool = |ui: &mut Ui, kind: &str, tip: &str| {
                         icon_button(ui, &t, kind, "", tip, false).on_hover_text(tr(tip))
                     };
@@ -1145,6 +1152,7 @@ impl App {
                             };
                             out = Some((text, title, files));
                             self.chat_text.clear();
+                            // the picks go with the message (see apply_chat)
                             self.post_title.clear();
                             self.chat_files.clear();
                         } else if enter && files_ok && self.chat_files.is_empty() {
@@ -1998,9 +2006,12 @@ impl App {
                 } => {
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    let mentions = self.data.mentions_in(&text);
+                    // the channel's box: the people picked from its @ list
+                    let picked = std::mem::take(&mut self.chat_picked);
+                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {
                         edited: None,
+                        imported: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2246,9 +2257,17 @@ impl App {
                     }
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    let mentions = self.data.mentions_in(&text);
+                    // the channel's box (not a thread reply): the people
+                    // picked from its @ list
+                    let picked = if parent.is_none() {
+                        std::mem::take(&mut self.chat_picked)
+                    } else {
+                        vec![]
+                    };
+                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {
                         edited: None,
+                        imported: None,
                         mentions,
                         attachments: files,
                         id,

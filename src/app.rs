@@ -358,6 +358,7 @@ struct Drafts {
     thread: DraftBox,
     chat_files: DraftBox<Vec<files::Pending>>,
     thread_files: DraftBox<Vec<files::Pending>>,
+    chat_picked: DraftBox<Vec<u64>>,
 }
 
 pub struct App {
@@ -392,6 +393,10 @@ pub struct App {
     /// People picked from the @mention list while writing a comment, so a
     /// name two people share means the one picked.
     comment_picked: Vec<u64>,
+    /// People picked from the @mention list in the channel's message box
+    /// (kept with its draft), so a name two people share means the one
+    /// picked.
+    chat_picked: Vec<u64>,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -553,8 +558,13 @@ pub struct App {
     undo_trash: Option<(Vec<u64>, i64)>,
     /// Asking before deleting the selected tasks.
     confirm_bulk_delete: bool,
-    /// Pictures and videos on their way onto a task: (task, file).
+    /// Pictures and videos on their way onto a task: (task, file). Kept in
+    /// the cache folder too (`taskfields::TASK_FILES`), so ones still going
+    /// up when the app quits join their task after the next start.
     task_files: Vec<(u64, files::Pending)>,
+    /// What of `task_files` is written down (task, file), once read back
+    /// for this workspace; None until then.
+    task_files_saved: Option<Vec<(u64, String)>>,
     /// Page state of the apps (reminders, search, whiteboards, forms, ...).
     sweep: more::SweepUi,
     /// Interface language picked in Settings > Language (kept on this computer).
@@ -712,6 +722,7 @@ impl App {
             quick_add: None,
             comment_text: String::new(),
             comment_picked: vec![],
+            chat_picked: vec![],
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),
@@ -867,6 +878,7 @@ impl App {
             undo_trash: None,
             confirm_bulk_delete: false,
             task_files: vec![],
+            task_files_saved: None,
             sweep: Default::default(),
             lang_choice,
             reminder_about: (None, None),
@@ -6387,6 +6399,9 @@ impl App {
         self.drafts
             .thread_files
             .swap(self.thread_open, &mut self.thread_files);
+        self.drafts
+            .chat_picked
+            .swap(self.chat_open, &mut self.chat_picked);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
         self.sync_view_prefs();

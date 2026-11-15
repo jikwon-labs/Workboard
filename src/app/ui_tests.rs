@@ -1416,6 +1416,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     let id = h.app.data.new_id();
     h.app.data.channels[0].messages.push(Message {
         edited: None,
+        imported: None,
         mentions: vec![],
         attachments: vec![],
         id,
@@ -8743,6 +8744,136 @@ fn check_boxes_are_squares_that_fill_when_ticked() {
         filled,
         outlined
     );
+}
+
+#[test]
+fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Chat;
+    h.settle();
+    let root = std::env::temp_dir().join(format!("wb-ui-slack2-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"alex","real_name":"Alex Kim","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    h.app.open_slack_export(&zip);
+    h.settle();
+    // the Slack Alex Kim is proposed as the member Alex Kim
+    assert!(h.has("Whose messages go where:"));
+    assert!(h.has("Alex Kim (@alex)"));
+    h.click("Messages from Alex Kim");
+    h.click("Import under my name");
+    match &h.app.modal {
+        Some(Modal::SlackImport(p)) => {
+            assert_eq!(p.assign.get("U1"), Some(&super::slack::Assign::Me))
+        }
+        _ => panic!("the dialog stays open"),
+    }
+    h.click("Import");
+    let me = h.app.data.me;
+    let design = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .unwrap();
+    assert_eq!(design.messages[0].author, me);
+    assert_eq!(design.messages[0].text, "Alex Kim: first sketch");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name() {
+    let mut h = Ui1::new();
+    let sam = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    let sam2 = h.app.data.new_id();
+    h.app.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        email: "sam2@example.com".into(),
+        role: "Member".into(),
+        invited: false,
+        status_text: String::new(),
+    });
+    h.click("general");
+    let before: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Sam Lee")
+        .map(|(_, r)| *r)
+        .collect();
+    h.click("Mention someone");
+    // the list's rows: the second Sam Lee is the lower one
+    let mut rows: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Sam Lee" && !before.contains(r))
+        .map(|(_, r)| *r)
+        .collect();
+    rows.sort_by(|a, b| a.center().y.total_cmp(&b.center().y));
+    rows.dedup();
+    assert_eq!(rows.len(), 2, "both are offered");
+    h.click_at(rows[1].center());
+    assert_eq!(h.app.chat_text, "@Sam Lee ");
+    h.type_text("can you look?");
+    h.key(egui::Key::Enter);
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let m = general.messages.last().unwrap();
+    assert_eq!(m.text, "@Sam Lee can you look?");
+    assert_eq!(m.mentions, vec![sam2], "the one picked, not both");
+    assert!(!m.mentions.contains(&sam));
+    assert!(h.app.chat_picked.is_empty(), "used up by the message");
+    // typed by hand, without the list: both (it can't tell which)
+    h.type_text("@Sam Lee again");
+    h.key(egui::Key::Enter);
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let mut both = general.messages.last().unwrap().mentions.clone();
+    both.sort();
+    let mut want = vec![sam, sam2];
+    want.sort();
+    assert_eq!(both, want);
 }
 
 /// A workspace with no List a task could go in: no Spaces at all, or

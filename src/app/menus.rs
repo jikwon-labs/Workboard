@@ -468,6 +468,11 @@ impl App {
         }
         if let Some(mut d) = d {
             super::together::fill_sync_baseline(&mut d);
+            // task attachments on their way stay written down with the
+            // workspace they belong to and come back with it
+            self.save_task_files();
+            self.task_files.clear();
+            self.task_files_saved = None;
             self.data = d;
             self.ws_file = file.to_string();
             if self.persist {

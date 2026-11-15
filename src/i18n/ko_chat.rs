@@ -48,7 +48,7 @@ pub const T: &[(&str, &str)] = &[
     ("Ask", "질문"),
     ("Title", "제목"),
     ("Share an announcement...", "공지를 공유하세요..."),
-    ("Write to {}, press 'space' for AI, '/' for commands", "{}에 메시지 쓰기 (AI는 'space', 명령은 '/')"),
+    ("Write to {}, press 'space' for AI, '/' for commands", "{}에 메시지 쓰기 (AI는 스페이스바, 명령은 '/')"),
     ("Add pictures or videos", "사진 또는 동영상 추가"),
     ("Mention someone", "멘션하기"),
     ("Emoji", "이모지"),

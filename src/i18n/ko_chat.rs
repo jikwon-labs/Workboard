@@ -6,8 +6,7 @@ pub const T: &[(&str, &str)] = &[
     ("Chat with your team", "팀과 채팅하기"),
     ("Channels keep conversations about a topic in one place. Direct messages are for one-on-one talks and calls.", "채널은 한 주제의 대화를 한곳에 모아 둡니다. 다이렉트 메시지는 일대일 대화와 통화에 씁니다."),
     ("#  Create a Channel", "#  채널 만들기"),
-    ("\u{1F464}  Message someone", "\u{1F464}  메시지 보내기"),
-    ("\u{1F465}  Work together", "\u{1F465}  함께 작업하기"),
+    ("Message someone", "메시지 보내기"),
     ("Share this workspace so others can chat with you", "이 워크스페이스를 공유해 다른 사람과 채팅하세요"),
     // call and huddle messages (kept in English, shown in the reader's language)
     ("Started a call", "통화를 시작했습니다"),
@@ -19,7 +18,6 @@ pub const T: &[(&str, &str)] = &[
     ("Reply...", "답장..."),
     ("Last reply {}", "마지막 답장 {}"),
     // header
-    ("\u{1F4DD}  Ask", "\u{1F4DD}  질문하기"),
     ("Start a SyncUp", "SyncUp 시작"),
     ("+  View", "+  보기"),
     // side panel
@@ -29,7 +27,6 @@ pub const T: &[(&str, &str)] = &[
     ("Pinned messages", "고정된 메시지"),
     ("Assigned", "할당됨"),
     ("Add bookmarks, notes, and more", "북마크, 메모 등 추가"),
-    ("\u{1F50D} Find in channel", "\u{1F50D} 채널에서 찾기"),
     ("Pinned messages", "고정된 메시지"),
     ("Messages with replies", "답장이 있는 메시지"),
     ("Messages turned into tasks", "작업으로 만든 메시지"),
@@ -38,7 +35,6 @@ pub const T: &[(&str, &str)] = &[
     ("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.", "작업과 대화를 오가며 자연스럽게 협업하세요. 팀과 채팅을 시작하거나 작업을 연결해 할 일을 놓치지 마세요."),
     ("+  Add People", "+  사람 추가"),
     ("+  Invite people", "+  사람 초대"),
-    ("\u{2728}  Import from Slack", "\u{2728}  Slack에서 가져오기"),
     ("Track Tasks", "작업 추적"),
     ("Manage tasks, bugs, people, and more", "작업, 버그, 사람 등을 관리합니다"),
     ("Add Doc", "문서 추가"),
@@ -62,8 +58,7 @@ pub const T: &[(&str, &str)] = &[
     // messages
     ("Someone", "알 수 없는 사용자"),
     ("(edited)", "(편집됨)"),
-    ("\u{1F516} Saved", "\u{1F516} 저장됨"),
-    ("\u{1F4CC} Pinned", "\u{1F4CC} 고정됨"),
+    ("Pinned", "고정됨"),
     ("You're in it", "참가 중"),
     ("Voice call in Workboard", "Workboard 음성 통화"),
     ("Call", "통화"),

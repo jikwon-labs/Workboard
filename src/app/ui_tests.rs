@@ -8230,7 +8230,7 @@ fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
         .unwrap()
         .success());
     super::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
-    h.click("\u{2728}  Import from Slack");
+    h.click("Import from Slack");
     assert!(matches!(h.app.modal, Some(Modal::SlackImport(_))));
     h.click("Import");
     let design = h
@@ -8477,7 +8477,7 @@ fn filled_buttons_tint_on_hover() {
     h.click("Message composer");
     h.type_text("ready to send");
     // the channel composer's send arrow turns solid once there is text
-    let send = h.find("\u{27A4}").unwrap();
+    let send = h.find("Send").unwrap();
     h.hover(pos2(send.x, send.y + 200.0));
     assert!(!h.hover_fill_at(send));
     h.hover(send);

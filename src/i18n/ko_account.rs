@@ -15,7 +15,7 @@ pub const T: &[(&str, &str)] = &[
     ("Sign in with your email, or use the invite code someone sent you.", "이메일로 로그인하거나 받은 초대 코드를 쓰세요."),
     ("Set up a server for my team", "팀 서버 만들기"),
     ("Put this workspace on your team's Workboard server and become its owner.", "이 워크스페이스를 팀의 Workboard 서버에 올리고 소유자가 됩니다."),
-    ("What should your team call you?", "팀에서 나를 뭐라고 부를까요?"),
+    ("What should we call you?", "이름을 어떻게 표시할까요?"),
     ("Your name", "내 이름"),
     ("Start", "시작"),
     ("Back", "뒤로"),

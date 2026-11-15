@@ -1962,7 +1962,8 @@ impl App {
                 }
             }
             1 => {
-                ui.label(RichText::new(tr("What should your team call you?")).color(t.text2));
+                // only "Use it on this Mac" comes here: no team yet
+                ui.label(RichText::new(tr("What should we call you?")).color(t.text2));
                 let r = ui.add(
                     field(name)
                         .hint_text(tr("Your name"))

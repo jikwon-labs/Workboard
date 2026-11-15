@@ -2086,3 +2086,94 @@ fn composer_mention_and_emoji_pickers() {
 
 #[path = "i18n_tests.rs"]
 mod i18n_tests;
+
+#[test]
+fn enter_in_the_middle_sends_without_a_line_break_and_shift_enter_keeps_one() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.click("Message composer");
+    h.type_text("helloworld");
+    for _ in 0..5 {
+        h.key(egui::Key::ArrowLeft);
+    }
+    h.key(egui::Key::Enter);
+    let last = h.app.data.channels.iter().find(|c| c.id == cid).unwrap().messages.last().unwrap().text.clone();
+    assert_eq!(last, "helloworld", "the cursor's spot gets no line break");
+    // Shift+Enter is still a new line
+    h.click("Message composer");
+    h.type_text("one");
+    let shift = egui::Modifiers { shift: true, ..Default::default() };
+    h.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: shift }]);
+    h.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: false, repeat: false, modifiers: shift }]);
+    h.type_text("two");
+    assert_eq!(h.app.chat_text, "one\ntwo");
+}
+
+#[test]
+fn others_never_see_a_private_channel_even_when_it_was_left_open() {
+    let mut h = Ui1::new();
+    let secret = h.app.create_channel("hush", true, false);
+    h.settle();
+    assert!(h.has("hush"));
+    // Sam signs in on this computer with the private channel still open
+    h.app.data.me = 3;
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(secret);
+    h.settle();
+    assert!(!h.has("hush"), "not in the sidebar");
+    assert_ne!(h.app.chat_open, Some(secret), "the chat moved to a channel Sam may see");
+    // and my DM with Alex isn't Sam's either
+    let dm = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().clone();
+    assert!(!h.app.listed(&dm));
+}
+
+#[test]
+fn a_message_from_a_clock_ahead_is_read_once() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    let ahead = now_ts() + 3600;
+    let id = h.app.data.new_id();
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == cid).unwrap();
+    let mut m = c.messages[0].clone();
+    m.id = id;
+    m.author = 2;
+    m.ts = ahead;
+    c.messages.push(m);
+    h.settle();
+    let c = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert!(c.last_read >= ahead, "read up to the newest message");
+    assert_eq!(c.messages.iter().filter(|m| m.ts > c.last_read).count(), 0);
+}
+
+#[test]
+fn delete_channel_asks_first_and_close_conversation_only_hides() {
+    let mut h = Ui1::new();
+    let cid = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Delete channel");
+    assert!(h.app.data.channels.iter().any(|c| c.id == cid), "one click doesn't delete");
+    h.click("Cancel");
+    assert!(h.app.data.channels.iter().any(|c| c.id == cid));
+    h.click("Delete channel");
+    h.click("Delete");
+    assert!(!h.app.data.channels.iter().any(|c| c.id == cid), "deleted after saying yes");
+    // a DM is only closed for me
+    let dm = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    h.app.modal = Some(Modal::ChannelSettings(dm));
+    h.settle();
+    h.click("Close conversation");
+    assert!(h.app.data.channels.iter().any(|c| c.id == dm));
+    assert!(!h.has("Alex Kim"));
+}
+
+#[test]
+fn mentions_of_names_with_spaces_are_marked_whole() {
+    let h = Ui1::new();
+    let job = h.app.mention_text("hi @Alex Kim and @Sam Lee, also @someone", 14.0);
+    let t = h.app.t();
+    let marked: Vec<&str> = job.sections.iter().filter(|s| s.format.background == t.selected_bg).map(|s| &job.text[s.byte_range.clone()]).collect();
+    assert_eq!(marked, vec!["@Alex Kim", "@Sam Lee", "@someone"]);
+}

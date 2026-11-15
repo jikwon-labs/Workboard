@@ -87,4 +87,9 @@ pub const T: &[(&str, &str)] = &[
     // toasts
     ("Reminder created", "리마인더를 만들었습니다"),
     ("Copied", "복사했습니다"),
+    // saved messages, attachments that wait or failed
+    ("Saved", "저장됨"),
+    ("Saved messages", "저장한 메시지"),
+    ("Click to try again", "클릭해서 다시 시도"),
+    ("This computer isn't signed in to the team server yet. The file goes up once it is.", "이 컴퓨터는 아직 팀 서버에 로그인하지 않았습니다. 로그인하면 파일이 올라갑니다."),
 ];

@@ -31,14 +31,21 @@ impl Rgba {
     }
 }
 
+/// File name endings taken as pictures, and as videos (the file picker
+/// offers exactly these).
+pub const IMAGE_EXTS: [&str; 10] = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp"];
+pub const VIDEO_EXTS: [&str; 4] = ["mov", "mp4", "m4v", "3gp"];
+
 /// What a file is, from its name. None for anything that isn't a picture or
 /// a video AVFoundation can play.
 pub fn kind_of(path: &Path) -> Option<MediaKind> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    match ext.as_str() {
-        "jpg" | "jpeg" | "png" | "gif" | "heic" | "heif" | "webp" | "tif" | "tiff" | "bmp" => Some(MediaKind::Image),
-        "mov" | "mp4" | "m4v" | "3gp" => Some(MediaKind::Video),
-        _ => None,
+    if IMAGE_EXTS.contains(&ext.as_str()) {
+        Some(MediaKind::Image)
+    } else if VIDEO_EXTS.contains(&ext.as_str()) {
+        Some(MediaKind::Video)
+    } else {
+        None
     }
 }
 
@@ -120,6 +127,9 @@ mod other {
         pub fn seek(&mut self, _: f32) {}
         pub fn set_muted(&mut self, _: bool) {}
         pub fn muted(&self) -> bool {
+            false
+        }
+        pub fn failed(&self) -> bool {
             false
         }
     }
@@ -424,10 +434,15 @@ mod mac {
             let _: () = msg_send![panel, setCanChooseDirectories: NO];
             let _: () = msg_send![panel, setCanChooseFiles: YES];
             let _: () = msg_send![panel, setMessage: ns(crate::i18n::tr("Choose pictures or videos to send"))];
-            let image: *mut Object = msg_send![class!(UTType), typeWithIdentifier: ns("public.image")];
-            let movie: *mut Object = msg_send![class!(UTType), typeWithIdentifier: ns("public.movie")];
-            if !image.is_null() && !movie.is_null() {
-                let _: () = msg_send![panel, setAllowedContentTypes: array(&[image, movie])];
+            // only the kinds kind_of takes, so nothing chosen is refused afterwards
+            let types: Vec<*mut Object> = IMAGE_EXTS
+                .iter()
+                .chain(VIDEO_EXTS.iter())
+                .map(|e| -> *mut Object { msg_send![class!(UTType), typeWithFilenameExtension: ns(e)] })
+                .filter(|t| !t.is_null())
+                .collect();
+            if !types.is_empty() {
+                let _: () = msg_send![panel, setAllowedContentTypes: array(&types)];
             }
             let r: isize = msg_send![panel, runModal];
             if r != 1 {
@@ -497,9 +512,18 @@ mod mac {
 
     impl Player {
         /// `w`×`h` is the size frames are scaled to (keep the video's shape).
+        /// None when there's nothing AVFoundation can play in the file.
         pub fn new(path: &Path, w: u32, h: u32) -> Option<Player> {
             autoreleasepool(|| unsafe {
-                let item: *mut Object = msg_send![class!(AVPlayerItem), playerItemWithURL: file_url(path)];
+                let asset: *mut Object = msg_send![class!(AVURLAsset), URLAssetWithURL: file_url(path) options: null_mut::<Object>()];
+                if asset.is_null() {
+                    return None;
+                }
+                let playable: BOOL = msg_send![asset, isPlayable];
+                if playable == NO {
+                    return None;
+                }
+                let item: *mut Object = msg_send![class!(AVPlayerItem), playerItemWithAsset: asset];
                 if item.is_null() {
                     return None;
                 }
@@ -595,6 +619,12 @@ mod mac {
 
         pub fn muted(&self) -> bool {
             self.muted
+        }
+
+        /// The video turned out not to play (AVPlayerItemStatusFailed).
+        pub fn failed(&self) -> bool {
+            let status: isize = unsafe { msg_send![self.item, status] };
+            status == 2
         }
     }
 

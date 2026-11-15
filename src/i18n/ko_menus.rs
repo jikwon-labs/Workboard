@@ -288,4 +288,8 @@ pub const T: &[(&str, &str)] = &[
     ("https://...", "https://... 주소"),
     // notepad
     ("Write anything. Only you can see this.", "무엇이든 적어 보세요. 나만 볼 수 있습니다."),
+    // channel settings: close a conversation, delete a channel
+    ("Hides it from your sidebar until a new message arrives. Nothing is deleted.", "새 메시지가 올 때까지 사이드바에서 숨깁니다. 아무것도 삭제되지 않습니다."),
+    ("Only members of this channel can delete it.", "이 채널의 멤버만 삭제할 수 있습니다."),
+    ("Delete #{} for everyone? Its messages are removed for the whole team.", "모든 사람에게서 #{} 채널을 삭제할까요? 메시지가 팀 전체에서 삭제됩니다."),
 ];

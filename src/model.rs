@@ -337,7 +337,8 @@ pub struct Channel {
     pub messages: Vec<Message>,
     #[serde(default)]
     pub last_read: i64,
-    /// Made with "Make Private" (stored only; everyone in this app can still see it).
+    /// Made with "Make Private": only its members see it (a direct message is
+    /// always seen only by the people in it).
     #[serde(default)]
     pub private: bool,
     /// The List made with "Add a List" and tied to this channel.
@@ -600,6 +601,10 @@ pub struct Extra {
     /// Space Overview cards turned off with Customize.
     #[serde(default)]
     pub hidden_cards: Vec<String>,
+    /// Direct messages I closed, with when: each stays out of my sidebar
+    /// until a message newer than that arrives (only on this computer).
+    #[serde(default)]
+    pub closed_dms: Vec<(u64, i64)>,
 }
 
 impl Default for Extra {
@@ -638,6 +643,7 @@ impl Default for Extra {
             sync: Default::default(),
             demo_removed: false,
             hidden_cards: vec![],
+            closed_dms: vec![],
         }
     }
 }

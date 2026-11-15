@@ -83,6 +83,14 @@ fn write_token_file(p: &Path, m: &std::collections::BTreeMap<String, String>) {
     }
 }
 
+/// Goes up whenever a token is saved or forgotten, so a copy kept to save
+/// reading the keychain every frame knows it's out of date.
+static TOKEN_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(super) fn token_gen() -> u64 {
+    TOKEN_GEN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub(super) fn load_token(addr: &str, device: &str) -> Option<String> {
     let key = token_account(addr, device);
     #[cfg(test)]
@@ -101,6 +109,7 @@ pub(super) fn load_token(addr: &str, device: &str) -> Option<String> {
 
 pub(super) fn save_token(addr: &str, device: &str, token: &str) {
     let key = token_account(addr, device);
+    TOKEN_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     #[cfg(test)]
     {
         test_tokens().lock().unwrap().insert(key, token.to_string());
@@ -120,6 +129,7 @@ pub(super) fn save_token(addr: &str, device: &str, token: &str) {
 
 pub(super) fn forget_token(addr: &str, device: &str) {
     let key = token_account(addr, device);
+    TOKEN_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     #[cfg(test)]
     {
         test_tokens().lock().unwrap().remove(&key);
@@ -331,6 +341,7 @@ impl App {
                     self.sync_note_change();
                     self.write_shared();
                     self.save_local();
+                    self.share_cached_files();
                     self.toast = Some((tr("Connected. This workspace is now on the server for your team.").into(), now_ts()));
                     if matches!(self.modal, Some(Modal::Together { .. })) {
                         self.modal = None;
@@ -468,6 +479,7 @@ impl App {
         self.write_shared();
         self.save_local();
         self.sync_rt = SyncRt::default();
+        self.share_cached_files();
         Ok(())
     }
 
@@ -496,6 +508,7 @@ impl App {
         d.extra.inbox_cleared.clear();
         d.extra.inbox_later.clear();
         d.extra.starred.clear();
+        d.extra.closed_dms.clear();
         d.extra.shared = Some(cfg);
         d.extra.sync.hashes.clear();
         d.me = 0;
@@ -919,7 +932,7 @@ impl App {
         ui.label(RichText::new(tr("The call opens in your browser (Jitsi Meet: free, no account). Everyone in the conversation gets a Join button.")).color(t.text2));
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Call in")).color(t.text2));
-        let chans: Vec<(u64, String)> = self.data.channels.iter().map(|c| (c.id, if c.kind == ChannelKind::Channel { format!("# {}", c.name) } else { self.channel_label(c) })).collect();
+        let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| self.listed(c)).map(|c| (c.id, if c.kind == ChannelKind::Channel { format!("# {}", c.name) } else { self.channel_label(c) })).collect();
         let cur = chans.iter().find(|c| c.0 == *ch).map(|c| c.1.clone()).unwrap_or_else(|| tr("Choose").into());
         egui::ComboBox::from_id_salt("call_in").selected_text(cur).width(300.0).show_ui(ui, |ui| {
             for (id, n) in &chans {

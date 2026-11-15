@@ -155,7 +155,7 @@ impl App {
             let place = self.channel_label(c);
             for m in &c.messages {
                 let key = format!("chat:{}:{}", c.id, m.id);
-                if m.author != me {
+                if m.author != me && m.imported.is_none() {
                     let who = self.who(m.author);
                     let target = format!("chat:{}", c.id);
                     if m.call.is_some() {
@@ -209,7 +209,11 @@ impl App {
                     }
                 }
                 if dm && n.direct {
-                    for r in m.replies.iter().filter(|r| r.author != me) {
+                    for r in m
+                        .replies
+                        .iter()
+                        .filter(|r| r.author != me && r.imported.is_none())
+                    {
                         let key = format!("chat:{}:{}", c.id, r.id);
                         add(
                             &mut out,
@@ -265,7 +269,7 @@ impl App {
             .map(|m| m.name.clone())
             .unwrap_or_default();
         for it in self.inbox_items() {
-            if it.author == me {
+            if it.author == me || it.imported {
                 continue;
             }
             let (key, target) = match it.src {

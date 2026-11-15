@@ -1202,6 +1202,7 @@ impl App {
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
             c.messages.push(Message {
                 edited: None,
+                imported: None,
                 mentions: vec![],
                 attachments: vec![],
                 id,

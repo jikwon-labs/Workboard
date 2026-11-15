@@ -219,6 +219,8 @@ impl App {
             .iter()
             .filter(|m| {
                 m.author != self.data.me
+                    // imported history isn't new to anyone
+                    && m.imported.is_none()
                     && match seen {
                         Some(s) => !s.has(m.id) && (m.ts >= s.floor || m.ts > c.last_read),
                         None => m.ts > c.last_read,
@@ -1971,6 +1973,7 @@ impl App {
                     let mentions = self.data.mentions_in(&text);
                     let m = Message {
                         edited: None,
+                        imported: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2219,6 +2222,7 @@ impl App {
                     let mentions = self.data.mentions_in(&text);
                     let m = Message {
                         edited: None,
+                        imported: None,
                         mentions,
                         attachments: files,
                         id,

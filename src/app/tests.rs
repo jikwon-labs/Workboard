@@ -3853,6 +3853,7 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         call: None,
         attachments: vec![],
         edited: None,
+        imported: None,
     }
 }
 
@@ -4409,6 +4410,7 @@ fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         call: None,
         attachments: vec![],
         edited: None,
+        imported: None,
     }
 }
 
@@ -5028,6 +5030,7 @@ fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
             call: None,
             attachments: vec![],
             edited: None,
+            imported: None,
             mentions: vec![],
         });
     let mut team = serde_json::to_value(&a.data).unwrap();
@@ -6927,8 +6930,8 @@ fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
     let before = a.data.members.len();
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
     let plan = super::slack::plan(&a.data, users, channels);
-    assert_eq!(plan.matched.get("U1"), Some(&mia), "matched by email");
-    assert_eq!(plan.missing, vec!["U2".to_string()]);
+    assert_eq!(plan.matched("U1"), Some(mia), "matched by email");
+    assert_eq!(plan.unmatched(), vec!["U2".to_string()]);
     assert_eq!(plan.message_count(), 4, "the join notice isn't a message");
     let (chans, msgs) = a.import_slack(&plan);
     assert_eq!((chans, msgs), (2, 4));
@@ -6977,7 +6980,7 @@ fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
     // the same export again adds nothing
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
     let again = super::slack::plan(&a.data, users, channels);
-    assert!(again.missing.is_empty(), "Casper is a member now");
+    assert!(again.unmatched().is_empty(), "Casper is a member now");
     assert_eq!(a.import_slack(&again), (0, 0));
 }
 
@@ -6986,7 +6989,9 @@ fn people_not_added_from_slack_come_in_under_my_name() {
     let mut a = app();
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
     let mut plan = super::slack::plan(&a.data, users, channels);
-    plan.create_missing = false;
+    for id in plan.unmatched() {
+        plan.assign.insert(id, super::slack::Assign::Me);
+    }
     let before = a.data.members.len();
     a.import_slack(&plan);
     assert_eq!(a.data.members.len(), before);
@@ -7141,4 +7146,282 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
     b.sync_note_change();
     b.write_shared();
     net_until(&mut a, "A keeps it all", |a| a.task(task.id).is_some());
+}
+
+/// Write a Slack export folder from (file, JSON) pairs and read it.
+fn slack_from(
+    files: &[(&str, serde_json::Value)],
+) -> (
+    Vec<super::slack::SlackUser>,
+    Vec<super::slack::SlackChannel>,
+) {
+    let root = temp_folder("slack2");
+    for (p, v) in files {
+        let path = root.join(p);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, v.to_string()).unwrap();
+    }
+    let out = super::slack::read_export(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    out
+}
+
+#[test]
+fn a_private_slack_channel_never_pours_into_a_public_one_or_goes_to_everyone() {
+    use serde_json::json;
+    let mut a = app();
+    a.apply_chat(vec![super::chat::ChatAction::NewChannel("design".into())]);
+    let public = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .unwrap()
+        .id;
+    let (users, channels) = slack_from(&[
+        (
+            "users.json",
+            json!([{"id": "U9", "name": "zed", "real_name": "Zed Nobody", "profile": {}}]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "design", "members": ["U9"]}]),
+        ),
+        (
+            "groups.json",
+            json!([{"id": "G1", "name": "design", "members": ["U9"]}]),
+        ),
+        (
+            "design/2024-01-01.json",
+            json!([{"type": "message", "user": "U9", "text": "secret plans", "ts": "1704100000.000100"}]),
+        ),
+    ]);
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    // Zed comes in under my name: no member to share the private one with
+    plan.assign.insert("U9".into(), super::slack::Assign::Me);
+    let ((chans, _), alone) = a.import_slack_report(&plan);
+    assert_eq!(chans, 2);
+    assert_eq!(alone, vec!["design".to_string()], "and the dialog says so");
+    let private: Vec<&Channel> = a
+        .data
+        .channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Channel && c.private)
+        .collect();
+    assert_eq!(private.len(), 1, "a channel of its own");
+    assert_eq!(private[0].name, "design-private", "named apart");
+    assert_eq!(
+        private[0].members,
+        vec![a.data.me],
+        "only me, not every member"
+    );
+    let pubc = a.data.channels.iter().find(|c| c.id == public).unwrap();
+    assert!(!pubc.private);
+    assert_eq!(pubc.messages.len(), 1, "the public one gets its own copy");
+    // again: each lands in its own channel and nothing doubles
+    let (users, channels) = slack_from(&[
+        ("users.json", json!([])),
+        ("groups.json", json!([{"id": "G1", "name": "design"}])),
+        (
+            "design/2024-01-01.json",
+            json!([{"type": "message", "user": "U9", "text": "secret plans", "ts": "1704100000.000100"}]),
+        ),
+    ]);
+    let plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(a.import_slack(&plan), (0, 0));
+    assert_eq!(
+        a.data
+            .channels
+            .iter()
+            .filter(|c| c.name.starts_with("design"))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn imported_mentions_and_replies_are_not_news_in_anyones_inbox() {
+    use serde_json::json;
+    let mut a = app();
+    let me = a.data.me;
+    let my_name = a.data.member(me).unwrap().name.clone();
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .email = "me@example.com".into();
+    let sam = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    let badge = a.inbox_badge();
+    let (users, channels) = slack_from(&[
+        (
+            "users.json",
+            json!([
+                {"id": "UME", "name": "me", "real_name": "Whoever", "profile": {"email": "me@example.com"}},
+                {"id": "US", "name": "sam", "real_name": "Sam Lee", "profile": {}}
+            ]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "old-news", "members": ["UME", "US"]}]),
+        ),
+        (
+            "old-news/2024-01-01.json",
+            json!([
+                {"type": "message", "user": "US", "text": "hey <@UME>", "ts": "1704100000.000100"},
+                {"type": "message", "user": "UME", "text": "my thread", "ts": "1704100100.000100", "thread_ts": "1704100100.000100"},
+                {"type": "message", "user": "US", "text": "a reply", "ts": "1704100200.000100", "thread_ts": "1704100100.000100"}
+            ]),
+        ),
+    ]);
+    let plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(plan.matched("UME"), Some(me));
+    assert_eq!(plan.matched("US"), Some(sam));
+    a.import_slack(&plan);
+    let ch = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "old-news")
+        .unwrap()
+        .clone();
+    assert!(ch.messages.iter().all(|m| m.imported.is_some()));
+    let mention = ch.messages.iter().find(|m| m.author == sam).unwrap();
+    assert_eq!(mention.text, format!("hey @{}", my_name));
+    let rows: Vec<_> = a
+        .inbox_items()
+        .into_iter()
+        .filter(|i| matches!(i.src, super::nav::InboxSrc::Chat { ch: c, .. } if c == ch.id))
+        .collect();
+    assert_eq!(rows.len(), 2, "the mention and the reply are in the Inbox");
+    assert!(
+        rows.iter().all(|r| r.tab == 3 && r.imported),
+        "but already cleared"
+    );
+    assert_eq!(a.inbox_badge(), badge, "the badge doesn't move");
+    a.notify_rt.seeded = true;
+    let keys: Vec<String> = a
+        .notify_candidates(&crate::model::NotifySettings::everything())
+        .into_iter()
+        .map(|(_, n)| n.key)
+        .collect();
+    assert!(
+        rows.iter().all(|r| !keys.contains(&r.key)),
+        "never announced"
+    );
+    // another member who had seen this channel long ago: not unread for them
+    let mut seen = ch.clone();
+    seen.last_read = 0;
+    assert_eq!(a.unread_here(&seen), 0);
+    // a real reply written now in my thread still is news
+    let thread = ch.messages.iter().find(|m| m.author == me).unwrap().id;
+    let c = a.data.channels.iter_mut().find(|c| c.id == ch.id).unwrap();
+    let t = c.messages.iter_mut().find(|m| m.id == thread).unwrap();
+    let mut live = t.replies[0].clone();
+    live.id = 987_654;
+    live.imported = None;
+    live.ts = now_ts();
+    t.replies.push(live);
+    assert_eq!(a.inbox_badge(), badge + 1);
+}
+
+#[test]
+fn slack_people_are_not_merged_by_name_and_same_second_messages_all_come_in() {
+    use serde_json::json;
+    let mut a = app();
+    let alex = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    // two members called Sam Lee here
+    let sam2 = a.data.new_id();
+    a.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        email: String::new(),
+        role: "Member".into(),
+        invited: false,
+        status_text: String::new(),
+    });
+    let export = [
+        (
+            "users.json",
+            json!([
+                {"id": "UA1", "name": "alex", "real_name": "Alex Kim", "profile": {}},
+                {"id": "UA2", "name": "alexk", "real_name": "Alex Kim", "profile": {}},
+                {"id": "US", "name": "sam", "real_name": "Sam Lee", "profile": {}},
+                {"id": "UJ", "name": "jordan", "real_name": "Jordan Park", "profile": {}}
+            ]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "busy", "members": ["UA1", "UA2", "US", "UJ"]}]),
+        ),
+        (
+            "busy/2024-01-01.json",
+            json!([
+                {"type": "message", "user": "UJ", "text": "+1", "ts": "1704100000.000100"},
+                {"type": "message", "user": "UJ", "text": "+1", "ts": "1704100000.000200"},
+                {"type": "message", "user": "UA1", "text": "hi", "ts": "1704100001.000100"},
+                {"type": "message", "user": "UA2", "text": "hi", "ts": "1704100002.000100"},
+                {"type": "message", "user": "US", "text": "yo", "ts": "1704100003.000100"}
+            ]),
+        ),
+    ];
+    let (users, channels) = slack_from(&export);
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(
+        plan.matched("UA1"),
+        None,
+        "two Slack Alexes: neither matched"
+    );
+    assert_eq!(plan.matched("UA2"), None);
+    assert_eq!(plan.matched("US"), None, "two Sams here: can't tell which");
+    assert!(
+        plan.matched("UJ").is_some(),
+        "one name, one member: matched"
+    );
+    assert_eq!(plan.people, vec!["UJ", "UA1", "UA2", "US"]);
+    assert!(plan.shared_members().is_empty());
+    // someone points both Alexes at Alex: allowed, and said
+    plan.assign
+        .insert("UA1".into(), super::slack::Assign::Member(alex));
+    plan.assign
+        .insert("UA2".into(), super::slack::Assign::Member(alex));
+    assert_eq!(
+        plan.shared_members(),
+        vec![(alex, vec!["UA1".to_string(), "UA2".to_string()])]
+    );
+    plan.assign.insert("US".into(), super::slack::Assign::Me);
+    let members = a.data.members.len();
+    assert_eq!(a.import_slack(&plan), (1, 5), "both +1s in the same second");
+    assert_eq!(a.data.members.len(), members, "nobody new");
+    let busy = a.data.channels.iter().find(|c| c.name == "busy").unwrap();
+    let me = a.data.me;
+    assert!(busy
+        .messages
+        .iter()
+        .any(|m| m.author == me && m.text == "Sam Lee: yo"));
+    assert_eq!(busy.messages.iter().filter(|m| m.author == alex).count(), 2);
+    // the same export again adds nothing
+    let (users, channels) = slack_from(&export);
+    let mut again = super::slack::plan(&a.data, users, channels);
+    again
+        .assign
+        .insert("UA1".into(), super::slack::Assign::Member(alex));
+    again
+        .assign
+        .insert("UA2".into(), super::slack::Assign::Member(alex));
+    again.assign.insert("US".into(), super::slack::Assign::Me);
+    assert_eq!(a.import_slack(&again), (0, 0));
 }

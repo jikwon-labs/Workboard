@@ -652,6 +652,12 @@ pub struct Message {
     /// `mentioned_ids`). Empty for messages from before this was kept.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<u64>,
+    /// Set on a message brought in by an import: where it came from
+    /// ("slack:<channel>:<ts>", unique per message). Imported messages are
+    /// old history, not news: they don't fill the Inbox, notifications,
+    /// unread counts or badges. Set once and never cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<String>,
 }
 
 pub use crate::media::MediaKind;
@@ -2611,6 +2617,7 @@ impl Data {
             call: None,
             attachments: vec![],
             edited: None,
+            imported: None,
         };
         let c1 = d.new_id();
         let mut m1 = msg(

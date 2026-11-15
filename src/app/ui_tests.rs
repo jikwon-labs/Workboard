@@ -1016,6 +1016,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     let id = h.app.data.new_id();
     h.app.data.channels[0].messages.push(Message {
         edited: None,
+        imported: None,
         mentions: vec![],
         attachments: vec![],
         id,
@@ -8206,4 +8207,62 @@ fn check_boxes_are_squares_that_fill_when_ticked() {
         filled,
         outlined
     );
+}
+
+#[test]
+fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Chat;
+    h.settle();
+    let root = std::env::temp_dir().join(format!("wb-ui-slack2-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"alex","real_name":"Alex Kim","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    h.app.open_slack_export(&zip);
+    h.settle();
+    // the Slack Alex Kim is proposed as the member Alex Kim
+    assert!(h.has("Whose messages go where:"));
+    assert!(h.has("Alex Kim (@alex)"));
+    h.click("Messages from Alex Kim");
+    h.click("Import under my name");
+    match &h.app.modal {
+        Some(Modal::SlackImport(p)) => {
+            assert_eq!(p.assign.get("U1"), Some(&super::slack::Assign::Me))
+        }
+        _ => panic!("the dialog stays open"),
+    }
+    h.click("Import");
+    let me = h.app.data.me;
+    let design = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .unwrap();
+    assert_eq!(design.messages[0].author, me);
+    assert_eq!(design.messages[0].text, "Alex Kim: first sketch");
+    let _ = std::fs::remove_dir_all(&root);
 }

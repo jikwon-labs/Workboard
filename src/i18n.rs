@@ -26,6 +26,7 @@ mod ko_parity;
 mod ko_shell;
 mod ko_small;
 mod ko_sweep;
+mod ko_templates;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
@@ -80,7 +81,7 @@ fn table() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-const ALL: [&[(&str, &str)]; 12] = [
+const ALL: [&[(&str, &str)]; 13] = [
     ko_common::T,
     ko_account::T,
     ko_app::T,
@@ -93,6 +94,7 @@ const ALL: [&[(&str, &str)]; 12] = [
     ko_shell::T,
     ko_small::T,
     ko_sweep::T,
+    ko_templates::T,
 ];
 
 /// The text in the interface language.

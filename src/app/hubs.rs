@@ -589,34 +589,27 @@ impl App {
                         egui::Frame::new()
                             .inner_margin(egui::Margin::symmetric(16, 12))
                             .show(ui, |ui| {
-                                ui.label(RichText::new(tr("Templates")).color(t.text2));
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(tr("Templates")).color(t.text2));
+                                    if ui
+                                        .add(ghost(egui::Button::new(
+                                            RichText::new(tr("Browse all templates"))
+                                                .color(t.text2),
+                                        )))
+                                        .clicked()
+                                    {
+                                        self.open_templates(super::templates::Category::Docs, None);
+                                    }
+                                });
                                 ui.add_space(4.0);
                                 let w = ui.available_width();
                                 let cw = ((w - 24.0) / 3.0).min(430.0);
                                 ui.horizontal(|ui| {
-                                    for (color, glyph, name, sub, body) in [
-                                        (
-                                            [0xe1, 0x6b, 0x16],
-                                            "\u{1F4CB}",
-                                            "Project Overview",
-                                            "Summarize goals, scope, and milestones",
-                                            "Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- ",
-                                        ),
-                                        (
-                                            [0xf8, 0xae, 0x00],
-                                            "\u{1F4DD}",
-                                            "Meeting Notes",
-                                            "Capture an agenda, notes, and action items",
-                                            "Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] ",
-                                        ),
-                                        (
-                                            [0x44, 0x66, 0xff],
-                                            "\u{1F4D3}",
-                                            "Wiki",
-                                            "Organize information in one place",
-                                            "Overview\n\nHow we work\n\nLinks\n",
-                                        ),
-                                    ] {
+                                    for b in super::templates::builtins()
+                                        .into_iter()
+                                        .filter(|b| b.tpl.kind == super::templates::KIND_DOC)
+                                    {
+                                        let (color, glyph, name) = (b.color, b.glyph, b.en);
                                         let (r, resp) =
                                             ui.allocate_exact_size(vec2(cw, 70.0), Sense::click());
                                         name_it(&resp, &format!("Template {}", name));
@@ -647,26 +640,19 @@ impl App {
                                         ui.painter().text(
                                             r.left_center() + vec2(62.0, -10.0),
                                             Align2::LEFT_CENTER,
-                                            tr(name),
+                                            &b.tpl.name,
                                             FontId::proportional(15.0),
                                             t.text,
                                         );
                                         ui.painter().with_clip_rect(r.shrink(4.0)).text(
                                             r.left_center() + vec2(62.0, 12.0),
                                             Align2::LEFT_CENTER,
-                                            tr(sub),
+                                            b.about,
                                             FontId::proportional(12.5),
                                             t.text2,
                                         );
                                         if resp.clicked() {
-                                            self.new_doc(self.current_space());
-                                            if let Some(d) = self.doc_open.and_then(|id| {
-                                                self.data.docs.iter_mut().find(|d| d.id == id)
-                                            }) {
-                                                d.title = name.to_string();
-                                                d.body = body.to_string();
-                                                d.meeting_note = name == "Meeting Notes";
-                                            }
+                                            self.use_builtin_doc(b.key, self.current_space());
                                         }
                                     }
                                 });

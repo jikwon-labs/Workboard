@@ -33,6 +33,7 @@ mod settings;
 mod shell;
 mod slack;
 mod taskfields;
+mod templates;
 #[cfg(test)]
 mod tests;
 mod timebar;

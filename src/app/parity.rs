@@ -1488,6 +1488,12 @@ impl App {
             }
             close_any(ui);
         }
+        if ui.button(tr("Save as template")).clicked() {
+            if self.save_list_as_template(lid).is_some() {
+                self.toast = Some((tr("Saved as a template").into(), now_ts()));
+            }
+            close_any(ui);
+        }
         if ui.button(tr("Archive")).clicked() {
             self.set_list_archived(lid, true);
             close_any(ui);
@@ -2034,6 +2040,10 @@ impl App {
             }
             if ui.button(tr("Doc")).clicked() {
                 self.new_doc(Some(sid));
+                close_any(ui);
+            }
+            if ui.button(tr("From a template")).clicked() {
+                self.open_templates(super::templates::Category::Lists, Some(sid));
                 close_any(ui);
             }
         });

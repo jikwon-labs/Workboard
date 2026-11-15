@@ -403,6 +403,37 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.new_team();
         }),
     ));
+    // the Template Center with each kind of template picked, and a team one
+    for key in [
+        "project-tracker",
+        "bug-report",
+        "meeting-notes",
+        "team",
+        "new",
+    ] {
+        v.push((
+            format!("template center {}", key),
+            Box::new(move |a: &mut App| {
+                use super::super::templates::{Category, Pick};
+                a.section = Section::Home;
+                a.loc = Location::List(list);
+                let pick = match key {
+                    "team" => {
+                        let id = a.save_list_as_template(list).unwrap();
+                        Pick::Team(id)
+                    }
+                    "new" => Pick::NewTask,
+                    k => Pick::Builtin(k),
+                };
+                let mut m = a.template_center(Category::All, None);
+                if let Modal::TemplateCenter(c) = &mut m {
+                    c.pick = Some(pick);
+                    c.new_space = false;
+                }
+                a.modal = Some(m);
+            }),
+        ));
+    }
     for f in 1..=4u8 {
         v.push((
             format!("teams tab {}", f),

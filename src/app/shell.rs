@@ -2596,6 +2596,7 @@ impl App {
         let plus =
             Rect::from_center_size(r.rect.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0));
         let pr = ui.interact(plus, ui.id().with(("splus", s.id)), Sense::click());
+        name_it(&pr, &format!("Create in {}", s.name));
         if r.hovered() || pr.hovered() || sel {
             ui.painter().text(
                 plus.center(),
@@ -2615,6 +2616,7 @@ impl App {
                 ("\u{1F4CB}", "Form"),
                 ("\u{1F4CA}", "Dashboard"),
                 ("\u{1F3A8}", "Whiteboard"),
+                ("\u{2728}", "From a template"),
             ] {
                 if ui
                     .add(ghost(egui::Button::new(format!("{}  {}", icon, tr(label)))))
@@ -2622,6 +2624,9 @@ impl App {
                 {
                     match label {
                         "List" => self.open_new_list(Some(sid), None),
+                        "From a template" => {
+                            self.open_templates(super::templates::Category::Lists, Some(sid))
+                        }
                         "Folder" => self.actions.push(Action::NewFolder(sid)),
                         "Doc" => self.new_doc(Some(sid)),
                         "Form" => self.new_form(),

@@ -1,0 +1,173 @@
+// Korean text for src/app/templates.rs (Template Center and the built-in
+// templates) and the places that open it (see src/i18n.rs).
+
+pub const T: &[(&str, &str)] = &[
+    // the dialog
+    ("Template Center", "템플릿 센터"),
+    (
+        "Start Lists, tasks and Docs from a template: built-in ones or your team's own.",
+        "기본 템플릿이나 팀이 저장한 템플릿으로 목록, 작업, 문서를 시작합니다.",
+    ),
+    ("Search templates", "템플릿 검색"),
+    ("All templates", "모든 템플릿"),
+    ("Lists & Spaces", "목록 및 스페이스"),
+    ("Your team", "우리 팀"),
+    ("Built-in", "기본 제공"),
+    (
+        "No templates match your search.",
+        "검색과 맞는 템플릿이 없습니다.",
+    ),
+    ("+ New task template", "+ 새 작업 템플릿"),
+    ("New task template", "새 작업 템플릿"),
+    (
+        "Pick a template to see what it makes.",
+        "템플릿을 고르면 무엇이 만들어지는지 보입니다.",
+    ),
+    ("What it makes", "만들어지는 것"),
+    ("1 task", "작업 1개"),
+    (
+        "Delete this template for everyone on the team?",
+        "팀 모두에게서 이 템플릿을 삭제할까요?",
+    ),
+    ("Template deleted", "템플릿을 삭제했습니다"),
+    ("Template name", "템플릿 이름"),
+    ("List name", "목록 이름"),
+    ("Doc title", "문서 제목"),
+    ("Where the List goes", "목록을 둘 곳"),
+    ("Add the task to", "작업을 넣을 곳"),
+    ("Choose a List", "목록 선택"),
+    (
+        "Add the template's statuses to this Space",
+        "이 스페이스에 템플릿의 상태 추가",
+    ),
+    ("Use template", "템플릿 사용"),
+    ("Made from the template", "템플릿으로 만들었습니다"),
+    ("Browse all templates", "모든 템플릿 보기"),
+    ("From a template", "템플릿으로 만들기"),
+    // built-in: project tracker
+    ("Project tracker", "프로젝트 관리"),
+    (
+        "Plan a project from kickoff to wrap-up, with a review step",
+        "검토 단계를 거쳐 시작부터 마무리까지 프로젝트를 계획합니다",
+    ),
+    ("in review", "검토 중"),
+    ("Write the project brief", "프로젝트 개요 작성"),
+    (
+        "Goals, scope, and what done looks like.",
+        "목표, 범위, 그리고 무엇이 되면 끝인지.",
+    ),
+    ("Scope", "범위"),
+    ("Success measures", "성공 기준"),
+    ("Plan milestones and dates", "마일스톤과 날짜 계획"),
+    ("Hold the kickoff meeting", "킥오프 회의 열기"),
+    ("Book a time", "시간 잡기"),
+    ("Share the brief", "개요 공유"),
+    ("Agree on roles", "역할 정하기"),
+    ("Weekly status update", "주간 진행 상황 공유"),
+    (
+        "Wrap up and note lessons learned",
+        "마무리하고 배운 점 정리",
+    ),
+    // built-in: bug tracker
+    ("Bug tracker", "버그 관리"),
+    (
+        "Report, sort and fix bugs until they are closed",
+        "버그를 보고하고 분류해 닫힐 때까지 고칩니다",
+    ),
+    ("reported", "보고됨"),
+    ("triaged", "분류됨"),
+    ("fixed", "수정됨"),
+    ("closed", "닫힘"),
+    (
+        "Example: The sign-in button does nothing",
+        "예시: 로그인 버튼을 눌러도 아무 일이 없음",
+    ),
+    (
+        "Steps to reproduce:\n1. \n2. \n\nWhat happened:\n\nWhat should happen:\n",
+        "재현 단계:\n1. \n2. \n\n실제 결과:\n\n기대 결과:\n",
+    ),
+    ("Reproduce", "재현하기"),
+    ("Find the cause", "원인 찾기"),
+    ("Fix and test", "고치고 확인하기"),
+    ("bug", "버그"),
+    (
+        "Example: A typo on the settings page",
+        "예시: 설정 페이지의 오타",
+    ),
+    // built-in: content calendar
+    ("Content calendar", "콘텐츠 캘린더"),
+    (
+        "Take posts from idea to published on a schedule",
+        "글을 아이디어부터 발행까지 일정에 맞춰 관리합니다",
+    ),
+    ("idea", "아이디어"),
+    ("writing", "작성 중"),
+    ("editing", "편집 중"),
+    ("scheduled", "예약됨"),
+    ("published", "발행됨"),
+    ("Blog post: product update", "블로그 글: 제품 업데이트"),
+    ("Outline", "개요"),
+    ("Draft", "초안"),
+    ("Pick an image", "이미지 고르기"),
+    ("blog", "블로그"),
+    ("Newsletter for this month", "이번 달 뉴스레터"),
+    ("newsletter", "뉴스레터"),
+    ("Social posts for the launch", "출시 소셜 게시물"),
+    ("social", "소셜"),
+    ("Customer story interview", "고객 사례 인터뷰"),
+    // built-in: onboarding
+    ("Onboarding checklist", "온보딩 체크리스트"),
+    (
+        "Help a new teammate settle in during the first month",
+        "새 팀원이 첫 달 동안 자리 잡도록 돕습니다",
+    ),
+    ("Set up accounts and tools", "계정과 도구 준비"),
+    ("Work tools", "업무 도구"),
+    ("Meet the team", "팀과 인사하기"),
+    ("One-on-one with your manager", "매니저와 1:1"),
+    ("Team lunch", "팀 점심"),
+    ("Meet your buddy", "버디와 만나기"),
+    ("Read how we work", "일하는 방식 읽기"),
+    ("Finish a first small task", "첫 작은 작업 끝내기"),
+    ("30-day check-in", "30일 점검"),
+    // built-in: task templates
+    ("Bug report", "버그 보고"),
+    (
+        "One bug with steps to reproduce and a fix checklist",
+        "재현 단계와 수정 체크리스트가 있는 버그 하나",
+    ),
+    ("New bug", "새 버그"),
+    ("Fix", "고치기"),
+    ("Test the fix", "수정 확인하기"),
+    ("Feature request", "기능 요청"),
+    (
+        "Describe a problem and the change that would solve it",
+        "문제와 그것을 풀어 줄 변경을 적습니다",
+    ),
+    ("New feature request", "새 기능 요청"),
+    (
+        "Problem:\n\nProposed change:\n\nWho it helps:\n",
+        "문제:\n\n제안하는 변경:\n\n도움을 받는 사람:\n",
+    ),
+    (
+        "Talk to the people it helps",
+        "도움을 받을 사람과 이야기하기",
+    ),
+    ("Agree on the scope", "범위 정하기"),
+    ("Build it", "만들기"),
+    ("Announce it", "알리기"),
+    ("feature", "기능"),
+    // built-in: doc templates (names and lines are in ko_hubs)
+    (
+        "Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] ",
+        "안건\n- \n\n메모\n- \n\n할 일\n- [ ] ",
+    ),
+    (
+        "Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- ",
+        "목표\n- \n\n범위\n- \n\n마일스톤\n- \n\n팀\n- ",
+    ),
+    (
+        "Overview\n\nHow we work\n\nLinks\n",
+        "개요\n\n일하는 방식\n\n링크\n",
+    ),
+];

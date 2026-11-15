@@ -941,4 +941,18 @@ final class Round3ClientTests: XCTestCase {
         c.setServer("ws://127.0.0.1:\(pb)")
         XCTAssertTrue(c.trash.isEmpty)
     }
+
+    func testVideosGoUpStreamedFromTheirFile() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let video = Data((0..<3_000_123).map { UInt8(($0 * 7) % 251) })
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("wbvideo-\(UUID().uuidString).mov")
+        try video.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(try FileAPI.sha256(file: file, chunk: 4096), FileAPI.sha256(video), "hashed a piece at a time, same answer")
+        let sha = try await FileAPI.upload(server: "ws://127.0.0.1:\(port)", auth: nil, file: file, contentType: "video/quicktime")
+        XCTAssertEqual(sha, FileAPI.sha256(video))
+        XCTAssertEqual(server.storedFile(sha), video)
+    }
 }

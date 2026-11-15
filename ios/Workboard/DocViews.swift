@@ -147,11 +147,11 @@ struct DocDetailView: View {
             }
             .confirmationDialog("Delete this doc?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
-                    if client.edit({ data, _ in Edits.deleteDoc(&data, doc: d.id) }) { dismiss() }
+                    if client.trashDoc(d.id) { dismiss() }
                 }
                 .accessibilityIdentifier("confirmDeleteDoc")
             } message: {
-                Text("It's removed for everyone, with its sub pages.")
+                Text("It's removed for everyone, with its sub pages. You can restore it from Trash in Settings.")
             }
         } else {
             EmptyNote(title: "This doc is gone", systemImage: "doc.text")

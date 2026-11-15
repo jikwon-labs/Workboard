@@ -256,7 +256,11 @@ struct PickedMovie: Transferable {
 
 enum MediaUpload {
     struct Prepared {
-        let data: Data
+        /// A picture's bytes; nil for a video, which goes up from `file`.
+        let data: Data?
+        /// A video's file (removed after the upload).
+        var file: URL? = nil
+        let bytes: Int
         let name: String
         let contentType: String
         let isVideo: Bool
@@ -281,8 +285,8 @@ enum MediaUpload {
     static func prepare(_ item: PhotosPickerItem) async throws -> Prepared {
         if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
             guard let movie = try await item.loadTransferable(type: PickedMovie.self) else { throw Unreadable() }
-            defer { try? FileManager.default.removeItem(at: movie.url) }
-            let data = try Data(contentsOf: movie.url, options: .mappedIfSafe)
+            // streamed up from the file (FileAPI.upload(file:)), never read whole
+            let bytes = (try? movie.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             let asset = AVURLAsset(url: movie.url)
             let secs = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
             var w = 0, h = 0
@@ -294,7 +298,7 @@ enum MediaUpload {
             }
             let ext = movie.url.pathExtension.lowercased()
             let type = ext == "mp4" || ext == "m4v" ? "video/mp4" : "video/quicktime"
-            return Prepared(data: data, name: "Video-\(stamp()).\(ext.isEmpty ? "mov" : ext)", contentType: type, isVideo: true, w: w, h: h, secs: secs.isFinite ? secs : 0, preview: nil)
+            return Prepared(data: nil, file: movie.url, bytes: bytes, name: "Video-\(stamp()).\(ext.isEmpty ? "mov" : ext)", contentType: type, isVideo: true, w: w, h: h, secs: secs.isFinite ? secs : 0, preview: nil)
         }
         guard let raw = try await item.loadTransferable(type: Data.self), let image = UIImage(data: raw) else { throw Unreadable() }
         let maxSide: CGFloat = 4096
@@ -305,6 +309,6 @@ enum MediaUpload {
         let drawn = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
         guard let jpeg = drawn.jpegData(compressionQuality: 0.85) else { throw Unreadable() }
         let preview = drawn.preparingThumbnail(of: CGSize(width: 120, height: 120 * size.height / max(size.width, 1)))
-        return Prepared(data: jpeg, name: "Photo-\(stamp()).jpg", contentType: "image/jpeg", isVideo: false, w: Int(size.width), h: Int(size.height), secs: 0, preview: preview)
+        return Prepared(data: jpeg, bytes: jpeg.count, name: "Photo-\(stamp()).jpg", contentType: "image/jpeg", isVideo: false, w: Int(size.width), h: Int(size.height), secs: 0, preview: preview)
     }
 }

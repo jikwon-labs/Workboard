@@ -383,7 +383,8 @@ struct MessageRow: View {
                     }
                 }
                 Section {
-                    if mine {
+                    // huddle and call cards aren't edited, as on the Mac
+                    if message.isEditable(by: client.me) {
                         Button { draft = message.text; editing = true } label: { Label("Edit message", systemImage: "pencil") }
                     }
                     if !isReply {
@@ -550,8 +551,14 @@ struct Composer: View {
         Task {
             do {
                 let a = try await MediaUpload.prepare(item)
-                let sha = try await FileAPI.upload(server: server, auth: auth, data: a.data, contentType: a.contentType)
-                f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.data.count, w: a.w, h: a.h, secs: a.secs)
+                defer { if let file = a.file { try? FileManager.default.removeItem(at: file) } }
+                let sha: String
+                if let file = a.file {
+                    sha = try await FileAPI.upload(server: server, auth: auth, file: file, contentType: a.contentType)
+                } else {
+                    sha = try await FileAPI.upload(server: server, auth: auth, data: a.data ?? Data(), contentType: a.contentType)
+                }
+                f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.bytes, w: a.w, h: a.h, secs: a.secs)
                 f.preview = a.preview
             } catch let e as FileError {
                 f.error = e.explanation

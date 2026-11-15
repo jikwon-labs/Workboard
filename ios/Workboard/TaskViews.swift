@@ -318,11 +318,11 @@ struct TaskDetailView: View {
             .confirmationDialog("Delete this task?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
                     loaded = false // nothing left to save
-                    if client.edit({ d, _ in Edits.deleteTask(&d, task: t.id) }) { dismiss() }
+                    if client.trashTask(t.id) { dismiss() }
                 }
                 .accessibilityIdentifier("confirmDeleteTask")
             } message: {
-                Text(client.view.subtasks(of: t.id).isEmpty ? "It's removed for everyone." : "It's removed for everyone, with its subtasks.")
+                Text(client.view.subtasks(of: t.id).isEmpty ? "It's removed for everyone. You can restore it from Trash in Settings." : "It's removed for everyone, with its subtasks. You can restore it from Trash in Settings.")
             }
             .onAppear {
                 if !loaded { name = t.name; desc = t.description; loaded = true }

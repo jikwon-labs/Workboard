@@ -120,7 +120,7 @@ public final class FakeServer: @unchecked Sendable {
     /// What /auth/forgot answers for "mail" (false: this server can't send email).
     public var canMail = true
     /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
-    /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T,
+    /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T[&imported=KEY],
     /// /admin/reset-code?email=E, /admin/drop-account?member=N,
     /// /admin/offline?secs=N, /admin/online, /admin/find?text=T,
     /// /admin/drop-answer), so UI
@@ -372,7 +372,18 @@ public final class FakeServer: @unchecked Sendable {
                 let ch = q("channel").flatMap { UInt64($0) } ?? 0
                 let author = q("author").flatMap { UInt64($0) } ?? 2
                 var snap = snapshot ?? [:]
-                Edits.sendMessage(&snap, channel: ch, text: q("text") ?? "Hello", me: author, id: UInt64(Date().timeIntervalSince1970 * 1000) * 1024 + 1023, ts: nowTs())
+                let id = UInt64(Date().timeIntervalSince1970 * 1000) * 1024 + 1023
+                Edits.sendMessage(&snap, channel: ch, text: q("text") ?? "Hello", me: author, id: id, ts: nowTs())
+                if let key = q("imported") {
+                    // as a Mac's Slack import writes it (Message::imported)
+                    var chans = snap["channels"]?.array ?? []
+                    for i in chans.indices where chans[i]["id"]?.uint == ch {
+                        var msgs = chans[i]["messages"]?.array ?? []
+                        for j in msgs.indices where msgs[j]["id"]?.uint == id { msgs[j]["imported"] = .string(key) }
+                        chans[i]["messages"] = .array(msgs)
+                    }
+                    snap["channels"] = .array(chans)
+                }
                 snapshot = snap
                 rev += 1
                 broadcast(.update(data: snap, rev: rev))

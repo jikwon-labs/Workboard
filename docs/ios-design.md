@@ -28,9 +28,9 @@ ios/
     Sources/WorkboardFakeServer/  테스트용 가짜 서버(합치기 없음)와 예제 작업공간
     Sources/wb-fake-server/    가짜 서버 실행 파일
     Sources/wb-cli/            손 검증용 명령줄 클라이언트(다른 기기 역할)
-    Tests/WorkboardKitTests/   단위·통합 테스트 67개
+    Tests/WorkboardKitTests/   단위·통합 테스트 126개
   Workboard/               SwiftUI 앱(화면, 통화, 알림)
-  WorkboardUITests/        시뮬레이터에서 앱을 직접 조작하는 UI 테스트 17개
+  WorkboardUITests/        시뮬레이터에서 앱을 직접 조작하는 UI 테스트 24개
   Workboard.xcodeproj      손으로 쓴 프로젝트(폴더 동기화 그룹, objectVersion 77)
   Config/Info.plist        ATS 예외, 마이크·카메라 문구, 백그라운드 모드, workboard:// URL 스킴
   Config/Workboard.entitlements  푸시용(아직 빌드에 연결 안 함, 아래 "푸시" 참고)
@@ -71,23 +71,23 @@ swift run wb-cli ws://127.0.0.1:8787 watch
 테스트:
 
 ```sh
-cd ios/WorkboardKit && swift test          # 67개 (2026-11-16)
+cd ios/WorkboardKit && swift test          # 126개 (2026-11-16)
 
 # UI 테스트용 가짜 서버 3개
 swift run wb-fake-server --port 18787 &
 swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev &
 swift run wb-fake-server --port 18789 --admin-http &
 xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
-  -destination 'platform=iOS Simulator,name=iPhone 17' test   # 17개 (2026-11-16)
+  -destination 'platform=iOS Simulator,name=iPhone 17' test   # 24개 (2026-11-16)
 #   이 맥에는 "iPhone 17" 이 런타임별로 두 개 있어서 id 로 골랐다:
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
 
-`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
+`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 답하지 않기(`/admin/drop-answer`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.
 
-앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbTab home|chat|tasks|docs`, `-wbOpen channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | settings`, `-wbOpenURL workboard://join?...`, `-wbNoPasswordAutoFill YES`(로그인 칸에 저장된 비밀번호·강한 비밀번호를 내놓지 않는다. iOS 의 "Use Strong Password" 시트가 타이핑 도중 키보드를 가로채서 UI 테스트가 흔들렸다. 모든 UI 테스트가 이것으로 띄운다).
+앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbTab home|chat|tasks|docs`, `-wbOpen channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | settings`, `-wbOpenURL workboard://join?...`, `-wbAskTimeout 2`(관리 요청의 답을 기다리는 초, 기본 15), `-wbNoPasswordAutoFill YES`(로그인 칸에 저장된 비밀번호·강한 비밀번호를 내놓지 않는다. iOS 의 "Use Strong Password" 시트가 타이핑 도중 키보드를 가로채서 UI 테스트가 흔들렸다. 모든 UI 테스트가 이것으로 띄운다).
 
 ## 데이터 다루는 방식
 
@@ -254,6 +254,14 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **멘션 고르기:** 메시지 칸에서 단어 첫머리에 `@` 를 치면 사람 목록(나와 초대 중인 사람은 빼고, 친 글자로 시작하는 이름, 동명이인은 이메일로 구별)이 뜬다. 고른 사람의 id 를 `picked` 로 넘겨 `mentions` 에 남기므로, 같은 이름이 여럿이어도 고른 사람만 멘션된다. 메시지·답글·작업 댓글 모두.
 - **UI 테스트:** 오프라인 테스트는 주소를 바꾸지 않고 18789 서버를 `/admin/offline` 으로 잠깐 없앴다가 되돌린다(주소를 바꾸면 앱이 사본을 버리는 게 맞다). 비밀번호 칸은 `-wbNoPasswordAutoFill` 로 강한 비밀번호 시트를 끄고, 칸에 글자 수가 다 찰 때까지 기다린다.
 
+## 5차 고침 (2026-11-16)
+
+- **가져온 Slack 메시지는 알리지 않는다:** 맥이 Slack 내보내기에서 가져온 메시지에는 `imported`("slack:<채널>:<ts>")가 붙는다. 옛 기록이므로 로컬 알림과 안 읽은 수(탭 배지)에서 뺀다(맥의 `notify.rs`, `unread_here` 와 같음). 필드는 JSON 에 온 그대로 남아 이 iPhone 이 고친 사본에도 그대로 실려 간다.
+- **관리 요청 답은 순서로만 맞춘다:** 서버는 `set_role`·`revoke` 의 답(`access_for`)을 잠금을 푼 뒤에 만든다. 그래서 다른 관리자가 같은 사람을 동시에 바꾸면 답에 요청한 역할이 안 보일 수 있고, 4차의 "답처럼 보일 때만" 규칙으로는 요청이 계속 남아 나중의 상관없는 거절을 가로챘다. 이제 답의 내용은 보지 않는다. 가장 오래된 요청이 목록을 바라는 것(`access_list`·`set_role`·`revoke`)이면 그다음 오는 `access` 가 그 답이다. 그 앞에 다른 종류의 요청이 기다리고 있으면 `access` 는 누군가 바꾼 뒤 모두에게 간 것으로 보고 목록만 받는다. 거절은 여전히 가장 오래된 요청의 것이다.
+- **답이 안 오면 놓아 준다:** 요청마다 보낸 시각을 두고(`asked`), 15초(초대 코드는 메일을 보내고 되돌리기는 작업공간 전체를 바꾸므로 60초) 안에 답이 없으면 목록에서 뺀다. 관리 요청이면 People·Backups 화면에 "The server didn't confirm that in time..." 이라는 회색 안내(`adminUnconfirmed`)를 띄우고, 비밀번호 바꾸기면 실패로 보여 다시 하게 한다. 바뀌었을 수도 있으므로 오류로 보이지 않는다. 새 요청을 보내면 안내는 사라진다.
+- **남는 한계:** 다른 관리자의 변경으로 생긴 `access` 가 내 요청이 서버에 닿기 전에 출발하면, 그것을 내 요청의 답으로 받는다. 진짜 답은 기다리는 요청이 없으면 목록으로만 쓰이므로 화면은 맞다. 이때 내 요청이 거절되면 그 거절은 관리 화면 오류 대신 화면 위 알림으로 보인다.
+- **가짜 서버:** 실제 서버처럼 `access` 변경 알림을 요청한 연결에도 (답 다음에) 보낸다. 테스트용으로 `meddleBeforeNextAnswer(member:role:)`(답을 만들기 직전에 다른 관리자가 같은 사람을 바꿈)와 `dropNextAnswer()`(다음 관리 요청에 답하지 않음)가 있다.
+
 ## 설계와 달라진 점
 
 1. **merge 도 Swift 로 옮겼다(1단계 설계 6번 변경).** 프로토콜에 "push 가 반영됐다"는 확인이 없어서, 다시 얹을 변경을 언제 지울지 알 수 없었다. 이제 iOS 는 맥 앱처럼 `merge(내 것, [정본])` 을 한다. Rust 정적 라이브러리 방식은 크로스 컴파일과 FFI 부담에 비해 이득이 적어 쓰지 않았다.
@@ -278,7 +286,7 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 ```
 
 - `push` 는 예전에 `snapshot` 필드로 보냈는데 실제 서버는 `data` 를 읽는다. 지금은 `data` 로 보낸다.
-- owner·admin 용 메시지(`access`, `invite`, `backups` 등)는 iOS 가 무시한다.
+- owner·admin 용 메시지도 쓴다(설정 > Team, `Admin.swift`). 보내는 것: `access_list`, `create_invite {member, role}`, `set_role {member, role}`, `revoke {member}`, `backup_list`, `restore {name}`. 받는 것: `access {people, role}`(요청의 답이기도 하고, 누군가 바꾼 뒤 모든 연결에 가기도 한다. 내 역할도 여기서 갱신), `invite {member, code, emailed?, mail_error?}`, `backups {backups}`, `restored {name}`, 거절은 `error {code: "denied"}`. 답은 요청 순서로 맞추고 15초(초대·되돌리기 60초) 안에 안 오면 놓아 준다("5차 고침" 참고). 일반 멤버에게는 Team 화면이 없다.
 - HTTP(같은 host:port): `GET /health`, `POST /auth/forgot`. 통화용 `POST /call-token` 은 가짜 서버에만 있다(아래 "실제 서버와 아직 다른 점").
 - 30초마다 ping, 75초 동안 아무것도 없으면 다시 연결한다. 간격은 1, 2, 4, 8, 16, 30... 초.
 - WebSocket 메시지 최대 크기를 64MB 로 늘렸다(URLSession 기본은 1MB).

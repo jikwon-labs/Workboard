@@ -12,7 +12,8 @@
 // of mailed; --no-mail makes /auth/forgot answer mail: false.
 // While running, type "invite 2" or "revoke 2" and press return.
 // --admin-http (tests only) also takes POST /admin/invite?member=N,
-// /admin/revoke?member=N, /admin/say?channel=C&author=A&text=T,
+// /admin/revoke?member=N, /admin/say?channel=C&author=A&text=T[&imported=KEY]
+// (KEY marks it as brought in from Slack),
 // /admin/reset-code?email=E, /admin/drop-account?member=N,
 // /admin/offline?secs=N (drop the app connections and turn new ones away),
 // /admin/online, /admin/find?text=T and /admin/drop-answer (the next access

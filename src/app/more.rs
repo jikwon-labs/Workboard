@@ -496,8 +496,27 @@ impl App {
                             ui.add_space(ui.available_height() * 0.3);
                             ui.vertical_centered(|ui| {
                                 let alone = self.data.members.len() <= 1;
+                                // alone, the Inbox stays empty: point at what is due
+                                let me = self.data.me;
+                                let due_work = self
+                                    .data
+                                    .tasks
+                                    .iter()
+                                    .filter(|x| {
+                                        x.assignees.contains(&me)
+                                            && x.due.is_some_and(|d| d <= today())
+                                            && !self.data.is_closed(x)
+                                            && self.data.task_live(x)
+                                    })
+                                    .count();
+                                let point_to_due = self.inbox_tab == 0 && alone && due_work > 0;
                                 // the people icon only where it invites people
                                 let (title, sub, icon) = match self.inbox_tab {
+                                    0 if point_to_due => (
+                                        "Nothing from other people",
+                                        "The Inbox collects comments, mentions and assignments from others.",
+                                        "\u{2713}",
+                                    ),
                                     0 if alone => (
                                         "Looking to collaborate?",
                                         "Collaboration is one invite away.",
@@ -542,7 +561,40 @@ impl App {
                                 ui.add_space(10.0);
                                 ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
                                 ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
-                                if self.inbox_tab == 0 && alone {
+                                if point_to_due {
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        RichText::new(trf!(
+                                            "Tasks due today or overdue: {}",
+                                            due_work
+                                        ))
+                                        .size(14.0)
+                                        .color(t.text),
+                                    );
+                                    ui.add_space(6.0);
+                                    if ui
+                                        .add(Tint(
+                                            egui::Button::new(
+                                                RichText::new(tr("Open Today & Overdue"))
+                                                    .size(15.0)
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .fill(t.primary)
+                                            .corner_radius(7)
+                                            .min_size(vec2(0.0, 38.0)),
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.actions.push(Action::Go(Location::TodayOverdue));
+                                    }
+                                    ui.add_space(4.0);
+                                    if ui.button(tr("Invite people")).clicked() {
+                                        self.modal = Some(Modal::Invite {
+                                            emails: String::new(),
+                                            role: "Member".into(),
+                                        });
+                                    }
+                                } else if self.inbox_tab == 0 && alone {
                                     ui.add_space(10.0);
                                     if ui
                                         .add(Tint(

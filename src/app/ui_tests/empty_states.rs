@@ -367,3 +367,28 @@ fn task_comments_alone_do_not_suggest_mentions_or_assigning() {
         .iter()
         .any(|x| x == "Write a comment, @mention someone"));
 }
+
+#[test]
+fn inbox_alone_with_due_work_points_to_today_and_overdue() {
+    let d = solo();
+    let list = d.spaces[0].lists[0].id;
+    let mut h = with(d, 1440.0, 900.0);
+    h.click("Inbox");
+    assert!(h.has("Looking to collaborate?"), "nothing due: the invite");
+    h.app.apply(Action::Add {
+        list,
+        name: "Send invoice".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![1],
+        due: Some(today() - Duration::days(1)),
+        parent: None,
+        open: false,
+    });
+    h.settle();
+    assert!(h.has("Nothing from other people"));
+    assert!(h.has("Tasks due today or overdue: 1"));
+    assert!(h.has("Invite people"), "inviting is still there");
+    h.click("Open Today & Overdue");
+    assert_eq!(h.app.loc, Location::TodayOverdue);
+}

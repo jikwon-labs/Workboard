@@ -1077,6 +1077,57 @@ fn the_top_bar_says_when_the_team_server_cannot_be_reached() {
 }
 
 #[test]
+fn work_together_on_a_server_that_is_down_leads_with_working_offline_and_can_change_the_address() {
+    let mut h = Ui1::new();
+    super::together::save_token("127.0.0.1:1", "dev-down", "tok-down");
+    server_down(&mut h);
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    // not "everyone sees it in a second or two" while nobody can
+    assert!(!h.has("Tasks, chat and docs show up for everyone within a second or two."));
+    assert!(h.has("You can keep working here. Your changes are kept on this computer and go up when the server is back."));
+    // the server moved: type its new address and connect there
+    h.click("Change address");
+    h.click("Server address");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("127.0.0.1:2");
+    h.click("Save and reconnect");
+    let cfg = h.app.data.extra.shared.clone().unwrap();
+    assert_eq!(cfg.server.as_deref(), Some("127.0.0.1:2"));
+    assert!(
+        h.app.sync_rt.net.is_none(),
+        "connects again on the next frame"
+    );
+    assert_eq!(
+        super::together::load_token("127.0.0.1:2", "dev-down").as_deref(),
+        Some("tok-down"),
+        "the sign-in goes along"
+    );
+    assert!(super::together::load_token("127.0.0.1:1", "dev-down").is_none());
+    assert!(h.has("127.0.0.1:2") && !h.has("Save and reconnect"));
+    // a wrong address says so and changes nothing
+    h.click("Change address");
+    h.click("Server address");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("wss://team.example");
+    h.click("Save and reconnect");
+    assert_eq!(
+        h.app.data.extra.shared.as_ref().unwrap().server.as_deref(),
+        Some("127.0.0.1:2")
+    );
+    assert!(h.has(
+        "Secure (wss) addresses aren't supported. Use the server's Tailscale name or address."
+    ));
+    h.click("Cancel");
+    assert!(!h.has("Save and reconnect"));
+    // connected: the usual words, and no address to change
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.settle();
+    assert!(h.has("Tasks, chat and docs show up for everyone within a second or two."));
+    assert!(!h.has("Change address"));
+}
+
+#[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();
     let ch = h.app.data.channels[0].id;

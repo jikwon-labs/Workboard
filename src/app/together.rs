@@ -171,6 +171,8 @@ pub struct SyncRt {
     pub(super) restore_confirm: Option<String>,
     /// Failed tries to reach the server in a row (none once connected).
     pub(super) fails: u32,
+    /// Work together shows a field for the server's new address.
+    pub(super) editing_addr: bool,
     /// The person was told the team's copy couldn't be read (said once).
     told_unreadable: bool,
     /// Told this session that someone in the shared folder runs an older app.
@@ -1245,6 +1247,33 @@ impl App {
         self.dirty = true;
     }
 
+    /// Keep this workspace on its server, reached at another address (the
+    /// server moved, or the address was mistyped), and connect again. The
+    /// sign-in goes along.
+    pub(super) fn change_server(&mut self, addr: &str) -> Result<(), String> {
+        wb_net::server_url(addr)?;
+        let new = addr.trim().to_string();
+        let Some(cfg) = self.data.extra.shared.as_mut() else {
+            return Ok(());
+        };
+        let Some(old) = cfg.server.clone() else {
+            return Ok(());
+        };
+        if old != new {
+            if let Some(token) = load_token(&old, &cfg.device) {
+                save_token(&new, &cfg.device, &token);
+                forget_token(&old, &cfg.device);
+            }
+            cfg.server = Some(new);
+            self.save_local();
+            self.dirty = true;
+        }
+        self.sync_rt.editing_addr = false;
+        self.sync_rt.net = None;
+        self.sync_rt.net_status = None;
+        Ok(())
+    }
+
     /// Who you are in a joined workspace: an existing (invited) member, or someone new.
     pub(super) fn become_member(&mut self, id: Option<u64>, name: &str, email: &str) {
         let id = match id {
@@ -2191,7 +2220,39 @@ impl App {
                 }
             }
             ui.add_space(8.0);
-            ui.label(RichText::new(tr("Tasks, chat and docs show up for everyone within a second or two. While the server can't be reached you keep working here, and your changes go up when it's back.")).small().color(t.text3));
+            let how = if connected {
+                tr("Tasks, chat and docs show up for everyone within a second or two.")
+            } else if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
+                tr("You can keep working here. Your changes are kept on this computer and go up once it's signed in again.")
+            } else {
+                tr("You can keep working here. Your changes are kept on this computer and go up when the server is back.")
+            };
+            ui.label(RichText::new(how).small().color(t.text3));
+            if !connected && self.sync_rt.editing_addr {
+                ui.add_space(8.0);
+                ui.label(RichText::new(tr("New server address")).color(t.text2));
+                let r = ui.add(
+                    egui::TextEdit::singleline(addr)
+                        .hint_text(tr("macmini or 100.101.102.103"))
+                        .desired_width(f32::INFINITY),
+                );
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address")
+                });
+                ui.horizontal(|ui| {
+                    if primary_button(ui, t, tr("Save and reconnect")).clicked() {
+                        match self.change_server(addr) {
+                            Ok(()) => result.clear(),
+                            Err(e) => *result = server_text(&e),
+                        }
+                    }
+                    if ui.button(tr("Cancel")).clicked() {
+                        self.sync_rt.editing_addr = false;
+                        *addr = server.clone();
+                        result.clear();
+                    }
+                });
+            }
             if connected {
                 ui.add_space(10.0);
                 self.account_section(ui, t);
@@ -2209,6 +2270,19 @@ impl App {
                 if ui.button(tr("Reconnect now")).clicked() {
                     self.sync_rt.net = None;
                     self.sync_rt.net_status = None;
+                }
+                // the server moved or the address was mistyped
+                if !connected
+                    && !self.sync_rt.editing_addr
+                    && ui
+                        .button(tr("Change address"))
+                        .on_hover_text(tr(
+                            "Connect this workspace to the server at another address",
+                        ))
+                        .clicked()
+                {
+                    self.sync_rt.editing_addr = true;
+                    *addr = server.clone();
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui

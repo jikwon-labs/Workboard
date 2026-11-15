@@ -2493,6 +2493,150 @@ impl App {
             .count()
     }
 
+    /// My reminders that are due and my meetings today and tomorrow, for
+    /// Home: (reminders, meetings), soonest first.
+    pub(super) fn home_due_extras(&self) -> (Vec<Reminder>, Vec<Meeting>) {
+        let (me, now, td) = (self.data.me, now_ts(), today());
+        let mut rs: Vec<Reminder> = self
+            .data
+            .extra
+            .reminders
+            .iter()
+            .filter(|r| r.owner == me && !r.done && r.due_ts <= now)
+            .cloned()
+            .collect();
+        rs.sort_by_key(|r| r.due_ts);
+        let mut ms: Vec<Meeting> = self
+            .data
+            .extra
+            .meetings
+            .iter()
+            .filter(|m| m.attendees.contains(&me) && (0..=1).contains(&(m.date - td).num_days()))
+            .cloned()
+            .collect();
+        ms.sort_by(|a, b| (a.date, &a.time).cmp(&(b.date, &b.time)));
+        (rs, ms)
+    }
+
+    /// The Reminders and Meetings rows under My Work on Home.
+    pub(super) fn home_extras_rows(&mut self, ui: &mut Ui, w: f32) {
+        let t = self.t();
+        let (rs, ms) = self.home_due_extras();
+        let td = today();
+        let mut go = None;
+        let rows: [(&str, Vec<(String, String, String)>); 2] = [
+            (
+                "Reminders",
+                rs.iter()
+                    .map(|r| {
+                        let when = chrono::DateTime::from_timestamp(r.due_ts, 0)
+                            .map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p"))
+                            .unwrap_or_default();
+                        (r.text.clone(), when, format!("reminder:{}", r.id))
+                    })
+                    .collect(),
+            ),
+            (
+                "Meetings",
+                ms.iter()
+                    .map(|m| {
+                        let day = if m.date == td { "Today" } else { "Tomorrow" };
+                        (
+                            m.title.clone(),
+                            format!("{} {}", tr(day), m.time),
+                            format!("meeting:{}", m.id),
+                        )
+                    })
+                    .collect(),
+            ),
+        ];
+        for (name, items) in rows {
+            if items.is_empty() {
+                continue;
+            }
+            let (r, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
+            ui.painter().text(
+                r.left_center() + vec2(18.0, 0.0),
+                Align2::LEFT_CENTER,
+                tr(name),
+                FontId::proportional(13.5),
+                t.text,
+            );
+            ui.painter().text(
+                r.left_center() + vec2(110.0, 0.0),
+                Align2::LEFT_CENTER,
+                items.len().to_string(),
+                FontId::proportional(12.0),
+                t.text3,
+            );
+            for (text, when, target) in items {
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                name_it(&resp, &text);
+                if resp.hovered() {
+                    ui.painter().rect_filled(r, 6.0, t.hover);
+                }
+                ui.painter()
+                    .with_clip_rect(Rect::from_min_max(
+                        r.min,
+                        pos2(r.right() - 140.0, r.bottom()),
+                    ))
+                    .text(
+                        r.left_center() + vec2(40.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        &text,
+                        FontId::proportional(13.0),
+                        t.text,
+                    );
+                ui.painter().text(
+                    r.right_center() - vec2(6.0, 0.0),
+                    Align2::RIGHT_CENTER,
+                    when,
+                    FontId::proportional(12.0),
+                    if name == "Reminders" {
+                        t.danger
+                    } else {
+                        t.text2
+                    },
+                );
+                if resp.clicked() {
+                    go = Some(target);
+                }
+            }
+        }
+        if let Some(target) = go {
+            self.open_target(&target);
+        }
+    }
+
+    /// My Work on Home with nothing assigned to me and nothing due: what
+    /// shows up here, and a way to add the first task.
+    pub(super) fn home_nothing_yet(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        ui.label(RichText::new(tr("Nothing assigned to you yet.")).color(t.text2));
+        ui.label(
+            RichText::new(tr(
+                "Tasks assigned to you show up here by due date, with your due reminders and upcoming meetings.",
+            ))
+            .small()
+            .color(t.text3),
+        );
+        ui.add_space(6.0);
+        if self.default_list().is_none() {
+            ui.label(
+                RichText::new(tr("Tasks live in Lists: make one in the Lists card first."))
+                    .small()
+                    .color(t.text3),
+            );
+        } else if ui.button(tr("+ Add a task for me")).clicked() {
+            self.open_quick_add(None);
+            if let Some(qa) = self.quick_add.as_mut() {
+                if !qa.assignees.contains(&self.data.me) {
+                    qa.assignees.push(self.data.me);
+                }
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- AI
 
     pub(super) fn ai_page(&mut self, ui: &mut Ui) {

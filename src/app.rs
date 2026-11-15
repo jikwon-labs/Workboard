@@ -3864,7 +3864,15 @@ impl App {
                                         ui.set_width(card_w - 34.0);
                                         ui.label(RichText::new(tr("My Work")).size(16.0).strong());
                                         ui.add_space(6.0);
-                                        for (name, list) in &sections {
+                                        // nothing of mine at all: say so, not five rows of 0
+                                        let (rs, ms) = self.home_due_extras();
+                                        let nothing = sections.iter().all(|s| s.1.is_empty())
+                                            && rs.is_empty()
+                                            && ms.is_empty();
+                                        if nothing {
+                                            self.home_nothing_yet(ui);
+                                        }
+                                        for (name, list) in sections.iter().filter(|_| !nothing) {
                                             let collapsed = self.home_collapsed.contains(name);
                                             let (r, resp) = ui.allocate_exact_size(
                                                 vec2(card_w - 34.0, 28.0),
@@ -3982,6 +3990,8 @@ impl App {
                                                 }
                                             }
                                         }
+                                        // due reminders and today's and tomorrow's meetings
+                                        self.home_extras_rows(ui, card_w - 34.0);
                                     })
                                 });
                             ui.add_space(12.0);

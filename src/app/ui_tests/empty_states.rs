@@ -224,3 +224,93 @@ fn snooze_never_moves_a_reminder_earlier() {
     assert!(!h.has("Snooze Renew lease"));
     assert!(h.has("Edit Renew lease"));
 }
+
+fn go_home(h: &mut Ui1) {
+    h.app.actions.push(Action::Go(Location::Home));
+    h.app.apply_actions();
+    h.settle();
+}
+
+#[test]
+fn home_my_work_with_nothing_says_so_and_adds_a_task() {
+    let mut h = with(solo(), 1440.0, 900.0);
+    go_home(&mut h);
+    assert!(h.has("Nothing assigned to you yet."));
+    assert!(
+        !h.texts().iter().any(|x| x == "Unscheduled"),
+        "no rows of 0"
+    );
+    h.click("+ Add a task for me");
+    let qa = h.app.quick_add.as_ref().expect("the quick add opens");
+    assert_eq!(qa.assignees, vec![1]);
+    // with no list there is nowhere to add it: say where to start
+    let mut h = with(no_space(), 1440.0, 900.0);
+    go_home(&mut h);
+    assert!(h.has("Tasks live in Lists: make one in the Lists card first."));
+    assert!(!h.has("+ Add a task for me"));
+    // anything of mine brings the rows back
+    let mut h = Ui1::new();
+    go_home(&mut h);
+    assert!(!h.has("Nothing assigned to you yet."));
+    assert!(h.texts().iter().any(|x| x == "Unscheduled"));
+}
+
+#[test]
+fn home_shows_due_reminders_and_tomorrows_meeting() {
+    let mut d = no_space();
+    let now = now_ts();
+    for (id, text, due, done) in [
+        (5000, "File taxes", now - 2 * 86400, false),
+        (5001, "Dentist", now - 86400, false),
+        (5002, "Mom's birthday", now + 2 * 86400, false),
+        (5003, "Old one", now - 86400, true),
+    ] {
+        d.extra.reminders.push(Reminder {
+            id,
+            text: text.into(),
+            due_ts: due,
+            done,
+            owner: 1,
+            alerted: true,
+            ..Default::default()
+        });
+    }
+    d.extra.meetings.push(Meeting {
+        id: 6000,
+        title: "Weekly sync".into(),
+        date: today() + Duration::days(1),
+        time: "10:00".into(),
+        attendees: vec![1],
+        agenda: String::new(),
+        notes: String::new(),
+    });
+    d.extra.meetings.push(Meeting {
+        id: 6001,
+        title: "Next month review".into(),
+        date: today() + Duration::days(30),
+        time: "10:00".into(),
+        attendees: vec![1],
+        agenda: String::new(),
+        notes: String::new(),
+    });
+    let mut h = with(d, 1440.0, 900.0);
+    go_home(&mut h);
+    assert!(!h.has("Nothing assigned to you yet."));
+    let texts = h.texts();
+    for x in [
+        "Reminders",
+        "File taxes",
+        "Dentist",
+        "Meetings",
+        "Weekly sync",
+    ] {
+        assert!(texts.iter().any(|t| t == x), "{} on Home: {:?}", x, texts);
+    }
+    for x in ["Mom's birthday", "Old one", "Next month review"] {
+        assert!(!texts.iter().any(|t| t == x), "{} is not due", x);
+    }
+    assert!(texts.iter().any(|t| t == "Tomorrow 10:00"));
+    h.click("Weekly sync");
+    assert_eq!(h.app.section, Section::Meetings);
+    assert_eq!(h.app.meeting_open, Some(6000));
+}

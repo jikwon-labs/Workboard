@@ -627,6 +627,7 @@ impl App {
         };
         let mut data = data;
         data.fix_activity_ids();
+        data.fold_legacy_slack();
         together::fill_sync_baseline(&mut data);
         let loc = data
             .first_list()

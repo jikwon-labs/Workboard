@@ -194,17 +194,19 @@ pub struct Member {
     pub invited: bool,
     #[serde(default)]
     pub status_text: String,
-    /// The Slack user ids whose messages an Import from Slack brought in as
-    /// this member, so importing again (from any teammate's computer) finds
-    /// them here even after a rename or with no email to match by.
-    /// A Slack user id is on one member at most: pointing them at another
-    /// member takes it off this one.
+    /// Only read: the Slack user ids an earlier version's Import from Slack
+    /// brought in as this member. Matching now keeps them per Slack id in
+    /// the shared `Extra::slack_map` (one list per member merged as a whole,
+    /// so two people pointing Slack people at one member at once lost one);
+    /// these go into it when a workspace opens (`Data::fold_legacy_slack`)
+    /// and stay here as they are, for older versions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack: Vec<String>,
     /// Only read, from files of an earlier version that kept "Import under
-    /// my name" here, on the shared member: my own member's list moves to
-    /// my personal `Extra::slack_under_me` (`Data::keep_slack_under_me_personal`)
-    /// and nothing writes it any more.
+    /// my name" here, on the shared member: my own member's list is copied
+    /// to my personal `Extra::slack_under_me` (`Data::keep_slack_under_me_personal`)
+    /// and left as it is, so each of my computers takes it over on its own
+    /// when it updates. Nothing writes it any more.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack_mine: Vec<String>,
 }
@@ -790,6 +792,10 @@ pub enum Location {
     List(u64),
 }
 
+/// Where `Extra::slack_map` sits in the saved workspace (one of
+/// `sync::SHARED_MAPS`).
+pub const SLACK_MAP: &str = "extra.slack_map";
+
 /// See `Data::take_unreadable`.
 static UNREADABLE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
@@ -1335,9 +1341,22 @@ pub struct Extra {
     /// The Slack user ids I chose to bring in under my name ("Import under
     /// my name"): my next import starts from that for them. My own choice,
     /// left out of the copy teammates get, so it never changes their
-    /// matching (`Member::slack`) and their imports never change it.
+    /// matching (`slack_map`) and their imports never change it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack_under_me: Vec<String>,
+    /// Slack user ids an earlier version kept under my name on my shared
+    /// member (`Member::slack_mine`, still read) that I since pointed
+    /// somewhere else: my own, like `slack_under_me`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slack_not_under_me: Vec<String>,
+    /// Slack user id -> the member an Import from Slack brings them in as,
+    /// so importing again (from any teammate's computer) finds them after a
+    /// rename or with no email to match by. Shared entry by entry
+    /// (`sync::SHARED_MAPS`): pointing a Slack person at a member sets only
+    /// their entry, and of two people setting one entry at once the later
+    /// wins everywhere. Several Slack people can go to one member.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub slack_map: std::collections::BTreeMap<String, u64>,
 }
 
 impl Default for Extra {
@@ -1386,6 +1405,8 @@ impl Default for Extra {
             sheet_rows: vec![],
             sheet_week_rows: vec![],
             slack_under_me: vec![],
+            slack_not_under_me: vec![],
+            slack_map: Default::default(),
         }
     }
 }
@@ -1532,28 +1553,33 @@ impl Data {
     }
 
     /// A file from the version that kept "Import under my name" on my
-    /// shared member (`Member::slack_mine`): the choices move to my personal
-    /// `Extra::slack_under_me` and leave the member. Only my own member's;
-    /// a teammate's are theirs to move on their computer. True when that
-    /// happened.
+    /// shared member (`Member::slack_mine`): the choices are copied to my
+    /// personal `Extra::slack_under_me`. The member keeps them as they are:
+    /// it is shared, and taking them off would leave nothing for my other
+    /// computers to take over when they update. Only my own member's; a
+    /// teammate's are theirs to take over on their computer. Ones I since
+    /// pointed elsewhere (`Extra::slack_not_under_me`) aren't. True when
+    /// any were copied.
     pub fn keep_slack_under_me_personal(&mut self) -> bool {
         let me = self.me;
-        let Some(m) = self.members.iter_mut().find(|m| m.id == me) else {
+        let Some(m) = self.members.iter().find(|m| m.id == me) else {
             return false;
         };
-        if m.slack_mine.is_empty() {
-            return false;
-        }
-        for sid in std::mem::take(&mut m.slack_mine) {
-            if !self.extra.slack_under_me.contains(&sid) {
-                self.extra.slack_under_me.push(sid);
+        let mut copied = false;
+        for sid in &m.slack_mine {
+            if !self.extra.slack_under_me.contains(sid)
+                && !self.extra.slack_not_under_me.contains(sid)
+            {
+                self.extra.slack_under_me.push(sid.clone());
+                copied = true;
             }
         }
-        true
+        copied
     }
 
     /// The Slack people I bring in under my name: my personal choices, and
-    /// any still on my member from an earlier version.
+    /// any still on my member from an earlier version that I haven't
+    /// pointed elsewhere since.
     pub fn slack_under_me(&self) -> Vec<String> {
         let mut out = self.extra.slack_under_me.clone();
         for sid in self
@@ -1561,11 +1587,63 @@ impl Data {
             .map(|m| &m.slack_mine[..])
             .unwrap_or(&[])
         {
-            if !out.contains(sid) {
+            if !out.contains(sid) && !self.extra.slack_not_under_me.contains(sid) {
                 out.push(sid.clone());
             }
         }
         out
+    }
+
+    /// The member a Slack person goes to by an earlier decision: their
+    /// entry in the shared `Extra::slack_map`, else (data from an older
+    /// version that came in since the workspace opened) the first member
+    /// whose `Member::slack` has them. An entry for a member no longer here
+    /// counts as none.
+    pub fn slack_member(&self, sid: &str) -> Option<u64> {
+        self.extra
+            .slack_map
+            .get(sid)
+            .copied()
+            .filter(|m| self.member(*m).is_some())
+            .or_else(|| {
+                self.members
+                    .iter()
+                    .find(|m| m.slack.iter().any(|x| x == sid))
+                    .map(|m| m.id)
+            })
+    }
+
+    /// The Slack matches an older version kept on the members
+    /// (`Member::slack`) go into the shared `Extra::slack_map` for Slack ids
+    /// it has no entry for (and never had one taken away), noted as nobody's
+    /// decision (`sync::carry_map_entry`): opening the workspace in the new
+    /// version isn't an edit, and any real decision, here or on a teammate's
+    /// computer, wins over them. An older version could leave one Slack id
+    /// on two members; the first wins, as matching picked before. The
+    /// members keep their lists, for older versions. True when any came in.
+    pub fn fold_legacy_slack(&mut self) -> bool {
+        let mut folded = false;
+        for m in &self.members {
+            for sid in &m.slack {
+                let decided = self
+                    .extra
+                    .sync
+                    .values
+                    .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+                if self.extra.slack_map.contains_key(sid) || decided {
+                    continue;
+                }
+                self.extra.slack_map.insert(sid.clone(), m.id);
+                crate::sync::carry_map_entry(
+                    &mut self.extra.sync,
+                    SLACK_MAP,
+                    sid,
+                    &serde_json::json!(m.id),
+                );
+                folded = true;
+            }
+        }
+        folded
     }
 
     /// A saved workspace that couldn't be read is copied aside before

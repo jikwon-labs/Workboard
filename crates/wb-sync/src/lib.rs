@@ -697,8 +697,9 @@ pub fn touch_fields(meta: &mut SyncMeta, id: u64, fields: &[&str], now: i64) -> 
 }
 
 /// Fingerprints of the shared settings, and of each entry of the shared
-/// maps there is (`map_part`).
-fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
+/// maps there is (`map_part`): `SyncMeta::value_hashes` for a copy as it
+/// is now.
+pub fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
     let mut out: BTreeMap<String, u64> = SHARED_VALUES
         .iter()
         .map(|p| {
@@ -2022,6 +2023,7 @@ const PERSONAL_EXTRA: &[&str] = &[
     "sheet_rows",
     "sheet_week_rows",
     "slack_under_me",
+    "slack_not_under_me",
 ];
 
 /// The copy other people get: personal notes, reminders, settings and

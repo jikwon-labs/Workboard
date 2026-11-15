@@ -471,6 +471,7 @@ impl App {
             self.toast = Some((super::unreadable_note(&p), now_ts()));
         }
         if let Some(mut d) = d {
+            d.fold_legacy_slack();
             super::together::fill_sync_baseline(&mut d);
             // task attachments on their way stay written down with the
             // workspace they belong to and come back with it

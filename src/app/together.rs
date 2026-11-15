@@ -1268,6 +1268,10 @@ impl App {
         let v = self.data_value();
         self.data.extra.sync.hashes = sync::fingerprints(&v);
         self.data.extra.sync.field_hashes = sync::part_hashes(&v);
+        // the team's settings and Slack matches as they came (the copy
+        // teammates send leaves these out): a change to one, even the
+        // first thing done here, is then noted as one (as the iPhone does)
+        self.data.extra.sync.value_hashes = sync::value_hashes(&v);
         self.loc = self
             .data
             .first_list()

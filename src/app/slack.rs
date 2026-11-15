@@ -5,19 +5,23 @@
 // channels; groups.json holds private ones when the export has them) and a
 // folder per channel with one JSON file per day: [{"user", "text", "ts",
 // "thread_ts", "files", ...}]. People are matched to members first by the
-// Slack id an earlier import remembered on the member (`Member::slack`, so a
-// renamed member or a teammate's import still finds them), then by email,
-// then by a name only one member has; two Slack people are never matched to
-// the same member on their own. The dialog shows the matching and each person
+// member an earlier import remembered for their Slack id (the shared
+// `Extra::slack_map`, so a renamed member or a teammate's import still finds
+// them; `Member::slack` from older versions after it), then by email, then
+// by a name only one member has; two Slack people are never matched to the
+// same member on their own. The dialog shows the matching and each person
 // can be pointed at a member (listed with their email, so two of one name
 // differ), added as a new member, or brought in under my name (their name in
-// front of their messages). A Slack person is remembered on one member at
+// front of their messages). A Slack person is remembered for one member at
 // most: pointing them at another member (or making a new member for them)
-// moves them there for everyone. "Under my name" is my own choice, kept in
-// my personal data (`Extra::slack_under_me`, never shared): my next import
-// starts from it, it leaves the shared match alone (a teammate's import
-// still goes to that member) and teammates' imports never change it. A new
-// member is made only when a message of theirs actually comes in. Messages keep their times,
+// sets their entry of the map, which moves them there for everyone; the map
+// merges entry by entry, so of two people moving one Slack person at once
+// the later wins on every computer, and two people pointing different Slack
+// people at one member both keep theirs. "Under my name" is my own choice,
+// kept in my personal data (`Extra::slack_under_me`, never shared): my next
+// import starts from it, it leaves the shared match alone (a teammate's
+// import still goes to that member) and teammates' imports never change it.
+// A new member is made only when a message of theirs actually comes in. Messages keep their times,
 // thread replies go under their message, files come in as links (the files
 // themselves need a Slack sign-in to fetch). Imported messages are marked
 // (`Message::imported`, with Slack's unique ts) so they aren't news for
@@ -93,6 +97,9 @@ pub(super) struct SlackPlan {
     pub channels: Vec<SlackChannel>,
     /// Slack id -> where their messages go, for everyone in `people`
     pub assign: HashMap<String, Assign>,
+    /// `assign` as matching proposed it, before anyone changed it in the
+    /// dialog: a person left as proposed was matched, not decided on
+    pub proposed: HashMap<String, Assign>,
     /// the people the dialog lists, in its order: everyone who wrote
     /// something, then channel members matched to a member here
     pub people: Vec<String>,
@@ -393,10 +400,12 @@ pub(super) fn plain_text(text: &str, names: &HashMap<String, String>) -> String 
 
 /// Match the people in an export to members. People I chose to bring in
 /// under my name at an earlier import (`Extra::slack_under_me`, my own
-/// choice on this computer) are again. Everyone else goes first to the
-/// member an earlier import brought them in as (`Member::slack`, kept in the
-/// shared workspace so a teammate's import finds it too, after a rename,
-/// with no email, or for an author the export's users.json leaves out), then
+/// choice on this computer, or one an earlier version kept on my member)
+/// are again. Everyone else goes first to the member an earlier import
+/// brought them in as (`Data::slack_member`: the shared `Extra::slack_map`,
+/// then older versions' `Member::slack`, so a teammate's import finds it
+/// too, after a rename, with no email, or for an author the export's
+/// users.json leaves out), then
 /// by email, then by a name only one member has. A member two Slack people
 /// would both match by email or name is left unmatched for both (the dialog
 /// lets someone choose), so nobody's messages end up under somebody else
@@ -418,8 +427,8 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     let mut known: HashMap<String, u64> = HashMap::new();
     let ids = users.iter().map(|u| &u.id).chain(people.iter());
     for id in ids.filter(|id| !mine.contains(id)) {
-        if let Some(m) = data.members.iter().find(|m| m.slack.contains(id)) {
-            known.insert(id.clone(), m.id);
+        if let Some(m) = data.slack_member(id) {
+            known.insert(id.clone(), m);
         }
     }
     let taken = |m: u64| known.values().any(|x| *x == m);
@@ -475,7 +484,7 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     quiet.sort();
     quiet.dedup();
     people.extend(quiet);
-    let assign = people
+    let assign: HashMap<String, Assign> = people
         .iter()
         .map(|id| {
             let a = if mine.contains(id) {
@@ -492,6 +501,7 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     SlackPlan {
         users,
         channels,
+        proposed: assign.clone(),
         assign,
         people,
         done: None,
@@ -639,8 +649,9 @@ impl App {
         plan: &SlackPlan,
     ) -> ((usize, usize), Vec<String>) {
         let me = self.data.me;
-        // choices an earlier version kept on my shared member
-        if self.data.keep_slack_under_me_personal() {
+        // choices an earlier version kept on my shared member, and matches
+        // it kept on the members (a copy from one came in since opening)
+        if self.data.keep_slack_under_me_personal() | self.data.fold_legacy_slack() {
             self.dirty = true;
         }
         // Slack id -> member; people under my name aren't in it, and people
@@ -837,12 +848,23 @@ impl App {
             count += added;
         }
         // remember where each person went, for the next import. The shared
-        // match (`Member::slack`, here and on teammates' computers) moves
-        // only to a member they now are, chosen or made for them, and is
-        // taken off any other then. "Under my name" is only my choice: kept
-        // in my personal data, it leaves the shared match alone, as does a
-        // person nobody was made for (nothing of theirs came in, or they're
-        // missing from users.json).
+        // match (their entry of `Extra::slack_map`, here and on teammates'
+        // computers) moves only to a member they now are, chosen or made
+        // for them; nothing on the members changes. Someone pointed
+        // somewhere in the dialog was decided on: their entry is set, and
+        // wins over anyone else's earlier setting. Someone left where
+        // matching put them (by email or name, or a new member for them)
+        // with no entry yet only gets one noted as nobody's decision
+        // (`sync::carry_map_entry`), so a teammate's choice made at the same
+        // time wins over it. "Under my name" is only my choice: kept in my
+        // personal data, it leaves the shared match alone, as does a person
+        // nobody was made for (nothing of theirs came in, or they're missing
+        // from users.json).
+        let legacy_mine: Vec<String> = self
+            .data
+            .member(me)
+            .map(|m| m.slack_mine.clone())
+            .unwrap_or_default();
         for sid in &plan.people {
             let target = people.get(sid).copied();
             let a = plan.assign.get(sid).copied().unwrap_or(Assign::New);
@@ -851,28 +873,47 @@ impl App {
                 continue;
             }
             let under_me = a == Assign::Me;
-            let mine = &mut self.data.extra.slack_under_me;
-            if under_me != mine.contains(sid) {
+            let ex = &mut self.data.extra;
+            if under_me != ex.slack_under_me.contains(sid) {
                 if under_me {
-                    mine.push(sid.clone());
+                    ex.slack_under_me.push(sid.clone());
                 } else {
-                    mine.retain(|x| x != sid);
+                    ex.slack_under_me.retain(|x| x != sid);
+                }
+                self.dirty = true;
+            }
+            // an earlier version's "under my name" stays on my member (my
+            // other computers still take it over): pointing them elsewhere
+            // is noted in my own data instead
+            let not_mine = !under_me && legacy_mine.contains(sid);
+            if not_mine != ex.slack_not_under_me.contains(sid) {
+                if not_mine {
+                    ex.slack_not_under_me.push(sid.clone());
+                } else {
+                    ex.slack_not_under_me.retain(|x| x != sid);
                 }
                 self.dirty = true;
             }
             let Some(target) = target else {
                 continue;
             };
-            for mem in self.data.members.iter_mut() {
-                let theirs = mem.id == target;
-                if theirs != mem.slack.contains(sid) {
-                    if theirs {
-                        mem.slack.push(sid.clone());
-                    } else {
-                        mem.slack.retain(|x| x != sid);
-                    }
-                    self.dirty = true;
+            if ex.slack_map.get(sid) != Some(&target) {
+                let decided = plan.proposed.get(sid) != Some(&a);
+                let fresh = !ex.slack_map.contains_key(sid)
+                    && !ex
+                        .sync
+                        .values
+                        .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+                ex.slack_map.insert(sid.clone(), target);
+                if !decided && fresh {
+                    crate::sync::carry_map_entry(
+                        &mut ex.sync,
+                        SLACK_MAP,
+                        sid,
+                        &serde_json::json!(target),
+                    );
                 }
+                self.dirty = true;
             }
         }
         // people who came in with their messages joined some of them

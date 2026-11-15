@@ -1134,13 +1134,42 @@ impl App {
             .show(ui, |ui| {
                 for (sid, sname, folders) in &spaces {
                     let cur = *sid == cur_space && cur_folder.is_none();
-                    if menu_row(ui, t, sname, cur, |_, _| {}).clicked() && !cur {
+                    // a Space by its colour and letter, its Folders under it,
+                    // as in the sidebar
+                    let color = self
+                        .data
+                        .spaces
+                        .iter()
+                        .find(|s| s.id == *sid)
+                        .map(|s| rgb(s.color))
+                        .unwrap_or(t.text3);
+                    let letter = sname
+                        .chars()
+                        .next()
+                        .unwrap_or('S')
+                        .to_uppercase()
+                        .to_string();
+                    let space_lead = |p: &egui::Painter, c: Pos2| {
+                        let r = Rect::from_center_size(c, vec2(16.0, 16.0));
+                        p.rect_filled(r, 4.0, color);
+                        p.text(
+                            c,
+                            Align2::CENTER_CENTER,
+                            &letter,
+                            FontId::proportional(10.0),
+                            Color32::WHITE,
+                        );
+                    };
+                    if menu_row(ui, t, sname, cur, space_lead).clicked() && !cur {
                         self.move_list(list, *sid, None);
                         close = true;
                     }
                     for (fid, fname) in folders {
                         let cur = cur_folder == Some(*fid);
-                        if menu_row(ui, t, &format!("    {}", fname), cur, |_, _| {}).clicked()
+                        if menu_row_named(ui, t, fname, &format!("      {}", fname), cur, |p, c| {
+                            super::icons::line_icon(p, "folder", c + vec2(18.0, 0.0), t.text2);
+                        })
+                        .clicked()
                             && !cur
                         {
                             self.move_list(list, *sid, Some(*fid));
@@ -3000,8 +3029,7 @@ impl App {
                                     }
                                 }
                                 ui.separator();
-                                if menu_row(ui, &t, tr("Unassign all"), false, |_, _| {}).clicked()
-                                {
+                                if menu_row_plain(ui, &t, tr("Unassign all"), false).clicked() {
                                     unassign = true;
                                     close_popup(ui);
                                 }
@@ -3041,7 +3069,7 @@ impl App {
                             let mut recur: Option<Option<String>> = None;
                             popup(ui, &r, pid.with("brc"), 160.0, |ui| {
                                 for (v, label) in RECUR {
-                                    if menu_row(ui, &t, tr(label), false, |_, _| {}).clicked() {
+                                    if menu_row_plain(ui, &t, tr(label), false).clicked() {
                                         recur = Some(if v.is_empty() {
                                             None
                                         } else {

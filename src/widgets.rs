@@ -524,6 +524,26 @@ pub fn menu_row_named(
     resp
 }
 
+/// A menu row with no icon: the text starts at the row's edge instead of
+/// after an empty icon slot.
+pub fn menu_row_plain(ui: &mut Ui, t: &Theme, label: &str, selected: bool) -> Response {
+    let w = ui.available_width().max(160.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    name_it(&resp, label);
+    if resp.hovered() || selected {
+        ui.painter()
+            .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
+    }
+    ui.painter().text(
+        rect.left_center() + vec2(10.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        t.text,
+    );
+    resp
+}
+
 pub fn status_menu(ui: &mut Ui, t: &Theme, statuses: &[Status], current: &mut String) -> bool {
     let mut changed = false;
     ui.label(egui::RichText::new(tr("Statuses")).small().color(t.text3));

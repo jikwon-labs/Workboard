@@ -890,7 +890,7 @@ impl App {
         let r = add_line(ui, t, tr("+  Add relationship"));
         popup(ui, &r, id.with(("rel_add", tid)), 200.0, |ui| {
             for mode in [TaskPick::WaitingOn, TaskPick::Blocking, TaskPick::Linked] {
-                if menu_row(ui, t, tr(mode.title()), false, |_, _| {}).clicked() {
+                if menu_row_plain(ui, t, tr(mode.title()), false).clicked() {
                     self.modal = Some(Modal::PickTask {
                         task: tid,
                         mode,

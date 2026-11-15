@@ -1709,7 +1709,7 @@ impl App {
                 .map(|x| x.timestamp())
                 .unwrap_or(now + 86400);
             popup(ui, &mb, more_id, 220.0, |ui| {
-                let row = |ui: &mut Ui, label: &str| menu_row(ui, &t, tr(label), false, |_, _| {});
+                let row = |ui: &mut Ui, label: &str| menu_row_plain(ui, &t, tr(label), false);
                 if !m.text.is_empty() && row(ui, "Copy text").clicked() {
                     ui.ctx().copy_text(m.text.clone());
                     acts.push(ChatAction::Copied);

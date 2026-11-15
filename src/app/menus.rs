@@ -49,6 +49,8 @@ pub enum Modal {
     MoveList { list: u64 },
     NewChannel { name: String, private: bool, add_list: bool },
     ListInfo { list: u64 },
+    /// Pick a task to set as parent, subtask, dependency or link.
+    PickTask { task: u64, mode: super::TaskPick, query: String },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -633,6 +635,7 @@ impl App {
             Modal::MoveList { .. } => "Move List".into(),
             Modal::NewChannel { .. } => "Create Channel".into(),
             Modal::ListInfo { .. } => "List Info".into(),
+            Modal::PickTask { mode, .. } => mode.title().into(),
         };
         // dim backdrop
         let screen = ctx.screen_rect();
@@ -691,6 +694,10 @@ impl App {
             Modal::MoveList { list } => {
                 let l = *list;
                 close = self.move_list_body(ui, t, l);
+            }
+            Modal::PickTask { task, mode, query } => {
+                let (tid, m) = (*task, *mode);
+                close = self.pick_task_body(ui, t, tid, m, query);
             }
             Modal::Invite { emails, role } => {
                 ui.label(RichText::new("Email").color(t.text2));

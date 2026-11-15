@@ -455,7 +455,17 @@ impl App {
                     }
                 }
             }
+            if let Some((_, p)) = self.task_files.iter_mut().find(|(_, p)| p.local == local) {
+                match &result {
+                    Ok(a) => {
+                        self.files.upload(a, &remote);
+                        p.att = Some(a.clone());
+                    }
+                    Err(e) => p.error = Some(e.clone()),
+                }
+            }
         }
+        self.attach_ready_task_files();
         if let Some(p) = self.pasted.take() {
             if self.section == Section::Chat && self.chat_open.is_some() {
                 let thread = ctx.is_some_and(|c| c.memory(|m| m.focused()) == Some(egui::Id::new(THREAD_BOX))) && self.thread_open.is_some();
@@ -502,7 +512,8 @@ impl App {
     /// thread panel, else the channel's.
     pub(super) fn take_dropped(&mut self, ctx: &egui::Context, thread_rect: Option<Rect>) {
         let (dropped, at) = ctx.input(|i| (i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect::<Vec<_>>(), i.pointer.latest_pos()));
-        if dropped.is_empty() {
+        // over an open task they belong to the task (see task_window)
+        if dropped.is_empty() || self.open_task.is_some() {
             return;
         }
         let thread = self.thread_open.is_some() && thread_rect.zip(at).is_some_and(|(r, p)| r.contains(p));
@@ -885,7 +896,7 @@ impl App {
 }
 
 /// The part of a texture that fills `size` without stretching (cropped).
-fn cover_uv(tex: egui::Vec2, size: egui::Vec2) -> Rect {
+pub(super) fn cover_uv(tex: egui::Vec2, size: egui::Vec2) -> Rect {
     let (ta, sa) = (tex.x / tex.y.max(1.0), size.x / size.y.max(1.0));
     if ta > sa {
         let w = sa / ta;

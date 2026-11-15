@@ -1779,7 +1779,7 @@ fn narrow_task_window_fields_stay_left_of_the_comments() {
     h.click_left("Task Write copy for landing page", 60.0);
     assert!(h.app.open_task.is_some());
     let panel = h.rect("Comments").left() - 12.0;
-    for name in ["Start", "0 min", "\u{23F1}  Track time", "\u{2691}  Priority", "\u{1F464}  Assignees", "\u{231B}  Time estimate"] {
+    for name in ["Time entries", "Time estimate value", "\u{23F1}  Track time", "\u{2691}  Priority", "\u{1F464}  Assignees", "\u{231B}  Time estimate"] {
         let r = h.rect(name);
         assert!(r.right() <= panel, "{:?} {:?} runs into the comments column (from x {})", name, r, panel);
     }
@@ -2082,4 +2082,236 @@ fn composer_mention_and_emoji_pickers() {
     // (the right-most "Jordan Park" is the list's row, not a name in the feed)
     h.click_side("Jordan Park", true);
     assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
+}
+
+// ---------------------------------------------------------------- task window fields (sf-taskfields)
+
+fn open_design_task(h: &mut Ui1) -> u64 {
+    h.click_left("Task Design new homepage layout", 120.0);
+    h.app.open_task.expect("the task window opens")
+}
+
+#[test]
+fn task_type_pill_switches_to_milestone() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.click("Task type");
+    h.click("Milestone");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().milestone);
+    h.click("Task type");
+    h.click_side("Task", true);
+    h.app.apply_actions();
+    assert!(!h.app.task(id).unwrap().milestone);
+}
+
+#[test]
+fn time_estimate_takes_hours_and_minutes_as_text() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.click("Time estimate value");
+    h.type_text("2h 30m");
+    h.key(egui::Key::Enter);
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().estimate_min, Some(150));
+    assert!(h.has("2h 30m"), "shown back as text");
+}
+
+#[test]
+fn time_entries_add_by_hand_and_remove() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap().time_entries.clear();
+    h.settle();
+    h.click("Time entries");
+    h.click("Time to add");
+    h.type_text("1h 30m");
+    h.click("Add time");
+    h.app.apply_actions();
+    let t = h.app.task(id).unwrap();
+    assert_eq!(t.time_entries.len(), 1);
+    assert_eq!(t.time_entries[0].end - t.time_entries[0].start, 5400);
+    h.click("Remove entry 1");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().time_entries.is_empty());
+}
+
+#[test]
+fn tag_field_suggests_tags_in_use() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.click("Add tag");
+    h.type_text("bu");
+    assert!(h.has("Tag bug"), "the tag used on another task is offered");
+    assert!(!h.has("Tag content"), "narrowed by what is typed");
+    h.click("Tag bug");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().tags.contains(&"bug".to_string()));
+}
+
+#[test]
+fn watch_toggle_and_watchers_menu() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    let me = h.app.data.me;
+    h.click("Watch task");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().watchers.contains(&me));
+    assert!(h.has("Stop watching"));
+    h.click("Watchers");
+    h.click("Watcher Sam Lee");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().watchers.contains(&3));
+    h.key(egui::Key::Escape);
+    h.click("Stop watching");
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().watchers, vec![3]);
+}
+
+#[test]
+fn checklist_items_rename_reorder_assign_and_become_subtasks() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    // rename by clicking the text
+    h.click("Sketch three options");
+    assert!(h.has("Checklist item name"));
+    h.type_text(" now");
+    h.key(egui::Key::Enter);
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().checklist[1].text, "Sketch three options now");
+    // on hover: move up
+    let p = h.find("Sketch three options now").unwrap();
+    h.hover(p);
+    h.click("Move up Sketch three options now");
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().checklist[0].text, "Sketch three options now");
+    // assign
+    let p = h.find("Share with the team").unwrap();
+    h.hover(p);
+    h.click("Assign item Share with the team");
+    h.click_side("Sam Lee", true);
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().checklist[2].assignee, Some(3));
+    // turn into a subtask (it keeps the assignee)
+    let p = h.find("Share with the team").unwrap();
+    h.hover(p);
+    h.click("Make subtask Share with the team");
+    h.app.apply_actions();
+    let t = h.app.task(id).unwrap();
+    assert_eq!(t.checklist.len(), 2);
+    let sub = h.app.data.tasks.iter().find(|x| x.parent == Some(id) && x.name == "Share with the team").expect("a subtask");
+    assert_eq!(sub.assignees, vec![3]);
+}
+
+#[test]
+fn subtask_rows_set_due_make_top_level_and_delete() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    let sub = |h: &Ui1, n: &str| h.app.data.tasks.iter().find(|t| t.name == n).map(|t| (t.id, t.parent, t.due));
+    h.click("Subtask due Pick hero image");
+    h.click("Today");
+    h.app.apply_actions();
+    assert_eq!(sub(&h, "Pick hero image").unwrap().2, Some(today()));
+    let p = h.find("Subtask due Wireframe hero section").unwrap();
+    h.hover(p);
+    h.click("Make top-level Wireframe hero section");
+    h.app.apply_actions();
+    assert_eq!(sub(&h, "Wireframe hero section").unwrap().1, None);
+    let p = h.find("Subtask due Pick hero image").unwrap();
+    h.hover(p);
+    h.click("Delete subtask Pick hero image");
+    h.app.apply_actions();
+    assert!(sub(&h, "Pick hero image").is_none());
+    assert!(h.app.subtasks(id).is_empty());
+}
+
+#[test]
+fn task_window_picker_sets_parent_and_adds_existing_subtask() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.click("\u{2026}");
+    h.click("Make subtask of...");
+    assert!(matches!(h.app.modal, Some(Modal::PickTask { mode: TaskPick::Parent, .. })));
+    assert!(!h.has("Pick Wireframe hero section"), "its own subtasks can't be its parent");
+    h.click("Search tasks");
+    h.type_text("q1");
+    h.click("Pick Plan Q1 campaign");
+    let q1 = h.app.data.tasks.iter().find(|t| t.name == "Plan Q1 campaign").unwrap().clone();
+    let t = h.app.task(id).unwrap();
+    assert_eq!(t.parent, Some(q1.id));
+    assert_eq!(t.list_id, q1.list_id, "a subtask moves into its parent's List");
+    assert!(h.app.modal.is_none());
+    // the reverse: put an existing task under this one
+    h.click("+  Add existing task");
+    h.click("Search tasks");
+    h.type_text("passport");
+    h.click("Pick Renew passport");
+    let p = h.app.data.tasks.iter().find(|t| t.name == "Renew passport").unwrap();
+    assert_eq!(p.parent, Some(id));
+}
+
+#[test]
+fn relationships_waiting_on_blocking_and_linked() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.click("+  Add relationship");
+    h.click("Waiting on");
+    h.click("Search tasks");
+    h.type_text("analytics");
+    h.click("Pick Set up analytics dashboard");
+    let other = h.app.data.tasks.iter().find(|t| t.name == "Set up analytics dashboard").unwrap().id;
+    assert_eq!(h.app.task(id).unwrap().waiting_on, vec![other]);
+    assert!(h.has("Waiting on Set up analytics dashboard"));
+    // the other task shows it as Blocking
+    assert_eq!(h.app.relations(other).1, vec![id]);
+    h.click("+  Add relationship");
+    h.click("Link a task");
+    h.click("Search tasks");
+    h.type_text("newsletter");
+    h.click("Pick Newsletter draft");
+    assert!(h.has("Link a task Newsletter draft"));
+    h.click("Remove link Set up analytics dashboard");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().waiting_on.is_empty());
+    // a row opens the other task
+    h.click("Link a task Newsletter draft");
+    h.app.apply_actions();
+    assert_ne!(h.app.open_task, Some(id));
+}
+
+#[test]
+fn description_keeps_markdown_and_ticks_checkboxes() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap().description = "- [ ] step".into();
+    h.settle();
+    // the "- [ ] " marker is hidden and a box is painted instead
+    let r = h.rect("Add description");
+    h.click_at(pos2(r.left() + 10.0, r.top() + 10.0));
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().description, "- [x] step");
+}
+
+#[test]
+fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    let pic = test_picture("mockup.png", 300, 200);
+    h.dropped = vec![egui::DroppedFile { path: Some(pic), ..Default::default() }];
+    h.frame(vec![]);
+    assert!(h.app.chat_files.is_empty(), "not taken by the chat box");
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.app.task(id).unwrap().attachments.is_empty() && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let t = h.app.task(id).unwrap();
+    assert_eq!(t.attachments.len(), 1);
+    assert_eq!((t.attachments[0].name.as_str(), t.attachments[0].w), ("mockup.png", 300));
+    assert!(h.app.task_files.is_empty());
+    h.settle();
+    assert!(h.has("Attachment mockup.png"));
+    h.click("Remove attachment mockup.png");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().attachments.is_empty());
 }

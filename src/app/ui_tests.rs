@@ -456,7 +456,7 @@ fn click_more_docs_new_doc() {
 fn click_workspace_menu_people_and_profile_themes() {
     let mut h = Ui1::new();
     h.click("Workspace menu");
-    h.click("\u{1F465}  People");
+    h.click("People");
     assert_eq!(h.app.section, Section::People);
     h.click("Profile menu");
     h.click("Themes");
@@ -1707,7 +1707,7 @@ fn list_dots_menu_moves_a_list() {
 fn settings_is_a_full_page_with_sections() {
     let mut h = Ui1::new();
     h.click("Workspace menu");
-    h.click("\u{2699}  Settings");
+    h.click("Settings");
     assert_eq!(h.app.section, Section::Settings);
     h.click("Settings Spaces");
     assert!(h.has("Team Space"));

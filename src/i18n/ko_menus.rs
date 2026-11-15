@@ -5,8 +5,6 @@ pub const T: &[(&str, &str)] = &[
     ("On your team's server \u{2022} every feature included", "팀 서버에 있음 \u{2022} 모든 기능 포함"),
     ("Shared with your team \u{2022} every feature included", "팀과 공유 중 \u{2022} 모든 기능 포함"),
     ("On this computer \u{2022} every feature included", "이 컴퓨터에 있음 \u{2022} 모든 기능 포함"),
-    ("\u{2699}  Settings", "\u{2699}  설정"),
-    ("\u{1F465}  People", "\u{1F465}  사람"),
     ("Manage", "관리"),
     ("Work together (shared)", "함께 작업하기 (공유 중)"),
     ("Switch Workspace", "워크스페이스 전환"),
@@ -17,7 +15,6 @@ pub const T: &[(&str, &str)] = &[
     // profile menu
     ("Notifications muted", "알림 꺼짐"),
     ("Online", "온라인"),
-    ("\u{263A}  Set status", "\u{263A}  상태 설정"),
     ("Mute notifications", "알림 끄기"),
     ("For 1 hour", "1시간 동안"),
     ("For 4 hours", "4시간 동안"),
@@ -63,8 +60,6 @@ pub const T: &[(&str, &str)] = &[
     ("Clip", "클립"),
     ("Clips", "클립"),
     ("Customize your sidebar", "사이드바 사용자 지정"),
-    ("\u{2B07}  Import", "\u{2B07}  가져오기"),
-    ("\u{2728}  Templates", "\u{2728}  템플릿"),
     // rail more menu
     ("Pin to the left bar", "왼쪽 막대에 고정"),
     ("Customize navigation", "왼쪽 막대 앱 고르기"),

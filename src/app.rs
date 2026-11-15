@@ -22,6 +22,7 @@ mod due_time_tests;
 mod files;
 mod hubs;
 mod huddle;
+mod icons;
 mod listview;
 mod menus;
 mod more;

@@ -6,6 +6,7 @@
 // Online-only features (AI, Clips, Talk to Text, huddles) open a dialog that
 // says they come with the shared server.
 
+use super::icons::{icon_button, icon_button_ex, line_icon};
 use super::*;
 use egui::Response;
 
@@ -164,18 +165,18 @@ pub const ROLES: [(&str, &str); 4] = [
 
 /// Personal tools as listed in the original's profile menu.
 pub const TOOLS: [(&str, &str, &str); 12] = [
-    ("create_task", "Create task", "\u{2611}"),
-    ("my_work", "My Work", "\u{1F4BC}"),
-    ("track_time", "Track Time", "\u{23F1}"),
-    ("notepad", "Notepad", "\u{1F4DD}"),
-    ("clip", "Record a Clip", "\u{1F3A5}"),
-    ("stt", "Talk to Text", "\u{1F3A4}"),
-    ("reminder", "Create Reminder", "\u{23F0}"),
-    ("doc", "Create Doc", "\u{1F4C4}"),
-    ("whiteboard", "Create Whiteboard", "\u{1F3A8}"),
-    ("people", "View People", "\u{1F465}"),
-    ("dashboard", "Create Dashboard", "\u{1F4CA}"),
-    ("notetaker", "AI Notetaker", "\u{1F4D3}"),
+    ("create_task", "Create task", "check_plus"),
+    ("my_work", "My Work", "briefcase"),
+    ("track_time", "Track Time", "clock"),
+    ("notepad", "Notepad", "edit"),
+    ("clip", "Record a Clip", "video"),
+    ("stt", "Talk to Text", "mic"),
+    ("reminder", "Create Reminder", "alarm"),
+    ("doc", "Create Doc", "docs"),
+    ("whiteboard", "Create Whiteboard", "whiteboards"),
+    ("people", "View People", "teams"),
+    ("dashboard", "Create Dashboard", "dashboards"),
+    ("notetaker", "AI Notetaker", "notebook"),
 ];
 
 pub fn unavailable(what: &str) -> Modal {
@@ -188,6 +189,8 @@ pub fn unavailable(what: &str) -> Modal {
     }
 }
 
+/// A menu row: a line icon (`icon` is its kind), the label and an optional
+/// hint on the right.
 fn menu_item(ui: &mut Ui, t: &Theme, icon: &str, label: &str, right: &str) -> Response {
     let w = ui.available_width().max(200.0);
     let (r, resp) = ui.allocate_exact_size(vec2(w, 27.0), Sense::click());
@@ -195,11 +198,10 @@ fn menu_item(ui: &mut Ui, t: &Theme, icon: &str, label: &str, right: &str) -> Re
     if resp.hovered() {
         ui.painter().rect_filled(r, 6.0, t.hover);
     }
-    ui.painter().text(
-        r.left_center() + vec2(14.0, 0.0),
-        Align2::CENTER_CENTER,
+    line_icon(
+        ui.painter(),
         icon,
-        FontId::proportional(13.0),
+        r.left_center() + vec2(16.0, 0.0),
         t.text2,
     );
     ui.painter().text(
@@ -228,13 +230,7 @@ fn menu_item2(ui: &mut Ui, t: &Theme, icon: &str, label: &str, sub: &str) -> Res
     if resp.hovered() {
         ui.painter().rect_filled(r, 6.0, t.hover);
     }
-    ui.painter().text(
-        r.left_top() + vec2(14.0, 14.0),
-        Align2::CENTER_CENTER,
-        icon,
-        FontId::proportional(13.0),
-        t.text2,
-    );
+    line_icon(ui.painter(), icon, r.left_top() + vec2(16.0, 14.0), t.text2);
     ui.painter().text(
         r.left_top() + vec2(32.0, 14.0),
         Align2::LEFT_CENTER,
@@ -311,24 +307,34 @@ impl App {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 8.0) / 2.0;
-            if ui
-                .add(
-                    egui::Button::new(tr("\u{2699}  Settings"))
-                        .min_size(vec2(w, 28.0))
-                        .stroke(Stroke::new(1.0, t.border)),
-                )
-                .clicked()
+            if icon_button_ex(
+                ui,
+                &t,
+                "settings",
+                tr("Settings"),
+                "Settings",
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
             {
                 self.open_settings("General");
                 close_popup(ui);
             }
-            if ui
-                .add(
-                    egui::Button::new(tr("\u{1F465}  People"))
-                        .min_size(vec2(w, 28.0))
-                        .stroke(Stroke::new(1.0, t.border)),
-                )
-                .clicked()
+            if icon_button_ex(
+                ui,
+                &t,
+                "teams",
+                tr("People"),
+                "People",
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
             {
                 self.section = Section::People;
                 close_popup(ui);
@@ -337,11 +343,11 @@ impl App {
         ui.separator();
         section_label(ui, &t, tr("Manage"));
         let items: [(&str, &str); 5] = [
-            ("\u{25A6}", "Apps"),
-            ("\u{25A4}", "Templates"),
-            ("\u{1F4DD}", "Custom fields"),
-            ("\u{2699}", "Automations"),
-            ("\u{1F3F7}", "Tag manager"),
+            ("apps", "Apps"),
+            ("templates", "Templates"),
+            ("fields", "Custom fields"),
+            ("robot", "Automations"),
+            ("tag", "Tag manager"),
         ];
         for (icon, label) in items {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
@@ -372,7 +378,7 @@ impl App {
         } else {
             tr("Work together")
         };
-        if menu_item(ui, &t, "\u{1F465}", label, "").clicked() {
+        if menu_item(ui, &t, "teams", label, "").clicked() {
             self.modal = Some(self.together_modal());
             close_popup(ui);
         }
@@ -396,7 +402,7 @@ impl App {
             for w in all {
                 // workspaces often share a name ("My Workspace"): say where each one lives
                 let place = self.workspace_place(&w.file);
-                if menu_item(ui, &t, "\u{1F3E2}", &w.name, tr(place)).clicked() {
+                if menu_item(ui, &t, "building", &w.name, tr(place)).clicked() {
                     self.switch_workspace(&w.file);
                     close_popup(ui);
                 }
@@ -503,13 +509,21 @@ impl App {
                 });
             });
         }
-        if ui
-            .add(
-                egui::Button::new(RichText::new(tr("\u{263A}  Set status")).color(t.text2))
-                    .min_size(vec2(ui.available_width(), 28.0))
-                    .stroke(Stroke::new(1.0, t.border)),
-            )
-            .clicked()
+        // a button, drawn like the other framed buttons (in grey text it read
+        // as an empty text field)
+        let w = ui.available_width();
+        if icon_button_ex(
+            ui,
+            &t,
+            "smile",
+            tr("Set status"),
+            "Set status",
+            true,
+            w,
+            t.text,
+            t.text2,
+        )
+        .clicked()
         {
             let cur = self
                 .data
@@ -521,7 +535,7 @@ impl App {
         }
         // a flyout beside the row (egui's sub menu drew over this menu): to the
         // right when it fits, otherwise to the left of the whole menu
-        let mr = menu_item(ui, &t, "\u{1F515}", tr("Mute notifications"), "\u{203A}");
+        let mr = menu_item(ui, &t, "bell_off", tr("Mute notifications"), "\u{203A}");
         let fly = ui.id().with("mute_fly");
         let keep: bool = ui.data(|d| d.get_temp(fly)).unwrap_or(false);
         let fly_w: f32 = ui.data(|d| d.get_temp(fly.with("w"))).unwrap_or(170.0);
@@ -597,14 +611,14 @@ impl App {
         ui.data_mut(|d| d.insert_temp(fly, mr.hovered() || over || (keep && gap)));
         ui.separator();
         let rows: [(&str, &str); 8] = [
-            ("\u{2699}", "Settings"),
-            ("\u{1F514}", "Notifications"),
-            ("\u{1F3A8}", "Themes"),
-            ("\u{2728}", "Labs"),
-            ("\u{2318}", "Keyboard shortcuts"),
-            ("\u{2B07}", "Download app"),
-            ("\u{21BB}", "Check for updates"),
-            ("\u{2753}", "Help"),
+            ("settings", "Settings"),
+            ("bell", "Notifications"),
+            ("palette", "Themes"),
+            ("sparkle", "Labs"),
+            ("keyboard", "Keyboard shortcuts"),
+            ("download", "Download app"),
+            ("refresh", "Check for updates"),
+            ("help", "Help"),
         ];
         for (icon, label) in rows {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
@@ -650,17 +664,17 @@ impl App {
         for (id, label, icon) in TOOLS {
             ui.horizontal(|ui| {
                 let pinned = self.data.extra.pinned_tools.iter().any(|p| p == id);
-                let w = ui.available_width() - 30.0;
+                // room for the 28 pt pin and the gap before it
+                let w = ui.available_width() - 28.0 - ui.spacing().item_spacing.x;
                 let (r, resp) = ui.allocate_exact_size(vec2(w, 27.0), Sense::click());
                 name_it(&resp, label);
                 if resp.hovered() {
                     ui.painter().rect_filled(r, 6.0, t.hover);
                 }
-                ui.painter().text(
-                    r.left_center() + vec2(14.0, 0.0),
-                    Align2::CENTER_CENTER,
+                line_icon(
+                    ui.painter(),
                     icon,
-                    FontId::proportional(13.0),
+                    r.left_center() + vec2(16.0, 0.0),
                     t.text2,
                 );
                 ui.painter().text(
@@ -674,15 +688,20 @@ impl App {
                     self.run_tool(id);
                     close_popup(ui);
                 }
-                let pin = ghost(egui::Button::new(
-                    RichText::new("\u{1F4CC}").size(11.0).color(if pinned {
-                        t.text
-                    } else {
-                        t.border
-                    }),
-                ));
-                if ui
-                    .add(pin)
+                // the pin: dark when pinned, the faint text grey otherwise
+                // (it was the border grey and could hardly be seen)
+                let pin = icon_button_ex(
+                    ui,
+                    &t,
+                    "pin",
+                    "",
+                    "Pin",
+                    false,
+                    0.0,
+                    t.text,
+                    if pinned { t.text } else { t.text3 },
+                );
+                if pin
                     .on_hover_text(if pinned {
                         tr("Unpin from the top bar")
                     } else {
@@ -700,12 +719,12 @@ impl App {
             });
         }
         ui.separator();
-        if menu_item(ui, &t, "\u{1F5D1}", tr("Trash"), "").clicked() {
+        if menu_item(ui, &t, "trash", tr("Trash"), "").clicked() {
             self.modal = Some(Modal::Trash);
             close_popup(ui);
         }
         // it changes who uses the app on this computer; nobody signs out
-        if menu_item(ui, &t, "\u{21AA}", tr("Switch person"), "")
+        if menu_item(ui, &t, "logout", tr("Switch person"), "")
             .on_hover_text(tr("Switch to another person on this computer"))
             .clicked()
         {
@@ -853,11 +872,11 @@ impl App {
         }
         ui.separator();
         section_label(ui, &t, tr("Create"));
-        if menu_item(ui, &t, "\u{2611}", tr("Task"), "\u{2325}T").clicked() {
+        if menu_item(ui, &t, "task", tr("Task"), "\u{2325}T").clicked() {
             self.open_quick_add(None);
             close_popup(ui);
         }
-        if menu_item(ui, &t, "\u{27A4}", tr("Message"), "\u{2318}G").clicked() {
+        if menu_item(ui, &t, "send", tr("Message"), "\u{2318}G").clicked() {
             self.new_message_open = true;
             close_popup(ui);
         }
@@ -868,7 +887,7 @@ impl App {
         if menu_item2(
             ui,
             &t,
-            "\u{2630}",
+            "list",
             tr("List"),
             tr("Track tasks, projects, people & more"),
         )
@@ -887,7 +906,7 @@ impl App {
         if menu_item2(
             ui,
             &t,
-            "#",
+            "hash",
             tr("Channel"),
             tr("Conversations on specific topics"),
         )
@@ -903,7 +922,7 @@ impl App {
         if menu_item2(
             ui,
             &t,
-            "\u{25CE}",
+            "space",
             tr("Space"),
             tr("Organize work by team or department"),
         )
@@ -917,22 +936,22 @@ impl App {
             close_popup(ui);
         }
         ui.separator();
-        if menu_item(ui, &t, "\u{2728}", tr("Create with AI"), "").clicked() {
+        if menu_item(ui, &t, "sparkle", tr("Create with AI"), "").clicked() {
             self.modal = Some(unavailable("Create with AI"));
             close_popup(ui);
         }
-        if menu_item(ui, &t, "\u{2699}", tr("Super Agent"), tr("Hot")).clicked() {
+        if menu_item(ui, &t, "robot", tr("Super Agent"), tr("Hot")).clicked() {
             self.modal = Some(unavailable("Super Agent"));
             close_popup(ui);
         }
         ui.separator();
         for (icon, label) in [
-            ("\u{1F4C4}", "Doc"),
-            ("\u{1F496}", "Artifact"),
-            ("\u{1F4CB}", "Form"),
-            ("\u{1F4CA}", "Dashboard"),
-            ("\u{1F3A8}", "Whiteboard"),
-            ("\u{1F3A5}", "Clip"),
+            ("docs", "Doc"),
+            ("heart", "Artifact"),
+            ("forms", "Form"),
+            ("dashboards", "Dashboard"),
+            ("whiteboards", "Whiteboard"),
+            ("video", "Clip"),
         ] {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 match label {
@@ -951,19 +970,24 @@ impl App {
             }
         }
         ui.separator();
-        if menu_item(ui, &t, "\u{25A6}", tr("Customize your sidebar"), "").clicked() {
+        if menu_item(ui, &t, "sidebar", tr("Customize your sidebar"), "").clicked() {
             self.modal = Some(Modal::CustomizeSidebar);
             close_popup(ui);
         }
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 8.0) / 2.0;
-            if ui
-                .add(
-                    egui::Button::new(tr("\u{2B07}  Import"))
-                        .min_size(vec2(w, 30.0))
-                        .stroke(Stroke::new(1.0, t.border)),
-                )
-                .clicked()
+            if icon_button_ex(
+                ui,
+                &t,
+                "download",
+                tr("Import"),
+                "Import",
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
             {
                 self.modal = Some(Modal::Import {
                     path: String::new(),
@@ -971,13 +995,18 @@ impl App {
                 });
                 close_popup(ui);
             }
-            if ui
-                .add(
-                    egui::Button::new(tr("\u{2728}  Templates"))
-                        .min_size(vec2(w, 30.0))
-                        .stroke(Stroke::new(1.0, t.border)),
-                )
-                .clicked()
+            if icon_button_ex(
+                ui,
+                &t,
+                "templates",
+                tr("Templates"),
+                "Templates",
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
             {
                 self.open_templates(super::templates::Category::All, None);
                 close_popup(ui);
@@ -1005,31 +1034,30 @@ impl App {
         let t = self.t();
         ui.set_width(220.0);
         let items: [(&str, &str); 10] = [
-            ("\u{25CE}", "Spaces"),
-            ("\u{1F4AC}", "Chat"),
-            ("\u{1F4C4}", "Docs"),
-            ("\u{1F4CA}", "Dashboards"),
-            ("\u{1F3A8}", "Whiteboards"),
-            ("\u{1F4CB}", "Forms"),
-            ("\u{1F3A5}", "Clips"),
-            ("\u{1F3AF}", "Goals"),
-            ("\u{23F1}", "Timesheets"),
-            ("\u{25A6}", "Apps"),
+            ("space", "Spaces"),
+            ("chat", "Chat"),
+            ("docs", "Docs"),
+            ("dashboards", "Dashboards"),
+            ("whiteboards", "Whiteboards"),
+            ("forms", "Forms"),
+            ("video", "Clips"),
+            ("goals", "Goals"),
+            ("timesheets", "Timesheets"),
+            ("apps", "Apps"),
         ];
         for (icon, label) in items {
             let pinned = self.data.extra.rail_items.iter().any(|r| r == label);
             ui.horizontal(|ui| {
-                let w = ui.available_width() - 28.0;
+                let w = ui.available_width() - 28.0 - ui.spacing().item_spacing.x;
                 let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
                 name_it(&resp, label);
                 if resp.hovered() {
                     ui.painter().rect_filled(r, 6.0, t.hover);
                 }
-                ui.painter().text(
-                    r.left_center() + vec2(14.0, 0.0),
-                    Align2::CENTER_CENTER,
+                line_icon(
+                    ui.painter(),
                     icon,
-                    FontId::proportional(13.0),
+                    r.left_center() + vec2(16.0, 0.0),
                     t.text2,
                 );
                 ui.painter().text(
@@ -1043,16 +1071,19 @@ impl App {
                     self.open_app(label);
                     close_popup(ui);
                 }
-                if ui
-                    .add(ghost(egui::Button::new(
-                        RichText::new("\u{1F4CC}").size(11.0).color(if pinned {
-                            t.text
-                        } else {
-                            t.border
-                        }),
-                    )))
-                    .on_hover_text(tr("Pin to the left bar"))
-                    .clicked()
+                if icon_button_ex(
+                    ui,
+                    &t,
+                    "pin",
+                    "",
+                    "Pin",
+                    false,
+                    0.0,
+                    t.text,
+                    if pinned { t.text } else { t.text3 },
+                )
+                .on_hover_text(tr("Pin to the left bar"))
+                .clicked()
                 {
                     if pinned {
                         self.data.extra.rail_items.retain(|r| r != label);
@@ -1064,7 +1095,7 @@ impl App {
             });
         }
         ui.separator();
-        if menu_item(ui, &t, "\u{2699}", tr("Customize navigation"), "").clicked() {
+        if menu_item(ui, &t, "settings", tr("Customize navigation"), "").clicked() {
             self.modal = Some(Modal::CustomizeNav);
             close_popup(ui);
         }

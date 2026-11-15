@@ -58,6 +58,8 @@ pub const T: &[(&str, &str)] = &[
     ("channel-name", "채널-이름"),
     ("Add Channel", "채널 추가"),
     ("Direct Messages", "다이렉트 메시지"),
+    // the topic of a channel made with Add Channel
+    ("Conversations about {}", "{}에 관한 대화"),
     ("New message", "새 메시지"),
     ("\u{2014} You", "\u{2014} 나"),
     ("DM Settings", "DM 설정"),

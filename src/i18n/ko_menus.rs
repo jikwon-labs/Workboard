@@ -245,7 +245,7 @@ pub const T: &[(&str, &str)] = &[
     ("Delete channel", "채널 삭제"),
     ("Close conversation", "대화 닫기"),
     // share
-    ("Share \"{}\" with people in your Workspace.", "\"{}\"을(를) 워크스페이스 사람들과 공유합니다."),
+    ("Share \"{}\" with people in your workspace.", "워크스페이스 사람들과 공유합니다: \"{}\""),
     ("Invited", "초대됨"),
     ("Invite by email", "이메일로 초대"),
     ("\u{1F517} Copy link", "\u{1F517} 링크 복사"),

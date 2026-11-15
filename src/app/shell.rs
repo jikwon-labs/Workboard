@@ -3422,9 +3422,14 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     // "Add Channel": a chat channel for this location (not on the
-                    // Personal List, as in the original)
+                    // Personal List, as in the original, nor on the views that
+                    // gather tasks from everywhere, which aren't a place to talk about)
                     let personal = self.on_personal_list();
-                    let ac = if personal {
+                    let gathered = matches!(
+                        self.loc,
+                        Location::TodayOverdue | Location::MyTasks | Location::Everything
+                    );
+                    let ac = if personal || gathered {
                         ui.allocate_response(vec2(0.0, 0.0), Sense::hover())
                     } else {
                         ui.add(
@@ -3458,7 +3463,7 @@ impl App {
                                 id,
                                 name: name.clone(),
                                 kind: ChannelKind::Channel,
-                                topic: format!(
+                                topic: trf!(
                                     "Conversations about {}",
                                     self.data.location_name(self.loc)
                                 ),

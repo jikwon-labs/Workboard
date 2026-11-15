@@ -2192,9 +2192,15 @@ impl App {
                 }
             }
             Modal::Share { emails } => {
-                let name = self.data.location_name(self.loc);
+                // the built-in views' names are the app's words, the rest are names people chose
+                let name = match self.loc {
+                    Location::Space(_) | Location::Folder(_) | Location::List(_) => {
+                        self.data.location_name(self.loc)
+                    }
+                    l => tr(&self.data.location_name(l)).to_string(),
+                };
                 ui.label(crate::trf!(
-                    "Share \"{}\" with people in your Workspace.",
+                    "Share \"{}\" with people in your workspace.",
                     name
                 ));
                 ui.add_space(4.0);

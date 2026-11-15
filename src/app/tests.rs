@@ -1391,3 +1391,172 @@ fn a_copy_from_before_comment_ids_merges_without_doubles() {
     assert_eq!(texts, vec!["old", "from the old app"]);
     assert!(t.activity.iter().all(|a| a.id != 0));
 }
+
+// ---------------------------------------------------------------- list view slice (sf-listview)
+
+fn tid(a: &App, name: &str) -> u64 {
+    a.data.tasks.iter().find(|t| t.name == name).map(|t| t.id).unwrap_or_else(|| panic!("no task {:?}", name))
+}
+
+fn names(a: &App) -> Vec<String> {
+    a.filtered().iter().map(|t| t.name.clone()).collect()
+}
+
+#[test]
+fn manual_order_moves_a_task_among_its_siblings() {
+    let mut a = app();
+    let web = a.data.tasks.iter().find(|t| t.name == "Write copy for landing page").unwrap().list_id;
+    a.loc = Location::List(web);
+    a.show_closed = true;
+    let before = names(&a);
+    let (drag, target) = (tid(&a, "Collect feedback from beta users"), tid(&a, "Write copy for landing page"));
+    a.reorder_task(drag, target, false);
+    let after = names(&a);
+    let pos = |v: &[String], n: &str| v.iter().position(|x| x == n).unwrap();
+    assert!(pos(&after, "Collect feedback from beta users") + 1 == pos(&after, "Write copy for landing page"), "{:?}", after);
+    assert_eq!(after.len(), before.len());
+    // dropped after a task
+    a.reorder_task(drag, tid(&a, "Choose color palette"), true);
+    let v = names(&a);
+    assert!(pos(&v, "Collect feedback from beta users") > pos(&v, "Choose color palette"));
+    // subtasks move only under their own parent
+    let (s1, s2) = (tid(&a, "Wireframe hero section"), tid(&a, "Pick hero image"));
+    let parent = a.task(s1).unwrap().parent.unwrap();
+    a.reorder_task(s2, s1, false);
+    let subs: Vec<u64> = a.subtasks(parent).iter().map(|t| t.id).collect();
+    assert_eq!(subs, vec![s2, s1]);
+    let top = tid(&a, "Write copy for landing page");
+    let order = a.task(s1).unwrap().order;
+    a.reorder_task(s1, top, false);
+    assert_eq!(a.task(s1).unwrap().parent, Some(parent));
+    assert_eq!(a.task(s1).unwrap().order, order, "a subtask is not moved among top-level tasks");
+}
+
+#[test]
+fn new_sorts_and_groups() {
+    let mut a = app();
+    a.loc = Location::Everything;
+    a.show_closed = true;
+    a.sort_by = SortBy::Status;
+    let sts: Vec<StatusKind> = a.filtered().iter().map(|t| a.data.status_of(t).kind).collect();
+    let rank = |k: &StatusKind| match k {
+        StatusKind::Open => 0,
+        StatusKind::Custom => 1,
+        StatusKind::Done => 2,
+        StatusKind::Closed => 3,
+    };
+    assert!(sts.windows(2).all(|w| rank(&w[0]) <= rank(&w[1])), "open statuses first");
+    a.sort_by = SortBy::StartDate;
+    let v = a.filtered();
+    let firsts: Vec<bool> = v.iter().map(|t| t.start.is_none()).collect();
+    assert!(firsts.windows(2).all(|w| !w[0] || w[1]), "no start date last");
+    a.sort_by = SortBy::Assignee;
+    let v = a.filtered();
+    assert!(v.last().unwrap().assignees.is_empty() || v.iter().all(|t| !t.assignees.is_empty()));
+    let id = tid(&a, "Newsletter draft");
+    a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().estimate_min = Some(5);
+    a.sort_by = SortBy::Estimate;
+    assert_eq!(a.filtered()[0].id, id);
+    a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().updated = now_ts() + 100;
+    a.sort_by = SortBy::Updated;
+    assert_eq!(a.filtered()[0].id, id, "most recently updated first");
+    // Group: Tags (a task under each of its tags) and Group: List
+    a.sort_by = SortBy::Manual;
+    a.group_by = GroupBy::Tags;
+    let tasks = a.filtered();
+    let groups = a.groups(&tasks, false);
+    let design = groups.iter().find(|g| g.key == "t:design").expect("a design group");
+    assert_eq!(design.tasks.len(), 2);
+    assert!(groups.iter().any(|g| g.label == "NO TAGS"));
+    a.group_by = GroupBy::List;
+    let tasks = a.filtered();
+    let groups = a.groups(&tasks, false);
+    assert!(groups.iter().any(|g| g.label == "MARKETING"));
+    // adding from a tag group gives the task that tag; from a list group, that list
+    a.group_by = GroupBy::Tags;
+    let tasks = a.filtered();
+    let g = a.groups(&tasks, false).into_iter().find(|g| g.key == "t:bug").unwrap();
+    a.add_from_group(&g, "Tagged".into(), false);
+    a.apply_actions();
+    assert_eq!(a.task(tid(&a, "Tagged")).unwrap().tags, vec!["bug".to_string()]);
+    a.group_by = GroupBy::List;
+    let tasks = a.filtered();
+    let g = a.groups(&tasks, false).into_iter().find(|g| g.label == "MARKETING").unwrap();
+    a.add_from_group(&g, "In marketing".into(), false);
+    a.apply_actions();
+    assert_eq!(a.data.list_name(a.task(tid(&a, "In marketing")).unwrap().list_id), "Marketing");
+}
+
+#[test]
+fn new_filter_fields() {
+    use parity::{FilterField, FilterRow};
+    let mut a = app();
+    a.loc = Location::Everything;
+    let row = |f: FilterField, v: &str| FilterRow { field: Some(f), not: false, values: vec![v.to_string()] };
+    a.filter.rows = vec![row(FilterField::HasSubtasks, "yes")];
+    assert_eq!(names(&a), vec!["Design new homepage layout".to_string()]);
+    a.filter.rows = vec![row(FilterField::StartDate, "5")];
+    assert!(!a.filtered().is_empty() && a.filtered().iter().all(|t| t.start.is_none()));
+    a.filter.rows = vec![row(FilterField::CreatedBy, "2")];
+    assert!(a.filtered().is_empty(), "the seed tasks were all made by Me");
+    a.filter.rows = vec![row(FilterField::CreatedBy, "1")];
+    assert!(!a.filtered().is_empty());
+    a.filter.rows = vec![row(FilterField::Created, "1")];
+    assert!(a.filtered().is_empty(), "nothing was made today");
+    a.filter.rows = vec![row(FilterField::Created, "3")];
+    assert!(!a.filtered().is_empty());
+    a.filter.rows = vec![row(FilterField::Updated, "1")];
+    assert!(!a.filtered().is_empty());
+}
+
+#[test]
+fn search_finds_subtasks() {
+    let mut a = app();
+    a.loc = Location::Everything;
+    a.show_closed = true;
+    a.search = "hero".into();
+    let v = names(&a);
+    assert!(v.contains(&"Pick hero image".to_string()) && v.contains(&"Wireframe hero section".to_string()), "{:?}", v);
+    a.search.clear();
+    assert!(!names(&a).contains(&"Pick hero image".to_string()), "subtasks stay under their parent otherwise");
+}
+
+#[test]
+fn view_settings_are_kept_per_location() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    let (l1, l2) = (lists[0], lists[1]);
+    a.loc = Location::List(l1);
+    a.sync_view_prefs();
+    a.group_by = GroupBy::Priority;
+    a.sort_by = SortBy::Name;
+    a.sync_view_prefs();
+    a.loc = Location::List(l2);
+    a.sync_view_prefs();
+    assert!(a.group_by == GroupBy::Priority, "a list never changed keeps what was showing");
+    a.group_by = GroupBy::Assignee;
+    a.show_closed = true;
+    a.sync_view_prefs();
+    a.loc = Location::List(l1);
+    a.sync_view_prefs();
+    assert!(a.group_by == GroupBy::Priority && a.sort_by == SortBy::Name && !a.show_closed);
+    a.loc = Location::List(l2);
+    a.sync_view_prefs();
+    assert!(a.group_by == GroupBy::Assignee && a.show_closed);
+    // and they survive a round trip through the saved file format
+    let s = serde_json::to_string(&a.view_prefs).unwrap();
+    let back: HashMap<String, listview::ViewPrefs> = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, a.view_prefs);
+}
+
+#[test]
+fn deleting_offers_undo() {
+    let mut a = app();
+    let n = a.data.tasks.len();
+    let id = tid(&a, "Design new homepage layout");
+    a.actions.push(Action::DeleteTask(id));
+    a.apply_actions();
+    assert_eq!(a.data.tasks.len(), n - 3, "the task and its two subtasks");
+    let (trash, _) = a.undo_trash.clone().expect("undo offered");
+    assert_eq!(trash.len(), 1);
+}

@@ -26,17 +26,27 @@ pub fn prop_width(name: &str) -> f32 {
 }
 
 /// A field a filter row can test.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum FilterField {
     Status,
     Priority,
     Assignee,
     DueDate,
     Tags,
+    StartDate,
+    Created,
+    Updated,
+    CreatedBy,
+    HasSubtasks,
 }
 
+/// Choices for the start date filter (index = stored value).
+pub const START_FILTERS: [&str; 6] = ["Any time", "Started", "Today", "This week", "Next week", "No start date"];
+/// Choices for the date created / updated filters (index = stored value).
+pub const AGE_FILTERS: [&str; 5] = ["Any time", "Today", "Yesterday", "Last 7 days", "Last 30 days"];
+
 impl FilterField {
-    pub const ALL: [FilterField; 5] = [FilterField::Status, FilterField::Priority, FilterField::Assignee, FilterField::DueDate, FilterField::Tags];
+    pub const ALL: [FilterField; 10] = [FilterField::Status, FilterField::Priority, FilterField::Assignee, FilterField::DueDate, FilterField::Tags, FilterField::StartDate, FilterField::Created, FilterField::Updated, FilterField::CreatedBy, FilterField::HasSubtasks];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -45,14 +55,21 @@ impl FilterField {
             FilterField::Assignee => "Assignee",
             FilterField::DueDate => "Due date",
             FilterField::Tags => "Tags",
+            FilterField::StartDate => "Start date",
+            FilterField::Created => "Date created",
+            FilterField::Updated => "Date updated",
+            FilterField::CreatedBy => "Created by",
+            FilterField::HasSubtasks => "Subtasks",
         }
+    }
+
+    /// Fields whose values exclude each other (one pick, not several).
+    pub fn single(self) -> bool {
+        matches!(self, FilterField::DueDate | FilterField::StartDate | FilterField::Created | FilterField::Updated | FilterField::HasSubtasks)
     }
 }
 
-/// One "+ Add filter" row: field, is / is not, and the chosen values
-/// (status names, priority numbers, member ids or "none", a DUE_FILTERS
-/// index, tags). A row without a field or values does nothing.
-#[derive(Clone, Default, PartialEq, Debug)]
+#[derive(Clone, Default, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FilterRow {
     pub field: Option<FilterField>,
     pub not: bool,
@@ -75,8 +92,42 @@ impl FilterRow {
             FilterField::Assignee => self.values.iter().any(|v| if v == "none" { t.assignees.is_empty() } else { v.parse::<u64>().is_ok_and(|id| t.assignees.contains(&id)) }),
             FilterField::DueDate => self.values.iter().any(|v| due_matches(v.parse().unwrap_or(0), t, data)),
             FilterField::Tags => self.values.iter().any(|v| t.tags.contains(v)),
+            FilterField::StartDate => self.values.iter().any(|v| start_matches(v.parse().unwrap_or(0), t.start)),
+            FilterField::Created => self.values.iter().any(|v| age_matches(v.parse().unwrap_or(0), t.created)),
+            FilterField::Updated => self.values.iter().any(|v| age_matches(v.parse().unwrap_or(0), t.updated)),
+            // the creator is whoever wrote the first activity line ("created this task")
+            FilterField::CreatedBy => self.values.iter().any(|v| v.parse::<u64>().ok() == t.activity.first().map(|a| a.author)),
+            FilterField::HasSubtasks => {
+                let has = data.tasks.iter().any(|x| x.parent == Some(t.id) && !x.archived);
+                self.values.iter().any(|v| (v == "yes") == has)
+            }
         };
         hit != self.not
+    }
+}
+
+fn start_matches(which: u8, start: Option<NaiveDate>) -> bool {
+    let td = today();
+    let week_start = td - Duration::days(td.weekday().num_days_from_monday() as i64);
+    match which {
+        1 => start.is_some_and(|d| d <= td),
+        2 => start == Some(td),
+        3 => start.is_some_and(|d| d >= week_start && d < week_start + Duration::days(7)),
+        4 => start.is_some_and(|d| d >= week_start + Duration::days(7) && d < week_start + Duration::days(14)),
+        5 => start.is_none(),
+        _ => true,
+    }
+}
+
+fn age_matches(which: u8, ts: i64) -> bool {
+    let day = chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today);
+    let age = (today() - day).num_days();
+    match which {
+        1 => age == 0,
+        2 => age == 1,
+        3 => age < 7,
+        4 => age < 30,
+        _ => true,
     }
 }
 
@@ -590,7 +641,12 @@ impl App {
             close_any(ui);
         }
         if ui.button("Rename").clicked() {
-            self.actions.push(Action::StartRename(Target::Task(tid)));
+            if self.view == ViewKind::List && self.open_task.is_none() && self.row_order.contains(&tid) {
+                // a row on screen is renamed in place
+                self.row_rename = Some((tid, task.name.clone()));
+            } else {
+                self.actions.push(Action::StartRename(Target::Task(tid)));
+            }
             close_any(ui);
         }
         let selected = self.selected.contains(&tid);
@@ -1165,6 +1221,10 @@ impl App {
                 tags.dedup();
                 tags.into_iter().map(|g| (g.clone(), g)).collect()
             }
+            FilterField::StartDate => START_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), l.to_string())).collect(),
+            FilterField::Created | FilterField::Updated => AGE_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), l.to_string())).collect(),
+            FilterField::CreatedBy => self.data.members.iter().map(|m| (m.id.to_string(), m.name.clone())).collect(),
+            FilterField::HasSubtasks => vec![("yes".into(), "Has subtasks".into()), ("no".into(), "No subtasks".into())],
         }
     }
 
@@ -1225,7 +1285,7 @@ impl App {
                                 let names: Vec<String> = row.values.iter().filter_map(|v| choices.iter().find(|c| c.0 == *v).map(|c| c.1.clone())).collect();
                                 truncate(&names.join(", "), 24)
                             };
-                            let single = row.field == Some(FilterField::DueDate);
+                            let single = row.field.is_some_and(|f| f.single());
                             let vr = egui::ComboBox::from_id_salt(("filter_vals", i))
                                 .width(200.0)
                                 .selected_text(summary)
@@ -1284,7 +1344,9 @@ impl App {
 
     /// The bar along the bottom while tasks are selected.
     pub(super) fn bulk_bar(&mut self, ctx: &egui::Context) {
+        self.undo_bar(ctx);
         self.selected.retain(|id| self.data.tasks.iter().any(|t| t.id == *id));
+        self.bulk_delete_confirm(ctx);
         if self.selected.is_empty() || self.section != Section::Home {
             return;
         }
@@ -1316,14 +1378,39 @@ impl App {
                     });
                     let r = ui.button("Assignees");
                     let mut pick_asg: Option<u64> = None;
+                    let mut drop_asg: Option<u64> = None;
+                    let mut unassign = false;
                     let members = self.data.members.clone();
+                    let sel_tasks: Vec<Task> = ids.iter().filter_map(|id| self.task(*id).cloned()).collect();
                     popup(ui, &r, pid.with("ba"), 200.0, |ui| {
+                        // ticked when every selected task has them: a click then removes
                         for m in &members {
                             let ring = t.card;
-                            if menu_row(ui, &t, &m.name, false, |p, c| paint_avatar(p, c, 9.0, m, ring)).clicked() {
-                                pick_asg = Some(m.id);
+                            let all = sel_tasks.iter().all(|x| x.assignees.contains(&m.id));
+                            if menu_row(ui, &t, &m.name, all, |p, c| paint_avatar(p, c, 9.0, m, ring)).clicked() {
+                                if all {
+                                    drop_asg = Some(m.id);
+                                } else {
+                                    pick_asg = Some(m.id);
+                                }
                                 close_popup(ui);
                             }
+                        }
+                        ui.separator();
+                        if menu_row(ui, &t, "Unassign all", false, |_, _| {}).clicked() {
+                            unassign = true;
+                            close_popup(ui);
+                        }
+                    });
+                    let r = ui.button("Tags");
+                    let mut add_tags: Option<Vec<String>> = None;
+                    let all_tags = self.all_tags();
+                    let tag_before: Vec<String> = all_tags.iter().filter(|g| sel_tasks.iter().all(|x| x.tags.contains(g))).cloned().collect();
+                    popup(ui, &r, pid.with("bt"), 220.0, |ui| {
+                        // tags every selected task has show ticked
+                        let mut common = tag_before.clone();
+                        if super::listview::tag_menu(ui, &t, &all_tags, &mut common) {
+                            add_tags = Some(common);
                         }
                     });
                     let r = ui.button("Due date");
@@ -1332,6 +1419,24 @@ impl App {
                     popup(ui, &r, pid.with("bd"), 380.0, |ui| {
                         if date_menu(ui, &t, pid.with("bdc"), &mut due) {
                             due_set = true;
+                        }
+                    });
+                    let r = ui.button("Start date");
+                    let mut start: Option<NaiveDate> = None;
+                    let mut start_set = false;
+                    popup(ui, &r, pid.with("bsd"), 380.0, |ui| {
+                        if date_menu(ui, &t, pid.with("bsdc"), &mut start) {
+                            start_set = true;
+                        }
+                    });
+                    let r = ui.button("Repeat");
+                    let mut recur: Option<Option<String>> = None;
+                    popup(ui, &r, pid.with("brc"), 160.0, |ui| {
+                        for (v, label) in RECUR {
+                            if menu_row(ui, &t, label, false, |_, _| {}).clicked() {
+                                recur = Some(if v.is_empty() { None } else { Some(v.to_string()) });
+                                close_popup(ui);
+                            }
                         }
                     });
                     let mut pick_pr: Option<u8> = None;
@@ -1351,14 +1456,16 @@ impl App {
                         self.toast = Some((format!("Duplicated {} tasks", ids.len()), now_ts()));
                         self.selected.clear();
                     }
-                    if ui.button("Archive").clicked() {
-                        self.set_archived(&ids, true);
+                    // archived tasks (Show archived tasks only) can be brought back
+                    let all_archived = sel_tasks.iter().all(|x| x.archived);
+                    if ui.button(if all_archived { "Unarchive" } else { "Archive" }).clicked() {
+                        self.set_archived(&ids, !all_archived);
+                        if all_archived {
+                            self.selected.clear();
+                        }
                     }
                     if ui.button(RichText::new("Delete").color(Color32::from_rgb(255, 120, 120))).clicked() {
-                        for id in &ids {
-                            self.actions.push(Action::DeleteTask(*id));
-                        }
-                        self.selected.clear();
+                        self.confirm_bulk_delete = true;
                     }
                     // apply picks
                     let mut edits: Vec<Task> = vec![];
@@ -1376,6 +1483,42 @@ impl App {
                                 e.assignees.push(a);
                                 ch = true;
                             }
+                        }
+                        if let Some(a) = drop_asg {
+                            if e.assignees.contains(&a) {
+                                e.assignees.retain(|x| *x != a);
+                                ch = true;
+                            }
+                        }
+                        if unassign && !e.assignees.is_empty() {
+                            e.assignees.clear();
+                            ch = true;
+                        }
+                        if let Some(common) = &add_tags {
+                            // tags ticked on are added to all, tags ticked off removed from all
+                            for g in common {
+                                if !e.tags.contains(g) {
+                                    e.tags.push(g.clone());
+                                    ch = true;
+                                }
+                            }
+                            for g in tag_before.iter().filter(|g| !common.contains(g)) {
+                                if e.tags.contains(g) {
+                                    e.tags.retain(|x| x != g);
+                                    ch = true;
+                                }
+                            }
+                        }
+                        if start_set {
+                            e.start = start;
+                            ch = true;
+                        }
+                        if let Some(r) = &recur {
+                            e.recur = r.clone();
+                            if e.recur.is_some() && e.due.is_none() {
+                                e.due = Some(today());
+                            }
+                            ch = true;
                         }
                         if due_set {
                             e.due = due;
@@ -1418,10 +1561,15 @@ impl App {
             }
         }
         if resp.clicked() {
-            if on {
-                self.selected.remove(&tid);
+            if ui.input(|i| i.modifiers.shift) {
+                self.select_click(tid, true);
             } else {
-                self.selected.insert(tid);
+                if on {
+                    self.selected.remove(&tid);
+                } else {
+                    self.selected.insert(tid);
+                }
+                self.select_anchor = Some(tid);
             }
             return true;
         }

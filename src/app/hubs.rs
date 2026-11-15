@@ -1867,6 +1867,7 @@ impl App {
                                     ui.add_space(((w - 4.0 * cw - 30.0) / 2.0).max(0.0));
                                     for (icon, label) in [("\u{1F465}", "All assigned tasks"), ("\u{25A4}", "Last week's tasks"), ("+", "Individual tasks"), ("\u{23F1}", "Track time")] {
                                         let (r, resp) = ui.allocate_exact_size(vec2(cw, 84.0), Sense::click());
+                                        name_it(&resp, label);
                                         ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
                                         ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                                         let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
@@ -1876,8 +1877,12 @@ impl App {
                                         if resp.clicked() {
                                             match label {
                                                 "All assigned tasks" => {
-                                                    let rows = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).map(|x| x.id).collect();
+                                                    let rows: Vec<u64> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).map(|x| x.id).collect();
+                                                    let none = rows.is_empty();
                                                     self.add_sheet_rows(ws, rows);
+                                                    if none {
+                                                        self.toast = Some((tr("No open tasks are assigned to you").into(), now_ts()));
+                                                    }
                                                 }
                                                 "Last week's tasks" => {
                                                     let lw = ws - Duration::days(7);
@@ -1891,6 +1896,10 @@ impl App {
                                                 "Individual tasks" => {
                                                     // show the grid; pick tasks with "+ Add task"
                                                     self.sheet_force = true;
+                                                }
+                                                // nothing to pick from: say why instead of an empty list
+                                                _ if !self.data.tasks.iter().any(|x| self.data.task_live(x)) => {
+                                                    self.toast = Some((tr("Make a task first: time is tracked on tasks").into(), now_ts()));
                                                 }
                                                 _ => {
                                                     let first = self.data.tasks.iter().find(|x| x.assignees.contains(&me) && self.data.task_live(x)).map(|x| x.id).unwrap_or(0);

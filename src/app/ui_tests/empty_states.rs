@@ -406,3 +406,21 @@ fn welcome_on_this_mac_asks_for_a_name_without_a_team() {
     assert!(h.has("What should we call you?"));
     assert!(!h.has("What should your team call you?"));
 }
+
+#[test]
+fn timesheet_options_with_no_tasks_say_why() {
+    let mut h = with(solo(), 1440.0, 900.0);
+    h.app.section = Section::Timesheets;
+    h.settle();
+    h.click("All assigned tasks");
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("No open tasks are assigned to you")
+    );
+    h.click("Track time");
+    assert!(h.app.modal.is_none(), "no empty task picker");
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Make a task first: time is tracked on tasks")
+    );
+}

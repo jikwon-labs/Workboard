@@ -137,6 +137,8 @@ pub const T: &[(&str, &str)] = &[
     ("Individual tasks", "개별 작업"),
     ("Track time", "시간 기록"),
     ("No time was tracked last week", "지난주에 기록된 시간이 없습니다"),
+    ("No open tasks are assigned to you", "나에게 할당된 열린 작업이 없습니다"),
+    ("Make a task first: time is tracked on tasks", "먼저 작업을 만드세요. 시간은 작업에 기록됩니다"),
     ("Total", "합계"),
     ("h", "시간"),
     ("+ Add task", "+ 작업 추가"),

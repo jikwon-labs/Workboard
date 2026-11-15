@@ -734,6 +734,10 @@ impl Default for ClickApps {
     }
 }
 
+/// Each person's own notification choices (not shared with the team: only
+/// `wb_sync::SHARED` paths are). The first five decide what shows in the
+/// Inbox; mentions, assignments, comments and reminders also get a desktop
+/// notification when that is on. The rest are desktop notifications only.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct NotifySettings {
@@ -742,11 +746,105 @@ pub struct NotifySettings {
     pub reminders: bool,
     pub chat: bool,
     pub assigned: bool,
+    /// Banners in Notification Center (when the app is not in front).
+    pub desktop: bool,
+    pub sound: bool,
+    /// The number on the Dock icon: Inbox plus unread direct messages.
+    pub dock_badge: bool,
+    pub direct: bool,
+    /// Replies in threads I started or wrote in.
+    pub replies: bool,
+    pub huddles: bool,
+    /// Reactions to my messages.
+    pub reactions: bool,
+    /// Someone else changes the status, due date or priority of my tasks,
+    /// or takes me off one.
+    pub task_changes: bool,
+    /// Once a day at `due_time`: my tasks due today and overdue.
+    pub due: bool,
+    /// "HH:MM"
+    pub due_time: String,
+    pub meetings: bool,
+    pub meeting_minutes: u32,
+    /// My goals due tomorrow and today.
+    pub goals: bool,
+    /// Someone joins the workspace (owners and admins).
+    pub team: bool,
+    /// A form I made gets an answer.
+    pub forms: bool,
+    /// The team server connection drops for a while, and comes back.
+    pub connection: bool,
+    /// Channel messages: "all", "mentions" or "nothing".
+    pub channel_default: String,
+    /// Channels set apart from `channel_default`.
+    pub channel_modes: Vec<(u64, String)>,
+    /// Notices on the clock (due tasks, meetings, goals) already given, so a
+    /// restart doesn't repeat them. Newest last, kept short.
+    pub fired: Vec<String>,
 }
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        Self { comments: true, mentions: true, reminders: true, chat: true, assigned: true }
+        Self {
+            comments: true,
+            mentions: true,
+            reminders: true,
+            chat: true,
+            assigned: true,
+            desktop: true,
+            sound: true,
+            dock_badge: true,
+            direct: true,
+            replies: true,
+            huddles: true,
+            reactions: false,
+            task_changes: true,
+            due: true,
+            due_time: "09:00".into(),
+            meetings: true,
+            meeting_minutes: 10,
+            goals: true,
+            team: true,
+            forms: true,
+            connection: true,
+            channel_default: "mentions".into(),
+            channel_modes: vec![],
+            fired: vec![],
+        }
+    }
+}
+
+impl NotifySettings {
+    /// Every kind on and every channel loud: for telling what exists at all.
+    pub fn everything() -> Self {
+        Self {
+            comments: true,
+            mentions: true,
+            reminders: true,
+            chat: true,
+            assigned: true,
+            direct: true,
+            replies: true,
+            huddles: true,
+            reactions: true,
+            task_changes: true,
+            team: true,
+            forms: true,
+            channel_default: "all".into(),
+            ..Self::default()
+        }
+    }
+
+    /// "all", "mentions" or "nothing" for a channel.
+    pub fn channel_mode(&self, id: u64) -> &str {
+        self.channel_modes.iter().find(|(c, _)| *c == id).map(|(_, m)| m.as_str()).unwrap_or(&self.channel_default)
+    }
+
+    pub fn set_channel_mode(&mut self, id: u64, mode: &str) {
+        self.channel_modes.retain(|(c, _)| *c != id);
+        if mode != self.channel_default {
+            self.channel_modes.push((id, mode.to_string()));
+        }
     }
 }
 

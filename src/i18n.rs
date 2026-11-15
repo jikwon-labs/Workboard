@@ -21,6 +21,7 @@ mod ko_common;
 mod ko_hubs;
 mod ko_menus;
 mod ko_more;
+mod ko_notify;
 mod ko_parity;
 mod ko_shell;
 mod ko_small;
@@ -79,7 +80,7 @@ fn table() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-const ALL: [&[(&str, &str)]; 11] = [
+const ALL: [&[(&str, &str)]; 12] = [
     ko_common::T,
     ko_account::T,
     ko_app::T,
@@ -87,6 +88,7 @@ const ALL: [&[(&str, &str)]; 11] = [
     ko_hubs::T,
     ko_menus::T,
     ko_more::T,
+    ko_notify::T,
     ko_parity::T,
     ko_shell::T,
     ko_small::T,
@@ -134,7 +136,7 @@ pub fn history_line(who: &str, text: &str) -> String {
 
 fn history_ko(text: &str) -> Option<String> {
     // (English pattern, Korean): {} values in order, {0} {1} in Korean
-    const LINES: [(&str, &str); 23] = [
+    const LINES: [(&str, &str); 24] = [
         ("changed status from {} to {}", "\u{c0c1}\u{d0dc}\u{b97c} {0}\u{c5d0}\u{c11c} {1}(\u{c73c})\u{b85c} \u{bcc0}\u{acbd}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("set priority to {}", "\u{c6b0}\u{c120}\u{c21c}\u{c704}\u{b97c} {0}(\u{c73c})\u{b85c} \u{c124}\u{c815}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("changed due date to {}", "\u{b9c8}\u{ac10}\u{c77c}\u{c744} {0}(\u{c73c})\u{b85c} \u{bcc0}\u{acbd}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
@@ -158,6 +160,7 @@ fn history_ko(text: &str) -> Option<String> {
         ("is waiting on {}", "이 작업이 {0}을(를) 기다리도록 설정했습니다"),
         ("linked {}", "{0}을(를) 연결했습니다"),
         ("attached {}", "{0}을(를) 첨부했습니다"),
+        ("submitted the form {}", "{0} 폼을 제출했습니다"),
     ];
     for (en, ko) in LINES {
         if let Some(vals) = match_pattern(en, text) {

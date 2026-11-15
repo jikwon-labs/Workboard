@@ -1116,6 +1116,8 @@ impl App {
                                 let name = if a.name.trim().is_empty() { format!("{} submission", f.name) } else { a.name };
                                 self.actions.push(Action::Add { list: f.list_id, name, status: None, priority: a.priority, assignees: a.assignees, due: a.due, parent: None, open: false });
                                 self.pending_description = Some(a.description.trim().to_string());
+                                // tells the form's owner (notify.rs); shared history, so in English
+                                self.pending_log = Some(format!("submitted the form {}", f.name));
                                 self.form_fill.clear();
                                 self.sweep.form_error = None;
                                 self.toast = Some((trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)), now_ts()));

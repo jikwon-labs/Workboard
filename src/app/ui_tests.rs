@@ -3732,3 +3732,60 @@ fn mention_picked_from_the_list_keeps_that_person_when_names_are_shared() {
     assert_eq!(c.text, "@Alex Kim this one");
     assert_eq!(c.mentions, vec![9], "only the person picked, not both Alex Kims");
 }
+
+#[test]
+fn click_notification_settings_turn_kinds_off_and_set_channels() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.click("Notifications");
+    assert!(matches!(h.app.modal, Some(Modal::Notifications)));
+    assert!(h.app.data.extra.notify.direct);
+    h.click("Direct messages");
+    assert!(!h.app.data.extra.notify.direct);
+    h.click("Reactions to my messages");
+    assert!(h.app.data.extra.notify.reactions);
+    // the dialog scrolls: wheel down over it to reach the channel choices
+    let over = h.find("Direct messages").unwrap();
+    for _ in 0..6 {
+        h.frame(vec![egui::Event::PointerMoved(over)]);
+        h.frame(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, -120.0), modifiers: Default::default() }]);
+    }
+    h.settle();
+    h.click("Every new message");
+    assert_eq!(h.app.data.extra.notify.channel_default, "all");
+    h.click("Send a test notification");
+    assert!(h.app.toast.as_ref().is_some_and(|t| t.0.starts_with("Sent a test notification")));
+}
+
+#[test]
+fn click_the_channel_bell_to_choose_what_it_notifies() {
+    let mut h = Ui1::new();
+    let g = h.app.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(g);
+    h.settle();
+    h.click("Channel notifications");
+    h.click("Every new message");
+    assert_eq!(h.app.data.extra.notify.channel_mode(g), "all");
+    h.click("Channel notifications");
+    h.click("Nothing");
+    assert_eq!(h.app.data.extra.notify.channel_mode(g), "nothing");
+}
+
+#[test]
+fn click_a_notification_toast_to_open_the_conversation() {
+    let mut h = Ui1::new();
+    let dm = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    // a teammate's message arrives, as a merge would bring it
+    let id = h.app.data.new_id();
+    let m: Message = serde_json::from_value(serde_json::json!({"id": id, "author": 2, "text": "Got a minute?", "ts": now_ts()})).unwrap();
+    h.app.data.channels.iter_mut().find(|c| c.id == dm).unwrap().messages.push(m);
+    h.app.notify_rt.pending = true;
+    h.settle();
+    let toast = h.app.toast.clone().expect("a toast for the new message").0;
+    assert!(toast.contains("Got a minute?"), "{}", toast);
+    assert_ne!(h.app.section, Section::Chat);
+    h.click(&format!("Open {}", toast));
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(h.app.chat_open, Some(dm));
+}

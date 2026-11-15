@@ -322,6 +322,23 @@ impl App {
                     ui.label(RichText::new(title).size(15.5).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let hb = |ui: &mut Ui, text: &str| ui.add(egui::Button::new(RichText::new(tr(text)).size(14.0).color(t.text2)).frame(false));
+                        if channel.kind == ChannelKind::Channel {
+                            // how this channel notifies me (notify.rs)
+                            let mode = self.data.extra.notify.channel_mode(cid).to_string();
+                            let bell = ui.add(egui::Button::new(RichText::new(if mode == "nothing" { "\u{1F515}" } else { "\u{1F514}" }).size(14.0).color(t.text2)).frame(false));
+                            name_it(&bell, "Channel notifications");
+                            let bell = bell.on_hover_text(tr("Notifications for this channel"));
+                            popup(ui, &bell, ui.id().with(("chan_notify", cid)), 240.0, |ui| {
+                                ui.label(RichText::new(tr("Notify me about")).small().color(t.text2));
+                                for (m, label) in [("all", "Every new message"), ("mentions", "Only @mentions and my threads"), ("nothing", "Nothing")] {
+                                    if ui.radio(mode == m, tr(label)).clicked() {
+                                        self.data.extra.notify.set_channel_mode(cid, m);
+                                        self.dirty = true;
+                                        close_popup(ui);
+                                    }
+                                }
+                            });
+                        }
                         if hb(ui, "\u{1F4DD}  Ask").clicked() {
                             self.section = Section::Ai;
                         }

@@ -8,7 +8,6 @@ pub const T: &[(&str, &str)] = &[
     ("{} replied: {}", "{}님의 답글: {}"),
     ("{} mentioned you: {}", "{}님이 나를 멘션함: {}"),
     ("Reminder", "리마인더"),
-    ("Reminder: {}", "리마인더: {}"),
     ("{} reminders are due", "리마인더 {}개의 시간이 되었습니다"),
     // files: attachments and the large viewer
     ("Loading {}%", "불러오는 중 {}%"),
@@ -56,8 +55,6 @@ pub const T: &[(&str, &str)] = &[
     ("Reconnecting\u{2026} {}", "다시 연결하는 중\u{2026} {}"),
     ("Not signed in. {}", "로그인되지 않았습니다. {}"),
     ("Couldn't write to the shared folder. Is it still there?", "공유 폴더에 쓰지 못했습니다. 폴더가 아직 있는지 확인하세요."),
-    ("1 new message from your team", "팀에서 새 메시지 1개가 왔습니다"),
-    ("{} new messages from your team", "팀에서 새 메시지 {}개가 왔습니다"),
     ("Restored the team's workspace to {}. Everyone gets it now.", "팀 워크스페이스를 {} 시점으로 복원했습니다. 모두에게 곧 반영됩니다."),
     ("Connected. This workspace is now on the server for your team.", "연결했습니다. 이제 이 워크스페이스는 팀 서버에 있습니다."),
     ("Joined as {}.", "{}(으)로 참가했습니다."),

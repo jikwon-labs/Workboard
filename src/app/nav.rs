@@ -376,20 +376,22 @@ impl App {
     pub(super) fn reminder_tick(&mut self, ctx: Option<&egui::Context>) {
         let me = self.data.me;
         let now = now_ts();
-        let on = self.data.extra.notify.reminders && self.data.extra.muted_until <= now;
-        let mut fired: Vec<String> = vec![];
+        let mut fired: Vec<Reminder> = vec![];
         for r in self.data.extra.reminders.iter_mut().filter(|r| r.owner == me && !r.done && !r.alerted && r.due_ts <= now) {
             r.alerted = true;
-            fired.push(r.text.clone());
+            fired.push(r.clone());
         }
         if !fired.is_empty() {
             self.dirty = true;
-            if on {
-                let msg = if fired.len() == 1 { trf!("Reminder: {}", fired[0]) } else { trf!("{} reminders are due", fired.len()) };
-                self.toast = Some((msg.clone(), now));
-                if self.persist {
-                    system_notification(&tr("Reminder"), &fired.join("\n"));
-                }
+            if self.data.extra.notify.reminders {
+                let key = format!("reminder:{}:{}", fired[0].id, now);
+                let note = if fired.len() == 1 {
+                    super::notify::Note { key, kind: super::notify::Kind::Reminder, title: tr("Reminder").into(), body: fired[0].text.clone(), target: format!("reminder:{}", fired[0].id) }
+                } else {
+                    let body = fired.iter().map(|r| r.text.clone()).collect::<Vec<_>>().join("\n");
+                    super::notify::Note { key, kind: super::notify::Kind::Reminder, title: trf!("{} reminders are due", fired.len()), body, target: "inbox".into() }
+                };
+                self.deliver(note);
             }
         }
         if let Some(ctx) = ctx {
@@ -409,18 +411,4 @@ impl App {
             self.open_chat_at(ch, thread);
         }
     }
-}
-
-/// A macOS notification (Notification Center), through osascript.
-fn system_notification(title: &str, body: &str) {
-    #[cfg(target_os = "macos")]
-    {
-        let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!("display notification \"{}\" with title \"{}\"", q(body), q(title));
-        std::thread::spawn(move || {
-            let _ = std::process::Command::new("osascript").arg("-e").arg(script).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
-        });
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (title, body);
 }

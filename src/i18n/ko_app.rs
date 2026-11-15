@@ -49,6 +49,8 @@ pub const T: &[(&str, &str)] = &[
     ("My Work", "내 작업"),
     ("Overdue", "기한 지남"),
     ("Unscheduled", "일정 없음"),
+    ("Show all {}", "{}개 모두 보기"),
+    ("Show fewer", "접기"),
     // inbox
     ("Replies", "답장"),
     ("Comments from others on tasks and chat replies", "작업에 달린 다른 사람의 댓글과 채팅 답장"),

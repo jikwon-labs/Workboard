@@ -272,3 +272,61 @@ fn planner_without_unscheduled_tasks_says_so() {
         ))
         .is_empty());
 }
+
+fn home_fits(w: f32, hh: f32) {
+    let mut h = Ui1::sized(w, hh);
+    heavy(&mut h);
+    h.app.actions.push(Action::Go(Location::Home));
+    h.settle();
+    let page = Rect::from_min_max(pos2(60.0, 40.0), h.size.to_pos2());
+    let over = overlapping(&h.texts_in(page));
+    assert!(over.is_empty(), "{}x{}: overlapping {:?}", w, hh, over);
+    let cut = h.cut_texts(page);
+    assert!(cut.is_empty(), "{}x{}: cut {:?}", w, hh, cut);
+    // the Lists card is not cut on the right: its long list is inside
+    h.scroll_into_view("Home show all Next");
+    let past = h.past_right_edge();
+    assert!(
+        past.is_empty(),
+        "{}x{}: past the right edge {:?}",
+        w,
+        hh,
+        past
+    );
+}
+
+#[test]
+fn home_cards_fit_and_long_names_do_not_overlap() {
+    home_fits(1440.0, 900.0);
+    home_fits(900.0, 560.0);
+}
+
+#[test]
+fn home_overdue_is_by_date_and_capped_with_show_all() {
+    let mut h = Ui1::new();
+    heavy(&mut h);
+    h.app.actions.push(Action::Go(Location::Home));
+    h.settle();
+    let me = h.app.data.me;
+    let mut overdue: Vec<&Task> = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|x| x.assignees.contains(&me) && x.is_overdue() && !h.app.data.is_closed(x))
+        .collect();
+    overdue.sort_by_key(|x| x.due_moment());
+    let n = overdue.len();
+    assert!(n > HOME_ROWS);
+    let first = overdue[0].name.clone();
+    let hidden = overdue[HOME_ROWS].name.clone();
+    // the oldest first, the rest behind "Show all"
+    let y = |h: &Ui1, name: &str| h.rect(&format!("Complete {}", name)).center().y;
+    assert!(y(&h, &first) < y(&h, &overdue[1].name.clone()));
+    assert!(!h.has(&format!("Complete {}", hidden)));
+    assert!(!h.painted_text(&trf!("Show all {}", n)).is_empty());
+    h.click("Home show all Overdue");
+    assert!(h.has(&format!("Complete {}", hidden)));
+    h.click("Home show all Overdue");
+    assert!(!h.has(&format!("Complete {}", hidden)));
+}

@@ -399,6 +399,8 @@ pub struct App {
     snap_pending: bool,
     actions: Vec<Action>,
     home_collapsed: HashSet<&'static str>,
+    /// Home "My Work" sections showing every task instead of the first few.
+    home_all: HashSet<&'static str>,
     section: Section,
     recent: Vec<u64>,
     doc_open: Option<u64>,
@@ -714,6 +716,7 @@ impl App {
             snap_pending: false,
             actions: vec![],
             home_collapsed: ["Done"].into_iter().collect(),
+            home_all: HashSet::new(),
             section: match arg("--section").as_deref() {
                 Some("planner") => Section::Planner,
                 Some("chat") => Section::Chat,
@@ -3849,11 +3852,21 @@ impl App {
                             ),
                             ("Done", done_mine.iter().collect()),
                         ];
-                        // today's in the order of their times
+                        // today's in the order of their times, overdue and next
+                        // by date (the oldest first)
                         sections[0].1.sort_by_key(|x| x.due_moment());
+                        sections[1].1.sort_by_key(|x| x.due_moment());
+                        sections[2].1.sort_by_key(|x| x.due_moment());
                         let avail = ui.available_width();
-                        let card_w = ((avail - 20.0) / 2.0).max(320.0);
-                        ui.horizontal_top(|ui| {
+                        // side by side when both fit, else one above the other
+                        let side = avail >= 2.0 * 320.0 + 20.0;
+                        let card_w = if side { (avail - 20.0) / 2.0 } else { avail };
+                        let layout = if side {
+                            Layout::left_to_right(Align::Min)
+                        } else {
+                            Layout::top_down(Align::Min)
+                        };
+                        ui.with_layout(layout, |ui| {
                             // My Work card
                             egui::Frame::new()
                                 .stroke(Stroke::new(1.0, t.border))
@@ -3912,7 +3925,11 @@ impl App {
                                                 }
                                             }
                                             if !collapsed {
-                                                for task in list {
+                                                // a long section shows the first few and
+                                                // a row to show the rest
+                                                let all = self.home_all.contains(name);
+                                                let cap = if all { list.len() } else { HOME_ROWS };
+                                                for task in list.iter().take(cap) {
                                                     let (r, resp) = ui.allocate_exact_size(
                                                         vec2(card_w - 34.0, 30.0),
                                                         Sense::click(),
@@ -3927,37 +3944,37 @@ impl App {
                                                         6.5,
                                                         &st,
                                                     );
-                                                    ui.painter()
-                                                        .with_clip_rect(Rect::from_min_max(
-                                                            r.min,
-                                                            pos2(r.right() - 140.0, r.bottom()),
-                                                        ))
-                                                        .text(
-                                                            r.left_center() + vec2(40.0, 0.0),
-                                                            Align2::LEFT_CENTER,
-                                                            &task.name,
-                                                            FontId::proportional(13.0),
-                                                            t.text,
-                                                        );
-                                                    ui.painter().text(
-                                                        r.right_center() - vec2(70.0, 0.0),
-                                                        Align2::RIGHT_CENTER,
-                                                        truncate(
-                                                            &self.data.list_name(task.list_id),
-                                                            14,
-                                                        ),
-                                                        FontId::proportional(11.5),
-                                                        t.text3,
-                                                    );
+                                                    // right to left: the date, the list
+                                                    // name, then the task name in what is left
+                                                    let mut list_right = r.right() - 70.0;
                                                     if let Some(d) = fmt_due(task) {
-                                                        ui.painter().text(
+                                                        let dr = ui.painter().text(
                                                             r.right_center() - vec2(6.0, 0.0),
                                                             Align2::RIGHT_CENTER,
                                                             d,
                                                             FontId::proportional(12.0),
                                                             due_color(task, false, &t),
                                                         );
+                                                        list_right = list_right.min(dr.left() - 10.0);
                                                     }
+                                                    let lr = paint_fit(
+                                                        ui,
+                                                        pos2(list_right, r.center().y),
+                                                        Align2::RIGHT_CENTER,
+                                                        &self.data.list_name(task.list_id),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                        ((r.width() - 40.0) * 0.3).min(120.0),
+                                                    );
+                                                    paint_fit(
+                                                        ui,
+                                                        r.left_center() + vec2(40.0, 0.0),
+                                                        Align2::LEFT_CENTER,
+                                                        &task.name,
+                                                        FontId::proportional(13.0),
+                                                        t.text,
+                                                        lr.left() - 10.0 - (r.left() + 40.0),
+                                                    );
                                                     // the status circle ticks the task done (or opens it again)
                                                     let cr = Rect::from_center_size(
                                                         r.left_center() + vec2(24.0, 0.0),
@@ -3986,6 +4003,24 @@ impl App {
                                                         self.toggle_done(task.id);
                                                     } else if resp.clicked() {
                                                         self.actions.push(Action::Open(task.id));
+                                                    }
+                                                }
+                                                if list.len() > HOME_ROWS {
+                                                    let label = if all {
+                                                        tr("Show fewer").to_string()
+                                                    } else {
+                                                        trf!("Show all {}", list.len())
+                                                    };
+                                                    let b = ui.add(ghost(egui::Button::new(
+                                                        RichText::new(label).size(12.5).color(t.text2),
+                                                    )));
+                                                    name_it(&b, &format!("Home show all {}", name));
+                                                    if b.clicked() {
+                                                        if all {
+                                                            self.home_all.remove(name);
+                                                        } else {
+                                                            self.home_all.insert(name);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -4063,46 +4098,57 @@ impl App {
                                                     4.0,
                                                     rgb(s.color),
                                                 );
-                                                ui.painter().text(
-                                                    r.left_center() + vec2(30.0, 0.0),
-                                                    Align2::LEFT_CENTER,
-                                                    &l.name,
-                                                    FontId::proportional(13.0),
-                                                    t.text,
-                                                );
-                                                // an empty List: no bar and "0/0", just say so
-                                                if total == 0 {
-                                                    ui.painter().text(
+                                                // right to left: the count and progress bar
+                                                // (or for an empty List just "No tasks yet"),
+                                                // then the name in what is left
+                                                let name_right = if total == 0 {
+                                                    let note = ui.painter().text(
                                                         r.right_center() - vec2(6.0, 0.0),
                                                         Align2::RIGHT_CENTER,
                                                         tr("No tasks yet"),
                                                         FontId::proportional(11.5),
                                                         t.text3,
                                                     );
-                                                    if resp.clicked() {
-                                                        self.actions
-                                                            .push(Action::Go(Location::List(l.id)));
-                                                    }
-                                                    continue;
-                                                }
-                                                // progress bar
-                                                let bar = Rect::from_min_size(
-                                                    pos2(r.right() - 150.0, r.center().y - 3.0),
-                                                    vec2(100.0, 6.0),
-                                                );
-                                                ui.painter().rect_filled(bar, 3.0, t.hover);
-                                                let f = done as f32 / total as f32;
-                                                ui.painter().rect_filled(
-                                                    Rect::from_min_size(bar.min, vec2(100.0 * f, 6.0)),
-                                                    3.0,
-                                                    rgb([0x00, 0x88, 0x44]),
-                                                );
-                                                ui.painter().text(
-                                                    r.right_center() - vec2(6.0, 0.0),
-                                                    Align2::RIGHT_CENTER,
-                                                    format!("{}/{}", done, total),
-                                                    FontId::proportional(11.5),
-                                                    t.text3,
+                                                    note.left() - 10.0
+                                                } else {
+                                                    let count = ui.painter().text(
+                                                        r.right_center() - vec2(6.0, 0.0),
+                                                        Align2::RIGHT_CENTER,
+                                                        format!("{}/{}", done, total),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                    );
+                                                    let bar_w =
+                                                        ((r.width() - 30.0) * 0.25).min(100.0);
+                                                    let bar = Rect::from_min_size(
+                                                        pos2(
+                                                            count.left().min(r.right() - 50.0)
+                                                                - 10.0
+                                                                - bar_w,
+                                                            r.center().y - 3.0,
+                                                        ),
+                                                        vec2(bar_w, 6.0),
+                                                    );
+                                                    ui.painter().rect_filled(bar, 3.0, t.hover);
+                                                    let f = done as f32 / total as f32;
+                                                    ui.painter().rect_filled(
+                                                        Rect::from_min_size(
+                                                            bar.min,
+                                                            vec2(bar_w * f, 6.0),
+                                                        ),
+                                                        3.0,
+                                                        rgb([0x00, 0x88, 0x44]),
+                                                    );
+                                                    bar.left() - 10.0
+                                                };
+                                                paint_fit(
+                                                    ui,
+                                                    r.left_center() + vec2(30.0, 0.0),
+                                                    Align2::LEFT_CENTER,
+                                                    &l.name,
+                                                    FontId::proportional(13.0),
+                                                    t.text,
+                                                    name_right - (r.left() + 30.0),
                                                 );
                                                 if resp.clicked() {
                                                     self.actions
@@ -6475,6 +6521,9 @@ pub(crate) fn unreadable_note(copy: &std::path::Path) -> String {
             .unwrap_or_default()
     )
 }
+
+/// Home "My Work" shows this many tasks of a section until "Show all".
+const HOME_ROWS: usize = 10;
 
 /// Day offsets beyond this are grouped as "Future" (original: B$4 = 7).
 const DUE_GROUP_CAP: i64 = 7;

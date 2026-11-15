@@ -5008,9 +5008,27 @@ fn only_a_channels_maker_or_an_admin_may_delete_it() {
     assert!(a.may_manage_channel(&c));
     let mut theirs = c.clone();
     theirs.creator = 2;
+    // alone or in a shared folder, the role in People decides
+    let me = a.data.me;
+    assert!(a.may_manage_channel(&theirs), "the owner may");
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Admin".into();
+    assert!(a.may_manage_channel(&theirs), "an admin may");
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Member".into();
     assert!(
         !a.may_manage_channel(&theirs),
         "a member who didn't make it"
+    );
+    // on a server, the server's role decides (People can't be trusted there)
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Owner".into();
+    assert!(
+        !a.may_manage_channel(&theirs),
+        "a role in People alone isn't enough"
     );
     a.sync_rt.role = Some(wb_net::Role::Admin);
     assert!(a.may_manage_channel(&theirs), "the server's admins may");

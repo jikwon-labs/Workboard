@@ -2570,3 +2570,69 @@ fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+/// A channel Ann (1) made: Bo (2), a plain member, can join and leave it but
+/// can't delete it, add or remove others, or drop who made it by sending a
+/// copy from an older app. In a channel from before makers were kept, anyone
+/// in it may.
+#[test]
+fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
+    let home = temp_home("changuard");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| {
+        let c = d["channels"].as_array_mut().unwrap();
+        c.push(json!({"id": 40, "name": "ann's", "kind": "Channel", "topic": "", "creator": 1, "members": [1, 3], "messages": [], "last_read": 0}));
+        c.push(json!({"id": 50, "name": "old", "kind": "Channel", "topic": "", "members": [1, 2], "messages": [], "last_read": 0}));
+    });
+    b.wait("B gets both", |d| {
+        channel(d, 40).is_some() && channel(d, 50).is_some()
+    });
+    // B joins, removes Cy and drops the maker (an app that doesn't know it)
+    b.change(|d| {
+        let c = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 40)
+            .unwrap();
+        c["members"] = json!([1, 2]);
+        c["name"] = json!("renamed by Bo");
+        c.as_object_mut().unwrap().remove("creator");
+    });
+    a.wait("B's rename at A", |d| {
+        channel(d, 40).is_some_and(|c| c["name"] == "renamed by Bo")
+    });
+    let c = channel(&a.data, 40).unwrap();
+    assert_eq!(c["members"], json!([1, 3, 2]), "B joined, Cy stays");
+    assert_eq!(c["creator"], 1, "the maker stays");
+    // B deletes it: nothing happens for the team; B deletes the old one: gone
+    b.change(|d| {
+        d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|c| c["id"] != 40 && c["id"] != 50);
+    });
+    assert!(b.meta().tombs.contains_key(&40));
+    a.wait("the old channel deleted at A", |d| channel(d, 50).is_none());
+    assert!(
+        channel(&a.data, 40).is_some(),
+        "Ann's channel is still there"
+    );
+    // an admin may
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 60, "name": "bo's", "kind": "Channel", "topic": "", "creator": 2, "members": [2], "messages": [], "last_read": 0}));
+    });
+    b.wait("B gets 60", |d| channel(d, 60).is_some());
+    a.change(|d| {
+        d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|c| c["id"] != 60);
+    });
+    b.wait("the owner deleted Bo's channel", |d| {
+        channel(d, 60).is_none()
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

@@ -649,12 +649,88 @@ fn copy_for(canon: &Value, member: u64) -> Option<(Value, Vec<u64>)> {
     Some((out, hidden))
 }
 
+/// Whether `member` may delete a channel and change who else is in it: the
+/// app's rule (`may_manage_channel`). Whoever made it, an owner or admin, or
+/// for one made before makers were kept (creator 0) anyone in it.
+pub fn may_manage_channel(ch: &Value, member: u64, role: Role) -> bool {
+    let creator = ch.get("creator").and_then(|c| c.as_u64()).unwrap_or(0);
+    let in_it = ch
+        .get("members")
+        .and_then(|m| m.as_array())
+        .is_some_and(|a| a.iter().any(|m| m.as_u64() == Some(member)));
+    role.manages() || creator == member || (creator == 0 && in_it)
+}
+
+/// Before merging a copy from `member`, for the team's channels: who made
+/// one stays (an older app or the iPhone may drop the field); and unless
+/// they may manage it (`may_manage_channel`), they can't delete it (their
+/// tombstone for it is dropped) or add or remove anyone but themselves
+/// (its member list stays the team's, with only their own place changed).
+fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
+    let Some(team) = canon.get("channels").and_then(|c| c.as_array()) else {
+        return;
+    };
+    let mut no_delete = vec![];
+    if let Some(mine) = data.get_mut("channels").and_then(|c| c.as_array_mut()) {
+        for t in team {
+            let Some(id) = t.get("id").and_then(|i| i.as_u64()) else {
+                continue;
+            };
+            let manages = may_manage_channel(t, member, role);
+            if !manages {
+                no_delete.push(id);
+            }
+            let Some(c) = mine
+                .iter_mut()
+                .find(|c| c.get("id").and_then(|i| i.as_u64()) == Some(id))
+            else {
+                continue;
+            };
+            let Some(c) = c.as_object_mut() else { continue };
+            match t.get("creator") {
+                Some(k) if k.as_u64().is_some_and(|k| k != 0) => {
+                    c.insert("creator".into(), k.clone());
+                }
+                _ => {}
+            }
+            if manages {
+                continue;
+            }
+            let ids = |v: Option<&Value>| -> Vec<u64> {
+                v.and_then(|m| m.as_array())
+                    .map(|a| a.iter().filter_map(|m| m.as_u64()).collect())
+                    .unwrap_or_default()
+            };
+            let theirs = ids(c.get("members"));
+            let mut allowed: Vec<u64> = ids(t.get("members"))
+                .into_iter()
+                .filter(|m| *m != member)
+                .collect();
+            if theirs.contains(&member) {
+                allowed.push(member);
+            }
+            let (mut a, mut b) = (allowed.clone(), theirs);
+            a.sort_unstable();
+            b.sort_unstable();
+            if a != b {
+                c.insert("members".into(), json!(allowed));
+            }
+        }
+    }
+    drop_ids(
+        data.get_mut("extra").and_then(|e| e.get_mut("sync")),
+        &["tombs"],
+        &no_delete,
+    );
+}
+
 /// Before merging a copy from `member`: the items hidden from them stay as
 /// the team has them. Their version of one (say, a private channel with
 /// themselves added to its members) is swapped for the team's, and their
 /// stamps, tombstones, revivals and moves for anything in it are dropped,
 /// so they can't change, join or delete it.
-fn guard_push(canon: &Value, data: &mut Value, member: u64) {
+fn guard_push(canon: &Value, data: &mut Value, member: u64, role: Role) {
+    guard_channels(canon, data, member, role);
     let hidden = wb_sync::hidden_from(canon, member);
     if hidden.is_empty() {
         return;
@@ -1383,7 +1459,7 @@ impl Hub {
             _ => None,
         };
         if let Some(c) = &g.canon {
-            guard_push(c, &mut data, member);
+            guard_push(c, &mut data, member, g.saved.role_of(member));
         }
         let claimer = g.saved.devices.contains_key(device);
         let changed = match g.canon.as_mut() {

@@ -5877,6 +5877,15 @@ fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
         .find(|c| c.id == cid)
         .unwrap()
         .creator = 2;
+    // a plain member (an owner or admin may manage anyone's channel)
+    let me = h.app.data.me;
+    h.app
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .role = "Member".into();
     h.app.modal = Some(Modal::ChannelSettings(cid));
     h.settle();
     // Alex Kim (2) is in it and Sam Lee (3) isn't: neither checkbox changes
@@ -6497,4 +6506,36 @@ fn comment_links_to_private_or_archived_places_do_not_open() {
     h.click(&link);
     assert_eq!(h.app.open_task, None);
     assert_eq!(h.app.loc, Location::List(lid));
+}
+
+#[test]
+fn an_owner_without_a_server_manages_someone_elses_channel() {
+    let mut h = Ui1::new();
+    let cid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "website-redesign")
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .creator = 2;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Sam Lee");
+    assert!(h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .members
+        .contains(&3));
 }

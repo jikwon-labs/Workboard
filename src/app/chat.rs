@@ -335,12 +335,24 @@ impl App {
 
     /// Whether I may delete a channel and change who else is in it: whoever
     /// made it (any member for one made before that was kept), or an owner
-    /// or admin of the team server.
+    /// or admin: of the team server on a server (it checks too), by the
+    /// role in People alone or in a shared folder.
     pub(super) fn may_manage_channel(&self, c: &Channel) -> bool {
         let me = self.data.me;
-        self.sync_rt.role.is_some_and(|r| r.manages())
-            || c.creator == me
-            || (c.creator == 0 && c.members.contains(&me))
+        let server = self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some());
+        let admin = if server {
+            self.sync_rt.role.is_some_and(|r| r.manages())
+        } else {
+            self.data
+                .member(me)
+                .is_some_and(|m| m.role == "Owner" || m.role == "Admin")
+        };
+        admin || c.creator == me || (c.creator == 0 && c.members.contains(&me))
     }
 
     /// Whether a channel shows in my lists: one I may see and, for a direct

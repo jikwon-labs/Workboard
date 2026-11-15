@@ -83,6 +83,10 @@ fn overlapping(texts: &[(String, Rect)]) -> Vec<(String, String)> {
     let mut out = vec![];
     for (i, (a, ra)) in texts.iter().enumerate() {
         for (b, rb) in &texts[i + 1..] {
+            // the same text drawn twice a hair apart is a bold label
+            if a == b && ra.center().distance(rb.center()) < 2.0 {
+                continue;
+            }
             let o = ra.intersect(*rb);
             if o.width() > 1.0 && o.height() > 1.0 {
                 out.push((a.clone(), b.clone()));
@@ -537,4 +541,42 @@ fn task_picker_says_how_many_it_does_not_list() {
         "{} more",
         more
     );
+}
+
+#[test]
+fn list_rows_show_tags_that_fit_and_count_the_rest() {
+    let mut h = Ui1::new();
+    let tags: Vec<String> = vec![
+        "release-blocker-for-launch".into(),
+        "bug".into(),
+        "design".into(),
+    ];
+    let base = task_named(&h, "Write copy for landing page").clone();
+    let mut short = base.clone();
+    short.id = 50_000;
+    short.name = "Short".into();
+    short.tags = tags.clone();
+    short.parent = None;
+    h.app.data.tasks.push(short);
+    let mut long = base.clone();
+    long.id = 50_001;
+    long.name = LONG_TASK.into();
+    long.tags = tags.clone();
+    long.parent = None;
+    h.app.data.tasks.push(long);
+    h.settle();
+    let row = |h: &Ui1, name: &str| h.rect(&format!("Task {}", name));
+    let in_row = |h: &Ui1, name: &str, text: &str| {
+        let r = row(h, name);
+        h.painted_text(text)
+            .iter()
+            .any(|(t, _)| r.contains(t.center()))
+    };
+    // room enough: all three
+    assert!(in_row(&h, "Short", "bug") && in_row(&h, "Short", "design"));
+    // a long name keeps room for the first tag and a count of the others
+    assert!(in_row(&h, LONG_TASK, "+2") || in_row(&h, LONG_TASK, "+3"));
+    let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
+    let over = overlapping(&h.texts_in(page));
+    assert!(over.is_empty(), "overlapping {:?}", over);
 }

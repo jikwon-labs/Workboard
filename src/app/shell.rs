@@ -4502,7 +4502,45 @@ impl App {
             + if task.checklist.is_empty() { 0.0 } else { 42.0 }
             + 12.0
             + quick_w;
-        let max_name = (cols.left - x - after).max(60.0);
+        // tags follow the name: a name too long for the row leaves room for
+        // the first tag and a "+N" for the rest (or just "+N" when narrow)
+        let tag_font = FontId::proportional(11.5);
+        let tags: Vec<String> = if apps.tags {
+            task.tags
+                .iter()
+                .map(|tag| fit_text(ui.painter(), tag, &tag_font, 90.0))
+                .collect()
+        } else {
+            vec![]
+        };
+        let measure = ui.painter().clone();
+        let chip_w = |s: &str| {
+            measure
+                .layout_no_wrap(s.to_string(), tag_font.clone(), t.text)
+                .size()
+                .x
+                + 12.0
+        };
+        let plus_w = chip_w(&format!("+{}", tags.len().max(1)));
+        let room = cols.left - x - after;
+        let tag_room = match tags.len() {
+            0 => 0.0,
+            1 => chip_w(&tags[0]) + 4.0,
+            _ => chip_w(&tags[0]) + 4.0 + plus_w + 4.0,
+        };
+        let name_w = measure
+            .layout_no_wrap(task.name.clone(), FontId::proportional(14.0), t.text)
+            .size()
+            .x;
+        let tag_room = if tags.is_empty() || name_w <= room {
+            // the whole name fits: tags take what is left after it
+            0.0
+        } else if room - tag_room >= 240.0 {
+            tag_room
+        } else {
+            plus_w + 4.0
+        };
+        let max_name = (room - tag_room).max(60.0);
         if renaming {
             let nr = Rect::from_min_max(
                 pos2(x - 4.0, rect.top() + 4.0),
@@ -4557,20 +4595,42 @@ impl App {
             self.row_quick_actions(ui, rect, x, cols.left - 8.0, task);
             x += quick_w;
         }
-        for tag in task.tags.iter().take(if apps.tags { 2 } else { 0 }) {
-            let col = tag_color(tag);
+        // as many tags as fit, then "+N" for the rest (hover lists them all)
+        let tag_end = cols.left - 8.0;
+        let mut shown = 0;
+        for (k, (tag, full)) in tags.iter().zip(&task.tags).enumerate() {
+            let rest = tags.len() - k - 1;
+            let w = chip_w(tag);
+            let need = if rest > 0 { w + 4.0 + plus_w } else { w };
+            if x + need > tag_end {
+                break;
+            }
+            let col = tag_color(full);
             let g = ui
                 .painter()
-                .layout_no_wrap(tag.clone(), FontId::proportional(11.5), col);
-            let r = Rect::from_min_size(
-                pos2(x, rect.center().y - 9.0),
-                vec2(g.size().x + 12.0, 18.0),
-            );
-            if r.right() < cols.left - 8.0 {
-                ui.painter().rect_filled(r, 9.0, col.gamma_multiply(0.16));
-                ui.painter().galley(r.center() - g.size() / 2.0, g, col);
-            }
+                .layout_no_wrap(tag.clone(), tag_font.clone(), col);
+            let r = Rect::from_min_size(pos2(x, rect.center().y - 9.0), vec2(w, 18.0));
+            ui.painter().rect_filled(r, 9.0, col.gamma_multiply(0.16));
+            ui.painter().galley(r.center() - g.size() / 2.0, g, col);
             x = r.right() + 4.0;
+            shown += 1;
+        }
+        if shown < tags.len() && x + plus_w <= tag_end {
+            let more = format!("+{}", tags.len() - shown);
+            let r = Rect::from_min_size(pos2(x, rect.center().y - 9.0), vec2(plus_w, 18.0));
+            ui.painter().rect_filled(r, 9.0, t.hover);
+            ui.painter().text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                more,
+                tag_font.clone(),
+                t.text2,
+            );
+            if ui.rect_contains_pointer(r) {
+                egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), id.with("tags_tip"), |ui| {
+                    ui.label(task.tags.join(", "))
+                });
+            }
         }
         let icon_col = Color32::from_rgb(160, 160, 160);
         // assignee

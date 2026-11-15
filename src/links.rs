@@ -6,12 +6,28 @@
 
 use std::sync::Mutex;
 
+#[cfg(not(test))]
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static WAKE: Mutex<Option<egui::Context>> = Mutex::new(None);
 
+/// The links not taken yet. Tests run side by side in one process, each
+/// with its own app, so there each test thread keeps its own.
+#[cfg(not(test))]
+fn pending<R>(f: impl FnOnce(&mut Vec<String>) -> R) -> R {
+    f(&mut PENDING.lock().unwrap())
+}
+
+#[cfg(test)]
+fn pending<R>(f: impl FnOnce(&mut Vec<String>) -> R) -> R {
+    thread_local! {
+        static PENDING: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    PENDING.with(|p| f(&mut p.borrow_mut()))
+}
+
 /// A link arrived: keep it and redraw so the app takes it.
 pub fn arrived(url: String) {
-    PENDING.lock().unwrap().push(url);
+    pending(|p| p.push(url));
     if let Some(ctx) = WAKE.lock().unwrap().as_ref() {
         ctx.request_repaint();
     }
@@ -24,10 +40,11 @@ pub fn wake(ctx: &egui::Context) {
 
 /// The newest workboard:// link not taken yet.
 pub fn take() -> Option<String> {
-    let mut p = PENDING.lock().unwrap();
-    let last = p.pop();
-    p.clear();
-    last
+    pending(|p| {
+        let last = p.pop();
+        p.clear();
+        last
+    })
 }
 
 /// Ask macOS to send workboard:// links here. Call before the event loop starts.

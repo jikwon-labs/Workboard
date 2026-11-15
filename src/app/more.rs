@@ -1913,6 +1913,8 @@ impl App {
                 super::nav::Link::Loc(l) => Some(("\u{2192}", self.data.location_name(l), String::new(), Hit::Go(l))),
             };
             match hit {
+                // archived, or in someone else's Personal space
+                Some(_) if self.link_shown(link) == Some(false) => rows.push(("Link", "\u{26A0}", tr("This link points to something archived or private").into(), String::new(), Hit::Query(String::new()))),
                 Some((g, title, place, hit)) => rows.push(("Link", g, title, place, hit)),
                 None => rows.push(("Link", "\u{26A0}", tr("Nothing with this link here (it may have been deleted)").into(), String::new(), Hit::Query(String::new()))),
             }
@@ -1953,11 +1955,12 @@ impl App {
             rows.extend(locs.into_iter().filter(|r| has(&r.2)).take(many(2)));
         }
         if show(1) {
-            let tasks = self.data.tasks.iter().filter(|x| !x.archived && self.data.space_of_list(x.list_id).map_or(true, |s| space_shown(s)) && (has(&x.name) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 });
+            // not in archived lists, folders or spaces, nor other people's Personal spaces
+            let tasks = self.data.tasks.iter().filter(|x| self.task_visible(x) && (has(&x.name) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 });
             rows.extend(tasks.map(|x| ("Tasks", "\u{2611}", x.name.clone(), self.data.list_name(x.list_id), Hit::Task(x.id))));
         }
         if show(3) {
-            let docs = self.data.docs.iter().filter(|d| !d.archived && (has(&d.title) || (ql.len() > 2 && d.body.to_lowercase().contains(&ql)))).take(many(3));
+            let docs = self.data.docs.iter().filter(|d| self.doc_shown(d) && (has(&d.title) || (ql.len() > 2 && d.body.to_lowercase().contains(&ql)))).take(many(3));
             rows.extend(docs.map(|d| ("Docs", "\u{1F4C4}", d.title.clone(), tr("Doc").into(), Hit::Doc(d.id))));
         }
         if show(4) {

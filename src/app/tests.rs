@@ -2988,3 +2988,100 @@ fn single_assignee_setting_replaces_instead_of_adding() {
     let t = a.data.tasks.iter().find(|t| t.name == "From Alex's group").unwrap();
     assert_eq!(t.assignees, vec![a.data.me]);
 }
+
+
+#[test]
+fn joining_a_shared_workspace_forgets_history() {
+    let dir = temp_folder("join-history");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.apply(Action::Go(Location::Inbox));
+    b.track_history();
+    b.apply(Action::Go(Location::Home));
+    b.track_history();
+    assert!(!b.nav_back.is_empty());
+    b.join_shared(&folder).unwrap();
+    assert!(b.nav_back.is_empty() && b.nav_fwd.is_empty(), "Back doesn't lead into the old workspace");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn back_returns_to_the_workspace_overview() {
+    let mut a = app();
+    a.section = Section::Dashboards;
+    a.dash_open = Some(super::hubs::WORKSPACE_OVERVIEW);
+    let spot = a.nav_spot();
+    assert!(a.nav_spot_exists(&spot));
+    a.track_history();
+    a.section = Section::Home;
+    a.dash_open = None;
+    a.track_history();
+    a.go_back();
+    a.track_history();
+    assert_eq!((a.section, a.dash_open), (Section::Dashboards, Some(super::hubs::WORKSPACE_OVERVIEW)));
+}
+
+#[test]
+fn links_to_archived_or_private_places_do_not_open() {
+    let mut a = app();
+    let me = a.data.me;
+    let lists = list_ids(&a);
+    let tid = add_task(&mut a, lists[0], "Behind a link");
+    // someone else's Personal space
+    let sid = a.data.space_of_list(lists[0]).unwrap().id;
+    a.data.spaces.iter_mut().find(|s| s.id == sid).unwrap().private_owner = Some(me + 100);
+    a.toast = None;
+    assert!(!a.open_link(&format!("workboard://space/{}", sid)));
+    assert!(!a.open_link(&format!("workboard://list/{}", lists[0])));
+    assert!(!a.open_link(&format!("workboard://task/{}", tid)));
+    a.apply_actions();
+    assert_eq!(a.open_task, None);
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("archived or private")));
+    assert!(a.search_rows(&format!("workboard://task/{}", tid), 0).iter().all(|r| r.4 != super::more::Hit::Task(tid)));
+    // my own Personal space opens
+    a.data.spaces.iter_mut().find(|s| s.id == sid).unwrap().private_owner = Some(me);
+    assert!(a.open_link(&format!("workboard://list/{}", lists[0])));
+    // an archived space doesn't
+    a.data.spaces.iter_mut().find(|s| s.id == sid).unwrap().archived = true;
+    assert!(!a.open_link(&format!("workboard://space/{}", sid)));
+    assert!(!a.open_link(&format!("workboard://list/{}", lists[0])));
+}
+
+#[test]
+fn search_leaves_out_archived_lists_and_other_peoples_private_docs() {
+    let mut a = app();
+    let me = a.data.me;
+    let lists = list_ids(&a);
+    add_task(&mut a, lists[0], "Zebra crossing");
+    let found = |a: &App, q: &str| a.search_rows(q, 0).iter().filter(|r| r.0 != "Recent searches").map(|r| r.2.clone()).collect::<Vec<_>>();
+    assert!(found(&a, "zebra").iter().any(|t| t == "Zebra crossing"));
+    a.data.list_item_mut(lists[0]).unwrap().archived = true;
+    assert!(!found(&a, "zebra").iter().any(|t| t == "Zebra crossing"), "a task in an archived list stays out");
+    let now = now_ts();
+    let space = a.data.spaces.iter().find(|s| s.private_owner.is_none() && !s.archived).map(|s| s.id);
+    for (id, owner, private, title) in [(9101, me + 100, true, "Quokka secret"), (9102, me, true, "Quokka mine"), (9103, me + 100, false, "Quokka shared")] {
+        a.data.docs.push(Doc { id, space, owner, private, archived: false, meeting_note: false, parent: None, title: title.into(), body: String::new(), created: now, updated: now, tags: vec![] });
+    }
+    let docs = found(&a, "quokka");
+    assert!(!docs.iter().any(|t| t == "Quokka secret"));
+    assert!(docs.iter().any(|t| t == "Quokka mine") && docs.iter().any(|t| t == "Quokka shared"));
+    let d = a.data.docs.iter().find(|d| d.id == 9101).unwrap();
+    assert!(!a.doc_shown(d));
+}
+
+#[test]
+fn comments_on_a_task_i_duplicated_go_to_primary() {
+    let mut a = app();
+    let me = a.data.me;
+    let lists = list_ids(&a);
+    let src = add_task(&mut a, lists[0], "Original");
+    let copy = a.duplicate_task(src).unwrap();
+    let other = a.data.members.iter().map(|m| m.id).find(|id| *id != me).unwrap();
+    let t = a.data.tasks.iter_mut().find(|t| t.id == copy).unwrap();
+    t.assignees.clear();
+    t.activity.push(Activity { ts: now_ts() + 5, author: other, text: "looks good".into(), comment: true, ..Default::default() });
+    let row = a.inbox_items().into_iter().find(|i| i.src == super::nav::InboxSrc::Task(copy) && i.text == "looks good").unwrap();
+    assert_eq!(row.tab, 0);
+}

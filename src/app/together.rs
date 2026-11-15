@@ -825,6 +825,7 @@ impl App {
         self.open_task = None;
         self.chat_open = None;
         self.recent.clear();
+        self.clear_history();
         self.save_local();
     }
 

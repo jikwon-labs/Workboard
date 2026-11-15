@@ -157,7 +157,8 @@ impl App {
         let mentions = |text: &str| !my_at.is_empty() && super::chat::mentions(text, &my_at[1..]);
         let mut out = vec![];
         for task in &self.data.tasks {
-            let mine = task.assignees.contains(&me) || task.activity.iter().any(|a| a.author == me && !a.comment && a.text == "created this task");
+            // a task I made (or made as a copy of another) is mine like one I'm assigned to
+            let mine = task.assignees.contains(&me) || task.activity.iter().any(|a| a.author == me && !a.comment && (a.text == "created this task" || a.text.starts_with("duplicated this task from ")));
             for a in &task.activity {
                 if a.author == me {
                     continue;
@@ -271,7 +272,8 @@ impl App {
             Section::Docs => self.data.docs.iter().any(|d| d.id == id),
             Section::Whiteboards => x.whiteboards.iter().any(|w| w.id == id),
             Section::Forms => x.forms.iter().any(|f| f.id == id),
-            Section::Dashboards => x.dashboards.iter().any(|d| d.id == id),
+            // the Workspace overview is built in, not one of the dashboards
+            Section::Dashboards => id == super::hubs::WORKSPACE_OVERVIEW || x.dashboards.iter().any(|d| d.id == id),
             _ => true,
         }
     }
@@ -305,23 +307,51 @@ impl App {
 
     // ---------------------------------------------------------------- links
 
-    /// Opens a workboard:// link; false when it isn't one this workspace has.
-    pub(super) fn open_link(&mut self, url: &str) -> bool {
-        let ok = match parse_link(url) {
-            Some(Link::Task(id)) if self.data.tasks.iter().any(|t| t.id == id) => {
-                self.actions.push(Action::Open(id));
-                true
+    /// A place I can go to, as the sidebar shows them: it exists, and isn't
+    /// archived (nor its folder or space) or in someone else's Personal space.
+    pub(super) fn location_shown(&self, loc: Location) -> bool {
+        let me = self.data.me;
+        let space_ok = |s: &Space| !s.archived && s.private_owner.is_none_or(|o| o == me);
+        self.data.location_exists(loc)
+            && match loc {
+                Location::Space(id) => self.data.spaces.iter().find(|s| s.id == id).is_some_and(space_ok),
+                Location::Folder(id) => self.data.spaces.iter().any(|s| space_ok(s) && s.folders.iter().any(|f| f.id == id && !f.archived)),
+                Location::List(id) => !self.data.list_archived(id) && self.data.space_of_list(id).is_some_and(space_ok),
+                _ => true,
             }
-            Some(Link::Loc(l)) if self.data.location_exists(l) => {
-                self.actions.push(Action::Go(l));
-                true
-            }
-            _ => false,
-        };
-        if !ok {
-            self.toast = Some((tr("This link can't be opened in this Workspace").into(), now_ts()));
+    }
+
+    /// A doc shown in lists, search and the sidebar: not archived, not
+    /// someone else's Private doc and not in a space I can't go to.
+    pub(super) fn doc_shown(&self, d: &Doc) -> bool {
+        !d.archived && (!d.private || d.owner == self.data.me) && d.space.is_none_or(|s| !self.data.location_exists(Location::Space(s)) || self.location_shown(Location::Space(s)))
+    }
+
+    /// What a workboard:// link opens: `None` when this workspace doesn't
+    /// have it, `Some(false)` when it is there but archived or someone
+    /// else's private place.
+    pub(super) fn link_shown(&self, link: Link) -> Option<bool> {
+        match link {
+            Link::Task(id) => self.task(id).map(|t| {
+                let l = Location::List(t.list_id);
+                !self.data.location_exists(l) || self.location_shown(l)
+            }),
+            Link::Loc(l) => self.data.location_exists(l).then(|| self.location_shown(l)),
         }
-        ok
+    }
+
+    /// Opens a workboard:// link; false when it isn't one this workspace has
+    /// (or it is archived or in someone else's Personal space).
+    pub(super) fn open_link(&mut self, url: &str) -> bool {
+        let link = parse_link(url);
+        let shown = link.and_then(|l| self.link_shown(l));
+        match (link, shown) {
+            (Some(Link::Task(id)), Some(true)) => self.actions.push(Action::Open(id)),
+            (Some(Link::Loc(l)), Some(true)) => self.actions.push(Action::Go(l)),
+            (_, Some(false)) => self.toast = Some((tr("This link points to something archived or private").into(), now_ts())),
+            _ => self.toast = Some((tr("This link can't be opened in this Workspace").into(), now_ts())),
+        }
+        shown == Some(true)
     }
 
     /// A message text with its workboard:// links clickable; returns the

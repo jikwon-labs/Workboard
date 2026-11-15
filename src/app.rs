@@ -3828,6 +3828,18 @@ impl App {
         self.new_message_window(ctx);
         self.bulk_bar(ctx);
         self.toast_ui(ctx);
+        // an invite link opened in a browser or mail
+        // (other workboard:// links, such as Copy link, open what they point to).
+        // Taken before the pending links open so it opens in this frame, and
+        // drawn again at once: no input may follow to wake the app up.
+        if let Some(url) = crate::links::take() {
+            if url.starts_with("workboard://join") {
+                self.open_join_link(&url);
+            } else {
+                self.link_pending = Some(url);
+            }
+            ctx.request_repaint();
+        }
         self.open_pending_links();
         self.reminder_tick(Some(ctx));
         self.apply_actions();
@@ -3851,15 +3863,6 @@ impl App {
         }
         self.huddle_tick(Some(ctx));
         self.huddle_bar(ctx);
-        // an invite link opened in a browser or mail
-        // (other workboard:// links, such as Copy link, open what they point to)
-        if let Some(url) = crate::links::take() {
-            if url.starts_with("workboard://join") {
-                self.open_join_link(&url);
-            } else {
-                self.link_pending = Some(url);
-            }
-        }
         // the first start: how do you want to start?
         if self.data.extra.welcome && self.persist && self.modal.is_none() {
             self.data.extra.welcome = false;

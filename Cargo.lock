@@ -5479,9 +5479,11 @@ dependencies = [
 name = "wb-voice"
 version = "0.1.1"
 dependencies = [
+ "block",
  "futures-util",
  "livekit",
  "nokhwa",
+ "objc",
  "serde_json",
  "tokio",
  "wb-net",

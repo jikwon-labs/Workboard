@@ -8,7 +8,8 @@
 
 - 2026-11-15 기준 158개. 로직 테스트, 실제 화면 입력(포인터·스크롤·드래그·키보드)으로 누르는 UI 테스트, 실제 서버를 띄우는 통합 테스트가 들어 있다.
 - 음성·영상 테스트(`crates/wb-voice/tests/huddle.rs`, 앱의 허들 테스트)는 실제 `livekit-server` 를 임시 포트로 띄운다. 설치돼 있지 않으면(`brew install livekit`) 그 테스트들은 "skipped" 를 찍고 건너뛴다.
-- 실제 마이크·카메라는 쓰지 않는다. 테스트에서는 신호음과 색 패턴을 보내고, 받는 쪽에서 소리 크기와 색을 잰다.
+- 실제 마이크·카메라·화면은 쓰지 않는다. 테스트에서는 신호음과 색 패턴(화면 공유도 색 패턴)을 보내고, 받는 쪽에서 소리 크기와 색, 받은 영상 크기를 잰다.
+- 실제 화면 캡처는 손으로 돌리는 테스트로 따로 있다: `cargo test -p wb-voice real_ -- --ignored --nocapture`. 주 화면과 창 하나를 ScreenCaptureKit 으로 실제로 받아 본다. 터미널에 화면 기록 권한이 있어야 한다(없으면 "no Screen Recording permission" 으로 실패한다).
 - cargo 가 PATH 에 없으면 `export PATH="$HOME/.cargo/bin:$PATH"`.
 
 ## Mac mini 에서 손으로 확인하기
@@ -65,6 +66,15 @@
 
 - 두 번째 참가자가 필요하다. 다른 컴퓨터에서 같은 허들에 Join 하거나, Mac mini 에서 같은 계정의 두 번째 컴퓨터로 들어간다(Mac mini 에서 `workboard-server invite <owner 멤버id>` 로 코드를 만들어 `WORKBOARD_HOME`·`WORKBOARD_TEST_VIDEO=1` 앱 사본에 넣는다).
 - 확인할 것: 서로의 영상이 이름과 함께 보이는지, 말하면 아바타에 초록 테두리가 생기는지, Mute 하면 상대 화면에 빨간 표시가 붙는지, Leave 하면 빠지는지.
+- 화질: 상대 영상 칸을 눌러 크게 하면 잠시 뒤 더 선명해지고(1280 겹), 다시 누르면 작은 겹으로 돌아오는지.
+
+**5. 화면 공유와 화면 기록 권한**
+
+1. 허들 막대에서 Share screen 을 누른다. 처음이면 macOS 가 화면 기록 권한을 묻는다. 터미널에서 띄웠다면 "터미널" 이름으로 뜬다.
+2. 거절했거나 아직 켜지 않았으면, 고르는 칸에 "Workboard needs the Screen Recording permission..." 안내와 Open System Settings 버튼이 보여야 한다. 버튼을 누르면 시스템 설정 > 개인정보 보호 및 보안 > 화면 및 시스템 오디오 녹음이 열린다. Workboard(또는 터미널)를 켜고 앱을 종료했다가 다시 연다(macOS 는 다시 열어야 권한을 적용한다).
+3. 다시 Share screen 을 누르면 화면(주 화면 먼저)과 창 목록이 보인다. 화면 하나를 고르면 막대에 "Sharing your screen" 이 뜨고, 상대 쪽에는 카메라 칸 위에 큰 칸과 "<이름>'s screen" 이 보여야 한다. 글자가 읽히는지 본다.
+4. 창 하나를 골라 공유해 보고, 그 창을 닫으면 공유가 멈추고 "The screen or window you shared is gone..." 이 뜨는지 본다.
+5. Stop sharing screen 을 누르거나 macOS 메뉴 막대의 화면 공유 표시에서 멈추면 상대 쪽 큰 칸이 사라지는지 본다.
 
 ## 재부팅 뒤 확인하기
 

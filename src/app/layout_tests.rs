@@ -787,3 +787,57 @@ fn search_shortens_a_long_path_before_its_kind() {
         kind
     );
 }
+
+fn chip_clear(h: &Ui1) {
+    let chip = h.rect(tr("Add bookmarks, notes, and more"));
+    let page = Rect::from_min_max(pos2(chip.left() - 20.0, chip.top()), h.size.to_pos2());
+    // the messages are cut a little below the chip, not right at its edge
+    let below = chip.expand2(vec2(0.0, 4.0));
+    for (t, r) in h.texts_in(page) {
+        if t != tr("Add bookmarks, notes, and more") && r.intersects(below) {
+            panic!("{:?} at {:?} under the chip {:?}", t, r, chip);
+        }
+    }
+}
+
+#[test]
+fn small_window_chat_chip_stays_above_the_messages() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    // enough messages to scroll
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter()
+        .position(|c| c.name == "general")
+        .unwrap();
+    let first = h.app.data.channels[ch].messages[0].clone();
+    for k in 0..12 {
+        let mut m = first.clone();
+        m.id = 70_000 + k;
+        m.text = format!("Message number {} with a few words in it", k);
+        m.replies.clear();
+        h.app.data.channels[ch].messages.push(m);
+    }
+    h.click("general");
+    // at the newest message, then a little way up, then at the top
+    chip_clear(&h);
+    for _ in 0..12 {
+        let at = pos2(500.0, 250.0);
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 7.0),
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+        chip_clear(&h);
+    }
+    // the right panel gives the messages room in a small window
+    let followers = h.painted_text(tr("Followers"))[0].0;
+    assert!(
+        h.size.x - followers.left() < 220.0,
+        "the panel is narrower: {:?}",
+        followers
+    );
+}

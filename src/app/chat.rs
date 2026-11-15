@@ -717,8 +717,9 @@ impl App {
             });
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
-            // right panel
-            egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(230.0).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
+            // right panel: narrower in a small window so the messages keep room
+            let panel_w = (ui.available_width() * 0.3).clamp(170.0, 230.0);
+            egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned messages", 1), ("\u{1F516}", "Saved", 4), ("\u{2611}", "Turned into tasks", 3), ("\u{2699}", "Settings", 12)];
@@ -736,7 +737,8 @@ impl App {
                         } else {
                             ui.painter().text(r.left_center() + vec2(12.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
                         }
-                        ui.painter().text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text);
+                        let count_w = if code == 10 { 24.0 } else { 0.0 };
+                        paint_fit(ui, r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text, w - 32.0 - count_w);
                         if code == 10 {
                             ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
                         }
@@ -771,6 +773,12 @@ impl App {
                     }
                 }
             });
+            // a gap and a hairline under the chips, so a message scrolled up
+            // under them reads as cut off by the list, not covered by a chip
+            ui.add_space(4.0);
+            let line = ui.available_rect_before_wrap();
+            ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5, t.border));
+            ui.add_space(2.0);
             let composer_h = 140.0 + if self.chat_files.is_empty() { 0.0 } else { 76.0 };
             let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
             let panel = self.channel_panel;

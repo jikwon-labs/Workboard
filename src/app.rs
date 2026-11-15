@@ -4153,14 +4153,33 @@ impl App {
             });
     }
 
+    /// The replies Replies lists under Unread, counted for the sidebar.
+    pub(super) fn unread_replies(&self) -> usize {
+        let seen = self.data.extra.replies_seen;
+        let read = &self.data.extra.replies_read;
+        let unread = |k: String| !read.contains(&k);
+        let me = self.data.me;
+        let on_tasks = self
+            .data
+            .tasks
+            .iter()
+            .flat_map(|t| t.activity.iter().map(move |a| (t.id, a)))
+            .filter(|(id, a)| {
+                a.comment
+                    && a.author != me
+                    && a.ts > seen
+                    && unread(reply_key(nav::InboxSrc::Task(*id), a.ts, a.author))
+            })
+            .count();
+        let in_chat = self
+            .chat_replies()
+            .into_iter()
+            .filter(|r| r.ts > seen && unread(reply_key(r.src, r.ts, r.author)))
+            .count();
+        on_tasks + in_chat
+    }
+
     fn inbox(&mut self, ui: &mut Ui, mode: u8) {
-        // what Replies' per-item "Mark read" keeps: "taskid:ts:author" or "chat:channel:message"
-        fn reply_key(src: nav::InboxSrc, ts: i64, author: u64) -> String {
-            match src {
-                nav::InboxSrc::Task(id) => format!("{}:{}:{}", id, ts, author),
-                nav::InboxSrc::Chat { ch, msg, .. } => format!("chat:{}:{}", ch, msg),
-            }
-        }
         let t = self.t();
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(24, 16))
@@ -6574,6 +6593,14 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.waiting_on != b.waiting_on
         || a.linked != b.linked
         || a.attachments != b.attachments
+}
+
+/// What Replies' per-item "Mark read" keeps: "taskid:ts:author" or "chat:channel:message".
+fn reply_key(src: nav::InboxSrc, ts: i64, author: u64) -> String {
+    match src {
+        nav::InboxSrc::Task(id) => format!("{}:{}:{}", id, ts, author),
+        nav::InboxSrc::Chat { ch, msg, .. } => format!("chat:{}:{}", ch, msg),
+    }
 }
 
 fn kind_label(k: StatusKind) -> &'static str {

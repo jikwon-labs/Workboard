@@ -1809,6 +1809,11 @@ impl App {
                         let muted = self.data.extra.muted_until > now_ts();
                         if filter.is_empty() {
                             let inbox_n = if muted { 0 } else { self.inbox_badge() };
+                            let replies_n = if muted || self.hidden("Replies") {
+                                0
+                            } else {
+                                self.unread_replies()
+                            };
                             let nav: [(&str, &str); 9] = [
                                 ("Inbox", "\u{1F4E5}"),
                                 ("Replies", "\u{21A9}"),
@@ -1845,10 +1850,10 @@ impl App {
                                     "Meetings" => self.section == Section::Meetings,
                                     _ => false,
                                 };
-                                let badge = if label == "Inbox" && inbox_n > 0 {
-                                    Some(inbox_n.to_string())
-                                } else {
-                                    None
+                                let badge = match label {
+                                    "Inbox" if inbox_n > 0 => Some(inbox_n.to_string()),
+                                    "Replies" if replies_n > 0 => Some(replies_n.to_string()),
+                                    _ => None,
                                 };
                                 let kind = match label {
                                     "Inbox" => "inbox",

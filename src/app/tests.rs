@@ -8758,3 +8758,36 @@ fn an_unfingerprinted_slack_match_is_not_an_edit_after_opening() {
     assert!(values.get("workspace").is_some_and(|s| *s > 100));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An older version could leave one Slack id on two members. Opening the
+/// workspace carries the first into the shared map without anyone deciding
+/// it; when that member is deleted the other one the older lists name still
+/// counts, instead of a new member being made on the next import.
+#[test]
+fn a_carried_slack_match_falls_back_to_the_other_older_list() {
+    use super::slack::Assign;
+    let mut a = app();
+    let (alex, sam) = (2, 3);
+    for id in [alex, sam] {
+        a.data
+            .members
+            .iter_mut()
+            .find(|m| m.id == id)
+            .unwrap()
+            .slack = vec!["UX".into()];
+    }
+    assert!(a.data.fold_legacy_slack());
+    assert_eq!(a.data.extra.slack_map.get("UX"), Some(&alex));
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(alex)));
+    a.data.members.retain(|m| m.id != alex);
+    assert_eq!(a.data.slack_member("UX"), Some(sam));
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(sam)));
+    // a real decision for a member who is gone stays no decision
+    a.data
+        .extra
+        .sync
+        .values
+        .insert(crate::sync::map_part(crate::model::SLACK_MAP, "UX"), 7);
+    a.data.extra.slack_map.insert("UX".into(), 99);
+    assert_eq!(a.data.slack_member("UX"), None);
+}

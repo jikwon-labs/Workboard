@@ -1602,20 +1602,28 @@ impl Data {
     /// lists stay as they were, for those versions, and may name a member
     /// a later decision moved them off): an entry for a member no longer
     /// here is no decision at all, and matching goes on by email or name.
+    /// An entry only carried over from those lists (nobody decided it) is
+    /// not a decision either: if its member is gone, the next member the
+    /// lists name still counts.
     pub fn slack_member(&self, sid: &str) -> Option<u64> {
-        let decided = self.extra.slack_map.contains_key(sid)
-            || self
-                .extra
-                .sync
-                .values
-                .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
-        if decided {
-            return self
-                .extra
-                .slack_map
-                .get(sid)
-                .copied()
-                .filter(|m| self.member(*m).is_some());
+        let part = crate::sync::map_part(SLACK_MAP, sid);
+        let meta = &self.extra.sync;
+        let entry = self.extra.slack_map.get(sid).copied();
+        let stamped = meta.values.contains_key(&part);
+        // carried over from an older version's lists (`fold_legacy_slack`,
+        // or an import that only kept what matching found): fingerprinted
+        // but never stamped, so nobody decided it. A decision is stamped,
+        // or was made here and not stamped yet (its value no longer matches
+        // the fingerprint, or has none).
+        let carried = !stamped
+            && entry.is_some_and(|m| {
+                meta.value_hashes.get(&part) == Some(&crate::sync::json_hash(&serde_json::json!(m)))
+            });
+        if stamped || (entry.is_some() && !carried) {
+            return entry.filter(|m| self.member(*m).is_some());
+        }
+        if let Some(m) = entry.filter(|m| self.member(*m).is_some()) {
+            return Some(m);
         }
         self.members
             .iter()

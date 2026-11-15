@@ -3494,4 +3494,48 @@ mod tests {
         assert!(!hub.inner.lock().unwrap().saved.invites.contains_key(&third));
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// A record of what was named lately that got cut short (it was being
+    /// written when the power went) deletes nothing: every file's clock
+    /// starts again, and the record is whole again afterwards.
+    #[test]
+    fn a_broken_named_record_deletes_nothing_and_starts_the_clock_again() {
+        let home = std::env::temp_dir().join(format!("wb-gc3-{:x}", wb_sync::random_u64()));
+        let dir = home.join(FILES_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = |c: char| std::iter::repeat(c).take(64).collect::<String>();
+        let now = std::time::SystemTime::now();
+        let day = Duration::from_secs(86_400);
+        let old = now - day * (FILE_KEEP_DAYS as u32 + 100);
+        let trashed = name('a');
+        std::fs::write(dir.join(&trashed), b"x").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join(&trashed))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let without = json!({"channels": [{"messages": []}]}).to_string();
+        for broken in ["", "{\"aaaa", "\0\0\0\0"] {
+            std::fs::write(dir.join(files::NAMED_FILE), broken).unwrap();
+            assert!(
+                collect_garbage(&home, Some(&without), now).is_empty(),
+                "nothing goes with a record of {:?}",
+                broken
+            );
+            assert!(dir.join(&trashed).exists());
+            let record = std::fs::read_to_string(dir.join(files::NAMED_FILE)).unwrap();
+            let map: BTreeMap<String, i64> = serde_json::from_str(&record).unwrap();
+            assert!(map.contains_key(&trashed), "rebuilt: {}", record);
+            assert!(!dir.join(format!("{}.tmp", files::NAMED_FILE)).exists());
+        }
+        // the clock started at `now`: still here a while later, gone after
+        // FILE_KEEP_DAYS
+        assert!(collect_garbage(&home, Some(&without), now + day * 10).is_empty());
+        assert_eq!(
+            collect_garbage(&home, Some(&without), now + day * FILE_KEEP_DAYS as u32),
+            vec![trashed.clone()]
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }

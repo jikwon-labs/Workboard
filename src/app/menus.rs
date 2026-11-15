@@ -1814,7 +1814,7 @@ impl App {
                     ui.add_space(12.0);
                     ui.label(RichText::new(tr("Channel messages")).strong());
                     for (mode, label) in [("all", "Every new message"), ("mentions", "Only @mentions and my threads"), ("nothing", "Nothing")] {
-                        if ui.radio(n.channel_default == mode, tr(label)).clicked() && n.channel_default != mode {
+                        if radio(ui, n.channel_default == mode, tr(label)).clicked() && n.channel_default != mode {
                             n.channel_default = mode.into();
                             // channels set the same way as the new default no longer stand apart
                             n.channel_modes.retain(|(_, m)| m != mode);

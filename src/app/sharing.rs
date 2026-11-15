@@ -285,12 +285,12 @@ impl App {
         ui.add_space(6.0);
         let mut close = false;
         ui.add_enabled_ui(may, |ui| {
-            let r = ui.radio(draft.everyone, tr("Everyone in the workspace"));
+            let r = radio(ui, draft.everyone, tr("Everyone in the workspace"));
             name_it(&r, "Share with everyone");
             if r.clicked() {
                 draft.everyone = true;
             }
-            let r = ui.radio(!draft.everyone, tr("Only the people chosen below"));
+            let r = radio(ui, !draft.everyone, tr("Only the people chosen below"));
             name_it(&r, "Share with chosen people");
             if r.clicked() && draft.everyone {
                 draft.everyone = false;

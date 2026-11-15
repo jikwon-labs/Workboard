@@ -3439,3 +3439,5 @@ fn timesheet_entry_edits_and_week_picker() {
     h.click("Pick a week");
     assert!(h.has("Today") || h.has("Tomorrow"), "the week picker opens a calendar");
 }
+#[path = "i18n_tests.rs"]
+mod i18n_tests;

@@ -99,32 +99,32 @@ pub fn fmt_estimate(min: u32) -> String {
 /// Milestone.
 pub(super) fn task_type_pill(ui: &mut Ui, t: &Theme, id: egui::Id, milestone: &mut bool) {
     let label = if *milestone { "Milestone" } else { "Task" };
-    let g = ui.painter().layout_no_wrap(label.into(), FontId::proportional(13.5), t.text);
-    let (tr, resp) = ui.allocate_exact_size(vec2(g.size().x + 44.0, 26.0), Sense::click());
+    let g = ui.painter().layout_no_wrap(tr(label).into(), FontId::proportional(13.5), t.text);
+    let (pill_r, resp) = ui.allocate_exact_size(vec2(g.size().x + 44.0, 26.0), Sense::click());
     name_it(&resp, "Task type");
     if resp.hovered() {
-        ui.painter().rect_filled(tr, 7.0, t.hover);
+        ui.painter().rect_filled(pill_r, 7.0, t.hover);
     }
-    ui.painter().rect_stroke(tr, 7.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
-    let c = tr.left_center() + vec2(13.0, 0.0);
+    ui.painter().rect_stroke(pill_r, 7.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
+    let c = pill_r.left_center() + vec2(13.0, 0.0);
     if *milestone {
         paint_diamond(ui.painter(), c, 5.5, t.text2);
     } else {
         ui.painter().circle_filled(c, 5.0, t.text2);
     }
-    ui.painter().galley(pos2(tr.left() + 24.0, tr.center().y - g.size().y / 2.0), g, t.text);
-    paint_triangle(ui.painter(), tr.right_center() - vec2(10.0, 0.0), true, t.text2);
-    let resp = resp.on_hover_text("Task type");
+    ui.painter().galley(pos2(pill_r.left() + 24.0, pill_r.center().y - g.size().y / 2.0), g, t.text);
+    paint_triangle(ui.painter(), pill_r.right_center() - vec2(10.0, 0.0), true, t.text2);
+    let resp = resp.on_hover_text(tr("Task type"));
     popup(ui, &resp, id.with("type"), 180.0, |ui| {
-        ui.label(RichText::new("Task type").small().color(t.text3));
+        ui.label(RichText::new(tr("Task type")).small().color(t.text3));
         let tc = t.text2;
-        if menu_row(ui, t, "Task", !*milestone, |p, c| {
+        if menu_row(ui, t, tr("Task"), !*milestone, |p, c| {
             p.circle_filled(c, 5.0, tc);
         }).clicked() {
             *milestone = false;
             close_popup(ui);
         }
-        if menu_row(ui, t, "Milestone", *milestone, |p, c| paint_diamond(p, c, 5.5, tc)).clicked() {
+        if menu_row(ui, t, tr("Milestone"), *milestone, |p, c| paint_diamond(p, c, 5.5, tc)).clicked() {
             *milestone = true;
             close_popup(ui);
         }
@@ -143,9 +143,9 @@ pub(super) fn estimate_field(ui: &mut Ui, id: egui::Id, est: &mut Option<u32>) {
     let buf_id = id.with("est_buf");
     let focused = ui.memory(|m| m.has_focus(te));
     let mut buf: String = if focused { ui.data(|d| d.get_temp(buf_id)).unwrap_or_default() } else { est.map(fmt_estimate).unwrap_or_default() };
-    let r = ui.add(egui::TextEdit::singleline(&mut buf).id(te).hint_text("Empty").frame(false).desired_width(110.0));
+    let r = ui.add(egui::TextEdit::singleline(&mut buf).id(te).hint_text(tr("Empty")).frame(false).desired_width(110.0));
     name_field(&r, "Time estimate value");
-    let r = r.on_hover_text("Type a time like 2h 30m, 45m or 1.5h");
+    let r = r.on_hover_text(tr("Type a time like 2h 30m, 45m or 1.5h"));
     if r.has_focus() {
         ui.data_mut(|d| d.insert_temp(buf_id, buf.clone()));
     }
@@ -162,9 +162,9 @@ pub(super) fn estimate_field(ui: &mut Ui, id: egui::Id, est: &mut Option<u32>) {
 /// The time entries popup under Track time: the entries (newest first)
 /// with a remove button, and a row to add time by hand.
 pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task, me: u64) {
-    ui.label(RichText::new("Time entries").small().color(t.text3));
+    ui.label(RichText::new(tr("Time entries")).small().color(t.text3));
     if task.time_entries.is_empty() {
-        ui.label(RichText::new("No time tracked yet").color(t.text3));
+        ui.label(RichText::new(tr("No time tracked yet")).color(t.text3));
     }
     let mut remove = None;
     for (i, e) in task.time_entries.iter().enumerate().rev() {
@@ -175,7 +175,7 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let r = ui.add(egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text3)).frame(false));
                 name_it(&r, &format!("Remove entry {}", i + 1));
-                if r.on_hover_text("Remove this entry").clicked() {
+                if r.on_hover_text(tr("Remove this entry")).clicked() {
                     remove = Some(i);
                 }
             });
@@ -191,18 +191,18 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
     let mut yesterday: bool = ui.data(|d| d.get_temp(day_id)).unwrap_or(false);
     let mut add = false;
     ui.horizontal(|ui| {
-        let r = ui.add(egui::TextEdit::singleline(&mut buf).hint_text("e.g. 1h 30m").desired_width(90.0));
+        let r = ui.add(egui::TextEdit::singleline(&mut buf).hint_text(tr("e.g. 1h 30m")).desired_width(90.0));
         name_field(&r, "Time to add");
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             add = true;
         }
-        if ui.selectable_label(!yesterday, "Today").clicked() {
+        if ui.selectable_label(!yesterday, tr("Today")).clicked() {
             yesterday = false;
         }
-        if ui.selectable_label(yesterday, "Yesterday").clicked() {
+        if ui.selectable_label(yesterday, tr("Yesterday")).clicked() {
             yesterday = true;
         }
-        if primary_button(ui, t, "Add time").clicked() {
+        if primary_button(ui, t, tr("Add time")).clicked() {
             add = true;
         }
     });
@@ -224,7 +224,7 @@ impl App {
     /// The tag field: typing offers tags already in use; Enter adds what is
     /// typed.
     pub(super) fn tag_field(&mut self, ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) {
-        let r = ui.add(egui::TextEdit::singleline(&mut self.tag_text).hint_text("Add tag").desired_width(100.0));
+        let r = ui.add(egui::TextEdit::singleline(&mut self.tag_text).hint_text(tr("Add tag")).desired_width(100.0));
         name_field(&r, "Add tag");
         let pid = id.with("tag_suggest");
         if r.gained_focus() || (r.has_focus() && r.changed()) {
@@ -247,7 +247,7 @@ impl App {
         }
         egui::popup_below_widget(ui, pid, &r, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
             ui.set_min_width(180.0);
-            ui.label(RichText::new("Tags in use").small().color(t.text3));
+            ui.label(RichText::new(tr("Tags in use")).small().color(t.text3));
             for g in &sugg {
                 let c = tag_color(g);
                 if menu_row(ui, t, &format!("Tag {}", g), false, |p, at| {
@@ -267,7 +267,7 @@ impl App {
         let on = task.watchers.contains(&me);
         let b = ui.add(egui::Button::new(RichText::new(if on { "\u{1F441} Watching" } else { "\u{1F441} Watch" }).size(12.0).color(if on { t.text } else { t.text2 })).frame(false));
         name_it(&b, if on { "Stop watching" } else { "Watch task" });
-        if b.on_hover_text(if on { "Stop getting updates" } else { "Get updates on this task" }).clicked() {
+        if b.on_hover_text(tr(if on { "Stop getting updates" } else { "Get updates on this task" })).clicked() {
             if on {
                 task.watchers.retain(|w| *w != me);
             } else {
@@ -290,7 +290,7 @@ impl App {
         let resp = resp.on_hover_text(format!("{} watching", task.watchers.len()));
         let data = &self.data;
         popup(ui, &resp, id.with("watchers"), 220.0, |ui| {
-            ui.label(RichText::new("Watchers").small().color(t.text3));
+            ui.label(RichText::new(tr("Watchers")).small().color(t.text3));
             for m in data.members.iter().filter(|m| !m.invited) {
                 let sel = task.watchers.contains(&m.id);
                 let ring = t.card;
@@ -314,7 +314,7 @@ impl App {
     pub(super) fn description_field(&mut self, ui: &mut Ui, t: &Theme, task: &mut Task) {
         let tc = t.clone();
         let mut layouter = |ui: &Ui, s: &str, wrap: f32| ui.fonts(|f| f.layout_job(super::docs::doc_layout_job(s, &tc, wrap)));
-        let out = egui::TextEdit::multiline(&mut task.description).hint_text("Add description").frame(false).font(FontId::proportional(15.0)).desired_rows(4).desired_width(f32::INFINITY).layouter(&mut layouter).show(ui);
+        let out = egui::TextEdit::multiline(&mut task.description).hint_text(tr("Add description")).frame(false).font(FontId::proportional(15.0)).desired_rows(4).desired_width(f32::INFINITY).layouter(&mut layouter).show(ui);
         name_field(&out.response, "Add description");
         // painted marks over the hidden Markdown markers, as in Docs
         let click = if out.response.clicked() { ui.input(|i| i.pointer.interact_pos()) } else { None };
@@ -392,7 +392,7 @@ impl App {
                     txt = txt.strikethrough().color(t.text3);
                 }
                 let l = row.add(egui::Label::new(txt).sense(Sense::click()).truncate());
-                if l.on_hover_text("Click to rename").clicked() {
+                if l.on_hover_text(tr("Click to rename")).clicked() {
                     editing = Some(i);
                 }
             }
@@ -409,7 +409,7 @@ impl App {
                             ui.painter().text(ar.center(), Align2::CENTER_CENTER, "\u{1F464}", FontId::proportional(12.0), t.text3);
                         }
                     }
-                    let aresp = aresp.on_hover_text("Assign");
+                    let aresp = aresp.on_hover_text(tr("Assign"));
                     popup(ui, &aresp, pid, 200.0, |ui| {
                         for m in &members {
                             let sel = item.assignee == Some(m.id);
@@ -426,25 +426,25 @@ impl App {
                 }
                 let x = ui.add(small("\u{2716}"));
                 name_it(&x, &format!("Remove item {}", label));
-                if x.on_hover_text("Remove").clicked() {
+                if x.on_hover_text(tr("Remove")).clicked() {
                     remove = Some(i);
                 }
                 let s = ui.add(small("\u{21B3}"));
                 name_it(&s, &format!("Make subtask {}", label));
-                if s.on_hover_text("Turn into a subtask").clicked() {
+                if s.on_hover_text(tr("Turn into a subtask")).clicked() {
                     to_sub = Some(i);
                 }
                 if i + 1 < n {
                     let d = ui.add(small("\u{2193}"));
                     name_it(&d, &format!("Move down {}", label));
-                    if d.on_hover_text("Move down").clicked() {
+                    if d.on_hover_text(tr("Move down")).clicked() {
                         swap = Some((i, i + 1));
                     }
                 }
                 if i > 0 {
                     let u = ui.add(small("\u{2191}"));
                     name_it(&u, &format!("Move up {}", label));
-                    if u.on_hover_text("Move up").clicked() {
+                    if u.on_hover_text(tr("Move up")).clicked() {
                         swap = Some((i - 1, i));
                     }
                 }
@@ -594,7 +594,7 @@ impl App {
     pub(super) fn relationships_section(&mut self, ui: &mut Ui, t: &Theme, id: egui::Id, tid: u64) {
         let (waiting, blocking, linked) = self.relations(tid);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Relationships").strong());
+            ui.label(RichText::new(tr("Relationships")).strong());
             let n = waiting.len() + blocking.len() + linked.len();
             if n > 0 {
                 ui.label(RichText::new(n.to_string()).color(t.text3));
@@ -626,7 +626,7 @@ impl App {
                 name_it(&resp, &format!("{} {}", mode.title(), o.name));
                 let x = ui.put(Rect::from_center_size(r.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0)), egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover { t.text2 } else { Color32::TRANSPARENT })).frame(false));
                 name_it(&x, &format!("Remove link {}", o.name));
-                if x.on_hover_text("Remove").clicked() {
+                if x.on_hover_text(tr("Remove")).clicked() {
                     drop = Some((mode, *oid));
                 } else if resp.clicked() {
                     self.actions.push(Action::Open(*oid));
@@ -636,7 +636,7 @@ impl App {
         if let Some((mode, oid)) = drop {
             self.remove_relation(tid, mode, oid);
         }
-        let r = add_line(ui, t, "+  Add relationship");
+        let r = add_line(ui, t, tr("+  Add relationship"));
         popup(ui, &r, id.with(("rel_add", tid)), 200.0, |ui| {
             for mode in [TaskPick::WaitingOn, TaskPick::Blocking, TaskPick::Linked] {
                 if menu_row(ui, t, mode.title(), false, |_, _| {}).clicked() {
@@ -652,14 +652,14 @@ impl App {
         let mut close = false;
         let name = self.task(tid).map(|x| x.name.clone()).unwrap_or_default();
         let prompt = match mode {
-            TaskPick::Parent => format!("Choose the task \"{}\" goes under.", name),
-            TaskPick::Child => format!("Choose a task to put under \"{}\".", name),
-            TaskPick::WaitingOn => format!("Choose a task \"{}\" waits on.", name),
-            TaskPick::Blocking => format!("Choose a task \"{}\" blocks.", name),
-            TaskPick::Linked => format!("Choose a task to link to \"{}\".", name),
+            TaskPick::Parent => trf!("Choose the task \"{}\" goes under.", name),
+            TaskPick::Child => trf!("Choose a task to put under \"{}\".", name),
+            TaskPick::WaitingOn => trf!("Choose a task \"{}\" waits on.", name),
+            TaskPick::Blocking => trf!("Choose a task \"{}\" blocks.", name),
+            TaskPick::Linked => trf!("Choose a task to link to \"{}\".", name),
         };
         ui.label(RichText::new(prompt).color(t.text2));
-        let r = ui.add(egui::TextEdit::singleline(query).hint_text("Search tasks...").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+        let r = ui.add(egui::TextEdit::singleline(query).hint_text(tr("Search tasks...")).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
         name_field(&r, "Search tasks");
         focus_once(ui, &r);
         ui.add_space(4.0);
@@ -683,7 +683,7 @@ impl App {
                 }
             }
             if shown == 0 {
-                ui.label(RichText::new("No tasks match").color(t.text3));
+                ui.label(RichText::new(tr("No tasks match")).color(t.text3));
             }
         });
         if let Some(oid) = picked {
@@ -733,14 +733,14 @@ impl App {
         let tid = task.id;
         let mut attach = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Attachments").strong());
+            ui.label(RichText::new(tr("Attachments")).strong());
             if !task.attachments.is_empty() {
                 ui.label(RichText::new(task.attachments.len().to_string()).color(t.text3));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let b = ui.add(egui::Button::new(RichText::new("\u{1F4CE} Attach").color(t.text2)).frame(false));
                 name_it(&b, "Attach file");
-                if b.on_hover_text("Attach pictures or videos (or drop them here)").clicked() {
+                if b.on_hover_text(tr("Attach pictures or videos (or drop them here)")).clicked() {
                     attach = true;
                 }
             });
@@ -776,7 +776,7 @@ impl App {
                     let hover = ui.rect_contains_pointer(rect);
                     let x = ui.put(Rect::from_center_size(pic.right_top() + vec2(-12.0, 12.0), vec2(20.0, 20.0)), egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover { Color32::WHITE } else { Color32::TRANSPARENT })).fill(if hover { Color32::from_black_alpha(150) } else { Color32::TRANSPARENT }).corner_radius(10));
                     name_it(&x, &format!("Remove attachment {}", a.name));
-                    if x.on_hover_text("Remove").clicked() {
+                    if x.on_hover_text(tr("Remove")).clicked() {
                         remove = Some(i);
                     } else if resp.clicked() {
                         open = Some(a.clone());

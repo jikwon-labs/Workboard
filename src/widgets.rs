@@ -2,6 +2,7 @@
 // status circle, priority flag, avatars, pills, and the status, priority,
 // assignee and date pickers.
 
+use crate::i18n::{tr, DateText};
 use crate::model::*;
 use crate::theme::{rgb, Theme};
 use chrono::{Datelike, Duration, NaiveDate};
@@ -120,7 +121,7 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
     } else {
         (rgb(st.color), Color32::WHITE)
     };
-    let text = st.name.to_uppercase();
+    let text = crate::i18n::status_text(&st.name).to_uppercase();
     let galley = ui.painter().layout_no_wrap(text, FontId::proportional(12.0), fg);
     let size = vec2(galley.size().x + 30.0, 22.0);
     let (rect, resp) = ui.allocate_exact_size(size, sense);
@@ -147,15 +148,15 @@ pub fn fmt_date(d: NaiveDate) -> String {
     let t = today();
     let diff = (d - t).num_days();
     match diff {
-        0 => "Today".into(),
-        1 => "Tomorrow".into(),
-        -1 => "Yesterday".into(),
-        2..=6 => d.format("%a").to_string(),
+        0 => tr("Today").into(),
+        1 => tr("Tomorrow").into(),
+        -1 => tr("Yesterday").into(),
+        2..=6 => d.text("%a"),
         _ => {
             if d.year() == t.year() {
-                d.format("%b %-d").to_string()
+                d.text("%b %-d")
             } else {
-                d.format("%-m/%-d/%y").to_string()
+                d.text("%-m/%-d/%y")
             }
         }
     }
@@ -180,26 +181,26 @@ pub fn fmt_duration(secs: i64) -> String {
     let m = (secs % 3600) / 60;
     let s = secs % 60;
     if h > 0 {
-        format!("{}h {}m", h, m)
+        crate::trf!("{}h {}m", h, m)
     } else if m > 0 {
-        format!("{}m {}s", m, s)
+        crate::trf!("{}m {}s", m, s)
     } else {
-        format!("{}s", s)
+        crate::trf!("{}s", s)
     }
 }
 
 pub fn fmt_ago(ts: i64) -> String {
     let d = now_ts() - ts;
     if d < 60 {
-        "just now".into()
+        tr("just now").into()
     } else if d < 3600 {
-        format!("{} mins ago", (d / 60).max(1))
+        crate::trf!("{} mins ago", (d / 60).max(1))
     } else if d < 86400 {
         let h = d / 3600;
-        if h == 1 { "1 hour ago".into() } else { format!("{} hours ago", h) }
+        if h == 1 { tr("1 hour ago").into() } else { crate::trf!("{} hours ago", h) }
     } else {
         let dt = chrono::DateTime::from_timestamp(ts, 0)
-            .map(|x| x.with_timezone(&chrono::Local).format("%b %-d at %-I:%M %p").to_string())
+            .map(|x| x.with_timezone(&chrono::Local).text("%b %-d at %-I:%M %p"))
             .unwrap_or_default();
         dt
     }
@@ -309,10 +310,10 @@ pub fn menu_row(ui: &mut Ui, t: &Theme, label: &str, selected: bool, lead: impl 
 
 pub fn status_menu(ui: &mut Ui, t: &Theme, statuses: &[Status], current: &mut String) -> bool {
     let mut changed = false;
-    ui.label(egui::RichText::new("Statuses").small().color(t.text3));
+    ui.label(egui::RichText::new(tr("Statuses")).small().color(t.text3));
     for st in statuses {
         let sel = &st.name == current;
-        let r = menu_row(ui, t, &st.name.to_uppercase(), sel, |p, c| paint_status_circle(p, c, 6.0, st));
+        let r = menu_row(ui, t, &crate::i18n::status_text(&st.name).to_uppercase(), sel, |p, c| paint_status_circle(p, c, 6.0, st));
         if r.clicked() {
             if !sel {
                 *current = st.name.clone();
@@ -339,17 +340,17 @@ pub fn priority_menu(ui: &mut Ui, t: &Theme, current: &mut u8) -> bool {
 /// clicked" separately from "the value changed".
 pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
     let mut picked = None;
-    ui.label(egui::RichText::new("Task Priority").small().color(t.text3));
+    ui.label(egui::RichText::new(tr("Task Priority")).small().color(t.text3));
     for pr in [1u8, 2, 3, 4] {
         let col = priority_color(pr, t);
-        let r = menu_row(ui, t, PRIORITIES[pr as usize].label, current == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0));
+        let r = menu_row(ui, t, tr(PRIORITIES[pr as usize].label), current == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0));
         if r.clicked() {
             picked = Some(pr);
             close_popup(ui);
         }
     }
     ui.separator();
-    let r = menu_row(ui, t, "Clear", false, |p, c| {
+    let r = menu_row(ui, t, tr("Clear"), false, |p, c| {
         p.text(c, Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), Color32::GRAY);
     });
     if r.clicked() {
@@ -361,10 +362,10 @@ pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
 
 pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>) -> bool {
     let mut changed = false;
-    ui.label(egui::RichText::new("People").small().color(t.text3));
+    ui.label(egui::RichText::new(tr("People")).small().color(t.text3));
     for m in &data.members {
         let sel = current.contains(&m.id);
-        let label = if m.id == data.me { format!("{} (you)", m.name) } else { m.name.clone() };
+        let label = if m.id == data.me { crate::trf!("{} (you)", m.name) } else { m.name.clone() };
         let ring = t.card;
         let r = menu_row(ui, t, &label, sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
         if sel {
@@ -417,7 +418,7 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
                 ("8 weeks", td + Duration::days(56)),
             ];
             for (label, d) in opts {
-                let r = ui.add(egui::Button::new(label).frame(false).min_size(vec2(126.0, 24.0)));
+                let r = ui.add(egui::Button::new(tr(label)).frame(false).min_size(vec2(126.0, 24.0)));
                 if r.clicked() {
                     *current = Some(d);
                     changed = true;
@@ -426,7 +427,7 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
             }
             if current.is_some() {
                 ui.separator();
-                if ui.add(egui::Button::new(egui::RichText::new("Clear").color(t.danger)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(egui::RichText::new(tr("Clear")).color(t.danger)).frame(false)).clicked() {
                     *current = None;
                     changed = true;
                     close_popup(ui);
@@ -440,7 +441,7 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
         sep_x = gap.center().x;
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(month.format("%B %Y").to_string()).strong());
+                ui.label(egui::RichText::new(month.text("%B %Y")).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button(">").clicked() {
                         month = add_months(month, 1);
@@ -454,7 +455,7 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
             let (rect, _) = ui.allocate_exact_size(vec2(cell * 7.0, cell * 7.0), Sense::hover());
             let p = ui.painter();
             for (i, d) in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].iter().enumerate() {
-                p.text(rect.min + vec2(cell * (i as f32 + 0.5), cell * 0.5), Align2::CENTER_CENTER, *d, FontId::proportional(11.0), t.text3);
+                p.text(rect.min + vec2(cell * (i as f32 + 0.5), cell * 0.5), Align2::CENTER_CENTER, tr(d), FontId::proportional(11.0), t.text3);
             }
             let start = month - Duration::days(month.weekday().num_days_from_sunday() as i64);
             for i in 0..42 {
@@ -592,8 +593,8 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<Naive
     ui.horizontal(|ui| {
         for (k, label, v) in [(0u8, "Start date", *start), (1u8, "Due date", *due)] {
             let txt = match v {
-                Some(d) => format!("{}: {}", label, fmt_date(d)),
-                None => label.to_string(),
+                Some(d) => format!("{}: {}", tr(label), fmt_date(d)),
+                None => tr(label).to_string(),
             };
             let sel = which == k;
             let b = egui::Button::new(egui::RichText::new(txt).color(if sel { t.text } else { t.text2 }))
@@ -624,11 +625,11 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<Naive
     }
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("\u{1F501}  Set Recurring").color(t.text2));
+        ui.label(egui::RichText::new(tr("\u{1F501}  Set Recurring")).color(t.text2));
         // plain buttons: a combo box would close this popup
         for (v, label) in RECUR {
             let sel = recur.as_deref().unwrap_or("") == v;
-            if ui.selectable_label(sel, label).clicked() && !sel {
+            if ui.selectable_label(sel, tr(label)).clicked() && !sel {
                 *recur = if v.is_empty() { None } else { Some(v.to_string()) };
                 changed = true;
             }
@@ -655,7 +656,7 @@ pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
             let c = r.center();
             ui.painter().line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], Stroke::new(1.5, t.text2));
             ui.painter().line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], Stroke::new(1.5, t.text2));
-            if resp.on_hover_text("Close").clicked() {
+            if resp.on_hover_text(tr("Close")).clicked() {
                 close = true;
             }
         });

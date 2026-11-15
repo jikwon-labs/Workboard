@@ -488,7 +488,7 @@ impl App {
     pub(super) fn add_media(&mut self, thread: bool, path: Option<PathBuf>, png: Option<Vec<u8>>) -> bool {
         let count = if thread { self.thread_files.len() } else { self.chat_files.len() };
         if count >= MAX_PER_MESSAGE {
-            self.toast = Some((format!("You can send up to {} pictures or videos in one message.", MAX_PER_MESSAGE), now_ts()));
+            self.toast = Some((trf!("You can send up to {} pictures or videos in one message.", MAX_PER_MESSAGE), now_ts()));
             return false;
         }
         let remote = self.media_remote();
@@ -597,7 +597,7 @@ impl App {
                 if let Some(why) = &failed {
                     painter.rect_stroke(rect, 8.0, Stroke::new(2.0, t.danger), egui::StrokeKind::Inside);
                     painter.text(rect.center(), Align2::CENTER_CENTER, "!", FontId::proportional(18.0), t.danger);
-                    let r = resp.clone().on_hover_text(why.clone());
+                    let r = resp.clone().on_hover_text(tr(why));
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
@@ -671,9 +671,9 @@ impl App {
                     None => {
                         painter.rect_filled(rect, 8.0, t.hover);
                         let status = match self.files.state(&a.file) {
-                            Some(Transfer::Down(f)) => format!("Loading {}%", (f * 100.0) as u32),
-                            Some(Transfer::Failed(e)) => e,
-                            _ if self.files.broken(&a.file, THUMB) => "Can't show this file".into(),
+                            Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
+                            Some(Transfer::Failed(e)) => tr(&e).to_string(),
+                            _ if self.files.broken(&a.file, THUMB) => tr("Can't show this file").into(),
                             _ => a.name.clone(),
                         };
                         painter.text(rect.center() + vec2(0.0, if a.kind == MediaKind::Video { 26.0 } else { 0.0 }), Align2::CENTER_CENTER, status, FontId::proportional(12.0), t.text3);
@@ -786,9 +786,9 @@ impl App {
                 }
                 None => {
                     let status = match self.files.state(&a.file) {
-                        Some(Transfer::Down(f)) => format!("Loading {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => e,
-                        _ => "Loading...".into(),
+                        Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
+                        Some(Transfer::Failed(e)) => tr(&e).to_string(),
+                        _ => tr("Loading...").into(),
                     };
                     ui.painter().text(pic.center(), Align2::CENTER_CENTER, status, FontId::proportional(15.0), Color32::from_gray(200));
                 }
@@ -799,21 +799,21 @@ impl App {
             // top: name and the buttons
             let top = Rect::from_min_size(bg.min + vec2(20.0, 12.0), vec2(bg.width() - 40.0, 30.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(top).layout(Layout::left_to_right(Align::Center)), |ui| {
-                let count = if m.attachments.len() > 1 { format!("  {} of {}", v.index + 1, m.attachments.len()) } else { String::new() };
+                let count = if m.attachments.len() > 1 { trf!("  {} of {}", v.index + 1, m.attachments.len()) } else { String::new() };
                 ui.label(RichText::new(format!("{}{}", a.name, count)).color(Color32::WHITE).size(14.0));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let b = |ui: &mut Ui, s: &str| ui.add(egui::Button::new(RichText::new(s).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(6).min_size(vec2(0.0, 28.0)));
-                    if b(ui, "Close").on_hover_text("Esc").clicked() {
+                    if b(ui, tr("Close")).on_hover_text("Esc").clicked() {
                         close = true;
                     }
                     if let Some(path) = &local {
-                        if b(ui, "Save to Downloads").clicked() {
+                        if b(ui, tr("Save to Downloads")).clicked() {
                             match save_copy(path, &a.name) {
-                                Ok(dest) => self.toast = Some((format!("Saved {}", dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()), now_ts())),
-                                Err(e) => self.toast = Some((format!("Couldn't save: {}", e), now_ts())),
+                                Ok(dest) => self.toast = Some((trf!("Saved {}", dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()), now_ts())),
+                                Err(e) => self.toast = Some((trf!("Couldn't save: {}", e), now_ts())),
                             }
                         }
-                        if b(ui, "Show in Finder").clicked() {
+                        if b(ui, tr("Show in Finder")).clicked() {
                             let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
                         }
                     }
@@ -871,10 +871,10 @@ impl App {
                     });
                 } else {
                     let status = match self.files.state(&a.file) {
-                        Some(Transfer::Down(f)) => format!("Loading the video {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => e,
-                        _ if local.is_some() => "This video can't be played on this Mac.".into(),
-                        _ => "Loading the video...".into(),
+                        Some(Transfer::Down(f)) => trf!("Loading the video {}%", (f * 100.0) as u32),
+                        Some(Transfer::Failed(e)) => tr(&e).to_string(),
+                        _ if local.is_some() => tr("This video can't be played on this Mac.").into(),
+                        _ => tr("Loading the video...").into(),
                     };
                     ui.painter().text(bar.center(), Align2::CENTER_CENTER, status, FontId::proportional(13.0), Color32::from_gray(220));
                     if local.is_none() {

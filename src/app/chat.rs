@@ -81,7 +81,7 @@ impl App {
                 .find(|m| **m != self.data.me)
                 .and_then(|m| self.data.member(*m))
                 .map(|m| m.name.clone())
-                .unwrap_or_else(|| "Just you".into()),
+                .unwrap_or_else(|| tr("Just you").into()),
         }
     }
 
@@ -124,22 +124,22 @@ impl App {
                 ui.painter().rect_filled(r, 14.0, t.accent_bg);
                 super::shell::line_icon(ui.painter(), "chat", r.center(), t.accent_text);
                 ui.add_space(14.0);
-                ui.label(RichText::new("Chat with your team").size(22.0).color(t.text));
+                ui.label(RichText::new(tr("Chat with your team")).size(22.0).color(t.text));
                 ui.add_space(4.0);
-                ui.label(RichText::new("Channels keep conversations about a topic in one place. Direct messages are for one-on-one talks and calls.").color(t.text2));
+                ui.label(RichText::new(tr("Channels keep conversations about a topic in one place. Direct messages are for one-on-one talks and calls.")).color(t.text2));
                 ui.add_space(18.0);
                 ui.horizontal(|ui| {
                     let w = 170.0 * 2.0 + 150.0 + 16.0;
                     ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                    let b = ui.add(egui::Button::new(RichText::new("#  Create a Channel").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(170.0, 34.0)));
+                    let b = ui.add(egui::Button::new(RichText::new(tr("#  Create a Channel")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(170.0, 34.0)));
                     name_it(&b, "Create a Channel");
                     if b.clicked() {
                         make = true;
                     }
-                    if ui.add(egui::Button::new("\u{1F464}  Message someone").stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(170.0, 34.0))).clicked() {
+                    if ui.add(egui::Button::new(tr("\u{1F464}  Message someone")).stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(170.0, 34.0))).clicked() {
                         self.new_message_open = true;
                     }
-                    if ui.add(egui::Button::new("\u{1F465}  Work together").stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(150.0, 34.0))).on_hover_text("Share this workspace so others can chat with you").clicked() {
+                    if ui.add(egui::Button::new(tr("\u{1F465}  Work together")).stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(150.0, 34.0))).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
                         self.modal = Some(self.together_modal());
                     }
                 });
@@ -167,7 +167,7 @@ impl App {
                     .frame(egui::Frame::new().fill(t.column_bg).inner_margin(egui::Margin::symmetric(14, 10)))
                     .show_inside(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Thread").size(15.0).strong());
+                            ui.label(RichText::new(tr("Thread")).size(15.0).strong());
                             ui.label(RichText::new(self.channel_label(&channel)).color(t.text3));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.add(egui::Button::new("\u{2716}").frame(false)).clicked() {
@@ -181,7 +181,7 @@ impl App {
                         egui::ScrollArea::vertical().id_salt("thread_scroll").max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
                             self.message_row(ui, cid, &parent, false, &mut acts);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(if parent.replies.len() == 1 { "1 reply".to_string() } else { format!("{} replies", parent.replies.len()) }).small().color(t.text3));
+                                ui.label(RichText::new(if parent.replies.len() == 1 { tr("1 reply").to_string() } else { trf!("{} replies", parent.replies.len()) }).small().color(t.text3));
                                 let r = ui.available_rect_before_wrap();
                                 ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, t.border));
                             });
@@ -189,7 +189,7 @@ impl App {
                                 self.message_row(ui, cid, r, false, &mut acts);
                             }
                         });
-                        if let Some((text, files)) = self.composer(ui, "Reply...", true) {
+                        if let Some((text, files)) = self.composer(ui, tr("Reply..."), true) {
                             acts.push(ChatAction::Send { ch: cid, text, parent: Some(tid), files });
                         }
                     });
@@ -220,21 +220,21 @@ impl App {
                     }
                     ui.label(RichText::new(title).size(15.5).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let hb = |ui: &mut Ui, text: &str| ui.add(egui::Button::new(RichText::new(text).size(14.0).color(t.text2)).frame(false));
+                        let hb = |ui: &mut Ui, text: &str| ui.add(egui::Button::new(RichText::new(tr(text)).size(14.0).color(t.text2)).frame(false));
                         if hb(ui, "\u{1F4DD}  Ask").clicked() {
                             self.section = Section::Ai;
                         }
                         if hb(ui, "\u{2699}  Integrate").clicked() {
                             self.modal = Some(super::menus::unavailable("Integrations"));
                         }
-                        if hb(ui, "\u{260E}").on_hover_text("Start a SyncUp").clicked() {
+                        if hb(ui, "\u{260E}").on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
                         }
                     });
                 });
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 14.0;
-                    let g = ui.painter().layout_no_wrap("Channel".into(), FontId::proportional(14.0), t.text);
+                    let g = ui.painter().layout_no_wrap(tr("Channel").into(), FontId::proportional(14.0), t.text);
                     let (r, _) = ui.allocate_exact_size(vec2(g.size().x + 34.0, 34.0), Sense::hover());
                     let ic = Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(15.0, 15.0));
                     ui.painter().rect_filled(ic, 3.0, Color32::from_rgb(0x5f, 0x55, 0xee));
@@ -243,17 +243,17 @@ impl App {
                     ui.painter().galley(pos2(r.left() + 26.3, r.center().y - g.size().y / 2.0), g, t.text);
                     ui.painter().rect_filled(Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), r.max), 1.0, t.text);
                     for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar)] {
-                        if ui.add(egui::Button::new(RichText::new(label).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0))).clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr(label)).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0))).clicked() {
                             self.view = v;
                             // a channel made with "Add a List" opens its own List
                             let to = channel.list.filter(|l| self.data.location_exists(Location::List(*l))).map(Location::List).unwrap_or(Location::Everything);
                             self.actions.push(Action::Go(to));
                         }
                     }
-                    let vr = ui.add(egui::Button::new(RichText::new("+  View").size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0)));
+                    let vr = ui.add(egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0)));
                     popup(ui, &vr, ui.id().with(("chan_view", cid)), 180.0, |ui| {
                         for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar), ("Gantt", ViewKind::Gantt), ("Table", ViewKind::Table)] {
-                            if ui.button(label).clicked() {
+                            if ui.button(tr(label)).clicked() {
                                 self.view = v;
                                 self.actions.push(Action::Go(Location::Everything));
                                 close_popup(ui);
@@ -283,7 +283,7 @@ impl App {
                         } else {
                             ui.painter().text(r.left_center() + vec2(12.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
                         }
-                        ui.painter().text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), t.text);
+                        ui.painter().text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text);
                         if code == 10 {
                             ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
                         }
@@ -299,18 +299,18 @@ impl App {
             });
             ui.horizontal(|ui| {
                 ui.add_space(14.0);
-                if ui.add(egui::Button::new(RichText::new("Add bookmarks, notes, and more").size(13.5).color(t.text2)).corner_radius(14)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(tr("Add bookmarks, notes, and more")).size(13.5).color(t.text2)).corner_radius(14)).clicked() {
                     self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                 }
                 if let Some(mut q) = self.channel_find.take() {
-                    ui.add(egui::TextEdit::singleline(&mut q).hint_text("\u{1F50D} Find in channel").desired_width(200.0));
+                    ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("\u{1F50D} Find in channel")).desired_width(200.0));
                     self.channel_find = Some(q);
                 }
                 if self.channel_panel != 0 {
                     let label = match self.channel_panel {
-                        1 => "Pinned messages",
-                        2 => "Messages with replies",
-                        _ => "Messages turned into tasks",
+                        1 => tr("Pinned messages"),
+                        2 => tr("Messages with replies"),
+                        _ => tr("Messages turned into tasks"),
                     };
                     if ui.add(egui::Button::new(format!("{}  \u{2716}", label)).corner_radius(14)).clicked() {
                         self.channel_panel = 0;
@@ -340,18 +340,18 @@ impl App {
                         let w = ui.available_width();
                         let cw = 400.0f32.min(w - 40.0);
                         let pad = ((w - cw) / 2.0).max(0.0);
-                        let name = if channel.kind == ChannelKind::Channel { format!("#{}", if channel.name == "general" { "General".to_string() } else { channel.name.clone() }) } else { self.channel_label(&channel) };
+                        let name = if channel.kind == ChannelKind::Channel { format!("#{}", if channel.name == "general" { tr("General").to_string() } else { channel.name.clone() }) } else { self.channel_label(&channel) };
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
                             ui.vertical(|ui| {
                                 ui.set_width(cw);
-                                ui.label(RichText::new(format!("Chat in {}", name)).size(16.0).color(t.text));
-                                ui.label(RichText::new("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.").color(t.text2));
+                                ui.label(RichText::new(trf!("Chat in {}", name)).size(16.0).color(t.text));
+                                ui.label(RichText::new(tr("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.")).color(t.text2));
                                 ui.add_space(10.0);
-                                if ui.add(egui::Button::new("+  Add People").min_size(vec2(cw, 32.0))).clicked() {
+                                if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, 32.0))).clicked() {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
-                                if ui.add(egui::Button::new("\u{2728}  Import from Slack").min_size(vec2(cw, 32.0))).clicked() {
+                                if ui.add(egui::Button::new(tr("\u{2728}  Import from Slack")).min_size(vec2(cw, 32.0))).clicked() {
                                     self.modal = Some(super::menus::unavailable("Import from Slack"));
                                 }
                                 ui.add_space(8.0);
@@ -362,8 +362,8 @@ impl App {
                                     let ib = Rect::from_center_size(r.left_center() + vec2(26.0, 0.0), vec2(34.0, 34.0));
                                     ui.painter().rect_filled(ib, 8.0, Color32::WHITE);
                                     ui.painter().text(ib.center(), Align2::CENTER_CENTER, icon, FontId::proportional(15.0), rgb(bg));
-                                    ui.painter().text(r.left_center() + vec2(54.0, -9.0), Align2::LEFT_CENTER, title, FontId::proportional(14.5), t.text);
-                                    ui.painter().text(r.left_center() + vec2(54.0, 10.0), Align2::LEFT_CENTER, sub, FontId::proportional(12.5), t.text2);
+                                    ui.painter().text(r.left_center() + vec2(54.0, -9.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(14.5), t.text);
+                                    ui.painter().text(r.left_center() + vec2(54.0, 10.0), Align2::LEFT_CENTER, tr(sub), FontId::proportional(12.5), t.text2);
                                     if resp.clicked() {
                                         match title {
                                             "Track Tasks" => self.actions.push(Action::Go(Location::Everything)),
@@ -387,9 +387,9 @@ impl App {
                             let (r, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
                             ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, t.border));
                             let label = match (d - today()).num_days() {
-                                0 => "Today".to_string(),
-                                -1 => "Yesterday".to_string(),
-                                _ => d.format("%A, %B %-d").to_string(),
+                                0 => tr("Today").to_string(),
+                                -1 => tr("Yesterday").to_string(),
+                                _ => d.text("%A, %B %-d"),
                             };
                             let g = ui.painter().layout_no_wrap(label, FontId::proportional(11.5), t.text2);
                             let pill = Rect::from_center_size(r.center(), g.size() + vec2(20.0, 8.0));
@@ -406,7 +406,7 @@ impl App {
             });
             egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 10 }).show(ui, |ui| {
                 let target = match channel.kind {
-                    ChannelKind::Channel => if channel.name == "general" { "General".to_string() } else { channel.name.clone() },
+                    ChannelKind::Channel => if channel.name == "general" { tr("General").to_string() } else { channel.name.clone() },
                     ChannelKind::Direct => self.channel_label(&channel),
                 };
                 if let Some((text, title, files)) = self.channel_composer(ui, &target) {
@@ -422,7 +422,7 @@ impl App {
             let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop_hint")));
             p.rect_filled(r.shrink(8.0), 12.0, t.primary.gamma_multiply(0.12));
             p.rect_stroke(r.shrink(8.0), 12.0, Stroke::new(2.0, t.primary), egui::StrokeKind::Inside);
-            p.text(r.center(), Align2::CENTER_CENTER, "Drop pictures or videos to send", FontId::proportional(18.0), t.text);
+            p.text(r.center(), Align2::CENTER_CENTER, tr("Drop pictures or videos to send"), FontId::proportional(18.0), t.text);
         }
 
         // mark as read (unless the person just marked it unread and is still here)
@@ -451,7 +451,7 @@ impl App {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (i, (icon, label)) in [("\u{1F4AC}", "Message"), ("\u{1F4E2}", "Post"), ("\u{2728}", "Ask")].iter().enumerate() {
                 let sel = self.composer_mode == i as u8;
-                let b = egui::Button::new(RichText::new(format!("{} {}", icon, label)).size(13.5).color(if sel { t.text } else { t.text2 })).fill(if sel { t.bg } else { Color32::TRANSPARENT }).stroke(if sel { Stroke::new(1.0, t.border) } else { Stroke::NONE }).corner_radius(6);
+                let b = egui::Button::new(RichText::new(format!("{} {}", icon, tr(label))).size(13.5).color(if sel { t.text } else { t.text2 })).fill(if sel { t.bg } else { Color32::TRANSPARENT }).stroke(if sel { Stroke::new(1.0, t.border) } else { Stroke::NONE }).corner_radius(6);
                 if ui.add(b).clicked() {
                     if i == 2 {
                         self.section = Section::Ai;
@@ -477,9 +477,9 @@ impl App {
             }
             self.pending_strip(ui, false);
             if self.composer_mode == 1 {
-                ui.add(egui::TextEdit::singleline(&mut self.post_title).hint_text("Title").font(FontId::proportional(15.0)).frame(false).desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::singleline(&mut self.post_title).hint_text(tr("Title")).font(FontId::proportional(15.0)).frame(false).desired_width(f32::INFINITY));
             }
-            let hint = if self.composer_mode == 1 { "Share an announcement...".to_string() } else { format!("Write to {}, press 'space' for AI, '/' for commands", target) };
+            let hint = if self.composer_mode == 1 { tr("Share an announcement...").to_string() } else { trf!("Write to {}, press 'space' for AI, '/' for commands", target) };
             let r = ui.add(egui::TextEdit::multiline(&mut self.chat_text).id(text_id).hint_text(hint).frame(false).desired_rows(1).desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer"));
             let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
@@ -502,7 +502,7 @@ impl App {
             let mut insert: Option<String> = None;
             ui.horizontal(|ui| {
                 let tool = |ui: &mut Ui, g: &str, tip: &str| {
-                    let b = ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tip);
+                    let b = ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tr(tip));
                     name_it(&b, tip);
                     b
                 };
@@ -514,7 +514,7 @@ impl App {
                 let people: Vec<Member> = self.data.members.iter().filter(|m| !m.invited && m.id != me).cloned().collect();
                 popup(ui, &at, mention_popup, 210.0, |ui| {
                     if people.is_empty() {
-                        ui.label(RichText::new("No one else here yet").color(t.text3));
+                        ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
                     }
                     for m in &people {
                         if menu_row(ui, &t, &m.name, false, |p, c| paint_avatar(p, c, 8.0, m, t.card)).clicked() {
@@ -534,7 +534,7 @@ impl App {
                     self.open_quick_add(None);
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let label = if self.composer_mode == 1 { "Post" } else { "\u{27A4}" };
+                    let label = if self.composer_mode == 1 { tr("Post") } else { "\u{27A4}" };
                     let (files_ok, files) = self.pending_ready(false);
                     let ready = files_ok && (!self.chat_text.trim().is_empty() || !files.is_empty() || (self.composer_mode == 1 && !self.post_title.trim().is_empty()));
                     let b = egui::Button::new(RichText::new(label).color(if ready { Color32::WHITE } else { t.text3 })).fill(if ready { t.primary } else { t.hover }).corner_radius(6).min_size(vec2(34.0, 28.0));
@@ -583,13 +583,13 @@ impl App {
             let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
             let mut pick = false;
             ui.horizontal(|ui| {
-                let b = ui.add(egui::Button::new(RichText::new("+").color(t.text2)).frame(false)).on_hover_text("Add pictures or videos");
+                let b = ui.add(egui::Button::new(RichText::new("+").color(t.text2)).frame(false)).on_hover_text(tr("Add pictures or videos"));
                 b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Add pictures or videos to the reply"));
                 pick = b.clicked();
-                ui.label(RichText::new("Enter to send, Shift+Enter for a new line").small().color(t.text3));
+                ui.label(RichText::new(tr("Enter to send, Shift+Enter for a new line")).small().color(t.text3));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let ready = files_ok && (!text.trim().is_empty() || !files.is_empty());
-                    if (primary_button(ui, &t, "Send").clicked() || enter) && ready {
+                    if (primary_button(ui, &t, tr("Send")).clicked() || enter) && ready {
                         out = Some((text.trim().to_string(), files));
                         text.clear();
                     } else if enter && !has_files {
@@ -630,7 +630,7 @@ impl App {
             let (ar, _) = ui.allocate_exact_size(vec2(36.0, if compact { 18.0 } else { 36.0 }), Sense::hover());
             if compact {
                 if ui.rect_contains_pointer(ar.expand2(vec2(0.0, 6.0)).union(Rect::from_min_size(ar.min, vec2(w, 22.0)))) {
-                    let time = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).format("%-I:%M").to_string()).unwrap_or_default();
+                    let time = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).text("%-I:%M")).unwrap_or_default();
                     ui.painter().text(ar.center(), Align2::CENTER_CENTER, time, FontId::proportional(10.5), t.text3);
                 }
             } else if let Some(au) = self.data.member(m.author) {
@@ -640,18 +640,18 @@ impl App {
                 ui.set_width(w - 50.0);
                 if !compact {
                 ui.horizontal(|ui| {
-                    let name = self.data.member(m.author).map(|x| x.name.clone()).unwrap_or_else(|| "Someone".into());
+                    let name = self.data.member(m.author).map(|x| x.name.clone()).unwrap_or_else(|| tr("Someone").into());
                     ui.label(RichText::new(name).strong());
-                    let time = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).format("%-I:%M %p").to_string()).unwrap_or_default();
+                    let time = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).text("%-I:%M %p")).unwrap_or_default();
                     ui.label(RichText::new(time).small().color(t.text3));
                     if m.edited.is_some() {
-                        ui.label(RichText::new("(edited)").small().color(t.text3));
+                        ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
                     if m.saved {
-                        ui.label(RichText::new("\u{1F516} Saved").small().color(Color32::from_rgb(0xe1, 0x6b, 0x16)));
+                        ui.label(RichText::new(tr("\u{1F516} Saved")).small().color(Color32::from_rgb(0xe1, 0x6b, 0x16)));
                     }
                     if m.pinned {
-                        ui.label(RichText::new("\u{1F4CC} Pinned").small().color(t.text3));
+                        ui.label(RichText::new(tr("\u{1F4CC} Pinned")).small().color(t.text3));
                     }
                 });
                 }
@@ -663,7 +663,7 @@ impl App {
                 } else if !m.text.is_empty() {
                     ui.add(egui::Label::new(self.mention_text(&m.text, 14.0)).wrap());
                     if compact && m.edited.is_some() {
-                        ui.label(RichText::new("(edited)").small().color(t.text3));
+                        ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
                 }
                 if let Some(index) = self.attachment_tiles(ui, m) {
@@ -677,12 +677,12 @@ impl App {
                             ui.painter().circle_filled(r.center(), 15.0, Color32::from_rgb(0x00, 0x88, 0x44));
                             super::shell::line_icon(ui.painter(), "phone", r.center(), Color32::WHITE);
                             ui.vertical(|ui| {
-                                ui.label(RichText::new("Huddle").strong());
-                                ui.label(RichText::new(if here { "You're in it" } else { "Voice call in Workboard" }).small().color(t.text3));
+                                ui.label(RichText::new(tr("Huddle")).strong());
+                                ui.label(RichText::new(if here { tr("You're in it") } else { tr("Voice call in Workboard") }).small().color(t.text3));
                             });
                             ui.add_space(16.0);
                             if !here {
-                                let join = ui.add(egui::Button::new(RichText::new("Join").color(Color32::WHITE)).fill(Color32::from_rgb(0x00, 0x88, 0x44)).corner_radius(6).min_size(vec2(64.0, 28.0)));
+                                let join = ui.add(egui::Button::new(RichText::new(tr("Join")).color(Color32::WHITE)).fill(Color32::from_rgb(0x00, 0x88, 0x44)).corner_radius(6).min_size(vec2(64.0, 28.0)));
                                 name_it(&join, "Join huddle");
                                 if join.clicked() {
                                     acts.push(ChatAction::JoinHuddle(ch));
@@ -697,16 +697,16 @@ impl App {
                             ui.painter().circle_filled(r.center(), 15.0, Color32::from_rgb(0x00, 0x88, 0x44));
                             super::shell::line_icon(ui.painter(), "phone", r.center(), Color32::WHITE);
                             ui.vertical(|ui| {
-                                ui.label(RichText::new("Call").strong());
+                                ui.label(RichText::new(tr("Call")).strong());
                                 ui.label(RichText::new(truncate(link, 46)).small().color(t.text3));
                             });
                             ui.add_space(16.0);
-                            let join = ui.add(egui::Button::new(RichText::new("Join").color(Color32::WHITE)).fill(Color32::from_rgb(0x00, 0x88, 0x44)).corner_radius(6).min_size(vec2(64.0, 28.0)));
+                            let join = ui.add(egui::Button::new(RichText::new(tr("Join")).color(Color32::WHITE)).fill(Color32::from_rgb(0x00, 0x88, 0x44)).corner_radius(6).min_size(vec2(64.0, 28.0)));
                             name_it(&join, "Join call");
                             if join.clicked() {
                                 ui.ctx().open_url(egui::OpenUrl::new_tab(link));
                             }
-                            if ui.button("Copy link").clicked() {
+                            if ui.button(tr("Copy link")).clicked() {
                                 ui.ctx().copy_text(link.clone());
                             }
                         });
@@ -751,9 +751,10 @@ impl App {
                         paint_avatars(ui.painter(), ui.cursor().left_center() + vec2(0.0, 9.0), 8.0, &m.replies.iter().map(|r| r.author).collect::<Vec<_>>(), &self.data, t.bg);
                         ui.add_space(30.0);
                         let label = if m.replies.len() == 1 { "1 reply".to_string() } else { format!("{} replies", m.replies.len()) };
+                        let shown = if m.replies.len() == 1 { tr("1 reply").to_string() } else { trf!("{} replies", m.replies.len()) };
                         // a link color that reads on both themes (dark primary is a dim grey)
                         let (link, link_hover) = if t.dark { (t.accent_text, t.text) } else { (t.primary, t.accent_text) };
-                        let g = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(13.0), link);
+                        let g = ui.painter().layout_no_wrap(shown, FontId::proportional(13.0), link);
                         let (lr, lk) = ui.allocate_exact_size(g.size() + vec2(4.0, 4.0), Sense::click());
                         name_it(&lk, &label);
                         let col = if lk.hovered() { link_hover } else { link };
@@ -765,7 +766,7 @@ impl App {
                         if lk.clicked() {
                             acts.push(ChatAction::Thread(m.id));
                         }
-                        ui.label(RichText::new(format!("Last reply {}", last)).small().color(t.text3));
+                        ui.label(RichText::new(trf!("Last reply {}", last)).small().color(t.text3));
                     });
                 }
             });
@@ -789,7 +790,7 @@ impl App {
                 x += bw;
                 let b = put_over(ui, r, egui::Button::new(label).frame(false));
                 name_it(&b, tip);
-                b.on_hover_text(tip)
+                b.on_hover_text(tr(tip))
             };
             for e in QUICK_REACTIONS {
                 let b = button(ui, e, "Add reaction");
@@ -827,7 +828,7 @@ impl App {
             let now = now_ts();
             let tomorrow = (today() + Duration::days(1)).and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or(now + 86400);
             popup(ui, &mb, more_id, 220.0, |ui| {
-                let row = |ui: &mut Ui, label: &str| menu_row(ui, &t, label, false, |_, _| {});
+                let row = |ui: &mut Ui, label: &str| menu_row(ui, &t, tr(label), false, |_, _| {});
                 if !m.text.is_empty() && row(ui, "Copy text").clicked() {
                     ui.ctx().copy_text(m.text.clone());
                     acts.push(ChatAction::Copied);
@@ -880,11 +881,11 @@ impl App {
         let mut save = enter;
         let mut cancel = esc;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Enter to save, Esc to cancel").small().color(t.text3));
-            if ui.button("Cancel").clicked() {
+            ui.label(RichText::new(tr("Enter to save, Esc to cancel")).small().color(t.text3));
+            if ui.button(tr("Cancel")).clicked() {
                 cancel = true;
             }
-            if primary_button(ui, &t, "Save").clicked() {
+            if primary_button(ui, &t, tr("Save")).clicked() {
                 save = true;
             }
         });
@@ -1038,12 +1039,12 @@ impl App {
                             let id = self.data.new_id();
                             self.data.extra.reminders.push(Reminder { id, text: what, due_ts: ts, done: false, owner: me });
                             self.dirty = true;
-                            self.toast = Some(("Reminder created".into(), now_ts()));
+                            self.toast = Some((tr("Reminder created").into(), now_ts()));
                         }
                         None => self.modal = Some(Modal::Reminder { text: what, date: Some(today()), time: "09:00".into() }),
                     }
                 }
-                ChatAction::Copied => self.toast = Some(("Copied".into(), now_ts())),
+                ChatAction::Copied => self.toast = Some((tr("Copied").into(), now_ts())),
                 ChatAction::OpenMedia { ch, msg, index } => {
                     self.viewer = Some(super::files::Viewer::new(ch, msg, index));
                 }

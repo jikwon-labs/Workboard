@@ -42,6 +42,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <!-- 앱 안의 언어는 설정 > 언어에서 고른다. 여기 목록은 macOS 권한 창과 Sparkle 업데이트 창의 언어를 정한다. -->
+  <key>CFBundleLocalizations</key><array><string>en</string><string>ko</string></array>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
@@ -61,6 +64,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# 권한 창(마이크·카메라)의 한국어 문구. 영어는 위 Info.plist 의 기본값을 쓴다.
+mkdir -p "$APP/Contents/Resources/en.lproj" "$APP/Contents/Resources/ko.lproj"
+cat > "$APP/Contents/Resources/ko.lproj/InfoPlist.strings" <<'STRINGS'
+"NSMicrophoneUsageDescription" = "Workboard는 허들과 음성 입력에 마이크를 사용합니다.";
+"NSCameraUsageDescription" = "Workboard는 허들과 클립 녹화에 카메라를 사용합니다.";
+STRINGS
 
 # 서명: Developer ID 인증서가 키체인에 있으면 그걸로, 없으면 임시(ad-hoc) 서명.
 ID="${SIGN_IDENTITY:-Developer ID Application: jikwon seo (K6599UJ4KM)}"

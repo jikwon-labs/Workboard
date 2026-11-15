@@ -5,6 +5,8 @@
 use crate::model::*;
 use crate::theme::{self, rgb, Theme};
 use crate::widgets::*;
+use crate::i18n::{tr, DateText};
+use crate::trf;
 use chrono::{Datelike, Duration, NaiveDate};
 use egui::{pos2, vec2, Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, Ui};
 use std::collections::{HashMap, HashSet};
@@ -472,6 +474,8 @@ pub struct App {
     task_files: Vec<(u64, files::Pending)>,
     /// Page state of the apps (reminders, search, whiteboards, forms, ...).
     sweep: more::SweepUi,
+    /// Interface language picked in Settings > Language (kept on this computer).
+    lang_choice: crate::i18n::Choice,
 }
 
 impl App {
@@ -483,6 +487,14 @@ impl App {
     /// Builds the app state; `data` is used as-is (and never saved) when given.
     pub(crate) fn build(screenshot: Option<PathBuf>, data: Option<Data>) -> Self {
         let persist = screenshot.is_none() && data.is_none();
+        // tests and screenshots are in English; the app follows Settings > Language
+        let mut lang_choice = if persist { Data::language() } else { crate::i18n::Choice::En };
+        // --lang ko / --lang en: for screenshots, without changing the saved choice
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(l) = args.iter().position(|a| a == "--lang").and_then(|i| args.get(i + 1)) {
+            lang_choice = crate::i18n::choice_from_key(l);
+        }
+        crate::i18n::set_lang(crate::i18n::resolve(lang_choice));
         // reopen the workspace that was open last (a joined team workspace, say)
         let last = if persist { Data::last_workspace().filter(|f| f != "data.json") } else { None };
         let mut ws_file = "data.json".to_string();
@@ -685,6 +697,7 @@ impl App {
             confirm_bulk_delete: false,
             task_files: vec![],
             sweep: Default::default(),
+            lang_choice,
         }
     }
 
@@ -799,7 +812,7 @@ impl App {
                     if ids.is_empty() && !include_empty {
                         continue;
                     }
-                    out.push(Group { key: format!("s:{}", st.name), label: st.name.to_uppercase(), color: rgb(st.color), status: Some(st), priority: None, assignee: None, due: None, tasks: ids });
+                    out.push(Group { key: format!("s:{}", st.name), label: crate::i18n::status_text(&st.name).to_uppercase(), color: rgb(st.color), status: Some(st), priority: None, assignee: None, due: None, tasks: ids });
                 }
             }
             GroupBy::Priority => {
@@ -808,7 +821,7 @@ impl App {
                     if ids.is_empty() && !include_empty {
                         continue;
                     }
-                    out.push(Group { key: format!("p:{}", pr), label: PRIORITIES[pr as usize].label.to_uppercase(), color: priority_color(pr, &t), status: None, priority: Some(pr), assignee: None, due: None, tasks: ids });
+                    out.push(Group { key: format!("p:{}", pr), label: tr(PRIORITIES[pr as usize].label).to_uppercase(), color: priority_color(pr, &t), status: None, priority: Some(pr), assignee: None, due: None, tasks: ids });
                 }
             }
             GroupBy::Assignee => {
@@ -821,7 +834,7 @@ impl App {
                 }
                 let ids: Vec<u64> = tasks.iter().filter(|x| x.assignees.is_empty()).map(|x| x.id).collect();
                 if !ids.is_empty() || include_empty {
-                    out.push(Group { key: "a:none".into(), label: "UNASSIGNED".into(), color: t.text3, status: None, priority: None, assignee: None, due: None, tasks: ids });
+                    out.push(Group { key: "a:none".into(), label: tr("UNASSIGNED").into(), color: t.text3, status: None, priority: None, assignee: None, due: None, tasks: ids });
                 }
             }
             GroupBy::DueDate => {
@@ -845,16 +858,16 @@ impl App {
                         continue;
                     }
                     let (label, due, color) = match k.as_str() {
-                        "-1" => ("OVERDUE".to_string(), Some(td - Duration::days(1)), t.danger),
-                        "0" => ("TODAY".to_string(), Some(td), Color32::from_rgb(0xe1, 0x6b, 0x16)),
-                        "1" => ("TOMORROW".to_string(), Some(td + Duration::days(1)), rgb([0x10, 0x90, 0xe0])),
-                        "null" => ("NO DUE DATE".to_string(), None, t.text3),
-                        "done" => ("DONE".to_string(), None, rgb([0x00, 0x88, 0x44])),
-                        _ if k.starts_with('+') => ("FUTURE".to_string(), Some(td + Duration::days(DUE_GROUP_CAP)), rgb([0x5f, 0x55, 0xee])),
+                        "-1" => (tr("OVERDUE").to_string(), Some(td - Duration::days(1)), t.danger),
+                        "0" => (tr("TODAY").to_string(), Some(td), Color32::from_rgb(0xe1, 0x6b, 0x16)),
+                        "1" => (tr("TOMORROW").to_string(), Some(td + Duration::days(1)), rgb([0x10, 0x90, 0xe0])),
+                        "null" => (tr("NO DUE DATE").to_string(), None, t.text3),
+                        "done" => (tr("DONE").to_string(), None, rgb([0x00, 0x88, 0x44])),
+                        _ if k.starts_with('+') => (tr("FUTURE").to_string(), Some(td + Duration::days(DUE_GROUP_CAP)), rgb([0x5f, 0x55, 0xee])),
                         _ => {
                             let n: i64 = k.parse().unwrap_or(2);
                             let d = td + Duration::days(n);
-                            (d.format("%A").to_string().to_uppercase(), Some(d), rgb([0x44, 0x66, 0xff]))
+                            (d.text("%A").to_uppercase(), Some(d), rgb([0x44, 0x66, 0xff]))
                         }
                     };
                     out.push(Group { key: format!("d:{}", k), label, color, status: None, priority: None, assignee: None, due, tasks: ids });
@@ -891,7 +904,7 @@ impl App {
                 }
             }
             GroupBy::None => {
-                out.push(Group { key: "all".into(), label: "ALL TASKS".into(), color: t.primary, status: None, priority: None, assignee: None, due: None, tasks: tasks.iter().map(|x| x.id).collect() });
+                out.push(Group { key: "all".into(), label: tr("ALL TASKS").into(), color: t.primary, status: None, priority: None, assignee: None, due: None, tasks: tasks.iter().map(|x| x.id).collect() });
             }
         }
         out
@@ -1033,6 +1046,8 @@ impl App {
                         let m = format!("set priority to {}", PRIORITIES[new.priority as usize].label);
                         Self::log(&mut new, me, m);
                     }
+                    // the history is shared with teammates: keep it in English
+                    let fmt_date = |d: NaiveDate| crate::i18n::in_english(|| fmt_date(d));
                     if old.due != new.due {
                         let s = new.due.map(fmt_date).unwrap_or_else(|| "none".into());
                         Self::log(&mut new, me, format!("changed due date to {}", s));
@@ -1064,7 +1079,7 @@ impl App {
                     }
                     if old.estimate_min != new.estimate_min {
                         let m = match new.estimate_min {
-                            Some(min) => format!("set the time estimate to {}", fmt_duration(min as i64 * 60)),
+                            Some(min) => format!("set the time estimate to {}", crate::i18n::in_english(|| fmt_duration(min as i64 * 60))),
                             None => "removed the time estimate".into(),
                         };
                         Self::log_edit(&mut new, me, "time estimate", m);
@@ -1085,7 +1100,7 @@ impl App {
                     if old.status != new.status && self.data.extra.labs.iter().any(|l| l == "confetti") {
                         let closes = self.data.statuses_for_list(new.list_id).iter().any(|s| s.name == new.status && matches!(s.kind, StatusKind::Closed | StatusKind::Done));
                         if closes {
-                            self.toast = Some((format!("\u{1F389} Nice! \"{}\" is complete", new.name), now_ts()));
+                            self.toast = Some((trf!("\u{1F389} Nice! \"{}\" is complete", new.name), now_ts()));
                         }
                     }
                     if old.status != new.status {
@@ -1529,7 +1544,7 @@ impl App {
         let week_anchor: NaiveDate = ui.data(|d| d.get_temp(egui::Id::new("cal_week_anchor"))).unwrap_or(td);
         let mut week_anchor = week_anchor;
         ui.horizontal(|ui| {
-            if ui.button("Today").clicked() {
+            if ui.button(tr("Today")).clicked() {
                 self.cal_month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
                 week_anchor = td;
             }
@@ -1549,17 +1564,17 @@ impl App {
             }
             let title = if self.cal_week {
                 let ws = week_anchor - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64);
-                format!("{} \u{2013} {}", ws.format("%b %-d"), (ws + Duration::days(6)).format("%b %-d, %Y"))
+                format!("{} \u{2013} {}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d, %Y"))
             } else {
-                self.cal_month.format("%B %Y").to_string()
+                self.cal_month.text("%B %Y")
             };
             ui.label(RichText::new(title).size(17.0).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.selectable_label(!self.cal_week, "Month").clicked() {
+                if ui.selectable_label(!self.cal_week, tr("Month")).clicked() {
                     self.cal_week = false;
                     self.cal_month = NaiveDate::from_ymd_opt(week_anchor.year(), week_anchor.month(), 1).unwrap();
                 }
-                if ui.selectable_label(self.cal_week, "Week").clicked() {
+                if ui.selectable_label(self.cal_week, tr("Week")).clicked() {
                     self.cal_week = true;
                 }
             });
@@ -1578,7 +1593,7 @@ impl App {
         ui.allocate_rect(full, Sense::hover());
         let p = ui.painter().clone();
         for (i, d) in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].iter().enumerate() {
-            p.text(pos2(area.left() + cw * i as f32 + 8.0, area.top() + head / 2.0), Align2::LEFT_CENTER, *d, FontId::proportional(12.0), t.text3);
+            p.text(pos2(area.left() + cw * i as f32 + 8.0, area.top() + head / 2.0), Align2::LEFT_CENTER, tr(d), FontId::proportional(12.0), t.text3);
         }
         let start = if self.cal_week {
             week_anchor - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64)
@@ -1638,11 +1653,11 @@ impl App {
                     if mr.hovered() {
                         p.rect_filled(more, 4.0, t.hover);
                     }
-                    p.text(more.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, format!("+{} more", day_tasks.len() - k), FontId::proportional(11.5), if mr.hovered() { t.text } else { t.text3 });
+                    p.text(more.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, trf!("+{} more", day_tasks.len() - k), FontId::proportional(11.5), if mr.hovered() { t.text } else { t.text3 });
                     // the day's whole list in a popup
                     let all: Vec<(u64, String, Status)> = day_tasks.iter().map(|(x, _, _)| (x.id, x.name.clone(), self.data.status_of(x))).collect();
                     popup(ui, &mr, ui.id().with(("calmore_pop", i)), 240.0, |ui| {
-                        ui.label(RichText::new(d.format("%A, %b %-d").to_string()).strong());
+                        ui.label(RichText::new(d.text("%A, %b %-d")).strong());
                         ui.add_space(4.0);
                         for (tid, name, st) in &all {
                             let r = menu_row(ui, &t, name, false, |p, c| paint_status_circle(p, c, 5.5, st));
@@ -1690,15 +1705,15 @@ impl App {
         let overdue: Vec<&Task> = tasks.iter().filter(|x| x.due.map_or(false, |d| d < td) && !self.data.is_closed(x)).collect();
         let mut new_tab = tab;
         side_ui.horizontal(|ui| {
-            if ui.selectable_label(tab == 0, format!("{} Unscheduled", unscheduled.len())).clicked() {
+            if ui.selectable_label(tab == 0, trf!("{} Unscheduled", unscheduled.len())).clicked() {
                 new_tab = 0;
             }
-            if ui.selectable_label(tab == 1, format!("{} Overdue", overdue.len())).clicked() {
+            if ui.selectable_label(tab == 1, trf!("{} Overdue", overdue.len())).clicked() {
                 new_tab = 1;
             }
         });
         side_ui.data_mut(|d| d.insert_temp(egui::Id::new("cal_side_tab"), new_tab));
-        side_ui.label(RichText::new("Drag a task onto a day to schedule it.").small().color(t.text3));
+        side_ui.label(RichText::new(tr("Drag a task onto a day to schedule it.")).small().color(t.text3));
         side_ui.add_space(4.0);
         let list = if tab == 0 { unscheduled } else { overdue };
         egui::ScrollArea::vertical().id_salt("cal_side").auto_shrink([false, false]).show(&mut side_ui, |ui| {
@@ -1726,7 +1741,7 @@ impl App {
         if dragging {
             if let Some(pos) = ui.ctx().pointer_hover_pos() {
                 egui::Area::new(egui::Id::new("cal_drag_ghost")).order(egui::Order::Tooltip).fixed_pos(pos + vec2(10.0, 6.0)).show(ui.ctx(), |ui| {
-                    ui.label(RichText::new("\u{1F4C5} Drop on a day").small());
+                    ui.label(RichText::new(tr("\u{1F4C5} Drop on a day")).small());
                 });
             }
         }
@@ -1783,31 +1798,31 @@ impl App {
         let name_w = 260.0;
         let head = 44.0;
         ui.horizontal(|ui| {
-            if ui.button("Today").clicked() {
+            if ui.button(tr("Today")).clicked() {
                 self.gantt_jump = true;
             }
             ui.separator();
             for (z, label) in [(0u8, "Day"), (1, "Week"), (2, "Month")] {
-                if ui.selectable_label(self.gantt_zoom == z, label).clicked() && self.gantt_zoom != z {
+                if ui.selectable_label(self.gantt_zoom == z, tr(label)).clicked() && self.gantt_zoom != z {
                     self.gantt_zoom = z;
                     self.gantt_jump = true;
                 }
             }
-            if ui.small_button("\u{2212}").on_hover_text("Zoom out").clicked() && self.gantt_zoom < 2 {
+            if ui.small_button("\u{2212}").on_hover_text(tr("Zoom out")).clicked() && self.gantt_zoom < 2 {
                 self.gantt_zoom += 1;
                 self.gantt_jump = true;
             }
-            if ui.small_button("+").on_hover_text("Zoom in").clicked() && self.gantt_zoom > 0 {
+            if ui.small_button("+").on_hover_text(tr("Zoom in")).clicked() && self.gantt_zoom > 0 {
                 self.gantt_zoom -= 1;
                 self.gantt_jump = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Export CSV").on_hover_text("Save the tasks in this view as a CSV file").clicked() {
+                if ui.button(tr("Export CSV")).on_hover_text(tr("Save the tasks in this view as a CSV file")).clicked() {
                     self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
                 }
                 let undated = tasks.iter().filter(|x| x.start.is_none() && x.due.is_none()).count();
                 if undated > 0 {
-                    ui.label(RichText::new(format!("{} without dates", undated)).small().color(t.text3));
+                    ui.label(RichText::new(trf!("{} without dates", undated)).small().color(t.text3));
                 }
             });
         });
@@ -1831,7 +1846,7 @@ impl App {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.set_width(name_w);
                     let (hr, _) = ui.allocate_exact_size(vec2(name_w, head), Sense::hover());
-                    ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "Name", FontId::proportional(12.0), t.text3);
+                    ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr("Name"), FontId::proportional(12.0), t.text3);
                     ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
                     for (task, depth, nsub) in &rows {
                         let (r, resp) = ui.allocate_exact_size(vec2(name_w, rh), Sense::click());
@@ -1874,7 +1889,7 @@ impl App {
                     if resp.hovered() {
                         ui.painter().rect_filled(r, 0.0, t.hover);
                     }
-                    ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, "+ Add Task", FontId::proportional(13.0), t.text3);
+                    ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, tr("+ Add Task"), FontId::proportional(13.0), t.text3);
                     if resp.clicked() {
                         self.open_quick_add(None);
                     }
@@ -1905,7 +1920,7 @@ impl App {
                         };
                         if tick {
                             p.vline(x, area.top()..=area.top() + total_h, Stroke::new(0.5, t.border));
-                            let label = if self.gantt_zoom == 2 { d.format("%b %Y").to_string() } else { d.format("%b %-d").to_string() };
+                            let label = if self.gantt_zoom == 2 { d.text("%b %Y") } else { d.text("%b %-d") };
                             p.text(pos2(x + 4.0, area.top() + 12.0), Align2::LEFT_CENTER, label, FontId::proportional(11.5), t.text2);
                         }
                         if self.gantt_zoom == 0 {
@@ -2129,7 +2144,8 @@ impl App {
                 if hresp.hovered() {
                     ui.painter().rect_filled(cell, 0.0, t.hover);
                 }
-                let g = ui.painter().layout_no_wrap(label, FontId::proportional(12.0), t.text3);
+                let shown = if matches!(c, TableCol::Field(_)) { label } else { tr(&label).to_string() };
+                let g = ui.painter().layout_no_wrap(shown, FontId::proportional(12.0), t.text3);
                 let gw = g.size().x;
                 ui.painter().with_clip_rect(cell).galley(pos2(x + 8.0, hr.center().y - g.size().y / 2.0), g, t.text3);
                 if let Some((sc, desc)) = sort {
@@ -2217,7 +2233,7 @@ impl App {
                             let editing = renaming.as_ref().is_some_and(|(rid, _)| *rid == task.id);
                             if editing {
                                 let mut text = renaming.as_ref().map(|(_, s)| s.clone()).unwrap_or_default();
-                                let r = put_over(ui, cell.shrink2(vec2(4.0, 5.0)), egui::TextEdit::singleline(&mut text).hint_text("Task name"));
+                                let r = put_over(ui, cell.shrink2(vec2(4.0, 5.0)), egui::TextEdit::singleline(&mut text).hint_text(tr("Task name")));
                                 name_field(&r, &format!("Name of {}", task.name));
                                 focus_once(ui, &r);
                                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -2278,7 +2294,7 @@ impl App {
                             let pr = ui.interact(cell, id.with("p"), Sense::click());
                             if task.priority > 0 {
                                 paint_flag(ui.painter(), cell.left_center() + vec2(10.0, 0.0), priority_color(task.priority, &t), 12.0);
-                                ui.painter().text(cell.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, PRIORITIES[task.priority as usize].label, FontId::proportional(13.0), t.text);
+                                ui.painter().text(cell.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, tr(PRIORITIES[task.priority as usize].label), FontId::proportional(13.0), t.text);
                             }
                             if let Some(true) = popup(ui, &pr, id.with("pp"), 180.0, |ui| priority_menu(ui, &t, &mut edited.priority)) {
                                 changed = true;
@@ -2331,7 +2347,7 @@ impl App {
             if resp.hovered() {
                 ui.painter().rect_filled(r, 0.0, t.hover);
             }
-            ui.painter().text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "+ Add Task", FontId::proportional(13.0), t.text3);
+            ui.painter().text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr("+ Add Task"), FontId::proportional(13.0), t.text3);
             if resp.clicked() {
                 self.open_quick_add(None);
             }
@@ -2351,8 +2367,8 @@ impl App {
                 let hour = chrono::Local::now().format("%H").to_string().parse::<u32>().unwrap_or(9);
                 let greet = if hour < 12 { "Good morning" } else if hour < 18 { "Good afternoon" } else { "Good evening" };
                 let me = self.data.member(self.data.me).map(|m| m.name.clone()).unwrap_or_default();
-                ui.label(RichText::new(format!("{}, {}", greet, me)).size(24.0).strong());
-                ui.label(RichText::new(chrono::Local::now().format("%A, %B %-d").to_string()).color(t.text2));
+                ui.label(RichText::new(trf!("{}, {}", tr(greet), me)).size(24.0).strong());
+                ui.label(RichText::new(chrono::Local::now().text("%A, %B %-d")).color(t.text2));
                 ui.add_space(18.0);
                 let td = today();
                 let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&self.data.me) && !self.data.is_closed(x)).cloned().collect();
@@ -2371,14 +2387,14 @@ impl App {
                     // My Work card
                     egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::same(16)).show(ui, |ui| ui.vertical(|ui| {
                         ui.set_width(card_w - 34.0);
-                        ui.label(RichText::new("My Work").size(16.0).strong());
+                        ui.label(RichText::new(tr("My Work")).size(16.0).strong());
                         ui.add_space(6.0);
                         for (name, list) in &sections {
                             let collapsed = self.home_collapsed.contains(name);
                             let (r, resp) = ui.allocate_exact_size(vec2(card_w - 34.0, 28.0), Sense::click());
                             paint_triangle(ui.painter(), r.left_center() + vec2(6.0, 0.0), !collapsed, t.text2);
                             let col = if *name == "Overdue" && !list.is_empty() { t.danger } else { t.text };
-                            ui.painter().text(r.left_center() + vec2(18.0, 0.0), Align2::LEFT_CENTER, *name, FontId::proportional(13.5), col);
+                            ui.painter().text(r.left_center() + vec2(18.0, 0.0), Align2::LEFT_CENTER, tr(name), FontId::proportional(13.5), col);
                             ui.painter().text(r.left_center() + vec2(110.0, 0.0), Align2::LEFT_CENTER, list.len().to_string(), FontId::proportional(12.0), t.text3);
                             if resp.clicked() {
                                 if collapsed {
@@ -2418,7 +2434,7 @@ impl App {
                     // Recents / lists overview
                     egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::same(16)).show(ui, |ui| ui.vertical(|ui| {
                         ui.set_width(card_w - 34.0);
-                        ui.label(RichText::new("Lists").size(16.0).strong());
+                        ui.label(RichText::new(tr("Lists")).size(16.0).strong());
                         ui.add_space(6.0);
                         let spaces = self.data.spaces.clone();
                         for s in &spaces {
@@ -2467,8 +2483,8 @@ impl App {
                 2 => ("Assigned Comments", "Comments assigned to someone, or that @mention them, until resolved"),
                 _ => ("Inbox", "Recent activity across your workspace"),
             };
-            ui.label(RichText::new(title).size(20.0).strong());
-            ui.label(RichText::new(sub).color(t.text2));
+            ui.label(RichText::new(tr(title)).size(20.0).strong());
+            ui.label(RichText::new(tr(sub)).color(t.text2));
             ui.add_space(8.0);
             // tabs: Unread / Read for Replies, Assigned to me / Delegated by me for comments
             let tab_id = egui::Id::new(("inbox_tab", mode));
@@ -2477,13 +2493,13 @@ impl App {
                 ui.horizontal(|ui| {
                     let labels = if mode == 1 { ["Unread", "Read"] } else { ["Assigned to me", "Delegated by me"] };
                     for (i, l) in labels.iter().enumerate() {
-                        if ui.selectable_label(tab == i as u8, *l).clicked() {
+                        if ui.selectable_label(tab == i as u8, tr(l)).clicked() {
                             tab = i as u8;
                         }
                     }
                     if mode == 1 && tab == 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button("Mark all as read").clicked() {
+                            if ui.button(tr("Mark all as read")).clicked() {
                                 self.data.extra.replies_seen = now_ts();
                                 self.dirty = true;
                             }
@@ -2495,7 +2511,7 @@ impl App {
             let seen = self.data.extra.replies_seen;
             if mode == 0 {
                 self.reminders_block(ui);
-                if ui.button("\u{23F0}  Create Reminder").clicked() {
+                if ui.button(tr("\u{23F0}  Create Reminder")).clicked() {
                     self.modal = Some(Modal::Reminder { text: String::new(), date: Some(today()), time: "09:00".into() });
                 }
             }
@@ -2521,7 +2537,7 @@ impl App {
             items.sort_by_key(|x| std::cmp::Reverse(x.0));
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if items.is_empty() {
-                    ui.label(RichText::new("You're all caught up").color(t.text3));
+                    ui.label(RichText::new(tr("You're all caught up")).color(t.text3));
                 }
                 for (ts, tid, tname, a) in items.into_iter().take(200) {
                     let w = ui.available_width();
@@ -2535,7 +2551,7 @@ impl App {
                     }
                     ui.painter().text(r.left_top() + vec2(48.0, 16.0), Align2::LEFT_CENTER, &tname, FontId::proportional(13.5), t.text);
                     let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_default();
-                    let line = if a.comment { format!("{} commented: {}", who, a.text) } else { format!("{} {}", who, a.text) };
+                    let line = if a.comment { trf!("{} commented: {}", who, a.text) } else { crate::i18n::history_line(&who, &a.text) };
                     ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 140.0, r.bottom()))).text(r.left_top() + vec2(48.0, 38.0), Align2::LEFT_CENTER, line, FontId::proportional(12.5), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(11.5), t.text3);
                     // tick off an assigned comment right here
@@ -2604,22 +2620,22 @@ impl App {
                     ui.horizontal(|ui| {
                         // previous / next task in the current view
                         let (prev, next) = self.neighbours(tid);
-                        if ui.add_enabled(prev.is_some(), egui::Button::new("\u{2191}").frame(false)).on_hover_text("Previous task").clicked() {
+                        if ui.add_enabled(prev.is_some(), egui::Button::new("\u{2191}").frame(false)).on_hover_text(tr("Previous task")).clicked() {
                             if let Some(p) = prev {
                                 self.actions.push(Action::Open(p));
                             }
                         }
-                        if ui.add_enabled(next.is_some(), egui::Button::new("\u{2193}").frame(false)).on_hover_text("Next task").clicked() {
+                        if ui.add_enabled(next.is_some(), egui::Button::new("\u{2193}").frame(false)).on_hover_text(tr("Next task")).clicked() {
                             if let Some(n) = next {
                                 self.actions.push(Action::Open(n));
                             }
                         }
                         let path = self.data.list_path(task.list_id).join("  /  ");
-                        if ui.add(egui::Button::new(RichText::new(path).color(t.text2)).frame(false)).on_hover_text("Move to another List").clicked() {
+                        if ui.add(egui::Button::new(RichText::new(path).color(t.text2)).frame(false)).on_hover_text(tr("Move to another List")).clicked() {
                             self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
                         }
                         if task.archived {
-                            ui.label(RichText::new("Archived").small().color(t.danger));
+                            ui.label(RichText::new(tr("Archived")).small().color(t.danger));
                         }
                         if let Some(pid) = task.parent {
                             if let Some(p) = self.task(pid) {
@@ -2630,67 +2646,67 @@ impl App {
                             }
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("\u{2716}").size(14.0)).frame(false)).on_hover_text("Close").clicked() {
+                            if ui.add(egui::Button::new(RichText::new("\u{2716}").size(14.0)).frame(false)).on_hover_text(tr("Close")).clicked() {
                                 close = true;
                             }
                             let r = ui.add(egui::Button::new(RichText::new("\u{2026}").size(16.0)).frame(false));
-                            if ui.add(egui::Button::new(RichText::new("ID").size(12.0)).frame(false)).on_hover_text("Copy task ID").clicked() {
+                            if ui.add(egui::Button::new(RichText::new("ID").size(12.0)).frame(false)).on_hover_text(tr("Copy task ID")).clicked() {
                                 ui.ctx().copy_text(tid.to_string());
-                                self.toast = Some(("Task ID copied".into(), now_ts()));
+                                self.toast = Some((tr("Task ID copied").into(), now_ts()));
                             }
                             self.watchers_header(ui, &t, win_id, &mut task);
                             popup(ui, &r, win_id.with("more"), 200.0, |ui| {
-                                if ui.button("Move to...").clicked() {
+                                if ui.button(tr("Move to...")).clicked() {
                                     self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
                                     close_popup(ui);
                                 }
-                                if ui.button("Make subtask of...").clicked() {
+                                if ui.button(tr("Make subtask of...")).clicked() {
                                     self.modal = Some(Modal::PickTask { task: tid, mode: TaskPick::Parent, query: String::new() });
                                     close_popup(ui);
                                 }
-                                if task.parent.is_some() && ui.button("Make top-level task").clicked() {
+                                if task.parent.is_some() && ui.button(tr("Make top-level task")).clicked() {
                                     task.parent = None;
                                     self.make_top_level(tid);
                                     close_popup(ui);
                                 }
-                                if ui.button("Duplicate").clicked() {
+                                if ui.button(tr("Duplicate")).clicked() {
                                     if let Some(n) = self.duplicate_task(tid) {
                                         self.actions.push(Action::Open(n));
                                     }
                                     close_popup(ui);
                                 }
-                                if ui.button("Remind me").clicked() {
+                                if ui.button(tr("Remind me")).clicked() {
                                     self.modal = Some(Modal::Reminder { text: task.name.clone(), date: Some(today() + Duration::days(1)), time: "09:00".into() });
                                     close_popup(ui);
                                 }
-                                if ui.button("Copy ID").clicked() {
+                                if ui.button(tr("Copy ID")).clicked() {
                                     ui.ctx().copy_text(tid.to_string());
-                                    self.toast = Some(("Task ID copied".into(), now_ts()));
+                                    self.toast = Some((tr("Task ID copied").into(), now_ts()));
                                     close_popup(ui);
                                 }
-                                if ui.button(if task.archived { "Unarchive" } else { "Archive" }).clicked() {
+                                if ui.button(if task.archived { tr("Unarchive") } else { tr("Archive") }).clicked() {
                                     let a = !task.archived;
                                     self.set_archived(&[tid], a);
                                     close_popup(ui);
                                 }
                                 ui.separator();
-                                if ui.button("Save as template").clicked() {
+                                if ui.button(tr("Save as template")).clicked() {
                                     let id = self.data.new_id();
                                     self.data.extra.templates.push(TaskTemplate { id, name: task.name.clone(), task_name: task.name.clone(), description: task.description.clone(), checklist: task.checklist.iter().map(|c| c.text.clone()).collect(), tags: task.tags.clone(), priority: task.priority });
-                                    self.toast = Some(("Saved as a template".into(), now_ts()));
+                                    self.toast = Some((tr("Saved as a template").into(), now_ts()));
                                     self.dirty = true;
                                     close_popup(ui);
                                 }
-                                if ui.button("Copy link").clicked() {
+                                if ui.button(tr("Copy link")).clicked() {
                                     ui.ctx().copy_text(format!("workboard://task/{}", tid));
-                                    self.toast = Some(("Link copied".into(), now_ts()));
+                                    self.toast = Some((tr("Link copied").into(), now_ts()));
                                     close_popup(ui);
                                 }
-                                if ui.button("Start timer").clicked() {
+                                if ui.button(tr("Start timer")).clicked() {
                                     self.actions.push(Action::ToggleTimer(tid));
                                     close_popup(ui);
                                 }
-                                if ui.button(RichText::new("Delete task").color(t.danger)).clicked() {
+                                if ui.button(RichText::new(tr("Delete task")).color(t.danger)).clicked() {
                                     self.actions.push(Action::DeleteTask(tid));
                                     close_popup(ui);
                                 }
@@ -2722,7 +2738,7 @@ impl App {
                     let fields = self.data.extra.fields.clone();
                     egui::Grid::new("fields").num_columns(4).spacing(vec2(12.0, 10.0)).min_col_width(90.0).show(ui, |ui| {
                         // Status
-                        ui.label(RichText::new("\u{25CE}  Status").color(t.text2));
+                        ui.label(RichText::new(tr("\u{25CE}  Status")).color(t.text2));
                         ui.horizontal(|ui| {
                             ui.set_width(field_w - 110.0);
                             let st = self.data.status_of(&task);
@@ -2731,11 +2747,11 @@ impl App {
                             // complete shortcut
                             if let Some(done) = statuses.iter().find(|s| s.kind == StatusKind::Closed) {
                                 let is_done = task.status == done.name;
-                                let txt = if is_done { "\u{2714} Done" } else { "\u{2714}" };
+                                let txt = if is_done { tr("\u{2714} Done") } else { "\u{2714}" };
                                 let b = egui::Button::new(RichText::new(txt).color(if is_done { Color32::WHITE } else { t.text2 }))
                                     .fill(if is_done { rgb(done.color) } else { Color32::TRANSPARENT })
                                     .stroke(Stroke::new(1.0, t.border));
-                                if ui.add(b).on_hover_text("Mark complete").clicked() {
+                                if ui.add(b).on_hover_text(tr("Mark complete")).clicked() {
                                     task.status = if is_done { statuses[0].name.clone() } else { done.name.clone() };
                                 }
                             }
@@ -2744,22 +2760,22 @@ impl App {
                             ui.end_row();
                         }
                         // Assignees
-                        ui.label(RichText::new("\u{1F464}  Assignees").color(t.text2));
+                        ui.label(RichText::new(tr("\u{1F464}  Assignees")).color(t.text2));
                         let (ar, aresp) = ui.allocate_exact_size(vec2(field_w - 110.0, 26.0), Sense::click());
                         if aresp.hovered() {
                             ui.painter().rect_filled(ar, 6.0, t.hover);
                         }
                         let used = paint_avatars(ui.painter(), ar.left_center() + vec2(4.0, 0.0), 11.0, &task.assignees, &self.data, t.card);
                         if used == 0.0 {
-                            ui.painter().text(ar.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, "Empty", FontId::proportional(13.0), t.text3);
+                            ui.painter().text(ar.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, tr("Empty"), FontId::proportional(13.0), t.text3);
                         }
                         let data = &self.data;
                         popup(ui, &aresp, win_id.with("as"), 220.0, |ui| assignee_menu(ui, &t, data, &mut task.assignees));
                         ui.end_row();
                         // Dates
-                        ui.label(RichText::new("\u{1F4C5}  Dates").color(t.text2));
+                        ui.label(RichText::new(tr("\u{1F4C5}  Dates")).color(t.text2));
                         ui.horizontal(|ui| {
-                            let s_txt = task.start.map(fmt_date).unwrap_or_else(|| "Start".into());
+                            let s_txt = task.start.map(fmt_date).unwrap_or_else(|| tr("Start").into());
                             let r = ui.add(egui::Button::new(RichText::new(s_txt).color(if task.start.is_some() { t.text } else { t.text3 })).frame(false));
                             if r.clicked() {
                                 ui.data_mut(|d| d.insert_temp(win_id.with("dates").with("which"), 0u8));
@@ -2769,12 +2785,12 @@ impl App {
                             let closed = statuses.iter().find(|s| s.name == task.status).map(|s| matches!(s.kind, StatusKind::Closed | StatusKind::Done)).unwrap_or(false);
                             let (d_txt, d_col) = match task.due {
                                 Some(d) => (fmt_date(d), date_color(d, closed, &t)),
-                                None => ("Due".into(), t.text3),
+                                None => (tr("Due").into(), t.text3),
                             };
                             let r = ui.add(egui::Button::new(RichText::new(d_txt).color(d_col)).frame(false));
                             popup(ui, &r, win_id.with("dd"), 380.0, |ui| dates_menu(ui, &t, win_id.with("dates2"), &mut task.start, &mut task.due, &mut task.recur));
                             if task.recur.is_some() {
-                                ui.label(RichText::new(format!("\u{1F501} {}", recur_label(&task.recur))).small().color(t.text2)).on_hover_text("Repeats when closed");
+                                ui.label(RichText::new(format!("\u{1F501} {}", tr(recur_label(&task.recur)))).small().color(t.text2)).on_hover_text(tr("Repeats when closed"));
                             }
                         });
                         if one_col {
@@ -2787,16 +2803,16 @@ impl App {
                                 ui.label("");
                             }
                         } else {
-                        ui.label(RichText::new("\u{2691}  Priority").color(t.text2));
+                        ui.label(RichText::new(tr("\u{2691}  Priority")).color(t.text2));
                         let (pr, presp) = ui.allocate_exact_size(vec2(field_w - 110.0, 26.0), Sense::click());
                         if presp.hovered() {
                             ui.painter().rect_filled(pr, 6.0, t.hover);
                         }
                         if task.priority > 0 {
                             paint_flag(ui.painter(), pr.left_center() + vec2(8.0, 0.0), priority_color(task.priority, &t), 13.0);
-                            ui.painter().text(pr.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, PRIORITIES[task.priority as usize].label, FontId::proportional(13.0), t.text);
+                            ui.painter().text(pr.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, tr(PRIORITIES[task.priority as usize].label), FontId::proportional(13.0), t.text);
                         } else {
-                            ui.painter().text(pr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, "Empty", FontId::proportional(13.0), t.text3);
+                            ui.painter().text(pr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, tr("Empty"), FontId::proportional(13.0), t.text3);
                         }
                         popup(ui, &presp, win_id.with("pr"), 180.0, |ui| priority_menu(ui, &t, &mut task.priority));
                         }
@@ -2805,7 +2821,7 @@ impl App {
                         }
                         // Time estimate
                         if apps.time_estimates {
-                        ui.label(RichText::new("\u{231B}  Time estimate").color(t.text2));
+                        ui.label(RichText::new(tr("\u{231B}  Time estimate")).color(t.text2));
                         ui.horizontal(|ui| {
                             taskfields::estimate_field(ui, win_id, &mut task.estimate_min);
                         });
@@ -2823,17 +2839,17 @@ impl App {
                                 ui.label("");
                             }
                         } else {
-                        ui.label(RichText::new("\u{23F1}  Track time").color(t.text2));
+                        ui.label(RichText::new(tr("\u{23F1}  Track time")).color(t.text2));
                         ui.horizontal(|ui| {
                             let running = task.timer_started.is_some();
                             let (txt, fill) = if running { ("\u{23F9}", t.danger) } else { ("\u{25B6}", t.primary) };
-                            if ui.add(egui::Button::new(RichText::new(txt).color(Color32::WHITE)).fill(fill).corner_radius(12).min_size(vec2(24.0, 24.0))).on_hover_text(if running { "Stop timer" } else { "Start timer" }).clicked() {
+                            if ui.add(egui::Button::new(RichText::new(txt).color(Color32::WHITE)).fill(fill).corner_radius(12).min_size(vec2(24.0, 24.0))).on_hover_text(if running { tr("Stop timer") } else { tr("Start timer") }).clicked() {
                                 self.actions.push(Action::ToggleTimer(tid));
                             }
                             let secs = task.tracked_secs(now);
-                            let te = ui.add(egui::Button::new(if secs > 0 { fmt_duration(secs) } else { "Start".into() }).frame(false));
+                            let te = ui.add(egui::Button::new(if secs > 0 { fmt_duration(secs) } else { tr("Start").into() }).frame(false));
                             name_it(&te, "Time entries");
-                            let te = te.on_hover_text("Time entries, add time by hand");
+                            let te = te.on_hover_text(tr("Time entries, add time by hand"));
                             popup(ui, &te, win_id.with("entries"), 260.0, |ui| taskfields::time_entries_menu(ui, &t, win_id.with("entries_m"), &mut task, self.data.me));
                             if running {
                                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
@@ -2844,12 +2860,12 @@ impl App {
                             ui.end_row();
                         }
                         // Tags
-                        ui.label(RichText::new("\u{1F3F7}  Tags").color(t.text2));
+                        ui.label(RichText::new(tr("\u{1F3F7}  Tags")).color(t.text2));
                         ui.horizontal_wrapped(|ui| {
                             ui.set_max_width(field_w * 2.0);
                             let mut remove = None;
                             for (i, tag) in task.tags.iter().enumerate() {
-                                if chip(ui, &format!("{}  \u{2716}", tag), tag_color(tag)).on_hover_text("Remove tag").clicked() {
+                                if chip(ui, &format!("{}  \u{2716}", tag), tag_color(tag)).on_hover_text(tr("Remove tag")).clicked() {
                                     remove = Some(i);
                                 }
                             }
@@ -2872,8 +2888,8 @@ impl App {
                                         }
                                     }
                                     "dropdown" => {
-                                        egui::ComboBox::from_id_salt(("cf", f.id)).selected_text(if v.is_empty() { "Empty".to_string() } else { v.clone() }).show_ui(ui, |ui| {
-                                            ui.selectable_value(v, String::new(), "Empty");
+                                        egui::ComboBox::from_id_salt(("cf", f.id)).selected_text(if v.is_empty() { tr("Empty").to_string() } else { v.clone() }).show_ui(ui, |ui| {
+                                            ui.selectable_value(v, String::new(), tr("Empty"));
                                             for o in &f.options {
                                                 ui.selectable_value(v, o.clone(), o);
                                             }
@@ -2881,19 +2897,19 @@ impl App {
                                     }
                                     "date" => {
                                         let mut d = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok();
-                                        let r = ui.add(egui::Button::new(RichText::new(d.map(fmt_date).unwrap_or_else(|| "Empty".into())).color(if d.is_some() { t.text } else { t.text3 })).frame(false));
+                                        let r = ui.add(egui::Button::new(RichText::new(d.map(fmt_date).unwrap_or_else(|| tr("Empty").into())).color(if d.is_some() { t.text } else { t.text3 })).frame(false));
                                         if let Some(true) = popup(ui, &r, win_id.with(("cfd", f.id)), 380.0, |ui| date_menu(ui, &t, win_id.with(("cfdc", f.id)), &mut d)) {
                                             *v = d.map(|d| d.to_string()).unwrap_or_default();
                                         }
                                     }
                                     "number" => {
-                                        let r = ui.add(egui::TextEdit::singleline(v).hint_text("Empty").desired_width(120.0));
+                                        let r = ui.add(egui::TextEdit::singleline(v).hint_text(tr("Empty")).desired_width(120.0));
                                         if r.changed() {
                                             v.retain(|c| c.is_ascii_digit() || c == '.' || c == '-');
                                         }
                                     }
                                     _ => {
-                                        ui.add(egui::TextEdit::singleline(v).hint_text("Empty").desired_width(field_w - 120.0));
+                                        ui.add(egui::TextEdit::singleline(v).hint_text(tr("Empty")).desired_width(field_w - 120.0));
                                     }
                                 }
                                 if one_col || i % 2 == 1 {
@@ -2915,7 +2931,7 @@ impl App {
                     let subs: Vec<Task> = self.subtasks(tid).into_iter().cloned().collect();
                     let done = subs.iter().filter(|s| self.data.is_closed(s)).count();
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Subtasks").strong());
+                        ui.label(RichText::new(tr("Subtasks")).strong());
                         if !subs.is_empty() {
                             ui.label(RichText::new(format!("{}/{}", done, subs.len())).color(t.text3));
                         }
@@ -2997,11 +3013,11 @@ impl App {
                     let mut sub_on: bool = ui.data(|d| d.get_temp(sub_on_id)).unwrap_or(false);
                     if sub_on {
                         ui.horizontal(|ui| {
-                            let r = ui.add(egui::TextEdit::singleline(&mut self.sub_text).hint_text("Task Name").desired_width(ui.available_width() - 70.0));
+                            let r = ui.add(egui::TextEdit::singleline(&mut self.sub_text).hint_text(tr("Task Name")).desired_width(ui.available_width() - 70.0));
                             name_field(&r, "Subtask name");
                             focus_once(ui, &r);
                             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if (ui.button("Save").clicked() || enter) && !self.sub_text.trim().is_empty() {
+                            if (ui.button(tr("Save")).clicked() || enter) && !self.sub_text.trim().is_empty() {
                                 self.actions.push(Action::Add { list: task.list_id, name: self.sub_text.clone(), status: None, priority: 0, assignees: vec![], due: None, parent: Some(tid), open: false });
                                 self.sub_text.clear();
                                 r.request_focus();
@@ -3009,7 +3025,7 @@ impl App {
                                 sub_on = false;
                             }
                         });
-                    } else if add_line(ui, &t, "+  Add subtask").clicked() {
+                    } else if add_line(ui, &t, tr("+  Add subtask")).clicked() {
                         sub_on = true;
                     }
                     ui.data_mut(|d| d.insert_temp(sub_on_id, sub_on));
@@ -3021,7 +3037,7 @@ impl App {
                     ui.add_space(16.0);
                     // checklist
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Checklist").strong());
+                        ui.label(RichText::new(tr("Checklist")).strong());
                         if !task.checklist.is_empty() {
                             let d = task.checklist.iter().filter(|c| c.done).count();
                             ui.label(RichText::new(format!("{}/{}", d, task.checklist.len())).color(t.text3));
@@ -3036,11 +3052,11 @@ impl App {
                     let mut ck_on: bool = ui.data(|d| d.get_temp(ck_on_id)).unwrap_or(false);
                     if ck_on {
                         ui.horizontal(|ui| {
-                            let r = ui.add(egui::TextEdit::singleline(&mut self.check_text).hint_text("Checklist item").desired_width(ui.available_width() - 70.0));
+                            let r = ui.add(egui::TextEdit::singleline(&mut self.check_text).hint_text(tr("Checklist item")).desired_width(ui.available_width() - 70.0));
                             name_field(&r, "Checklist item");
                             focus_once(ui, &r);
                             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if (ui.button("Save").clicked() || enter) && !self.check_text.trim().is_empty() {
+                            if (ui.button(tr("Save")).clicked() || enter) && !self.check_text.trim().is_empty() {
                                 task.checklist.push(CheckItem { text: self.check_text.trim().to_string(), done: false, assignee: None });
                                 self.check_text.clear();
                                 r.request_focus();
@@ -3048,7 +3064,7 @@ impl App {
                                 ck_on = false;
                             }
                         });
-                    } else if add_line(ui, &t, if task.checklist.is_empty() { "+  Create checklist" } else { "+  Add item" }).clicked() {
+                    } else if add_line(ui, &t, if task.checklist.is_empty() { tr("+  Create checklist") } else { tr("+  Add item") }).clicked() {
                         ck_on = true;
                     }
                     ui.data_mut(|d| d.insert_temp(ck_on_id, ck_on));
@@ -3059,9 +3075,9 @@ impl App {
                 // ---- right: activity
                 let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(vec2(16.0, 12.0))).layout(Layout::top_down(Align::Min)));
                 right_ui.horizontal(|ui| {
-                    ui.label(RichText::new("Comments").size(15.0).strong());
-                    let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %-d").to_string()).unwrap_or_default();
-                    ui.label(RichText::new(format!("Created {}", created)).color(t.text3));
+                    ui.label(RichText::new(tr("Comments")).size(15.0).strong());
+                    let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).text("%b %-d")).unwrap_or_default();
+                    ui.label(RichText::new(trf!("Created {}", created)).color(t.text3));
                 });
                 right_ui.add_space(6.0);
                 let comment_id = win_id.with("comment_box");
@@ -3071,10 +3087,10 @@ impl App {
                 if let Some(q) = find.as_mut() {
                     let mut drop = false;
                     right_ui.horizontal(|ui| {
-                        let r = ui.add(egui::TextEdit::singleline(q).hint_text("Search comments...").desired_width(ui.available_width() - 30.0));
+                        let r = ui.add(egui::TextEdit::singleline(q).hint_text(tr("Search comments...")).desired_width(ui.available_width() - 30.0));
                         name_field(&r, "Search comments");
                         focus_once(ui, &r);
-                        if ui.add(egui::Button::new("\u{2716}").frame(false)).on_hover_text("Close search").clicked() {
+                        if ui.add(egui::Button::new("\u{2716}").frame(false)).on_hover_text(tr("Close search")).clicked() {
                             drop = true;
                         }
                     });
@@ -3087,11 +3103,11 @@ impl App {
                 if !has_comments {
                     let r = right_ui.available_rect_before_wrap();
                     let c = pos2(r.left() + 10.0, r.top() + r.height() * 0.32);
-                    right_ui.painter().text(c, Align2::LEFT_BOTTOM, "Send the first comment", FontId::proportional(16.0), t.text);
-                    right_ui.painter().text(c + vec2(0.0, 8.0), Align2::LEFT_TOP, "Ask a question, share an update, or loop someone in.", FontId::proportional(13.0), t.text2);
+                    right_ui.painter().text(c, Align2::LEFT_BOTTOM, tr("Send the first comment"), FontId::proportional(16.0), t.text);
+                    right_ui.painter().text(c + vec2(0.0, 8.0), Align2::LEFT_TOP, tr("Ask a question, share an update, or loop someone in."), FontId::proportional(13.0), t.text2);
                     let row = Rect::from_min_size(c + vec2(0.0, 34.0), vec2(r.width() - 20.0, 30.0));
                     let mut bui = right_ui.new_child(egui::UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)));
-                    if bui.button("@  Mention a teammate").clicked() {
+                    if bui.button(tr("@  Mention a teammate")).clicked() {
                         if !self.comment_text.ends_with('@') {
                             if !self.comment_text.is_empty() && !self.comment_text.ends_with(' ') {
                                 self.comment_text.push(' ');
@@ -3101,7 +3117,7 @@ impl App {
                         bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
                         bui.memory_mut(|m| m.request_focus(comment_id));
                     }
-                    assign_resp = Some(bui.button("\u{1F464}  Assign this task"));
+                    assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
                 }
                 if let Some(r) = assign_resp {
                     let data = &self.data;
@@ -3123,16 +3139,16 @@ impl App {
                 let tab_id = win_id.with("comment_tab");
                 let mut post: bool = right_ui.data(|d| d.get_temp(tab_id)).unwrap_or(false);
                 right_ui.horizontal(|ui| {
-                    if ui.selectable_label(!post, "Comment").clicked() {
+                    if ui.selectable_label(!post, tr("Comment")).clicked() {
                         post = false;
                     }
-                    if ui.selectable_label(post, "Post").clicked() {
+                    if ui.selectable_label(post, tr("Post")).clicked() {
                         post = true;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let r = ui.add(egui::Button::new("\u{1F50D}").frame(false));
                         name_it(&r, "Search comments button");
-                        if r.on_hover_text("Search comments").clicked() {
+                        if r.on_hover_text(tr("Search comments")).clicked() {
                             find = if find.is_some() { None } else { Some(String::new()) };
                         }
                         // hide the "changed status..." lines
@@ -3150,7 +3166,7 @@ impl App {
                 });
                 // Cmd+Enter sends (taken before the box sees it as a new line)
                 let send_key = right_ui.memory(|m| m.has_focus(comment_id)) && right_ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
-                let cr = right_ui.add(egui::TextEdit::multiline(&mut self.comment_text).id(comment_id).hint_text(if post { "Write a post..." } else { "Write a comment, @mention someone" }).desired_rows(3).desired_width(f32::INFINITY));
+                let cr = right_ui.add(egui::TextEdit::multiline(&mut self.comment_text).id(comment_id).hint_text(if post { tr("Write a post...") } else { tr("Write a comment, @mention someone") }).desired_rows(3).desired_width(f32::INFINITY));
                 name_field(&cr, "Comment box");
                 let mention_id = win_id.with("mention_open");
                 // typing "@" (or a name after it) brings up the people list
@@ -3197,13 +3213,13 @@ impl App {
                     });
                     let ck = ui.add(egui::Button::new("\u{2611}").frame(false).min_size(vec2(24.0, 24.0)));
                     name_it(&ck, "Checklist item in comment");
-                    if ck.on_hover_text("Add a checklist item").clicked() {
+                    if ck.on_hover_text(tr("Add a checklist item")).clicked() {
                         let lead = if self.comment_text.is_empty() || self.comment_text.ends_with('\n') { "" } else { "\n" };
                         insert = Some(format!("{}\u{2610} ", lead));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let label = if post { "Post" } else { "Comment" };
-                        let send = primary_button(ui, &t, label);
+                        let send = primary_button(ui, &t, tr(label));
                         name_it(&send, &format!("Send {}", label));
                         if (send.clicked() || send_key) && !self.comment_text.trim().is_empty() {
                             let id = self.data.new_id();
@@ -3266,17 +3282,17 @@ impl App {
         if let Some((tg, mut name)) = self.rename.take() {
             let mut open = true;
             let mut done = false;
-            egui::Window::new("Rename").collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
+            egui::Window::new(tr("Rename")).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(320.0));
                 r.request_focus();
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     done = true;
                 }
                 ui.horizontal(|ui| {
-                    if primary_button(ui, &t, "Save").clicked() {
+                    if primary_button(ui, &t, tr("Save")).clicked() {
                         done = true;
                     }
-                    if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                         open = false;
                     }
                 });
@@ -3290,20 +3306,20 @@ impl App {
         // delete confirmation
         if let Some(tg) = self.confirm_delete {
             let what = match tg {
-                Target::Space(id) => format!("Space \"{}\"", self.data.location_name(Location::Space(id))),
-                Target::Folder(id) => format!("Folder \"{}\"", self.data.location_name(Location::Folder(id))),
-                Target::List(id) => format!("List \"{}\"", self.data.location_name(Location::List(id))),
-                Target::Task(id) => format!("task \"{}\"", self.task(id).map(|x| x.name.clone()).unwrap_or_default()),
-                Target::Workspace => "workspace".into(),
+                Target::Space(id) => trf!("Space \"{}\"", self.data.location_name(Location::Space(id))),
+                Target::Folder(id) => trf!("Folder \"{}\"", self.data.location_name(Location::Folder(id))),
+                Target::List(id) => trf!("List \"{}\"", self.data.location_name(Location::List(id))),
+                Target::Task(id) => trf!("task \"{}\"", self.task(id).map(|x| x.name.clone()).unwrap_or_default()),
+                Target::Workspace => tr("workspace").into(),
             };
-            egui::Window::new("Delete").collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
-                ui.label(format!("Delete {}? Everything inside it will be removed.", what));
+            egui::Window::new(tr("Delete")).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
+                ui.label(trf!("Delete {}? Everything inside it will be removed.", what));
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(RichText::new("Delete").color(Color32::WHITE)).fill(t.danger)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() {
                         self.do_delete(tg);
                         self.confirm_delete = None;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         self.confirm_delete = None;
                     }
                 });
@@ -3313,7 +3329,7 @@ impl App {
         if let Some(sid) = self.edit_statuses {
             let mut open = true;
             if let Some(si) = self.data.spaces.iter().position(|s| s.id == sid) {
-                let title = format!("Statuses - {}", self.data.spaces[si].name);
+                let title = trf!("Statuses - {}", self.data.spaces[si].name);
                 let mut changed = false;
                 egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
                     let sts = &mut self.data.spaces[si].statuses;
@@ -3340,9 +3356,9 @@ impl App {
                             if ui.add(egui::TextEdit::singleline(&mut st.name).desired_width(160.0)).changed() {
                                 changed = true;
                             }
-                            egui::ComboBox::from_id_salt(("kind", i)).selected_text(kind_label(st.kind)).width(90.0).show_ui(ui, |ui| {
+                            egui::ComboBox::from_id_salt(("kind", i)).selected_text(tr(kind_label(st.kind))).width(90.0).show_ui(ui, |ui| {
                                 for k in [StatusKind::Open, StatusKind::Custom, StatusKind::Done, StatusKind::Closed] {
-                                    if ui.selectable_value(&mut st.kind, k, kind_label(k)).changed() {
+                                    if ui.selectable_value(&mut st.kind, k, tr(kind_label(k))).changed() {
                                         changed = true;
                                     }
                                 }
@@ -3356,13 +3372,13 @@ impl App {
                         sts.remove(i);
                         changed = true;
                     }
-                    if ui.button("+ Add status").clicked() {
+                    if ui.button(tr("+ Add status")).clicked() {
                         let c = STATUS_PALETTE[(sts.len() * 2 + 1) % STATUS_PALETTE.len()];
                         let pos = sts.iter().position(|s| matches!(s.kind, StatusKind::Done | StatusKind::Closed)).unwrap_or(sts.len());
                         sts.insert(pos, Status::new("new status", c, StatusKind::Custom));
                         changed = true;
                     }
-                    ui.label(RichText::new("Tasks keep their status name; renamed statuses show as the first status.").small().color(t.text3));
+                    ui.label(RichText::new(tr("Tasks keep their status name; renamed statuses show as the first status.")).small().color(t.text3));
                 });
                 if changed {
                     self.dirty = true;
@@ -3375,7 +3391,7 @@ impl App {
         // people
         if self.people_open {
             let mut open = true;
-            egui::Window::new("People").open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
+            egui::Window::new(tr("People")).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
                 let mut remove = None;
                 let me = self.data.me;
                 for (i, m) in self.data.members.iter_mut().enumerate() {
@@ -3386,7 +3402,7 @@ impl App {
                             self.dirty = true;
                         }
                         if m.id == me {
-                            ui.label(RichText::new("you").small().color(t.text3));
+                            ui.label(RichText::new(tr("you")).small().color(t.text3));
                         } else if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
                             remove = Some(i);
                         }
@@ -3401,8 +3417,8 @@ impl App {
                     self.dirty = true;
                 }
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.new_person).hint_text("Name").desired_width(180.0));
-                    if ui.button("Add person").clicked() && !self.new_person.trim().is_empty() {
+                    ui.add(egui::TextEdit::singleline(&mut self.new_person).hint_text(tr("Name")).desired_width(180.0));
+                    if ui.button(tr("Add person")).clicked() && !self.new_person.trim().is_empty() {
                         let id = self.data.new_id();
                         let color = STATUS_PALETTE[1 + (id as usize % 13)];
                         self.data.members.push(Member { id, name: self.new_person.trim().to_string(), color, role: "Member".into(), ..Default::default() });
@@ -3430,7 +3446,7 @@ impl App {
                 .max_width(600.0)
                 .frame(dialog_frame(&t))
                 .show(ctx, |ui| {
-                    if dialog_header(ui, &t, "Create Task") {
+                    if dialog_header(ui, &t, tr("Create Task")) {
                         open = false;
                     }
                     ui.add_space(6.0);
@@ -3446,7 +3462,7 @@ impl App {
                             }
                         }
                     }
-                    let cur = all.iter().find(|x| x.0 == qa.list).map(|x| x.1.clone()).unwrap_or_else(|| "Choose list".into());
+                    let cur = all.iter().find(|x| x.0 == qa.list).map(|x| x.1.clone()).unwrap_or_else(|| tr("Choose list").into());
                     let before = qa.list;
                     egui::ComboBox::from_id_salt("qa_list").selected_text(truncate(&cur, 40)).show_ui(ui, |ui| {
                         for (id, name) in &all {
@@ -3457,14 +3473,14 @@ impl App {
                         qa.status = None;
                     }
                     ui.add_space(6.0);
-                    let r = ui.add(egui::TextEdit::singleline(&mut qa.name).hint_text("Task Name or type '/' for commands").font(FontId::proportional(18.0)).frame(false).desired_width(f32::INFINITY));
+                    let r = ui.add(egui::TextEdit::singleline(&mut qa.name).hint_text(tr("Task Name or type '/' for commands")).font(FontId::proportional(18.0)).frame(false).desired_width(f32::INFINITY));
                     name_field(&r, "Task Name or type '/' for commands");
                     focus_once(ui, &r);
                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         create = true;
                     }
                     ui.add_space(4.0);
-                    let dr = ui.add(egui::TextEdit::multiline(&mut qa.description).hint_text("Add description").desired_rows(3).desired_width(f32::INFINITY));
+                    let dr = ui.add(egui::TextEdit::multiline(&mut qa.description).hint_text(tr("Add description")).desired_rows(3).desired_width(f32::INFINITY));
                     name_field(&dr, "Add description");
                     ui.add_space(8.0);
                     // status, assignee, due date, priority, tags
@@ -3480,7 +3496,7 @@ impl App {
                             }
                         }
                         let a_txt = if qa.assignees.is_empty() {
-                            "\u{1F464} Assignee".to_string()
+                            tr("\u{1F464} Assignee").to_string()
                         } else {
                             let names: Vec<String> = qa.assignees.iter().filter_map(|id| self.data.member(*id).map(|m| m.name.clone())).collect();
                             format!("\u{1F464} {}", truncate(&names.join(", "), 20))
@@ -3488,23 +3504,23 @@ impl App {
                         let r = ui.button(a_txt);
                         let data = &self.data;
                         popup(ui, &r, egui::Id::new("qa_as"), 220.0, |ui| assignee_menu(ui, &t, data, &mut qa.assignees));
-                        let d_txt = qa.due.map(|d| format!("\u{1F4C5} {}", fmt_date(d))).unwrap_or_else(|| "\u{1F4C5} Due date".into());
+                        let d_txt = qa.due.map(|d| format!("\u{1F4C5} {}", fmt_date(d))).unwrap_or_else(|| tr("\u{1F4C5} Due date").into());
                         let r = ui.button(d_txt);
                         popup(ui, &r, egui::Id::new("qa_due"), 380.0, |ui| date_menu(ui, &t, egui::Id::new("qa_cal"), &mut qa.due));
-                        let p_txt = if qa.priority > 0 { format!("\u{2691} {}", PRIORITIES[qa.priority as usize].label) } else { "\u{2691} Priority".into() };
+                        let p_txt = if qa.priority > 0 { format!("\u{2691} {}", tr(PRIORITIES[qa.priority as usize].label)) } else { tr("\u{2691} Priority").into() };
                         let r = ui.button(p_txt);
                         popup(ui, &r, egui::Id::new("qa_pr"), 180.0, |ui| priority_menu(ui, &t, &mut qa.priority));
-                        let r = ui.button("\u{1F3F7} Tags");
+                        let r = ui.button(tr("\u{1F3F7} Tags"));
                         popup(ui, &r, egui::Id::new("qa_tags"), 220.0, |ui| {
-                            let tr = ui.add(egui::TextEdit::singleline(&mut qa.tag_text).hint_text("Search or add tags...").desired_width(f32::INFINITY));
-                            focus_once(ui, &tr);
-                            if tr.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            let tag_r = ui.add(egui::TextEdit::singleline(&mut qa.tag_text).hint_text(tr("Search or add tags...")).desired_width(f32::INFINITY));
+                            focus_once(ui, &tag_r);
+                            if tag_r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                 let tag = qa.tag_text.trim().to_lowercase();
                                 if !tag.is_empty() && !qa.tags.contains(&tag) {
                                     qa.tags.push(tag);
                                 }
                                 qa.tag_text.clear();
-                                tr.request_focus();
+                                tag_r.request_focus();
                             }
                             let mut known: Vec<String> = self.data.tasks.iter().flat_map(|t| t.tags.iter().cloned()).collect();
                             known.sort();
@@ -3527,7 +3543,7 @@ impl App {
                         });
                         let mut drop: Option<String> = None;
                         for tag in &qa.tags {
-                            if chip(ui, &format!("{} \u{00D7}", tag), tag_color(tag)).on_hover_text("Remove tag").clicked() {
+                            if chip(ui, &format!("{} \u{00D7}", tag), tag_color(tag)).on_hover_text(tr("Remove tag")).clicked() {
                                 drop = Some(tag.clone());
                             }
                         }
@@ -3539,7 +3555,7 @@ impl App {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if primary_button(ui, &t, "Create Task").clicked() {
+                            if primary_button(ui, &t, tr("Create Task")).clicked() {
                                 create = true;
                             }
                         });

@@ -7,6 +7,15 @@
 #[path = "../src/media.rs"]
 mod media;
 
+// media.rs shows its file-picker text through the app's translation; the
+// player needs none of it
+#[allow(dead_code)]
+mod i18n {
+    pub fn tr(s: &str) -> &str {
+        s
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {

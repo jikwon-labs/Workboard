@@ -5,7 +5,7 @@
 use super::*;
 
 /// (group, label) in the order the left list shows them.
-pub const SETTINGS: [(&str, &str); 14] = [
+pub const SETTINGS: [(&str, &str); 15] = [
     ("Admin", "General"),
     ("Admin", "People"),
     ("Admin", "Spaces"),
@@ -19,6 +19,7 @@ pub const SETTINGS: [(&str, &str); 14] = [
     ("Personal", "My Settings"),
     ("Personal", "Notifications"),
     ("Personal", "Themes"),
+    ("Personal", "Language"),
     ("Personal", "Keyboard shortcuts"),
 ];
 
@@ -59,7 +60,7 @@ impl App {
         ui.painter().rect_filled(nav, 0.0, t.sidebar);
         ui.painter().vline(nav.right(), nav.y_range(), Stroke::new(1.0, t.border));
         let mut nui = ui.new_child(egui::UiBuilder::new().max_rect(nav.shrink(10.0)).layout(Layout::top_down(Align::Min)));
-        if nui.add(egui::Button::new(RichText::new("\u{2190}  Back to Workspace").color(t.text2)).frame(false)).clicked() {
+        if nui.add(egui::Button::new(RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2)).frame(false)).clicked() {
             self.section = Section::Home;
         }
         nui.add_space(6.0);
@@ -70,7 +71,7 @@ impl App {
             if *group != last_group {
                 last_group = group;
                 nui.add_space(8.0);
-                nui.label(RichText::new(*group).small().color(t.text3));
+                nui.label(RichText::new(tr(group)).small().color(t.text3));
             }
             let sel = self.settings_tab as usize == i;
             let w = nui.available_width();
@@ -81,7 +82,7 @@ impl App {
             } else if resp.hovered() {
                 nui.painter().rect_filled(r, 6.0, t.hover);
             }
-            nui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, *label, FontId::proportional(13.5), if sel { t.selected_text } else { t.text });
+            nui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(13.5), if sel { t.selected_text } else { t.text });
             if resp.clicked() && !sel {
                 self.settings_tab = i as u8;
                 self.settings_state = None;
@@ -89,7 +90,7 @@ impl App {
         }
         let label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
         let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(body.shrink2(vec2(32.0, 20.0))).layout(Layout::top_down(Align::Min)));
-        bui.label(RichText::new(label).size(22.0).strong());
+        bui.label(RichText::new(tr(label)).size(22.0).strong());
         bui.add_space(12.0);
         match label {
             "People" => {
@@ -98,6 +99,10 @@ impl App {
             }
             "Spaces" => {
                 self.spaces_settings(&mut bui);
+                return;
+            }
+            "Language" => {
+                self.language_settings(&mut bui);
                 return;
             }
             _ => {}
@@ -116,6 +121,25 @@ impl App {
         });
     }
 
+    /// The interface language: the system's, English or Korean.
+    fn language_settings(&mut self, ui: &mut Ui) {
+        use crate::i18n::Choice;
+        ui.label(RichText::new(tr("The language of menus, buttons and messages on this computer. Names and text people write stay as they are.")).color(self.t().text2));
+        ui.add_space(10.0);
+        // each language is named in itself, so it can be found whatever is on
+        for (c, label) in [(Choice::System, tr("Same as the system")), (Choice::En, "English"), (Choice::Ko, "\u{d55c}\u{ad6d}\u{c5b4}")] {
+            let r = ui.radio(self.lang_choice == c, label);
+            name_it(&r, &format!("Language {}", crate::i18n::choice_key(c)));
+            if r.clicked() && self.lang_choice != c {
+                self.lang_choice = c;
+                crate::i18n::set_lang(crate::i18n::resolve(c));
+                if self.persist {
+                    Data::set_language(c);
+                }
+            }
+        }
+    }
+
     /// Spaces table: open, rename, colour, statuses, delete.
     fn spaces_settings(&mut self, ui: &mut Ui) {
         let t = self.t();
@@ -130,9 +154,9 @@ impl App {
             })
             .collect();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{} Spaces", spaces.len())).color(t.text2));
+            ui.label(RichText::new(trf!("{} Spaces", spaces.len())).color(t.text2));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, &t, "+ New Space").clicked() {
+                if primary_button(ui, &t, tr("+ New Space")).clicked() {
                     self.modal = Some(Modal::NewSpace { name: String::new(), color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13] });
                 }
             });
@@ -140,7 +164,7 @@ impl App {
         ui.add_space(8.0);
         egui::Grid::new("spaces_table").num_columns(5).striped(true).spacing(vec2(24.0, 10.0)).show(ui, |ui| {
             for h in ["Name", "Lists", "Tasks", "", ""] {
-                ui.label(RichText::new(h).small().color(t.text3));
+                ui.label(RichText::new(tr(h)).small().color(t.text3));
             }
             ui.end_row();
             for (id, name, color, nl, nt) in spaces {
@@ -157,7 +181,7 @@ impl App {
                 click_menu(&r, |ui| self.space_menu(ui, id));
                 let hidden = self.data.spaces.iter().find(|s| s.id == id).is_some_and(|s| s.hidden);
                 if hidden {
-                    let b = ui.button("Show in sidebar");
+                    let b = ui.button(tr("Show in sidebar"));
                     name_it(&b, &format!("Show {}", name));
                     if b.clicked() {
                         if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == id) {
@@ -182,15 +206,15 @@ impl App {
             .collect();
         let arch_folders: Vec<(u64, String)> = self.data.spaces.iter().filter(|s| !s.archived).flat_map(|s| s.folders.iter().filter(|f| f.archived).map(move |f| (f.id, format!("{} / {}", s.name, f.name)))).collect();
         ui.add_space(18.0);
-        ui.label(RichText::new("Archived").strong());
+        ui.label(RichText::new(tr("Archived")).strong());
         if arch_spaces.is_empty() && arch_lists.is_empty() && arch_folders.is_empty() {
-            ui.label(RichText::new("Nothing is archived. Archived Spaces and Lists show here so you can restore them.").color(t.text3));
+            ui.label(RichText::new(tr("Nothing is archived. Archived Spaces and Lists show here so you can restore them.")).color(t.text3));
         }
         egui::Grid::new("archived_table").num_columns(3).striped(true).spacing(vec2(24.0, 8.0)).show(ui, |ui| {
             for (id, name) in arch_spaces {
-                ui.label(RichText::new("Space").small().color(t.text3));
+                ui.label(RichText::new(tr("Space")).small().color(t.text3));
                 ui.label(&name);
-                let b = ui.button("Restore");
+                let b = ui.button(tr("Restore"));
                 name_it(&b, &format!("Restore {}", name));
                 if b.clicked() {
                     self.set_space_archived(id, false);
@@ -198,9 +222,9 @@ impl App {
                 ui.end_row();
             }
             for (id, name) in arch_folders {
-                ui.label(RichText::new("Folder").small().color(t.text3));
+                ui.label(RichText::new(tr("Folder")).small().color(t.text3));
                 ui.label(&name);
-                let b = ui.button("Restore");
+                let b = ui.button(tr("Restore"));
                 name_it(&b, &format!("Restore {}", name));
                 if b.clicked() {
                     self.set_folder_archived(id, false);
@@ -208,9 +232,9 @@ impl App {
                 ui.end_row();
             }
             for (id, name) in arch_lists {
-                ui.label(RichText::new("List").small().color(t.text3));
+                ui.label(RichText::new(tr("List")).small().color(t.text3));
                 ui.label(&name);
-                let b = ui.button("Restore");
+                let b = ui.button(tr("Restore"));
                 name_it(&b, &format!("Restore {}", name));
                 if b.clicked() {
                     self.set_list_archived(id, false);

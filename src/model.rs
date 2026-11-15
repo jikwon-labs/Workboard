@@ -814,6 +814,17 @@ impl Data {
         (!f.is_empty() && !f.contains('/') && !f.contains("..")).then_some(f)
     }
 
+    /// The interface language picked on this computer.
+    pub fn language() -> crate::i18n::Choice {
+        let s = std::fs::read_to_string(Self::dir().join("language")).unwrap_or_default();
+        crate::i18n::choice_from_key(&s)
+    }
+
+    pub fn set_language(c: crate::i18n::Choice) {
+        let _ = std::fs::create_dir_all(Self::dir());
+        let _ = std::fs::write(Self::dir().join("language"), crate::i18n::choice_key(c));
+    }
+
     pub fn set_last_workspace(file: &str) {
         let _ = std::fs::create_dir_all(Self::dir());
         let _ = std::fs::write(Self::dir().join("last-workspace"), file);

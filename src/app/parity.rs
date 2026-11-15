@@ -240,20 +240,20 @@ impl App {
 
     pub(super) fn new_list_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String, space: &mut u64, folder: &mut Option<u64>) -> bool {
         let mut close = false;
-        ui.label(RichText::new("All Lists are located within a Space. Lists can house any type of task.").color(t.text2));
+        ui.label(RichText::new(tr("All Lists are located within a Space. Lists can house any type of task.")).color(t.text2));
         ui.add_space(8.0);
-        ui.label(RichText::new("Name").color(t.text2));
-        let r = ui.add(egui::TextEdit::singleline(name).hint_text("e.g. Project, List of items, Campaign").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+        ui.label(RichText::new(tr("Name")).color(t.text2));
+        let r = ui.add(egui::TextEdit::singleline(name).hint_text(tr("e.g. Project, List of items, Campaign")).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
         focus_once(ui, &r);
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(8.0);
-        ui.label(RichText::new("Space (location)").color(t.text2));
+        ui.label(RichText::new(tr("Space (location)")).color(t.text2));
         let spaces: Vec<(u64, String, Vec<(u64, String)>)> = self.open_spaces().iter().map(|s| (s.id, s.name.clone(), s.folders.iter().map(|f| (f.id, f.name.clone())).collect())).collect();
         let cur = spaces.iter().find(|s| s.0 == *space).map(|s| match folder.and_then(|f| s.2.iter().find(|x| x.0 == f)) {
             Some(f) => format!("{} / {}", s.1, f.1),
             None => s.1.clone(),
         });
-        egui::ComboBox::from_id_salt("new_list_space").width(ui.available_width() - 10.0).selected_text(cur.unwrap_or_else(|| "Choose a Space".into())).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("new_list_space").width(ui.available_width() - 10.0).selected_text(cur.unwrap_or_else(|| tr("Choose a Space").into())).show_ui(ui, |ui| {
             for (sid, sname, folders) in &spaces {
                 if ui.selectable_label(*space == *sid && folder.is_none(), sname).clicked() {
                     *space = *sid;
@@ -271,10 +271,10 @@ impl App {
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let ok = spaces.iter().any(|s| s.0 == *space);
-                if (ui.add_enabled(ok, egui::Button::new(RichText::new("Create").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(90.0, 32.0))).clicked() || (enter && ok)) && self.create_list(*space, *folder, name).is_some() {
+                if (ui.add_enabled(ok, egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(90.0, 32.0))).clicked() || (enter && ok)) && self.create_list(*space, *folder, name).is_some() {
                     close = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
             });
@@ -284,21 +284,21 @@ impl App {
 
     pub(super) fn new_space_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String, color: &mut [u8; 3]) -> bool {
         let mut close = false;
-        ui.label(RichText::new("A Space represents teams, departments, or groups, each with its own Lists, workflows, and settings.").color(t.text2));
+        ui.label(RichText::new(tr("A Space represents teams, departments, or groups, each with its own Lists, workflows, and settings.")).color(t.text2));
         ui.add_space(8.0);
-        ui.label(RichText::new("Icon & name").color(t.text2));
+        ui.label(RichText::new(tr("Icon & name")).color(t.text2));
         let mut enter = false;
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
             ui.painter().rect_filled(r, 7.0, rgb(*color));
             let letter = name.chars().next().unwrap_or('S').to_uppercase().to_string();
             ui.painter().text(r.center(), Align2::CENTER_CENTER, letter, FontId::proportional(15.0), Color32::WHITE);
-            let te = ui.add(egui::TextEdit::singleline(name).hint_text("e.g. Marketing, Engineering, HR").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+            let te = ui.add(egui::TextEdit::singleline(name).hint_text(tr("e.g. Marketing, Engineering, HR")).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
             focus_once(ui, &te);
             enter = te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         });
         ui.add_space(8.0);
-        ui.label(RichText::new("Color").color(t.text2));
+        ui.label(RichText::new(tr("Color")).color(t.text2));
         ui.horizontal_wrapped(|ui| {
             for c in STATUS_PALETTE.iter().skip(1) {
                 let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
@@ -314,11 +314,11 @@ impl App {
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, t, "Continue").clicked() || enter {
+                if primary_button(ui, t, tr("Continue")).clicked() || enter {
                     self.create_space(name, *color);
                     close = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
             });
@@ -329,10 +329,10 @@ impl App {
     /// "Create Channel" (+ Create > Channel, the sidebar's Channels "+").
     pub(super) fn new_channel_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String, private: &mut bool, add_list: &mut bool) -> bool {
         let mut close = false;
-        ui.label(RichText::new("Channels are where your team communicates. They're best when organized around a topic, like #marketing.").color(t.text2));
+        ui.label(RichText::new(tr("Channels are where your team communicates. They're best when organized around a topic, like #marketing.")).color(t.text2));
         ui.add_space(8.0);
-        ui.label(RichText::new("Name").color(t.text2));
-        let r = ui.add(egui::TextEdit::singleline(name).hint_text("e.g. design-team").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+        ui.label(RichText::new(tr("Name")).color(t.text2));
+        let r = ui.add(egui::TextEdit::singleline(name).hint_text(tr("e.g. design-team")).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
         name_field(&r, "Channel name");
         focus_once(ui, &r);
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -340,8 +340,8 @@ impl App {
         for (on, label, help) in [(&mut *private, "Make Private", "Only invited people can find this channel."), (&mut *add_list, "Add a List", "Make a List with the same name, tied to this channel.")] {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(label).color(t.text));
-                    ui.label(RichText::new(help).small().color(t.text3));
+                    ui.label(RichText::new(tr(label)).color(t.text));
+                    ui.label(RichText::new(tr(help)).small().color(t.text3));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     switch(ui, t, on, label);
@@ -353,7 +353,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let ok = !name.trim().is_empty();
-                let b = ui.add_enabled(ok, egui::Button::new(RichText::new("Create").color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(90.0, 32.0)));
+                let b = ui.add_enabled(ok, egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(90.0, 32.0)));
                 if (b.clicked() || (enter && ok)) && ok {
                     self.create_channel(name, *private, *add_list);
                     close = true;
@@ -418,7 +418,7 @@ impl App {
             t.updated = now_ts();
         }
         self.dirty = true;
-        self.toast = Some((if ids.len() == 1 { format!("Moved to {}", lname) } else { format!("Moved {} tasks to {}", ids.len(), lname) }, now_ts()));
+        self.toast = Some((if ids.len() == 1 { trf!("Moved to {}", lname) } else { trf!("Moved {} tasks to {}", ids.len(), lname) }, now_ts()));
     }
 
     /// Copies a task with its subtasks; returns the copy's id.
@@ -462,7 +462,7 @@ impl App {
         }
         self.selected.retain(|s| !ids.contains(s));
         self.dirty = true;
-        self.toast = Some((if archived { format!("Archived {} task{}", ids.len(), if ids.len() == 1 { "" } else { "s" }) } else { "Unarchived".into() }, now_ts()));
+        self.toast = Some((if !archived { tr("Unarchived").into() } else if ids.len() == 1 { trf!("Archived {} task", ids.len()) } else { trf!("Archived {} tasks", ids.len()) }, now_ts()));
     }
 
     /// Moves a list to another space or folder.
@@ -493,7 +493,7 @@ impl App {
                 t.status = statuses[0].name.clone();
             }
         }
-        self.toast = Some((format!("Moved {} to {}", item.name, self.data.location_name(folder.map(Location::Folder).unwrap_or(Location::Space(space)))), now_ts()));
+        self.toast = Some((trf!("Moved {} to {}", item.name, self.data.location_name(folder.map(Location::Folder).unwrap_or(Location::Space(space)))), now_ts()));
         self.dirty = true;
     }
 
@@ -564,8 +564,8 @@ impl App {
     pub(super) fn move_tasks_body(&mut self, ui: &mut Ui, t: &Theme, ids: &[u64], query: &mut String) -> bool {
         let mut close = false;
         let here: Vec<u64> = ids.iter().filter_map(|i| self.task(*i)).map(|t| t.list_id).collect();
-        ui.label(RichText::new(if ids.len() == 1 { "Move this task to another List.".to_string() } else { format!("Move {} tasks to another List.", ids.len()) }).color(t.text2));
-        let r = ui.add(egui::TextEdit::singleline(query).hint_text("Search Lists...").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+        ui.label(RichText::new(if ids.len() == 1 { tr("Move this task to another List.").to_string() } else { trf!("Move {} tasks to another List.", ids.len()) }).color(t.text2));
+        let r = ui.add(egui::TextEdit::singleline(query).hint_text(tr("Search Lists...")).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
         focus_once(ui, &r);
         ui.add_space(4.0);
         let q = query.to_lowercase();
@@ -589,7 +589,7 @@ impl App {
 
     pub(super) fn move_list_body(&mut self, ui: &mut Ui, t: &Theme, list: u64) -> bool {
         let mut close = false;
-        ui.label(RichText::new(format!("Move \"{}\" to:", self.data.list_name(list))).color(t.text2));
+        ui.label(RichText::new(trf!("Move \"{}\" to:", self.data.list_name(list))).color(t.text2));
         ui.add_space(4.0);
         let spaces: Vec<(u64, String, Vec<(u64, String)>)> = self.open_spaces().iter().map(|s| (s.id, s.name.clone(), s.folders.iter().map(|f| (f.id, f.name.clone())).collect())).collect();
         let (cur_space, cur_folder) = {
@@ -624,23 +624,23 @@ impl App {
         let Some(task) = self.task(tid).cloned() else { return };
         ui.set_min_width(220.0);
         ui.horizontal(|ui| {
-            if ui.button("Copy link").clicked() {
+            if ui.button(tr("Copy link")).clicked() {
                 ui.ctx().copy_text(format!("workboard://task/{}", tid));
-                self.toast = Some(("Link copied".into(), now_ts()));
+                self.toast = Some((tr("Link copied").into(), now_ts()));
                 close_any(ui);
             }
-            if ui.button("Copy ID").clicked() {
+            if ui.button(tr("Copy ID")).clicked() {
                 ui.ctx().copy_text(format!("{}", tid));
-                self.toast = Some(("Task ID copied".into(), now_ts()));
+                self.toast = Some((tr("Task ID copied").into(), now_ts()));
                 close_any(ui);
             }
         });
         ui.separator();
-        if ui.button("Open").clicked() {
+        if ui.button(tr("Open")).clicked() {
             self.actions.push(Action::Open(tid));
             close_any(ui);
         }
-        if ui.button("Rename").clicked() {
+        if ui.button(tr("Rename")).clicked() {
             if self.view == ViewKind::List && self.open_task.is_none() && self.row_order.contains(&tid) {
                 // a row on screen is renamed in place
                 self.row_rename = Some((tid, task.name.clone()));
@@ -651,7 +651,7 @@ impl App {
         }
         let star = format!("task:{}", tid);
         let fav = self.data.extra.starred.contains(&star);
-        if ui.button(if fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
+        if ui.button(tr(if fav { "Remove from Favorites" } else { "Add to Favorites" })).clicked() {
             if fav {
                 self.data.extra.starred.retain(|s| *s != star);
             } else {
@@ -661,7 +661,7 @@ impl App {
             close_any(ui);
         }
         let selected = self.selected.contains(&tid);
-        if ui.button(if selected { "Deselect" } else { "Select" }).clicked() {
+        if ui.button(if selected { tr("Deselect") } else { tr("Select") }).clicked() {
             if selected {
                 self.selected.remove(&tid);
             } else {
@@ -671,10 +671,10 @@ impl App {
         }
         ui.separator();
         let statuses = self.data.statuses_for_list(task.list_id);
-        ui.menu_button("Status", |ui| {
+        ui.menu_button(tr("Status"), |ui| {
             ui.set_max_width(200.0);
             for st in &statuses {
-                if menu_row(ui, &t, &st.name.to_uppercase(), st.name == task.status, |p, c| paint_status_circle(p, c, 6.0, st)).clicked() {
+                if menu_row(ui, &t, &crate::i18n::status_text(&st.name).to_uppercase(), st.name == task.status, |p, c| paint_status_circle(p, c, 6.0, st)).clicked() {
                     let mut e = task.clone();
                     e.status = st.name.clone();
                     self.actions.push(Action::Replace(e));
@@ -683,12 +683,12 @@ impl App {
             }
         });
         if self.data.extra.apps.priorities {
-            ui.menu_button("Priority", |ui| {
+            ui.menu_button(tr("Priority"), |ui| {
                 ui.set_max_width(180.0);
                 for pr in [1u8, 2, 3, 4, 0] {
                     let col = priority_color(pr, &t);
                     let label = if pr == 0 { "Clear" } else { PRIORITIES[pr as usize].label };
-                    if menu_row(ui, &t, label, task.priority == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0)).clicked() {
+                    if menu_row(ui, &t, tr(label), task.priority == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0)).clicked() {
                         let mut e = task.clone();
                         e.priority = pr;
                         self.actions.push(Action::Replace(e));
@@ -697,7 +697,7 @@ impl App {
                 }
             });
         }
-        ui.menu_button("Assignees", |ui| {
+        ui.menu_button(tr("Assignees"), |ui| {
             ui.set_max_width(220.0);
             let members = self.data.members.clone();
             for m in &members {
@@ -715,11 +715,11 @@ impl App {
                 }
             }
         });
-        ui.menu_button("Due date", |ui| {
+        ui.menu_button(tr("Due date"), |ui| {
             let td = today();
             let wd = td.weekday().num_days_from_monday() as i64;
             for (label, d) in [("Today", Some(td)), ("Tomorrow", Some(td + Duration::days(1))), ("Next week", Some(td + Duration::days(7 - wd))), ("2 weeks", Some(td + Duration::days(14))), ("Clear", None)] {
-                if ui.button(label).clicked() {
+                if ui.button(tr(label)).clicked() {
                     let mut e = task.clone();
                     e.due = d;
                     self.actions.push(Action::Replace(e));
@@ -727,10 +727,10 @@ impl App {
                 }
             }
         });
-        ui.menu_button("Repeat", |ui| {
+        ui.menu_button(tr("Repeat"), |ui| {
             for (v, label) in RECUR {
                 let sel = task.recur.as_deref().unwrap_or("") == v;
-                if ui.selectable_label(sel, label).clicked() {
+                if ui.selectable_label(sel, tr(label)).clicked() {
                     let mut e = task.clone();
                     e.recur = if v.is_empty() { None } else { Some(v.to_string()) };
                     if e.recur.is_some() && e.due.is_none() {
@@ -742,49 +742,49 @@ impl App {
             }
         });
         ui.separator();
-        if ui.button("Add subtask").clicked() {
+        if ui.button(tr("Add subtask")).clicked() {
             self.actions.push(Action::Add { list: task.list_id, name: String::new(), status: None, priority: 0, assignees: vec![], due: None, parent: Some(tid), open: true });
             close_any(ui);
         }
-        if ui.button("Move to...").clicked() {
+        if ui.button(tr("Move to...")).clicked() {
             self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
             close_any(ui);
         }
-        if ui.button("Make subtask of...").clicked() {
+        if ui.button(tr("Make subtask of...")).clicked() {
             self.modal = Some(Modal::PickTask { task: tid, mode: TaskPick::Parent, query: String::new() });
             close_any(ui);
         }
-        if task.parent.is_some() && ui.button("Make top-level task").clicked() {
+        if task.parent.is_some() && ui.button(tr("Make top-level task")).clicked() {
             self.make_top_level(tid);
             close_any(ui);
         }
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             if self.duplicate_task(tid).is_some() {
-                self.toast = Some(("Task duplicated".into(), now_ts()));
+                self.toast = Some((tr("Task duplicated").into(), now_ts()));
             }
             close_any(ui);
         }
-        if ui.button("Remind me").clicked() {
+        if ui.button(tr("Remind me")).clicked() {
             self.modal = Some(Modal::Reminder { text: task.name.clone(), date: Some(today() + Duration::days(1)), time: "09:00".into() });
             close_any(ui);
         }
-        if ui.button(if task.timer_started.is_some() { "Stop timer" } else { "Start timer" }).clicked() {
+        if ui.button(if task.timer_started.is_some() { tr("Stop timer") } else { tr("Start timer") }).clicked() {
             self.actions.push(Action::ToggleTimer(tid));
             close_any(ui);
         }
-        if ui.button("Save as template").clicked() {
+        if ui.button(tr("Save as template")).clicked() {
             let id = self.data.new_id();
             self.data.extra.templates.push(TaskTemplate { id, name: task.name.clone(), task_name: task.name.clone(), description: task.description.clone(), checklist: task.checklist.iter().map(|c| c.text.clone()).collect(), tags: task.tags.clone(), priority: task.priority });
-            self.toast = Some(("Saved as a template".into(), now_ts()));
+            self.toast = Some((tr("Saved as a template").into(), now_ts()));
             self.dirty = true;
             close_any(ui);
         }
         ui.separator();
-        if ui.button(if task.archived { "Unarchive" } else { "Archive" }).clicked() {
+        if ui.button(if task.archived { tr("Unarchive") } else { tr("Archive") }).clicked() {
             self.set_archived(&[tid], !task.archived);
             close_any(ui);
         }
-        if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
+        if ui.button(RichText::new(tr("Delete")).color(t.danger)).clicked() {
             self.actions.push(Action::DeleteTask(tid));
             close_any(ui);
         }
@@ -796,20 +796,20 @@ impl App {
         let loc = Location::List(lid);
         ui.set_min_width(200.0);
         let fav = if self.data.favorites.contains(&loc) { "Remove from Favorites" } else { "Add to Favorites" };
-        if ui.button(fav).clicked() {
+        if ui.button(tr(fav)).clicked() {
             self.actions.push(Action::ToggleFavorite(loc));
             close_any(ui);
         }
-        if ui.button("Rename").clicked() {
+        if ui.button(tr("Rename")).clicked() {
             self.actions.push(Action::StartRename(Target::List(lid)));
             close_any(ui);
         }
-        if ui.button("Copy link").clicked() {
+        if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://list/{}", lid));
-            self.toast = Some(("Link copied".into(), now_ts()));
+            self.toast = Some((tr("Link copied").into(), now_ts()));
             close_any(ui);
         }
-        if ui.button("List Info").clicked() {
+        if ui.button(tr("List Info")).clicked() {
             self.modal = Some(Modal::ListInfo { list: lid });
             close_any(ui);
         }
@@ -843,39 +843,39 @@ impl App {
             }
         });
         ui.separator();
-        ui.menu_button("Create new", |ui| self.list_create_menu(ui, lid));
+        ui.menu_button(tr("Create new"), |ui| self.list_create_menu(ui, lid));
         if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
-            if ui.button("Task statuses").clicked() {
+            if ui.button(tr("Task statuses")).clicked() {
                 self.actions.push(Action::EditStatuses(sid));
                 close_any(ui);
             }
         }
-        if ui.button("Custom Fields").clicked() {
+        if ui.button(tr("Custom Fields")).clicked() {
             self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
             close_any(ui);
         }
-        if ui.button("Automations").clicked() {
+        if ui.button(tr("Automations")).clicked() {
             self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
             close_any(ui);
         }
         ui.separator();
-        if ui.button("Move...").clicked() {
+        if ui.button(tr("Move...")).clicked() {
             self.modal = Some(Modal::MoveList { list: lid });
             close_any(ui);
         }
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_list(lid) {
                 self.section = Section::Home;
                 self.loc = Location::List(n);
-                self.toast = Some(("List duplicated".into(), now_ts()));
+                self.toast = Some((tr("List duplicated").into(), now_ts()));
             }
             close_any(ui);
         }
-        if ui.button("Archive").clicked() {
+        if ui.button(tr("Archive")).clicked() {
             self.set_list_archived(lid, true);
             close_any(ui);
         }
-        if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
+        if ui.button(RichText::new(tr("Delete")).color(t.danger)).clicked() {
             self.actions.push(Action::AskDelete(Target::List(lid)));
             close_any(ui);
         }
@@ -888,34 +888,34 @@ impl App {
         let Some(sid) = self.data.spaces.iter().find(|s| s.folders.iter().any(|f| f.id == fid)).map(|s| s.id) else { return };
         ui.set_min_width(200.0);
         let fav = if self.data.favorites.contains(&floc) { "Remove from Favorites" } else { "Add to Favorites" };
-        if ui.button(fav).clicked() {
+        if ui.button(tr(fav)).clicked() {
             self.actions.push(Action::ToggleFavorite(floc));
             close_any(ui);
         }
-        if ui.button("Rename").clicked() {
+        if ui.button(tr("Rename")).clicked() {
             self.actions.push(Action::StartRename(Target::Folder(fid)));
             close_any(ui);
         }
-        if ui.button("Copy link").clicked() {
+        if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://folder/{}", fid));
-            self.toast = Some(("Link copied".into(), now_ts()));
+            self.toast = Some((tr("Link copied").into(), now_ts()));
             close_any(ui);
         }
         ui.separator();
-        ui.menu_button("Create new", |ui| {
-            if ui.button("List").clicked() {
+        ui.menu_button(tr("Create new"), |ui| {
+            if ui.button(tr("List")).clicked() {
                 self.open_new_list(Some(sid), Some(fid));
                 close_any(ui);
             }
-            if ui.button("Doc").clicked() {
+            if ui.button(tr("Doc")).clicked() {
                 self.new_doc(Some(sid));
                 close_any(ui);
             }
         });
         let others: Vec<(u64, String)> = self.open_spaces().iter().filter(|s| s.id != sid).map(|s| (s.id, s.name.clone())).collect();
-        ui.menu_button("Move to Space", |ui| {
+        ui.menu_button(tr("Move to Space"), |ui| {
             if others.is_empty() {
-                ui.label(RichText::new("No other Space").color(t.text3));
+                ui.label(RichText::new(tr("No other Space")).color(t.text3));
             }
             for (id, name) in &others {
                 if ui.button(name).clicked() {
@@ -924,19 +924,19 @@ impl App {
                 }
             }
         });
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_folder(fid) {
                 self.actions.push(Action::Go(Location::Folder(n)));
-                self.toast = Some(("Folder duplicated".into(), now_ts()));
+                self.toast = Some((tr("Folder duplicated").into(), now_ts()));
             }
             close_any(ui);
         }
-        if ui.button("Archive").clicked() {
+        if ui.button(tr("Archive")).clicked() {
             self.set_folder_archived(fid, true);
             close_any(ui);
         }
         ui.separator();
-        if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
+        if ui.button(RichText::new(tr("Delete")).color(t.danger)).clicked() {
             self.actions.push(Action::AskDelete(Target::Folder(fid)));
             close_any(ui);
         }
@@ -1053,9 +1053,9 @@ impl App {
         ui.set_min_width(200.0);
         let sid = self.data.space_of_list(lid).map(|s| s.id);
         let folder = self.data.spaces.iter().flat_map(|s| s.folders.iter()).find(|f| f.lists.iter().any(|l| l.id == lid)).map(|f| f.id);
-        ui.label(RichText::new("Create").small().color(self.t().text3));
+        ui.label(RichText::new(tr("Create")).small().color(self.t().text3));
         for (icon, label) in [("\u{2611}", "Task"), ("\u{2630}", "List"), ("\u{1F4C4}", "Doc"), ("\u{1F4CA}", "Dashboard"), ("\u{1F3A8}", "Whiteboard"), ("\u{1F4CB}", "Form")] {
-            let b = ui.button(format!("{}  {}", icon, label));
+            let b = ui.button(format!("{}  {}", icon, tr(label)));
             name_it(&b, &format!("Create {}", label));
             if b.clicked() {
                 match label {
@@ -1089,7 +1089,7 @@ impl App {
         if archived && self.loc == Location::List(lid) {
             self.loc = Location::Home;
         }
-        let msg = if archived { format!("Archived \"{}\". Restore it from Settings > Spaces.", name) } else { format!("Restored \"{}\".", name) };
+        let msg = if archived { trf!("Archived \"{}\". Restore it from Settings > Spaces.", name) } else { trf!("Restored \"{}\".", name) };
         self.toast = Some((msg, now_ts()));
     }
 
@@ -1157,19 +1157,19 @@ impl App {
             for (k, v) in [
                 ("Name", item.name.clone()),
                 ("Location", path),
-                ("Tasks", format!("{} ({} open, {} closed)", tops.len(), tops.len() - closed, closed)),
+                ("Tasks", trf!("{} ({} open, {} closed)", tops.len(), tops.len() - closed, closed)),
                 ("Subtasks", subs.to_string()),
                 ("Archived tasks", archived.to_string()),
             ] {
-                ui.label(RichText::new(k).color(t.text2));
+                ui.label(RichText::new(tr(k)).color(t.text2));
                 ui.label(RichText::new(v).color(t.text));
                 ui.end_row();
             }
         });
         ui.add_space(8.0);
-        ui.label(RichText::new("Description").color(t.text2));
+        ui.label(RichText::new(tr("Description")).color(t.text2));
         let mut desc = item.description.clone();
-        let r = ui.add(egui::TextEdit::multiline(&mut desc).hint_text("What is this List for?").desired_rows(3).desired_width(f32::INFINITY));
+        let r = ui.add(egui::TextEdit::multiline(&mut desc).hint_text(tr("What is this List for?")).desired_rows(3).desired_width(f32::INFINITY));
         name_field(&r, "List description");
         if desc != item.description {
             if let Some(l) = self.data.list_item_mut(lid) {
@@ -1181,7 +1181,7 @@ impl App {
         let mut close = false;
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, t, "Done").clicked() {
+                if primary_button(ui, t, tr("Done")).clicked() {
                     close = true;
                 }
             });
@@ -1210,35 +1210,35 @@ impl App {
         let loc = Location::Space(sid);
         ui.set_min_width(200.0);
         let fav = if self.data.favorites.contains(&loc) { "Remove from Favorites" } else { "Add to Favorites" };
-        if ui.button(fav).clicked() {
+        if ui.button(tr(fav)).clicked() {
             self.actions.push(Action::ToggleFavorite(loc));
             close_any(ui);
         }
-        if ui.button("Rename").clicked() {
+        if ui.button(tr("Rename")).clicked() {
             self.actions.push(Action::StartRename(Target::Space(sid)));
             close_any(ui);
         }
-        if ui.button("Copy link").clicked() {
+        if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://space/{}", sid));
-            self.toast = Some(("Link copied".into(), now_ts()));
+            self.toast = Some((tr("Link copied").into(), now_ts()));
             close_any(ui);
         }
-        ui.menu_button("Create new", |ui| {
-            if ui.button("List").clicked() {
+        ui.menu_button(tr("Create new"), |ui| {
+            if ui.button(tr("List")).clicked() {
                 self.open_new_list(Some(sid), None);
                 close_any(ui);
             }
-            if ui.button("Folder").clicked() {
+            if ui.button(tr("Folder")).clicked() {
                 self.actions.push(Action::NewFolder(sid));
                 close_any(ui);
             }
-            if ui.button("Doc").clicked() {
+            if ui.button(tr("Doc")).clicked() {
                 self.new_doc(Some(sid));
                 close_any(ui);
             }
         });
-        ui.menu_button("Color & Icon", |ui| {
-            ui.label(RichText::new("Space color").small().color(t.text3));
+        ui.menu_button(tr("Color & Icon"), |ui| {
+            ui.label(RichText::new(tr("Space color")).small().color(t.text3));
             ui.horizontal_wrapped(|ui| {
                 ui.set_max_width(190.0);
                 for c in STATUS_PALETTE.iter().skip(1) {
@@ -1252,7 +1252,7 @@ impl App {
                 }
             });
             ui.add_space(4.0);
-            ui.label(RichText::new("Icon").small().color(t.text3));
+            ui.label(RichText::new(tr("Icon")).small().color(t.text3));
             let color = self.data.spaces.iter().find(|s| s.id == sid).map(|s| s.color).unwrap_or([96, 73, 231]);
             let letter = self.data.spaces.iter().find(|s| s.id == sid).map(|s| s.name.chars().next().unwrap_or('S').to_uppercase().to_string()).unwrap_or_default();
             ui.horizontal_wrapped(|ui| {
@@ -1272,43 +1272,43 @@ impl App {
                 }
             });
         });
-        if ui.button("Task statuses").clicked() {
+        if ui.button(tr("Task statuses")).clicked() {
             self.actions.push(Action::EditStatuses(sid));
             close_any(ui);
         }
-        if ui.button("Custom Fields").clicked() {
+        if ui.button(tr("Custom Fields")).clicked() {
             self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
             close_any(ui);
         }
-        if ui.button("Automations").clicked() {
+        if ui.button(tr("Automations")).clicked() {
             self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
             close_any(ui);
         }
         ui.separator();
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_space(sid) {
                 self.actions.push(Action::Go(Location::Space(n)));
-                self.toast = Some(("Space duplicated".into(), now_ts()));
+                self.toast = Some((tr("Space duplicated").into(), now_ts()));
             }
             close_any(ui);
         }
         let hidden = self.data.spaces.iter().find(|s| s.id == sid).is_some_and(|s| s.hidden);
-        if ui.button(if hidden { "Show Space" } else { "Hide Space" }).clicked() {
+        if ui.button(if hidden { tr("Show Space") } else { tr("Hide Space") }).clicked() {
             if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
                 s.hidden = !hidden;
                 self.dirty = true;
             }
             if !hidden {
-                self.toast = Some(("Space hidden from the sidebar. Show it again from Settings > Spaces.".into(), now_ts()));
+                self.toast = Some((tr("Space hidden from the sidebar. Show it again from Settings > Spaces.").into(), now_ts()));
             }
             close_any(ui);
         }
         let archived = self.data.spaces.iter().find(|s| s.id == sid).is_some_and(|s| s.archived);
-        if ui.button(if archived { "Restore" } else { "Archive" }).clicked() {
+        if ui.button(if archived { tr("Restore") } else { tr("Archive") }).clicked() {
             self.set_space_archived(sid, !archived);
             close_any(ui);
         }
-        if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
+        if ui.button(RichText::new(tr("Delete")).color(t.danger)).clicked() {
             self.actions.push(Action::AskDelete(Target::Space(sid)));
             close_any(ui);
         }
@@ -1357,11 +1357,11 @@ impl App {
             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(40) }).show(ui, |ui| {
                 ui.set_width(rect.width() - 28.0);
                 ui.set_min_height(rect.height() - 28.0);
-                if dialog_header(ui, &t, "Fields") {
+                if dialog_header(ui, &t, tr("Fields")) {
                     close = true;
                 }
                 ui.add_space(6.0);
-                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search for new or existing fields").desired_width(f32::INFINITY));
+                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search for new or existing fields")).desired_width(f32::INFINITY));
                 name_field(&r, "Search fields");
                 ui.add_space(6.0);
                 let ql = q.trim().to_lowercase();
@@ -1376,15 +1376,15 @@ impl App {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(rect.height() - 160.0).show(ui, |ui| {
                     for (title, shown) in [("Shown", true), ("Properties", false)] {
                         let names: Vec<&str> = all.iter().copied().filter(|n| self.col_on(n) == shown && hit(n)).collect();
-                        ui.label(RichText::new(title).small().color(t.text3));
+                        ui.label(RichText::new(tr(title)).small().color(t.text3));
                         if names.is_empty() {
-                            ui.label(RichText::new(if shown { "No fields shown" } else { "No more fields" }).small().color(t.text3));
+                            ui.label(RichText::new(if shown { tr("No fields shown") } else { tr("No more fields") }).small().color(t.text3));
                         }
                         for n in names {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(n).color(t.text));
+                                ui.label(RichText::new(tr(n)).color(t.text));
                                 if shown && PROPERTIES.contains(&n) && !fits.contains(&n) {
-                                    ui.label(RichText::new("no room").small().color(t.text3)).on_hover_text("The List is too narrow to show this column; widen the window or turn another field off.");
+                                    ui.label(RichText::new(tr("no room")).small().color(t.text3)).on_hover_text(tr("The List is too narrow to show this column; widen the window or turn another field off."));
                                 }
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     let mut on = shown;
@@ -1402,7 +1402,7 @@ impl App {
                     }
                 });
                 ui.separator();
-                if ui.button("+ Create new field").clicked() {
+                if ui.button(tr("+ Create new field")).clicked() {
                     self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
                     close = true;
                 }
@@ -1422,14 +1422,14 @@ impl App {
     /// Choices for a filter row's values: (stored value, label).
     fn filter_choices(&self, f: FilterField) -> Vec<(String, String)> {
         match f {
-            FilterField::Status => self.location_statuses().into_iter().map(|s| (s.name.clone(), s.name.to_uppercase())).collect(),
-            FilterField::Priority => [1u8, 2, 3, 4, 0].iter().map(|p| (p.to_string(), if *p == 0 { "No priority".to_string() } else { PRIORITIES[*p as usize].label.to_string() })).collect(),
+            FilterField::Status => self.location_statuses().into_iter().map(|s| (s.name.clone(), crate::i18n::status_text(&s.name).to_uppercase())).collect(),
+            FilterField::Priority => [1u8, 2, 3, 4, 0].iter().map(|p| (p.to_string(), if *p == 0 { tr("No priority").to_string() } else { tr(PRIORITIES[*p as usize].label).to_string() })).collect(),
             FilterField::Assignee => {
                 let mut v: Vec<(String, String)> = self.data.members.iter().map(|m| (m.id.to_string(), m.name.clone())).collect();
-                v.push(("none".into(), "Unassigned".into()));
+                v.push(("none".into(), tr("Unassigned").into()));
                 v
             }
-            FilterField::DueDate => DUE_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), l.to_string())).collect(),
+            FilterField::DueDate => DUE_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), tr(l).to_string())).collect(),
             FilterField::Tags => {
                 let mut tags: Vec<String> = self.data.tasks.iter().flat_map(|t| t.tags.iter().cloned()).collect();
                 tags.sort();
@@ -1453,9 +1453,9 @@ impl App {
             egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
                 ui.set_width(560.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Filters").strong());
+                    ui.label(RichText::new(tr("Filters")).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Clear all").clicked() {
+                        if ui.small_button(tr("Clear all")).clicked() {
                             self.filter = Default::default();
                             self.search.clear();
                             self.me_mode = false;
@@ -1463,7 +1463,7 @@ impl App {
                         }
                     });
                 });
-                let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Task name or tag...").desired_width(f32::INFINITY));
+                let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text(tr("Task name or tag...")).desired_width(f32::INFINITY));
                 name_field(&r, "Filter search");
                 ui.add_space(6.0);
                 let mut drop: Option<usize> = None;
@@ -1473,10 +1473,10 @@ impl App {
                     ui.horizontal(|ui| {
                         // a fixed-width lead so every row's drop-downs line up
                         let (lr, _) = ui.allocate_exact_size(vec2(48.0, 20.0), Sense::hover());
-                        ui.painter().text(lr.left_center(), Align2::LEFT_CENTER, if i == 0 { "Where" } else { "And" }, FontId::proportional(14.0), t.text3);
-                        let fr = egui::ComboBox::from_id_salt(("filter_field", i)).width(130.0).selected_text(row.field.map(|f| f.label()).unwrap_or("Select filter")).show_ui(ui, |ui| {
+                        ui.painter().text(lr.left_center(), Align2::LEFT_CENTER, if i == 0 { tr("Where") } else { tr("And") }, FontId::proportional(14.0), t.text3);
+                        let fr = egui::ComboBox::from_id_salt(("filter_field", i)).width(130.0).selected_text(row.field.map(|f| tr(f.label())).unwrap_or(tr("Select filter"))).show_ui(ui, |ui| {
                             for f in FilterField::ALL {
-                                if ui.selectable_label(row.field == Some(f), f.label()).clicked() && row.field != Some(f) {
+                                if ui.selectable_label(row.field == Some(f), tr(f.label())).clicked() && row.field != Some(f) {
                                     new.field = Some(f);
                                     new.values.clear();
                                 }
@@ -1484,18 +1484,18 @@ impl App {
                         });
                         name_it(&fr.response, &format!("Filter {} field", i + 1));
                         ui.add_enabled_ui(row.field.is_some(), |ui| {
-                            let or = egui::ComboBox::from_id_salt(("filter_op", i)).width(70.0).selected_text(if row.not { "is not" } else { "is" }).show_ui(ui, |ui| {
-                                if ui.selectable_label(!row.not, "is").clicked() {
+                            let or = egui::ComboBox::from_id_salt(("filter_op", i)).width(70.0).selected_text(if row.not { tr("is not") } else { tr("is") }).show_ui(ui, |ui| {
+                                if ui.selectable_label(!row.not, tr("is")).clicked() {
                                     new.not = false;
                                 }
-                                if ui.selectable_label(row.not, "is not").clicked() {
+                                if ui.selectable_label(row.not, tr("is not")).clicked() {
                                     new.not = true;
                                 }
                             });
                             name_it(&or.response, &format!("Filter {} condition", i + 1));
                             let choices = row.field.map(|f| self.filter_choices(f)).unwrap_or_default();
                             let summary = if row.values.is_empty() {
-                                "Select option".to_string()
+                                tr("Select option").to_string()
                             } else {
                                 let names: Vec<String> = row.values.iter().filter_map(|v| choices.iter().find(|c| c.0 == *v).map(|c| c.1.clone())).collect();
                                 truncate(&names.join(", "), 24)
@@ -1519,7 +1519,7 @@ impl App {
                                         }
                                     }
                                     if choices.is_empty() {
-                                        ui.label(RichText::new("Nothing to pick").color(t.text3));
+                                        ui.label(RichText::new(tr("Nothing to pick")).color(t.text3));
                                     }
                                 });
                             name_it(&vr.response, &format!("Filter {} values", i + 1));
@@ -1537,12 +1537,12 @@ impl App {
                 if let Some(i) = drop {
                     self.filter.rows.remove(i);
                 }
-                if ui.add(egui::Button::new(RichText::new("+ Add filter").color(t.text2)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(tr("+ Add filter")).color(t.text2)).frame(false)).clicked() {
                     self.filter.rows.push(FilterRow::default());
                 }
                 ui.separator();
-                ui.checkbox(&mut self.filter.archived, "Show archived tasks only");
-                ui.checkbox(&mut self.me_mode, "Only my tasks");
+                ui.checkbox(&mut self.filter.archived, tr("Show archived tasks only"));
+                ui.checkbox(&mut self.me_mode, tr("Only my tasks"));
             });
         });
         // close on Escape, or a press outside the panel and its drop-downs
@@ -1574,24 +1574,24 @@ impl App {
                     ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
                     ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(52, 52, 58);
                     ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(72, 72, 80);
-                    ui.label(RichText::new(format!("{} task{} selected", ids.len(), if ids.len() == 1 { "" } else { "s" })).strong().color(Color32::WHITE));
-                    if ui.small_button("\u{2716}").on_hover_text("Clear selection").clicked() {
+                    ui.label(RichText::new(if ids.len() == 1 { trf!("{} task selected", ids.len()) } else { trf!("{} tasks selected", ids.len()) }).strong().color(Color32::WHITE));
+                    if ui.small_button("\u{2716}").on_hover_text(tr("Clear selection")).clicked() {
                         self.selected.clear();
                     }
                     ui.separator();
                     let pid = ui.id();
                     let statuses = first.as_ref().map(|f| self.data.statuses_for_list(f.list_id)).unwrap_or_else(default_statuses);
-                    let r = ui.button("Status");
+                    let r = ui.button(tr("Status"));
                     let mut pick_status: Option<String> = None;
                     popup(ui, &r, pid.with("bs"), 180.0, |ui| {
                         for st in &statuses {
-                            if menu_row(ui, &t, &st.name.to_uppercase(), false, |p, c| paint_status_circle(p, c, 6.0, st)).clicked() {
+                            if menu_row(ui, &t, &crate::i18n::status_text(&st.name).to_uppercase(), false, |p, c| paint_status_circle(p, c, 6.0, st)).clicked() {
                                 pick_status = Some(st.name.clone());
                                 close_popup(ui);
                             }
                         }
                     });
-                    let r = ui.button("Assignees");
+                    let r = ui.button(tr("Assignees"));
                     let mut pick_asg: Option<u64> = None;
                     let mut drop_asg: Option<u64> = None;
                     let mut unassign = false;
@@ -1628,7 +1628,7 @@ impl App {
                             add_tags = Some(common);
                         }
                     });
-                    let r = ui.button("Due date");
+                    let r = ui.button(tr("Due date"));
                     let mut due: Option<NaiveDate> = None;
                     let mut due_set = false;
                     popup(ui, &r, pid.with("bd"), 380.0, |ui| {
@@ -1656,30 +1656,30 @@ impl App {
                     });
                     let mut pick_pr: Option<u8> = None;
                     if self.data.extra.apps.priorities {
-                        let r = ui.button("Priority");
+                        let r = ui.button(tr("Priority"));
                         popup(ui, &r, pid.with("bp"), 160.0, |ui| {
                             pick_pr = priority_pick(ui, &t, 0);
                         });
                     }
-                    if ui.button("Move").clicked() {
+                    if ui.button(tr("Move")).clicked() {
                         self.modal = Some(Modal::MoveTasks { ids: ids.clone(), query: String::new() });
                     }
-                    if ui.button("Duplicate").clicked() {
+                    if ui.button(tr("Duplicate")).clicked() {
                         for id in &ids {
                             self.duplicate_task(*id);
                         }
-                        self.toast = Some((format!("Duplicated {} tasks", ids.len()), now_ts()));
+                        self.toast = Some((trf!("Duplicated {} tasks", ids.len()), now_ts()));
                         self.selected.clear();
                     }
                     // archived tasks (Show archived tasks only) can be brought back
                     let all_archived = sel_tasks.iter().all(|x| x.archived);
-                    if ui.button(if all_archived { "Unarchive" } else { "Archive" }).clicked() {
+                    if ui.button(tr(if all_archived { "Unarchive" } else { "Archive" })).clicked() {
                         self.set_archived(&ids, !all_archived);
                         if all_archived {
                             self.selected.clear();
                         }
                     }
-                    if ui.button(RichText::new("Delete").color(Color32::from_rgb(255, 120, 120))).clicked() {
+                    if ui.button(RichText::new(tr("Delete")).color(Color32::from_rgb(255, 120, 120))).clicked() {
                         self.confirm_bulk_delete = true;
                     }
                     // apply picks
@@ -1809,7 +1809,7 @@ impl App {
             new.start = Some(s + shift);
         }
         new.status = first;
-        new.activity.push(Activity { ts: now_ts(), author: self.data.me, text: format!("completed a {} repeat; next due {}", r, fmt_date(next)), comment: false, ..Default::default() });
+        new.activity.push(Activity { ts: now_ts(), author: self.data.me, text: format!("completed a {} repeat; next due {}", r, crate::i18n::in_english(|| fmt_date(next))), comment: false, ..Default::default() });
         for c in &mut new.checklist {
             c.done = false;
         }
@@ -1865,7 +1865,8 @@ impl App {
                             _ => false,
                         };
                         if space_ok {
-                            out.push(("doc".into(), id, d.title.clone(), "Doc".into()));
+                            out.push(("doc".into(), id, d.title.clone(), tr("Doc").into()));
+
                         }
                     }
                 }

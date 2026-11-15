@@ -152,7 +152,7 @@ impl App {
                 if self.task(id).is_some() {
                     self.actions.push(Action::Open(id));
                 } else {
-                    self.toast = Some(("That task no longer exists".into(), now_ts()));
+                    self.toast = Some((tr("That task no longer exists").into(), now_ts()));
                 }
             }
             LinkTo::List(id) if self.data.space_of_list(id).is_some() => {
@@ -166,7 +166,7 @@ impl App {
                 self.section = Section::Home;
                 self.loc = Location::Space(id);
             }
-            _ => self.toast = Some(("That place no longer exists".into(), now_ts())),
+            _ => self.toast = Some((tr("That place no longer exists").into(), now_ts())),
         }
     }
 
@@ -197,9 +197,9 @@ impl App {
                     continue;
                 }
                 shown += 1;
-                let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| "Someone".into());
+                let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| tr("Someone").into());
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(format!("\u{2022} {} {}", who, a.text)).small().color(t.text2));
+                    ui.label(RichText::new(format!("\u{2022} {}", crate::i18n::history_line(&who, &a.text))).small().color(t.text2));
                     ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
                 });
                 continue;
@@ -217,16 +217,16 @@ impl App {
                         }
                         if let Some((_, text)) = replying.as_mut().filter(|(p, _)| *p == a.id) {
                             let send_key = ui.memory(|m| m.has_focus(reply_id)) && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
-                            let r = ui.add(egui::TextEdit::multiline(text).id(reply_id).hint_text("Reply...").desired_rows(2).desired_width(f32::INFINITY));
+                            let r = ui.add(egui::TextEdit::multiline(text).id(reply_id).hint_text(tr("Reply...")).desired_rows(2).desired_width(f32::INFINITY));
                             name_field(&r, "Reply box");
                             focus_once(ui, &r);
                             ui.horizontal(|ui| {
-                                let send = primary_button(ui, &t, "Reply");
+                                let send = primary_button(ui, &t, tr("Reply"));
                                 name_it(&send, "Send reply");
                                 if (send.clicked() || send_key) && !text.trim().is_empty() {
                                     acts.push(Act::SendReply { parent: a.id, text: text.trim().to_string() });
                                 }
-                                if ui.button("Cancel").clicked() {
+                                if ui.button(tr("Cancel")).clicked() {
                                     acts.push(Act::Reply(0));
                                 }
                             });
@@ -237,7 +237,7 @@ impl App {
             }
         }
         if q.is_some() && shown == 0 {
-            ui.label(RichText::new("No comments match").color(t.text3));
+            ui.label(RichText::new(tr("No comments match")).color(t.text3));
         }
         for act in acts {
             let find = |task: &mut Task, id: u64| task.activity.iter().position(|a| a.id == id);
@@ -277,7 +277,7 @@ impl App {
                     if editing.as_ref().is_some_and(|(e, _)| *e == id) {
                         editing = None;
                     }
-                    self.toast = Some(("Comment deleted".into(), now_ts()));
+                    self.toast = Some((tr("Comment deleted").into(), now_ts()));
                 }
                 Act::Assign { id, to } => {
                     if let Some(i) = find(task, id) {
@@ -302,7 +302,7 @@ impl App {
     fn comment_card(&self, ui: &mut Ui, t: &Theme, a: &Activity, names: &[String], editing: &mut Option<(u64, String)>, acts: &mut Vec<Act>) {
         let me = self.data.me;
         let mine = a.author == me;
-        let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| "Someone".into());
+        let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| tr("Someone").into());
         let fill = if a.post { t.accent_bg } else { t.card };
         egui::Frame::new().fill(fill).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -313,7 +313,7 @@ impl App {
                 }
                 ui.label(RichText::new(&who).strong());
                 if a.post {
-                    chip(ui, "Post", if t.dark { t.accent_text } else { t.primary });
+                    chip(ui, tr("Post"), if t.dark { t.accent_text } else { t.primary });
                 }
                 ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
                 if a.edited.is_some() {
@@ -323,37 +323,37 @@ impl App {
                     let more = ui.add(egui::Button::new(RichText::new("\u{22EF}").color(t.text2)).frame(false));
                     name_it(&more, "Comment actions");
                     click_menu(&more, |ui| {
-                        if a.parent.is_none() && ui.button("Reply").clicked() {
+                        if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
                             acts.push(Act::Reply(a.id));
                             ui.close_menu();
                         }
-                        if mine && ui.button("Edit").clicked() {
+                        if mine && ui.button(tr("Edit")).clicked() {
                             acts.push(Act::Edit(a.id));
                             ui.close_menu();
                         }
-                        ui.menu_button("Assign comment", |ui| {
+                        ui.menu_button(tr("Assign comment"), |ui| {
                             for m in self.data.members.iter().filter(|m| !m.invited) {
                                 if ui.selectable_label(a.assignee == Some(m.id), &m.name).clicked() {
                                     acts.push(Act::Assign { id: a.id, to: Some(m.id) });
                                     ui.close_menu();
                                 }
                             }
-                            if a.assignee.is_some() && ui.button("Unassign").clicked() {
+                            if a.assignee.is_some() && ui.button(tr("Unassign")).clicked() {
                                 acts.push(Act::Assign { id: a.id, to: None });
                                 ui.close_menu();
                             }
                         });
-                        if ui.button(if a.resolved { "Reopen" } else { "Resolve" }).clicked() {
+                        if ui.button(tr(if a.resolved { "Reopen" } else { "Resolve" })).clicked() {
                             acts.push(Act::Resolve { id: a.id, done: !a.resolved });
                             ui.close_menu();
                         }
-                        if ui.button("Copy text").clicked() {
+                        if ui.button(tr("Copy text")).clicked() {
                             ui.ctx().copy_text(a.text.clone());
                             ui.close_menu();
                         }
                         if mine {
                             ui.separator();
-                            if ui.button(RichText::new("Delete comment").color(t.danger)).clicked() {
+                            if ui.button(RichText::new(tr("Delete comment")).color(t.danger)).clicked() {
                                 acts.push(Act::Delete(a.id));
                                 ui.close_menu();
                             }
@@ -376,17 +376,17 @@ impl App {
             // assigned: who, and the tick that resolves it
             if let Some(to) = a.assignee {
                 ui.horizontal(|ui| {
-                    let name = self.data.member(to).map(|m| m.name.clone()).unwrap_or_else(|| "someone".into());
+                    let name = self.data.member(to).map(|m| m.name.clone()).unwrap_or_else(|| tr("someone").into());
                     let tick = ui.add(egui::Button::new(if a.resolved { "\u{2611}" } else { "\u{2610}" }).frame(false));
                     name_it(&tick, if a.resolved { "Reopen comment" } else { "Resolve comment" });
                     if tick.clicked() {
                         acts.push(Act::Resolve { id: a.id, done: !a.resolved });
                     }
-                    let label = if a.resolved { format!("Resolved \u{00B7} assigned to {}", name) } else { format!("Assigned to {}", name) };
+                    let label = if a.resolved { trf!("Resolved \u{00B7} assigned to {}", name) } else { trf!("Assigned to {}", name) };
                     ui.label(RichText::new(label).small().color(if a.resolved { t.text3 } else { t.text2 }));
                 });
             } else if a.resolved {
-                ui.label(RichText::new("Resolved").small().color(t.text3));
+                ui.label(RichText::new(tr("Resolved")).small().color(t.text3));
             }
             match editing.as_mut().filter(|(id, _)| *id == a.id) {
                 Some((_, text)) => {
@@ -396,12 +396,12 @@ impl App {
                     name_field(&r, "Edit comment box");
                     focus_once(ui, &r);
                     ui.horizontal(|ui| {
-                        let save = primary_button(ui, t, "Save");
+                        let save = primary_button(ui, t, tr("Save"));
                         name_it(&save, "Save comment");
                         if (save.clicked() || save_key) && !text.trim().is_empty() {
                             acts.push(Act::SaveEdit { id: a.id, text: text.trim().to_string() });
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             acts.push(Act::CancelEdit);
                         }
                     });

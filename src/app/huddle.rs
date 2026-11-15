@@ -92,7 +92,7 @@ impl App {
             return;
         }
         if !self.huddles_on_server() {
-            self.toast = Some(("Huddles need the team's server. Connect in Work together.".into(), now_ts()));
+            self.toast = Some((tr("Huddles need the team's server. Connect in Work together.").into(), now_ts()));
             return;
         }
         let (audio, video) = (self.huddle.audio, self.huddle.video);
@@ -246,10 +246,10 @@ impl App {
                         ui.vertical(|ui| {
                             let r = ui.add(egui::Image::new((tex.id(), vec2(w, h))).corner_radius(8).sense(Sense::click()));
                             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("Video of {}", name)));
-                            if r.on_hover_text(if big { "Click to make smaller" } else { "Click to make larger" }).clicked() {
+                            if r.on_hover_text(if big { tr("Click to make smaller") } else { tr("Click to make larger") }).clicked() {
                                 clicked = Some(id.clone());
                             }
-                            ui.label(RichText::new(name).small().color(t.text2));
+                            ui.label(RichText::new(if id == ME { tr("You") } else { name.as_str() }).small().color(t.text2));
                         });
                     }
                 });
@@ -269,7 +269,7 @@ impl App {
     pub(super) fn huddle_bar(&mut self, ctx: &egui::Context) {
         let Some(ch) = self.huddle.channel else { return };
         let t = self.t();
-        let where_ = self.data.channels.iter().find(|c| c.id == ch).map(|c| if c.kind == ChannelKind::Channel { format!("#{}", c.name) } else { self.channel_label(c) }).unwrap_or_else(|| "a conversation".into());
+        let where_ = self.data.channels.iter().find(|c| c.id == ch).map(|c| if c.kind == ChannelKind::Channel { format!("#{}", c.name) } else { self.channel_label(c) }).unwrap_or_else(|| tr("a conversation").into());
         let green = Color32::from_rgb(0x00, 0x88, 0x44);
         let mut leave = false;
         let mut mute: Option<bool> = None;
@@ -282,8 +282,8 @@ impl App {
                     ui.painter().circle_filled(r.center(), 13.0, green);
                     super::shell::line_icon(ui.painter(), "phone", r.center(), Color32::WHITE);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(format!("Huddle in {}", where_)).strong().color(t.text));
-                        let status = if self.huddle.joined { match self.huddle.people.len() { 0 | 1 => "Only you so far".to_string(), n => format!("{} people", n) } } else { "Connecting\u{2026}".to_string() };
+                        ui.label(RichText::new(trf!("Huddle in {}", where_)).strong().color(t.text));
+                        let status = if self.huddle.joined { match self.huddle.people.len() { 0 | 1 => tr("Only you so far").to_string(), n => trf!("{} people", n) } } else { tr("Connecting\u{2026}").to_string() };
                         ui.label(RichText::new(status).small().color(t.text2));
                     });
                     ui.add_space(10.0);
@@ -304,18 +304,19 @@ impl App {
                         let state = if p.muted { "muted" } else if p.speaking { "speaking" } else { "listening" };
                         let label = if p.me { format!("{} (you), {}", name, state) } else { format!("{}, {}", name, state) };
                         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
-                        resp.on_hover_text(label);
+                        let shown = if p.me { trf!("{} (you), {}", name, tr(state)) } else { format!("{}, {}", name, tr(state)) };
+                        resp.on_hover_text(shown);
                     }
                     ui.add_space(10.0);
                     let muted = self.huddle.muted;
-                    if ui.add(egui::Button::new(if muted { "Unmute" } else { "Mute" }).min_size(vec2(72.0, 30.0)).corner_radius(7)).clicked() {
+                    if ui.add(egui::Button::new(if muted { tr("Unmute") } else { tr("Mute") }).min_size(vec2(72.0, 30.0)).corner_radius(7)).clicked() {
                         mute = Some(!muted);
                     }
                     let cam = self.huddle.camera;
-                    if ui.add(egui::Button::new(if cam { "Stop video" } else { "Video" }).min_size(vec2(72.0, 30.0)).corner_radius(7)).clicked() {
+                    if ui.add(egui::Button::new(if cam { tr("Stop video") } else { tr("Video") }).min_size(vec2(72.0, 30.0)).corner_radius(7)).clicked() {
                         camera = Some(!cam);
                     }
-                    if ui.add(egui::Button::new(RichText::new("Leave").color(Color32::WHITE)).fill(t.danger).min_size(vec2(64.0, 30.0)).corner_radius(7)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Leave")).color(Color32::WHITE)).fill(t.danger).min_size(vec2(64.0, 30.0)).corner_radius(7)).clicked() {
                         leave = true;
                     }
                 });

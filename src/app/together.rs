@@ -140,11 +140,11 @@ pub(super) fn forget_token(addr: &str, device: &str) {
 /// How the server connection is doing, in words.
 pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>) -> String {
     match (net, s) {
-        (false, _) => "Disconnected".into(),
-        (true, None) | (true, Some(NetStatus::Connecting)) => "Connecting\u{2026}".into(),
-        (true, Some(NetStatus::Connected)) => "Connected".into(),
-        (true, Some(NetStatus::Reconnecting(why))) => format!("Reconnecting\u{2026} {}", why),
-        (true, Some(NetStatus::Refused(why))) => format!("Not signed in. {}", why),
+        (false, _) => tr("Disconnected").into(),
+        (true, None) | (true, Some(NetStatus::Connecting)) => tr("Connecting\u{2026}").into(),
+        (true, Some(NetStatus::Connected)) => tr("Connected").into(),
+        (true, Some(NetStatus::Reconnecting(why))) => trf!("Reconnecting\u{2026} {}", why),
+        (true, Some(NetStatus::Refused(why))) => trf!("Not signed in. {}", why),
     }
 }
 
@@ -190,7 +190,7 @@ impl App {
             return;
         }
         if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v).is_err() {
-            self.toast = Some(("Couldn't write to the shared folder. Is it still there?".into(), now_ts()));
+            self.toast = Some((tr("Couldn't write to the shared folder. Is it still there?").into(), now_ts()));
         }
         self.sync_rt.pending = false;
     }
@@ -235,7 +235,7 @@ impl App {
         if changed {
             let n = count_new(&self.data).saturating_sub(before);
             if n > 0 {
-                self.toast = Some((if n == 1 { "1 new message from your team".into() } else { format!("{} new messages from your team", n) }, now_ts()));
+                self.toast = Some((if n == 1 { tr("1 new message from your team").into() } else { trf!("{} new messages from your team", n) }, now_ts()));
             }
             self.save_local();
             self.sync_rt.pending = true;
@@ -310,7 +310,7 @@ impl App {
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();
-                    self.toast = Some((format!("Restored the team's workspace to {}. Everyone gets it now.", label), now_ts()));
+                    self.toast = Some((trf!("Restored the team's workspace to {}. Everyone gets it now.", label), now_ts()));
                     self.sync_rt.restore_confirm = None;
                     // the copy from before the restore is a new backup
                     self.access_request(NetMsg::BackupList);
@@ -332,7 +332,7 @@ impl App {
                     self.sync_note_change();
                     self.write_shared();
                     self.save_local();
-                    self.toast = Some(("Connected. This workspace is now on the server for your team.".into(), now_ts()));
+                    self.toast = Some((tr("Connected. This workspace is now on the server for your team.").into(), now_ts()));
                     if matches!(self.modal, Some(Modal::Together { .. })) {
                         self.modal = None;
                     }
@@ -346,7 +346,7 @@ impl App {
                         self.write_shared();
                         self.save_local();
                         let name = self.data.member(member).map(|m| m.name.clone()).unwrap_or_default();
-                        self.toast = Some((format!("Joined as {}.", name), now_ts()));
+                        self.toast = Some((trf!("Joined as {}.", name), now_ts()));
                         if matches!(self.modal, Some(Modal::Together { .. })) {
                             self.modal = None;
                         }
@@ -403,7 +403,7 @@ impl App {
     pub(super) fn access_request(&mut self, msg: NetMsg) {
         match &self.sync_rt.net {
             Some(n) if self.sync_rt.net_status == Some(NetStatus::Connected) => n.send(msg),
-            _ => self.toast = Some(("Not connected to the server right now.".into(), now_ts())),
+            _ => self.toast = Some((tr("Not connected to the server right now.").into(), now_ts())),
         }
     }
 
@@ -460,9 +460,9 @@ impl App {
     pub(super) fn share_here(&mut self, folder: &str) -> Result<(), String> {
         let folder = folder.trim();
         if folder.is_empty() {
-            return Err("Choose a folder first.".into());
+            return Err(tr("Choose a folder first.").into());
         }
-        std::fs::create_dir_all(folder).map_err(|e| format!("Couldn't use that folder: {}", e))?;
+        std::fs::create_dir_all(folder).map_err(|e| trf!("Couldn't use that folder: {}", e))?;
         self.data.extra.shared = Some(Self::new_cfg(folder));
         self.data.extra.sync = Default::default();
         self.sync_note_change();
@@ -477,8 +477,8 @@ impl App {
     pub(super) fn join_shared(&mut self, folder: &str) -> Result<(), String> {
         let folder = folder.trim();
         let files = sync::other_files(Path::new(folder), "");
-        let newest = files.iter().max_by_key(|(_, m)| *m).ok_or("No shared workspace in that folder yet.")?;
-        let base = sync::read_json(&newest.0).ok_or("The shared workspace couldn't be read.")?;
+        let newest = files.iter().max_by_key(|(_, m)| *m).ok_or(tr("No shared workspace in that folder yet."))?;
+        let base = sync::read_json(&newest.0).ok_or(tr("The shared workspace couldn't be read."))?;
         self.join_from(base, Self::new_cfg(folder))?;
         self.sync_rt = SyncRt::default();
         self.sync_pull();
@@ -488,7 +488,7 @@ impl App {
 
     /// Open the team's copy as a new workspace on this computer.
     fn join_from(&mut self, base: serde_json::Value, cfg: SharedCfg) -> Result<(), String> {
-        let mut d: Data = serde_json::from_value(base).map_err(|_| "The shared workspace couldn't be read.".to_string())?;
+        let mut d: Data = serde_json::from_value(base).map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
         // keep only the team's things; personal ones start empty
         d.favorites.clear();
         d.extra.notepad.clear();
@@ -615,11 +615,11 @@ impl App {
         self.dirty = true;
         if archived {
             self.toast = Some(match self.export_doc(id) {
-                Some(p) => (format!("Archived. A copy was saved in {}", p.parent().map(|p| p.display().to_string()).unwrap_or_default()), now_ts()),
-                None => ("Archived. (The Markdown copy couldn't be saved.)".into(), now_ts()),
+                Some(p) => (trf!("Archived. A copy was saved in {}", p.parent().map(|p| p.display().to_string()).unwrap_or_default()), now_ts()),
+                None => (tr("Archived. (The Markdown copy couldn't be saved.)").into(), now_ts()),
             });
         } else {
-            self.toast = Some(("Moved back to Docs".into(), now_ts()));
+            self.toast = Some((tr("Moved back to Docs").into(), now_ts()));
         }
     }
 
@@ -627,16 +627,16 @@ impl App {
 
     /// The owner: go back to an earlier copy of the team's workspace.
     fn backups_section(&mut self, ui: &mut Ui, t: &Theme) {
-        ui.label(RichText::new("Backups").strong());
-        ui.label(RichText::new("Go back to an earlier copy of the team's workspace. Deleted items come back; anything made since stays. The server keeps a copy from just before.").small().color(t.text3));
+        ui.label(RichText::new(tr("Backups")).strong());
+        ui.label(RichText::new(tr("Go back to an earlier copy of the team's workspace. Deleted items come back; anything made since stays. The server keeps a copy from just before.")).small().color(t.text3));
         let Some(list) = self.sync_rt.backups.clone() else {
-            if ui.button("Show backups").clicked() {
+            if ui.button(tr("Show backups")).clicked() {
                 self.access_request(NetMsg::BackupList);
             }
             return;
         };
         if list.is_empty() {
-            ui.label(RichText::new("No backups yet. The first one is made within a minute of the server having a workspace.").color(t.text2));
+            ui.label(RichText::new(tr("No backups yet. The first one is made within a minute of the server having a workspace.")).color(t.text2));
             return;
         }
         let mut req: Option<NetMsg> = None;
@@ -648,13 +648,13 @@ impl App {
                     ui.label(RichText::new(format!("{} KB", b.bytes.div_ceil(1024))).small().color(t.text3));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if confirm.as_deref() == Some(b.name.as_str()) {
-                            if row_button(ui, "Cancel").clicked() {
+                            if row_button(ui, tr("Cancel")).clicked() {
                                 confirm = None;
                             }
-                            if row_button(ui, RichText::new("Yes, restore").color(t.danger)).clicked() {
+                            if row_button(ui, RichText::new(tr("Yes, restore")).color(t.danger)).clicked() {
                                 req = Some(NetMsg::Restore { name: b.name.clone() });
                             }
-                        } else if row_button(ui, "Restore").on_hover_text(format!("Go back to {}", b.label())).clicked() {
+                        } else if row_button(ui, tr("Restore")).on_hover_text(trf!("Go back to {}", b.label())).clicked() {
                             confirm = Some(b.name.clone());
                         }
                     });
@@ -669,8 +669,8 @@ impl App {
 
     /// Owners and admins: everyone's access, invite codes, roles.
     fn people_section(&mut self, ui: &mut Ui, t: &Theme) {
-        ui.label(RichText::new("People").strong());
-        ui.label(RichText::new("Give each person their invite code (it works once, for 7 days). Add people first with Invite.").small().color(t.text3));
+        ui.label(RichText::new(tr("People")).strong());
+        ui.label(RichText::new(tr("Give each person their invite code (it works once, for 7 days). Add people first with Invite.")).small().color(t.text3));
         let me = self.data.me;
         let my_role = self.sync_rt.role.unwrap_or_default();
         let people = self.sync_rt.people.clone();
@@ -681,23 +681,23 @@ impl App {
                 let name = m.name.clone();
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&name).color(t.text));
-                    ui.label(RichText::new(p.role.label()).small().color(t.text2));
-                    ui.label(RichText::new(match p.devices { 0 => "not signed in".to_string(), 1 => "1 computer".to_string(), n => format!("{} computers", n) }).small().color(t.text3));
+                    ui.label(RichText::new(tr(p.role.label())).small().color(t.text2));
+                    ui.label(RichText::new(match p.devices { 0 => tr("not signed in").to_string(), 1 => tr("1 computer").to_string(), n => trf!("{} computers", n) }).small().color(t.text3));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if p.role != Role::Owner && p.member != me {
-                            if row_button(ui, RichText::new("Remove access").color(t.danger)).on_hover_text(format!("Sign out {}'s computers", name)).clicked() {
+                            if row_button(ui, RichText::new(tr("Remove access")).color(t.danger)).on_hover_text(trf!("Sign out {}'s computers", name)).clicked() {
                                 req = Some(NetMsg::Revoke { member: p.member });
                             }
                             if my_role.manages() {
                                 let (label, role) = if p.role == Role::Admin { ("Make member", Role::Member) } else { ("Make admin", Role::Admin) };
-                                if row_button(ui, label).clicked() {
+                                if row_button(ui, tr(label)).clicked() {
                                     req = Some(NetMsg::SetRole { member: p.member, role });
                                 }
                             }
                         }
                         // a code for the owner signs in as the owner: only the owner makes one
                         let may_invite = p.member != me && (p.role != Role::Owner || my_role == Role::Owner);
-                        if may_invite && row_button(ui, if p.invite.is_some() { "New code" } else { "Invite code" }).clicked() {
+                        if may_invite && row_button(ui, if p.invite.is_some() { tr("New code") } else { tr("Invite code") }).clicked() {
                             req = Some(NetMsg::CreateInvite { member: p.member, role: Role::Member });
                         }
                     });
@@ -705,10 +705,10 @@ impl App {
                 if let Some(code) = &p.invite {
                     ui.horizontal(|ui| {
                         ui.add_space(12.0);
-                        ui.label(RichText::new(format!("Code for {}: {}", name, code)).monospace().color(t.text));
-                        if row_button(ui, "Copy").clicked() {
+                        ui.label(RichText::new(trf!("Code for {}: {}", name, code)).monospace().color(t.text));
+                        if row_button(ui, tr("Copy")).clicked() {
                             ui.ctx().copy_text(code.clone());
-                            self.toast = Some(("Invite code copied".into(), now_ts()));
+                            self.toast = Some((tr("Invite code copied").into(), now_ts()));
                         }
                     });
                 }
@@ -733,29 +733,29 @@ impl App {
     pub(super) fn together_body(&mut self, ui: &mut Ui, t: &Theme, path: &mut String, addr: &mut String, code: &mut String, result: &mut String) -> bool {
         let mut close = false;
         if let Some(SharedCfg { server: Some(server), .. }) = self.data.extra.shared.clone() {
-            ui.label(RichText::new("This workspace is on a server").size(15.0).strong());
+            ui.label(RichText::new(tr("This workspace is on a server")).size(15.0).strong());
             ui.label(RichText::new(&server).color(t.text2));
             let connected = self.sync_rt.net_status == Some(NetStatus::Connected);
             let status = net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
-            ui.label(RichText::new(format!("Status: {}", status)).color(if connected { t.text } else { t.text2 }));
+            ui.label(RichText::new(trf!("Status: {}", status)).color(if connected { t.text } else { t.text2 }));
             if let Some(role) = self.sync_rt.role.filter(|_| connected) {
                 let name = self.data.member(self.data.me).map(|m| m.name.clone()).unwrap_or_default();
-                ui.label(RichText::new(format!("Signed in as {} ({})", name, role.label())).color(t.text2));
+                ui.label(RichText::new(trf!("Signed in as {} ({})", name, tr(role.label()))).color(t.text2));
             }
             if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
                 ui.add_space(6.0);
-                ui.label(RichText::new("Sign this computer in again with an invite code from the owner or an admin.").color(t.text2));
+                ui.label(RichText::new(tr("Sign this computer in again with an invite code from the owner or an admin.")).color(t.text2));
                 ui.horizontal(|ui| {
                     let r = ui.add(egui::TextEdit::singleline(code).hint_text("XXXX-XXXX-XXXX").desired_width(220.0));
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Invite code entry"));
-                    if primary_button(ui, t, "Sign in").clicked() {
+                    if primary_button(ui, t, tr("Sign in")).clicked() {
                         self.sign_in_again(code);
                         code.clear();
                     }
                 });
             }
             ui.add_space(8.0);
-            ui.label(RichText::new("Tasks, chat and docs show up for everyone within a second or two. While the server can't be reached you keep working here, and your changes go up when it's back.").small().color(t.text3));
+            ui.label(RichText::new(tr("Tasks, chat and docs show up for everyone within a second or two. While the server can't be reached you keep working here, and your changes go up when it's back.")).small().color(t.text3));
             if connected && self.sync_rt.role.is_some_and(|r| r.manages()) {
                 ui.add_space(10.0);
                 self.people_section(ui, t);
@@ -766,51 +766,51 @@ impl App {
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Reconnect now").clicked() {
+                if ui.button(tr("Reconnect now")).clicked() {
                     self.sync_rt.net = None;
                     self.sync_rt.net_status = None;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button(RichText::new("Stop sharing").color(t.danger)).on_hover_text("Keep working on this computer only; your copy stays").clicked() {
+                    if ui.button(RichText::new(tr("Stop sharing")).color(t.danger)).on_hover_text(tr("Keep working on this computer only; your copy stays")).clicked() {
                         self.stop_sharing();
                         close = true;
                     }
                 });
             });
         } else if let Some(cfg) = self.data.extra.shared.clone() {
-            ui.label(RichText::new("This workspace is shared").size(15.0).strong());
+            ui.label(RichText::new(tr("This workspace is shared")).size(15.0).strong());
             ui.label(RichText::new(&cfg.folder).color(t.text2));
             let n = sync::other_files(Path::new(&cfg.folder), &cfg.device).len();
             ui.label(RichText::new(match n {
-                0 => "Nobody else has joined yet. Share this folder with your teammates in your sync app, then they choose Work together > Join.".to_string(),
-                1 => "1 other computer is working in it.".to_string(),
-                n => format!("{} other computers are working in it.", n),
+                0 => tr("Nobody else has joined yet. Share this folder with your teammates in your sync app, then they choose Work together > Join.").to_string(),
+                1 => tr("1 other computer is working in it.").to_string(),
+                n => trf!("{} other computers are working in it.", n),
             }).color(t.text2));
             ui.add_space(8.0);
-            ui.label(RichText::new("Tasks, chat, docs and calls show up for everyone within a few seconds of their sync app copying the folder.").small().color(t.text3));
+            ui.label(RichText::new(tr("Tasks, chat, docs and calls show up for everyone within a few seconds of their sync app copying the folder.")).small().color(t.text3));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Check for changes now").clicked() {
+                if ui.button(tr("Check for changes now")).clicked() {
                     let changed = self.sync_pull();
-                    *result = if changed { "Got the latest changes.".into() } else { "Everything is up to date.".into() };
+                    *result = if changed { tr("Got the latest changes.").into() } else { tr("Everything is up to date.").into() };
                 }
-                if ui.button("Show folder").clicked() {
+                if ui.button(tr("Show folder")).clicked() {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(format!("file://{}", cfg.folder)));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button(RichText::new("Stop sharing").color(t.danger)).on_hover_text("Keep working on this computer only; your copy stays").clicked() {
+                    if ui.button(RichText::new(tr("Stop sharing")).color(t.danger)).on_hover_text(tr("Keep working on this computer only; your copy stays")).clicked() {
                         self.stop_sharing();
                         close = true;
                     }
                 });
             });
         } else {
-            ui.label("Work on this workspace with other people, without a server.");
-            ui.label(RichText::new("Pick a folder that a sync app shares with your teammates (iCloud Drive, Dropbox, Google Drive, OneDrive or Syncthing). Everyone opens Workboard on their own computer and points it at the same folder.").color(t.text2));
+            ui.label(tr("Work on this workspace with other people, without a server."));
+            ui.label(RichText::new(tr("Pick a folder that a sync app shares with your teammates (iCloud Drive, Dropbox, Google Drive, OneDrive or Syncthing). Everyone opens Workboard on their own computer and points it at the same folder.")).color(t.text2));
             ui.add_space(8.0);
             let sugg = sync::suggested_folders();
             if !sugg.is_empty() {
-                ui.label(RichText::new("Found on this computer").small().color(t.text3));
+                ui.label(RichText::new(tr("Found on this computer")).small().color(t.text3));
                 ui.horizontal_wrapped(|ui| {
                     for (name, p) in &sugg {
                         if ui.button(name).on_hover_text(p).clicked() {
@@ -819,15 +819,15 @@ impl App {
                     }
                 });
             }
-            ui.label(RichText::new("Folder").color(t.text2));
-            ui.add(egui::TextEdit::singleline(path).hint_text("Paste a folder path, or pick one above").desired_width(f32::INFINITY));
+            ui.label(RichText::new(tr("Folder")).color(t.text2));
+            ui.add(egui::TextEdit::singleline(path).hint_text(tr("Paste a folder path, or pick one above")).desired_width(f32::INFINITY));
             let n = folder_people(path);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if n > 0 {
-                    ui.label(RichText::new(format!("A shared workspace is already here ({} {}).", n, if n == 1 { "person" } else { "people" })).color(t.text2));
+                    ui.label(RichText::new(if n == 1 { tr("A shared workspace is already here (1 person).").to_string() } else { trf!("A shared workspace is already here ({} people).", n) }).color(t.text2));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, t, "Join this workspace").clicked() {
+                        if primary_button(ui, t, tr("Join this workspace")).clicked() {
                             match self.join_shared(path) {
                                 Ok(()) => {
                                     self.modal = Some(Modal::WhoAmI { name: String::new(), email: String::new() });
@@ -838,10 +838,10 @@ impl App {
                     });
                 } else {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, t, "Share this workspace here").clicked() {
+                        if primary_button(ui, t, tr("Share this workspace here")).clicked() {
                             match self.share_here(path) {
                                 Ok(()) => {
-                                    self.toast = Some(("Shared. Now share the folder with your teammates in your sync app.".into(), now_ts()));
+                                    self.toast = Some((tr("Shared. Now share the folder with your teammates in your sync app.").into(), now_ts()));
                                     close = true;
                                 }
                                 Err(e) => *result = e,
@@ -853,13 +853,13 @@ impl App {
             ui.add_space(12.0);
             ui.separator();
             ui.add_space(4.0);
-            ui.label(RichText::new("Or connect to your team's server").strong());
-            ui.label(RichText::new("A Workboard server (for example a Mac mini your team reaches through Tailscale). To join your team, type the invite code you were given. Setting up a new, empty server? Leave the code empty: this workspace goes up and you become its owner.").color(t.text2));
-            ui.label(RichText::new("Server").color(t.text2));
-            let r = ui.add(egui::TextEdit::singleline(addr).hint_text("macmini or 100.101.102.103").desired_width(f32::INFINITY));
+            ui.label(RichText::new(tr("Or connect to your team's server")).strong());
+            ui.label(RichText::new(tr("A Workboard server (for example a Mac mini your team reaches through Tailscale). To join your team, type the invite code you were given. Setting up a new, empty server? Leave the code empty: this workspace goes up and you become its owner.")).color(t.text2));
+            ui.label(RichText::new(tr("Server")).color(t.text2));
+            let r = ui.add(egui::TextEdit::singleline(addr).hint_text(tr("macmini or 100.101.102.103")).desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address"));
-            ui.label(RichText::new("Invite code").color(t.text2));
-            let r = ui.add(egui::TextEdit::singleline(code).hint_text("XXXX-XXXX-XXXX (empty for a new server)").desired_width(f32::INFINITY));
+            ui.label(RichText::new(tr("Invite code")).color(t.text2));
+            let r = ui.add(egui::TextEdit::singleline(code).hint_text(tr("XXXX-XXXX-XXXX (empty for a new server)")).desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Invite code entry"));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -869,12 +869,12 @@ impl App {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if self.sync_rt.joining.is_some() {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             self.sync_rt.joining = None;
                             self.sync_rt.net = None;
                             self.sync_rt.net_status = None;
                         }
-                    } else if primary_button(ui, t, "Connect").clicked() {
+                    } else if primary_button(ui, t, tr("Connect")).clicked() {
                         result.clear();
                         if let Err(e) = self.connect_server(addr, code) {
                             *result = e;
@@ -891,12 +891,12 @@ impl App {
 
     pub(super) fn who_am_i_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String, email: &mut String) -> bool {
         let mut close = false;
-        ui.label(RichText::new("Pick yourself so your messages and tasks show your name.").color(t.text2));
+        ui.label(RichText::new(tr("Pick yourself so your messages and tasks show your name.")).color(t.text2));
         ui.add_space(6.0);
         let members: Vec<Member> = self.data.members.clone();
         egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
             for m in &members {
-                let label = if m.invited { format!("{}   {}  (invited)", m.name, m.email) } else { format!("{}   {}", m.name, m.email) };
+                let label = if m.invited { trf!("{}   {}  (invited)", m.name, m.email) } else { format!("{}   {}", m.name, m.email) };
                 if ui.add(egui::Button::new(label).frame(false)).clicked() {
                     self.become_member(Some(m.id), "", "");
                     close = true;
@@ -904,11 +904,11 @@ impl App {
             }
         });
         ui.separator();
-        ui.label(RichText::new("I'm new here").color(t.text2));
-        ui.add(egui::TextEdit::singleline(name).hint_text("Your name").desired_width(f32::INFINITY));
-        ui.add(egui::TextEdit::singleline(email).hint_text("Email").desired_width(f32::INFINITY));
+        ui.label(RichText::new(tr("I'm new here")).color(t.text2));
+        ui.add(egui::TextEdit::singleline(name).hint_text(tr("Your name")).desired_width(f32::INFINITY));
+        ui.add(egui::TextEdit::singleline(email).hint_text(tr("Email")).desired_width(f32::INFINITY));
         ui.add_space(6.0);
-        if primary_button(ui, t, "Join as new member").clicked() && !name.trim().is_empty() {
+        if primary_button(ui, t, tr("Join as new member")).clicked() && !name.trim().is_empty() {
             self.become_member(None, name, email);
             close = true;
         }
@@ -917,28 +917,28 @@ impl App {
 
     pub(super) fn call_body(&mut self, ui: &mut Ui, t: &Theme, ch: &mut u64, link: &mut String) -> bool {
         let mut close = false;
-        ui.label(RichText::new("The call opens in your browser (Jitsi Meet: free, no account). Everyone in the conversation gets a Join button.").color(t.text2));
+        ui.label(RichText::new(tr("The call opens in your browser (Jitsi Meet: free, no account). Everyone in the conversation gets a Join button.")).color(t.text2));
         ui.add_space(8.0);
-        ui.label(RichText::new("Call in").color(t.text2));
+        ui.label(RichText::new(tr("Call in")).color(t.text2));
         let chans: Vec<(u64, String)> = self.data.channels.iter().map(|c| (c.id, if c.kind == ChannelKind::Channel { format!("# {}", c.name) } else { self.channel_label(c) })).collect();
-        let cur = chans.iter().find(|c| c.0 == *ch).map(|c| c.1.clone()).unwrap_or_else(|| "Choose".into());
+        let cur = chans.iter().find(|c| c.0 == *ch).map(|c| c.1.clone()).unwrap_or_else(|| tr("Choose").into());
         egui::ComboBox::from_id_salt("call_in").selected_text(cur).width(300.0).show_ui(ui, |ui| {
             for (id, n) in &chans {
                 ui.selectable_value(ch, *id, n);
             }
         });
         ui.add_space(6.0);
-        ui.label(RichText::new("Or use your own meeting link (Zoom, Google Meet...)").small().color(t.text3));
+        ui.label(RichText::new(tr("Or use your own meeting link (Zoom, Google Meet...)")).small().color(t.text3));
         ui.add(egui::TextEdit::singleline(link).hint_text("https://...").desired_width(f32::INFINITY));
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, t, "Start call").clicked() && chans.iter().any(|c| c.0 == *ch) {
+                if primary_button(ui, t, tr("Start call")).clicked() && chans.iter().any(|c| c.0 == *ch) {
                     let ctx = ui.ctx().clone();
                     self.start_call(Some(&ctx), *ch, link);
                     close = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
             });

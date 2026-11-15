@@ -3222,9 +3222,9 @@ impl App {
     pub(super) fn planner_add_row(&mut self, ui: &mut Ui, d: NaiveDate, w: f32) {
         let t = self.t();
         let Some((_, text)) = self.sweep.planner_add.as_mut().filter(|p| p.0 == d) else {
-            let b = ui.add(ghost(egui::Button::new(
-                RichText::new(tr("+ Add task")).color(t.text3),
-            )));
+            let b = ui.add(ghost(
+                egui::Button::new(RichText::new(tr("+ Add task")).color(t.text3)).truncate(),
+            ));
             name_it(&b, &format!("Add task on {}", d.format("%a %-d")));
             if b.clicked() {
                 self.sweep.planner_add = Some((d, String::new()));

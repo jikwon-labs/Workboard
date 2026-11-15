@@ -147,3 +147,128 @@ fn small_window_settings_people_columns_do_not_overlap() {
     }
     assert!(h.past_right_edge().is_empty());
 }
+
+const LONG_LIST: &str =
+    "A very long list name that is wider than the sidebar and any column it shows in";
+const LONG_TASK: &str =
+    "A very long task name that goes on and on to see how every screen shortens it at the end";
+
+/// The seed plus what the audit's heavy state had: a list with a long name,
+/// 35 overdue tasks of mine and one long-named task on that list due today.
+fn heavy(h: &mut Ui1) -> u64 {
+    let me = h.app.data.me;
+    let long = h.app.data.new_id();
+    h.app.data.spaces[0].lists.push(ListItem {
+        id: long,
+        name: LONG_LIST.into(),
+        color: None,
+        start: None,
+        end: None,
+        priority: 0,
+        owner: None,
+        description: String::new(),
+        archived: false,
+    });
+    let base = task_named(h, "Set up analytics dashboard").clone();
+    let td = today();
+    for k in 0..35 {
+        let mut x = base.clone();
+        x.id = 20_000 + k;
+        x.name = format!("Overdue chore {}", k);
+        x.assignees = vec![me];
+        x.start = None;
+        x.due = Some(td - Duration::days(1 + (k as i64 * 7) % 20));
+        x.parent = None;
+        h.app.data.tasks.push(x);
+    }
+    let mut x = base.clone();
+    x.id = 20_100;
+    x.name = LONG_TASK.into();
+    x.list_id = long;
+    x.assignees = vec![me];
+    x.start = None;
+    x.due = Some(td);
+    x.parent = None;
+    h.app.data.tasks.push(x);
+    h.settle();
+    long
+}
+
+fn planner_days_share_the_width(w: f32, hh: f32) {
+    let mut h = Ui1::sized(w, hh);
+    heavy(&mut h);
+    h.app.section = Section::Planner;
+    h.settle();
+    let week = h.app.planner_week;
+    let adds: Vec<Rect> = (0..7)
+        .map(|i| {
+            h.rect(&format!(
+                "Add task on {}",
+                (week + Duration::days(i)).format("%a %-d")
+            ))
+        })
+        .collect();
+    // every day is inside the window and they are evenly spaced
+    for (i, r) in adds.iter().enumerate() {
+        assert!(
+            r.right() <= w,
+            "{}x{}: day {} ends at {}",
+            w,
+            hh,
+            i,
+            r.right()
+        );
+    }
+    let steps: Vec<f32> = adds.windows(2).map(|p| p[1].left() - p[0].left()).collect();
+    for s in &steps {
+        assert!(
+            (s - steps[0]).abs() < 1.5,
+            "{}x{}: day columns differ: {:?}",
+            w,
+            hh,
+            steps
+        );
+    }
+    // and they use the width: no wide empty strip on the right
+    let last = adds[6].left() + steps[0];
+    assert!(w - last < 60.0, "{}x{}: {} px left empty", w, hh, w - last);
+    let page = Rect::from_min_max(pos2(60.0, 40.0), h.size.to_pos2());
+    let cut = h.cut_texts(page);
+    assert!(cut.is_empty(), "{}x{}: cut texts {:?}", w, hh, cut);
+    // today's 36 tasks scroll, so the "+ Add task" under them is reachable
+    let add_today = format!("Add task on {}", today().format("%a %-d"));
+    if week <= today() && today() < week + Duration::days(7) {
+        h.click(&add_today);
+        assert!(
+            h.app.sweep.planner_add.is_some(),
+            "{}x{}: the add row under today's tasks is reachable",
+            w,
+            hh
+        );
+    }
+}
+
+#[test]
+fn planner_days_share_the_width_and_today_scrolls() {
+    planner_days_share_the_width(1440.0, 900.0);
+    planner_days_share_the_width(900.0, 560.0);
+}
+
+#[test]
+fn planner_without_unscheduled_tasks_says_so() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let td = today();
+    for x in h.app.data.tasks.iter_mut() {
+        if x.assignees.contains(&me) && x.due.is_none() {
+            x.due = Some(td);
+        }
+    }
+    h.app.section = Section::Planner;
+    h.settle();
+    assert!(!h
+        .painted_text(tr(
+            "Nothing to schedule. Every task of yours has a day, or drag one here to take its date off."
+        ))
+        .is_empty());
+}

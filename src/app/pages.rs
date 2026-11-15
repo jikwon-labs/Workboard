@@ -223,8 +223,16 @@ impl App {
                     .cloned()
                     .collect();
                 let avail = ui.available_rect_before_wrap();
-                let left_w = 260.0;
+                // the "To schedule" column gives up room first in a small
+                // window; the seven days share what is left exactly
+                let left_w = (avail.width() * 0.26).clamp(170.0, 260.0);
                 let mut dropped: Option<(u64, Option<NaiveDate>)> = None;
+                // a day with many tasks (overdue ones pile up on today) scrolls
+                egui::ScrollArea::vertical()
+                    .id_salt("planner_week")
+                    .auto_shrink([false, false])
+                    .drag_to_scroll(false)
+                    .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     // unscheduled list
                     ui.vertical(|ui| {
@@ -246,7 +254,9 @@ impl App {
                                 .color(t.text3),
                             );
                             ui.add_space(6.0);
+                            let mut none = true;
                             for task in mine.iter().filter(|x| x.due.is_none()) {
+                                none = false;
                                 let resp = ui.dnd_drag_source(
                                     egui::Id::new(("plan", task.id)),
                                     task.id,
@@ -256,13 +266,24 @@ impl App {
                                     self.actions.push(Action::Open(task.id));
                                 }
                             }
+                            if none {
+                                ui.add_space(10.0);
+                                ui.label(
+                                    RichText::new(tr(
+                                        "Nothing to schedule. Every task of yours has a day, or drag one here to take its date off.",
+                                    ))
+                                    .small()
+                                    .color(t.text3),
+                                );
+                            }
                         });
                         if let Some(p) = payload {
                             dropped = Some((*p, None));
                         }
                     });
-                    // week columns
-                    let col_w = ((ui.available_width() - 7.0 * 22.0) / 7.0).max(100.0);
+                    // week columns: equal parts of the rest, gaps included
+                    let gap = ui.spacing().item_spacing.x;
+                    let col_w = ((ui.available_width() - 7.0 * gap) / 7.0).floor().max(60.0);
                     for i in 0..7 {
                         let d = week + Duration::days(i);
                         ui.vertical(|ui| {
@@ -313,6 +334,7 @@ impl App {
                         });
                     }
                 });
+                    });
                 if let Some((id, due)) = dropped {
                     if let Some(mut task) = self.task(id).cloned() {
                         task.due = due;
@@ -337,12 +359,44 @@ impl App {
                     paint_status_circle(ui.painter(), r.center(), 5.5, &st);
                     ui.add(egui::Label::new(RichText::new(&task.name).size(12.5)).truncate());
                 });
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(self.data.list_name(task.list_id))
-                            .small()
-                            .color(t.text3),
-                    );
+                ui.horizontal_wrapped(|ui| {
+                    // the list name gives up its room to the flag, time and
+                    // "Overdue" after it, and is shortened to fit the day;
+                    // in a very narrow day those go on a line of their own
+                    let small = egui::TextStyle::Small.resolve(ui.style());
+                    let gap = ui.spacing().item_spacing.x;
+                    let width_of = |ui: &Ui, s: &str| {
+                        ui.painter()
+                            .layout_no_wrap(s.to_string(), small.clone(), Color32::WHITE)
+                            .size()
+                            .x
+                            + gap
+                    };
+                    let mut extras = 0.0;
+                    if task.priority > 0 {
+                        extras += 12.0 + gap;
+                    }
+                    if let Some(at) = task.due_at() {
+                        extras += width_of(ui, &fmt_time(at));
+                    }
+                    if task.is_overdue() {
+                        extras += width_of(ui, tr("Overdue"));
+                    }
+                    let mut room = ui.available_width() - extras;
+                    if room < 30.0 {
+                        room = ui.available_width();
+                    }
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(self.data.list_name(task.list_id))
+                                    .small()
+                                    .color(t.text3),
+                            )
+                            .truncate(),
+                        );
+                    });
                     if task.priority > 0 {
                         let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
                         paint_flag(

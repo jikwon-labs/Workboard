@@ -174,6 +174,7 @@ pub const T: &[(&str, &str)] = &[
     ("Opened tasks stay here for quick access", "열었던 작업이 여기에 남아 빠르게 다시 열 수 있습니다"),
     ("To schedule", "일정 잡기"),
     ("Your tasks without a due date. Drag one onto a day.", "마감일이 없는 내 작업입니다. 날짜로 끌어다 놓으세요."),
+    ("Nothing to schedule. Every task of yours has a day, or drag one here to take its date off.", "일정을 잡을 작업이 없습니다. 내 작업에 모두 날짜가 있어요. 날짜를 빼려면 여기로 끌어다 놓으세요."),
     ("Overdue", "기한 지남"),
     ("\u{1F464} Manage people", "\u{1F464} 사람 관리"),
     ("What everyone is working on", "모두가 진행 중인 작업"),

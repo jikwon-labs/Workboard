@@ -899,11 +899,19 @@ impl App {
             };
             if ex.slack_map.get(sid) != Some(&target) {
                 let decided = plan.proposed.get(sid) != Some(&a);
-                let fresh = !ex.slack_map.contains_key(sid)
-                    && !ex
-                        .sync
-                        .values
-                        .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+                // nothing decided for them stands: no entry, or one for a
+                // member who is gone (matching found someone else)
+                let gone = ex
+                    .slack_map
+                    .get(sid)
+                    .is_some_and(|m| !self.data.members.iter().any(|x| x.id == *m));
+                let ex = &mut self.data.extra;
+                let fresh = gone
+                    || (!ex.slack_map.contains_key(sid)
+                        && !ex
+                            .sync
+                            .values
+                            .contains_key(&crate::sync::map_part(SLACK_MAP, sid)));
                 // a Slack person an older version left on two members stays
                 // with those lists until someone decides (see
                 // `Data::fold_legacy_slack`): only matching found them here
@@ -919,6 +927,11 @@ impl App {
                 }
                 let ex = &mut self.data.extra;
                 ex.slack_map.insert(sid.clone(), target);
+                if decided {
+                    ex.slack_carried.retain(|x| x != sid);
+                } else if fresh && !ex.slack_carried.contains(sid) {
+                    ex.slack_carried.push(sid.clone());
+                }
                 if !decided && fresh {
                     crate::sync::carry_map_entry(
                         &mut ex.sync,

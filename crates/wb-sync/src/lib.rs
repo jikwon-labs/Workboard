@@ -2044,6 +2044,7 @@ const PERSONAL_EXTRA: &[&str] = &[
     "sheet_week_rows",
     "slack_under_me",
     "slack_not_under_me",
+    "slack_carried",
 ];
 
 /// The copy other people get: personal notes, reminders, settings and

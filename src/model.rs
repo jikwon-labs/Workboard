@@ -1349,6 +1349,14 @@ pub struct Extra {
     /// somewhere else: my own, like `slack_under_me`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack_not_under_me: Vec<String>,
+    /// Slack ids whose shared match this computer only carried over from an
+    /// older version's lists (`Data::fold_legacy_slack`, or an import that
+    /// kept what matching found), with nobody deciding it. If that member is
+    /// deleted, the next member the older lists name still counts. My own
+    /// note, never shared, so sharing and joining don't change it; a real
+    /// decision in the import dialog takes the id off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slack_carried: Vec<String>,
     /// Slack user id -> the member an Import from Slack brings them in as,
     /// so importing again (from any teammate's computer) finds them after a
     /// rename or with no email to match by. Shared entry by entry
@@ -1406,6 +1414,7 @@ impl Default for Extra {
             sheet_week_rows: vec![],
             slack_under_me: vec![],
             slack_not_under_me: vec![],
+            slack_carried: vec![],
             slack_map: Default::default(),
         }
     }
@@ -1609,21 +1618,33 @@ impl Data {
                 .sync
                 .values
                 .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+        let legacy = || {
+            self.members
+                .iter()
+                .find(|m| m.slack.iter().any(|x| x == sid))
+                .map(|m| m.id)
+        };
         if decided {
-            return self
+            if let Some(m) = self
                 .extra
                 .slack_map
                 .get(sid)
                 .copied()
-                .filter(|m| self.member(*m).is_some());
+                .filter(|m| self.member(*m).is_some())
+            {
+                return Some(m);
+            }
+            // only carried over from the older lists here, never decided:
+            // with that member gone, another member they name still counts
+            if self.extra.slack_carried.iter().any(|x| x == sid) {
+                return legacy();
+            }
+            return None;
         }
         // an older version's lists; one could name a Slack person on two
         // members (`fold_legacy_slack` leaves those out of the map), and the
         // first member still here wins
-        self.members
-            .iter()
-            .find(|m| m.slack.iter().any(|x| x == sid))
-            .map(|m| m.id)
+        legacy()
     }
 
     /// The Slack matches an older version kept on the members
@@ -1666,6 +1687,9 @@ impl Data {
                     continue;
                 }
                 self.extra.slack_map.insert(sid.clone(), m.id);
+                if !self.extra.slack_carried.contains(sid) {
+                    self.extra.slack_carried.push(sid.clone());
+                }
                 crate::sync::carry_map_entry(
                     &mut self.extra.sync,
                     SLACK_MAP,

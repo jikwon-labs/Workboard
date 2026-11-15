@@ -8846,3 +8846,91 @@ fn importing_a_slack_id_on_two_older_lists_keeps_it_out_of_the_map() {
     a.import_slack(&p);
     assert_eq!(a.data.extra.slack_map.get("UX"), Some(&4));
 }
+
+/// A Slack person whose shared match points at a deleted member: a plain
+/// import that only accepts what matching finds for them isn't a decision,
+/// so a teammate's real decision made at about the same time wins on both
+/// computers after a real merge.
+#[test]
+fn a_plain_import_over_a_deleted_members_match_does_not_beat_a_teammates_choice() {
+    use super::slack::{plan, Assign};
+    let dir = temp_folder("slack-gone");
+    let folder = dir.to_str().unwrap().to_string();
+    let (alex, sam, jordan) = (2, 3, 4);
+    let mut a = app();
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == sam)
+        .unwrap()
+        .slack = vec!["UA".into()];
+    a.data.fold_legacy_slack();
+    assert_eq!(a.data.extra.slack_map.get("UA"), Some(&sam));
+    a.share_here(&folder).unwrap();
+    let mut b = slack_joiner(&folder, jordan);
+    a.data.members.retain(|m| m.id != sam);
+    slack_push(&mut a);
+    assert!(b.sync_pull());
+    assert_eq!(slack_next(&b, "UA"), Some(Assign::Member(alex)), "by email");
+
+    // A decides Jordan; B, a moment later and before syncing, imports and
+    // keeps what matching found
+    let (u, c) = slack_moves(&[(1, "UA")]);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UA".into(), Assign::Member(jordan));
+    a.import_slack(&p);
+    slack_push(&mut a);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let (u, c) = slack_moves(&[(1, "UA")]);
+    b.import_slack(&plan(&b.data, u, c));
+    slack_push(&mut b);
+    a.sync_pull();
+    b.sync_pull();
+    for (who, x) in [("A", &a), ("B", &b)] {
+        assert_eq!(x.data.extra.slack_map.get("UA"), Some(&jordan), "{}", who);
+        assert_eq!(slack_next(x, "UA"), Some(Assign::Member(jordan)), "{}", who);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A match carried over from one older list, and a second older list for
+/// the same Slack person arriving later from a teammate's older app: when
+/// the first member is deleted, the second still counts.
+#[test]
+fn a_carried_slack_match_falls_back_to_an_older_list_that_came_later() {
+    use super::slack::Assign;
+    let dir = temp_folder("slack-late");
+    let folder = dir.to_str().unwrap().to_string();
+    let (alex, sam, jordan) = (2, 3, 4);
+    let mut a = app();
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == alex)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    a.data.fold_legacy_slack();
+    assert_eq!(a.data.extra.slack_carried, ["UX"]);
+    a.share_here(&folder).unwrap();
+    let mut b = slack_joiner(&folder, jordan);
+    // an older app on B's side had put UX on Sam
+    b.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == sam)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    slack_push(&mut b);
+    assert!(a.sync_pull());
+    a.data.members.retain(|m| m.id != alex);
+    assert_eq!(a.data.slack_member("UX"), Some(sam));
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(sam)));
+    // my note is mine: it isn't in the copy teammates get
+    let shared = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+        .collect::<String>();
+    assert!(!shared.contains("slack_carried"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

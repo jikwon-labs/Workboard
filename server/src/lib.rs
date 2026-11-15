@@ -12,6 +12,7 @@
 //                         "transport": "folder")
 //   backups/              hourly-YYYYMMDD-HH.json (48 kept),
 //                         daily-YYYYMMDD.json (30 kept), before-restore-*.json
+//                         (20 kept)
 //   admin-request.json    a request from the `workboard-server` admin
 //   admin-result.json     commands, picked up within a second (see admin)
 //   updates/              app updates: appcast.xml and the Workboard-*.zip it
@@ -35,9 +36,13 @@
 // (with a link to /join) and password-reset codes (POST /auth/forgot).
 // Removing someone's access also deletes their account.
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::http::{header, StatusCode};
+use axum::http::{header, Method, StatusCode, Version};
+use futures_util::{SinkExt, StreamExt};
+use hyper_util::rt::TokioIo;
+use tokio_tungstenite::tungstenite::protocol::{Role as WsRole, WebSocketConfig};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::WebSocketStream;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -79,6 +84,13 @@ pub const MAX_TRIES: u32 = 5;
 pub const LOCK_MINUTES: i64 = 15;
 /// PBKDF2-HMAC-SHA256 rounds for new password hashes.
 const PBKDF2_ROUNDS: u32 = 100_000;
+/// before-restore-*.json copies kept (the newest ones).
+pub const KEEP_BEFORE_RESTORE: usize = 20;
+/// A claim on an empty server that never brought its workspace (the app quit
+/// right after) gives way to another claim after this long.
+pub const CLAIM_WAIT_SECS: u64 = 60;
+/// The largest first message (hello) before someone has signed in.
+pub const MAX_HELLO: usize = 64 << 10;
 
 /// `WORKBOARD_SERVER_HOME`, else ~/Library/Application Support/WorkboardServer.
 pub fn home_dir() -> PathBuf {
@@ -303,7 +315,12 @@ impl Saved {
     }
 
     fn drop_expired_invites(&mut self, now: i64) {
-        self.invites.retain(|_, i| now - i.created < INVITE_DAYS * 86_400_000);
+        self.invites.retain(|_, i| invite_alive(i, now));
+    }
+
+    /// The code `member` can still sign in with (expired ones don't count).
+    pub fn open_invite(&self, member: u64, now: i64) -> Option<&String> {
+        self.invites.iter().find(|(_, i)| i.member == member && invite_alive(i, now)).map(|(c, _)| c)
     }
 
     /// A fresh one-time code for `member`, replacing any earlier one.
@@ -357,11 +374,15 @@ impl Saved {
                 member,
                 role: self.role_of(member),
                 devices: self.devices.values().filter(|d| d.member == member).count(),
-                invite: self.invites.iter().find(|(_, i)| i.member == member).map(|(c, _)| c.clone()).filter(|_| viewer == Role::Owner || self.role_of(member) != Role::Owner),
+                invite: self.open_invite(member, now_ms()).cloned().filter(|_| viewer == Role::Owner || self.role_of(member) != Role::Owner),
                 account: self.accounts.contains_key(&member),
             })
             .collect()
     }
+}
+
+fn invite_alive(i: &InviteRec, now: i64) -> bool {
+    now - i.created < INVITE_DAYS * 86_400_000
 }
 
 fn member_ids(canon: Option<&Value>) -> Vec<u64> {
@@ -389,6 +410,9 @@ fn member_exists(canon: Option<&Value>, member: u64) -> bool {
 /// back the items deleted since: their change stamps become `now` and each
 /// one counts as restored.
 pub fn mark_restored(data: &mut Value, now: i64) {
+    if !copy_shape_ok(data) {
+        return;
+    }
     let ids: Vec<u64> = wb_sync::fingerprints(data).into_keys().collect();
     let mut meta: wb_sync::SyncMeta = data.get("extra").and_then(|e| e.get("sync")).and_then(|s| serde_json::from_value(s.clone()).ok()).unwrap_or_default();
     for id in ids {
@@ -404,6 +428,9 @@ pub fn mark_restored(data: &mut Value, now: i64) {
 
 /// Write a member's role into the team's copy so everyone's app shows it.
 fn label_role(canon: &mut Value, member: u64, role: Role) -> bool {
+    if !copy_shape_ok(canon) {
+        return false;
+    }
     let Some(m) = canon.get_mut("members").and_then(|m| m.as_array_mut()).and_then(|a| a.iter_mut().find(|m| m.get("id").and_then(|i| i.as_u64()) == Some(member))) else { return false };
     if m.get("role").and_then(|r| r.as_str()) == Some(role.label()) {
         return false;
@@ -416,6 +443,79 @@ fn label_role(canon: &mut Value, member: u64, role: Role) -> bool {
     let prev = stamps.get(member.to_string()).and_then(|s| s.as_i64()).unwrap_or(0);
     stamps[member.to_string()] = json!(now_ms().max(prev + 1));
     true
+}
+
+/// A workspace copy the server can work with: an object whose `extra`,
+/// `extra.sync` and `extra.sync.stamps` are objects (or missing), so writing
+/// into them can't fail.
+fn copy_shape_ok(v: &Value) -> bool {
+    let fine = |x: Option<&Value>| x.is_none_or(|x| x.is_null() || x.is_object());
+    let extra = v.get("extra");
+    let sync = extra.and_then(|e| e.get("sync"));
+    v.is_object() && fine(extra) && fine(sync) && fine(sync.and_then(|s| s.get("stamps")))
+}
+
+/// A DM or a private channel with a member list that doesn't include
+/// `member`: they don't get it and can't change it.
+fn closed_to(ch: &Value, member: u64) -> bool {
+    let restricted = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct") || ch.get("private").and_then(|p| p.as_bool()) == Some(true);
+    let members: Vec<u64> = ch.get("members").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.as_u64()).collect()).unwrap_or_default();
+    restricted && !members.is_empty() && !members.contains(&member)
+}
+
+/// The conversations in the team's copy closed to `member`, each with the
+/// ids of everything in it (the channel, its messages and replies).
+fn closed_channels(canon: &Value, member: u64) -> Vec<(&Value, Vec<u64>)> {
+    canon
+        .get("channels")
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().filter(|ch| ch.get("id").and_then(|i| i.as_u64()).is_some() && closed_to(ch, member)).map(|ch| (ch, wb_sync::fingerprints(&json!({ "channels": [ch] })).into_keys().collect())).collect())
+        .unwrap_or_default()
+}
+
+fn drop_ids(meta: Option<&mut Value>, keys: &[&str], ids: &[u64]) {
+    let Some(meta) = meta else { return };
+    for k in keys {
+        if let Some(m) = meta.get_mut(*k).and_then(|m| m.as_object_mut()) {
+            for id in ids {
+                m.remove(&id.to_string());
+            }
+        }
+    }
+}
+
+/// What `member` gets of the team's copy: DMs and private channels they
+/// aren't in left out (with their change stamps). None when nothing is
+/// left out. Tombstones stay, so deletes still reach everyone; an app never
+/// treats a conversation missing here as deleted (only a tombstone deletes).
+fn copy_for(canon: &Value, member: u64) -> Option<Value> {
+    let closed = closed_channels(canon, member);
+    if closed.is_empty() {
+        return None;
+    }
+    let hide: Vec<u64> = closed.iter().filter_map(|(ch, _)| ch.get("id")?.as_u64()).collect();
+    let inner: Vec<u64> = closed.iter().flat_map(|(_, ids)| ids.iter().copied()).collect();
+    let mut out = canon.clone();
+    if let Some(a) = out.get_mut("channels").and_then(|c| c.as_array_mut()) {
+        a.retain(|ch| !ch.get("id").and_then(|i| i.as_u64()).is_some_and(|i| hide.contains(&i)));
+    }
+    drop_ids(out.get_mut("extra").and_then(|e| e.get_mut("sync")), &["stamps"], &inner);
+    Some(out)
+}
+
+/// Before merging a copy from `member`: the conversations closed to them
+/// stay as the team has them. Their version of one (say, with themselves
+/// added to its members) is swapped for the team's, and their stamps,
+/// tombstones and revivals for anything in it are dropped, so they can't
+/// change, join or delete it.
+fn guard_push(canon: &Value, data: &mut Value, member: u64) {
+    for (ch, ids) in closed_channels(canon, member) {
+        let id = ch.get("id").and_then(|i| i.as_u64());
+        if let Some(theirs) = data.get_mut("channels").and_then(|c| c.as_array_mut()).and_then(|a| a.iter_mut().find(|c| c.get("id").and_then(|i| i.as_u64()) == id)) {
+            *theirs = ch.clone();
+        }
+        drop_ids(data.get_mut("extra").and_then(|e| e.get_mut("sync")), &["stamps", "tombs", "revived"], &ids);
+    }
 }
 
 fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
@@ -530,10 +630,31 @@ enum Reply {
     Denied(String),
 }
 
+/// A new team copy for every connection; each one sends what its person may see.
+struct Canon {
+    data: Value,
+    rev: u64,
+    /// the whole copy as an update message, for people nothing is hidden from
+    json: String,
+}
+
+impl Canon {
+    fn new(data: &Value, rev: u64) -> Canon {
+        Canon { json: Msg::Update { data: data.clone(), rev }.to_json(), data: data.clone(), rev }
+    }
+
+    fn update_for(&self, member: u64) -> String {
+        match copy_for(&self.data, member) {
+            Some(data) => Msg::Update { data, rev: self.rev }.to_json(),
+            None => self.json.clone(),
+        }
+    }
+}
+
 struct Hub {
     home: PathBuf,
     inner: Mutex<Inner>,
-    updates: broadcast::Sender<Arc<str>>,
+    updates: broadcast::Sender<Arc<Canon>>,
     /// device ids whose access was just removed
     kicks: broadcast::Sender<Arc<Vec<String>>>,
     /// roles or invites changed: each connection re-sends access info
@@ -542,6 +663,7 @@ struct Hub {
     connections: AtomicUsize,
     /// the largest file /files takes
     max_file: u64,
+    claim_wait: Duration,
 }
 
 impl Hub {
@@ -583,7 +705,7 @@ impl Hub {
         g.saved.rev += 1;
         g.dirty = true;
         if let Some(c) = &g.canon {
-            let _ = self.updates.send(Arc::from(Msg::Update { data: c.clone(), rev: g.saved.rev }.to_json()));
+            let _ = self.updates.send(Arc::new(Canon::new(c, g.saved.rev)));
         }
     }
 
@@ -670,9 +792,24 @@ impl Hub {
         }
         if let Some(member) = h.claim {
             // only the very first claim wins: two people setting up the same
-            // empty server at once must not end up with their workspaces merged
+            // empty server at once must not end up with their workspaces merged.
+            // A claim that never brought its workspace (the app quit right
+            // after) can be made again from the same computer, and gives way
+            // to anyone after claim_wait.
             if g.canon.is_none() && !g.saved.devices.is_empty() {
-                return Err("Someone else is setting up this server right now. Ask them for an invite code.".into());
+                let same_device = g.saved.devices.len() == 1 && g.saved.devices.contains_key(device);
+                let stale = g.saved.devices.values().all(|d| now_ms() - d.created >= self.claim_wait.as_millis() as i64);
+                if !same_device && !stale {
+                    return Err("Someone else is setting up this server right now. Ask them for an invite code.".into());
+                }
+                let gone: Vec<String> = g.saved.devices.keys().filter(|d| d.as_str() != device).cloned().collect();
+                g.saved.devices.clear();
+                g.saved.roles.clear();
+                g.saved.invites.clear();
+                g.saved.accounts.clear();
+                if !gone.is_empty() {
+                    let _ = self.kicks.send(Arc::new(gone));
+                }
             }
             if g.canon.is_none() && g.saved.devices.is_empty() {
                 if let Some(pw) = h.new_password.as_deref() {
@@ -777,15 +914,28 @@ impl Hub {
     fn welcome(&self, tag: u16, member: u64, role: Role, token: Option<String>) -> String {
         let g = self.inner.lock().unwrap();
         let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
-        Msg::Welcome { tag, snapshot: g.canon.clone(), rev: g.saved.rev, member, role, token, email }.to_json()
+        let snapshot = g.canon.as_ref().map(|c| copy_for(c, member).unwrap_or_else(|| c.clone()));
+        Msg::Welcome { tag, snapshot, rev: g.saved.rev, member, role, token, email }.to_json()
     }
 
-    /// Merge an app's copy into the team's copy; tell everyone when it changed.
-    fn push(&self, data: Value) {
-        let data = wb_sync::shareable(&data);
+    /// Merge the copy `member` sent from `device` into the team's copy; tell
+    /// everyone when it changed.
+    fn push(&self, member: u64, device: &str, data: Value) {
+        if !copy_shape_ok(&data) {
+            eprintln!("ignored a copy from member {} that isn't a workspace", member);
+            return;
+        }
+        let mut data = wb_sync::shareable(&data);
         let mut g = self.inner.lock().unwrap();
         let members_before = member_ids(g.canon.as_ref());
+        if let Some(c) = &g.canon {
+            guard_push(c, &mut data, member);
+        }
+        let claimer = g.saved.devices.contains_key(device);
         let changed = match g.canon.as_mut() {
+            // the workspace comes from the computer that claimed the server
+            // (a claim taken over after claim_wait no longer counts)
+            None if !claimer => false,
             None => {
                 // the owner's first copy brings the workspace
                 let mut data = data;
@@ -814,9 +964,9 @@ impl Hub {
         }
     }
 
-    fn latest(&self) -> Option<String> {
+    fn latest(&self, member: u64) -> Option<String> {
         let g = self.inner.lock().unwrap();
-        g.canon.as_ref().map(|c| Msg::Update { data: c.clone(), rev: g.saved.rev }.to_json())
+        g.canon.as_ref().map(|c| Msg::Update { data: copy_for(c, member).unwrap_or_else(|| c.clone()), rev: g.saved.rev }.to_json())
     }
 
     fn access_for(&self, member: u64) -> Msg {
@@ -955,6 +1105,9 @@ impl Hub {
             Ok(None) => return Err(format!("{} doesn't exist", path.display())),
             Err(e) => return Err(e.to_string()),
         };
+        if !copy_shape_ok(&data) {
+            return Err(format!("{} isn't a Workboard workspace", path.display()));
+        }
         {
             mark_restored(&mut data, now_ms());
             let data = wb_sync::shareable(&data);
@@ -963,6 +1116,10 @@ impl Hub {
                 let keep = self.home.join(BACKUP_DIR).join(format!("before-restore-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")));
                 let _ = std::fs::create_dir_all(self.home.join(BACKUP_DIR));
                 let _ = write_atomic(&keep, &serde_json::to_string(cur).unwrap_or_default());
+                let mut kept = backup_files(&self.home.join(BACKUP_DIR), "before-restore");
+                while kept.len() > KEEP_BEFORE_RESTORE {
+                    let _ = std::fs::remove_file(kept.remove(0));
+                }
             }
             match g.canon.as_mut() {
                 Some(c) => {
@@ -1012,10 +1169,47 @@ impl Hub {
     }
 }
 
-async fn ws_route(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>, headers: axum::http::HeaderMap) -> impl IntoResponse {
+type WebSocket = WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>;
+
+fn ws_config(max: usize) -> WebSocketConfig {
+    WebSocketConfig::default().max_message_size(Some(max)).max_frame_size(Some(max))
+}
+
+/// Sec-WebSocket-Accept for a Sec-WebSocket-Key (RFC 6455).
+fn accept_key(key: &[u8]) -> String {
+    use base64::Engine as _;
+    use sha1::{Digest, Sha1};
+    let mut h = Sha1::new();
+    h.update(key);
+    h.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    base64::engine::general_purpose::STANDARD.encode(h.finalize())
+}
+
+/// The WebSocket upgrade, done here rather than with axum's extractor so the
+/// size limit can change after signing in: until then a message may be at
+/// most MAX_HELLO, afterwards MAX_MESSAGE (a whole workspace).
+async fn ws_route(State(hub): State<Arc<Hub>>, mut req: axum::extract::Request) -> Response {
+    let h = req.headers();
     // the address this app reached us at, for links in invite mails
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).map(|h| h.to_string());
-    ws.max_message_size(wb_net::MAX_MESSAGE).max_frame_size(wb_net::MAX_MESSAGE).on_upgrade(move |socket| connection(socket, hub, host))
+    let host = h.get(header::HOST).and_then(|h| h.to_str().ok()).map(|h| h.to_string());
+    let has = |name: header::HeaderName, want: &str| h.get_all(name).iter().any(|v| v.to_str().is_ok_and(|v| v.split(',').any(|p| p.trim().eq_ignore_ascii_case(want))));
+    let ok = req.method() == Method::GET && req.version() == Version::HTTP_11 && has(header::CONNECTION, "upgrade") && has(header::UPGRADE, "websocket") && has(header::SEC_WEBSOCKET_VERSION, "13");
+    let Some(key) = h.get(header::SEC_WEBSOCKET_KEY).filter(|_| ok).map(|k| accept_key(k.as_bytes())) else {
+        return (StatusCode::BAD_REQUEST, "This address takes Workboard's WebSocket connection.").into_response();
+    };
+    let on_upgrade = hyper::upgrade::on(&mut req);
+    tokio::spawn(async move {
+        let Ok(upgraded) = on_upgrade.await else { return };
+        let socket = WebSocketStream::from_raw_socket(TokioIo::new(upgraded), WsRole::Server, Some(ws_config(MAX_HELLO))).await;
+        connection(socket, hub, host).await;
+    });
+    Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header(header::CONNECTION, "upgrade")
+        .header(header::UPGRADE, "websocket")
+        .header(header::SEC_WEBSOCKET_ACCEPT, key)
+        .body(axum::body::Body::empty())
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 /// POST /auth/forgot {"email"}: email a password-reset code. Always "ok", so
@@ -1105,7 +1299,7 @@ async fn health(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
 }
 
 async fn send(socket: &mut WebSocket, text: &str) -> bool {
-    socket.send(Message::Text(text.into())).await.is_ok()
+    socket.send(Message::text(text)).await.is_ok()
 }
 
 struct Counted(Arc<Hub>);
@@ -1122,7 +1316,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     let mut stop = hub.stop.clone();
     // the first message must be hello
     let hello = tokio::select! {
-        m = tokio::time::timeout(Duration::from_secs(10), socket.recv()) => m,
+        m = tokio::time::timeout(Duration::from_secs(10), socket.next()) => m,
         _ = stop.changed() => return,
     };
     let Ok(Some(Ok(Message::Text(t)))) = hello else { return };
@@ -1142,6 +1336,9 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             return;
         }
     };
+    // signed in: from now on a message may hold a whole workspace. The app
+    // sends nothing between hello and welcome, so nothing read ahead is lost.
+    let mut socket = WebSocketStream::from_raw_socket(socket.into_inner(), WsRole::Server, Some(ws_config(wb_net::MAX_MESSAGE))).await;
     // listen before sending the copy so no update falls in between
     let mut updates = hub.updates.subscribe();
     let mut kicks = hub.kicks.subscribe();
@@ -1155,7 +1352,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
     loop {
         tokio::select! {
-            m = tokio::time::timeout(silent, socket.recv()) => {
+            m = tokio::time::timeout(silent, socket.next()) => {
                 let m = match m {
                     Err(_) => break, // heard nothing for too long
                     Ok(None) | Ok(Some(Err(_))) => break,
@@ -1166,15 +1363,15 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                 };
                 let out = match Msg::parse(t.as_str()) {
                     Some(Msg::Push { data }) => {
-                        let hub2 = hub.clone();
+                        let (hub2, device2) = (hub.clone(), device.clone());
                         // merging can take a moment on a big workspace
-                        let _ = tokio::task::spawn_blocking(move || hub2.push(data)).await;
+                        let _ = tokio::task::spawn_blocking(move || hub2.push(member, &device2, data)).await;
                         None
                     }
                     Some(Msg::Ping) => Some(Msg::Pong.to_json()),
                     Some(Msg::CallJoin { channel }) => Some(match hub.call(member, &device, channel) {
                         Ok(m) => m.to_json(),
-                        Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+                        Err(why) => Msg::call_denied(&why, channel).to_json(),
                     }),
                     Some(Msg::SetPassword { email, password, old_password }) => {
                         let h = hub.clone();
@@ -1204,9 +1401,9 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             }
             u = updates.recv() => {
                 let text = match u {
-                    Ok(t) => t.to_string(),
+                    Ok(c) => c.update_for(member),
                     // fell behind: the newest copy says it all
-                    Err(broadcast::error::RecvError::Lagged(_)) => match hub.latest() { Some(t) => t, None => continue },
+                    Err(broadcast::error::RecvError::Lagged(_)) => match hub.latest(member) { Some(t) => t, None => continue },
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
                 if !send(&mut socket, &text).await {
@@ -1237,11 +1434,13 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
 pub struct Options {
     /// The largest picture or video an app may upload.
     pub max_file: u64,
+    /// How long a claim on an empty server holds without its workspace.
+    pub claim_wait: Duration,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { max_file: MAX_FILE }
+        Options { max_file: MAX_FILE, claim_wait: Duration::from_secs(CLAIM_WAIT_SECS) }
     }
 }
 
@@ -1265,6 +1464,7 @@ pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, option
         stop: stop_rx,
         connections: AtomicUsize::new(0),
         max_file: options.max_file,
+        claim_wait: options.claim_wait,
     });
     // a request left while the server was off
     hub.admin_file();
@@ -1471,5 +1671,29 @@ mod tests {
         assert_eq!(s.rev, 9);
         assert!(s.devices.is_empty());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn expired_invite_codes_are_not_shown() {
+        let mut s = Saved::default();
+        s.invites.insert("OLDC-ODEX-XXXX".into(), InviteRec { member: 8, role: Role::Member, created: now_ms() - 8 * 86_400_000 });
+        let fresh = s.make_invite(9, Role::Member);
+        let canon = json!({"members": [{"id": 8}, {"id": 9}]});
+        let people = s.people(Some(&canon), Role::Owner);
+        assert_eq!(people.iter().find(|p| p.member == 8).unwrap().invite, None);
+        assert_eq!(people.iter().find(|p| p.member == 9).unwrap().invite, Some(fresh));
+        assert_eq!(s.open_invite(8, now_ms()), None);
+    }
+
+    #[test]
+    fn odd_copies_never_panic() {
+        for mut v in [json!("x"), json!([1]), json!({"members": [{"id": 1}], "extra": 3}), json!({"members": [{"id": 1}], "extra": {"sync": "s"}}), json!({"members": [{"id": 1}], "extra": {"sync": {"stamps": []}}})] {
+            assert!(!copy_shape_ok(&v));
+            assert!(!label_role(&mut v, 1, Role::Owner));
+            mark_restored(&mut v, 1);
+        }
+        let mut ok = json!({"members": [{"id": 1}]});
+        assert!(label_role(&mut ok, 1, Role::Owner));
+        assert_eq!(ok["members"][0]["role"], "Owner");
     }
 }

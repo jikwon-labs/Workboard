@@ -117,7 +117,7 @@ impl App {
                 Event::Update { data, .. } => self.data = Some(data),
                 Event::Invite { code, .. } => self.code = Some(code),
                 Event::CallToken { url, token, .. } => self.token = Some((url, token)),
-                Event::Denied(why) => self.denied.push(why),
+                Event::Denied(why) | Event::CallDenied { why, .. } => self.denied.push(why),
                 _ => {}
             }
         }

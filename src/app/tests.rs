@@ -980,10 +980,11 @@ fn a_huddle_on_the_server_connects_two_computers() {
     a.open_call_dialog();
     assert!(a.modal.is_none(), "no browser-call dialog on the server");
     assert_eq!(a.huddle.channel, Some(ch));
+    let msg_is_huddle = |x: &App| x.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.last()).and_then(|m| m.call.as_deref()).and_then(huddle::huddle_channel) == Some(ch);
+    // the card goes out once the server hands A the call token
+    net_until(&mut a, "A's huddle card", msg_is_huddle);
     a.sync_note_change();
     a.write_shared();
-    let msg_is_huddle = |x: &App| x.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.last()).and_then(|m| m.call.as_deref()).and_then(huddle::huddle_channel) == Some(ch);
-    assert!(msg_is_huddle(&a));
     net_until(&mut b, "B sees the huddle message", |b| msg_is_huddle(b));
 
     // B presses Join on it; both hear each other (a tone in tests)
@@ -1220,4 +1221,42 @@ fn one_message_takes_at_most_ten_pictures() {
     a.chat_files.pop();
     assert!(a.add_media(false, Some(pic), None));
     assert_eq!(a.chat_files.len(), 10);
+}
+
+#[test]
+fn a_huddle_join_gives_up_after_a_while_and_only_its_own_denial_cancels_it() {
+    let mut a = app();
+    let ch = a.data.channels[0].id;
+    let other = a.data.channels.get(1).map(|c| c.id).unwrap_or(ch + 1);
+    let waiting = |asked: std::time::Instant| {
+        let mut h = huddle::HuddleRt::default();
+        (h.channel, h.waiting, h.asked, h.announce) = (Some(ch), true, Some(asked), true);
+        h
+    };
+    let cards = |a: &App| a.data.channels[0].messages.iter().filter(|m| m.call.as_deref().and_then(huddle::huddle_channel) == Some(ch)).count();
+
+    // an unrelated refusal (a backup, an invite, another conversation) leaves it waiting
+    a.huddle = waiting(std::time::Instant::now());
+    a.huddle_denied(other);
+    assert!(a.huddle.waiting && a.huddle.channel == Some(ch));
+    // its own refusal ends it, and no "Started a huddle" card was posted
+    a.huddle_denied(ch);
+    assert!(a.huddle.channel.is_none());
+    assert_eq!(cards(&a), 0);
+
+    // no answer for HUDDLE_JOIN_SECS: give up and say so
+    a.huddle = waiting(std::time::Instant::now() - std::time::Duration::from_secs(huddle::HUDDLE_JOIN_SECS + 1));
+    a.toast = None;
+    a.huddle_tick(None);
+    assert!(a.huddle.channel.is_none() && !a.huddle.waiting);
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("didn't answer")), "{:?}", a.toast);
+    assert_eq!(cards(&a), 0);
+
+    // the token came: now the card goes out, once
+    a.huddle = waiting(std::time::Instant::now());
+    a.huddle_token(ch, "ws://x".into(), "t".into());
+    assert_eq!(cards(&a), 1);
+    assert!(!a.huddle.waiting && a.huddle.token.is_some());
+    a.huddle_token(ch, "ws://x".into(), "t".into());
+    assert_eq!(cards(&a), 1);
 }

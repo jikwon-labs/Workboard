@@ -315,6 +315,9 @@ pub enum Msg {
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         code: Option<String>,
+        /// Set when a call_join for this conversation was turned down.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<u64>,
     },
 }
 
@@ -328,7 +331,18 @@ impl Msg {
     }
 
     pub fn error(message: &str, code: Option<&str>) -> Msg {
-        Msg::Error { message: message.to_string(), code: code.map(|c| c.to_string()) }
+        Msg::Error { message: message.to_string(), code: code.map(|c| c.to_string()), channel: None }
+    }
+
+    /// A call_join for `channel` turned down.
+    pub fn call_denied(message: &str, channel: u64) -> Msg {
+        Msg::Error { message: message.to_string(), code: Some(CODE_DENIED.to_string()), channel: Some(channel) }
+    }
+
+    /// A request that waits for the connection while reconnecting (pushes
+    /// don't: the newest copy goes after every welcome anyway).
+    fn waits_for_connection(&self) -> bool {
+        matches!(self, Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. } | Msg::CallJoin { .. })
     }
 }
 
@@ -396,6 +410,9 @@ pub enum Event {
     Access { people: Vec<Person>, role: Role },
     /// A request was turned down; the connection stays.
     Denied(String),
+    /// The huddle of this conversation was turned down (not in it, voice
+    /// not set up...); the connection stays.
+    CallDenied { channel: u64, why: String },
     CallToken { channel: u64, url: String, token: String },
     Backups(Vec<Backup>),
     Restored(String),
@@ -448,7 +465,8 @@ impl Client {
         let _ = self.tx.send(Cmd::Push(data));
     }
 
-    /// Send a request (access requests). Dropped when not connected.
+    /// Send a request (access requests, call_join). While (re)connecting it
+    /// waits and goes once the server lets this computer in.
     pub fn send(&self, msg: Msg) {
         let _ = self.tx.send(Cmd::Send(msg));
     }
@@ -498,13 +516,26 @@ fn connect(addr: &str) -> Result<WebSocket<TcpStream>, String> {
     Err(last)
 }
 
+/// Requests kept while not connected; older ones beyond this are dropped.
+const MAX_QUEUED: usize = 32;
+
+/// Keep a request for after the next welcome.
+fn queue(queued: &mut Vec<Msg>, m: Msg) {
+    if m.waits_for_connection() {
+        queued.push(m);
+        if queued.len() > MAX_QUEUED {
+            queued.remove(0);
+        }
+    }
+}
+
 /// Wait before trying again; false when the app asked to stop.
-fn wait(crx: &Receiver<Cmd>, pending: &mut Option<Value>, secs: u64) -> bool {
+fn wait(crx: &Receiver<Cmd>, pending: &mut Option<Value>, queued: &mut Vec<Msg>, secs: u64) -> bool {
     let until = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < until {
         match crx.recv_timeout(Duration::from_millis(100)) {
             Ok(Cmd::Push(v)) => *pending = Some(v),
-            Ok(Cmd::Send(_)) => {}
+            Ok(Cmd::Send(m)) => queue(queued, m),
             Ok(Cmd::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return false,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
@@ -521,12 +552,13 @@ enum End {
 fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>, wake: Wake) {
     let line = Line { tx: etx, wake };
     let mut pending: Option<Value> = None;
+    let mut queued: Vec<Msg> = vec![];
     let mut tries: u64 = 0;
     line.emit(Event::Status(Status::Connecting));
     loop {
         let end = match connect(&addr) {
             Ok(mut ws) => {
-                let end = session(&mut ws, &line, &crx, &mut sign_in, &mut pending, &mut tries);
+                let end = session(&mut ws, &line, &crx, &mut sign_in, &mut pending, &mut queued, &mut tries);
                 let _ = ws.close(None);
                 let _ = ws.flush();
                 end
@@ -553,13 +585,13 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
         }
         // 1, 2, 3, 4, 5, 5... seconds
         tries += 1;
-        if !wait(&crx, &mut pending, tries.min(5)) {
+        if !wait(&crx, &mut pending, &mut queued, tries.min(5)) {
             return;
         }
     }
 }
 
-fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign_in: &mut SignIn, pending: &mut Option<Value>, tries: &mut u64) -> End {
+fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign_in: &mut SignIn, pending: &mut Option<Value>, queued: &mut Vec<Msg>, tries: &mut u64) -> End {
     let send = |ws: &mut WebSocket<TcpStream>, m: &Msg| ws.send(Message::text(m.to_json())).map_err(|e| e.to_string());
     let hello = Msg::Hello {
         device: sign_in.device.clone(),
@@ -579,23 +611,30 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
     loop {
-        let mut outbox: Vec<Msg> = vec![];
         loop {
             match crx.try_recv() {
                 Ok(Cmd::Push(v)) => *pending = Some(v),
-                Ok(Cmd::Send(m)) => outbox.push(m),
+                Ok(Cmd::Send(m)) if welcomed => queued.push(m),
+                Ok(Cmd::Send(m)) => queue(queued, m),
                 Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => return End::Stop,
                 Err(TryRecvError::Empty) => break,
             }
         }
         if welcomed {
+            // the copy first, so a conversation made a moment ago is on the
+            // server before a call_join for it
             if let Some(v) = pending.take() {
                 if let Err(e) = send(ws, &Msg::Push { data: v }) {
                     return End::Lost(e);
                 }
             }
-            for m in outbox {
+            while !queued.is_empty() {
+                let m = queued.remove(0);
                 if let Err(e) = send(ws, &m) {
+                    // it may not have gone: try it again after reconnecting
+                    if m.waits_for_connection() {
+                        queued.insert(0, m);
+                    }
                     return End::Lost(e);
                 }
             }
@@ -638,9 +677,12 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
                     Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
                     Some(Msg::Restored { name }) => emit(Event::Restored(name)),
                     Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
-                    Some(Msg::Error { message, code }) => match code.as_deref() {
+                    Some(Msg::Error { message, code, channel }) => match code.as_deref() {
                         Some(CODE_AUTH) => Err(End::Refused(message)),
-                        Some(CODE_DENIED) => emit(Event::Denied(message)),
+                        Some(CODE_DENIED) => match channel {
+                            Some(channel) => emit(Event::CallDenied { channel, why: message }),
+                            None => emit(Event::Denied(message)),
+                        },
                         _ => Err(End::Lost(message)),
                     },
                     _ => Ok(()),
@@ -716,5 +758,27 @@ mod tests {
     fn roles_order_from_member_to_owner() {
         assert!(Role::Owner.manages() && Role::Admin.manages() && !Role::Member.manages());
         assert!(Role::Owner > Role::Admin && Role::Admin > Role::Member);
+    }
+
+    #[test]
+    fn a_call_refusal_names_its_conversation_and_old_errors_still_read() {
+        assert_eq!(Msg::call_denied("no", 5).to_json(), r#"{"type":"error","message":"no","code":"denied","channel":5}"#);
+        assert_eq!(Msg::parse(r#"{"type":"error","message":"no","code":"denied"}"#), Some(Msg::error("no", Some(CODE_DENIED))));
+        assert_eq!(Msg::error("x", None).to_json(), r#"{"type":"error","message":"x"}"#);
+    }
+
+    #[test]
+    fn requests_wait_while_reconnecting_but_pings_and_pushes_do_not() {
+        let mut q = vec![];
+        queue(&mut q, Msg::CallJoin { channel: 1 });
+        queue(&mut q, Msg::Ping);
+        queue(&mut q, Msg::Push { data: Value::Null });
+        queue(&mut q, Msg::BackupList);
+        assert_eq!(q, vec![Msg::CallJoin { channel: 1 }, Msg::BackupList]);
+        for _ in 0..MAX_QUEUED {
+            queue(&mut q, Msg::AccessList);
+        }
+        assert_eq!(q.len(), MAX_QUEUED);
+        assert_eq!(q[0], Msg::AccessList, "the oldest went first");
     }
 }

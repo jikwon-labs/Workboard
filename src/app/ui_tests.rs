@@ -6869,3 +6869,94 @@ fn whiteboard_view_keeps_the_anchor_point_when_zooming() {
     let back = v.to_board(o, p);
     assert!((back[0] - 10.0).abs() < 1e-3 && (back[1] - 20.0).abs() < 1e-3);
 }
+
+// ---- custom field columns in the List view (r3-work)
+
+#[test]
+fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them() {
+    let mut h = Ui1::new();
+    h.app.data.extra.apps.custom_fields = true;
+    let field = |id, name: &str, kind: &str, options: &[&str]| CustomField {
+        id,
+        name: name.into(),
+        kind: kind.into(),
+        options: options.iter().map(|s| s.to_string()).collect(),
+    };
+    h.app.data.extra.fields = vec![
+        field(9001, "Billable", "checkbox", &[]),
+        field(9002, "Size", "dropdown", &["S", "M", "L"]),
+    ];
+    let name = "Write copy for landing page";
+    let tid = task_named(&h, name).id;
+    let list = task_named(&h, name).list_id;
+    h.app.apply(Action::Go(Location::List(list)));
+    h.app.view = ViewKind::List;
+    h.settle();
+    // make room for two field columns next to the name
+    h.app.hidden_cols.insert("Comments".into());
+    h.app.hidden_cols.insert("Assignee".into());
+    h.settle();
+    let custom = |h: &Ui1, f: u64| h.app.task(tid).unwrap().custom.get(&f).cloned();
+    // a checkbox ticks in place, without opening the task
+    h.click(&format!("Billable of {}", name));
+    assert_eq!(custom(&h, 9001).as_deref(), Some("true"));
+    assert!(h.app.open_task.is_none());
+    // a dropdown opens its options
+    h.click(&format!("Size of {}", name));
+    h.click("M");
+    assert_eq!(custom(&h, 9002).as_deref(), Some("M"));
+    // the Columns panel turns a field column off; the list remembers it
+    h.click("\u{25A5}  Columns");
+    assert!(h.has("Custom Fields"));
+    h.click("Field Billable");
+    assert!(h.app.hidden_cols.contains("field:9001"));
+    h.key(egui::Key::Escape);
+    assert!(!h.has(&format!("Billable of {}", name)));
+    let other = list_of_other(&h, list);
+    h.app.apply(Action::Go(Location::List(other)));
+    h.settle();
+    h.app.hidden_cols.remove("field:9001");
+    h.settle();
+    h.app.apply(Action::Go(Location::List(list)));
+    h.settle();
+    assert!(
+        h.app.hidden_cols.contains("field:9001"),
+        "the first list still hides it"
+    );
+    // text and number fields open a box; a number takes only numbers
+    h.app.data.extra.fields = vec![
+        field(9003, "Notes", "text", &[]),
+        field(9004, "Points", "number", &[]),
+    ];
+    h.settle();
+    h.click(&format!("Notes of {}", name));
+    h.type_text("hello");
+    assert_eq!(custom(&h, 9003).as_deref(), Some("hello"));
+    h.key(egui::Key::Enter);
+    h.click(&format!("Points of {}", name));
+    h.type_text("abc");
+    assert_eq!(custom(&h, 9004), None);
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("5");
+    assert_eq!(custom(&h, 9004).as_deref(), Some("5"));
+    // with the Custom Fields ClickApp off the columns go away
+    h.key(egui::Key::Enter);
+    h.app.data.extra.apps.custom_fields = false;
+    h.settle();
+    assert!(!h.has(&format!("Notes of {}", name)));
+}
+
+fn list_of_other(h: &Ui1, not: u64) -> u64 {
+    h.app
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| {
+            s.lists
+                .iter()
+                .map(|l| l.id)
+                .chain(s.folders.iter().flat_map(|f| f.lists.iter().map(|l| l.id)))
+        })
+        .find(|l| *l != not)
+        .unwrap()
+}

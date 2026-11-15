@@ -2219,6 +2219,9 @@ impl App {
                 } else {
                     PROPERTIES.to_vec()
                 };
+                let list_cols = self.list_cols(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.list_width.max(1.0), 30.0)));
+                let field_fits: Vec<u64> = if self.list_width > 0.0 { list_cols.fields.iter().map(|c| c.0).collect() } else { self.list_field_ids() };
+                let fields: Vec<(u64, String)> = self.list_field_ids().into_iter().filter_map(|id| self.data.extra.fields.iter().find(|f| f.id == id).map(|f| (id, f.name.clone()))).collect();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(rect.height() - 160.0).show(ui, |ui| {
                     for (title, shown) in [("Shown", true), ("Properties", false)] {
                         let names: Vec<&str> = all.iter().copied().filter(|n| self.col_on(n) == shown && hit(n)).collect();
@@ -2239,6 +2242,32 @@ impl App {
                                             self.hidden_cols.remove(n);
                                         } else {
                                             self.hidden_cols.insert(n.to_string());
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                        ui.add_space(8.0);
+                    }
+                    // custom fields: shown at first, each can be turned off here
+                    let shown_fields: Vec<&(u64, String)> = fields.iter().filter(|(_, n)| hit(n)).collect();
+                    if !shown_fields.is_empty() {
+                        ui.label(RichText::new(tr("Custom Fields")).small().color(t.text3));
+                        for (fid, name) in shown_fields {
+                            let key = super::shell::field_col_key(*fid);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("\u{25A4} {}", name)).color(t.text));
+                                let on_now = !self.hidden_cols.contains(&key);
+                                if on_now && !field_fits.contains(fid) {
+                                    ui.label(RichText::new(tr("no room")).small().color(t.text3)).on_hover_text(tr("The List is too narrow to show this column; widen the window or turn another field off."));
+                                }
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let mut on = on_now;
+                                    if switch(ui, &t, &mut on, &format!("Field {}", name)).clicked() {
+                                        if on {
+                                            self.hidden_cols.remove(&key);
+                                        } else {
+                                            self.hidden_cols.insert(key.clone());
                                         }
                                     }
                                 });

@@ -108,6 +108,7 @@ pub const T: &[(&str, &str)] = &[
     ("Time estimate", "예상 시간"),
     ("Latest comment", "최근 댓글"),
     ("Add a column (Custom Field)", "열 추가 (사용자 지정 필드)"),
+    ("Enter a number", "숫자를 입력하세요"),
     ("All tasks here are done", "이곳의 작업을 모두 완료했습니다"),
     (
         "All {} tasks here are done",

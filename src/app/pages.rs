@@ -370,7 +370,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Teams")).size(20.0).strong());
+                    ui.label(RichText::new(tr("Analytics")).size(20.0).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button(tr("\u{1F464} Manage people")).clicked() {
                             // the People settings page: server roles, removal with a question
@@ -379,8 +379,13 @@ impl App {
                     });
                 });
                 ui.label(RichText::new(tr("What everyone is working on")).color(t.text2));
-                ui.add_space(12.0);
                 let members = self.data.members.clone();
+                // with one person the bar would always be full and read like progress
+                let bars = members.len() > 1;
+                if bars {
+                    ui.label(RichText::new(tr("Bars compare open tasks with the busiest person.")).small().color(t.text3));
+                }
+                ui.add_space(12.0);
                 let max_open = members
                     .iter()
                     .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).count())
@@ -410,10 +415,12 @@ impl App {
                                         });
                                     });
                                     ui.add_space(4.0);
-                                    let (r, _) = ui.allocate_exact_size(vec2(cw - 30.0, 8.0), Sense::hover());
-                                    ui.painter().rect_filled(r, 4.0, t.hover);
-                                    let f = open.len() as f32 / max_open as f32;
-                                    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * f, r.height())), 4.0, rgb(m.color));
+                                    if bars {
+                                        let (r, _) = ui.allocate_exact_size(vec2(cw - 30.0, 8.0), Sense::hover());
+                                        ui.painter().rect_filled(r, 4.0, t.hover);
+                                        let f = open.len() as f32 / max_open as f32;
+                                        ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * f, r.height())), 4.0, rgb(m.color));
+                                    }
                                     if overdue > 0 {
                                         ui.label(RichText::new(trf!("{} overdue", overdue)).small().color(t.danger));
                                     }
@@ -486,7 +493,7 @@ impl App {
                                     wiki: None,
                                     views: vec![],
                                     parent: None,
-                                    title: "Untitled".into(),
+                                    title: tr("Untitled").into(),
                                     body: String::new(),
                                     created: now,
                                     updated: now,
@@ -766,7 +773,7 @@ impl App {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if primary_button(ui, &t, tr("+ Dashboard")).clicked() {
                                     self.modal = Some(Modal::NewDashboard {
-                                        name: "New Dashboard".into(),
+                                        name: tr("New Dashboard").into(),
                                     });
                                 }
                             });
@@ -815,9 +822,16 @@ impl App {
             .filter(|x| in_view(x))
             .cloned()
             .collect();
-        let top: Vec<Task> = scope
+        // time tracked stays counted after its task is archived (Timesheets
+        // shows it too), so the time cards take archived tasks as well
+        let tracked: Vec<Task> = self
+            .data
+            .tasks
             .iter()
-            .filter(|x| x.parent.is_none())
+            .filter(|x| {
+                space_lists.as_ref().is_none_or(|l| l.contains(&x.list_id))
+                    && (!x.time_entries.is_empty() || !x.running_timers().is_empty())
+            })
             .cloned()
             .collect();
         let w = ui.available_width();
@@ -888,13 +902,14 @@ impl App {
                                     });
                                 });
                                 ui.add_space(6.0);
-                                let tops: Vec<&Task> = top.iter().collect();
+                                // subtasks count like any task, as on the Teams page
+                                let tasks: Vec<&Task> = scope.iter().collect();
                                 if let Some(id) = self.dash_card_body(
                                     ui,
                                     &cards[ci].kind,
                                     cw - 34.0,
-                                    &tops,
-                                    &scope,
+                                    &tasks,
+                                    &tracked,
                                 ) {
                                     open = Some(id);
                                 }
@@ -949,33 +964,34 @@ impl App {
         self.dirty = true;
     }
 
-    /// One card's contents; returns a task clicked in it. `top` are the top
-    /// level tasks in view, `scope` every task in view (for tracked time).
+    /// One card's contents; returns a task clicked in it. `tasks` are the
+    /// tasks in view, subtasks included; `scope` every task with tracked
+    /// time, archived ones included.
     fn dash_card_body(
         &self,
         ui: &mut Ui,
         kind: &str,
         w: f32,
-        top: &[&Task],
+        tasks: &[&Task],
         scope: &[Task],
     ) -> Option<u64> {
         let t = self.t();
         let td = today();
         let now = now_ts();
-        let overdue: Vec<&&Task> = top
+        let overdue: Vec<&&Task> = tasks
             .iter()
             .filter(|x| !self.data.is_closed(x) && x.is_overdue())
             .collect();
         match kind {
             "stats" => {
-                let open = top.iter().filter(|x| !self.data.is_closed(x)).count();
+                let open = tasks.iter().filter(|x| !self.data.is_closed(x)).count();
                 ui.horizontal(|ui| {
                     let tw = (w - 36.0) / 4.0;
                     for (label, v, c) in [
-                        ("Total tasks", top.len(), t.text),
+                        ("Total tasks", tasks.len(), t.text),
                         ("Open", open, rgb([0x5f, 0x55, 0xee])),
                         ("Overdue", overdue.len(), t.danger),
-                        ("Completed", top.len() - open, rgb([0x00, 0x88, 0x44])),
+                        ("Completed", tasks.len() - open, rgb([0x00, 0x88, 0x44])),
                     ] {
                         egui::Frame::new()
                             .fill(t.bg)
@@ -1010,10 +1026,15 @@ impl App {
                         }
                     }
                 }
+                // no space yet: the statuses a new space starts with, all at 0
+                if sts.is_empty() {
+                    sts = default_statuses();
+                }
                 let counts: Vec<usize> = sts
                     .iter()
                     .map(|st| {
-                        top.iter()
+                        tasks
+                            .iter()
                             .filter(|x| self.data.status_of(x).name == st.name)
                             .count()
                     })
@@ -1034,7 +1055,8 @@ impl App {
             "priority" => {
                 let counts: Vec<usize> = (0..5u8)
                     .map(|p| {
-                        top.iter()
+                        tasks
+                            .iter()
                             .filter(|x| x.priority == p && !self.data.is_closed(x))
                             .count()
                     })
@@ -1060,13 +1082,32 @@ impl App {
                     .map(|m| {
                         (
                             m.name.clone(),
-                            top.iter()
+                            tasks
+                                .iter()
                                 .filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x))
                                 .count(),
                             rgb(m.color),
                         )
                     })
                     .collect();
+                // one person: a bar against themselves is always full and
+                // reads like progress, so show the number alone
+                if counts.len() == 1 {
+                    for (name, n, _) in counts {
+                        ui.horizontal(|ui| {
+                            ui.label(name);
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new(trf!("{} open", n)).color(t.text2));
+                            });
+                        });
+                    }
+                    return None;
+                }
+                ui.label(
+                    RichText::new(tr("Bars compare open tasks with the busiest person."))
+                        .small()
+                        .color(t.text3),
+                );
                 let max = counts.iter().map(|c| c.1).max().unwrap_or(1) as f32;
                 for (name, n, c) in counts {
                     bar_row(ui, &t, &name, n as f32, max, c, trf!("{} open", n));
@@ -1110,19 +1151,7 @@ impl App {
                     .collect();
                 let max = rows.iter().map(|r| r.1).max().unwrap_or(1).max(1) as f32;
                 for (name, secs, c) in rows {
-                    bar_row(
-                        ui,
-                        &t,
-                        &name,
-                        secs as f32,
-                        max,
-                        c,
-                        if secs > 0 {
-                            fmt_duration(secs)
-                        } else {
-                            "-".into()
-                        },
-                    );
+                    bar_row(ui, &t, &name, secs as f32, max, c, fmt_hm(secs));
                 }
             }
             "time" => {
@@ -1152,11 +1181,7 @@ impl App {
                         *secs as f32,
                         max,
                         t.primary,
-                        if *secs > 0 {
-                            fmt_duration(*secs)
-                        } else {
-                            "-".into()
-                        },
+                        fmt_hm(*secs),
                     );
                 }
             }

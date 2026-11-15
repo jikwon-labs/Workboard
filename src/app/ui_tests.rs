@@ -6,6 +6,8 @@
 use super::*;
 use egui::Pos2;
 
+mod empty_states;
+
 struct Ui1 {
     ctx: egui::Context,
     app: App,
@@ -113,6 +115,10 @@ impl Ui1 {
     }
 
     fn click(&mut self, name: &str) {
+        if !self.has(name) && self.app.modal.is_some() {
+            // maybe further down a dialog that scrolls
+            self.scroll_dialog_to(name);
+        }
         self.scroll_into_view(name);
         let pos = self.find(name).unwrap_or_else(|| {
             let mut names: Vec<&String> = self.tree.iter().map(|(n, _)| n).collect();
@@ -386,7 +392,7 @@ fn click_invite_in_rail_and_send() {
     h.click("Rail Invite");
     assert!(matches!(h.app.modal, Some(Modal::Invite { .. })));
     h.type_text("lee.jiwoo@team.kr");
-    h.click("Send free invite");
+    h.click("Send invite");
     assert_eq!(h.app.data.members.len(), n + 1);
     assert_eq!(
         h.app.data.members.last().unwrap().email,
@@ -623,7 +629,7 @@ fn click_goals_dashboards_teams_create() {
     h.click("Rail Teams");
     assert_eq!(h.app.section, Section::Teams);
     let n = h.app.data.extra.teams.len();
-    h.click("Create Team");
+    h.click("Create team");
     assert_eq!(h.app.data.extra.teams.len(), n + 1);
 }
 
@@ -633,9 +639,9 @@ fn click_settings_dialogs_open_and_close() {
     for item in [
         "Apps",
         "Templates",
-        "Custom Fields",
+        "Custom fields",
         "Automations",
-        "Tag Manager",
+        "Tag manager",
     ] {
         h.click("Workspace menu");
         h.click(item);
@@ -799,6 +805,60 @@ fn click_work_together_opens_sharing() {
 }
 
 #[test]
+fn work_together_in_a_shared_folder_says_how_teammates_join_and_keeps_the_path_on_one_line() {
+    let mut h = Ui1::new();
+    // no sync folder found on this computer: nothing "above" to pick
+    h.click("Workspace menu");
+    h.click("Work together");
+    let hint = |h: &Ui1, s: &str| !h.painted_text(s).is_empty();
+    if crate::sync::suggested_folders().is_empty() {
+        assert!(hint(&h, "Paste a folder path"));
+        assert!(!hint(&h, "Paste a folder path, or pick one above"));
+    } else {
+        assert!(h.has("Found on this computer"));
+        assert!(hint(&h, "Paste a folder path, or pick one above"));
+    }
+    h.key(egui::Key::Escape);
+    let dir = std::env::temp_dir()
+        .join(format!("wb-ui-{:x}", crate::sync::random_u64()))
+        .join("audit-states-shared-folder")
+        .join("team-workspace-folder")
+        .join("_shared");
+    std::fs::create_dir_all(&dir).unwrap();
+    let full = dir.to_str().unwrap().to_string();
+    h.app.share_here(&full).unwrap();
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    // the long path is cut from the front at folder names, on one line
+    let short = super::together::short_path(&full, 48);
+    assert!(short.starts_with('\u{2026}') && short.ends_with("/team-workspace-folder/_shared"));
+    assert!(h.has(&short), "{}", short);
+    let at = h.painted_text(&short);
+    assert_eq!(at.len(), 1, "one line: {:?}", at);
+    assert!(at[0].0.height() < 24.0, "{:?}", at);
+    // counts computers, and says what teammates do on theirs
+    assert!(h.has("No other computer is working in this folder yet. Share the folder with your teammates in your sync app. On their computer they open Work together, paste the folder's path and choose Join this workspace."));
+    assert!(h.has("Tasks, chat and docs show up for everyone a few seconds after their sync app copies the folder. Calls open in the browser from a link posted in chat."));
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn work_together_fits_a_small_window_and_scrolls() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.click("Workspace menu");
+    h.click("Work together");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    // the title and the close button stay on screen
+    let close = h.rect("Close");
+    assert!(close.top() >= 0.0 && close.bottom() <= 560.0, "{:?}", close);
+    // the bottom of the dialog is reached by scrolling inside it
+    h.scroll_into_view("Connect");
+    let connect = h.rect("Connect");
+    assert!(connect.bottom() <= 560.0, "{:?}", connect);
+    assert!(h.rect("Close").top() >= 0.0, "the title stays put");
+}
+
+#[test]
 fn work_together_connects_to_a_server_and_shows_the_status() {
     let mut h = Ui1::new();
     h.click("Workspace menu");
@@ -866,11 +926,25 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     }
     h.settle();
     assert!(
-        h.tree
-            .iter()
-            .any(|(n, _)| n.starts_with("Status: Reconnecting")),
+        h.has("Status: Reconnecting\u{2026}"),
         "shows that it is reconnecting"
     );
+    // why, in plain words, without the system's error text
+    assert!(
+        h.has("Nothing answers at 127.0.0.1:1. Check that workboard-server is running there. Trying again every few seconds."),
+        "says why"
+    );
+    assert!(!h.tree.iter().any(|(n, _)| n.contains("os error")));
+    let status = h.painted_text("Status: Reconnecting\u{2026}");
+    assert!(
+        !status.is_empty() && status.iter().all(|(_, c)| *c == super::together::WARN),
+        "in the warning colour: {:?}",
+        status
+    );
+    // still failing after a few tries: it says it can't reach the server
+    h.app.sync_rt.fails = super::together::FAILS_BEFORE_CANT_REACH;
+    h.settle();
+    assert!(h.has("Status: Can't reach the server"));
     // owners and admins see everyone's access
     h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
     h.app.sync_rt.role = Some(wb_net::Role::Owner);
@@ -996,6 +1070,332 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.app.sync_rt.net.is_none(), "starts over on the next frame");
     h.click("Stop sharing");
     assert!(h.app.data.extra.shared.is_none());
+}
+
+impl Ui1 {
+    // where the open dialog is on screen
+    fn modal_rect(&self) -> Rect {
+        self.try_modal_rect().expect("a dialog is drawn")
+    }
+
+    fn try_modal_rect(&self) -> Option<Rect> {
+        let m = self.app.modal.as_ref()?;
+        self.ctx
+            .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
+    }
+
+    // turn the mouse wheel over the open dialog until a control in it shows
+    fn scroll_dialog_to(&mut self, name: &str) {
+        for _ in 0..30 {
+            if self.has(name) {
+                break;
+            }
+            let Some(r) = self.try_modal_rect() else {
+                return;
+            };
+            let at = r.center();
+            self.frame(vec![egui::Event::PointerMoved(at)]);
+            self.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -120.0),
+                modifiers: Default::default(),
+            }]);
+            self.settle();
+        }
+    }
+}
+
+// a server workspace whose server can't be reached, waited on until the
+// app has tried and failed (nothing listens on port 1)
+fn server_down(h: &mut Ui1) {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-down".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !matches!(
+        h.app.sync_rt.net_status,
+        Some(wb_net::Status::Reconnecting(_))
+    ) && std::time::Instant::now() < until
+    {
+        // tests don't save, so the frame doesn't run the connection
+        h.app.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.settle();
+}
+
+#[test]
+fn the_top_bar_says_when_the_team_server_cannot_be_reached() {
+    let mut h = Ui1::new();
+    // working alone: nothing about a server
+    assert!(!h.has("Server connection"));
+    server_down(&mut h);
+    assert!(h.has("Server connection"), "a word beside the profile menu");
+    assert!(h
+        .painted_text("Reconnecting\u{2026}")
+        .iter()
+        .any(|(r, _)| r.top() < 40.0));
+    h.app.sync_rt.fails = super::together::FAILS_BEFORE_CANT_REACH;
+    h.settle();
+    assert!(h
+        .painted_text("Not connected")
+        .iter()
+        .any(|(r, _)| r.top() < 40.0));
+    // it sits left of the profile menu, inside the top bar
+    let word = h.rect("Server connection");
+    let profile = h.rect("Profile menu");
+    assert!(word.right() <= profile.left() + 1.0 && word.bottom() <= 40.0);
+    h.click("Server connection");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    assert!(h.has("This workspace is on a server"));
+    h.key(egui::Key::Escape);
+    // signed out by the server: says so too
+    h.app.sync_rt.net_status = Some(wb_net::Status::Refused(
+        "Your access to this server was removed.".into(),
+    ));
+    h.settle();
+    assert!(h
+        .painted_text("Not signed in")
+        .iter()
+        .any(|(r, _)| r.top() < 40.0));
+    // connected: out of the way
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.settle();
+    assert!(!h.has("Server connection"));
+}
+
+#[test]
+fn work_together_on_a_server_that_is_down_leads_with_working_offline_and_can_change_the_address() {
+    let mut h = Ui1::new();
+    super::together::save_token("127.0.0.1:1", "dev-down", "tok-down");
+    server_down(&mut h);
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    // not "everyone sees it in a second or two" while nobody can
+    assert!(!h.has("Tasks, chat and docs show up for everyone within a second or two."));
+    assert!(h.has("You can keep working here. Your changes are kept on this computer and go up when the server is back."));
+    // the server moved: type its new address and connect there
+    h.click("Change address");
+    h.click("Server address");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("127.0.0.1:2");
+    h.click("Save and reconnect");
+    let cfg = h.app.data.extra.shared.clone().unwrap();
+    assert_eq!(cfg.server.as_deref(), Some("127.0.0.1:2"));
+    assert!(
+        h.app.sync_rt.net.is_none(),
+        "connects again on the next frame"
+    );
+    assert_eq!(
+        super::together::load_token("127.0.0.1:2", "dev-down").as_deref(),
+        Some("tok-down"),
+        "the sign-in goes along"
+    );
+    assert!(super::together::load_token("127.0.0.1:1", "dev-down").is_none());
+    assert!(h.has("127.0.0.1:2") && !h.has("Save and reconnect"));
+    // a wrong address says so and changes nothing
+    h.click("Change address");
+    h.click("Server address");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("wss://team.example");
+    h.click("Save and reconnect");
+    assert_eq!(
+        h.app.data.extra.shared.as_ref().unwrap().server.as_deref(),
+        Some("127.0.0.1:2")
+    );
+    assert!(h.has(
+        "Secure (wss) addresses aren't supported. Use the server's Tailscale name or address."
+    ));
+    h.click("Cancel");
+    assert!(!h.has("Save and reconnect"));
+    // connected: the usual words, and no address to change
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.settle();
+    assert!(h.has("Tasks, chat and docs show up for everyone within a second or two."));
+    assert!(!h.has("Change address"));
+}
+
+#[test]
+fn people_says_why_roles_are_missing_offline_and_how_invited_people_join() {
+    let mut h = Ui1::new();
+    h.app.section = Section::People;
+    h.settle();
+    // nobody invited: no note about invited people
+    let invited_note = |h: &Ui1| h.tree.iter().any(|(n, _)| n.starts_with("Invited people "));
+    assert!(!invited_note(&h));
+    h.app
+        .invite_people(&["dana@example.com".to_string()], "Member");
+    h.settle();
+    assert!(h.has("Invited people can join once you share this workspace (Work together). Until then they can use this computer through Switch person in the profile menu."));
+    assert!(h.has("Remove") && !h.has("Changing roles and removing people need the team's server. They come back once it's connected."));
+    // on a server that can't be reached yet: the owner's controls are gone, and it says why
+    server_down(&mut h);
+    h.app.section = Section::People;
+    h.settle();
+    assert!(!h.has("Remove"));
+    assert!(h.has("Changing roles and removing people need the team's server. They come back once it's connected."));
+    assert!(h.has("Invited people sign in with the invite code the server emails them. Owners and admins also find the codes in Work together > People while connected."));
+    // signed in as the owner: the controls are back, the note goes
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.settle();
+    assert!(h.has("Remove"));
+    assert!(!h.has("Changing roles and removing people need the team's server. They come back once it's connected."));
+    // a shared folder: invited people join from the folder
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: "/tmp/wb-none".into(),
+        device: "dev-f".into(),
+        tag: 1,
+        server: None,
+    });
+    h.settle();
+    assert!(h.has("Invited people join from the shared folder: on their computer they open Work together, paste the folder's path, choose Join this workspace and pick their name."));
+}
+
+#[test]
+fn inviting_while_the_server_is_down_says_the_codes_wait_and_the_dialog_stays_narrow() {
+    let window = |h: &Ui1| h.modal_rect();
+    let bookmark = || Modal::Bookmark {
+        title: String::new(),
+        url: String::new(),
+    };
+    // a small dialog's width when nothing wide was open before
+    let mut fresh = Ui1::new();
+    fresh.app.modal = Some(bookmark());
+    fresh.settle();
+    let small = window(&fresh).width();
+
+    let mut h = Ui1::new();
+    server_down(&mut h);
+    h.app.modal = Some(Modal::Invite {
+        emails: String::new(),
+        role: "Member".into(),
+    });
+    h.settle();
+    // no "Work together > People" while that isn't there; the link names the place
+    assert!(h.has("The team's server can't be reached right now. The invites are kept, and their invite codes are asked for once it's back."));
+    assert!(h.has("Work together") && !h.has("Sharing"));
+    let w = window(&h).width();
+    assert!(
+        w <= 640.0,
+        "the note wraps instead of widening the dialog: {}",
+        w
+    );
+    h.type_text("dana@example.com");
+    h.click("Send invite");
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Invited 1 people. Their invite codes are asked for once the server is back.")
+    );
+    assert!(h
+        .app
+        .data
+        .members
+        .iter()
+        .any(|m| m.email == "dana@example.com" && m.invited));
+    // the next dialog opens at its own size
+    h.app.modal = Some(bookmark());
+    h.settle();
+    assert!(
+        (window(&h).width() - small).abs() < 2.0,
+        "{} vs {}",
+        window(&h).width(),
+        small
+    );
+}
+
+#[test]
+fn help_says_where_the_workspace_is_kept() {
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::Help);
+    h.settle();
+    assert!(
+        h.has("This is your own copy of the work manager. Everything is saved on this computer.")
+    );
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: "/tmp/wb-help".into(),
+        device: "dev-help".into(),
+        tag: 1,
+        server: None,
+    });
+    h.settle();
+    assert!(h.has("This workspace is shared through a folder your sync app keeps in step. Your copy is saved on this computer and in that folder."));
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.settle();
+    assert!(h.has("This workspace is on your team's server. A copy is kept on this computer, so you can keep working while the server can't be reached."));
+    assert!(
+        !h.has("This is your own copy of the work manager. Everything is saved on this computer.")
+    );
+}
+
+#[test]
+fn calls_say_why_there_is_no_huddle_when_the_server_is_down_and_when_nobody_else_is_there() {
+    let alone_note = "You're the only one in this conversation, so nobody else gets the Join button. Invite people first.";
+    let down_note = "The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.";
+    let mut h = Ui1::new();
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(general);
+    // a team in #general, no server: the browser call, no extra words
+    h.app.open_call_dialog();
+    h.settle();
+    assert!(matches!(h.app.modal, Some(Modal::Call { .. })));
+    assert!(!h.has(alone_note) && !h.has(down_note));
+    h.key(egui::Key::Escape);
+    // the server is set up but down: says why it's a browser call
+    server_down(&mut h);
+    h.app.open_call_dialog();
+    h.settle();
+    assert!(matches!(h.app.modal, Some(Modal::Call { .. })));
+    assert!(h.has(down_note));
+    h.key(egui::Key::Escape);
+    // joining someone's huddle: not "huddles need a server" when there is one
+    h.app.join_huddle(general);
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.")
+    );
+    // alone in the conversation: nobody else gets the Join button
+    let mut solo = Ui1::new();
+    let me = solo.app.data.me;
+    solo.app.data.members.retain(|m| m.id == me);
+    for c in &mut solo.app.data.channels {
+        c.members.retain(|id| *id == me);
+    }
+    solo.app.section = Section::Chat;
+    solo.app.chat_open = Some(general);
+    solo.app.open_call_dialog();
+    solo.settle();
+    assert!(solo.has(alone_note));
+}
+
+#[test]
+fn share_says_when_nobody_else_is_in_the_workspace_yet() {
+    let note = "Only you are in this Workspace so far. Invite people by email below to work on it together.";
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::Share {
+        emails: String::new(),
+    });
+    h.settle();
+    assert!(!h.has(note), "a team has people to share with");
+    let mut solo = Ui1::new();
+    let me = solo.app.data.me;
+    solo.app.data.members.retain(|m| m.id == me);
+    solo.app.modal = Some(Modal::Share {
+        emails: String::new(),
+    });
+    solo.settle();
+    assert!(solo.has(note));
 }
 
 #[test]
@@ -2463,7 +2863,7 @@ fn list_menu_info_archive_and_restore_from_settings() {
     h.app.section = Section::Settings;
     h.settle();
     h.click("Settings Spaces");
-    h.click("Restore Team Space / Marketing");
+    h.click("Restore Team Space / Projects / Marketing");
     assert!(!h.app.data.list_item(mk).unwrap().archived);
 }
 
@@ -2714,14 +3114,52 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
 }
 
 #[test]
-fn short_window_profile_menu_scrolls_to_trash_and_log_out() {
+fn switch_person_on_a_team_server_does_not_become_someone_else() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let my_name = h.app.data.member(me).unwrap().name.clone();
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.id != me)
+        .unwrap()
+        .name
+        .clone();
+    let count = |h: &Ui1| h.tree.iter().filter(|(n, _)| *n == other).count();
+    let before = count(&h);
+    // on this computer only: pick anyone
+    h.click("Profile menu");
+    h.click("Switch person");
+    assert!(count(&h) > before);
+    h.key(egui::Key::Escape);
+    // on a server the person is who signed in
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-switch".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.click("Profile menu");
+    h.click("Switch person");
+    assert!(matches!(h.app.modal, Some(Modal::SwitchUser)));
+    assert!(h.has(&format!("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", my_name)));
+    assert_eq!(count(&h), before, "no other member to switch to");
+    h.click("Work together");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    assert_eq!(h.app.data.me, me);
+}
+
+#[test]
+fn short_window_profile_menu_scrolls_to_trash_and_switch_person() {
     let mut h = Ui1::sized(900.0, 560.0);
     h.click("Profile menu");
     h.settle();
     let menu_top = h.rect("Settings").top();
     // the menu does not run off the window: its bottom row is reached by
     // scrolling inside the menu
-    for name in ["Trash", "Log out"] {
+    for name in ["Trash", "Switch person"] {
         h.scroll_into_view(name);
         let r = h.rect(name);
         assert!(
@@ -2731,7 +3169,7 @@ fn short_window_profile_menu_scrolls_to_trash_and_log_out() {
             r
         );
     }
-    h.click("Log out");
+    h.click("Switch person");
     assert!(
         matches!(h.app.modal, Some(Modal::SwitchUser)),
         "the bottom row of the menu works"
@@ -3192,6 +3630,74 @@ fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
     let p = dir.join(name);
     img.save(&p).unwrap();
     p
+}
+
+#[test]
+fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-ui-offline-pic".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    super::together::save_token("127.0.0.1:9", "dev-ui-offline-pic", "tok");
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("offline.png", 60, 40)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    // nothing listens on port 9: the upload fails, but the message may go
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !matches!(
+        h.app
+            .chat_files
+            .first()
+            .and_then(|p| p.transfer(&h.app.files)),
+        Some(super::files::Transfer::Failed(_))
+    ) && std::time::Instant::now() < until
+    {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let Some(super::files::Transfer::Failed(why)) = h.app.chat_files[0].transfer(&h.app.files)
+    else {
+        panic!("the upload failed");
+    };
+    // said without the system's English words
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown = App::error_text(&why);
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(
+        !shown.contains("os error") && !shown.contains("refused"),
+        "{}",
+        shown
+    );
+    let (ok, files) = h.app.pending_ready(false);
+    assert!(ok && files.len() == 1, "the message can go");
+    h.click("Message composer");
+    h.type_text("from the train");
+    h.key(egui::Key::Enter);
+    let m = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone();
+    super::together::forget_token("127.0.0.1:9", "dev-ui-offline-pic");
+    assert_eq!(m.text, "from the train");
+    assert_eq!(m.attachments.len(), 1);
+    assert!(
+        h.app.files.is_waiting(&m.attachments[0].file),
+        "the picture waits to go up, also after a restart"
+    );
 }
 
 #[test]
@@ -5721,11 +6227,35 @@ fn trash_empty_asks_then_clears() {
 }
 
 #[test]
+fn invited_people_are_marked_in_channel_and_team_member_lists() {
+    let mut h = Ui1::new();
+    h.app
+        .invite_people(&["dana.reed@example.com".to_string()], "Member");
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    // in #general already, for when they join: marked as not here yet
+    h.app.modal = Some(Modal::ChannelSettings(general));
+    h.settle();
+    assert!(h.has("Dana Reed (invited)"));
+    h.key(egui::Key::Escape);
+    h.app.section = Section::Teams;
+    h.settle();
+    h.click_side("Create team", true);
+    assert!(h.has("Dana Reed (invited)"));
+}
+
+#[test]
 fn team_color_and_my_teams() {
     let mut h = Ui1::new();
     h.app.section = Section::Teams;
     h.settle();
-    h.click_side("Create Team", true);
+    h.click_side("Create team", true);
     let id = h.app.team_open.unwrap();
     h.click("Team color 3");
     assert_eq!(
@@ -5795,6 +6325,8 @@ fn timesheet_entry_edits_and_week_picker() {
 mod i18n_tests;
 #[path = "template_tests.rs"]
 mod template_tests;
+#[path = "wording_tests.rs"]
+mod wording_tests;
 
 #[test]
 fn the_first_start_offers_working_alone_joining_or_a_new_server() {
@@ -7335,7 +7867,7 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     assert_eq!(custom(&h, 9002).as_deref(), Some("M"));
     // the Columns panel turns a field column off; the list remembers it
     h.click("\u{25A5}  Columns");
-    assert!(h.has("Custom Fields"));
+    assert!(h.has("Custom fields"));
     h.click("Field Billable");
     assert!(h.app.hidden_cols.contains("field:9001"));
     h.key(egui::Key::Escape);
@@ -7508,7 +8040,10 @@ fn an_owner_without_a_server_manages_someone_elses_channel() {
         .creator = 2;
     h.app.modal = Some(Modal::ChannelSettings(cid));
     h.settle();
-    h.click("Sam Lee");
+    // the Sam Lee checkbox in the dialog, not a name on the page behind it
+    let dialog = h.modal_rect();
+    let sam = h.rect_in("Sam Lee", dialog);
+    h.click_at(sam.center());
     assert!(h
         .app
         .data
@@ -7912,7 +8447,7 @@ fn painted_controls_get_the_hand_but_fields_and_backdrops_do_not() {
     let mut h = Ui1::new();
     h.app.section = Section::Teams;
     h.settle();
-    h.click_side("Create Team", true);
+    h.click_side("Create team", true);
     // a colour swatch is painted by hand, not an egui button
     let sw = h.find("Team color 3").unwrap();
     h.hover(sw);
@@ -8337,4 +8872,563 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
     let mut want = vec![sam, sam2];
     want.sort();
     assert_eq!(both, want);
+}
+
+/// A workspace with no List a task could go in: no Spaces at all, or
+/// (with `keep_space`) a Space whose Lists are gone.
+fn no_list_workspace(keep_space: bool) -> Ui1 {
+    let mut h = Ui1::new();
+    if keep_space {
+        for s in h.app.data.spaces.iter_mut() {
+            s.lists.clear();
+            s.folders.clear();
+        }
+    } else {
+        h.app.data.spaces.retain(|s| s.private_owner.is_some());
+        for s in h.app.data.spaces.iter_mut() {
+            s.lists.clear();
+            s.folders.clear();
+        }
+    }
+    assert_eq!(h.app.data.first_list(), None);
+    h.settle();
+    h
+}
+
+#[test]
+fn add_task_without_a_list_says_why_and_offers_one() {
+    // the header "Add Task" on My Tasks: no Space yet, so New Space opens
+    let mut h = no_list_workspace(false);
+    h.click("My Tasks");
+    h.click("Add Task");
+    assert!(h.app.quick_add.is_none());
+    let toast = h.app.toast.clone().expect("a toast says why").0;
+    assert!(toast.contains("Make a Space first"), "{}", toast);
+    assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
+    // with a Space, the New List dialog opens instead (Everything, + Create > Task)
+    let mut h = no_list_workspace(true);
+    h.click("All Tasks");
+    h.click("Create");
+    h.click("Task");
+    assert!(h.app.quick_add.is_none());
+    assert!(h.app.toast.clone().unwrap().0.contains("Make one first"));
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+}
+
+#[test]
+fn inline_add_without_a_list_keeps_the_name() {
+    let mut h = no_list_workspace(true);
+    h.click("Today & Overdue");
+    let row = h
+        .tree
+        .iter()
+        .map(|(n, _)| n.clone())
+        .find(|n| n.starts_with("Add Task in "))
+        .expect("an inline add row");
+    h.click(&row);
+    h.type_text("Call the printer");
+    h.key(egui::Key::Enter);
+    assert!(h
+        .app
+        .data
+        .tasks
+        .iter()
+        .all(|t| t.name != "Call the printer"));
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+    assert_eq!(
+        h.app.adding.as_ref().map(|a| a.1.as_str()),
+        Some("Call the printer")
+    );
+}
+
+#[test]
+fn planner_add_without_a_list_keeps_the_name_and_says_why() {
+    let mut h = no_list_workspace(false);
+    h.app.section = Section::Planner;
+    h.settle();
+    let day = h.app.planner_week + Duration::days(2);
+    h.click(&format!("Add task on {}", day.format("%a %-d")));
+    h.type_text("Plan the trip");
+    h.key(egui::Key::Enter);
+    assert!(h.app.data.tasks.iter().all(|t| t.name != "Plan the trip"));
+    assert_eq!(
+        h.app.sweep.planner_add,
+        Some((day, "Plan the trip".to_string()))
+    );
+    assert!(h.app.toast.is_some());
+    assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
+}
+
+/// The seed with every List and task archived (the audit's "archived" state).
+fn archived_workspace() -> Ui1 {
+    let mut h = Ui1::new();
+    for s in h.app.data.spaces.iter_mut() {
+        for l in s.lists.iter_mut() {
+            l.archived = true;
+        }
+        for f in s.folders.iter_mut() {
+            for l in f.lists.iter_mut() {
+                l.archived = true;
+            }
+        }
+    }
+    for t in h.app.data.tasks.iter_mut() {
+        t.archived = true;
+    }
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    h
+}
+
+fn list_id(h: &Ui1, name: &str) -> u64 {
+    h.app
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| {
+            s.lists
+                .iter()
+                .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
+        })
+        .find(|l| l.name == name)
+        .map(|l| l.id)
+        .unwrap()
+}
+
+#[test]
+fn archived_favorite_leaves_the_sidebar_and_its_page_says_archived() {
+    let h0 = Ui1::new();
+    assert!(h0.has("Website Redesign"), "a favorite in the sidebar");
+    let mut h = archived_workspace();
+    let web = list_id(&h, "Website Redesign");
+    assert!(h.app.data.favorites.contains(&Location::List(web)));
+    assert!(!h.has("Website Redesign"), "archived: out of Favorites");
+    // opened another way (a link), the page says it is archived and restores it
+    h.app.actions.push(Action::Go(Location::List(web)));
+    h.settle();
+    assert!(h.has("Restore archived here"));
+    h.click("Restore archived here");
+    assert!(!h.app.data.list_archived(web));
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.has("Website Redesign"), "back in Favorites");
+}
+
+#[test]
+fn views_with_only_archived_tasks_say_so_and_show_the_way_back() {
+    let mut h = archived_workspace();
+    h.click("All Tasks");
+    assert!(!h.has("No tasks here yet"));
+    let n = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.parent.is_none())
+        .count();
+    assert!(h.has(&format!("All {} tasks here are archived", n)));
+    // the tasks sit in archived Lists: they come back from Settings > Spaces
+    assert!(!h.has("Show archived tasks"));
+    h.click("See archived Lists");
+    assert_eq!(h.app.section, Section::Settings);
+    // a List that is not archived, with only archived tasks: the Archived filter
+    let mut h = Ui1::new();
+    let web = list_id(&h, "Website Redesign");
+    for t in h.app.data.tasks.iter_mut().filter(|t| t.list_id == web) {
+        t.archived = true;
+    }
+    h.app.actions.push(Action::Go(Location::List(web)));
+    h.settle();
+    h.click("Show archived tasks");
+    assert!(h.app.filter.archived);
+    assert!(h.has("Task Design new homepage layout"));
+}
+
+#[test]
+fn home_lists_card_tells_archived_lists_from_none_and_empty_lists_have_no_bar() {
+    let mut h = archived_workspace();
+    assert!(!h.has("No Lists yet. Lists keep a Space's tasks together."));
+    assert!(h.has("All 4 Lists are archived."));
+    h.click("Home archived lists");
+    assert_eq!(h.app.section, Section::Settings);
+    // an empty List says so instead of "0/0" beside an empty bar
+    let mut h = Ui1::new();
+    h.app.data.tasks.clear();
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.painted_text("0/0").is_empty());
+    assert!(!h.painted_text("No tasks yet").is_empty());
+}
+
+#[test]
+fn create_list_or_channel_list_without_a_space_says_so() {
+    let mut h = no_list_workspace(false);
+    h.click("Create");
+    h.click("List");
+    assert!(
+        matches!(h.app.modal, Some(Modal::NewSpace { .. })),
+        "no Space to pick: New Space instead of a List dialog with nothing to pick"
+    );
+    assert!(h
+        .app
+        .toast
+        .clone()
+        .unwrap()
+        .0
+        .contains("Make a Space first"));
+    // the channel's "Add a List" switch is off and says why
+    h.app.modal = Some(Modal::NewChannel {
+        name: String::new(),
+        private: false,
+        add_list: true,
+    });
+    h.settle();
+    assert!(h.has("Needs a Space to put the List in. Make one from + Create > Space."));
+    h.click("Add a List");
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewChannel {
+            add_list: false,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn settings_counts_leave_out_archived_and_say_how_many() {
+    let mut h = archived_workspace();
+    h.app.open_settings("Spaces");
+    h.settle();
+    // nothing live is left to count; the archived List shows its Folder
+    assert!(h.has("Team Space / Projects / Website Redesign"));
+    let team = h
+        .app
+        .data
+        .lists_in(Location::Space(h.app.data.spaces[0].id))
+        .unwrap();
+    let before = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| team.contains(&t.list_id))
+        .count();
+    assert!(before > 4);
+    assert!(
+        !h.has(&before.to_string()),
+        "archived tasks are not counted in the Spaces table"
+    );
+    h.app.open_settings("General");
+    h.settle();
+    let n = h.app.data.tasks.len();
+    let people = h.app.data.members.len();
+    assert!(h.has(&format!(
+        "{} people \u{2022} 2 spaces \u{2022} 0 tasks \u{2022} {} archived",
+        people, n
+    )));
+}
+
+#[test]
+fn sidebar_says_when_a_folder_or_space_holds_only_archived_lists() {
+    let mut h = archived_workspace();
+    for s in h.app.data.spaces.iter_mut() {
+        s.expanded = true;
+    }
+    h.settle();
+    // the Projects folder (2 Lists) and Side Projects (1 List) look empty otherwise
+    assert!(h.has("2 archived Lists"));
+    assert!(h.has("1 archived List"));
+    h.click("2 archived Lists");
+    assert_eq!(h.app.section, Section::Settings);
+    // nothing archived: no such rows
+    let h = Ui1::new();
+    assert!(!h.tree.iter().any(|(n, _)| n.contains("archived List")));
+}
+
+#[test]
+fn time_on_archived_tasks_counts_on_the_dashboard_and_is_marked_in_timesheets() {
+    let mut h = archived_workspace();
+    // today at 00:01, so the entry is in this week whenever the test runs
+    let start = today()
+        .and_hms_opt(0, 1, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .single()
+        .unwrap()
+        .timestamp();
+    let i = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .position(|t| t.parent.is_none())
+        .unwrap();
+    let name = h.app.data.tasks[i].name.clone();
+    h.app.data.tasks[i].time_entries = vec![TimeEntry {
+        start,
+        end: start + 7200,
+        member: h.app.data.me,
+    }];
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Week");
+    let did = h.app.dash_open.unwrap();
+    let d = h
+        .app
+        .data
+        .extra
+        .dashboards
+        .iter_mut()
+        .find(|d| d.id == did)
+        .unwrap();
+    d.cards = Some(vec![DashCard {
+        kind: "time".into(),
+        title: String::new(),
+    }]);
+    h.settle();
+    fn texts(h: &Ui1) -> Vec<String> {
+        fn walk(s: &egui::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                _ => {}
+            }
+        }
+        let mut out = vec![];
+        for s in &h.shapes {
+            walk(&s.shape, &mut out);
+        }
+        out
+    }
+    // (the seed has some time of its own today too)
+    assert!(
+        texts(&h).iter().any(|x| x.starts_with("2h")),
+        "the dashboard counts the time Timesheets shows"
+    );
+    h.app.section = Section::Timesheets;
+    h.settle();
+    assert!(!h.painted_text(&format!("{} (archived)", name)).is_empty());
+}
+
+#[test]
+fn move_dialogs_leave_out_archived_lists_and_say_when_there_is_nowhere_else() {
+    let mut h = archived_workspace();
+    let ideas = list_id(&h, "Ideas");
+    let web = list_id(&h, "Website Redesign");
+    h.app.data.list_item_mut(ideas).unwrap().archived = false;
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == web)
+        .unwrap()
+        .id;
+    h.app.modal = Some(Modal::MoveTasks {
+        ids: vec![tid],
+        query: String::new(),
+    });
+    h.settle();
+    assert!(h.has("Side Projects / Ideas"));
+    assert!(
+        !h.has("Team Space / Projects / Marketing"),
+        "archived: not a place to move to"
+    );
+    // a task already in the only List there is: nowhere else to go, and it says so
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == ideas)
+        .unwrap()
+        .id;
+    h.app.modal = Some(Modal::MoveTasks {
+        ids: vec![tid],
+        query: String::new(),
+    });
+    h.settle();
+    assert!(h.has("There is no other List to move to yet. Make one first."));
+    // Move List with one Space and no Folder: the same
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    h.app.data.spaces.retain(|s| s.id == sid);
+    h.app.data.spaces[0].folders.clear();
+    let l = h.app.data.spaces[0].lists[0].id;
+    h.app.modal = Some(Modal::MoveList { list: l });
+    h.settle();
+    assert!(h.has("There is no other Space or Folder to move it to yet. Make one first."));
+    // with somewhere else to go, no such line
+    let mut h = Ui1::new();
+    let l = list_id(&h, "Ideas");
+    h.app.modal = Some(Modal::MoveList { list: l });
+    h.settle();
+    assert!(!h.has("There is no other Space or Folder to move it to yet. Make one first."));
+}
+
+#[test]
+fn form_list_picker_marks_an_archived_list_already_picked() {
+    let mut h = Ui1::new();
+    let web = list_id(&h, "Website Redesign");
+    h.app.new_form();
+    let fid = h.app.form_open.unwrap();
+    h.app
+        .data
+        .extra
+        .forms
+        .iter_mut()
+        .find(|f| f.id == fid)
+        .unwrap()
+        .list_id = web;
+    h.app.data.list_item_mut(web).unwrap().archived = true;
+    h.settle();
+    assert!(!h.painted_text("Website Redesign (archived)").is_empty());
+}
+
+#[test]
+fn search_says_how_many_archived_matches_it_leaves_out() {
+    let mut h = archived_workspace();
+    h.app.palette = Some("Website".into());
+    h.settle();
+    assert!(!h.has("Team Space / Projects / Website Redesign"));
+    // the List and the archived task with that word in its name
+    let n = 1 + h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.name.to_lowercase().contains("website"))
+        .count();
+    let text = if n == 1 {
+        "1 archived match is not shown".to_string()
+    } else {
+        format!("{} archived matches are not shown", n)
+    };
+    assert!(h.has(&text), "{}", text);
+    // nothing archived: no such line
+    let mut h = Ui1::new();
+    h.app.palette = Some("Website".into());
+    h.settle();
+    assert!(!h.tree.iter().any(|(n, _)| n.contains("archived match")));
+}
+
+#[test]
+fn inbox_marks_comments_on_archived_tasks() {
+    let mut h = Ui1::new();
+    let tid = h.app.data.tasks[1].id;
+    let name = h.app.data.tasks[1].name.clone();
+    let ts = now_ts() - 30;
+    h.app.data.tasks[1].activity.push(Activity {
+        ts,
+        author: 2,
+        text: "Over to you".into(),
+        comment: true,
+        post: false,
+        ..Default::default()
+    });
+    h.app
+        .data
+        .extra
+        .inbox_later
+        .push(format!("{}:{}:2", tid, ts));
+    h.app.data.tasks[1].archived = true;
+    h.click("Inbox");
+    h.click("Inbox Later");
+    assert!(!h.painted_text(&format!("{} (archived)", name)).is_empty());
+}
+
+#[test]
+fn task_picker_with_nothing_typed_does_not_say_no_match() {
+    let mut h = archived_workspace();
+    let tid = h.app.data.tasks[0].id;
+    h.app.data.tasks[0].archived = false;
+    h.app.modal = Some(Modal::PickTask {
+        task: tid,
+        mode: TaskPick::Linked,
+        query: String::new(),
+    });
+    h.settle();
+    assert!(!h.has("No tasks match"));
+    assert!(h.has("No other tasks to pick. Archived tasks are not offered here."));
+}
+
+/// What the app names a whiteboard, form, team or workspace when it makes
+/// one is saved in the language of the person who made it.
+#[test]
+fn things_the_app_names_are_named_in_korean() {
+    let mut h = Ui1::new();
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    h.app.new_whiteboard();
+    h.app.new_form();
+    h.app.new_team();
+    let fresh = Data::fresh();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let d = &h.app.data.extra;
+    assert_eq!(d.whiteboards.last().unwrap().name, "화이트보드 1");
+    let f = d.forms.last().unwrap();
+    assert_eq!(f.name, "새 양식");
+    assert_eq!(f.fields[0].label, "제목");
+    assert!(d.teams.last().unwrap().name.starts_with("팀 "));
+    assert_eq!(fresh.workspace, "내 워크스페이스");
+    assert_eq!(fresh.spaces[0].name, "기본 스페이스");
+    assert_eq!(fresh.spaces[0].lists[0].name, "목록");
+    // and in English, as before
+    h.app.new_whiteboard();
+    assert_eq!(
+        h.app.data.extra.whiteboards.last().unwrap().name,
+        "Whiteboard 2"
+    );
+}
+
+/// A call message is saved in English for every device and shown in the
+/// reader's language; a member who joined is "활성", not the task status.
+#[test]
+fn call_messages_and_member_state_read_in_korean() {
+    let mut h = Ui1::new();
+    let ch = h.app.data.channels[0].id;
+    h.app.start_call(None, ch, "https://meet.example/x");
+    let m = h.app.data.channels[0].messages.last().unwrap().clone();
+    assert_eq!(m.text, "Started a call", "saved as before");
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    assert_eq!(super::chat::shown_text(&m), "통화를 시작했습니다");
+    assert_eq!(crate::i18n::tr_ctx("Active (member)", "Active"), "활성");
+    assert_eq!(
+        crate::i18n::tr("Active"),
+        "진행",
+        "the task status keeps its word"
+    );
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(super::chat::shown_text(&m), "Started a call");
+}
+
+/// The invite dialog's long note wraps inside the dialog instead of
+/// stretching it past its widest.
+#[test]
+fn invite_note_wraps_inside_the_dialog() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    // connected as the owner: the longest note
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.modal = Some(Modal::Invite {
+        emails: String::new(),
+        role: "Member".into(),
+    });
+    h.settle();
+    let close = h.rect("Close");
+    let note = h
+        .tree
+        .iter()
+        .rev()
+        .find(|(n, _)| n.starts_with("This workspace is on a server"))
+        .map(|(_, r)| *r)
+        .expect("the note");
+    assert!(note.width() <= 620.0, "note {} wide", note.width());
+    assert!(note.right() <= close.right() + 1.0, "inside the dialog");
 }

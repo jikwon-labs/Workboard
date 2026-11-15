@@ -157,7 +157,7 @@ pub enum Modal {
 
 pub const ROLES: [(&str, &str); 4] = [
     ("Admin", "Can manage people, settings and all items."),
-    ("Member", "Can access all public items in your Workspace."),
+    ("Member", "Can access all public items in your workspace."),
     ("Guest", "Can only access items shared with them."),
     ("Owner", "Owns the Workspace."),
 ];
@@ -266,6 +266,11 @@ fn section_label(ui: &mut Ui, t: &Theme, s: &str) {
     ui.label(RichText::new(s).size(12.5).color(t.text3));
 }
 
+/// The window a dialog of this kind is drawn in.
+pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
+    egui::Id::new(("modal_window", std::mem::discriminant(m)))
+}
+
 impl App {
     // ---------------------------------------------------------------- menus
 
@@ -334,16 +339,16 @@ impl App {
         let items: [(&str, &str); 5] = [
             ("\u{25A6}", "Apps"),
             ("\u{25A4}", "Templates"),
-            ("\u{1F4DD}", "Custom Fields"),
+            ("\u{1F4DD}", "Custom fields"),
             ("\u{2699}", "Automations"),
-            ("\u{1F3F7}", "Tag Manager"),
+            ("\u{1F3F7}", "Tag manager"),
         ];
         for (icon, label) in items {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 self.modal = Some(match label {
                     "Apps" => Modal::ClickApps,
                     "Templates" => self.template_center(super::templates::Category::All, None),
-                    "Custom Fields" => Modal::CustomFields {
+                    "Custom fields" => Modal::CustomFields {
                         name: String::new(),
                         kind: "text".into(),
                         opts: String::new(),
@@ -609,7 +614,7 @@ impl App {
         for (icon, label) in rows {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 if label == "Settings" {
-                    self.open_settings("My Settings");
+                    self.open_settings("My settings");
                     close_popup(ui);
                     continue;
                 }
@@ -704,7 +709,8 @@ impl App {
             self.modal = Some(Modal::Trash);
             close_popup(ui);
         }
-        if menu_item(ui, &t, "\u{21AA}", tr("Log out"), "")
+        // it changes who uses the app on this computer; nobody signs out
+        if menu_item(ui, &t, "\u{21AA}", tr("Switch person"), "")
             .on_hover_text(tr("Switch to another person on this computer"))
             .clicked()
         {
@@ -743,7 +749,7 @@ impl App {
             "people" => self.section = Section::People,
             "dashboard" => {
                 self.modal = Some(Modal::NewDashboard {
-                    name: "New Dashboard".into(),
+                    name: tr("New Dashboard").into(),
                 })
             }
             _ => self.modal = Some(unavailable("AI Notetaker")),
@@ -765,7 +771,7 @@ impl App {
                 wiki: None,
                 views: vec![],
                 parent: None,
-                title: "Untitled".into(),
+                title: tr("Untitled").into(),
                 body: String::new(),
                 created: now,
                 updated: now,
@@ -782,7 +788,7 @@ impl App {
         let n = self.data.extra.whiteboards.len() + 1;
         self.data.extra.whiteboards.push(Whiteboard {
             id,
-            name: format!("Whiteboard {}", n),
+            name: crate::trf!("Whiteboard {}", n),
             strokes: vec![],
             notes: vec![],
             owner: self.data.me,
@@ -797,17 +803,17 @@ impl App {
         let list = self.default_list().unwrap_or(0);
         self.data.extra.forms.push(Form {
             id,
-            name: "New Form".into(),
+            name: tr("New Form").into(),
             list_id: list,
-            description: "Fill out this form to create a task.".into(),
+            description: tr("Fill out this form to create a task.").into(),
             fields: vec![
                 FormField {
-                    label: "Title".into(),
+                    label: tr("Title").into(),
                     map: "name".into(),
                     ..Default::default()
                 },
                 FormField {
-                    label: "Details".into(),
+                    label: tr("Details").into(),
                     map: "description".into(),
                     ..Default::default()
                 },
@@ -843,8 +849,11 @@ impl App {
                     parent: None,
                     open: true,
                 });
+                self.create_text.clear();
+            } else {
+                // the text stays here for after the List is made
+                self.need_a_list();
             }
-            self.create_text.clear();
             close_popup(ui);
         }
         ui.separator();
@@ -870,7 +879,14 @@ impl App {
         )
         .clicked()
         {
-            self.open_new_list(space, None);
+            // no Space to put it in: say so and make the Space first
+            if self.open_spaces().is_empty() {
+                self.toast = Some((
+                    tr("Lists live in a Space. Make a Space first: it comes with a List.").into(),
+                    now_ts(),
+                ));
+            }
+            self.offer_new_list(space);
             close_popup(ui);
         }
         if menu_item2(
@@ -929,7 +945,7 @@ impl App {
                     "Form" => self.new_form(),
                     "Dashboard" => {
                         self.modal = Some(Modal::NewDashboard {
-                            name: "New Dashboard".into(),
+                            name: tr("New Dashboard").into(),
                         })
                     }
                     "Whiteboard" => self.new_whiteboard(),
@@ -1107,10 +1123,10 @@ impl App {
         let mut open = true;
         let mut close = false;
         let title = match &modal {
-            Modal::Invite { .. } => tr("Invite people for free").to_string(),
+            Modal::Invite { .. } => tr("Invite people").to_string(),
             Modal::WorkspaceSettings { .. } => tr("Workspace settings").into(),
             Modal::NewWorkspace { .. } => tr("Create Workspace").into(),
-            Modal::Profile { .. } => tr("My Settings").into(),
+            Modal::Profile { .. } => tr("My settings").into(),
             Modal::SetStatus { .. } => tr("Set status").into(),
             Modal::Themes => tr("Themes").into(),
             Modal::Shortcuts => tr("Keyboard shortcuts").into(),
@@ -1118,12 +1134,12 @@ impl App {
             Modal::Labs => tr("Labs").into(),
             Modal::Notifications => tr("Notifications").into(),
             Modal::ClickApps => tr("Apps").into(),
-            Modal::CustomFields { .. } => tr("Custom Fields").into(),
+            Modal::CustomFields { .. } => tr("Custom fields").into(),
             Modal::Automations { .. } => tr("Automations").into(),
-            Modal::TagManager { .. } => tr("Tag Manager").into(),
+            Modal::TagManager { .. } => tr("Tag manager").into(),
             Modal::TemplateCenter(_) => tr("Template Center").into(),
             Modal::Import { .. } => tr("Import and export").into(),
-            Modal::ChannelSettings(_) => tr("Channel Settings").into(),
+            Modal::ChannelSettings(_) => tr("Channel settings").into(),
             Modal::SavedMessages => tr("Saved messages").into(),
             Modal::Share { .. } => tr("Share").into(),
             Modal::CustomizeNav => tr("Customize navigation").into(),
@@ -1133,7 +1149,7 @@ impl App {
             Modal::Trash => tr("Trash").into(),
             Modal::Unavailable { title, .. } => tr(title).to_string(),
             Modal::SlackImport(_) => tr("Import from Slack").into(),
-            Modal::Bookmark { .. } => tr("Add Bookmark").into(),
+            Modal::Bookmark { .. } => tr("Add bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::Together { .. } => tr("Work together").into(),
@@ -1165,13 +1181,19 @@ impl App {
             .show(ctx, |ui| {
                 let r = ui.allocate_rect(screen, Sense::click());
                 crate::widgets::no_pointer(&r);
-                ui.painter()
-                    .rect_filled(screen, 0.0, Color32::from_black_alpha(90));
+                // the dark theme needs its stronger overlay to set the dialog apart
+                let dim = if t.dark {
+                    t.overlay
+                } else {
+                    Color32::from_black_alpha(90)
+                };
+                ui.painter().rect_filled(screen, 0.0, dim);
                 if r.clicked() {
                     close = true;
                 }
             });
-        let win_id = egui::Id::new("modal_window");
+        // each kind of dialog sizes itself: a wide one doesn't leave the next wide
+        let win_id = modal_window_id(&modal);
         // the Template Center has a list beside its preview
         let wide = matches!(modal, Modal::TemplateCenter(_));
         let (min_w, max_w) = if wide { (800.0, 820.0) } else { (460.0, 620.0) };
@@ -1190,7 +1212,22 @@ impl App {
                     open = false;
                 }
                 ui.add_space(10.0);
-                close |= self.modal_body(ui, &t, &mut modal);
+                // the server and sign-in dialogs can be taller than a small
+                // window: the title stays put and the rest scrolls (the
+                // others are short, or scroll their own lists)
+                if matches!(modal, Modal::Together { .. } | Modal::Welcome { .. }) {
+                    let tall = (screen.height() - 140.0).max(200.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("modal_body")
+                        .max_height(tall)
+                        .min_scrolled_height(tall)
+                        .show(ui, |ui| {
+                            ui.set_min_width(min_w - 20.0);
+                            close |= self.modal_body(ui, &t, &mut modal);
+                        });
+                } else {
+                    close |= self.modal_body(ui, &t, &mut modal);
+                }
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
@@ -1293,9 +1330,27 @@ impl App {
                     .shared
                     .as_ref()
                     .is_some_and(|c| c.server.is_some());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(if on_server { tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
-                    if ui.link(if shared { tr("Sharing") } else { tr("Work together") }).clicked() {
+                // codes are made by the server, by its owner and admins
+                let connected = self.sync_rt.net_status == Some(wb_net::Status::Connected);
+                let manages = self.sync_rt.role.is_some_and(|r| r.manages());
+                let note = if on_server && !connected {
+                    tr("The team's server can't be reached right now. The invites are kept, and their invite codes are asked for once it's back.")
+                } else if on_server && !manages {
+                    tr("This workspace is on a server. The owner or an admin gives each person their invite code.")
+                } else if on_server {
+                    tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.")
+                } else if shared {
+                    tr("This workspace is shared, so invited people can join it from the shared folder.")
+                } else {
+                    tr("To work with them, share this workspace in a folder first.")
+                };
+                // wrapped: in a plain row the long note pushed the dialog past its width
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(note).small().color(t.text2));
+                    if ui
+                        .link(RichText::new(tr("Work together")).small())
+                        .clicked()
+                    {
                         self.modal = Some(self.together_modal());
                     }
                 });
@@ -1304,11 +1359,10 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let valid: Vec<String> = emails.split(|c: char| c == ',' || c.is_whitespace()).map(|s| s.trim().to_string()).filter(|s| s.contains('@') && s.contains('.')).collect();
-                        let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send free invite"))));
+                        let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send invite"))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
-                            let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
-                            self.toast = Some((if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            self.toast = Some((if on_server && !connected { crate::trf!("Invited {} people. Their invite codes are asked for once the server is back.", valid.len()) } else if on_server && !manages { crate::trf!("Invited {} people. The owner or an admin gives them their invite codes.", valid.len()) } else if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
                             self.dirty = true;
                             close = true;
                         }
@@ -1323,8 +1377,15 @@ impl App {
                 ui.add(field(name).desired_width(f32::INFINITY));
                 ui.add_space(6.0);
                 ui.label(tr("Workspace color"));
+                // the current colour first when it isn't one of these (the
+                // default a new workspace starts with is not), so it shows chosen
+                let current = self.data.extra.workspace_color;
+                let mut colors: Vec<[u8; 3]> = STATUS_PALETTE[1..].to_vec();
+                if !colors.contains(&current) {
+                    colors.insert(0, current);
+                }
                 ui.horizontal_wrapped(|ui| {
-                    for c in STATUS_PALETTE.iter().skip(1) {
+                    for c in colors.iter() {
                         let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
                         ui.painter().rect_filled(r.shrink(2.0), 5.0, rgb(*c));
                         hover_ring(ui, &resp, r.shrink(1.0), 6.0);
@@ -1343,15 +1404,24 @@ impl App {
                     }
                 });
                 ui.add_space(6.0);
-                ui.label(
-                    RichText::new(crate::trf!(
-                        "{} people \u{2022} {} spaces \u{2022} {} tasks",
-                        self.data.members.len(),
-                        self.data.spaces.len(),
-                        self.data.tasks.len()
-                    ))
-                    .color(t.text2),
+                // archived tasks are not in the count, but say how many there are
+                let live = self
+                    .data
+                    .tasks
+                    .iter()
+                    .filter(|x| self.data.task_live(x))
+                    .count();
+                let archived = self.data.tasks.len() - live;
+                let mut counts = crate::trf!(
+                    "{} people \u{2022} {} spaces \u{2022} {} tasks",
+                    self.data.members.len(),
+                    self.open_spaces().len(),
+                    live
                 );
+                if archived > 0 {
+                    counts += &crate::trf!(" \u{2022} {} archived", archived);
+                }
+                ui.label(RichText::new(counts).color(t.text2));
                 ui.add_space(8.0);
                 if primary_button(ui, t, tr("Save")).clicked() && !name.trim().is_empty() {
                     self.data.workspace = name.trim().to_string();
@@ -1365,7 +1435,7 @@ impl App {
                 }
             }
             Modal::NewWorkspace { name } => {
-                ui.label(tr("Name your Workspace"));
+                ui.label(tr("Name your workspace"));
                 let r = ui.add(
                     field(name)
                         .hint_text(tr("e.g. Acme Inc."))
@@ -1519,6 +1589,14 @@ impl App {
                         hover_bg(ui, &resp, r, 8.0);
                         ui.painter()
                             .circle_filled(r.center_top() + vec2(0.0, 16.0), 13.0, rgb(c));
+                        // "black" is the dark background's own colour: outline it
+                        if t.dark {
+                            ui.painter().circle_stroke(
+                                r.center_top() + vec2(0.0, 16.0),
+                                13.0,
+                                Stroke::new(1.0, t.text3),
+                            );
+                        }
                         if sel {
                             ui.painter().circle_stroke(
                                 r.center_top() + vec2(0.0, 16.0),
@@ -1526,10 +1604,12 @@ impl App {
                                 Stroke::new(2.0, t.text),
                             );
                         }
+                        // the saved name is lower case ("black"); shown as a name ("Black")
+                        let label = name[..1].to_uppercase() + &name[1..];
                         ui.painter().text(
                             r.center_bottom() - vec2(0.0, 8.0),
                             Align2::CENTER_CENTER,
-                            tr(name),
+                            tr(&label),
                             FontId::proportional(11.5),
                             t.text2,
                         );
@@ -1573,7 +1653,11 @@ impl App {
                     });
             }
             Modal::Help => {
-                ui.label(tr("This is your own copy of the work manager. Everything is saved on this computer."));
+                ui.label(match &self.data.extra.shared {
+                    None => tr("This is your own copy of the work manager. Everything is saved on this computer."),
+                    Some(c) if c.server.is_some() => tr("This workspace is on your team's server. A copy is kept on this computer, so you can keep working while the server can't be reached."),
+                    Some(_) => tr("This workspace is shared through a folder your sync app keeps in step. Your copy is saved on this computer and in that folder."),
+                });
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new(crate::trf!("Saved in: {}", Data::dir().display()))
@@ -1689,7 +1773,7 @@ impl App {
                 ch |= check(ui, &mut a.tags, tr("Tags")).changed();
                 ch |= check(ui, &mut a.time_tracking, tr("Time Tracking")).changed();
                 ch |= check(ui, &mut a.time_estimates, tr("Time Estimates")).changed();
-                ch |= check(ui, &mut a.custom_fields, tr("Custom Fields")).changed();
+                ch |= check(ui, &mut a.custom_fields, tr("Custom fields")).changed();
                 ch |= check(ui, &mut a.multiple_assignees, tr("Multiple Assignees")).changed();
                 if ch {
                     self.dirty = true;
@@ -1996,7 +2080,14 @@ impl App {
                 for (tag, n) in &counts {
                     ui.horizontal(|ui| {
                         chip(ui, tag, tag_color(tag));
-                        ui.label(RichText::new(crate::trf!("{} tasks", n)).color(t.text2));
+                        ui.label(
+                            RichText::new(if *n == 1 {
+                                tr("1 task").to_string()
+                            } else {
+                                crate::trf!("{} tasks", n)
+                            })
+                            .color(t.text2),
+                        );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
                                 .add(ghost(egui::Button::new(
@@ -2097,7 +2188,13 @@ impl App {
                         for m in &members {
                             let mut on = self.data.channels[ci].members.contains(&m.id);
                             let allowed = manager || m.id == me;
-                            let b = ui.add_enabled(allowed, Check::new(&mut on, &m.name));
+                            // in the channel once they join, like #general
+                            let label = if m.invited {
+                                crate::trf!("{} (invited)", m.name)
+                            } else {
+                                m.name.clone()
+                            };
+                            let b = ui.add_enabled(allowed, Check::new(&mut on, label));
                             let b = if allowed { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can change who else is in it.")) };
                             if b.changed() && allowed {
                                 let c = &mut self.data.channels[ci];
@@ -2178,11 +2275,24 @@ impl App {
                 }
             }
             Modal::Share { emails } => {
-                let name = self.data.location_name(self.loc);
+                // the built-in views' names are the app's words, the rest are names people chose
+                let name = match self.loc {
+                    Location::Space(_) | Location::Folder(_) | Location::List(_) => {
+                        self.data.location_name(self.loc)
+                    }
+                    l => tr(&self.data.location_name(l)).to_string(),
+                };
                 ui.label(crate::trf!(
-                    "Share \"{}\" with people in your Workspace.",
+                    "Share \"{}\" with people in your workspace.",
                     name
                 ));
+                if !self.data.members.iter().any(|m| m.id != self.data.me) {
+                    ui.label(
+                        RichText::new(tr("Only you are in this Workspace so far. Invite people by email below to work on it together."))
+                            .small()
+                            .color(t.text3),
+                    );
+                }
                 ui.add_space(4.0);
                 for m in self.data.members.clone() {
                     ui.horizontal(|ui| {
@@ -2475,7 +2585,7 @@ impl App {
                         .hint_text(tr("https://..."))
                         .desired_width(f32::INFINITY),
                 );
-                if primary_button(ui, t, tr("Add Bookmark")).clicked() && !url.trim().is_empty() {
+                if primary_button(ui, t, tr("Add bookmark")).clicked() && !url.trim().is_empty() {
                     let id = self.data.new_id();
                     let ttl = if title.trim().is_empty() {
                         url.trim().to_string()
@@ -2492,10 +2602,40 @@ impl App {
                     close = true;
                 }
             }
+            Modal::SwitchUser
+                if self
+                    .data
+                    .extra
+                    .shared
+                    .as_ref()
+                    .is_some_and(|c| c.server.is_some()) =>
+            {
+                // the server knows this computer as the person who signed in
+                // on it: being someone else takes their sign-in
+                let name = self
+                    .data
+                    .member(self.data.me)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_default();
+                ui.label(crate::trf!("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", name));
+                ui.add_space(6.0);
+                if ui.link(tr("Work together")).clicked() {
+                    self.modal = Some(self.together_modal());
+                }
+            }
             Modal::SwitchUser => {
                 ui.label(tr(
-                    "Who's using the app? Everyone on this computer shares the same Workspace.",
+                    "Who's using the app? Everyone on this computer shares the same workspace.",
                 ));
+                if self.data.solo() {
+                    // alone there's no one to switch to yet: say where people come from
+                    ui.label(
+                        RichText::new(tr(
+                            "Only you are in this workspace. People you invite show up here.",
+                        ))
+                        .color(t.text3),
+                    );
+                }
                 ui.add_space(4.0);
                 for m in self.data.members.clone() {
                     let ring = t.card;
@@ -2524,7 +2664,13 @@ impl App {
                 close = self.confirm_remove_body(ui, t, kind, *id, name)
             }
             Modal::NewDashboard { name } => {
-                ui.add(field(name).desired_width(f32::INFINITY));
+                ui.label(tr("Dashboard name"));
+                let r = ui.add(
+                    field(name)
+                        .hint_text(tr("For example: Weekly overview"))
+                        .desired_width(f32::INFINITY),
+                );
+                name_field(&r, "Dashboard name entry");
                 let spaces: Vec<(u64, String)> = self
                     .data
                     .spaces
@@ -2539,9 +2685,12 @@ impl App {
                     .color(t.text2),
                 );
                 let _ = spaces;
-                if primary_button(ui, t, tr("Create Dashboard")).clicked()
-                    && !name.trim().is_empty()
-                {
+                // off until it has a name, rather than doing nothing
+                let named = !name.trim().is_empty();
+                let create = ui
+                    .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create Dashboard")))
+                    .inner;
+                if create.clicked() && named {
                     self.new_dashboard(name.trim());
                     self.section = Section::Dashboards;
                     close = true;
@@ -2866,7 +3015,11 @@ impl App {
                 self.restore_doc_pages(pages);
             }
             "List" => {
-                if let Some(lt) = ListTrash::parse(&item.payload) {
+                if let Some(mut lt) = ListTrash::parse(&item.payload) {
+                    // a List deleted while archived comes back to be seen, not
+                    // archived again where only Settings > Spaces shows it
+                    lt.list.archived = false;
+                    let lid = lt.list.id;
                     // back into its folder, else its space, else the first space
                     let folder = lt.folder.and_then(|f| {
                         self.data
@@ -2917,6 +3070,16 @@ impl App {
                         self.fit_statuses(tasks.iter_mut().collect(), &lt.statuses, into);
                     }
                     self.data.tasks.extend(tasks);
+                    // its Folder or Space is archived: it is back, but hidden with them
+                    if self.data.list_archived(lid) {
+                        self.toast = Some((
+                            crate::trf!(
+                                "\"{}\" is back in an archived Folder or Space. Restore that from Settings > Spaces.",
+                                name
+                            ),
+                            now_ts(),
+                        ));
+                    }
                 }
             }
             "Space" => {
@@ -3401,6 +3564,8 @@ impl App {
                             trf!("Task created in {}", self.data.list_name(list)),
                             now_ts(),
                         ));
+                    } else {
+                        self.need_a_list();
                     }
                 }
             });

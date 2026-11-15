@@ -240,8 +240,19 @@ impl App {
             return;
         }
         if !self.huddles_on_server() {
+            let has_server = self
+                .data
+                .extra
+                .shared
+                .as_ref()
+                .is_some_and(|c| c.server.is_some());
             self.toast = Some((
-                tr("Huddles need the team's server. Connect in Work together.").into(),
+                if has_server {
+                    tr("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.")
+                } else {
+                    tr("Huddles need the team's server. Connect in Work together.")
+                }
+                .into(),
                 now_ts(),
             ));
             return;
@@ -1025,9 +1036,9 @@ impl App {
             });
         // the huddle floats over the page but under dialogs: put an open
         // dialog (and its dimmed background) back on top
-        if self.modal.is_some() {
-            for id in ["modal_dim", "modal_window"] {
-                ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, egui::Id::new(id)));
+        if let Some(m) = &self.modal {
+            for id in [egui::Id::new("modal_dim"), super::menus::modal_window_id(m)] {
+                ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
             }
         }
         if self.new_message_open {

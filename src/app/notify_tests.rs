@@ -613,6 +613,48 @@ fn reminders_go_through_notifications_and_open_their_task() {
 }
 
 #[test]
+fn reminders_missed_while_closed_say_overdue_with_names_apart() {
+    let mut a = app();
+    for (text, ago) in [("File taxes", 2 * 86400), ("Dentist", 86400)] {
+        let id = a.data.new_id();
+        a.data.extra.reminders.push(Reminder {
+            id,
+            text: text.into(),
+            due_ts: now_ts() - ago,
+            owner: 1,
+            ..Default::default()
+        });
+    }
+    a.reminder_tick(None);
+    assert_eq!(
+        a.toast.as_ref().unwrap().0,
+        "2 reminders are overdue: File taxes, Dentist"
+    );
+    // one that just came due is still "due"
+    let id = a.data.new_id();
+    a.data.extra.reminders.push(Reminder {
+        id,
+        text: "Stretch".into(),
+        due_ts: now_ts() - 5,
+        owner: 1,
+        ..Default::default()
+    });
+    let id = a.data.new_id();
+    a.data.extra.reminders.push(Reminder {
+        id,
+        text: "Water".into(),
+        due_ts: now_ts() - 5,
+        owner: 1,
+        ..Default::default()
+    });
+    a.reminder_tick(None);
+    assert_eq!(
+        a.toast.as_ref().unwrap().0,
+        "2 reminders are due: Stretch, Water"
+    );
+}
+
+#[test]
 fn the_dock_count_adds_unread_direct_messages_to_the_inbox() {
     let mut a = app();
     let base = a.dock_count();

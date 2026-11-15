@@ -37,7 +37,6 @@ pub const T: &[(&str, &str)] = &[
     ("Export CSV", "CSV 내보내기"),
     ("Save the tasks in this view as a CSV file", "이 보기의 작업을 CSV 파일로 저장합니다"),
     ("{} without dates", "날짜 없음 {}"),
-    ("+ Add Task", "+ 작업 추가"),
     // timeline
     ("Lanes", "레인"),
     ("Show the tasks that have no start or due date", "시작일과 마감일이 없는 작업을 보여 줍니다"),
@@ -117,6 +116,8 @@ pub const T: &[(&str, &str)] = &[
     ("No comments match", "일치하는 댓글이 없습니다"),
     ("Write a post...", "게시물 작성..."),
     ("Write a comment, @mention someone", "댓글을 쓰거나 @멘션하세요"),
+    ("Write a comment", "댓글 쓰기"),
+    ("Keep notes and updates on this task here.", "이 작업의 메모와 진행 상황을 여기에 남기세요."),
     ("Add a checklist item", "체크리스트 항목 추가"),
     // dialogs
     ("Space \"{}\"", "스페이스 \"{}\""),
@@ -172,4 +173,9 @@ pub const T: &[(&str, &str)] = &[
     ("Yearly", "매년"),
     // timers
     ("No Lists yet. Lists keep a Space's tasks together.", "아직 목록이 없습니다. 목록은 스페이스의 작업을 한데 모아 둡니다."),
+    ("Tasks live in a List. Make a Space first: it comes with one.", "작업은 목록 안에 들어갑니다. 먼저 스페이스를 만드세요. 목록이 함께 생깁니다."),
+    ("Tasks live in a List. Make one first.", "작업은 목록 안에 들어갑니다. 먼저 목록을 만드세요."),
+    ("The only List is archived.", "하나뿐인 목록이 보관되어 있습니다."),
+    ("All {} Lists are archived.", "목록 {}개가 모두 보관되어 있습니다."),
+    ("No tasks yet", "아직 작업 없음"),
 ];

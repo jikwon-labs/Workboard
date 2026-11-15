@@ -278,6 +278,18 @@ pub fn fmt_duration(secs: i64) -> String {
     }
 }
 
+/// Tracked time in hours and minutes ("1h 20m", "40m", "2h"), the one way
+/// timesheets show it, in their cells and their totals; "-" for none.
+pub fn fmt_hm(secs: i64) -> String {
+    let min = (secs as f64 / 60.0).round() as i64;
+    match (min / 60, min % 60) {
+        (0, 0) => "-".into(),
+        (0, m) => crate::trf!("{}m", m),
+        (h, 0) => crate::trf!("{}h", h),
+        (h, m) => crate::trf!("{}h {}m", h, m),
+    }
+}
+
 pub fn fmt_ago(ts: i64) -> String {
     let d = now_ts() - ts;
     if d < 60 {
@@ -417,9 +429,22 @@ pub fn menu_row(
     selected: bool,
     lead: impl FnOnce(&egui::Painter, Pos2),
 ) -> Response {
+    menu_row_named(ui, t, label, label, selected, lead)
+}
+
+/// A `menu_row` showing `label` whose accessibility name is `name` (a row
+/// that shows a task's name but is called "Pick <name>").
+pub fn menu_row_named(
+    ui: &mut Ui,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
     let w = ui.available_width().max(160.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-    name_it(&resp, label);
+    name_it(&resp, name);
     if resp.hovered() || selected {
         ui.painter()
             .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
@@ -755,14 +780,28 @@ pub fn row_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
 
 pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let font = FontId::proportional(11.0);
+    let bg = color;
+    // on a dark theme the full colour is too dark to read on its own tint
+    let color = if ui.visuals().dark_mode {
+        chip_text_on_dark(color)
+    } else {
+        color
+    };
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 18.0), Sense::click());
     let strength = if resp.hovered() { 0.28 } else { 0.16 };
     ui.painter()
-        .rect_filled(rect, 4.0, color.gamma_multiply(strength));
+        .rect_filled(rect, 4.0, bg.gamma_multiply(strength));
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, color);
     resp
+}
+
+/// A chip's text colour on a dark theme: the colour mixed halfway to white,
+/// so a dark green or purple tag stays readable on its tinted background.
+pub fn chip_text_on_dark(c: Color32) -> Color32 {
+    let mix = |x: u8| x + ((255 - x as u16) / 2) as u8;
+    Color32::from_rgb(mix(c.r()), mix(c.g()), mix(c.b()))
 }
 
 pub fn tag_color(tag: &str) -> Color32 {

@@ -30,9 +30,8 @@
 
 **알려진 한계(급하지 않음)**
 5. 동기화할 때마다 작업공간 전체를 주고받는다. 작은 팀에는 충분하고, 커지면 변경분 전송으로 바꾼다.
-6. 영상 화질은 고정(640px, 15fps)이다. 네트워크에 맞춘 화질 조절과 화면 공유는 없다.
-7. `third_party/nokhwa-bindings-macos` 는 한 줄 고친 사본이다(2026-11-15 확인: crates.io 최신이 아직 0.2.4 라 계속 필요). nokhwa 를 올릴 때 아직 필요한지 확인한다. 앱 실행 파일은 통화 라이브러리 때문에 약 37MB 다.
-8. 정전 뒤에는 FileVault 화면에서 누군가 암호를 한 번 넣어야 서버가 뜬다(FileVault 를 켜 두기로 했다). 계획된 재시작은 `sudo fdesetup authrestart`.
+6. `third_party/nokhwa-bindings-macos` 는 한 줄 고친 사본이다(2026-11-15 확인: crates.io 최신이 아직 0.2.4 라 계속 필요). nokhwa 를 올릴 때 아직 필요한지 확인한다. 앱 실행 파일은 통화 라이브러리 때문에 약 37MB 다.
+7. 정전 뒤에는 FileVault 화면에서 누군가 암호를 한 번 넣어야 서버가 뜬다(FileVault 를 켜 두기로 했다). 계획된 재시작은 `sudo fdesetup authrestart`.
 
 ## 구조 (실제로 만든 것)
 
@@ -55,10 +54,10 @@
 |---|---|
 | `crates/wb-sync` | 작업공간 합치기(변경 시각, 지움·되살림 기록). 앱·서버·공유 폴더가 같이 쓴다. |
 | `crates/wb-net` | WebSocket 메시지(`Msg`)와 앱 쪽 연결(별도 스레드, 다시 연결, 거절되면 멈춤), `/files` 올리기·받기(`files.rs`, 직접 쓴 HTTP/1.1) |
-| `crates/wb-voice` | LiveKit 통화(마이크·스피커, 카메라, 받은 영상 → RGBA). 별도 스레드 + 자체 tokio |
+| `crates/wb-voice` | LiveKit 통화(마이크·스피커, 카메라, 화면 공유, 받은 영상 → RGBA, 화질 조절). 별도 스레드 + 자체 tokio. 화면 캡처는 `screen.rs`(ScreenCaptureKit), 화질 설정은 `quality.rs` |
 | `server/` | `workboard-server`: 정본 보관·합치기·배포, 로그인·권한, 백업, 통화 토큰, 관리 명령 |
 | `src/app/together.rs` | 함께 쓰기 창, 서버 연결, 토큰(키체인), People 화면 |
-| `src/app/huddle.rs` | 허들 막대, 영상 칸 |
+| `src/app/huddle.rs` | 허들 막대, 영상 칸, 화면 공유 고르기, 공유 화면 칸 |
 | `src/app/files.rs` | 채팅 사진·영상: 캐시, 올리기·받기 스레드, 입력창 칸, 메시지 칸, 크게 보기·재생 창 |
 | `src/media.rs` | macOS 기본 기능(ImageIO, AVFoundation, AppKit)으로 사진 크기·축소, 영상 길이·첫 장면·재생, 파일 선택 창, 클립보드 |
 | `third_party/nokhwa-bindings-macos` | 카메라 잠금 버그를 고친 사본(`[patch.crates-io]`) |
@@ -212,6 +211,16 @@ iPhone 앱이 연결돼 있지 않을 때도 새 메시지·멘션·DM 을 알�
 - **설정.** 서버 폴더의 `apns.json`(`key`: .p8 경로, `key_id`, `team_id`, `topic`) 또는 환경 변수 `WB_APNS_KEY`, `WB_APNS_KEY_ID`, `WB_APNS_TEAM_ID`, `WB_APNS_TOPIC`(변수가 이긴다). LaunchAgent plist 는 환경 변수를 넘기지 않으므로 Mac mini 에서는 `apns.json` 을 쓴다. 넷 중 하나라도 없으면 푸시는 꺼지고, 서버가 시작할 때 로그에 "iPhone notifications off: ..." 를 한 번 찍는다. 시작할 때 읽으므로 바꾼 뒤에는 서버를 다시 켠다.
 - **검증:** 단위(받는 사람 규칙: DM·멘션·스레드·비공개·작성자·오래된 메시지, 묶기, 페이로드 모양, JWT 서명 검증과 재사용, curl 설정 따옴표, APNs 응답 해석, 설정 없으면 꺼짐) + 통합 2개(가짜 sender: 토큰 저장과 재시작 뒤 유지, DM → 상대 폰에 문서의 페이로드, 채널 멘션 → 멘션된 사람만, 스레드 답글 → 스레드 사람, 작성자 제외, 연결된 폰 제외, gone 이면 토큰 삭제 / 설정 없는 서버는 토큰만 저장하고 그대로 동작, hex 아닌 토큰 무시).
 - **알려진 한계:** 실제 APNs 로는 한 번도 보내 보지 않았다. 실제 번들 ID, Push capability, entitlements, .p8 키가 있어야 확인할 수 있다(`docs/ios-design.md` "알림"). "연결된 기기 제외" 는 서버가 연결이 끊긴 걸 알아챌 때까지(앱이 정지된 뒤 최대 약 90초) 푸시가 가지 않는다는 뜻이기도 하다. 그 사이 온 메시지는 iOS 가 앱을 깨워 주지 않으면 알림이 없다. 알림마다 curl 을 한 번 띄운다(작은 팀에는 충분).
+
+### 화면 공유와 화질 조절 (2026-11-16)
+
+"알려진 한계" 에 있던 두 가지(고정 화질, 화면 공유 없음)를 만들었다.
+
+- **화면 공유.** 허들 막대의 Share screen 을 누르면 고르는 칸이 뜬다: 화면(주 화면 먼저)과 다른 앱의 창. 고르면 LiveKit 화면 공유 트랙(`TrackSource::Screenshare`)으로 보내고, 막대에 "Sharing your screen" 이 뜨며 버튼이 Stop sharing screen 으로 바뀐다. 받는 쪽은 카메라 칸 위에 큰 칸으로 보고, 칸 아래에 "<이름>'s screen" 이 붙는다. 자기 화면은 자기에게 다시 보여 주지 않는다(거울 속 거울이 된다).
+- **캡처.** macOS 12.3 이상은 ScreenCaptureKit 을 Objective-C 런타임으로 직접 부른다(`src/media.rs` 와 같은 방식). `SCShareableContent` 로 화면·창 목록, `SCStream` 이 시스템에서 보낼 크기(1920x1080 안)로 줄인 NV12 프레임을 주고, libyuv 로 I420 으로 바꾼다. ScreenCaptureKit 은 `dlopen` 으로 불러서 macOS 11 에서도 앱이 뜨고, 그때는 libwebrtc 의 CGDisplayStream 캡처로 대신한다. 화면은 바뀔 때만 프레임이 오므로 마지막 그림을 초당 장수에 맞춰 다시 보낸다(늦게 들어온 사람도 멈춘 화면을 받는다). macOS 메뉴 막대의 공유 중지로 멈추면 앱도 공유를 끈다.
+- **권한.** 화면 기록 권한이 필요하다. 없으면 처음 한 번 macOS 요청 창을 띄우고, 고르는 칸에 "시스템 설정 > 개인정보 보호 및 보안 > 화면 및 시스템 오디오 녹음에서 Workboard 를 켠 다음 다시 열라" 는 안내와 Open System Settings, Try again 버튼을 보여 준다. 공유 중에 권한이 거절돼도 같은 안내가 뜬다.
+- **화질 조절.** 카메라는 1280px 로 받아 세 겹(320/640/1280, 초당 15장)의 simulcast 로 보내고, 화면은 두 겹(960 초당 5장, 원래 크기 최대 1920 초당 10장)으로 보낸다. 방은 dynacast(아무도 안 보는 겹은 인코딩하지 않음)와 adaptive stream 을 켠다. 앱은 각 칸을 실제 몇 픽셀로 그리는지 통화에 알려 주고(`set_view_sizes`), 통화는 그 크기에 맞는 겹을 서버에 요청한다(360px 이하 320 겹, 800px 이하 640 겹, 그보다 크면 원래 크기). 이 컴퓨터의 연결 품질이 Poor 가 되면 카메라는 640px·초당 10장, Lost 면 320px·초당 5장으로 줄여 보내고, 화면은 크기를 지키고 장수만 줄인다. 그 위에 WebRTC 자체의 대역폭 조절(카메라 Balanced, 화면 MaintainResolution)이 더해진다.
+- **검증:** wb-voice 단위 테스트가 겹 구성(SDK 의 `compute_video_encodings` 로 계산), 칸 크기별 겹 선택, 연결 품질별 줄이기, 프레임 변환을 확인한다. 실제 livekit-server 통합 테스트(`crates/wb-voice/tests/huddle.rs`)에서 받는 쪽이 칸 크기를 바꾸면 320 → 1280 → 640 겹으로 바뀌어 오는 것, 화면 공유 트랙이 1920x1080 으로 상대에게 도착하고 멈추면 사라지는 것을 확인한다. 앱-서버 테스트와 UI 테스트가 Share screen 고르기, 권한 안내, 공유 화면 큰 칸을 확인한다. 실제 캡처는 이 MacBook 에서 `cargo test -p wb-voice real_ -- --ignored` 로 주 화면과 창 하나를 실제로 받는 것을 확인했다. 두 사람이 실제 앱으로 화면을 공유하는 손 검증은 아직이다([`docs/testing.md`](testing.md) "다른 Mac 에서" 5번).
 
 ## 부록 A: 처음 설계 (2026-11-14, 기록용)
 

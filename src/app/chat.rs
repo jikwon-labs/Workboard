@@ -767,7 +767,10 @@ impl App {
                 if editing {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
-                    ui.add(egui::Label::new(self.mention_text(&m.text, 14.0)).wrap());
+                    let job = self.mention_text(&m.text, 14.0);
+                    if let Some(link) = self.text_with_links(ui, job, &m.text) {
+                        self.link_pending = Some(link);
+                    }
                     if compact && m.edited.is_some() {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
@@ -1143,11 +1146,14 @@ impl App {
                     match at {
                         Some(ts) => {
                             let id = self.data.new_id();
-                            self.data.extra.reminders.push(Reminder { id, text: what, due_ts: ts, done: false, owner: me });
+                            self.data.extra.reminders.push(Reminder { id, text: what, due_ts: ts, done: false, owner: me, message: Some((ch, msg)), ..Default::default() });
                             self.dirty = true;
                             self.toast = Some((tr("Reminder created").into(), now_ts()));
                         }
-                        None => self.modal = Some(Modal::Reminder { text: what, date: Some(today()), time: "09:00".into() }),
+                        None => {
+                            self.modal = Some(Modal::Reminder { text: what, date: Some(today()), time: "09:00".into() });
+                            self.reminder_about = (None, Some((ch, msg)));
+                        }
                     }
                 }
                 ChatAction::Copied => self.toast = Some((tr("Copied").into(), now_ts())),

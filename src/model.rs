@@ -407,6 +407,15 @@ pub struct Reminder {
     pub due_ts: i64,
     pub done: bool,
     pub owner: u64,
+    /// The task it is about ("Remind me" on a task).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<u64>,
+    /// The message it is about: (channel, message).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<(u64, u64)>,
+    /// The due notice was shown.
+    #[serde(default)]
+    pub alerted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

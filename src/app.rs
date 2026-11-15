@@ -19,6 +19,7 @@ mod hubs;
 mod huddle;
 mod menus;
 mod more;
+mod nav;
 mod pages;
 mod parity;
 mod settings;
@@ -263,9 +264,9 @@ pub struct App {
     planner_week: NaiveDate,
     sheet_week: NaiveDate,
     chat_open: Option<u64>,
-    nav_last: Option<(Section, Location)>,
-    nav_back: Vec<(Section, Location)>,
-    nav_fwd: Vec<(Section, Location)>,
+    nav_last: Option<nav::NavSpot>,
+    nav_back: Vec<nav::NavSpot>,
+    nav_fwd: Vec<nav::NavSpot>,
     nav_skip: bool,
     assignee_filter: Option<u64>,
     show_search: bool,
@@ -370,6 +371,10 @@ pub struct App {
     settings_state: Option<Modal>,
     /// Interface language picked in Settings > Language (kept on this computer).
     lang_choice: crate::i18n::Choice,
+    /// The task or message (channel, message) the Reminder window is for.
+    reminder_about: (Option<u64>, Option<(u64, u64)>),
+    /// A workboard:// link clicked in a message, opened after the pass.
+    link_pending: Option<String>,
 }
 
 impl App {
@@ -575,6 +580,8 @@ impl App {
             settings_tab: 0,
             settings_state: None,
             lang_choice,
+            reminder_about: (None, None),
+            link_pending: None,
         }
     }
 
@@ -2043,7 +2050,7 @@ impl App {
                 }
             }
             ui.add_space(10.0);
-            let mut items: Vec<(i64, u64, String, Activity)> = vec![];
+            let mut items: Vec<(i64, nav::InboxSrc, String, Activity)> = vec![];
             let me = self.data.me;
             let my_name = self.data.member(me).map(|m| format!("@{}", m.name)).unwrap_or_default();
             for task in &self.data.tasks {
@@ -2056,7 +2063,15 @@ impl App {
                         _ => true,
                     };
                     if keep {
-                        items.push((a.ts, task.id, task.name.clone(), a.clone()));
+                        items.push((a.ts, nav::InboxSrc::Task(task.id), task.name.clone(), a.clone()));
+                    }
+                }
+            }
+            // chat replies in threads I started or wrote in
+            if mode == 1 {
+                for r in self.chat_replies() {
+                    if (tab == 0) == (r.ts > seen) {
+                        items.push((r.ts, r.src, r.title, Activity { ts: r.ts, author: r.author, text: r.text, comment: true, ..Default::default() }));
                     }
                 }
             }
@@ -2065,7 +2080,7 @@ impl App {
                 if items.is_empty() {
                     ui.label(RichText::new(tr("You're all caught up")).color(t.text3));
                 }
-                for (ts, tid, tname, a) in items.into_iter().take(200) {
+                for (ts, src, tname, a) in items.into_iter().take(200) {
                     let w = ui.available_width();
                     let (r, resp) = ui.allocate_exact_size(vec2(w, 56.0), Sense::click());
                     if resp.hovered() {
@@ -2076,12 +2091,11 @@ impl App {
                         paint_avatar(ui.painter(), r.left_center() + vec2(22.0, 0.0), 13.0, m, t.bg);
                     }
                     ui.painter().text(r.left_top() + vec2(48.0, 16.0), Align2::LEFT_CENTER, &tname, FontId::proportional(13.5), t.text);
-                    let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_default();
-                    let line = if a.comment { trf!("{} commented: {}", who, a.text) } else { crate::i18n::history_line(&who, &a.text) };
+                    let line = self.inbox_line(a.author, &a.text, a.comment, src, false);
                     ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 140.0, r.bottom()))).text(r.left_top() + vec2(48.0, 38.0), Align2::LEFT_CENTER, line, FontId::proportional(12.5), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(11.5), t.text3);
                     if resp.clicked() {
-                        self.actions.push(Action::Open(tid));
+                        self.open_inbox_src(src);
                     }
                 }
             });
@@ -2174,6 +2188,7 @@ impl App {
                                 }
                                 if ui.button(tr("Remind me")).clicked() {
                                     self.modal = Some(Modal::Reminder { text: task.name.clone(), date: Some(today() + Duration::days(1)), time: "09:00".into() });
+                                    self.reminder_about = (Some(task.id), None);
                                     close_popup(ui);
                                 }
                                 if ui.button(tr("Copy ID")).clicked() {
@@ -3105,11 +3120,41 @@ impl App {
                 ui.data_mut(|d| d.insert_temp(kid, kind));
                 ui.separator();
                 let ql = q.to_lowercase();
-                let mut first: Option<Action> = None;
+                // what Enter opens: the first result shown, of any kind
+                enum First {
+                    Act(Action),
+                    Doc(u64),
+                    Chat(u64),
+                    Link(String),
+                }
+                let mut first: Option<First> = None;
                 let mut open_doc: Option<u64> = None;
                 let mut open_chat: Option<u64> = None;
+                let mut open_link: Option<String> = None;
                 let show = |k: u8| kind == 0 || kind == k;
+                let me = self.data.me;
+                // like the sidebar: no other people's Personal spaces, nothing archived
+                let space_shown = |s: &Space| !s.archived && s.private_owner.map_or(true, |o| o == me);
                 egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+                    // a pasted workboard:// link (from Copy link)
+                    if let Some(link) = nav::parse_link(&q) {
+                        let what = match link {
+                            nav::Link::Task(id) => self.task(id).map(|x| x.name.clone()),
+                            nav::Link::Loc(l) => self.data.location_exists(l).then(|| self.data.location_name(l)),
+                        };
+                        let label = match &what {
+                            Some(name) => trf!("Open link: {}", name),
+                            None => tr("This link can't be opened in this Workspace").to_string(),
+                        };
+                        if what.is_some() && first.is_none() {
+                            first = Some(First::Link(q.trim().to_string()));
+                        }
+                        if ui.add_enabled(what.is_some(), egui::Button::new(label).frame(false)).clicked() {
+                            open_link = Some(q.trim().to_string());
+                            open = false;
+                        }
+                        ui.add_space(4.0);
+                    }
                     if ql.is_empty() && kind == 0 {
                         let items = self.recent_items(None);
                         if !items.is_empty() {
@@ -3122,6 +3167,13 @@ impl App {
                                         _ => "\u{2630}",
                                     };
                                     ui.label(RichText::new(glyph).color(t.text3));
+                                    if first.is_none() {
+                                        first = Some(match k.as_str() {
+                                            "task" => First::Act(Action::Open(id)),
+                                            "doc" => First::Doc(id),
+                                            _ => First::Act(Action::Go(Location::List(id))),
+                                        });
+                                    }
                                     if ui.add(egui::Button::new(&name).frame(false)).clicked() {
                                         match k.as_str() {
                                             "task" => self.actions.push(Action::Open(id)),
@@ -3138,15 +3190,15 @@ impl App {
                     }
                     if show(2) {
                         let mut locs: Vec<(Location, String)> = vec![];
-                        for s in &self.data.spaces {
+                        for s in self.data.spaces.iter().filter(|s| space_shown(s)) {
                             locs.push((Location::Space(s.id), s.name.clone()));
                             for f in &s.folders {
                                 locs.push((Location::Folder(f.id), format!("{} / {}", s.name, f.name)));
-                                for l in &f.lists {
+                                for l in f.lists.iter().filter(|l| !l.archived) {
                                     locs.push((Location::List(l.id), format!("{} / {} / {}", s.name, f.name, l.name)));
                                 }
                             }
-                            for l in &s.lists {
+                            for l in s.lists.iter().filter(|l| !l.archived) {
                                 locs.push((Location::List(l.id), format!("{} / {}", s.name, l.name)));
                             }
                         }
@@ -3157,7 +3209,7 @@ impl App {
                         }
                         for (l, name) in locs {
                             if first.is_none() {
-                                first = Some(Action::Go(*l));
+                                first = Some(First::Act(Action::Go(*l)));
                             }
                             if ui.add(egui::Button::new(name).frame(false)).clicked() {
                                 self.actions.push(Action::Go(*l));
@@ -3167,13 +3219,13 @@ impl App {
                         ui.add_space(4.0);
                     }
                     if show(1) {
-                        let tasks: Vec<&Task> = self.data.tasks.iter().filter(|x| !x.archived && (ql.is_empty() || x.name.to_lowercase().contains(&ql) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 }).collect();
+                        let tasks: Vec<&Task> = self.data.tasks.iter().filter(|x| !x.archived && self.data.space_of_list(x.list_id).map_or(true, |s| space_shown(s)) && (ql.is_empty() || x.name.to_lowercase().contains(&ql) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 }).collect();
                         if !tasks.is_empty() {
                             ui.label(RichText::new(tr("Tasks")).small().color(t.text3));
                         }
                         for task in tasks {
                             if first.is_none() {
-                                first = Some(Action::Open(task.id));
+                                first = Some(First::Act(Action::Open(task.id)));
                             }
                             ui.horizontal(|ui| {
                                 let st = self.data.status_of(task);
@@ -3193,6 +3245,9 @@ impl App {
                         if !docs.is_empty() {
                             ui.label(RichText::new(tr("Docs")).small().color(t.text3));
                             for (id, title) in docs {
+                                if first.is_none() {
+                                    first = Some(First::Doc(id));
+                                }
                                 if ui.add(egui::Button::new(format!("\u{1F4C4}  {}", title)).frame(false)).clicked() {
                                     open_doc = Some(id);
                                     open = false;
@@ -3206,6 +3261,9 @@ impl App {
                         if !chans.is_empty() {
                             ui.label(RichText::new(tr("Channels")).small().color(t.text3));
                             for (id, name) in chans {
+                                if first.is_none() {
+                                    first = Some(First::Chat(id));
+                                }
                                 if ui.add(egui::Button::new(format!("#  {}", name)).frame(false)).clicked() {
                                     open_chat = Some(id);
                                     open = false;
@@ -3226,6 +3284,9 @@ impl App {
                         if !hits.is_empty() {
                             ui.label(RichText::new(tr("Messages")).small().color(t.text3));
                             for (cid, where_, text) in hits.into_iter().take(20) {
+                                if first.is_none() {
+                                    first = Some(First::Chat(cid));
+                                }
                                 ui.horizontal(|ui| {
                                     if ui.add(egui::Button::new(truncate(&text, 60)).frame(false)).clicked() {
                                         open_chat = Some(cid);
@@ -3237,6 +3298,16 @@ impl App {
                         }
                     }
                 });
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    match first {
+                        Some(First::Act(a)) => self.actions.push(a),
+                        Some(First::Doc(id)) => open_doc = Some(id),
+                        Some(First::Chat(id)) => open_chat = Some(id),
+                        Some(First::Link(l)) => open_link = Some(l),
+                        None => {}
+                    }
+                    open = false;
+                }
                 if let Some(id) = open_doc {
                     self.doc_open = Some(id);
                     self.section = Section::Docs;
@@ -3246,11 +3317,8 @@ impl App {
                     self.chat_open = Some(id);
                     self.thread_open = None;
                 }
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    if let Some(a) = first {
-                        self.actions.push(a);
-                    }
-                    open = false;
+                if let Some(l) = open_link {
+                    self.open_link(&l);
                 }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     open = false;
@@ -3293,7 +3361,9 @@ impl App {
         if ctx.input(|i| i.modifiers.command && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::J))) {
             self.palette = if self.palette.is_some() { None } else { Some(String::new()) };
         }
-        if ctx.input(|i| (i.modifiers.command && i.key_pressed(egui::Key::N)) || (i.modifiers.alt && i.key_pressed(egui::Key::T))) {
+        // Option+T types a character in a text field: only a shortcut outside one
+        let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
+        if ctx.input(|i| (i.modifiers.command && i.key_pressed(egui::Key::N)) || (!typing && i.modifiers.alt && i.key_pressed(egui::Key::T))) {
             self.open_quick_add(None);
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::G)) {
@@ -3311,6 +3381,8 @@ impl App {
         self.new_message_window(ctx);
         self.bulk_bar(ctx);
         self.toast_ui(ctx);
+        self.open_pending_links();
+        self.reminder_tick(Some(ctx));
         self.apply_actions();
         self.track_history();
         self.note_recent();
@@ -3331,8 +3403,13 @@ impl App {
         self.huddle_tick(Some(ctx));
         self.huddle_bar(ctx);
         // an invite link opened in a browser or mail
+        // (other workboard:// links, such as Copy link, open what they point to)
         if let Some(url) = crate::links::take() {
-            self.open_join_link(&url);
+            if url.starts_with("workboard://join") {
+                self.open_join_link(&url);
+            } else {
+                self.link_pending = Some(url);
+            }
         }
         // the first start: how do you want to start?
         if self.data.extra.welcome && self.persist && self.modal.is_none() {

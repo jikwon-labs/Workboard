@@ -102,6 +102,12 @@ pub enum Mode {
     NewServer,
 }
 
+/// Shown with a shared folder: every computer's copy in the folder holds the
+/// whole workspace, so what the app hides from other people (Personal
+/// spaces, private docs, channels and dashboards) can still be read from the
+/// files. Only a team server leaves those out of other people's copies.
+pub(super) const FOLDER_PRIVACY: &str = "Private items (Personal spaces, private docs, channels and dashboards) are hidden in the app, but anyone with this folder can read them in its files. Use a team server to keep them private.";
+
 /// What's typed into the sign-in and account fields.
 #[derive(Default)]
 pub struct Form {
@@ -2065,6 +2071,7 @@ impl App {
             }).color(t.text2));
             ui.add_space(8.0);
             ui.label(RichText::new(tr("Tasks, chat, docs and calls show up for everyone within a few seconds of their sync app copying the folder.")).small().color(t.text3));
+            ui.label(RichText::new(tr(FOLDER_PRIVACY)).small().color(t.text2));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button(tr("Check for changes now")).clicked() {
@@ -2095,6 +2102,7 @@ impl App {
                 "Work on this workspace with other people, without a server.",
             ));
             ui.label(RichText::new(tr("Pick a folder that a sync app shares with your teammates (iCloud Drive, Dropbox, Google Drive, OneDrive or Syncthing). Everyone opens Workboard on their own computer and points it at the same folder.")).color(t.text2));
+            ui.label(RichText::new(tr(FOLDER_PRIVACY)).small().color(t.text2));
             ui.add_space(8.0);
             let sugg = sync::suggested_folders();
             if !sugg.is_empty() {

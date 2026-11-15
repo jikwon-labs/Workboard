@@ -1055,9 +1055,9 @@ impl App {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Dashboards")).size(15.0));
                         // My: the ones I made (older ones without a maker show in both)
-                        for d in self.data.extra.dashboards.clone().into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0)
-                            // someone else's private dashboard stays out of the list
-                            .filter(|d| !d.private || d.owner == me || d.owner == 0) {
+                        // someone else's private dashboard stays out of the list
+                        let shown: Vec<Dashboard> = self.data.extra.dashboards.iter().filter(|d| self.dash_shown(d)).cloned().collect();
+                        for d in shown.into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("dash:{}", d.id));
                                 if ui.add(egui::Button::new(format!("\u{1F4CA}  {}", d.name)).frame(false)).clicked() {
@@ -1270,7 +1270,7 @@ impl App {
                         let me = self.data.me;
                         let mine_only = self.hub_filter.min(1) == 1;
                         // My: the ones I made (older ones without a maker show in both)
-                        for f in self.data.extra.forms.clone().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
+                        for f in self.data.extra.forms.clone().into_iter().filter(|f| self.form_shown(f)).collect::<Vec<_>>().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("form:{}", f.id));
                                 if ui.add(egui::Button::new(format!("\u{1F4CB}  {}", f.name)).frame(false)).clicked() {

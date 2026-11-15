@@ -5813,3 +5813,79 @@ fn files_from_before_ids_were_kept_still_load_and_new_fields_stay_out_when_empty
         .iter()
         .any(|i| i.assigned && i.text == "assigned to Me"));
 }
+
+#[test]
+fn search_leaves_out_other_peoples_private_dashboards_and_personal_forms() {
+    use super::more::Hit;
+    let mut a = app();
+    let me = a.data.me;
+    let lists = list_ids(&a);
+    let hits =
+        |a: &App, q: &str| -> Vec<Hit> { a.search_rows(q, 6).into_iter().map(|r| r.4).collect() };
+    a.new_dashboard("Salary plans");
+    let did = a.dash_open.unwrap();
+    fn dash(a: &mut App, did: u64) -> &mut Dashboard {
+        a.data
+            .extra
+            .dashboards
+            .iter_mut()
+            .find(|d| d.id == did)
+            .unwrap()
+    }
+    dash(&mut a, did).private = true;
+    assert!(
+        hits(&a, "salary").contains(&Hit::Dashboard(did)),
+        "my own private one shows"
+    );
+    dash(&mut a, did).owner = me + 100;
+    assert!(
+        !hits(&a, "salary").contains(&Hit::Dashboard(did)),
+        "someone else's stays out"
+    );
+    // older dashboards without a maker are everyone's
+    dash(&mut a, did).owner = 0;
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    // a public dashboard in someone else's Personal space stays out too
+    let sid = a.data.space_of_list(lists[0]).unwrap().id;
+    let d = dash(&mut a, did);
+    d.private = false;
+    d.owner = me + 100;
+    d.space = Some(sid);
+    a.data.extra.forms.push(Form {
+        id: 777_001,
+        name: "Secret survey".into(),
+        list_id: lists[0],
+        description: String::new(),
+        fields: vec![],
+        owner: me + 100,
+    });
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me + 100);
+    assert!(!hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(!hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+    let d = a
+        .data
+        .extra
+        .dashboards
+        .iter()
+        .find(|d| d.id == did)
+        .unwrap()
+        .clone();
+    let f = a.data.extra.forms.last().unwrap().clone();
+    assert!(!a.dash_shown(&d) && !a.form_shown(&f));
+    // my own Personal space: both show
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me);
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+}

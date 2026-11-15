@@ -6399,3 +6399,29 @@ fn click_a_notification_toast_to_open_the_conversation() {
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat_open, Some(dm));
 }
+
+#[test]
+fn a_shared_folder_says_private_items_are_readable_from_its_files() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("Work together");
+    assert!(h.has(together::FOLDER_PRIVACY), "said before sharing");
+    let dir = std::env::temp_dir().join(format!("wb-folder-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: dir.to_string_lossy().into(),
+        device: "dev1".into(),
+        tag: 5,
+        server: None,
+    });
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(h.has("This workspace is shared"));
+    assert!(h.has(together::FOLDER_PRIVACY), "and while sharing");
+    // on a server, other people's copies leave private items out: no note
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(!h.has(together::FOLDER_PRIVACY));
+    let _ = std::fs::remove_dir_all(&dir);
+}

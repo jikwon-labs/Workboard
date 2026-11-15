@@ -449,6 +449,26 @@ impl App {
             })
     }
 
+    /// A dashboard shown in lists and search: not someone else's private
+    /// one (older ones without a maker are everyone's) and not in a space I
+    /// can't go to.
+    pub(super) fn dash_shown(&self, d: &Dashboard) -> bool {
+        (!d.private || d.owner == self.data.me || d.owner == 0)
+            && d.space.is_none_or(|s| {
+                !self.data.location_exists(Location::Space(s))
+                    || self.location_shown(Location::Space(s))
+            })
+    }
+
+    /// A form shown in lists and search: not one for a list in someone
+    /// else's Personal space.
+    pub(super) fn form_shown(&self, f: &Form) -> bool {
+        let me = self.data.me;
+        self.data
+            .space_of_list(f.list_id)
+            .is_none_or(|s| s.private_owner.is_none_or(|o| o == me))
+    }
+
     /// What a workboard:// link opens: `None` when this workspace doesn't
     /// have it, `Some(false)` when it is there but archived or someone
     /// else's private place.

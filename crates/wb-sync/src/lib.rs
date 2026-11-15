@@ -750,8 +750,8 @@ pub fn closed_to(ch: &Value, member: u64) -> bool {
 
 /// The top-level items of a team's copy that `member` doesn't get (and
 /// can't change): DMs and private channels they aren't in, other people's
-/// Personal spaces with the tasks and docs in them, and other people's
-/// private docs with their sub pages.
+/// Personal spaces with the tasks, docs, dashboards and forms in them, and
+/// other people's private docs (with their sub pages) and dashboards.
 pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
     let arr = |path: &str| {
         get_path(data, path)
@@ -783,6 +783,32 @@ pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
             .iter()
             .filter(|t| {
                 t.get("list_id")
+                    .and_then(|l| l.as_u64())
+                    .is_some_and(|l| lists.contains(&l))
+            })
+            .filter_map(id_of),
+    );
+    // other people's private dashboards (older ones without a maker are
+    // everyone's), and dashboards and forms in their Personal spaces
+    out.extend(
+        arr("extra.dashboards")
+            .iter()
+            .filter(|d| {
+                let owner = d.get("owner").and_then(|o| o.as_u64()).unwrap_or(0);
+                (d.get("private").and_then(|p| p.as_bool()) == Some(true)
+                    && owner != 0
+                    && owner != member)
+                    || d.get("space")
+                        .and_then(|s| s.as_u64())
+                        .is_some_and(|s| spaces.contains(&s))
+            })
+            .filter_map(id_of),
+    );
+    out.extend(
+        arr("extra.forms")
+            .iter()
+            .filter(|f| {
+                f.get("list_id")
                     .and_then(|l| l.as_u64())
                     .is_some_and(|l| lists.contains(&l))
             })
@@ -1580,5 +1606,41 @@ mod tests {
         d["tasks"] = json!([{"id": 7, "name": "T", "attachments": [{"file": "x"}]}]);
         merge(&mut d, &[newer]);
         assert_eq!(d["tasks"][0]["attachments"], json!([{"file": "x"}]));
+    }
+
+    #[test]
+    fn private_dashboards_and_personal_forms_are_hidden() {
+        let d = json!({"workspace": "W", "members": [], "channels": [], "docs": [], "tasks": [],
+            "spaces": [{"id": 50, "name": "Personal", "private_owner": 1, "folders": [{"id": 53, "name": "F", "lists": [{"id": 54, "name": "In folder"}]}], "lists": [{"id": 51, "name": "Mine"}]},
+                       {"id": 60, "name": "Bo's", "private_owner": 2, "folders": [], "lists": [{"id": 61, "name": "Bo"}]},
+                       space(70, json!([]), json!([list(71)]))],
+            "extra": {"sync": {},
+                "dashboards": [{"id": 90, "name": "a", "owner": 1, "private": true},
+                               {"id": 91, "name": "b", "owner": 2, "private": true},
+                               {"id": 92, "name": "c", "owner": 0, "private": true},
+                               {"id": 93, "name": "d", "owner": 1},
+                               {"id": 94, "name": "e", "owner": 3, "space": 50},
+                               {"id": 95, "name": "f", "owner": 3, "space": 70}],
+                "forms": [{"id": 100, "name": "x", "list_id": 51},
+                          {"id": 101, "name": "y", "list_id": 54},
+                          {"id": 102, "name": "z", "list_id": 61},
+                          {"id": 103, "name": "w", "list_id": 71}]}});
+        let mut hidden = hidden_from(&d, 2);
+        hidden.sort();
+        assert_eq!(hidden, vec![50, 90, 94, 100, 101]);
+        // the owner of the Personal space and maker of the dashboard sees them
+        let mut theirs = hidden_from(&d, 1);
+        theirs.sort();
+        assert_eq!(theirs, vec![60, 91, 102]);
+        let mut out = d.clone();
+        hide(&mut out, &hidden);
+        let names: Vec<&str> = out["extra"]["dashboards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["b", "c", "d", "f"]);
+        assert_eq!(out["extra"]["forms"].as_array().unwrap().len(), 2);
     }
 }

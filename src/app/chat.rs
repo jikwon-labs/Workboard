@@ -234,7 +234,7 @@ impl App {
             .sum()
     }
 
-    fn unread_here(&self, c: &Channel) -> usize {
+    pub(super) fn unread_here(&self, c: &Channel) -> usize {
         let seen = self.data.extra.chat_seen.get(&c.id);
         c.messages
             .iter()
@@ -548,7 +548,16 @@ impl App {
         let primary = self.dm_primary(&channel);
         if primary != cid {
             self.chat_open = Some(primary);
-            self.thread_open = None;
+            // a thread opened in that copy (from a notification or the
+            // Inbox) stays open: the shown copy has its messages too
+            let keep = self.thread_open.is_some_and(|tid| {
+                self.conversation(&channel)
+                    .iter()
+                    .any(|d| d.messages.iter().any(|m| m.id == tid))
+            });
+            if !keep {
+                self.thread_open = None;
+            }
             return;
         }
         // with the messages of its duplicates, in time order

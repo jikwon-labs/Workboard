@@ -6399,3 +6399,53 @@ fn click_a_notification_toast_to_open_the_conversation() {
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat_open, Some(dm));
 }
+
+#[test]
+fn a_reply_notice_from_a_duplicate_dm_copy_opens_its_thread() {
+    let mut h = Ui1::new();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .clone();
+    // the shown copy has a message; a second copy (made on another
+    // computer at the same time) holds a thread with a reply
+    let first = h.app.data.new_id();
+    let mut primary = dm.clone();
+    primary.messages.push(
+        serde_json::from_value(
+            serde_json::json!({"id": first, "author": 1, "text": "hello", "ts": now_ts() - 100}),
+        )
+        .unwrap(),
+    );
+    let pid = primary.id;
+    *h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == pid)
+        .unwrap() = primary;
+    let dup_id = h.app.data.new_id();
+    let parent = h.app.data.new_id();
+    let reply = h.app.data.new_id();
+    let mut dup = dm.clone();
+    dup.id = dup_id;
+    dup.messages = vec![serde_json::from_value(serde_json::json!({
+        "id": parent, "author": 2, "text": "question in the other copy", "ts": now_ts() - 50,
+        "replies": [{"id": reply, "author": 2, "text": "the answer", "ts": now_ts() - 10}]
+    }))
+    .unwrap()];
+    h.app.data.channels.push(dup);
+    h.app.open_target(&format!("chat:{}:{}", dup_id, parent));
+    h.settle();
+    assert_eq!(h.app.chat_open, Some(pid), "the shown copy opens");
+    assert_eq!(
+        h.app.thread_open,
+        Some(parent),
+        "with the thread still open"
+    );
+    assert!(h.has("Thread"), "the thread panel is on screen");
+}

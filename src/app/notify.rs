@@ -804,12 +804,9 @@ impl App {
             .channels
             .iter()
             .filter(|c| c.kind == ChannelKind::Direct && c.members.contains(&me))
-            .map(|c| {
-                c.messages
-                    .iter()
-                    .filter(|m| m.ts > c.last_read && m.author != me)
-                    .count()
-            })
+            // the sidebar's rule: messages not seen by id, so a late one
+            // (its author's clock behind) still counts and a read one doesn't
+            .map(|c| self.unread_here(c))
             .sum();
         self.inbox_badge() + dms
     }

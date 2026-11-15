@@ -2677,6 +2677,59 @@ impl App {
         let dragging = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx());
         let released = ui.input(|i| i.pointer.any_released());
         let mut drop_on: Option<NaiveDate> = None;
+        // bar labels: (room, x, text, font, colour), drawn over all the days
+        let mut labels: Vec<(Rect, f32, String, FontId, Color32)> = vec![];
+        // a task with a start and a due date shows on every day between
+        let span = |x: &Task| match (x.start, x.due) {
+            (Some(s), Some(e)) if s <= e => Some((s, e)),
+            (_, Some(e)) => Some((e, e)),
+            _ => None,
+        };
+        // the time a bar starts at: its start time, or a one-day task's due time
+        let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
+            Some(at) if x.start == Some(s) => Some(at),
+            _ if s == e => x.due_at(),
+            _ => None,
+        };
+        // each week row gives every bar one line for all its days, so a bar
+        // that runs over several days stays in one piece: earlier starts and
+        // longer bars take the top lines, then all-day before timed ones
+        let mut lanes: HashMap<(i64, u64), usize> = HashMap::new();
+        for w in 0..rows as i64 {
+            let ws = start + Duration::days(w * 7);
+            let we = ws + Duration::days(6);
+            let mut week: Vec<(&Task, NaiveDate, NaiveDate, NaiveDate, NaiveDate)> = tasks
+                .iter()
+                .filter_map(|x| {
+                    span(x)
+                        .filter(|(s, e)| *s <= we && *e >= ws)
+                        .map(|(s, e)| (x, s, e, s.max(ws), e.min(we)))
+                })
+                .collect();
+            week.sort_by_key(|(x, s, e, a, b)| {
+                let at = bar_time(x, *s, *e);
+                (
+                    *a,
+                    std::cmp::Reverse((*b - *a).num_days()),
+                    at.is_some(),
+                    at,
+                    x.id,
+                )
+            });
+            // the last day each line is taken up to
+            let mut until: Vec<NaiveDate> = vec![];
+            for (x, _, _, a, b) in week {
+                let lane = match until.iter().position(|u| *u < a) {
+                    Some(l) => l,
+                    None => {
+                        until.push(b);
+                        until.len() - 1
+                    }
+                };
+                until[lane] = b;
+                lanes.insert((w, x.id), lane);
+            }
+        }
         for i in 0..(rows * 7) as i64 {
             let d = start + Duration::days(i);
             let cell = Rect::from_min_size(
@@ -2738,43 +2791,27 @@ impl App {
                     self.open_quick_add(Some(d));
                 }
             }
-            // a task with a start and a due date shows on every day between
-            let span = |x: &Task| match (x.start, x.due) {
-                (Some(s), Some(e)) if s <= e => Some((s, e)),
-                (_, Some(e)) => Some((e, e)),
-                _ => None,
-            };
-            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate)> = tasks
+            let week_row = i / 7;
+            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate, usize)> = tasks
                 .iter()
                 .filter_map(|x| {
+                    let lane = *lanes.get(&(week_row, x.id))?;
                     span(x)
                         .filter(|(s, e)| *s <= d && d <= *e)
-                        .map(|(s, e)| (x, s, e))
+                        .map(|(s, e)| (x, s, e, lane))
                 })
                 .collect();
-            // the time a bar starts at: its start time, or a one-day task's due time
-            let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
-                Some(at) if x.start == Some(s) => Some(at),
-                _ if s == e => x.due_at(),
-                _ => None,
-            };
-            // longer spans first, so a bar keeps its line from day to day; in a
-            // day, ones without a time (all day) first, then by time
-            day_tasks.sort_by_key(|(x, s, e)| {
-                let at = bar_time(x, *s, *e);
-                (
-                    std::cmp::Reverse((*e - *s).num_days()),
-                    *s,
-                    at.is_some(),
-                    at,
-                    x.id,
-                )
-            });
-            let max = ((ch - 30.0) / 22.0).floor().max(1.0) as usize;
-            for (k, (task, s0, e0)) in day_tasks.iter().enumerate() {
+            day_tasks.sort_by_key(|x| x.3);
+            // lines of 22 that fit under the day number; when some don't, the
+            // last line that fits says "+N more" instead
+            let fit = ((ch - 24.0) / 22.0).floor().max(1.0) as usize;
+            let needed = day_tasks.last().map(|x| x.3 + 1).unwrap_or(0);
+            let max = if needed > fit { fit - 1 } else { fit };
+            for (task, s0, e0, k) in day_tasks.iter().copied() {
                 if k >= max {
+                    let hidden = day_tasks.iter().filter(|x| x.3 >= max).count();
                     let more = Rect::from_min_size(
-                        cell.left_top() + vec2(4.0, 26.0 + 22.0 * k as f32),
+                        cell.left_top() + vec2(4.0, 26.0 + 22.0 * max as f32),
                         vec2(cw - 8.0, 20.0),
                     );
                     let mr = ui.interact(more, ui.id().with(("calmore", i)), Sense::click());
@@ -2785,14 +2822,14 @@ impl App {
                     p.text(
                         more.left_center() + vec2(4.0, 0.0),
                         Align2::LEFT_CENTER,
-                        trf!("+{} more", day_tasks.len() - k),
+                        trf!("+{} more", hidden),
                         FontId::proportional(11.5),
                         if mr.hovered() { t.text } else { t.text3 },
                     );
                     // the day's whole list in a popup
                     let all: Vec<(u64, String, Status)> = day_tasks
                         .iter()
-                        .map(|(x, _, _)| (x.id, x.name.clone(), self.data.status_of(x)))
+                        .map(|(x, _, _, _)| (x.id, x.name.clone(), self.data.status_of(x)))
                         .collect();
                     popup(ui, &mr, ui.id().with(("calmore_pop", i)), 240.0, |ui| {
                         ui.label(RichText::new(d.text("%A, %b %-d")).strong());
@@ -2809,9 +2846,9 @@ impl App {
                     });
                     break;
                 }
-                let starts = d == *s0 || i % 7 == 0;
-                let goes_on = d < *e0 && i % 7 != 6;
-                let left = if d > *s0 && i % 7 != 0 {
+                let starts = d == s0 || i % 7 == 0;
+                let goes_on = d < e0 && i % 7 != 6;
+                let left = if d > s0 && i % 7 != 0 {
                     cell.left()
                 } else {
                     cell.left() + 4.0
@@ -2838,8 +2875,8 @@ impl App {
                 let st = self.data.status_of(task);
                 let col = rgb(st.color);
                 let round = egui::CornerRadius {
-                    nw: if d > *s0 && i % 7 != 0 { 0 } else { 4 },
-                    sw: if d > *s0 && i % 7 != 0 { 0 } else { 4 },
+                    nw: if d > s0 && i % 7 != 0 { 0 } else { 4 },
+                    sw: if d > s0 && i % 7 != 0 { 0 } else { 4 },
                     ne: if goes_on { 0 } else { 4 },
                     se: if goes_on { 0 } else { 4 },
                 };
@@ -2854,25 +2891,24 @@ impl App {
                 );
                 if starts {
                     p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
-                    let max_chars = ((cw - 24.0) / 6.5) as usize;
+                    // the label may use the bar's whole length in this week; it
+                    // is drawn after all days so later days don't paint over it
+                    let week_end = start + Duration::days(week_row * 7 + 6);
+                    let days = (e0.min(week_end) - d).num_days() as f32;
+                    let room = Rect::from_min_max(r.min, pos2(r.right() + cw * days, r.bottom()));
                     let mut label_x = r.left() + 8.0;
-                    if let Some(at) = bar_time(task, *s0, *e0).filter(|_| d == *s0) {
-                        let g = p.layout_no_wrap(fmt_time(at), FontId::proportional(11.0), t.text2);
-                        let w = g.size().x;
-                        p.with_clip_rect(r).galley(
-                            pos2(label_x, r.center().y - g.size().y / 2.0),
-                            g,
-                            t.text2,
-                        );
+                    if let Some(at) = bar_time(task, s0, e0).filter(|_| d == s0) {
+                        let font = FontId::proportional(11.0);
+                        let w = p
+                            .layout_no_wrap(fmt_time(at), font.clone(), t.text2)
+                            .size()
+                            .x;
+                        labels.push((room, label_x, fmt_time(at), font, t.text2));
                         label_x += w + 4.0;
                     }
-                    p.with_clip_rect(r).text(
-                        pos2(label_x, r.center().y),
-                        Align2::LEFT_CENTER,
-                        truncate(&task.name, max_chars.max(4)),
-                        FontId::proportional(12.0),
-                        t.text,
-                    );
+                    let font = FontId::proportional(12.0);
+                    let name = fit_text(&p, &task.name, &font, room.right() - 4.0 - label_x);
+                    labels.push((room, label_x, name, font, t.text));
                 }
                 name_it(&resp, &format!("Calendar {} {}", task.name, d));
                 let tid = task.id;
@@ -2881,6 +2917,15 @@ impl App {
                     self.actions.push(Action::Open(task.id));
                 }
             }
+        }
+        for (room, x, text, font, color) in labels {
+            p.with_clip_rect(room).text(
+                pos2(x, room.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                font,
+                color,
+            );
         }
         // Unscheduled / Overdue panel
         p.rect_filled(side, 8.0, t.column_bg);

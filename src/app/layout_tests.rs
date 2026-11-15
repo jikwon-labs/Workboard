@@ -392,3 +392,86 @@ fn gantt_without_tasks_says_how_to_start() {
         ))
         .is_empty());
 }
+
+/// Monday of the current week.
+fn this_monday() -> NaiveDate {
+    let td = today();
+    td - Duration::days(td.weekday().num_days_from_monday() as i64)
+}
+
+#[test]
+fn calendar_multi_day_bar_keeps_one_line() {
+    let mut h = Ui1::new();
+    let base = task_named(&h, "Write copy for landing page").clone();
+    for x in h.app.data.tasks.iter_mut() {
+        x.start = None;
+        x.due = None;
+    }
+    let mon = this_monday();
+    // Mon-Wed, and a longer one that starts on Tuesday: it used to take the
+    // top line from Tuesday on and push the first bar down
+    for (id, name, s, e) in [
+        (31_000, "Three days", 0, 2),
+        (31_001, "Five days from Tuesday", 1, 5),
+        (31_002, "Single Tuesday", 1, 1),
+    ] {
+        let mut x = base.clone();
+        x.id = id;
+        x.name = name.into();
+        x.start = Some(mon + Duration::days(s));
+        x.due = Some(mon + Duration::days(e));
+        x.parent = None;
+        h.app.data.tasks.push(x);
+    }
+    h.click("View Calendar");
+    h.app.cal_week = true;
+    // the week of that Monday (weeks start on Sunday)
+    h.ctx
+        .data_mut(|d| d.insert_temp(egui::Id::new("cal_week_anchor"), mon));
+    h.settle();
+    let y = |h: &Ui1, d: i64| {
+        h.rect(&format!("Calendar Three days {}", mon + Duration::days(d)))
+            .center()
+            .y
+    };
+    assert!((y(&h, 0) - y(&h, 1)).abs() < 1.0, "same line on day 2");
+    assert!((y(&h, 0) - y(&h, 2)).abs() < 1.0, "same line on day 3");
+}
+
+#[test]
+fn calendar_more_line_fits_inside_the_day() {
+    let mut h = Ui1::new();
+    let base = task_named(&h, "Write copy for landing page").clone();
+    let td = today();
+    // a day in the month's second row, so the third row is below it
+    let day = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap() + Duration::days(7);
+    for k in 0..14 {
+        let mut x = base.clone();
+        x.id = 32_000 + k;
+        x.name = format!("Busy {}", k);
+        x.start = None;
+        x.due = Some(day);
+        x.parent = None;
+        h.app.data.tasks.push(x);
+    }
+    h.click("View Calendar");
+    let more = h.rect(&format!("More tasks on {}", day));
+    // the next week's day number, right under this day
+    let next = (day + Duration::days(7)).day().to_string();
+    let below = h
+        .painted_text(&next)
+        .into_iter()
+        .map(|(r, _)| r)
+        .find(|r| {
+            r.left() >= more.left() - 8.0 && r.left() < more.left() + 30.0 && r.top() > more.top()
+        })
+        .expect("the next week's day number");
+    // that number sits 12 px under its cell's top
+    let cell_bottom = below.center().y - 12.0;
+    assert!(
+        more.bottom() <= cell_bottom + 0.5,
+        "the more line {:?} ends inside the day (bottom {})",
+        more,
+        cell_bottom
+    );
+}

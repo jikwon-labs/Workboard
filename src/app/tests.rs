@@ -6182,3 +6182,178 @@ fn every_workspace_on_this_computer_counts_for_the_cache() {
         "an unreadable file counts by its text"
     );
 }
+
+/// A small Slack export: two people, #general with a thread and a file,
+/// and #random. `Mia` is a member here by email, `ghost` isn't.
+fn slack_export() -> std::path::PathBuf {
+    let root = temp_folder("slack").join("My Slack export");
+    std::fs::create_dir_all(root.join("general")).unwrap();
+    std::fs::create_dir_all(root.join("random")).unwrap();
+    let w = |p: &str, v: serde_json::Value| std::fs::write(root.join(p), v.to_string()).unwrap();
+    w(
+        "users.json",
+        serde_json::json!([
+            {"id": "U1", "name": "mia", "real_name": "Mia Park", "profile": {"email": "MIA@example.com", "display_name": "mia"}},
+            {"id": "U2", "name": "ghost", "real_name": "Casper Ghost", "profile": {"email": "casper@example.com"}}
+        ]),
+    );
+    w(
+        "channels.json",
+        serde_json::json!([
+            {"id": "C1", "name": "general", "members": ["U1", "U2"], "topic": {"value": "Everything"}},
+            {"id": "C2", "name": "random", "members": ["U1"]}
+        ]),
+    );
+    w(
+        "general/2023-11-14.json",
+        serde_json::json!([
+            {"type": "message", "subtype": "channel_join", "user": "U2", "text": "<@U2> has joined the channel", "ts": "1699999000.000100"},
+            {"type": "message", "user": "U1", "text": "Plan for <#C2|random> &amp; <https://example.com|the site>, cc <@U2>", "ts": "1700000000.000200", "thread_ts": "1700000000.000200"},
+            {"type": "message", "user": "U2", "text": "on it", "ts": "1700000100.000300", "thread_ts": "1700000000.000200"},
+            {"type": "message", "user": "U2", "text": "", "ts": "1700000200.000400", "files": [{"name": "spec.pdf", "permalink": "https://slack.example/spec"}]}
+        ]),
+    );
+    w(
+        "random/2023-11-15.json",
+        serde_json::json!([{"type": "message", "user": "U1", "text": "hello random", "ts": "1700086400.000000"}]),
+    );
+    root.parent().unwrap().to_path_buf()
+}
+
+#[test]
+fn slack_markup_becomes_plain_text() {
+    use super::slack::{plain_text, ts_secs};
+    let names: HashMap<String, String> = [("U1".to_string(), "Mia Park".to_string())].into();
+    assert_eq!(
+        plain_text(
+            "hi <@U1> see <#C9|dev> and <https://a.b|docs> or <https://c.d> &lt;3 <!here>",
+            &names
+        ),
+        "hi @Mia Park see #dev and docs (https://a.b) or https://c.d <3 @here"
+    );
+    assert_eq!(
+        plain_text("<mailto:x@y.z|x@y.z> <@U7>", &names),
+        "x@y.z @U7"
+    );
+    assert_eq!(ts_secs("1700000000.000200"), 1_700_000_000);
+}
+
+#[test]
+fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
+    let mut a = app();
+    let mia = a.data.new_id();
+    a.data.members.push(Member {
+        id: mia,
+        name: "Someone Else".into(),
+        color: [1, 2, 3],
+        email: "mia@example.com".into(),
+        role: "Member".into(),
+        invited: false,
+        status_text: String::new(),
+    });
+    let before = a.data.members.len();
+    let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
+    let plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(plan.matched.get("U1"), Some(&mia), "matched by email");
+    assert_eq!(plan.missing, vec!["U2".to_string()]);
+    assert_eq!(plan.message_count(), 4, "the join notice isn't a message");
+    let (chans, msgs) = a.import_slack(&plan);
+    assert_eq!((chans, msgs), (2, 4));
+    assert_eq!(a.data.members.len(), before + 1, "Casper is added");
+    let casper = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Casper Ghost")
+        .unwrap();
+    assert_eq!(casper.email, "casper@example.com");
+    let casper = casper.id;
+    let general = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general" && c.kind == ChannelKind::Channel)
+        .unwrap()
+        .clone();
+    let plan_msg = general
+        .messages
+        .iter()
+        .find(|m| m.ts == 1_700_000_000)
+        .expect("the original time");
+    assert_eq!(plan_msg.author, mia);
+    assert_eq!(
+        plan_msg.text,
+        "Plan for #random & the site (https://example.com), cc @Casper Ghost"
+    );
+    assert_eq!(plan_msg.replies.len(), 1, "the reply is in its thread");
+    assert_eq!(plan_msg.replies[0].author, casper);
+    assert_eq!(plan_msg.replies[0].ts, 1_700_000_100);
+    let file = general
+        .messages
+        .iter()
+        .find(|m| m.ts == 1_700_000_200)
+        .unwrap();
+    assert_eq!(
+        file.text, "[spec.pdf] https://slack.example/spec",
+        "files as links"
+    );
+    let random = a.data.channels.iter().find(|c| c.name == "random").unwrap();
+    assert_eq!(random.topic, "");
+    assert!(random.members.contains(&mia) && random.members.contains(&a.data.me));
+    assert_eq!(a.unread(random), 0, "old messages coming in aren't unread");
+    // the same export again adds nothing
+    let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
+    let again = super::slack::plan(&a.data, users, channels);
+    assert!(again.missing.is_empty(), "Casper is a member now");
+    assert_eq!(a.import_slack(&again), (0, 0));
+}
+
+#[test]
+fn people_not_added_from_slack_come_in_under_my_name() {
+    let mut a = app();
+    let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    plan.create_missing = false;
+    let before = a.data.members.len();
+    a.import_slack(&plan);
+    assert_eq!(a.data.members.len(), before);
+    let general = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let m = general
+        .messages
+        .iter()
+        .find(|m| m.ts == 1_700_000_000)
+        .unwrap();
+    assert_eq!(m.author, a.data.me);
+    assert!(m.text.starts_with("Mia Park: Plan for"), "{}", m.text);
+}
+
+#[test]
+fn a_slack_export_zip_opens_and_anything_else_says_why() {
+    let dir = slack_export();
+    let zip = temp_folder("slackzip").with_extension("zip");
+    let ok = std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k", "--keepParent"])
+        .arg(dir.join("My Slack export"))
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let mut a = app();
+    a.open_slack_export(&zip);
+    match &a.modal {
+        Some(super::menus::Modal::SlackImport(p)) => assert_eq!(p.channels.len(), 2),
+        _ => panic!("the import dialog opens"),
+    }
+    a.modal = None;
+    let junk = temp_folder("junk").with_extension("zip");
+    std::fs::write(&junk, b"not a zip").unwrap();
+    a.open_slack_export(&junk);
+    assert!(a.modal.is_none());
+    assert!(a.toast.as_ref().unwrap().0.contains(".zip"));
+}

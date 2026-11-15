@@ -80,6 +80,8 @@ pub enum Modal {
         title: String,
         body: String,
     },
+    /// A Slack export read and waiting for Import (slack.rs).
+    SlackImport(Box<super::slack::SlackPlan>),
     Bookmark {
         title: String,
         url: String,
@@ -1137,6 +1139,7 @@ impl App {
             Modal::Reminder { .. } => tr("Create Reminder").into(),
             Modal::Trash => tr("Trash").into(),
             Modal::Unavailable { title, .. } => tr(title).to_string(),
+            Modal::SlackImport(_) => tr("Import from Slack").into(),
             Modal::Bookmark { .. } => tr("Add Bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
@@ -2217,6 +2220,10 @@ impl App {
                         *result = self.export_csv();
                     }
                 });
+                ui.add_space(6.0);
+                if ui.button(tr("Import from Slack")).clicked() {
+                    self.start_slack_import();
+                }
                 if !result.is_empty() {
                     ui.label(RichText::new(result.clone()).color(t.text2));
                 }
@@ -2617,6 +2624,11 @@ impl App {
                 if let Some(i) = purge {
                     self.data.extra.trash.remove(i);
                     self.dirty = true;
+                }
+            }
+            Modal::SlackImport(plan) => {
+                if self.slack_modal(ui, t, plan) {
+                    close = true;
                 }
             }
             Modal::Unavailable { body, .. } => {

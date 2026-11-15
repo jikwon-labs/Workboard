@@ -6492,3 +6492,55 @@ fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
         "and no longer waits to go up"
     );
 }
+
+#[test]
+fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
+    let mut h = Ui1::new();
+    h.app
+        .apply_chat(vec![super::chat::ChatAction::NewChannel("fresh".into())]);
+    h.app.section = Section::Chat;
+    h.settle();
+    assert!(!h.has("\u{2699}  Integrate"), "no button that does nothing");
+    // a Slack export zip, "chosen" in the file picker
+    let root = std::env::temp_dir().join(format!("wb-ui-slack-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"alex","real_name":"Alex Kim","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    super::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
+    h.click("\u{2728}  Import from Slack");
+    assert!(matches!(h.app.modal, Some(Modal::SlackImport(_))));
+    h.click("Import");
+    let design = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .expect("the channel came in");
+    assert_eq!(design.messages[0].text, "first sketch");
+    assert_eq!(design.messages[0].ts, 1_704_189_600);
+    h.click("OK");
+    assert!(h.app.modal.is_none());
+}

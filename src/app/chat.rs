@@ -696,9 +696,6 @@ impl App {
                         if hb(ui, "\u{1F4DD}  Ask").clicked() {
                             self.section = Section::Ai;
                         }
-                        if hb(ui, "\u{2699}  Integrate").clicked() {
-                            self.modal = Some(super::menus::unavailable("Integrations"));
-                        }
                         if hb(ui, "\u{260E}").on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
                         }
@@ -826,7 +823,7 @@ impl App {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
                                 if ui.add(egui::Button::new(tr("\u{2728}  Import from Slack")).min_size(vec2(cw, 32.0))).clicked() {
-                                    self.modal = Some(super::menus::unavailable("Import from Slack"));
+                                    self.start_slack_import();
                                 }
                                 ui.add_space(8.0);
                                 ui.separator();

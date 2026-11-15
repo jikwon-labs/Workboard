@@ -6,8 +6,9 @@
 #   scripts/wt new <name>      new worktree + branch <name> off origin/main,
 #                              with a copy-on-write copy of the main checkout's
 #                              build cache; prints the worktree path last
-#   scripts/wt verify          cargo test --workspace on the committed HEAD and
-#                              record it as verified (the pre-push hook checks)
+#   scripts/wt verify          test the committed HEAD (cargo and/or swift,
+#                              by what changed) and record it as verified
+#                              (the pre-push hook checks)
 #   scripts/wt ship            fetch, rebase onto origin/main, verify again if
 #                              HEAD changed, push HEAD to main
 #   scripts/wt rm <name> [--force]
@@ -73,12 +74,41 @@ cmd_hook_create() {
   cmd_new "$name"
 }
 
+# What to test follows what the branch changed since origin/main:
+#   ios/**            swift test in ios/WorkboardKit (UI tests too with WB_IOS_UI=1)
+#   *.md, docs/**     nothing
+#   anything else     cargo test --workspace
+# WB_VERIFY_ALL=1 runs every suite; a branch with no changes runs cargo.
 cmd_verify() {
-  local head
+  local head base files rust=0 ios=0 f
   [ -z "$(git status --porcelain)" ] || die "commit first: verify tests the committed HEAD"
   head=$(git rev-parse HEAD)
-  say "cargo test --workspace on $(git rev-parse --short HEAD)"
-  cargo test --workspace
+  base=$(git merge-base origin/main HEAD)
+  files=$(git diff --name-only "$base" HEAD)
+  [ -n "$files" ] || rust=1
+  while IFS= read -r f; do
+    case $f in
+      '') ;;
+      ios/*) ios=1 ;;
+      *.md|docs/*) ;;
+      *) rust=1 ;;
+    esac
+  done <<<"$files"
+  [ -n "${WB_VERIFY_ALL:-}" ] && { rust=1; ios=1; }
+  if [ $rust = 1 ]; then
+    say "cargo test --workspace on $(git rev-parse --short HEAD)"
+    cargo test --workspace
+  fi
+  if [ $ios = 1 ]; then
+    say "swift test (ios/WorkboardKit) on $(git rev-parse --short HEAD)"
+    swift test --package-path ios/WorkboardKit
+    if [ -n "${WB_IOS_UI:-}" ]; then
+      say "iOS UI tests on the simulator"
+      xcodebuild -quiet -project ios/Workboard.xcodeproj -scheme Workboard \
+        -destination "platform=iOS Simulator,name=${WB_IOS_SIM:-iPhone 17}" test
+    fi
+  fi
+  [ $rust = 1 ] || [ $ios = 1 ] || say "only docs changed; no tests to run"
   echo "$head" > "$(marker)"
   say "verified $(git rev-parse --short HEAD)"
 }
@@ -141,5 +171,5 @@ case $cmd in
   ship) cmd_ship ;;
   rm) cmd_rm "$@" ;;
   ls) cmd_ls ;;
-  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,/^set -euo/p' "$0" | sed -n 's/^# \{0,1\}//p'; exit 1 ;;
 esac

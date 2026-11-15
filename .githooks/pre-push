@@ -1,6 +1,6 @@
 #!/bin/sh
 # Claude Code sessions push to main only a fast-forward commit that
-# `scripts/wt verify` (cargo test --workspace) passed. `scripts/wt ship` does
+# `scripts/wt verify` passed. `scripts/wt ship` does
 # all of it. Pushes made by people (no CLAUDECODE) are not affected.
 [ -n "$CLAUDECODE" ] || exit 0
 marker="$(git rev-parse --path-format=absolute --git-dir)/wb-verified"
@@ -16,7 +16,7 @@ while read -r lref lsha rref rsha; do
       fi ;;
   esac
   if [ "$verified" != "$lsha" ]; then
-    echo "pre-push: $lsha has not passed cargo test --workspace. Run scripts/wt ship (or scripts/wt verify)." >&2
+    echo "pre-push: $lsha has not been verified. Run scripts/wt ship (or scripts/wt verify)." >&2
     exit 1
   fi
 done

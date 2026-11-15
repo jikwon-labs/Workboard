@@ -885,6 +885,64 @@ fn two_computers_work_through_a_server() {
 }
 
 #[test]
+fn a_teammates_message_through_the_server_becomes_a_notification() {
+    use super::notify::Kind;
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| a.data.extra.shared.is_some());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file() && std::time::Instant::now() < until {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    net_until(&mut a, "A sees the people list", |a| a.sync_rt.people.iter().any(|p| p.member == 3));
+    a.access_request(wb_net::Msg::CreateInvite { member: 3, role: wb_net::Role::Member });
+    net_until(&mut a, "invite code", |a| a.sync_rt.people.iter().any(|p| p.member == 3 && p.invite.is_some()));
+    let code = a.sync_rt.people.iter().find(|p| p.member == 3).unwrap().invite.clone().unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.connect_server(&addr, &code).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    assert_eq!(b.data.me, 3);
+
+    // A's window is in the background; what both have now is old news
+    a.notify_rt.away = true;
+    a.notify_tick(None);
+    b.notify_tick(None);
+    a.notify_rt.sent.clear();
+    b.notify_rt.sent.clear();
+
+    // Sam (B) writes to A directly, mentions A in #general and gives A a task
+    let dm = b.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members.contains(&1) && c.members.contains(&3)).unwrap().id;
+    let g = b.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    b.apply_chat(vec![ChatAction::Send { ch: dm, text: "are you free at 3?".into(), parent: None, files: vec![] }]);
+    b.apply_chat(vec![ChatAction::Send { ch: g, text: "@Me the build is green".into(), parent: None, files: vec![] }]);
+    let list = b.data.first_list().unwrap();
+    b.apply(Action::Add { list, name: "Review the copy".into(), status: None, priority: 0, assignees: vec![1], due: None, parent: None, open: false });
+    b.sync_note_change();
+    b.write_shared();
+    net_until(&mut a, "B's changes at A", |a| a.data.tasks.iter().any(|t| t.name == "Review the copy") && a.data.channels.iter().any(|c| c.id == dm && c.messages.iter().any(|m| m.text == "are you free at 3?")));
+    assert!(a.notify_rt.pending, "taking in the team's changes asks for a look");
+    a.notify_tick(None);
+    let sent = a.notify_rt.sent.clone();
+    let dm_note = sent.iter().find(|n| n.kind == Kind::Direct).unwrap_or_else(|| panic!("a direct message notice: {:?}", sent));
+    assert_eq!(dm_note.title, "Sam Lee");
+    assert_eq!(dm_note.body, "are you free at 3?");
+    assert_eq!(dm_note.target, format!("chat:{}", dm));
+    assert!(sent.iter().any(|n| n.kind == Kind::Mention && n.body == "@Me the build is green"), "{:?}", sent);
+    assert!(sent.iter().any(|n| n.kind == Kind::Assigned && n.body == "Review the copy"), "{:?}", sent);
+    assert_eq!(sent.len(), 3, "{:?}", sent);
+    // and nothing twice
+    a.notify_rt.pending = true;
+    a.notify_tick(None);
+    assert_eq!(a.notify_rt.sent.len(), 3);
+    // B is never told about what B did
+    b.notify_tick(None);
+    assert!(b.notify_rt.sent.is_empty(), "{:?}", b.notify_rt.sent);
+}
+
+#[test]
 fn a_bad_server_address_is_explained() {
     let mut a = app();
     assert!(a.connect_server("", "").is_err());

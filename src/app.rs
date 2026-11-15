@@ -17,6 +17,8 @@ mod account_tests;
 mod chat;
 mod comments;
 mod docs;
+#[cfg(test)]
+mod due_time_tests;
 mod files;
 mod hubs;
 mod huddle;
@@ -934,14 +936,18 @@ impl App {
     fn sort(&self, v: &mut [&Task]) {
         match self.sort_by {
             SortBy::Manual => v.sort_by_key(|t| t.order),
-            SortBy::DueDate => v.sort_by_key(|t| (t.due.is_none(), t.due, t.order)),
+            // by day, then by time within it (a day without one last)
+            SortBy::DueDate => v.sort_by_key(|t| (t.due.is_none(), t.due_moment(), t.order)),
             SortBy::Priority => {
                 v.sort_by_key(|t| (if t.priority == 0 { 9 } else { t.priority }, t.order))
             }
             SortBy::Name => v.sort_by_key(|t| t.name.to_lowercase()),
             SortBy::Created => v.sort_by_key(|t| std::cmp::Reverse(t.created)),
             SortBy::Updated => v.sort_by_key(|t| std::cmp::Reverse(t.updated)),
-            SortBy::StartDate => v.sort_by_key(|t| (t.start.is_none(), t.start, t.order)),
+            // a day without a time first (it starts with the day), then by time
+            SortBy::StartDate => {
+                v.sort_by_key(|t| (t.start.is_none(), t.start, t.start_at(), t.order))
+            }
             SortBy::Estimate => {
                 v.sort_by_key(|t| (t.estimate_min.is_none(), t.estimate_min, t.order))
             }
@@ -1432,6 +1438,7 @@ impl App {
             Action::Replace(mut new) => {
                 if let Some(idx) = self.data.tasks.iter().position(|t| t.id == new.id) {
                     let old = self.data.tasks[idx].clone();
+                    new.tidy_times(&old);
                     if old.status != new.status {
                         let m = format!(
                             "changed status from {} to {}",
@@ -1463,13 +1470,25 @@ impl App {
                         Self::log(&mut new, me, m);
                     }
                     // the history is shared with teammates: keep it in English
-                    let fmt_date = |d: NaiveDate| crate::i18n::in_english(|| fmt_date(d));
-                    if old.due != new.due {
-                        let s = new.due.map(fmt_date).unwrap_or_else(|| "none".into());
+                    // with a time: "Nov 16 at 2:30 PM"
+                    let fmt_date = |d: NaiveDate, time: Option<chrono::NaiveTime>| {
+                        crate::i18n::in_english(|| match time {
+                            Some(time) => format!("{} at {}", fmt_date(d), fmt_time(time)),
+                            None => fmt_date(d),
+                        })
+                    };
+                    if (old.due, old.due_at()) != (new.due, new.due_at()) {
+                        let s = new
+                            .due
+                            .map(|d| fmt_date(d, new.due_at()))
+                            .unwrap_or_else(|| "none".into());
                         Self::log(&mut new, me, format!("changed due date to {}", s));
                     }
-                    if old.start != new.start {
-                        let s = new.start.map(fmt_date).unwrap_or_else(|| "none".into());
+                    if (old.start, old.start_at()) != (new.start, new.start_at()) {
+                        let s = new
+                            .start
+                            .map(|d| fmt_date(d, new.start_at()))
+                            .unwrap_or_else(|| "none".into());
                         Self::log(&mut new, me, format!("changed start date to {}", s));
                     }
                     for aid in new.assignees.clone() {
@@ -1648,6 +1667,8 @@ impl App {
                     assignees,
                     start: None,
                     due,
+                    start_time: None,
+                    due_time: None,
                     tags: vec![],
                     checklist: vec![],
                     activity,
@@ -2687,8 +2708,24 @@ impl App {
                         .map(|(s, e)| (x, s, e))
                 })
                 .collect();
-            // longer spans first, so a bar keeps its line from day to day
-            day_tasks.sort_by_key(|(x, s, e)| (std::cmp::Reverse((*e - *s).num_days()), *s, x.id));
+            // the time a bar starts at: its start time, or a one-day task's due time
+            let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
+                Some(at) if x.start == Some(s) => Some(at),
+                _ if s == e => x.due_at(),
+                _ => None,
+            };
+            // longer spans first, so a bar keeps its line from day to day; in a
+            // day, ones without a time (all day) first, then by time
+            day_tasks.sort_by_key(|(x, s, e)| {
+                let at = bar_time(x, *s, *e);
+                (
+                    std::cmp::Reverse((*e - *s).num_days()),
+                    *s,
+                    at.is_some(),
+                    at,
+                    x.id,
+                )
+            });
             let max = ((ch - 30.0) / 22.0).floor().max(1.0) as usize;
             for (k, (task, s0, e0)) in day_tasks.iter().enumerate() {
                 if k >= max {
@@ -2774,8 +2811,19 @@ impl App {
                 if starts {
                     p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
                     let max_chars = ((cw - 24.0) / 6.5) as usize;
+                    let mut label_x = r.left() + 8.0;
+                    if let Some(at) = bar_time(task, *s0, *e0).filter(|_| d == *s0) {
+                        let g = p.layout_no_wrap(fmt_time(at), FontId::proportional(11.0), t.text2);
+                        let w = g.size().x;
+                        p.with_clip_rect(r).galley(
+                            pos2(label_x, r.center().y - g.size().y / 2.0),
+                            g,
+                            t.text2,
+                        );
+                        label_x += w + 4.0;
+                    }
                     p.with_clip_rect(r).text(
-                        r.left_center() + vec2(8.0, 0.0),
+                        pos2(label_x, r.center().y),
                         Align2::LEFT_CENTER,
                         truncate(&task.name, max_chars.max(4)),
                         FontId::proportional(12.0),
@@ -2801,9 +2849,10 @@ impl App {
             .data(|d| d.get_temp(egui::Id::new("cal_side_tab")))
             .unwrap_or(0);
         let unscheduled: Vec<&Task> = tasks.iter().filter(|x| x.due.is_none()).collect();
+        let now = now_local();
         let overdue: Vec<&Task> = tasks
             .iter()
-            .filter(|x| x.due.map_or(false, |d| d < td) && !self.data.is_closed(x))
+            .filter(|x| x.is_overdue_at(now) && !self.data.is_closed(x))
             .collect();
         let mut new_tab = tab;
         side_ui.horizontal(|ui| {
@@ -3518,17 +3567,23 @@ impl App {
                             TableCol::Due => {
                                 let dr = ui.interact(cell, id.with("d"), Sense::click());
                                 hover_bg(ui, &dr, cell.shrink(2.0), 4.0);
-                                if let Some(d) = task.due {
+                                if let Some(d) = fmt_due(task) {
                                     ui.painter().text(
                                         cell.left_center() + vec2(8.0, 0.0),
                                         Align2::LEFT_CENTER,
-                                        fmt_date(d),
+                                        d,
                                         FontId::proportional(13.0),
-                                        date_color(d, closed, &t),
+                                        due_color(task, closed, &t),
                                     );
                                 }
                                 if let Some(true) = popup(ui, &dr, id.with("dp"), 380.0, |ui| {
-                                    date_menu(ui, &t, id.with("dc"), &mut edited.due)
+                                    date_time_menu(
+                                        ui,
+                                        &t,
+                                        id.with("dc"),
+                                        &mut edited.due,
+                                        &mut edited.due_time,
+                                    )
                                 }) {
                                     changed = true;
                                 }
@@ -3719,13 +3774,18 @@ impl App {
                             .cloned()
                             .collect();
                         // Section order follows the original's My Work tabs: Today, Overdue, Next, Unscheduled, Done.
-                        let sections: [(&'static str, Vec<&Task>); 5] = [
-                            ("Today", mine.iter().filter(|x| x.due == Some(td)).collect()),
+                        // due today with a time that has passed counts as overdue
+                        let now = now_local();
+                        let mut sections: [(&'static str, Vec<&Task>); 5] = [
+                            (
+                                "Today",
+                                mine.iter()
+                                    .filter(|x| x.due == Some(td) && !x.is_overdue_at(now))
+                                    .collect(),
+                            ),
                             (
                                 "Overdue",
-                                mine.iter()
-                                    .filter(|x| x.due.map(|d| d < td).unwrap_or(false))
-                                    .collect(),
+                                mine.iter().filter(|x| x.is_overdue_at(now)).collect(),
                             ),
                             (
                                 "Next",
@@ -3739,6 +3799,8 @@ impl App {
                             ),
                             ("Done", done_mine.iter().collect()),
                         ];
+                        // today's in the order of their times
+                        sections[0].1.sort_by_key(|x| x.due_moment());
                         let avail = ui.available_width();
                         let card_w = ((avail - 20.0) / 2.0).max(320.0);
                         ui.horizontal_top(|ui| {
@@ -3829,13 +3891,13 @@ impl App {
                                                         FontId::proportional(11.5),
                                                         t.text3,
                                                     );
-                                                    if let Some(d) = task.due {
+                                                    if let Some(d) = fmt_due(task) {
                                                         ui.painter().text(
                                                             r.right_center() - vec2(6.0, 0.0),
                                                             Align2::RIGHT_CENTER,
-                                                            fmt_date(d),
+                                                            d,
                                                             FontId::proportional(12.0),
-                                                            date_color(d, false, &t),
+                                                            due_color(task, false, &t),
                                                         );
                                                     }
                                                     // the status circle ticks the task done (or opens it again)
@@ -4622,10 +4684,8 @@ impl App {
                                 // Dates
                                 ui.label(RichText::new(tr("\u{1F4C5}  Dates")).color(t.text2));
                                 ui.horizontal(|ui| {
-                                    let s_txt = task
-                                        .start
-                                        .map(fmt_date)
-                                        .unwrap_or_else(|| tr("Start").into());
+                                    let s_txt =
+                                        fmt_start(&task).unwrap_or_else(|| tr("Start").into());
                                     let r = ui.add(ghost(egui::Button::new(
                                         RichText::new(s_txt).color(if task.start.is_some() {
                                             t.text
@@ -4639,14 +4699,7 @@ impl App {
                                         });
                                     }
                                     popup(ui, &r, win_id.with("sd"), 380.0, |ui| {
-                                        dates_menu(
-                                            ui,
-                                            &t,
-                                            win_id.with("dates"),
-                                            &mut task.start,
-                                            &mut task.due,
-                                            &mut task.recur,
-                                        )
+                                        dates_menu(ui, &t, win_id.with("dates"), &mut task)
                                     });
                                     ui.label(RichText::new("\u{2192}").color(t.text3));
                                     let closed = statuses
@@ -4656,22 +4709,15 @@ impl App {
                                             matches!(s.kind, StatusKind::Closed | StatusKind::Done)
                                         })
                                         .unwrap_or(false);
-                                    let (d_txt, d_col) = match task.due {
-                                        Some(d) => (fmt_date(d), date_color(d, closed, &t)),
+                                    let (d_txt, d_col) = match fmt_due(&task) {
+                                        Some(d) => (d, due_color(&task, closed, &t)),
                                         None => (tr("Due").into(), t.text3),
                                     };
                                     let r = ui.add(ghost(egui::Button::new(
                                         RichText::new(d_txt).color(d_col),
                                     )));
                                     popup(ui, &r, win_id.with("dd"), 380.0, |ui| {
-                                        dates_menu(
-                                            ui,
-                                            &t,
-                                            win_id.with("dates2"),
-                                            &mut task.start,
-                                            &mut task.due,
-                                            &mut task.recur,
-                                        )
+                                        dates_menu(ui, &t, win_id.with("dates2"), &mut task)
                                     });
                                     if task.recur.is_some() {
                                         ui.label(
@@ -5051,14 +5097,14 @@ impl App {
                             if d.hovered() {
                                 ui.painter().rect_filled(dr, 5.0, t.hover);
                             }
-                            match s.due {
+                            match fmt_due(s) {
                                 Some(dd) => {
                                     ui.painter().text(
                                         dr.right_center() - vec2(4.0, 0.0),
                                         Align2::RIGHT_CENTER,
-                                        fmt_date(dd),
+                                        dd,
                                         FontId::proportional(12.0),
-                                        date_color(dd, closed, &t),
+                                        due_color(s, closed, &t),
                                     );
                                 }
                                 None if hover => {
@@ -5074,7 +5120,13 @@ impl App {
                             }
                             if let Some(true) =
                                 popup(ui, &d, win_id.with(("subduep", s.id)), 380.0, |ui| {
-                                    date_menu(ui, &t, win_id.with(("subduec", s.id)), &mut se.due)
+                                    date_time_menu(
+                                        ui,
+                                        &t,
+                                        win_id.with(("subduec", s.id)),
+                                        &mut se.due,
+                                        &mut se.due_time,
+                                    )
                                 })
                             {
                                 sub_changed = true;
@@ -6394,6 +6446,8 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.assignees != b.assignees
         || a.due != b.due
         || a.start != b.start
+        || a.due_time != b.due_time
+        || a.start_time != b.start_time
         || a.description != b.description
         || a.tags != b.tags
         || a.estimate_min != b.estimate_min

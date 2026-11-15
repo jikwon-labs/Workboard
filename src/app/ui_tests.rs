@@ -4590,6 +4590,81 @@ fn subtask_rows_set_due_make_top_level_and_delete() {
 }
 
 #[test]
+fn list_due_date_takes_a_time_removes_it_and_clearing_the_date_drops_it() {
+    let mut h = Ui1::new();
+    let name = "Write copy for landing page";
+    let cell = format!("Due date of {}", name);
+    // Add time: 9:00 on the date (today when there was none)
+    h.click(&cell);
+    h.click("Add time");
+    h.app.apply_actions();
+    let t = task_named(&h, name);
+    assert!(t.due.is_some());
+    assert_eq!(t.due_at(), chrono::NaiveTime::from_hms_opt(9, 0, 0));
+    // type another time and press Enter
+    h.click("Time of day");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("2:30 pm");
+    h.key(egui::Key::Enter);
+    h.app.apply_actions();
+    let t = task_named(&h, name).clone();
+    assert_eq!(t.due_at(), chrono::NaiveTime::from_hms_opt(14, 30, 0));
+    // shown next to the date in the row, and in the history
+    h.key(egui::Key::Escape);
+    let shown = fmt_due(&t).unwrap();
+    assert!(shown.ends_with("2:30 PM"), "{}", shown);
+    assert!(
+        !h.painted_text(&shown).is_empty(),
+        "the row shows {:?}",
+        shown
+    );
+    let line = &t.activity.last().unwrap().text;
+    assert!(
+        line.starts_with("changed due date to ") && line.ends_with(" at 2:30 PM"),
+        "{}",
+        line
+    );
+    // Remove time keeps the date
+    h.click(&cell);
+    h.click("Remove time");
+    h.app.apply_actions();
+    let t = task_named(&h, name);
+    assert!(t.due.is_some());
+    assert_eq!(t.due_at(), None);
+    assert_eq!(t.due_time, Some(None), "a removed time is written as null");
+    // with a time again, clearing the date drops the time too
+    h.click("Add time");
+    h.app.apply_actions();
+    assert!(task_named(&h, name).due_at().is_some());
+    h.click("Clear");
+    h.app.apply_actions();
+    let t = task_named(&h, name);
+    assert_eq!((t.due, t.due_time), (None, Some(None)));
+    // a new date afterwards starts without a time
+    h.click(&cell);
+    h.click("Tomorrow");
+    h.app.apply_actions();
+    let t = task_named(&h, name);
+    assert_eq!(t.due, Some(today() + Duration::days(1)));
+    assert_eq!(t.due_at(), None);
+}
+
+#[test]
+fn subtask_due_date_takes_a_time() {
+    let mut h = Ui1::new();
+    open_design_task(&mut h);
+    h.click("Subtask due Pick hero image");
+    h.click("Add time");
+    h.app.apply_actions();
+    let t = task_named(&h, "Pick hero image");
+    assert_eq!(t.due, Some(today()), "a time on no date sets today");
+    assert_eq!(t.due_at(), chrono::NaiveTime::from_hms_opt(9, 0, 0));
+    h.click("Remove time");
+    h.app.apply_actions();
+    assert_eq!(task_named(&h, "Pick hero image").due_at(), None);
+}
+
+#[test]
 fn task_window_picker_sets_parent_and_adds_existing_subtask() {
     let mut h = Ui1::new();
     let id = open_design_task(&mut h);
@@ -4891,6 +4966,40 @@ fn calendar_more_opens_the_days_tasks_and_spans_show_every_day() {
     h.click(&format!("More tasks on {}", td));
     h.click("Busy day 7");
     assert_eq!(h.app.open_task, Some(9007));
+}
+
+#[test]
+fn calendar_shows_due_times_and_orders_a_day_by_them() {
+    let mut h = Ui1::new();
+    let td = today();
+    let base = task_named(&h, "Set up analytics dashboard").clone();
+    // only these on the calendar, so none is hidden under "+N more"
+    for x in h.app.data.tasks.iter_mut() {
+        x.start = None;
+        x.due = None;
+    }
+    for (k, name, at) in [
+        (0, "Late call", Some(15)),
+        (1, "Early call", Some(9)),
+        (2, "All day", None),
+    ] {
+        let mut x = base.clone();
+        x.id = 9200 + k;
+        x.name = name.into();
+        x.start = None;
+        x.due = Some(td);
+        x.set_due_time(at.and_then(|hr| chrono::NaiveTime::from_hms_opt(hr, 0, 0)));
+        h.app.data.tasks.push(x);
+    }
+    h.click("View Calendar");
+    let y = |h: &Ui1, n: &str| rect_of(h, &format!("Calendar {} {}", n, td)).center().y;
+    assert!(
+        y(&h, "All day") < y(&h, "Early call"),
+        "a day without a time first"
+    );
+    assert!(y(&h, "Early call") < y(&h, "Late call"), "then by time");
+    assert!(!h.painted_text("9:00 AM").is_empty());
+    assert!(!h.painted_text("3:00 PM").is_empty());
 }
 
 #[test]

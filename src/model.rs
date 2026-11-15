@@ -1,7 +1,7 @@
 // Data model for the workspace: spaces, folders, lists, tasks and members.
 // Default statuses and priorities follow the values recorded in MECHANICS.md.
 
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -250,6 +250,77 @@ fn is_zero(n: &u64) -> bool {
     *n == 0
 }
 
+/// A time of day typed or saved as "14:30", "14:30:00", "2:30 pm", "2pm"
+/// or "14". None when it isn't one.
+pub fn parse_time_of_day(s: &str) -> Option<NaiveTime> {
+    let s = s.trim().to_lowercase().replace(' ', "");
+    let (s, half) = if let Some(x) = s.strip_suffix("am") {
+        (x, Some(false))
+    } else if let Some(x) = s.strip_suffix("pm") {
+        (x, Some(true))
+    } else {
+        (s.as_str(), None)
+    };
+    let mut parts = s.split(':');
+    let h: u32 = parts.next()?.parse().ok()?;
+    let m: u32 = match parts.next() {
+        Some(m) => m.parse().ok()?,
+        None => 0,
+    };
+    let sec: u32 = match parts.next() {
+        Some(x) => x.split('.').next()?.parse().ok()?,
+        None => 0,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    let h = match half {
+        Some(pm) if (1..=12).contains(&h) => h % 12 + if pm { 12 } else { 0 },
+        Some(_) => return None,
+        None => h,
+    };
+    NaiveTime::from_hms_opt(h, m, sec)
+}
+
+/// `Task::start_time` / `due_time` in the file: there (a time, or null once
+/// removed) or missing. A value this app can't read counts as removed
+/// rather than failing the whole file.
+fn time_slot<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<NaiveTime>>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(Some(v.and_then(|v| v.as_str().and_then(parse_time_of_day))))
+}
+
+/// Writes a time of day as "14:30".
+fn write_time_slot<S: serde::Serializer>(
+    t: &Option<Option<NaiveTime>>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    match t {
+        Some(Some(t)) => s.serialize_str(&t.format("%H:%M").to_string()),
+        _ => s.serialize_none(),
+    }
+}
+
+/// Sets a time slot: removing one that was never set leaves it missing.
+pub fn set_slot(slot: &mut Option<Option<NaiveTime>>, t: Option<NaiveTime>) {
+    *slot = match t {
+        Some(t) => Some(Some(
+            t.with_second(0)
+                .unwrap_or(t)
+                .with_nanosecond(0)
+                .unwrap_or(t),
+        )),
+        None => slot.map(|_| None),
+    };
+}
+
+/// The local date and time now.
+pub fn now_local() -> NaiveDateTime {
+    Local::now().naive_local()
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TimeEntry {
     pub start: i64,
@@ -280,6 +351,26 @@ pub struct Task {
     pub assignees: Vec<u64>,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
+    /// Time of day on `start` / `due`, when one was picked ("14:30"). Only
+    /// means something with its date: read them through `start_at` /
+    /// `due_at`. Missing until first set; removing a time writes null rather
+    /// than leaving it out, so it never goes back to missing and wb-sync
+    /// needs no default rule for it (like `Doc::wiki`). Older apps don't
+    /// read them and keep the date alone.
+    #[serde(
+        default,
+        deserialize_with = "time_slot",
+        serialize_with = "write_time_slot",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub start_time: Option<Option<NaiveTime>>,
+    #[serde(
+        default,
+        deserialize_with = "time_slot",
+        serialize_with = "write_time_slot",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub due_time: Option<Option<NaiveTime>>,
     pub tags: Vec<String>,
     pub checklist: Vec<CheckItem>,
     pub activity: Vec<Activity>,
@@ -351,6 +442,56 @@ pub fn fix_task_activity_ids(t: &mut Task) {
 }
 
 impl Task {
+    /// The time of day on the start date, if it has both.
+    pub fn start_at(&self) -> Option<NaiveTime> {
+        self.start.and(self.start_time.flatten())
+    }
+
+    /// The time of day on the due date, if it has both.
+    pub fn due_at(&self) -> Option<NaiveTime> {
+        self.due.and(self.due_time.flatten())
+    }
+
+    pub fn set_start_time(&mut self, t: Option<NaiveTime>) {
+        set_slot(&mut self.start_time, t);
+    }
+
+    pub fn set_due_time(&mut self, t: Option<NaiveTime>) {
+        set_slot(&mut self.due_time, t);
+    }
+
+    /// After an edit (`old` is the task before it): a date that was cleared
+    /// takes its time with it, and a date set where there was none doesn't
+    /// bring back a time left over from before.
+    pub fn tidy_times(&mut self, old: &Task) {
+        if self.due.is_none() || (old.due.is_none() && self.due_time == old.due_time) {
+            self.set_due_time(None);
+        }
+        if self.start.is_none() || (old.start.is_none() && self.start_time == old.start_time) {
+            self.set_start_time(None);
+        }
+    }
+
+    /// When the task is due: its due date at its due time, or without a time
+    /// the end of that day (the next midnight). Orders tasks by due date.
+    pub fn due_moment(&self) -> Option<NaiveDateTime> {
+        let d = self.due?;
+        Some(match self.due_at() {
+            Some(t) => d.and_time(t),
+            None => (d + Duration::days(1)).and_time(NaiveTime::MIN),
+        })
+    }
+
+    /// Past due at `now`: a day that has gone by, or today after its due time.
+    /// Says nothing about whether the task is closed.
+    pub fn is_overdue_at(&self, now: NaiveDateTime) -> bool {
+        self.due_moment().is_some_and(|m| m <= now)
+    }
+
+    pub fn is_overdue(&self) -> bool {
+        self.is_overdue_at(now_local())
+    }
+
     pub fn tracked_secs(&self, now: i64) -> i64 {
         let mut s: i64 = self.time_entries.iter().map(|e| e.end - e.start).sum();
         if let Some(st) = self.timer_started {
@@ -2256,6 +2397,8 @@ impl Data {
                 assignees: asg,
                 start,
                 due,
+                start_time: None,
+                due_time: None,
                 tags: tags.into_iter().map(String::from).collect(),
                 checklist: vec![],
                 activity: vec![Activity {
@@ -2307,6 +2450,8 @@ impl Data {
                 assignees: vec![2],
                 start: None,
                 due: None,
+                start_time: None,
+                due_time: None,
                 tags: vec![],
                 checklist: vec![],
                 activity: vec![],

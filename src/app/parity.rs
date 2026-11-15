@@ -230,7 +230,7 @@ fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
     };
     let week_start = td - Duration::days(back as i64);
     match due {
-        1 => t.due.map_or(false, |d| d < td) && !data.is_closed(t),
+        1 => t.is_overdue() && !data.is_closed(t),
         2 => t.due == Some(td),
         3 => t.due.map_or(false, |d| {
             d >= week_start && d < week_start + Duration::days(7)
@@ -2220,7 +2220,7 @@ impl App {
             "Date closed" => t.closed_at.map(day).unwrap_or_default(),
             "Date done" => t.done_at.map(day).unwrap_or_default(),
             "Date updated" => day(t.updated),
-            "Start date" => t.start.map(fmt_date).unwrap_or_default(),
+            "Start date" => fmt_start(t).unwrap_or_default(),
             "Time estimate" => t
                 .estimate_min
                 .map(|m| fmt_duration(m as i64 * 60))
@@ -3217,7 +3217,11 @@ impl App {
             text: format!(
                 "completed a {} repeat; next due {}",
                 r,
-                crate::i18n::in_english(|| fmt_date(next))
+                crate::i18n::in_english(|| match new.due_at() {
+                    // the time stays with the task
+                    Some(at) => format!("{} at {}", fmt_date(next), fmt_time(at)),
+                    None => fmt_date(next),
+                })
             ),
             comment: false,
             ..Default::default()

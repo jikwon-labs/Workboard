@@ -4414,14 +4414,22 @@ impl App {
         let dr = ui.interact(cols.due, id.with("du"), Sense::click());
         hover_bg(ui, &dr, cols.due.expand2(vec2(4.0, -6.0)), 4.0);
         name_it(&dr, &format!("Due date of {}", task.name));
-        match task.due {
+        match fmt_due(task) {
             Some(d) => {
-                ui.painter_at(cols.due).text(
-                    cols.due.left_center(),
-                    Align2::LEFT_CENTER,
-                    fmt_date(d),
-                    FontId::proportional(13.5),
-                    date_color(d, closed, &t),
+                // a date with a time is long for the column: a size smaller
+                let col = due_color(task, closed, &t);
+                let mut g = ui
+                    .painter()
+                    .layout_no_wrap(d.clone(), FontId::proportional(13.5), col);
+                if g.size().x > cols.due.width() - 4.0 {
+                    g = ui
+                        .painter()
+                        .layout_no_wrap(d, FontId::proportional(11.5), col);
+                }
+                ui.painter_at(cols.due).galley(
+                    pos2(cols.due.left(), cols.due.center().y - g.size().y / 2.0),
+                    g,
+                    col,
                 );
             }
             None => paint_calendar_icon(
@@ -4440,14 +4448,7 @@ impl App {
             );
         }
         if let Some(true) = popup(ui, &dr, id.with("dup"), 380.0, |ui| {
-            dates_menu(
-                ui,
-                &t,
-                id.with("dcal"),
-                &mut edited.start,
-                &mut edited.due,
-                &mut edited.recur,
-            )
+            dates_menu(ui, &t, id.with("dcal"), &mut edited)
         }) {
             changed = true;
         }
@@ -4962,12 +4963,12 @@ impl App {
                     x += 26.0;
                     b
                 };
-                let d_rect = match task.due {
+                let d_rect = match fmt_due(task) {
                     Some(d) => {
                         let g = p.layout_no_wrap(
-                            fmt_date(d),
+                            d,
                             FontId::proportional(12.5),
-                            date_color(d, closed, &t),
+                            due_color(task, closed, &t),
                         );
                         let b =
                             Rect::from_min_size(pos2(x, r.top()), vec2(g.size().x + 26.0, 22.0));
@@ -5033,14 +5034,7 @@ impl App {
                 hover_bg(ui, &dr, d_rect, 4.0);
                 name_it(&dr, &format!("Card due date {}", task.name));
                 if let Some(true) = popup(ui, &dr, cid.with("dup"), 380.0, |ui| {
-                    dates_menu(
-                        ui,
-                        &t,
-                        cid.with("dcal"),
-                        &mut edited.start,
-                        &mut edited.due,
-                        &mut edited.recur,
-                    )
+                    dates_menu(ui, &t, cid.with("dcal"), &mut edited)
                 }) {
                     changed = true;
                 }

@@ -1319,3 +1319,218 @@ fn team_settings_and_moved_lists_reach_everyone_once() {
     assert!(a.toast.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn deleting_a_folder_or_space_sends_its_lists_to_trash() {
+    let mut a = app();
+    let sid = a.data.spaces[0].id;
+    let fid = a.data.spaces[0].folders[0].id;
+    let web = a.data.spaces[0].folders[0].lists[0].id;
+    let n = a.data.tasks.iter().filter(|t| t.list_id == web).count();
+    assert!(n > 0);
+    a.do_delete(Target::Folder(fid));
+    assert!(!list_ids(&a).contains(&web));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List" && x.title == "Website Redesign").expect("folder's list in trash");
+    // the folder is gone, so it comes back in its space and says so
+    a.restore_trash(i);
+    assert!(a.data.spaces[0].lists.iter().any(|l| l.id == web));
+    assert_eq!(a.data.tasks.iter().filter(|t| t.list_id == web).count(), n);
+    assert!(a.toast.is_some());
+    // a whole space: each list goes to Trash and lands in the first space
+    let ideas_space = a.data.spaces[1].id;
+    let ideas = a.data.spaces[1].lists[0].id;
+    a.do_delete(Target::Space(ideas_space));
+    let i = a.data.extra.trash.iter().position(|x| x.title == "Ideas").expect("space's list in trash");
+    a.restore_trash(i);
+    assert!(a.data.spaces.iter().find(|s| s.id == sid).unwrap().lists.iter().any(|l| l.id == ideas));
+}
+
+#[test]
+fn a_restored_list_keeps_its_settings_and_folder() {
+    let mut a = app();
+    let fid = a.data.spaces[0].folders[0].id;
+    let mkt = a.data.spaces[0].folders[0].lists[1].id;
+    {
+        let l = a.data.list_item_mut(mkt).unwrap();
+        l.color = Some([1, 2, 3]);
+        l.description = "about".into();
+        l.priority = 2;
+    }
+    a.do_delete(Target::List(mkt));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List").unwrap();
+    a.restore_trash(i);
+    let f = a.data.spaces[0].folders.iter().find(|f| f.id == fid).unwrap();
+    let l = f.lists.iter().find(|l| l.id == mkt).expect("back in its folder");
+    assert_eq!((l.color, l.description.as_str(), l.priority), (Some([1, 2, 3]), "about", 2));
+    // an entry saved by an older version (space id, list, tasks) still restores
+    let sid = a.data.spaces[1].id;
+    let old = ListItem { id: 9999, name: "Old one".into(), ..Default::default() };
+    let payload = serde_json::to_string(&(sid, old, Vec::<Task>::new())).unwrap();
+    a.data.extra.trash.push(TrashItem { id: 1, kind: "List".into(), title: "Old one".into(), deleted: 0, payload });
+    let i = a.data.extra.trash.len() - 1;
+    a.restore_trash(i);
+    assert!(a.data.spaces[1].lists.iter().any(|l| l.id == 9999));
+}
+
+#[test]
+fn a_restored_task_whose_list_is_gone_finds_a_home() {
+    let mut a = app();
+    let ideas = a.data.spaces[1].lists[0].id;
+    let id = add_task(&mut a, ideas, "Lonely");
+    a.apply(Action::DeleteTask(id));
+    a.do_delete(Target::List(ideas));
+    // the list is in Trash: it comes back with the task
+    let i = a.data.extra.trash.iter().position(|x| x.title == "Lonely").unwrap();
+    a.restore_trash(i);
+    assert!(list_ids(&a).contains(&ideas));
+    assert_eq!(a.task(id).unwrap().list_id, ideas);
+    // the list is gone for good: the task goes to the first list
+    a.apply(Action::DeleteTask(id));
+    a.do_delete(Target::List(ideas));
+    a.data.extra.trash.retain(|x| x.kind != "List");
+    let i = a.data.extra.trash.iter().position(|x| x.title == "Lonely").unwrap();
+    a.restore_trash(i);
+    assert_eq!(a.task(id).unwrap().list_id, a.data.first_list().unwrap());
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("list is gone")));
+}
+
+#[test]
+fn renaming_or_deleting_a_status_carries_its_tasks() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Moving");
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "in progress".into();
+    a.apply(Action::Replace(t));
+    a.data.extra.automations.push(Automation { id: 5, enabled: true, trigger_status: "in progress".into(), action: "priority".into(), value: "1".into(), list: None });
+    let si = 0;
+    let mut orig: Vec<Option<String>> = a.data.spaces[si].statuses.iter().map(|s| Some(s.name.clone())).collect();
+    let i = a.data.spaces[si].statuses.iter().position(|s| s.name == "in progress").unwrap();
+    // a rename that matches another status waits, so tasks never merge
+    a.data.spaces[si].statuses[i].name = "to do".into();
+    a.commit_status_renames(si, &mut orig);
+    assert_eq!(a.task(id).unwrap().status, "in progress");
+    a.data.spaces[si].statuses[i].name = "doing".into();
+    a.commit_status_renames(si, &mut orig);
+    assert_eq!(a.task(id).unwrap().status, "doing");
+    // the other space still has "in progress", so the automation stays
+    assert_eq!(a.data.extra.automations[0].trigger_status, "in progress");
+    // deleting it moves the task to a status of the same kind (or the first)
+    let st = a.data.spaces[si].statuses.remove(i);
+    let old = orig.remove(i).unwrap();
+    a.move_off_status(si, &old, st.kind, &orig);
+    let t = a.task(id).unwrap();
+    let kind_match = a.data.spaces[si].statuses.iter().find(|s| s.kind == st.kind).map(|s| s.name.clone()).unwrap_or_else(|| a.data.spaces[si].statuses[0].name.clone());
+    assert_eq!(t.status, kind_match);
+    assert!(t.activity.iter().any(|x| x.text.contains("changed status from DOING")));
+}
+
+#[test]
+fn archived_subtasks_hide_and_my_subtasks_show_on_personal_views() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let parent = add_task(&mut a, list, "Parent");
+    let me = a.data.me;
+    a.apply(Action::Add { list, name: "Mine sub".into(), status: None, priority: 0, assignees: vec![me], due: Some(today()), parent: Some(parent), open: false });
+    let sub = a.data.tasks.iter().find(|t| t.name == "Mine sub").unwrap().id;
+    a.loc = Location::MyTasks;
+    assert!(a.filtered().iter().any(|t| t.id == sub), "my subtask on Assigned to me");
+    a.loc = Location::TodayOverdue;
+    assert!(a.filtered().iter().any(|t| t.id == sub), "my subtask on Today & Overdue");
+    a.set_archived(&[sub], true);
+    assert!(a.subtasks(parent).is_empty(), "archived subtask hidden");
+    assert!(!a.filtered().iter().any(|t| t.id == sub));
+    // the archived view still reaches it
+    a.loc = Location::List(list);
+    a.filter.archived = true;
+    assert!(a.filtered().iter().any(|t| t.id == sub));
+    assert!(!a.task_visible(a.task(sub).unwrap()));
+}
+
+#[test]
+fn tasks_made_on_today_and_overdue_stay_there() {
+    let mut a = app();
+    a.loc = Location::TodayOverdue;
+    let g = Group { key: "all".into(), label: String::new(), color: Color32::WHITE, status: None, priority: None, assignee: None, due: None, tasks: vec![] };
+    a.add_from_group(&g, "Due now".into(), false);
+    a.apply_actions();
+    let t = a.data.tasks.iter().find(|t| t.name == "Due now").unwrap();
+    assert!(t.assignees.contains(&a.data.me));
+    assert_eq!(t.due, Some(today()));
+    assert!(a.filtered().iter().any(|x| x.name == "Due now"));
+    a.open_quick_add(None);
+    let qa = a.quick_add.as_ref().unwrap();
+    assert_eq!((qa.assignees.clone(), qa.due), (vec![a.data.me], Some(today())));
+}
+
+#[test]
+fn first_list_skips_archived_spaces() {
+    let mut a = app();
+    a.data.spaces[0].archived = true;
+    let ideas = a.data.spaces[1].lists[0].id;
+    assert_eq!(a.data.first_list(), Some(ideas));
+    a.loc = Location::Everything;
+    assert_eq!(a.default_list(), Some(ideas));
+}
+
+#[test]
+fn going_somewhere_clears_the_selection_and_overview() {
+    let mut a = app();
+    a.selected.insert(1);
+    let sid = a.data.spaces[0].id;
+    a.apply(Action::Go(Location::Space(sid)));
+    assert!(a.selected.is_empty());
+    a.view = ViewKind::Overview;
+    a.apply(Action::Go(Location::Everything));
+    assert!(a.view == ViewKind::List);
+}
+
+#[test]
+fn a_recurring_task_reopens_without_a_date_done() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Repeat me");
+    let mut t = a.task(id).unwrap().clone();
+    t.due = Some(today());
+    t.recur = Some("daily".into());
+    a.apply(Action::Replace(t));
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let t = a.task(id).unwrap();
+    assert_eq!(t.status, "to do");
+    assert!(t.done_at.is_none() && t.closed_at.is_none());
+}
+
+#[test]
+fn csv_export_reads_back_with_commas_quotes_and_line_breaks() {
+    let mut a = app();
+    let list = a.data.spaces[1].lists[0].id;
+    a.loc = Location::List(list);
+    let names = ["Plain", "Commas, and more", "Say \"hi\"", "Two\nlines"];
+    for n in names {
+        add_task(&mut a, list, n);
+    }
+    let text = a.csv_text();
+    let dir = std::env::temp_dir().join(format!("wb-csv-{}", now_ts()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("round.csv");
+    std::fs::write(&f, &text).unwrap();
+    let before = a.data.tasks.len();
+    let msg = a.import_csv(f.to_str().unwrap());
+    a.apply_actions();
+    assert!(msg.contains(&format!("Imported {}", a.data.tasks.len() - before)), "{}", msg);
+    assert!(a.data.tasks.len() - before >= names.len());
+    let new: Vec<String> = a.data.tasks[before..].iter().map(|t| t.name.clone()).collect();
+    for n in names {
+        assert!(new.iter().any(|x| x == n), "{:?} missing from {:?}", n, new);
+    }
+    assert_eq!(super::menus::parse_csv("a, \"b,\"\"c\"\"\" ,d\n"), vec![vec!["a".to_string(), "b,\"c\"".into(), "d".into()]]);
+}
+
+#[test]
+fn a_login_name_starting_with_a_non_ascii_letter() {
+    assert_eq!(Data::display_user("\u{e9}va"), "\u{c9}va");
+    assert_eq!(Data::display_user("\u{c9c0}\u{c6d0}"), "\u{c9c0}\u{c6d0}");
+    assert_eq!(Data::display_user(""), "Me");
+}

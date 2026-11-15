@@ -591,7 +591,8 @@ impl App {
     }
 
     fn subtasks(&self, id: u64) -> Vec<&Task> {
-        let mut v: Vec<&Task> = self.data.tasks.iter().filter(|t| t.parent == Some(id)).collect();
+        // archived subtasks only show with the Archived filter on
+        let mut v: Vec<&Task> = self.data.tasks.iter().filter(|t| t.parent == Some(id) && (self.filter.archived || !t.archived)).collect();
         v.sort_by_key(|t| t.order);
         v
     }
@@ -604,7 +605,14 @@ impl App {
             .data
             .tasks
             .iter()
-            .filter(|t| t.parent.is_none())
+            // subtasks show nested under their parent, except: my assigned
+            // subtasks on the personal views, and archived subtasks of a
+            // task that isn't archived when the Archived filter is on
+            .filter(|t| {
+                t.parent.is_none()
+                    || (matches!(self.loc, Location::MyTasks | Location::TodayOverdue) && t.assignees.contains(&self.data.me))
+                    || (self.filter.archived && t.archived && !t.parent.and_then(|p| self.task(p)).is_some_and(|p| p.archived))
+            })
             .filter(|t| match self.loc {
                 Location::MyTasks => t.assignees.contains(&self.data.me),
                 Location::TodayOverdue => t.assignees.contains(&self.data.me) && t.due.map(|d| d <= today()).unwrap_or(false) && !self.data.is_closed(t),
@@ -620,6 +628,12 @@ impl App {
             .collect();
         self.sort(&mut v);
         v
+    }
+
+    /// Not archived, not in an archived list or space and not in someone
+    /// else's private space: the tasks personal counts and Home show.
+    pub(crate) fn task_visible(&self, t: &Task) -> bool {
+        !t.archived && !self.data.list_archived(t.list_id) && !self.data.space_of_list(t.list_id).and_then(|s| s.private_owner).is_some_and(|o| o != self.data.me)
     }
 
     fn sort(&self, v: &mut [&Task]) {
@@ -749,7 +763,7 @@ impl App {
     fn default_list(&self) -> Option<u64> {
         match self.loc {
             Location::List(id) => Some(id),
-            _ => self.data.lists_in(self.loc).and_then(|v| v.first().copied()).or_else(|| self.data.first_list()),
+            _ => self.data.lists_in(self.loc).and_then(|v| v.into_iter().find(|l| !self.data.list_archived(*l))).or_else(|| self.data.first_list()),
         }
     }
 
@@ -759,16 +773,20 @@ impl App {
             if let Some(a) = g.assignee {
                 assignees.push(a);
             }
-            if self.loc == Location::MyTasks && !assignees.contains(&self.data.me) {
+            // on the personal views a new task is mine (and due today on Today &
+            // Overdue), or it would leave the page as soon as it's made
+            let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
+            if personal && !assignees.contains(&self.data.me) {
                 assignees.push(self.data.me);
             }
+            let due = if self.loc == Location::TodayOverdue { g.due.filter(|d| *d <= today()).or(Some(today())) } else { g.due };
             self.actions.push(Action::Add {
                 list,
                 name,
                 status: g.status.as_ref().map(|s| s.name.clone()),
                 priority: g.priority.unwrap_or(0),
                 assignees,
-                due: g.due,
+                due,
                 parent: None,
                 open,
             });
@@ -978,6 +996,12 @@ impl App {
                 if matches!(l, Location::Space(_)) && self.loc != l && !self.data.extra.hidden_views.iter().any(|h| h == "Overview") {
                     // spaces open on their Overview, as in the original
                     self.view = ViewKind::Overview;
+                } else if self.view == ViewKind::Overview && !matches!(l, Location::Space(_) | Location::Folder(_)) {
+                    // Overview only covers a space or a folder
+                    self.view = ViewKind::List;
+                }
+                if self.loc != l {
+                    self.selected.clear();
                 }
                 self.loc = l;
                 self.open_task = None;
@@ -1126,11 +1150,18 @@ impl App {
                 if let Some(l) = self.data.lists_in(Location::Space(id)) {
                     lists = l;
                 }
+                // the lists inside go to Trash one by one, like deleting a list
+                for &l in &lists {
+                    self.trash_list(l);
+                }
                 self.data.spaces.retain(|s| s.id != id);
             }
             Target::Folder(id) => {
                 if let Some(l) = self.data.lists_in(Location::Folder(id)) {
                     lists = l;
+                }
+                for &l in &lists {
+                    self.trash_list(l);
                 }
                 for s in &mut self.data.spaces {
                     s.folders.retain(|f| f.id != id);
@@ -1138,13 +1169,7 @@ impl App {
             }
             Target::List(id) => {
                 lists = vec![id];
-                if let Some(sp) = self.data.space_of_list(id) {
-                    let sid = sp.id;
-                    let item = ListItem { id, name: self.data.list_name(id), ..Default::default() };
-                    let tasks: Vec<Task> = self.data.tasks.iter().filter(|t| t.list_id == id).cloned().collect();
-                    let tid = self.data.new_id();
-                    self.data.extra.trash.push(TrashItem { id: tid, kind: "List".into(), title: item.name.clone(), deleted: now_ts(), payload: serde_json::to_string(&(sid, item, tasks)).unwrap_or_default() });
-                }
+                self.trash_list(id);
                 for s in &mut self.data.spaces {
                     s.lists.retain(|l| l.id != id);
                     for f in &mut s.folders {
@@ -1167,11 +1192,89 @@ impl App {
         self.dirty = true;
     }
 
+    /// Passes status renames made in the status editor on to the space's tasks
+    /// (and to automations no other space's status uses). `orig` holds the
+    /// name tasks carry for each status; a rename waits while the new name
+    /// matches another status, so two statuses' tasks never merge.
+    fn commit_status_renames(&mut self, si: usize, orig: &mut [Option<String>]) {
+        let Some(sp) = self.data.spaces.get(si) else { return };
+        let sid = sp.id;
+        let names: Vec<String> = sp.statuses.iter().map(|s| s.name.clone()).collect();
+        let mut map: Vec<(String, String)> = vec![];
+        for (i, o) in orig.iter_mut().enumerate() {
+            let (Some(old), Some(new)) = (o.clone(), names.get(i)) else { continue };
+            if *new == old || new.trim().is_empty() || names.iter().enumerate().any(|(j, n)| j != i && n == new) {
+                continue;
+            }
+            map.push((old, new.clone()));
+            *o = Some(new.clone());
+        }
+        if map.is_empty() {
+            return;
+        }
+        let lists = self.data.lists_in(Location::Space(sid)).unwrap_or_default();
+        for t in self.data.tasks.iter_mut().filter(|t| lists.contains(&t.list_id)) {
+            if let Some((_, new)) = map.iter().find(|(old, _)| *old == t.status) {
+                t.status = new.clone();
+            }
+        }
+        for (old, new) in &map {
+            let elsewhere = self.data.spaces.iter().any(|s| s.id != sid && s.statuses.iter().any(|x| x.name == *old));
+            if !elsewhere {
+                for a in self.data.extra.automations.iter_mut().filter(|a| a.trigger_status == *old) {
+                    a.trigger_status = new.clone();
+                }
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Moves the tasks of a status deleted in the status editor to a status of
+    /// the same kind (else the first one) and notes it in each task's history.
+    fn move_off_status(&mut self, si: usize, old: &str, kind: StatusKind, orig: &[Option<String>]) {
+        let Some(sp) = self.data.spaces.get(si) else { return };
+        let sid = sp.id;
+        // the name tasks carry for the status they move to
+        let carried = |i: usize| orig.get(i).cloned().flatten().unwrap_or_else(|| sp.statuses[i].name.clone());
+        let Some(to_i) = sp.statuses.iter().position(|s| s.kind == kind).or(if sp.statuses.is_empty() { None } else { Some(0) }) else { return };
+        let to = carried(to_i);
+        let shown = sp.statuses[to_i].name.clone();
+        let lists = self.data.lists_in(Location::Space(sid)).unwrap_or_default();
+        let me = self.data.me;
+        for t in self.data.tasks.iter_mut().filter(|t| lists.contains(&t.list_id) && t.status == old) {
+            t.status = to.clone();
+            Self::log(t, me, format!("changed status from {} to {}", old.to_uppercase(), shown.to_uppercase()));
+        }
+        self.dirty = true;
+    }
+
+    /// Puts a list, with its settings, place and tasks, into Trash (the list
+    /// itself is removed by the caller).
+    fn trash_list(&mut self, id: u64) {
+        let Some(sp) = self.data.space_of_list(id) else { return };
+        let space = sp.id;
+        let folder = sp.folders.iter().find(|f| f.lists.iter().any(|l| l.id == id)).map(|f| f.id);
+        let Some(list) = self.data.list_item(id).cloned() else { return };
+        let tasks: Vec<Task> = self.data.tasks.iter().filter(|t| t.list_id == id).cloned().collect();
+        let title = list.name.clone();
+        let payload = serde_json::to_string(&ListTrash { space, folder, list, tasks }).unwrap_or_default();
+        let tid = self.data.new_id();
+        self.data.extra.trash.push(TrashItem { id: tid, kind: "List".into(), title, deleted: now_ts(), payload });
+    }
+
     // ---------------------------------------------------------------- top bar
 
     fn open_quick_add(&mut self, due: Option<NaiveDate>) {
         if let Some(list) = self.default_list() {
-            self.quick_add = Some(QuickAdd { list, due, ..Default::default() });
+            let mut qa = QuickAdd { list, due, ..Default::default() };
+            // made from My Tasks / Today & Overdue: mine (and due today there)
+            if self.section == Section::Home && matches!(self.loc, Location::MyTasks | Location::TodayOverdue) {
+                qa.assignees.push(self.data.me);
+                if self.loc == Location::TodayOverdue && qa.due.is_none() {
+                    qa.due = Some(today());
+                }
+            }
+            self.quick_add = Some(qa);
         }
     }
 
@@ -1501,7 +1604,7 @@ impl App {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button(tr("Export CSV")).on_hover_text(tr("Save the tasks in this view as a CSV file")).clicked() {
-                    self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
+                    self.toast = Some((self.export_csv(), now_ts()));
                 }
                 let undated = tasks.iter().filter(|x| x.start.is_none() && x.due.is_none()).count();
                 if undated > 0 {
@@ -1640,13 +1743,23 @@ impl App {
         let t = self.t();
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let now = now_ts();
-        let widths = [44.0, 300.0, 130.0, 110.0, 110.0, 110.0, 150.0, 100.0, 110.0];
+        let mut widths = [44.0, 300.0, 130.0, 110.0, 110.0, 110.0, 150.0, 100.0, 110.0];
+        // columns of ClickApps that are off take no room
+        let apps = self.data.extra.apps.clone();
+        for (i, on) in [(5, apps.priorities), (6, apps.tags), (7, apps.time_tracking)] {
+            if !on {
+                widths[i] = 0.0;
+            }
+        }
         let heads = ["#", "Name", "Status", "Assignee", "Due date", "Priority", "Tags", "Time tracked", "Date created"];
         egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
             let total: f32 = widths.iter().sum();
             let (hr, _) = ui.allocate_exact_size(vec2(total, 30.0), Sense::hover());
             let mut x = hr.left();
             for (i, h) in heads.iter().enumerate() {
+                if widths[i] == 0.0 {
+                    continue;
+                }
                 ui.painter().text(pos2(x + 8.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(12.0), t.text3);
                 ui.painter().vline(x, hr.y_range(), Stroke::new(0.5, t.border));
                 x += widths[i];
@@ -1711,7 +1824,7 @@ impl App {
                 }
                 // priority
                 let pr = ui.interact(cells[4], id.with("p"), Sense::click());
-                if task.priority > 0 {
+                if task.priority > 0 && apps.priorities {
                     paint_flag(ui.painter(), cells[4].left_center() + vec2(10.0, 0.0), priority_color(task.priority, &t), 12.0);
                     ui.painter().text(cells[4].left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, tr(PRIORITIES[task.priority as usize].label), FontId::proportional(13.0), t.text);
                 }
@@ -1719,7 +1832,7 @@ impl App {
                     changed = true;
                 }
                 // tags
-                {
+                if apps.tags {
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cells[5].shrink2(vec2(8.0, 6.0))).layout(Layout::left_to_right(Align::Center)));
                     child.set_clip_rect(cells[5]);
                     for tag in &task.tags {
@@ -1727,7 +1840,7 @@ impl App {
                     }
                 }
                 let secs = task.tracked_secs(now);
-                if secs > 0 {
+                if secs > 0 && apps.time_tracking {
                     ui.painter().text(cells[6].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_duration(secs), FontId::proportional(13.0), t.text2);
                 }
                 let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or(td_default());
@@ -1771,8 +1884,8 @@ impl App {
                 ui.label(RichText::new(chrono::Local::now().text("%A, %B %-d")).color(t.text2));
                 ui.add_space(18.0);
                 let td = today();
-                let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&self.data.me) && !self.data.is_closed(x)).cloned().collect();
-                let done_mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&self.data.me) && self.data.is_closed(x)).cloned().collect();
+                let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&self.data.me) && self.task_visible(x) && !self.data.is_closed(x)).cloned().collect();
+                let done_mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&self.data.me) && self.task_visible(x) && self.data.is_closed(x)).cloned().collect();
                 // Section order follows the original's My Work tabs: Today, Overdue, Next, Unscheduled, Done.
                 let sections: [(&'static str, Vec<&Task>); 5] = [
                     ("Today", mine.iter().filter(|x| x.due == Some(td)).collect()),
@@ -1831,13 +1944,13 @@ impl App {
                         ui.add_space(6.0);
                         let spaces = self.data.spaces.clone();
                         for s in &spaces {
-                            if s.archived {
+                            if s.archived || s.private_owner.is_some_and(|o| o != self.data.me) {
                                 continue;
                             }
                             let lists: Vec<ListItem> = s.lists.iter().cloned().chain(s.folders.iter().flat_map(|f| f.lists.iter().cloned())).filter(|l| !l.archived).collect();
                             for l in lists {
-                                let total = self.data.tasks.iter().filter(|x| x.list_id == l.id && x.parent.is_none()).count();
-                                let done = self.data.tasks.iter().filter(|x| x.list_id == l.id && x.parent.is_none() && self.data.is_closed(x)).count();
+                                let total = self.data.tasks.iter().filter(|x| x.list_id == l.id && x.parent.is_none() && !x.archived).count();
+                                let done = self.data.tasks.iter().filter(|x| x.list_id == l.id && x.parent.is_none() && !x.archived && self.data.is_closed(x)).count();
                                 let (r, resp) = ui.allocate_exact_size(vec2(card_w - 34.0, 34.0), Sense::click());
                                 if resp.hovered() {
                                     ui.painter().rect_filled(r, 6.0, t.hover);
@@ -2060,7 +2173,7 @@ impl App {
                                     self.toast = Some((tr("Link copied").into(), now_ts()));
                                     close_popup(ui);
                                 }
-                                if ui.button(tr("Start timer")).clicked() {
+                                if ui.button(if task.timer_started.is_some() { tr("Stop timer") } else { tr("Start timer") }).clicked() {
                                     self.actions.push(Action::ToggleTimer(tid));
                                     close_popup(ui);
                                 }
@@ -2226,7 +2339,8 @@ impl App {
                         if !one_col || apps.time_tracking {
                             ui.end_row();
                         }
-                        // Tags
+                        // Tags (when the Tags ClickApp is on)
+                        if apps.tags {
                         ui.label(RichText::new(tr("\u{1F3F7}  Tags")).color(t.text2));
                         ui.horizontal_wrapped(|ui| {
                             ui.set_max_width(field_w * 2.0);
@@ -2249,6 +2363,7 @@ impl App {
                             }
                         });
                         ui.end_row();
+                        }
                         // custom fields, two per row
                         if apps.custom_fields {
                             for (i, f) in fields.iter().enumerate() {
@@ -2653,7 +2768,10 @@ impl App {
                 Target::Workspace => tr("workspace").into(),
             };
             egui::Window::new(tr("Delete")).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
-                ui.label(trf!("Delete {}? Everything inside it will be removed.", what));
+                ui.label(match tg {
+                    Target::Space(_) | Target::Folder(_) => trf!("Delete {}? Its lists and their tasks go to Trash, where you can restore them.", what),
+                    _ => trf!("Delete {}? It goes to Trash with everything inside it, where you can restore it.", what),
+                });
                 ui.horizontal(|ui| {
                     if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() {
                         self.do_delete(tg);
@@ -2671,6 +2789,12 @@ impl App {
             if let Some(si) = self.data.spaces.iter().position(|s| s.id == sid) {
                 let title = trf!("Statuses - {}", self.data.spaces[si].name);
                 let mut changed = false;
+                // the names tasks carry for each status (None: added here), so
+                // renames can be passed on to the tasks when an edit is done
+                let orig_id = egui::Id::new(("status_orig", sid));
+                let mut orig: Vec<Option<String>> = ctx.data(|d| d.get_temp(orig_id)).filter(|o: &Vec<Option<String>>| o.len() == self.data.spaces[si].statuses.len()).unwrap_or_else(|| self.data.spaces[si].statuses.iter().map(|s| Some(s.name.clone())).collect());
+                let mut commit = false;
+                let mut removed: Option<(String, StatusKind)> = None;
                 egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
                     let sts = &mut self.data.spaces[si].statuses;
                     let mut remove = None;
@@ -2693,8 +2817,12 @@ impl App {
                                     }
                                 });
                             });
-                            if ui.add(egui::TextEdit::singleline(&mut st.name).desired_width(160.0)).changed() {
+                            let name_edit = ui.add(egui::TextEdit::singleline(&mut st.name).desired_width(160.0));
+                            if name_edit.changed() {
                                 changed = true;
+                            }
+                            if name_edit.lost_focus() {
+                                commit = true;
                             }
                             egui::ComboBox::from_id_salt(("kind", i)).selected_text(tr(kind_label(st.kind))).width(90.0).show_ui(ui, |ui| {
                                 for k in [StatusKind::Open, StatusKind::Custom, StatusKind::Done, StatusKind::Closed] {
@@ -2709,16 +2837,32 @@ impl App {
                         });
                     }
                     if let Some(i) = remove {
-                        sts.remove(i);
+                        let st = sts.remove(i);
+                        let old = orig.remove(i).unwrap_or(st.name);
+                        removed = Some((old, st.kind));
                         changed = true;
                     }
                     if ui.button(tr("+ Add status")).clicked() {
                         let c = STATUS_PALETTE[(sts.len() * 2 + 1) % STATUS_PALETTE.len()];
                         let pos = sts.iter().position(|s| matches!(s.kind, StatusKind::Done | StatusKind::Closed)).unwrap_or(sts.len());
                         sts.insert(pos, Status::new("new status", c, StatusKind::Custom));
+                        orig.insert(pos, None);
                         changed = true;
                     }
-                    ui.label(RichText::new(tr("Tasks keep their status name; renamed statuses show as the first status.")).small().color(t.text3));
+                    ui.label(RichText::new(tr("Renamed statuses are renamed on their tasks too; tasks of a deleted status move to a status of the same kind.")).small().color(t.text3));
+                });
+                if let Some((old, kind)) = removed {
+                    self.move_off_status(si, &old, kind, &orig);
+                }
+                if commit || !open {
+                    self.commit_status_renames(si, &mut orig);
+                }
+                ctx.data_mut(|d| {
+                    if open {
+                        d.insert_temp(orig_id, orig);
+                    } else {
+                        d.remove::<Vec<Option<String>>>(orig_id);
+                    }
                 });
                 if changed {
                     self.dirty = true;
@@ -2813,8 +2957,8 @@ impl App {
                         qa.status = None;
                     }
                     ui.add_space(6.0);
-                    let r = ui.add(egui::TextEdit::singleline(&mut qa.name).hint_text(tr("Task Name or type '/' for commands")).font(FontId::proportional(18.0)).frame(false).desired_width(f32::INFINITY));
-                    name_field(&r, "Task Name or type '/' for commands");
+                    let r = ui.add(egui::TextEdit::singleline(&mut qa.name).hint_text(tr("Task Name")).font(FontId::proportional(18.0)).frame(false).desired_width(f32::INFINITY));
+                    name_field(&r, "Task Name");
                     focus_once(ui, &r);
                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         create = true;

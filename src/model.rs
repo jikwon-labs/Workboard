@@ -471,6 +471,29 @@ pub struct TrashItem {
     pub payload: String,
 }
 
+/// What a deleted list keeps in Trash: the whole list with its settings, where
+/// it sat (space and folder) and its tasks. Older entries were saved as a
+/// `(space id, list, tasks)` tuple; `parse` reads both.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ListTrash {
+    pub space: u64,
+    #[serde(default)]
+    pub folder: Option<u64>,
+    pub list: ListItem,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+}
+
+impl ListTrash {
+    pub fn parse(payload: &str) -> Option<ListTrash> {
+        if let Ok(t) = serde_json::from_str::<ListTrash>(payload) {
+            return Some(t);
+        }
+        let (space, list, tasks) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(payload).ok()?;
+        Some(ListTrash { space, folder: None, list, tasks })
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CustomField {
     pub id: u64,
@@ -843,9 +866,19 @@ impl Data {
     }
 
     /// The empty workspace a first start opens with.
+    /// The login name with its first letter in capitals ("Me" when empty);
+    /// works on any first character, not only ASCII.
+    pub fn display_user(user: &str) -> String {
+        let mut cs = user.chars();
+        match cs.next() {
+            None => "Me".to_string(),
+            Some(c) => c.to_uppercase().collect::<String>() + cs.as_str(),
+        }
+    }
+
     pub fn fresh() -> Self {
         let user = std::env::var("USER").unwrap_or_default();
-        let name = if user.is_empty() { "Me".to_string() } else { user[..1].to_uppercase() + &user[1..] };
+        let name = Self::display_user(&user);
         let owner = Member { id: 1, name, color: [0x5f, 0x55, 0xee], email: String::new(), role: "Owner".into(), ..Default::default() };
         let mut d = Self::blank("My Workspace", owner);
         d.extra.welcome = true;
@@ -1151,14 +1184,19 @@ impl Data {
         }
     }
 
+    /// The first list new tasks can go into: skips archived spaces and lists
+    /// and other people's private spaces.
     pub fn first_list(&self) -> Option<u64> {
         for s in &self.spaces {
+            if s.archived || s.private_owner.is_some_and(|o| o != self.me) {
+                continue;
+            }
             for f in &s.folders {
-                if let Some(l) = f.lists.first() {
+                if let Some(l) = f.lists.iter().find(|l| !l.archived) {
                     return Some(l.id);
                 }
             }
-            if let Some(l) = s.lists.first() {
+            if let Some(l) = s.lists.iter().find(|l| !l.archived) {
                 return Some(l.id);
             }
         }

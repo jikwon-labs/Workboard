@@ -1189,7 +1189,9 @@ impl App {
                                         *tag = nt.clone();
                                     }
                                 }
-                                task.tags.dedup();
+                                // drop repeats anywhere in the list, keeping the first
+                                let mut seen = std::collections::HashSet::new();
+                                task.tags.retain(|g| seen.insert(g.clone()));
                             }
                             from.clear();
                             self.dirty = true;
@@ -1580,8 +1582,7 @@ impl App {
         let Some(list) = self.default_list() else { return tr("Open a list first").into() };
         let statuses = self.data.statuses_for_list(list);
         let mut n = 0;
-        for (i, line) in text.lines().enumerate() {
-            let cols: Vec<String> = line.split(',').map(|c| c.trim().trim_matches('"').to_string()).collect();
+        for (i, cols) in parse_csv(&text).into_iter().enumerate() {
             if cols.is_empty() || cols[0].is_empty() {
                 continue;
             }
@@ -1598,20 +1599,22 @@ impl App {
         crate::trf!("Imported {} tasks into {}", n, self.data.list_name(list))
     }
 
-    pub(super) fn export_csv(&self) -> String {
+    /// The current tasks as CSV text (every field quoted, so names keep their
+    /// commas, quotes and line breaks; `import_csv` reads it back).
+    pub(super) fn csv_text(&self) -> String {
+        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
         let mut out = String::from("name,status,priority,due,assignee,list\n");
         for t in self.filtered() {
             let who = t.assignees.first().and_then(|a| self.data.member(*a)).map(|m| m.name.clone()).unwrap_or_default();
-            out.push_str(&format!(
-                "\"{}\",{},{},{},{},\"{}\"\n",
-                t.name.replace('"', "'"),
-                t.status,
-                PRIORITIES[t.priority as usize].label,
-                t.due.map(|d| d.to_string()).unwrap_or_default(),
-                who,
-                self.data.list_name(t.list_id)
-            ));
+            let row = [t.name.clone(), t.status.clone(), PRIORITIES[t.priority as usize].label.to_string(), t.due.map(|d| d.to_string()).unwrap_or_default(), who, self.data.list_name(t.list_id)];
+            out.push_str(&row.iter().map(|f| q(f)).collect::<Vec<_>>().join(","));
+            out.push('\n');
         }
+        out
+    }
+
+    pub(super) fn export_csv(&self) -> String {
+        let out = self.csv_text();
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         let path = PathBuf::from(home).join("Downloads").join(format!("tasks-{}.csv", today()));
         match std::fs::write(&path, out) {
@@ -1624,8 +1627,40 @@ impl App {
         let item = self.data.extra.trash.remove(i);
         match item.kind.as_str() {
             "Task" => {
-                if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {
+                if let Ok(mut tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {
+                    // the list it came from may be gone: bring the list back
+                    // from Trash too, or else put the task in the first list
+                    let mut gone: Vec<u64> = tasks.iter().map(|t| t.list_id).filter(|l| !self.data.location_exists(Location::List(*l))).collect();
+                    gone.sort_unstable();
+                    gone.dedup();
+                    let mut note = None;
+                    for l in gone {
+                        if self.data.location_exists(Location::List(l)) {
+                            continue;
+                        }
+                        let in_trash = self.data.extra.trash.iter().position(|x| x.kind == "List" && ListTrash::parse(&x.payload).is_some_and(|lt| lt.list.id == l));
+                        if let Some(j) = in_trash {
+                            let name = self.data.extra.trash[j].title.clone();
+                            self.restore_trash(j);
+                            if self.data.location_exists(Location::List(l)) {
+                                note = Some(crate::trf!("Also restored its list \"{}\"", name));
+                                continue;
+                            }
+                        }
+                        let Some(to) = self.data.first_list() else {
+                            self.data.extra.trash.insert(i.min(self.data.extra.trash.len()), item);
+                            self.toast = Some((tr("There is no list to restore it into. Make a list first.").into(), now_ts()));
+                            return;
+                        };
+                        for t in tasks.iter_mut().filter(|t| t.list_id == l) {
+                            t.list_id = to;
+                        }
+                        note = Some(crate::trf!("Its list is gone, so it went to {}", self.data.list_name(to)));
+                    }
                     self.data.tasks.extend(tasks);
+                    if let Some(n) = note {
+                        self.toast = Some((n, now_ts()));
+                    }
                 }
             }
             "Doc" => {
@@ -1634,12 +1669,27 @@ impl App {
                 }
             }
             "List" => {
-                if let Ok((sid, l, tasks)) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(&item.payload) {
-                    let idx = self.data.spaces.iter().position(|s| s.id == sid).unwrap_or(0);
-                    if let Some(s) = self.data.spaces.get_mut(idx) {
-                        s.lists.push(l);
+                if let Some(lt) = ListTrash::parse(&item.payload) {
+                    // back into its folder, else its space, else the first space
+                    let folder = lt.folder.and_then(|f| self.data.spaces.iter().position(|s| s.folders.iter().any(|x| x.id == f)).map(|si| (si, f)));
+                    let space = self.data.spaces.iter().position(|s| s.id == lt.space);
+                    let name = lt.list.name.clone();
+                    if let Some((si, fid)) = folder {
+                        if let Some(f) = self.data.spaces[si].folders.iter_mut().find(|x| x.id == fid) {
+                            f.lists.push(lt.list);
+                        }
+                    } else if let Some(si) = space.or(if self.data.spaces.is_empty() { None } else { Some(0) }) {
+                        let home = self.data.spaces[si].name.clone();
+                        self.data.spaces[si].lists.push(lt.list);
+                        if lt.folder.is_some() || space.is_none() {
+                            self.toast = Some((crate::trf!("\"{}\" was restored to {} because its old place is gone", name, home), now_ts()));
+                        }
+                    } else {
+                        self.data.extra.trash.insert(i.min(self.data.extra.trash.len()), item);
+                        self.toast = Some((tr("There is no space to restore it into. Make a space first.").into(), now_ts()));
+                        return;
                     }
-                    self.data.tasks.extend(tasks);
+                    self.data.tasks.extend(lt.tasks);
                 }
             }
             _ => {}
@@ -1831,4 +1881,54 @@ impl App {
         let _ = t;
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
+}
+
+/// Splits CSV text into rows of fields. A quoted field may hold commas, line
+/// breaks and doubled quotes (""); unquoted fields are trimmed.
+pub(super) fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows: Vec<Vec<String>> = vec![];
+    let mut row: Vec<String> = vec![];
+    let mut field = String::new();
+    let (mut quoted, mut was_quoted) = (false, false);
+    let finish = |field: &mut String, was_quoted: &mut bool, row: &mut Vec<String>| {
+        row.push(if *was_quoted { std::mem::take(field) } else { std::mem::take(field).trim().to_string() });
+        *was_quoted = false;
+    };
+    let mut it = text.chars().peekable();
+    while let Some(c) = it.next() {
+        if quoted {
+            if c == '"' {
+                if it.peek() == Some(&'"') {
+                    it.next();
+                    field.push('"');
+                } else {
+                    quoted = false;
+                }
+            } else {
+                field.push(c);
+            }
+            continue;
+        }
+        match c {
+            ',' => finish(&mut field, &mut was_quoted, &mut row),
+            '\n' => {
+                finish(&mut field, &mut was_quoted, &mut row);
+                rows.push(std::mem::take(&mut row));
+            }
+            '\r' => {}
+            '"' if !was_quoted && field.trim().is_empty() => {
+                field.clear();
+                quoted = true;
+                was_quoted = true;
+            }
+            // anything after a closing quote, before the comma, is dropped
+            _ if was_quoted => {}
+            _ => field.push(c),
+        }
+    }
+    if !field.is_empty() || was_quoted || !row.is_empty() {
+        finish(&mut field, &mut was_quoted, &mut row);
+        rows.push(row);
+    }
+    rows
 }

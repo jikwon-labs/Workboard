@@ -110,7 +110,7 @@
 - 비밀 값(LiveKit 키, 기기 토큰)은 레포나 data.json 에 넣지 않는다. 앱의 토큰은 macOS 키체인에 둔다.
 - data.json 형식을 깨지 않는다. 새 필드는 기본값으로 예전 파일도 읽힌다.
 - 공유 폴더 방식(서버 없이)은 계속 동작한다.
-- 일부러 안 하기로 한 기능(다시 제안하지 않는다): AI·Clips·외부 통합처럼 외부 서버가 필요한 기능, Follow task, 작업·문서 첨부, 의존 관계, 날짜의 시간, 저장된 필터, nested filter, Timeline / Workload / Mind Map 보기, App Center, Template Center, 작업 유형·사용자 필드·템플릿 선택, 스페이스 권한, 사이드바 너비 조절, 비밀번호·2FA·결제.
+- 일부러 안 하기로 한 기능(다시 제안하지 않는다): AI·Clips·외부 통합처럼 외부 서버가 필요한 기능, App Center, Workload / Mind Map 보기, 문서 첨부, 2FA, 결제. 예전 목록에 있던 Follow task, 작업 첨부, 의존 관계, 날짜의 시간, 저장된 필터, nested filter, Timeline 보기, Template Center, 작업 유형·사용자 필드·템플릿, 스페이스 권한, 사이드바 너비 조절, 비밀번호 로그인은 2026-11-16 까지 모두 만들었다.
 
 ## 단계별 구현 기록
 
@@ -420,7 +420,7 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 - 비밀 값(LiveKit 키, 토큰)을 레포나 data.json 에 넣지 않는다.
 - 서버를 `0.0.0.0` 이나 공개 인터넷에 열지 않는다.
 - 사용자가 켜 둔 원래 Workboard 창과 원래 data.json 을 건드리지 않는다.
-- 아래는 일부러 안 하기로 한 기능이다. 다시 제안하지 않는다: AI·Clips·외부 통합처럼 외부 서버가 필요한 기능, Follow task, 첨부, 의존 관계, 날짜의 시간, 저장된 필터, nested filter, Timeline / Workload / Mind Map 보기, App Center, Template Center, 작업 유형·사용자 필드·템플릿 선택, 스페이스 권한, 사이드바 너비 조절, 비밀번호·2FA·결제.
+- 아래는 일부러 안 하기로 한 기능이다. 다시 제안하지 않는다: AI·Clips·외부 통합처럼 외부 서버가 필요한 기능, App Center, Workload / Mind Map 보기, 문서 첨부, 2FA, 결제. (1단계 당시 목록에는 더 많았지만, 나머지는 위 "정해 둔 원칙" 에 적은 대로 나중에 만들었다.)
 
 ### 이미 끝난 것: 건드리지 말 것
 

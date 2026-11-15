@@ -3345,7 +3345,13 @@ impl App {
                 }
             });
         }
-        let widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        let mut widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        // Name takes the room the other columns leave (at least 200), so the
+        // last column and the "+" fit instead of running off the right edge
+        if let Some(ni) = cols.iter().position(|c| *c == TableCol::Name) {
+            let others: f32 = widths.iter().sum::<f32>() - widths[ni];
+            widths[ni] = (ui.available_width() - others - 36.0 - 12.0).max(200.0);
+        }
         let edit_id = egui::Id::new("table_rename");
         let mut renaming: Option<(u64, String)> = ui.data(|d| d.get_temp(edit_id));
         egui::ScrollArea::both()

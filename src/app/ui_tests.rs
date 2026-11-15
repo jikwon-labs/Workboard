@@ -535,13 +535,28 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     h.click("Server address");
     h.type_text("127.0.0.1:1");
     h.settle();
+    // email and password first; an invite code on its own tab
+    assert!(h.has("Email entry") && h.has("Password entry") && h.has("Forgot password?"));
+    h.click("Invite code");
     h.click("Invite code entry");
     h.type_text("abcd-efgh-jkmn");
+    h.click("Choose a password entry");
+    h.type_text("pw-123");
+    h.click("Repeat password entry");
+    h.type_text("pw-123");
+    h.settle();
+    h.click("Connect");
+    assert!(h.app.sync_rt.joining.is_none(), "too short");
+    assert!(h.has("Choose a password of at least 8 characters."));
+    h.click("Choose a password entry");
+    h.type_text("45678");
+    h.click("Repeat password entry");
+    h.type_text("45678");
     h.settle();
     h.click("Connect");
     let j = h.app.sync_rt.joining.as_ref().expect("connecting");
     assert_eq!(j.addr, "127.0.0.1:1");
-    assert_eq!(j.invite, "abcd-efgh-jkmn");
+    assert_eq!(j.how, together::How::Invite { code: "abcd-efgh-jkmn".into(), email: String::new(), password: "pw-12345678".into() });
     assert!(h.has("Cancel"));
     h.click("Cancel");
     assert!(h.app.sync_rt.joining.is_none());
@@ -569,8 +584,8 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     let me = h.app.data.me;
     let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().clone();
     h.app.sync_rt.people = vec![
-        wb_net::Person { member: me, role: wb_net::Role::Owner, devices: 1, invite: None },
-        wb_net::Person { member: other.id, role: wb_net::Role::Member, devices: 0, invite: Some("ABCD-EFGH-JKMN".into()) },
+        wb_net::Person { member: me, role: wb_net::Role::Owner, devices: 1, invite: None, account: true },
+        wb_net::Person { member: other.id, role: wb_net::Role::Member, devices: 0, invite: Some("ABCD-EFGH-JKMN".into()), account: false },
     ];
     h.settle();
     let my_name = h.app.data.member(me).unwrap().name.clone();
@@ -595,22 +610,37 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     // an admin can't make a code for the owner
     h.app.sync_rt.role = Some(wb_net::Role::Admin);
     h.app.sync_rt.people[0].member = other.id;
-    h.app.sync_rt.people[1] = wb_net::Person { member: me, role: wb_net::Role::Admin, devices: 1, invite: None };
+    h.app.sync_rt.people[1] = wb_net::Person { member: me, role: wb_net::Role::Admin, devices: 1, invite: None, account: false };
     h.settle();
     assert!(!h.has("Invite code") && !h.has("New code"), "no code button on the owner's row for an admin");
     // a member sees no People list
     h.app.sync_rt.role = Some(wb_net::Role::Member);
     h.settle();
     assert!(!h.has("People") && !h.has("Make admin"));
-    // access removed: sign in again with a code
+    // access removed: sign in again with email and password, or a new code
+    h.app.sync_rt.form = together::Form::default();
     h.app.sync_rt.net_status = Some(wb_net::Status::Refused("Your access to this server was removed.".into()));
     h.settle();
     assert!(h.has("Sign in"));
-    h.click("Invite code entry");
-    h.type_text("NEWC-ODEX-XXXX");
+    h.click("Email entry");
+    h.type_text("me@team.io");
+    h.click("Password entry");
+    h.type_text("secret-pass");
     h.settle();
     h.click("Sign in");
-    assert_eq!(h.app.sync_rt.reinvite.as_deref(), Some("NEWC-ODEX-XXXX"));
+    assert_eq!(h.app.sync_rt.resign, Some(together::How::Account { email: "me@team.io".into(), password: "secret-pass".into() }));
+    h.app.sync_rt.net_status = Some(wb_net::Status::Refused("That email and password don't match an account on this server.".into()));
+    h.settle();
+    h.click("Invite code");
+    h.click("Invite code entry");
+    h.type_text("NEWC-ODEX-XXXX");
+    h.click("Choose a password entry");
+    h.type_text("new-secret-1");
+    h.click("Repeat password entry");
+    h.type_text("new-secret-1");
+    h.settle();
+    h.click("Sign in");
+    assert!(matches!(&h.app.sync_rt.resign, Some(together::How::Invite { code, .. }) if code == "NEWC-ODEX-XXXX"));
     h.click("Reconnect now");
     assert!(h.app.sync_rt.net.is_none(), "starts over on the next frame");
     h.click("Stop sharing");
@@ -2086,3 +2116,100 @@ fn composer_mention_and_emoji_pickers() {
 
 #[path = "i18n_tests.rs"]
 mod i18n_tests;
+
+#[test]
+fn the_first_start_offers_working_alone_joining_or_a_new_server() {
+    let mut h = Ui1::new();
+    assert!(Data::fresh().extra.welcome, "a first start shows the welcome");
+    let old: Data = serde_json::from_str(&serde_json::to_string(&Data::seed()).unwrap().replace(r#","welcome":false"#, "")).unwrap();
+    assert!(!old.extra.welcome, "files from before don't");
+    h.app.modal = Some(Modal::Welcome { step: 0, name: String::new(), addr: String::new() });
+    h.settle();
+    assert!(h.has("Use it on this Mac") && h.has("Join my team") && h.has("Set up a server for my team"));
+
+    // alone: just a name
+    h.click("Use it on this Mac");
+    assert!(h.has("Your name entry"));
+    let me = h.app.data.me;
+    h.app.modal = Some(Modal::Welcome { step: 1, name: "Jiwon".into(), addr: String::new() });
+    h.settle();
+    h.click("Start");
+    assert!(h.app.modal.is_none());
+    assert_eq!(h.app.data.member(me).unwrap().name, "Jiwon");
+
+    // join: server, then email and password or an invite code
+    h.app.modal = Some(Modal::Welcome { step: 0, name: String::new(), addr: String::new() });
+    h.settle();
+    h.click("Join my team");
+    assert!(h.has("Join your team") && h.has("Server address") && h.has("Email entry") && h.has("Invite code"));
+    h.click("Server address");
+    h.type_text("127.0.0.1:1");
+    h.click("Email entry");
+    h.type_text("me@team.io");
+    h.click("Password entry");
+    h.type_text("secret-pass");
+    h.settle();
+    h.click("Connect");
+    let j = h.app.sync_rt.joining.as_ref().expect("connecting");
+    assert_eq!(j.how, together::How::Account { email: "me@team.io".into(), password: "secret-pass".into() });
+    assert!(h.has("Cancel"));
+    h.click("Cancel");
+
+    // a new server: the owner's email and password
+    h.click("Back");
+    h.click("Set up a server for my team");
+    assert!(h.has("Set up your team's server") && h.has("Repeat password entry") && !h.has("Invite code entry"));
+}
+
+#[test]
+fn an_invite_link_opens_the_join_form_filled_in() {
+    let mut h = Ui1::new();
+    h.app.open_join_link("workboard://join?server=mac-mini.tail1.ts.net%3A8787&code=ABCD-EFGH-JKMN&email=bo%40team.io");
+    h.settle();
+    assert!(matches!(&h.app.modal, Some(Modal::Welcome { step: 2, addr, .. }) if addr == "mac-mini.tail1.ts.net:8787"));
+    assert_eq!(h.app.sync_rt.form.mode, together::Mode::Invite);
+    assert_eq!((h.app.sync_rt.form.code.as_str(), h.app.sync_rt.form.email.as_str()), ("ABCD-EFGH-JKMN", "bo@team.io"));
+    assert!(h.has("Invite code entry") && h.has("Choose a password entry"));
+
+    // a whole invite mail pasted into the code field fills in the server too
+    h.app.modal = Some(Modal::Welcome { step: 2, name: String::new(), addr: String::new() });
+    h.app.sync_rt.form = together::Form { mode: together::Mode::Invite, ..Default::default() };
+    h.settle();
+    h.click("Invite code entry");
+    h.type_text("Open this: workboard://join?server=macmini&code=WXYZ-2345-6789 thanks");
+    h.settle();
+    h.settle();
+    assert_eq!(h.app.sync_rt.form.code, "WXYZ-2345-6789");
+    assert!(matches!(&h.app.modal, Some(Modal::Welcome { addr, .. }) if addr == "macmini"));
+
+    // already on a server: says so instead of switching
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+    h.app.open_join_link("workboard://join?server=other&code=ABCD-EFGH-JKMN");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    assert!(h.app.toast.as_ref().is_some_and(|t| t.0.contains("already on 127.0.0.1:1")));
+}
+
+#[test]
+fn signed_in_on_a_server_you_set_a_password_or_change_it() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(h.has("Your account") && h.has("Set a password to sign in on your other computers and phones without a new invite code."));
+    h.click("Password entry");
+    h.type_text("long-enough");
+    h.click("Repeat password entry");
+    h.type_text("long-enougH");
+    h.settle();
+    h.click("Save password");
+    assert!(h.has("The two passwords aren't the same."));
+    // with an account: change it (needs the current one)
+    h.app.sync_rt.account = Some("me@team.io".into());
+    h.app.sync_rt.acct = together::Form::default();
+    h.settle();
+    assert!(h.has("You sign in with me@team.io on your other computers and phones."));
+    h.click("Change password");
+    assert!(h.has("Current password entry") && h.has("New password entry"));
+}

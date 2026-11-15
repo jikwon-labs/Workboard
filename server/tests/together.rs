@@ -105,6 +105,10 @@ struct App {
     denied: Vec<String>,
     backups: Option<Vec<wb_net::Backup>>,
     restored: Vec<String>,
+    /// account email from the welcome, then from `account` answers
+    email: Option<String>,
+    /// (member, emailed to, mail error) for each invite answer
+    mailed: Vec<(u64, Option<String>, Option<String>)>,
 }
 
 impl App {
@@ -129,7 +133,7 @@ impl App {
         }
         let device = sign_in.device.clone();
         let client = Client::start(&format!("127.0.0.1:{}", port), sign_in, Arc::new(|| {}));
-        App { data, client, device, status: None, member: None, role: None, token: None, invites: vec![], people: vec![], denied: vec![], backups: None, restored: vec![] }
+        App { data, client, device, status: None, member: None, role: None, token: None, invites: vec![], people: vec![], denied: vec![], backups: None, restored: vec![], email: None, mailed: vec![] }
     }
 
     /// Ask for an invite code for `member` and wait for it.
@@ -197,8 +201,9 @@ impl App {
         for e in self.client.events() {
             match e {
                 Event::Status(s) => self.status = Some(s),
-                Event::Welcome { snapshot, member, role, token, .. } => {
+                Event::Welcome { snapshot, member, role, token, email, .. } => {
                     self.member = Some(member);
+                    self.email = email;
                     self.role = Some(role);
                     if token.is_some() {
                         self.token = token;
@@ -210,7 +215,11 @@ impl App {
                     self.push();
                 }
                 Event::Update { data, .. } => self.take_in(data),
-                Event::Invite { member, code } => self.invites.push((member, code)),
+                Event::Invite { member, code, emailed, mail_error } => {
+                    self.invites.push((member, code));
+                    self.mailed.push((member, emailed, mail_error));
+                }
+                Event::Account(e) => self.email = Some(e),
                 Event::Access { people, role } => {
                     self.people = people;
                     self.role = Some(role);
@@ -799,6 +808,250 @@ fn attachments_survive_an_app_that_does_not_know_them() {
     a.wait("B's reaction at A", |d| d["channels"][0]["messages"].as_array().unwrap().iter().any(|m| m["id"] == 4001 && m["reactions"][0]["users"] == json!([2])));
     let at_a = a.data["channels"][0]["messages"].as_array().unwrap().iter().find(|m| m["id"] == 4001).unwrap().clone();
     assert_eq!(at_a["attachments"], pic, "the picture is still there");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ---------------------------------------------------------------- accounts
+
+/// A workspace whose people have emails, and a server that writes its mails
+/// to outbox/ instead of sending them.
+fn mail_home(tag: &str) -> PathBuf {
+    let home = temp_home(tag);
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join(workboard_server::MAIL_FILE), r#"{"transport": "folder"}"#).unwrap();
+    home
+}
+
+fn emailed_workspace() -> Value {
+    let mut w = workspace();
+    w["members"][0]["email"] = json!("ann@team.io");
+    w["members"][1]["email"] = json!("bo@team.io");
+    w["members"][2]["email"] = json!("cy@team.io");
+    w
+}
+
+/// The mails written so far to `to`, oldest first.
+fn outbox(home: &PathBuf, to: &str) -> Vec<String> {
+    let mut files: Vec<_> = std::fs::read_dir(home.join(workboard_server::OUTBOX_DIR)).map(|d| d.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+    files.sort();
+    files.iter().filter_map(|p| std::fs::read_to_string(p).ok()).filter(|t| t.starts_with(&format!("To: {}\n", to))).collect()
+}
+
+/// The first XXXX-XXXX-XXXX in a text.
+fn code_in(text: &str) -> String {
+    text.split(|c: char| c.is_whitespace() || c == '=' || c == '&')
+        .find(|w| w.len() == 14 && w.chars().filter(|c| *c == '-').count() == 2 && w.chars().all(|c| c == '-' || c.is_ascii_uppercase() || c.is_ascii_digit()))
+        .unwrap_or_else(|| panic!("no code in: {}", text))
+        .to_string()
+}
+
+fn sign_in(port: u16, s: SignIn) -> App {
+    App::start(port, Value::Null, s)
+}
+
+fn refused_with(app: &mut App, what: &str) -> String {
+    app.wait_status(|s| matches!(s, Status::Refused(_)), what);
+    match &app.status {
+        Some(Status::Refused(why)) => why.clone(),
+        _ => unreachable!(),
+    }
+}
+
+fn http_post(port: u16, path: &str, body: &str) -> (String, String) {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(format!("POST {} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", path, body.len(), body).as_bytes()).unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let (h, b) = out.split_once("\r\n\r\n").unwrap();
+    (h.to_string(), b.to_string())
+}
+
+fn wait_for_mail(home: &PathBuf, to: &str, n: usize) -> String {
+    let until = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < until {
+        let m = outbox(home, to);
+        if m.len() >= n {
+            return m[n - 1].clone();
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    panic!("no mail #{} to {}", n, to);
+}
+
+#[test]
+fn an_emailed_invite_sets_a_password_that_signs_in_on_any_device() {
+    let home = mail_home("accounts");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+
+    // the owner sets up the server and chooses a password at the same time
+    let mut d = emailed_workspace();
+    let mut meta = SyncMeta::default();
+    wb_sync::stamp(&d, &mut meta, now());
+    d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    let mut a = App::start(port, d, SignIn { claim: Some(1), email: Some("ann@team.io".into()), new_password: Some("ann-secret-1".into()), ..Default::default() });
+    a.until("owner in", |a| a.role == Some(Role::Owner));
+    assert_eq!(a.email.as_deref(), Some("ann@team.io"));
+    a.until("workspace up", |a| a.people.iter().any(|p| p.member == 2));
+
+    // the invite code goes out by email, with a link to the join page
+    let code = a.invite(2, Role::Member);
+    a.until("mail answer", |a| !a.mailed.is_empty());
+    assert_eq!(a.mailed[0], (2, Some("bo@team.io".to_string()), None));
+    let mail = wait_for_mail(&home, "bo@team.io", 1);
+    assert!(mail.contains(&code), "{}", mail);
+    assert!(mail.contains(&format!("http://127.0.0.1:{}/join?code={}&email=bo%40team.io", port, code)), "{}", mail);
+    assert!(mail.contains("Subject: You're invited to Team on Workboard"), "{}", mail);
+    assert!(mail.contains("Ann invited you"), "{}", mail);
+
+    // a too-short password doesn't use up the code
+    let mut short = sign_in(port, SignIn { invite: Some(code.clone()), new_password: Some("short".into()), ..Default::default() });
+    assert!(refused_with(&mut short, "short password").contains("at least 8"));
+    // Bo joins with the code and a password; the email comes from the member record
+    let mut b = sign_in(port, SignIn { invite: Some(code.to_lowercase()), new_password: Some("bo-secret-22".into()), ..Default::default() });
+    b.wait("B joins", |d| task_names(d).len() == 2);
+    assert_eq!((b.member, b.email.as_deref()), (Some(2), Some("bo@team.io")));
+    a.until("A sees B has an account", |a| a.people.iter().any(|p| p.member == 2 && p.account && p.devices == 1));
+
+    // Bo's phone: email and password, no new code; any case of the email
+    let mut phone = sign_in(port, SignIn { email: Some(" Bo@Team.io".into()), password: Some("bo-secret-22".into()), ..Default::default() });
+    phone.wait("phone gets the workspace", |d| task_names(d).len() == 2);
+    assert_eq!(phone.member, Some(2));
+    assert!(phone.token.is_some(), "the phone gets its own token");
+    a.until("two devices", |a| a.people.iter().any(|p| p.member == 2 && p.devices == 2));
+    // and later just the token
+    let mut again = sign_in(port, SignIn { device: phone.device.clone(), token: phone.token.clone(), ..Default::default() });
+    again.until("token works", |a| a.member == Some(2));
+
+    // wrong passwords, unknown emails: the same answer; too many locks the email
+    let mut wrong = sign_in(port, SignIn { email: Some("bo@team.io".into()), password: Some("nope-nope".into()), ..Default::default() });
+    let why = refused_with(&mut wrong, "wrong password");
+    let mut nobody = sign_in(port, SignIn { email: Some("zed@team.io".into()), password: Some("nope-nope".into()), ..Default::default() });
+    assert_eq!(refused_with(&mut nobody, "unknown email"), why);
+    for _ in 0..4 {
+        let mut w = sign_in(port, SignIn { email: Some("bo@team.io".into()), password: Some("nope-nope".into()), ..Default::default() });
+        refused_with(&mut w, "wrong again");
+    }
+    let mut locked = sign_in(port, SignIn { email: Some("bo@team.io".into()), password: Some("bo-secret-22".into()), ..Default::default() });
+    assert!(refused_with(&mut locked, "locked").contains("Too many"));
+
+    // removing access deletes the account too
+    a.client.send(Msg::Revoke { member: 2 });
+    b.wait_status(|s| matches!(s, Status::Refused(_)), "B signed out");
+    a.until("no account", |a| a.people.iter().any(|p| p.member == 2 && !p.account && p.devices == 0));
+
+    // nobody else can take an email already in use
+    let code = a.invite(3, Role::Member);
+    let mut cy = sign_in(port, SignIn { invite: Some(code.clone()), email: Some("ann@team.io".into()), new_password: Some("cy-secret-33".into()), ..Default::default() });
+    assert!(refused_with(&mut cy, "taken email").contains("already"));
+    let mut cy = sign_in(port, SignIn { invite: Some(code), email: Some("cy.home@mail.io".into()), new_password: Some("cy-secret-33".into()), ..Default::default() });
+    cy.until("C joins with another email", |c| c.email.as_deref() == Some("cy.home@mail.io"));
+    server.stop();
+
+    // passwords are kept hashed, never as typed
+    let state = std::fs::read_to_string(home.join(workboard_server::STATE_FILE)).unwrap();
+    assert!(state.contains("ann@team.io") && !state.contains("ann-secret-1") && !state.contains("cy-secret-33"));
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_forgotten_password_is_reset_with_an_emailed_code() {
+    let home = mail_home("forgot");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let mut a = App::start(port, {
+        let mut d = emailed_workspace();
+        let mut meta = SyncMeta::default();
+        wb_sync::stamp(&d, &mut meta, now());
+        d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+        d
+    }, SignIn { claim: Some(1), email: Some("ann@team.io".into()), new_password: Some("ann-secret-1".into()), ..Default::default() });
+    a.until("owner in", |a| a.role == Some(Role::Owner));
+
+    // the same answer whether or not the email has an account
+    let (h, body) = http_post(port, "/auth/forgot", r#"{"email": "nobody@team.io"}"#);
+    assert!(h.starts_with("HTTP/1.1 200"), "{}", h);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), json!({"ok": true, "mail": true}));
+    assert_eq!(wb_net::forgot_password(&format!("127.0.0.1:{}", port), "ANN@team.io"), Ok(true));
+    let mail = wait_for_mail(&home, "ann@team.io", 1);
+    assert!(mail.contains("password reset code"), "{}", mail);
+    let code = code_in(&mail);
+    assert!(outbox(&home, "nobody@team.io").is_empty());
+    // asking again within a minute sends nothing new
+    wb_net::forgot_password(&format!("127.0.0.1:{}", port), "ann@team.io").unwrap();
+
+    // a wrong code fails; the right one sets the new password and signs in
+    let mut bad = sign_in(port, SignIn { email: Some("ann@team.io".into()), reset_code: Some("AAAA-BBBB-CCCC".into()), new_password: Some("ann-secret-2".into()), ..Default::default() });
+    assert!(refused_with(&mut bad, "wrong code").contains("reset code"));
+    let mut laptop = sign_in(port, SignIn { email: Some("ann@team.io".into()), reset_code: Some(code.clone()), new_password: Some("ann-secret-2".into()), ..Default::default() });
+    laptop.until("reset signs in", |l| l.member == Some(1) && l.role == Some(Role::Owner));
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(outbox(&home, "ann@team.io").len(), 1, "one mail only");
+    // the code worked once; the old password is gone
+    let mut reuse = sign_in(port, SignIn { email: Some("ann@team.io".into()), reset_code: Some(code), new_password: Some("ann-secret-3".into()), ..Default::default() });
+    refused_with(&mut reuse, "code used");
+    let mut old = sign_in(port, SignIn { email: Some("ann@team.io".into()), password: Some("ann-secret-1".into()), ..Default::default() });
+    refused_with(&mut old, "old password");
+    let mut new = sign_in(port, SignIn { email: Some("ann@team.io".into()), password: Some("ann-secret-2".into()), ..Default::default() });
+    new.until("new password", |n| n.member == Some(1));
+    server.stop();
+
+    // without mail.json the server says it can't email
+    std::fs::remove_file(home.join(workboard_server::MAIL_FILE)).unwrap();
+    let server = Server::start(&home, 0);
+    assert_eq!(wb_net::forgot_password(&format!("127.0.0.1:{}", server.port), "ann@team.io"), Ok(false));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn someone_signed_in_without_a_password_sets_one_up_later() {
+    let home = temp_home("set-password");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let mut a = App::connect(port, Some(emailed_workspace()));
+    a.until("owner in", |a| a.role == Some(Role::Owner));
+    assert_eq!(a.email, None, "no account yet");
+    // no mail.json: the code isn't emailed and nothing complains
+    a.until("workspace up", |a| a.people.iter().any(|p| p.member == 2));
+    let code = a.invite(2, Role::Member);
+    assert_eq!(a.mailed.last(), Some(&(2, None, None)));
+
+    // an older app joins with the code alone
+    let mut b = App::join(port, &code);
+    b.wait("B joins", |d| task_names(d).len() == 2);
+    assert_eq!(b.email, None);
+    b.client.send(Msg::SetPassword { email: "bo@team.io".into(), password: "short".into(), old_password: None });
+    b.until("short refused", |b| b.denied.iter().any(|d| d.contains("at least 8")));
+    b.client.send(Msg::SetPassword { email: "bo@team.io".into(), password: "bo-secret-22".into(), old_password: None });
+    b.until("account set up", |b| b.email.as_deref() == Some("bo@team.io"));
+    // changing it needs the current one
+    b.denied.clear();
+    b.client.send(Msg::SetPassword { email: "bo@team.io".into(), password: "bo-secret-33".into(), old_password: Some("wrong-one".into()) });
+    b.until("needs the current password", |b| b.denied.iter().any(|d| d.contains("current password")));
+    b.email = None;
+    b.client.send(Msg::SetPassword { email: "bo@team.io".into(), password: "bo-secret-33".into(), old_password: Some("bo-secret-22".into()) });
+    b.until("changed", |b| b.email.is_some());
+    let mut phone = sign_in(port, SignIn { email: Some("bo@team.io".into()), password: Some("bo-secret-33".into()), ..Default::default() });
+    phone.until("phone signs in with the changed password", |p| p.member == Some(2));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_join_page_opens_the_app_with_the_invite() {
+    let home = temp_home("join-page");
+    let server = Server::start(&home, 0);
+    let (head, body) = http_get(server.port, "/join?code=ABCD-EFGH-JKMN&email=bo%40team.io");
+    let body = String::from_utf8(body).unwrap();
+    assert!(head.starts_with("HTTP/1.1 200") && head.to_lowercase().contains("text/html"), "{}", head);
+    // http_get sends "Host: x"
+    assert!(body.contains(r#"href="workboard://join?server=x&amp;code=ABCD-EFGH-JKMN&amp;email=bo%40team.io""#), "{}", body);
+    assert!(body.contains("<dd>ABCD-EFGH-JKMN</dd>"));
+    let (_, body) = http_get(server.port, "/join?code=%3Cscript%3E");
+    assert!(!String::from_utf8(body).unwrap().contains("<script>"), "what's typed into the link is escaped");
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

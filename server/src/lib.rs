@@ -5,7 +5,11 @@
 // Files in the server folder:
 //   workspace.json        the team's copy
 //   server.json           devices (hashed tokens, member, id tag), roles,
-//                         open invites, revision number
+//                         open invites, accounts (email, salted password
+//                         hash), revision number
+//   mail.json             how to send email (see mail.rs); optional
+//   outbox/               mails written here instead of sent (mail.json
+//                         "transport": "folder")
 //   backups/              hourly-YYYYMMDD-HH.json (48 kept),
 //                         daily-YYYYMMDD.json (30 kept), before-restore-*.json
 //   admin-request.json    a request from the `workboard-server` admin
@@ -23,6 +27,13 @@
 // by the owner or an admin, which signs that computer in as one member of
 // the workspace and gives it a token for later. Owners and admins can also
 // change roles and remove someone's access.
+//
+// Accounts: joining with an invite code (or setting up an empty server) can
+// also choose a password; the account's email is the one on the person's
+// member record. With it the person signs in on any other computer or phone
+// without a new code. When mail.json is set up the server emails invite codes
+// (with a link to /join) and password-reset codes (POST /auth/forgot).
+// Removing someone's access also deletes their account.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -39,10 +50,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
-use wb_net::{Backup, Msg, Person, Role, CODE_AUTH, CODE_DENIED};
+use wb_net::{Backup, Msg, Person, Role, CODE_AUTH, CODE_DENIED, MIN_PASSWORD};
 
 mod files;
 pub use files::{file_name_ok, parse_range, FILES_DIR, MAX_FILE};
+pub mod mail;
+pub use mail::{load_mail, MailCfg, MAIL_FILE, OUTBOX_DIR};
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
@@ -58,6 +71,14 @@ pub const KEEP_HOURLY: usize = 48;
 pub const KEEP_DAILY: usize = 30;
 /// Invite codes stop working after this long.
 pub const INVITE_DAYS: i64 = 7;
+/// Password-reset codes stop working after this long.
+pub const RESET_MINUTES: i64 = 30;
+/// Wrong passwords or reset codes in a row before an email is locked...
+pub const MAX_TRIES: u32 = 5;
+/// ...for this long.
+pub const LOCK_MINUTES: i64 = 15;
+/// PBKDF2-HMAC-SHA256 rounds for new password hashes.
+const PBKDF2_ROUNDS: u32 = 100_000;
 
 /// `WORKBOARD_SERVER_HOME`, else ~/Library/Application Support/WorkboardServer.
 pub fn home_dir() -> PathBuf {
@@ -89,6 +110,48 @@ fn hex(b: &[u8]) -> String {
 fn hash_token(token: &str) -> String {
     use sha2::{Digest, Sha256};
     hex(&Sha256::digest(token.as_bytes()))
+}
+
+/// PBKDF2 with HMAC-SHA256, one 32-byte block.
+fn pbkdf2_sha256(password: &[u8], salt: &[u8], rounds: u32) -> [u8; 32] {
+    use hmac::{KeyInit, Mac};
+    let prf = hmac::Hmac::<sha2::Sha256>::new_from_slice(password).expect("any key length");
+    let mut mac = prf.clone();
+    mac.update(salt);
+    mac.update(&1u32.to_be_bytes());
+    let mut u: [u8; 32] = mac.finalize().into_bytes().into();
+    let mut out = u;
+    for _ in 1..rounds {
+        let mut mac = prf.clone();
+        mac.update(&u);
+        u = mac.finalize().into_bytes().into();
+        for (o, x) in out.iter_mut().zip(u.iter()) {
+            *o ^= x;
+        }
+    }
+    out
+}
+
+/// Emails compare without case or surrounding spaces.
+fn norm_email(e: &str) -> String {
+    e.trim().to_lowercase()
+}
+
+fn email_ok(e: &str) -> bool {
+    let e = e.trim();
+    match e.split_once('@') {
+        Some((a, b)) => !a.is_empty() && b.contains('.') && !b.starts_with('.') && !b.ends_with('.') && !e.contains(char::is_whitespace),
+        None => false,
+    }
+}
+
+fn password_problem(p: &str) -> Option<String> {
+    (p.chars().count() < MIN_PASSWORD).then(|| format!("Choose a password of at least {} characters.", MIN_PASSWORD))
+}
+
+/// Compare without leaking where two strings differ.
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
 /// XXXX-XXXX-XXXX without look-alike letters.
@@ -167,6 +230,30 @@ pub struct InviteRec {
     pub created: i64,
 }
 
+/// A person's account: the email and password that sign them in anywhere.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Account {
+    pub email: String,
+    /// hex
+    pub salt: String,
+    /// hex PBKDF2-HMAC-SHA256 of the password
+    pub hash: String,
+    pub rounds: u32,
+    pub created: i64,
+}
+
+impl Account {
+    fn new(email: &str, password: &str) -> Account {
+        let salt = random_bytes::<16>();
+        Account { email: email.trim().to_string(), salt: hex(&salt), hash: hex(&pbkdf2_sha256(password.as_bytes(), &salt, PBKDF2_ROUNDS)), rounds: PBKDF2_ROUNDS, created: now_ms() }
+    }
+
+    fn check(&self, password: &str) -> bool {
+        let salt: Vec<u8> = (0..self.salt.len() / 2).filter_map(|i| u8::from_str_radix(&self.salt[2 * i..2 * i + 2], 16).ok()).collect();
+        same(&hex(&pbkdf2_sha256(password.as_bytes(), &salt, self.rounds)), &self.hash)
+    }
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct Saved {
@@ -177,6 +264,8 @@ pub struct Saved {
     pub roles: BTreeMap<u64, Role>,
     /// code (as shown, XXXX-XXXX-XXXX) -> invite
     pub invites: BTreeMap<String, InviteRec>,
+    /// member -> account
+    pub accounts: BTreeMap<u64, Account>,
 }
 
 impl Saved {
@@ -225,11 +314,33 @@ impl Saved {
         code
     }
 
-    fn take_invite(&mut self, typed: &str) -> Option<InviteRec> {
+    fn find_invite(&mut self, typed: &str) -> Option<String> {
         self.drop_expired_invites(now_ms());
         let want = normalize_code(typed);
-        let key = self.invites.keys().find(|k| normalize_code(k) == want)?.clone();
+        self.invites.keys().find(|k| normalize_code(k) == want).cloned()
+    }
+
+    #[cfg(test)]
+    fn take_invite(&mut self, typed: &str) -> Option<InviteRec> {
+        let key = self.find_invite(typed)?;
         self.invites.remove(&key)
+    }
+
+    /// The member whose account has this email.
+    pub fn account_member(&self, email: &str) -> Option<u64> {
+        let want = norm_email(email);
+        self.accounts.iter().find(|(_, a)| norm_email(&a.email) == want).map(|(m, _)| *m)
+    }
+
+    /// Why `member` can't have an account with `email`, if they can't.
+    fn account_problem(&self, member: u64, email: &str, password: &str) -> Option<String> {
+        if !email_ok(email) {
+            return Some("Type a valid email address.".into());
+        }
+        if self.account_member(email).is_some_and(|m| m != member) {
+            return Some("Someone else in this workspace already signs in with that email.".into());
+        }
+        password_problem(password)
     }
 
     /// Everyone the workspace knows, with their access, as `viewer` may see
@@ -247,6 +358,7 @@ impl Saved {
                 role: self.role_of(member),
                 devices: self.devices.values().filter(|d| d.member == member).count(),
                 invite: self.invites.iter().find(|(_, i)| i.member == member).map(|(c, _)| c.clone()).filter(|_| viewer == Role::Owner || self.role_of(member) != Role::Owner),
+                account: self.accounts.contains_key(&member),
             })
             .collect()
     }
@@ -254,6 +366,19 @@ impl Saved {
 
 fn member_ids(canon: Option<&Value>) -> Vec<u64> {
     canon.and_then(|c| c.get("members")).and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.get("id")?.as_u64()).collect()).unwrap_or_default()
+}
+
+/// A text field of a member in the team's copy ("name", "email").
+fn member_field(canon: Option<&Value>, member: u64, field: &str) -> String {
+    canon
+        .and_then(|c| c.get("members"))
+        .and_then(|m| m.as_array())
+        .and_then(|a| a.iter().find(|m| m.get("id").and_then(|i| i.as_u64()) == Some(member)))
+        .and_then(|m| m.get(field))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn member_exists(canon: Option<&Value>, member: u64) -> bool {
@@ -357,6 +482,46 @@ struct Inner {
     canon: Option<Value>,
     saved: Saved,
     dirty: bool,
+    /// email (normalized) -> (reset code, when made); kept in memory only
+    resets: std::collections::HashMap<String, (String, i64)>,
+    /// email (normalized) -> (wrong tries in a row, time of the last one)
+    fails: std::collections::HashMap<String, (u32, i64)>,
+}
+
+impl Inner {
+    /// Refuse while an email has had too many wrong tries.
+    fn locked(&self, email: &str) -> Option<String> {
+        let (n, last) = self.fails.get(&norm_email(email)).copied()?;
+        (n >= MAX_TRIES && now_ms() - last < LOCK_MINUTES * 60_000).then(|| format!("Too many wrong tries. Wait {} minutes and try again, or use Forgot password.", LOCK_MINUTES))
+    }
+
+    fn failed(&mut self, email: &str) {
+        let now = now_ms();
+        let e = self.fails.entry(norm_email(email)).or_insert((0, now));
+        if now - e.1 >= LOCK_MINUTES * 60_000 {
+            e.0 = 0;
+        }
+        e.0 += 1;
+        e.1 = now;
+    }
+}
+
+/// What a hello asked for.
+#[derive(Default)]
+struct Hello {
+    device: String,
+    tag: Option<u16>,
+    token: Option<String>,
+    invite: Option<String>,
+    claim: Option<u64>,
+    email: Option<String>,
+    password: Option<String>,
+    new_password: Option<String>,
+    reset_code: Option<String>,
+}
+
+fn given(s: &Option<String>) -> Option<&str> {
+    s.as_deref().filter(|v| !v.trim().is_empty())
 }
 
 /// What a request from an app turned into.
@@ -423,47 +588,196 @@ impl Hub {
     }
 
     /// Check a hello. Ok: (member, role, tag, new token).
-    fn sign_in(&self, device: &str, tag: Option<u16>, token: Option<String>, invite: Option<String>, claim: Option<u64>) -> Result<(u64, Role, u16, Option<String>), String> {
+    fn sign_in(&self, h: &Hello) -> Result<(u64, Role, u16, Option<String>), String> {
         let mut g = self.inner.lock().unwrap();
-        if let Some(code) = invite.filter(|c| !c.trim().is_empty()) {
-            let Some(inv) = g.saved.take_invite(&code) else {
+        let device = h.device.as_str();
+        // a password-reset code from the email POST /auth/forgot sent
+        if let Some(code) = given(&h.reset_code) {
+            let email = given(&h.email).ok_or("Type the email you sign in with.")?;
+            if let Some(why) = g.locked(email) {
+                return Err(why);
+            }
+            let pw = h.new_password.as_deref().unwrap_or("");
+            if let Some(why) = password_problem(pw) {
+                return Err(why);
+            }
+            let key = norm_email(email);
+            let fresh = g.resets.get(&key).is_some_and(|(c, t)| same(&normalize_code(c), &normalize_code(code)) && now_ms() - t < RESET_MINUTES * 60_000);
+            let member = g.saved.account_member(email).filter(|_| fresh);
+            let Some(member) = member else {
+                g.failed(email);
+                return Err(format!("That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.", RESET_MINUTES));
+            };
+            g.resets.remove(&key);
+            g.fails.remove(&key);
+            let kept = g.saved.accounts[&member].email.clone();
+            g.saved.accounts.insert(member, Account::new(&kept, pw));
+            return Ok(self.signed_in(g, device, member, h.tag));
+        }
+        if let Some(code) = given(&h.invite) {
+            let Some(key) = g.saved.find_invite(code) else {
                 return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
             };
-            let (tag, token) = g.saved.add_device(device, inv.member, tag);
-            if inv.role > g.saved.role_of(inv.member) {
-                g.saved.set_role(inv.member, inv.role);
+            let member = g.saved.invites[&key].member;
+            // choosing a password: check it all before the code is used up
+            let account = match h.new_password.as_deref() {
+                Some(pw) => {
+                    let email = given(&h.email).map(|e| e.trim().to_string()).unwrap_or_else(|| member_field(g.canon.as_ref(), member, "email"));
+                    if email.is_empty() {
+                        return Err("Type your email too: you sign in with it on your other computers and phones.".into());
+                    }
+                    if let Some(why) = g.saved.account_problem(member, &email, pw) {
+                        return Err(why);
+                    }
+                    Some(Account::new(&email, pw))
+                }
+                None => None,
+            };
+            let inv = g.saved.invites.remove(&key).expect("found above");
+            if let Some(a) = account {
+                g.saved.accounts.insert(member, a);
             }
-            g.dirty = true;
-            let role = g.saved.role_of(inv.member);
-            drop(g);
-            let _ = self.access.send(());
-            return Ok((inv.member, role, tag, Some(token)));
+            if inv.role > g.saved.role_of(member) {
+                g.saved.set_role(member, inv.role);
+            }
+            return Ok(self.signed_in(g, device, member, h.tag));
         }
-        if let Some(token) = token {
+        if let (Some(email), Some(pw)) = (given(&h.email), h.password.as_deref()) {
+            if let Some(why) = g.locked(email) {
+                return Err(why);
+            }
+            let found = g.saved.account_member(email);
+            let ok = match found {
+                Some(m) => g.saved.accounts[&m].check(pw),
+                None => {
+                    // as slow as a real check, so the answer doesn't tell who has an account
+                    let _ = Account::new("x@x.x", pw);
+                    false
+                }
+            };
+            let Some(member) = found.filter(|_| ok) else {
+                g.failed(email);
+                return Err("That email and password don't match an account on this server.".into());
+            };
+            g.fails.remove(&norm_email(email));
+            return Ok(self.signed_in(g, device, member, h.tag));
+        }
+        if let Some(token) = &h.token {
             return match g.saved.devices.get(device) {
-                Some(d) if d.token == hash_token(&token) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
-                _ => Err("This computer isn't signed in to this server anymore. Ask the owner or an admin for a new invite code.".into()),
+                Some(d) if same(&d.token, &hash_token(token)) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
+                _ => Err("This computer isn't signed in to this server anymore. Sign in with your email and password, or ask the owner or an admin for a new invite code.".into()),
             };
         }
-        if let Some(member) = claim {
+        if let Some(member) = h.claim {
             // only the very first claim wins: two people setting up the same
             // empty server at once must not end up with their workspaces merged
             if g.canon.is_none() && !g.saved.devices.is_empty() {
                 return Err("Someone else is setting up this server right now. Ask them for an invite code.".into());
             }
             if g.canon.is_none() && g.saved.devices.is_empty() {
-                let (tag, token) = g.saved.add_device(device, member, tag);
+                if let Some(pw) = h.new_password.as_deref() {
+                    let email = given(&h.email).unwrap_or("").trim().to_string();
+                    if let Some(why) = g.saved.account_problem(member, &email, pw) {
+                        return Err(why);
+                    }
+                    g.saved.accounts.insert(member, Account::new(&email, pw));
+                }
                 g.saved.set_role(member, Role::Owner);
-                g.dirty = true;
-                return Ok((member, Role::Owner, tag, Some(token)));
+                return Ok(self.signed_in(g, device, member, h.tag));
             }
         }
-        Err("This server already has a workspace. Ask its owner or an admin for an invite code.".into())
+        Err("This server already has a workspace. Sign in with your email and password, or ask its owner or an admin for an invite code.".into())
+    }
+
+    /// Give `device` a new token for `member`.
+    fn signed_in(&self, mut g: std::sync::MutexGuard<'_, Inner>, device: &str, member: u64, tag: Option<u16>) -> (u64, Role, u16, Option<String>) {
+        let (tag, token) = g.saved.add_device(device, member, tag);
+        g.dirty = true;
+        let role = g.saved.role_of(member);
+        drop(g);
+        let _ = self.access.send(());
+        (member, role, tag, Some(token))
+    }
+
+    /// Set up `member`'s account or change its password.
+    fn set_password(&self, member: u64, email: &str, password: &str, old: Option<&str>) -> Result<Msg, String> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(existing) = g.saved.accounts.get(&member).cloned() {
+            if let Some(why) = g.locked(&existing.email) {
+                return Err(why);
+            }
+            if !existing.check(old.unwrap_or("")) {
+                g.failed(&existing.email);
+                return Err("Your current password isn't right.".into());
+            }
+        }
+        if let Some(why) = g.saved.account_problem(member, email, password) {
+            return Err(why);
+        }
+        g.saved.accounts.insert(member, Account::new(email, password));
+        g.dirty = true;
+        drop(g);
+        let _ = self.access.send(());
+        Ok(Msg::Account { email: email.trim().to_string() })
+    }
+
+    /// Email a password-reset code when `email` has an account (quietly
+    /// does nothing otherwise). False when this server can't send email.
+    fn forgot(&self, email: &str) -> bool {
+        let Some(cfg) = load_mail(&self.home) else { return false };
+        if !email_ok(email) {
+            return true;
+        }
+        let target = {
+            let mut g = self.inner.lock().unwrap();
+            let key = norm_email(email);
+            let now = now_ms();
+            // at most one mail a minute per address
+            let recent = g.resets.get(&key).is_some_and(|(_, t)| now - t < 60_000);
+            match g.saved.account_member(email) {
+                Some(m) if !recent => {
+                    let code = new_code();
+                    g.resets.insert(key, (code.clone(), now));
+                    Some((g.saved.accounts[&m].email.clone(), code))
+                }
+                _ => None,
+            }
+        };
+        if let Some((to, code)) = target {
+            let home = self.home.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = mail::send(&home, &cfg, &mail::reset_mail(&to, &code, RESET_MINUTES)) {
+                    eprintln!("couldn't email a reset code to {}: {}", to, e);
+                }
+            });
+        }
+        true
+    }
+
+    /// Email `who`'s new invite code, when mail is set up and they have an
+    /// email. (emailed to, why it failed)
+    fn email_invite(&self, from: u64, who: u64, code: &str, connected_to: Option<&str>) -> (Option<String>, Option<String>) {
+        let Some(cfg) = load_mail(&self.home) else { return (None, None) };
+        let (to, workspace, inviter) = {
+            let g = self.inner.lock().unwrap();
+            let c = g.canon.as_ref();
+            (member_field(c, who, "email"), c.and_then(|c| c.get("workspace")).and_then(|w| w.as_str()).unwrap_or("").to_string(), member_field(c, from, "name"))
+        };
+        if !email_ok(&to) {
+            return (None, None);
+        }
+        let server = mail::link_address(&cfg, connected_to);
+        let m = mail::invite_mail(&to, &workspace, &inviter, code, server.as_deref(), INVITE_DAYS);
+        match mail::send(&self.home, &cfg, &m) {
+            Ok(()) => (Some(to), None),
+            Err(e) => (None, Some(e)),
+        }
     }
 
     fn welcome(&self, tag: u16, member: u64, role: Role, token: Option<String>) -> String {
         let g = self.inner.lock().unwrap();
-        Msg::Welcome { tag, snapshot: g.canon.clone(), rev: g.saved.rev, member, role, token }.to_json()
+        let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
+        Msg::Welcome { tag, snapshot: g.canon.clone(), rev: g.saved.rev, member, role, token, email }.to_json()
     }
 
     /// Merge an app's copy into the team's copy; tell everyone when it changed.
@@ -549,7 +863,7 @@ impl Hub {
                 g.saved.drop_expired_invites(now_ms());
                 let code = g.saved.make_invite(who, role);
                 g.dirty = true;
-                Some(Msg::Invite { member: who, code })
+                Some(Msg::Invite { member: who, code, emailed: None, mail_error: None })
             }
             Msg::SetRole { member: who, role } => {
                 if role == Role::Owner || g.saved.role_of(who) == Role::Owner {
@@ -570,6 +884,8 @@ impl Hub {
                 kicked = g.saved.devices.iter().filter(|(_, d)| d.member == who).map(|(id, _)| id.clone()).collect();
                 g.saved.devices.retain(|_, d| d.member != who);
                 g.saved.invites.retain(|_, i| i.member != who);
+                // and the password that would let them back in
+                g.saved.accounts.remove(&who);
                 // removing access also takes back admin rights
                 g.saved.set_role(who, Role::Member);
                 g.dirty = true;
@@ -696,9 +1012,60 @@ impl Hub {
     }
 }
 
-async fn ws_route(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>) -> impl IntoResponse {
-    ws.max_message_size(wb_net::MAX_MESSAGE).max_frame_size(wb_net::MAX_MESSAGE).on_upgrade(move |socket| connection(socket, hub))
+async fn ws_route(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>, headers: axum::http::HeaderMap) -> impl IntoResponse {
+    // the address this app reached us at, for links in invite mails
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).map(|h| h.to_string());
+    ws.max_message_size(wb_net::MAX_MESSAGE).max_frame_size(wb_net::MAX_MESSAGE).on_upgrade(move |socket| connection(socket, hub, host))
 }
+
+/// POST /auth/forgot {"email"}: email a password-reset code. Always "ok", so
+/// it doesn't tell who has an account; "mail": false when mail isn't set up.
+async fn forgot_route(State(hub): State<Arc<Hub>>, body: axum::body::Bytes) -> Response {
+    let email = serde_json::from_slice::<Value>(&body).ok().and_then(|v| v.get("email").and_then(|e| e.as_str()).map(|e| e.to_string())).unwrap_or_default();
+    let h = hub.clone();
+    let mail = tokio::task::spawn_blocking(move || h.forgot(&email)).await.unwrap_or(false);
+    Json(json!({"ok": true, "mail": mail})).into_response()
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+}
+
+/// GET /join?code=...&email=...: the page an invite mail links to. It opens
+/// the app with everything filled in, and shows what to type otherwise.
+async fn join_route(axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>, headers: axum::http::HeaderMap) -> Response {
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
+    let code = q.get("code").map(|c| c.trim().to_string()).unwrap_or_default();
+    let email = q.get("email").map(|e| e.trim().to_string()).filter(|e| !e.is_empty());
+    let link = wb_net::join_link(&host, &code, email.as_deref());
+    let page = JOIN_PAGE.replace("{link}", &html_escape(&link)).replace("{server}", &html_escape(&host)).replace("{code}", &html_escape(if code.is_empty() { "(ask for your invite code)" } else { &code }));
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], page).into_response()
+}
+
+const JOIN_PAGE: &str = r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join your team on Workboard</title>
+<style>
+:root { color-scheme: light dark; --bg: #f7f7f9; --card: #fff; --text: #1d1d22; --muted: #6b6b76; --line: #e3e3e8; --primary: #5f55ee; }
+@media (prefers-color-scheme: dark) { :root { --bg: #18181b; --card: #222226; --text: #ececf0; --muted: #a0a0aa; --line: #34343a; } }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 440px; margin: 48px auto; padding: 0 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+h1 { font-size: 20px; margin: 0 0 8px; }
+p { margin: 0 0 16px; color: var(--muted); }
+a.button { display: block; text-align: center; background: var(--primary); color: #fff; text-decoration: none; padding: 11px; border-radius: 8px; font-weight: 600; }
+dl { margin: 20px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+</style></head>
+<body><main><div class="card">
+<h1>Join your team on Workboard</h1>
+<p>Open the app with your invite filled in. You'll choose a password, and then sign in with your email on your other computers and phones.</p>
+<a class="button" href="{link}">Open in Workboard</a>
+<p style="margin-top:20px">Nothing happened? Install Workboard first, or open it, choose <b>Join my team</b> and type:</p>
+<dl><dt>Server</dt><dd>{server}</dd><dt>Invite code</dt><dd>{code}</dd></dl>
+</div></main></body></html>
+"#;
 
 /// The content type for a file the updates route may serve: a plain name
 /// (no folders, not hidden) of a kind Sparkle asks for. None for anything else.
@@ -749,7 +1116,7 @@ impl Drop for Counted {
     }
 }
 
-async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
+async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) {
     hub.connections.fetch_add(1, Ordering::Relaxed);
     let _count = Counted(hub.clone());
     let mut stop = hub.stop.clone();
@@ -759,11 +1126,15 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
         _ = stop.changed() => return,
     };
     let Ok(Some(Ok(Message::Text(t)))) = hello else { return };
-    let Some(Msg::Hello { device, tag, token, invite, claim }) = Msg::parse(t.as_str()) else {
+    let Some(Msg::Hello { device, tag, token, invite, claim, email, password, new_password, reset_code }) = Msg::parse(t.as_str()) else {
         let _ = send(&mut socket, &Msg::error("Say hello first.", None).to_json()).await;
         return;
     };
-    let (member, role, tag, token) = match hub.sign_in(&device, tag, token, invite, claim) {
+    let hello = Hello { device: device.clone(), tag, token, invite, claim, email, password, new_password, reset_code };
+    let h = hub.clone();
+    // password hashing takes a moment
+    let signed = tokio::task::spawn_blocking(move || h.sign_in(&hello)).await.unwrap_or_else(|_| Err("The server had a problem. Try again.".into()));
+    let (member, role, tag, token) = match signed {
         Ok(x) => x,
         Err(why) => {
             let _ = send(&mut socket, &Msg::error(&why, Some(CODE_AUTH)).to_json()).await;
@@ -805,7 +1176,21 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
                         Ok(m) => m.to_json(),
                         Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
                     }),
+                    Some(Msg::SetPassword { email, password, old_password }) => {
+                        let h = hub.clone();
+                        let r = tokio::task::spawn_blocking(move || h.set_password(member, &email, &password, old_password.as_deref())).await.unwrap_or_else(|_| Err("The server had a problem. Try again.".into()));
+                        Some(match r {
+                            Ok(m) => m.to_json(),
+                            Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+                        })
+                    }
                     Some(m @ (Msg::CreateInvite { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. })) => match hub.request(member, m) {
+                        Reply::To(Msg::Invite { member: who, code, .. }) => {
+                            // email it when the server can (sending takes a moment)
+                            let (h, c, at) = (hub.clone(), code.clone(), host.clone());
+                            let (emailed, mail_error) = tokio::task::spawn_blocking(move || h.email_invite(member, who, &c, at.as_deref())).await.unwrap_or((None, None));
+                            Some(Msg::Invite { member: who, code, emailed, mail_error }.to_json())
+                        }
                         Reply::To(r) => Some(r.to_json()),
                         Reply::Denied(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
                     },
@@ -873,7 +1258,7 @@ pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, option
     let (stop_tx, stop_rx) = watch::channel(false);
     let hub = Arc::new(Hub {
         home,
-        inner: Mutex::new(Inner { canon, saved, dirty: false }),
+        inner: Mutex::new(Inner { canon, saved, dirty: false, resets: Default::default(), fails: Default::default() }),
         updates: broadcast::channel(64).0,
         kicks: broadcast::channel(16).0,
         access: broadcast::channel(16).0,
@@ -906,6 +1291,8 @@ pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, option
         // get() also answers HEAD. Uploads are read as a stream, which axum's
         // body limit doesn't cover; put_file enforces max_file itself.
         .route("/files/{file}", get(files::get_file).put(files::put_file))
+        .route("/auth/forgot", axum::routing::post(forgot_route))
+        .route("/join", get(join_route))
         .with_state(hub.clone());
     let res = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
@@ -1042,6 +1429,24 @@ mod tests {
         assert_eq!(claims["video"]["room"], "wb-10");
         assert_eq!(claims["video"]["roomJoin"], true);
         assert_eq!(claims["exp"], 1_000_000 + CALL_TOKEN_SECS);
+    }
+
+    #[test]
+    fn passwords_hash_with_pbkdf2_and_check() {
+        // PBKDF2-HMAC-SHA256 test vectors (RFC 7914 section 11 / common sets)
+        assert_eq!(hex(&pbkdf2_sha256(b"password", b"salt", 1)), "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
+        assert_eq!(hex(&pbkdf2_sha256(b"password", b"salt", 4096)), "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a");
+        let a = Account::new(" Kim@Company.com ", "correct horse");
+        assert_eq!(a.email, "Kim@Company.com");
+        assert!(a.check("correct horse") && !a.check("correct horsE") && !a.check(""));
+        assert_ne!(Account::new("k@c.co", "correct horse").salt, a.salt, "every hash has its own salt");
+        let mut s = Saved::default();
+        s.accounts.insert(4, a);
+        assert_eq!(s.account_member("kim@company.COM"), Some(4));
+        assert!(s.account_problem(5, "kim@company.com", "long enough").unwrap().contains("already"));
+        assert!(s.account_problem(4, "kim@company.com", "short").unwrap().contains("at least 8"));
+        assert!(s.account_problem(4, "not an email", "long enough").is_some());
+        assert_eq!(s.account_problem(4, "kim@company.com", "long enough"), None);
     }
 
     #[test]

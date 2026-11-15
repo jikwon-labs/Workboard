@@ -27,6 +27,8 @@ mod together;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod account_tests;
+#[cfg(test)]
 mod ui_tests;
 pub use menus::Modal;
 pub use pages::Section;
@@ -374,6 +376,7 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, screenshot: Option<PathBuf>) -> Self {
         setup_fonts(&cc.egui_ctx);
+        crate::links::wake(&cc.egui_ctx);
         Self::build(screenshot, None)
     }
 
@@ -426,6 +429,8 @@ impl App {
             Some("fields") => Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() }),
             Some("themes") => Some(Modal::Themes),
             Some("together") => Some(Modal::Together { path: String::new(), addr: String::new(), code: String::new(), result: String::new() }),
+            Some("welcome") => Some(Modal::Welcome { step: 0, name: String::new(), addr: String::new() }),
+            Some("join") => Some(Modal::Welcome { step: 2, name: String::new(), addr: String::new() }),
             Some("call") => Some(Modal::Call { ch: data.channels.first().map(|c| c.id).unwrap_or(0), link: String::new() }),
             Some("reminder") => Some(Modal::Reminder { text: String::new(), date: Some(today()), time: "09:00".into() }),
             _ => None,
@@ -3154,6 +3159,16 @@ impl App {
         }
         self.huddle_tick(Some(ctx));
         self.huddle_bar(ctx);
+        // an invite link opened in a browser or mail
+        if let Some(url) = crate::links::take() {
+            self.open_join_link(&url);
+        }
+        // the first start: how do you want to start?
+        if self.data.extra.welcome && self.persist && self.modal.is_none() {
+            self.data.extra.welcome = false;
+            self.dirty = true;
+            self.modal = Some(Modal::Welcome { step: 0, name: String::new(), addr: String::new() });
+        }
         // a joined workspace needs to know who you are
         // (on a server the invite code says who you are)
         if self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_none()) && self.data.member(self.data.me).is_none() && self.modal.is_none() {

@@ -2,13 +2,20 @@
 // WebSocket) and the app's side of the connection, which runs on its own
 // thread so the window never waits for the network.
 //
-// Order of a connection: the app sends `hello` (with its device token, or an
-// invite code, or a claim on an empty server), the server answers `welcome`
-// with the team's copy (and a new token when it issued one), then the app
+// Order of a connection: the app sends `hello` (with its device token, an
+// invite code, an email and password, a password-reset code, or a claim on
+// an empty server), the server answers `welcome` with the team's copy (and a
+// new token when it issued one), then the app
 // sends `push` with its whole shared copy whenever it changes and the server
 // sends `update` to everyone when the team's copy changed. Both sides answer
 // `ping` with `pong`. Owners and admins also send the access requests
-// (`create_invite`, `set_role`, `revoke`, `access_list`).
+// (`create_invite`, `set_role`, `revoke`, `access_list`). Anyone signed in
+// may send `set_password` to set up or change their account.
+//
+// Accounts: an email and a password that sign a person in on any computer
+// or phone. Someone joining with an invite code chooses the password then;
+// the owner chooses one when setting up an empty server. A forgotten
+// password is reset with a code the server emails (POST /auth/forgot).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,7 +28,7 @@ use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
 mod files;
-pub use files::{download, remote_size, sha256_file, upload, Auth, FileError};
+pub use files::{download, forgot_password, remote_size, sha256_file, upload, Auth, FileError};
 
 pub const DEFAULT_PORT: u16 = 8787;
 pub const PATH: &str = "/ws";
@@ -66,6 +73,87 @@ pub struct Person {
     /// An invite code not used yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invite: Option<String>,
+    /// Has set up an account (email and password).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub account: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// The shortest password the server takes.
+pub const MIN_PASSWORD: usize = 8;
+
+/// What a person typed into an invite code field: a bare code, or a
+/// `workboard://join?...` link (also inside a whole pasted email).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct JoinLink {
+    pub server: Option<String>,
+    pub code: String,
+    pub email: Option<String>,
+}
+
+/// The link that opens Workboard ready to join.
+pub fn join_link(server: &str, code: &str, email: Option<&str>) -> String {
+    let mut s = format!("workboard://join?server={}&code={}", pct_encode(server), pct_encode(code));
+    if let Some(e) = email.filter(|e| !e.is_empty()) {
+        s.push_str("&email=");
+        s.push_str(&pct_encode(e));
+    }
+    s
+}
+
+/// Read a pasted invite: the first workboard://join link in the text, else
+/// the text itself as a code.
+pub fn parse_join(text: &str) -> JoinLink {
+    let t = text.trim();
+    let Some(start) = t.find("workboard://join") else {
+        return JoinLink { code: t.to_string(), ..Default::default() };
+    };
+    let link: String = t[start..].chars().take_while(|c| !c.is_whitespace() && !"<>\"'".contains(*c)).collect();
+    let mut out = JoinLink::default();
+    if let Some((_, query)) = link.split_once('?') {
+        for pair in query.split('&') {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let v = pct_decode(v);
+            match k {
+                "server" if !v.trim().is_empty() => out.server = Some(v.trim().to_string()),
+                "code" => out.code = v.trim().to_string(),
+                "email" if !v.trim().is_empty() => out.email = Some(v.trim().to_string()),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+fn pct_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{:02X}", b) })
+        .collect()
+}
+
+fn pct_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() => match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or(""), 16) {
+                Ok(v) => {
+                    out.push(v);
+                    i += 3;
+                    continue;
+                }
+                Err(_) => out.push(b'%'),
+            },
+            b'+' => out.push(b' '),
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// A backup of the team's copy on the server.
@@ -121,6 +209,18 @@ pub enum Msg {
         /// Setting up an empty server: who I am in the workspace I bring.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         claim: Option<u64>,
+        /// The account's email: signing in with `password`, choosing a
+        /// password with `new_password`, or resetting with `reset_code`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        email: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<String>,
+        /// With an invite, a claim or a reset code: the password to set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        new_password: Option<String>,
+        /// The code a password-reset email gave.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reset_code: Option<String>,
     },
     Welcome {
         /// The id tag this device must use; the server keeps them unique.
@@ -134,6 +234,9 @@ pub enum Msg {
         /// A new token to keep (after an invite or a claim).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<String>,
+        /// This person's account email, when they have set up an account.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        email: Option<String>,
     },
     Push {
         data: Value,
@@ -153,6 +256,24 @@ pub enum Msg {
     Invite {
         member: u64,
         code: String,
+        /// The address the code was emailed to.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        emailed: Option<String>,
+        /// Why it couldn't be emailed (mail is set up but sending failed).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mail_error: Option<String>,
+    },
+    /// Set up this person's account, or change its password
+    /// (`old_password` is needed once an account exists).
+    SetPassword {
+        email: String,
+        password: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        old_password: Option<String>,
+    },
+    /// The account is set up (answer to `set_password`).
+    Account {
+        email: String,
     },
     SetRole {
         member: u64,
@@ -267,9 +388,11 @@ pub enum Status {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Status(Status),
-    Welcome { tag: u16, snapshot: Option<Value>, rev: u64, member: u64, role: Role, token: Option<String> },
+    Welcome { tag: u16, snapshot: Option<Value>, rev: u64, member: u64, role: Role, token: Option<String>, email: Option<String> },
     Update { data: Value, rev: u64 },
-    Invite { member: u64, code: String },
+    Invite { member: u64, code: String, emailed: Option<String>, mail_error: Option<String> },
+    /// The account is set up or its password changed.
+    Account(String),
     Access { people: Vec<Person>, role: Role },
     /// A request was turned down; the connection stays.
     Denied(String),
@@ -286,6 +409,10 @@ pub struct SignIn {
     pub token: Option<String>,
     pub invite: Option<String>,
     pub claim: Option<u64>,
+    pub email: Option<String>,
+    pub password: Option<String>,
+    pub new_password: Option<String>,
+    pub reset_code: Option<String>,
 }
 
 enum Cmd {
@@ -434,7 +561,17 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
 
 fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign_in: &mut SignIn, pending: &mut Option<Value>, tries: &mut u64) -> End {
     let send = |ws: &mut WebSocket<TcpStream>, m: &Msg| ws.send(Message::text(m.to_json())).map_err(|e| e.to_string());
-    let hello = Msg::Hello { device: sign_in.device.clone(), tag: sign_in.tag, token: sign_in.token.clone(), invite: sign_in.invite.clone(), claim: sign_in.claim };
+    let hello = Msg::Hello {
+        device: sign_in.device.clone(),
+        tag: sign_in.tag,
+        token: sign_in.token.clone(),
+        invite: sign_in.invite.clone(),
+        claim: sign_in.claim,
+        email: sign_in.email.clone(),
+        password: sign_in.password.clone(),
+        new_password: sign_in.new_password.clone(),
+        reset_code: sign_in.reset_code.clone(),
+    };
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
     }
@@ -477,20 +614,25 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
                 match Msg::parse(t.as_str()) {
-                    Some(Msg::Welcome { tag, snapshot, rev, member, role, token }) => {
-                        // sign in the same way next time
+                    Some(Msg::Welcome { tag, snapshot, rev, member, role, token, email }) => {
+                        // sign in the same way next time: with the token, not the password
                         sign_in.tag = Some(tag);
                         if let Some(t) = &token {
                             sign_in.token = Some(t.clone());
                         }
                         sign_in.invite = None;
                         sign_in.claim = None;
+                        sign_in.email = None;
+                        sign_in.password = None;
+                        sign_in.new_password = None;
+                        sign_in.reset_code = None;
                         welcomed = true;
                         *tries = 0;
-                        emit(Event::Status(Status::Connected)).and_then(|_| emit(Event::Welcome { tag, snapshot, rev, member, role, token }))
+                        emit(Event::Status(Status::Connected)).and_then(|_| emit(Event::Welcome { tag, snapshot, rev, member, role, token, email }))
                     }
                     Some(Msg::Update { data, rev }) => emit(Event::Update { data, rev }),
-                    Some(Msg::Invite { member, code }) => emit(Event::Invite { member, code }),
+                    Some(Msg::Invite { member, code, emailed, mail_error }) => emit(Event::Invite { member, code, emailed, mail_error }),
+                    Some(Msg::Account { email }) => emit(Event::Account(email)),
                     Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),
                     Some(Msg::CallToken { channel, url, token }) => emit(Event::CallToken { channel, url, token }),
                     Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
@@ -540,11 +682,25 @@ mod tests {
 
     #[test]
     fn messages_round_trip_as_tagged_json() {
-        let m = Msg::Hello { device: "d1".into(), tag: Some(3), token: None, invite: None, claim: None };
-        assert_eq!(m.to_json(), r#"{"type":"hello","device":"d1","tag":3}"#);
-        assert_eq!(Msg::parse(r#"{"type":"hello","device":"d1"}"#), Some(Msg::Hello { device: "d1".into(), tag: None, token: None, invite: None, claim: None }));
+        let hello = |tag| Msg::Hello { device: "d1".into(), tag, token: None, invite: None, claim: None, email: None, password: None, new_password: None, reset_code: None };
+        assert_eq!(hello(Some(3)).to_json(), r#"{"type":"hello","device":"d1","tag":3}"#);
+        assert_eq!(Msg::parse(r#"{"type":"hello","device":"d1"}"#), Some(hello(None)));
+        // an older server's welcome (no email) still reads
+        assert!(matches!(Msg::parse(r#"{"type":"welcome","tag":1,"snapshot":null,"rev":0,"member":2,"role":"member"}"#), Some(Msg::Welcome { email: None, .. })));
         assert_eq!(Msg::parse(r#"{"type":"ping"}"#), Some(Msg::Ping));
         assert_eq!(Msg::parse(r#"{"type":"set_role","member":5,"role":"admin"}"#), Some(Msg::SetRole { member: 5, role: Role::Admin }));
+    }
+
+    #[test]
+    fn invite_links_round_trip_and_read_from_pasted_mail() {
+        let link = join_link("mac-mini.tail1.ts.net:8787", "ABCD-EFGH-JKMN", Some("kim.minji+wb@company.com"));
+        assert_eq!(link, "workboard://join?server=mac-mini.tail1.ts.net%3A8787&code=ABCD-EFGH-JKMN&email=kim.minji%2Bwb%40company.com");
+        let want = JoinLink { server: Some("mac-mini.tail1.ts.net:8787".into()), code: "ABCD-EFGH-JKMN".into(), email: Some("kim.minji+wb@company.com".into()) };
+        assert_eq!(parse_join(&link), want);
+        let mail = format!("Hi,\n\nOpen this: <{}>\nThanks", link);
+        assert_eq!(parse_join(&mail), want);
+        assert_eq!(parse_join("  abcd-efgh-jkmn "), JoinLink { code: "abcd-efgh-jkmn".into(), ..Default::default() });
+        assert_eq!(parse_join("workboard://join?code=X%2"), JoinLink { code: "X%2".into(), ..Default::default() });
     }
 
     #[test]

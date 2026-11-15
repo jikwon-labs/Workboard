@@ -248,3 +248,25 @@ pub fn download(addr: &str, auth: &Auth, sha: &str, dest: &Path, progress: &mut 
     std::fs::rename(&part, dest).map_err(|e| FileError::Other(e.to_string()))?;
     Ok(())
 }
+
+/// Ask the server to email a password-reset code (POST /auth/forgot).
+/// Ok(true): a code is on its way if that email has an account. Ok(false):
+/// this server can't send email.
+pub fn forgot_password(addr: &str, email: &str) -> Result<bool, String> {
+    let (mut s, host) = open(addr).map_err(|e| e.explain())?;
+    let body = serde_json::json!({ "email": email.trim() }).to_string();
+    let req = format!("POST /auth/forgot HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", host, body.len(), body);
+    s.write_all(req.as_bytes()).map_err(|e| format!("Couldn't reach the server: {}", e))?;
+    let mut text = String::new();
+    s.read_to_string(&mut text).map_err(|e| format!("Couldn't reach the server: {}", e))?;
+    let status: u16 = text.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+    if status == 404 || status == 405 {
+        return Err("This server can't reset passwords yet. Update workboard-server, or ask the owner or an admin for a new invite code.".into());
+    }
+    let json = text.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    let v: serde_json::Value = serde_json::from_str(json.trim()).map_err(|_| format!("The server answered {}.", status))?;
+    if status != 200 {
+        return Err(v.get("message").and_then(|m| m.as_str()).unwrap_or("The server said no.").to_string());
+    }
+    Ok(v.get("mail").and_then(|m| m.as_bool()).unwrap_or(false))
+}

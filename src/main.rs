@@ -1,5 +1,6 @@
 mod app;
 mod i18n;
+mod links;
 mod model;
 use wb_sync as sync;
 mod theme;
@@ -50,6 +51,7 @@ fn main() -> eframe::Result<()> {
         }));
     }
 
+    links::listen();
     eframe::run_native(
         "Workboard",
         options,

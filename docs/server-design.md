@@ -69,12 +69,13 @@
 
 | 방향 | 메시지 | 내용 |
 |---|---|---|
-| 앱 → 서버 | `hello` | `device`, `tag`, 그리고 `token`(평소) / `invite`(초대 코드) / `claim`(빈 서버 첫 등록) 중 하나 |
-| 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token` |
+| 앱 → 서버 | `hello` | `device`, `tag`, 그리고 다음 중 하나: `token`(평소) / `invite`(초대 코드, `new_password`·`email` 을 같이 보내면 계정도 만든다) / `email`+`password`(계정 로그인) / `reset_code`+`email`+`new_password`(비밀번호 재설정) / `claim`(빈 서버 첫 등록, `email`+`new_password` 로 owner 계정) |
+| 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token`, 계정이 있으면 `email` |
+| 앱 → 서버 | `set_password` | `email`, `password`, 계정이 이미 있으면 `old_password`. 서버가 `account{email}` 로 답한다 |
 | 앱 → 서버 | `push` | 앱의 공유 사본 전체 |
 | 서버 → 모두 | `update` | 합친 정본과 `rev` |
 | 앱 → 서버 | `create_invite` / `set_role` / `revoke` / `access_list` | owner·admin 만 |
-| 서버 → 앱 | `invite` / `access` | 만든 코드, 사람별 역할·컴퓨터 수·열린 코드 |
+| 서버 → 앱 | `invite` / `access` | 만든 코드(메일로 보냈으면 `emailed`, 실패했으면 `mail_error`), 사람별 역할·컴퓨터 수·열린 코드·계정 여부(`account`) |
 | 앱 → 서버 | `backup_list` / `restore` | owner 만. 서버가 `backups`(목록) / `restored` 로 답한다 |
 | 앱 → 서버 | `call_join` | 대화 id → 서버가 `call_token`(LiveKit 주소와 JWT)으로 답한다 |
 | 서버 → 앱 | `error` | `code: "auth"` 면 앱이 다시 연결을 멈춘다, `"denied"` 는 요청만 거절 |
@@ -82,7 +83,13 @@
 
 **파일 (Mac mini, `~/Library/Application Support/WorkboardServer/`)**
 
-- `workspace.json` 정본, `server.json` 기기(토큰은 sha256)·역할·초대 코드(권한 600)
+- `workspace.json` 정본, `server.json` 기기(토큰은 sha256)·역할·초대 코드·계정(이메일, 솔트, PBKDF2 해시)(권한 600)
+- `mail.json` 메일 설정(선택, 아래 "계정과 메일"). `outbox/` 는 `"transport": "folder"` 일 때 메일 대신 쓰는 곳
+
+**HTTP (같은 host:port)**
+
+- `POST /auth/forgot` `{"email"}` → 항상 `{"ok": true, "mail": bool}`. 계정이 있으면 재설정 코드를 메일로 보낸다(30분, 한 번). `mail: false` 는 메일 설정이 없다는 뜻
+- `GET /join?code=&email=` 초대 메일의 링크가 여는 페이지. "Open in Workboard" 버튼이 `workboard://join?server=&code=&email=` 를 연다
 - `backups/` 매시간 48개, 매일 30개, 되돌리기 전 사본
 - `livekit.yaml`, `livekit.json` LiveKit 설정과 키(권한 600, 레포에 없음)
 - `updates/` 앱 업데이트(appcast, zip)
@@ -177,6 +184,20 @@
 - **붙여넣기.** egui 는 클립보드에 글자가 있을 때만 붙여넣기를 넘긴다. 그래서 `raw_input_hook` 에서 입력창에 초점이 있을 때 Cmd+V 를 보고 클립보드를 직접 읽는다: Finder 에서 복사한 파일은 그 파일을(같이 오는 파일 이름 글자는 버림), 그림만 있으면 V 키를 뗄 때 PNG 로.
 - **검증:** 서버 통합 5개(올리기·받기·Range, 토큰·내용 확인, 크기 제한, 이어받기, 예전 앱), 앱 5개(서버를 거쳐 다른 컴퓨터에 사진, 채널별 초안·붙여넣기·스레드 답장, 공유 폴더, 영상 첫 장면, UI: 끌어다 놓기 → 보내기 → 크게 보기), 미디어 단위 3개, 재생 테스트(`tests/player.rs`, AVPlayer 는 메인 스레드가 필요해서 harness 없이 따로 돈다). 손 검증(로컬 앱): 붙여넣기로 사진, Finder 복사로 영상, 함께 보내기, 첫 장면과 길이 표시, 앱 안 재생·되감기, 사진 크게 보기와 넘기기.
 - **알려진 한계:** 서버의 파일은 지우지 않는다. 영상은 원본 그대로 올린다(변환·압축 없음). 작업 댓글·문서 첨부는 없다.
+
+### 6단계: 계정·초대 메일·첫 실행 (2026-11-16)
+
+사용자 결정: 메일은 SMTP 로 보내고, 새 기기 로그인은 이메일 + 비밀번호로 한다. 같은 기기는 원래도 토큰으로 이어졌지만, 다른 컴퓨터·폰에서 이어 쓰려면 매번 새 초대 코드가 필요했던 것을 없앤다.
+
+- **계정.** 멤버 한 명에 계정 하나(`server.json` 의 `accounts`, 멤버 id → 이메일·솔트·해시). 비밀번호는 PBKDF2-HMAC-SHA256 10만 번, 16바이트 솔트(직접 구현, RFC 7914 벡터로 테스트). 이메일은 대소문자 무시, 계정끼리 겹치면 거절. 비밀번호 8자 이상. 만드는 때: 초대 코드로 들어올 때 `new_password`(이메일은 멤버 기록의 것, 없거나 다르게 쓰고 싶으면 `email`), 빈 서버를 처음 올릴 때(`claim` + `email` + `new_password`), 이미 들어와 있는 기기에서 `set_password`. 비밀번호를 바꿀 때는 지금 비밀번호가 필요하다. 비밀번호 없이 초대 코드만 보내는 예전 앱도 그대로 들어온다.
+- **잠금.** 같은 이메일로 비밀번호·재설정 코드를 5번 틀리면 15분 동안 거절한다(메모리에만, 서버를 다시 켜면 풀린다). 없는 이메일도 같은 메시지와 비슷한 시간으로 답해서 누가 계정이 있는지 드러나지 않게 했다.
+- **접속 끊기(`revoke`)는 계정도 지운다.** 그대로 두면 비밀번호로 다시 들어올 수 있기 때문이다. 다시 들이려면 새 초대 코드를 준다.
+- **메일.** `mail.json`(형식은 `server/src/mail.rs` 맨 위). 없으면 예전처럼 코드를 직접 전달한다. owner·admin 이 코드를 만들면(`create_invite`) 그 멤버에게 이메일이 있으면 서버가 바로 보내고, `invite` 답에 `emailed`/`mail_error` 를 담는다. 링크 주소는 `public_address` 가 있으면 그것, 없으면 초대한 앱이 접속한 주소(Host 헤더). 시험: `workboard-server mail-test <주소>`. `"transport": "folder"` 면 `outbox/` 에 글로 쓴다(테스트도 이것을 쓴다). lettre(SMTP, macOS TLS).
+- **앱(Mac).** Work together 의 서버 칸이 탭 셋이 됐다: Email and password / Invite code(비밀번호 정하기, 초대 링크나 메일 전체를 붙여넣으면 서버·코드·이메일을 채운다) / New server. "Forgot password?" 는 코드 메일을 받고 새 비밀번호로 들어온다. 서버에 붙어 있으면 "Your account" 에서 비밀번호를 정하거나 바꾼다. 접속이 끊기면 이메일·비밀번호 또는 새 코드로 다시 들어온다. Invite 로 사람을 더하면 서버가 그 사람을 알게 된 뒤 앱이 알아서 코드를 만들어(그러면 서버가 메일로 보낸다) 보낸 결과를 알려 준다.
+- **첫 실행.** data.json 이 없던 첫 시작에만(`extra.welcome`) "Welcome to Workboard" 를 띄운다: 이 Mac 에서 혼자 쓰기(이름만) / 팀에 들어가기(서버 + 로그인) / 팀 서버 만들기. 예전 파일은 이 값이 없어서 뜨지 않는다.
+- **초대 링크.** `workboard://join?server=&code=&email=`. 번들에 URL 스킴을 등록하고(`scripts/bundle.sh`), `src/links.rs` 가 Apple 이벤트(GURL)로 받아 Join 화면을 채워서 연다. 이미 다른 서버에 붙어 있으면 바꾸지 않고 알려 준다. Gmail 같은 메일 앱은 사용자 정의 스킴 링크를 누를 수 없게 만들 때가 있어서, 메일에는 서버의 `http://.../join` 페이지 링크를 넣고 그 페이지에서 앱을 연다.
+- **검증:** 서버 단위(PBKDF2 벡터, 계정 규칙) + 통합 4개(메일 초대 → 비밀번호 → 다른 기기 로그인·잠금·revoke 로 계정 삭제·이메일 중복, 비밀번호 재설정, 나중에 비밀번호 정하기·바꾸기, join 페이지), wb-net(링크 만들기·읽기), 앱 통합 1개(owner 가 비밀번호로 서버 생성 → 두 번째 Mac 이 이메일로 → 초대 메일 → 코드 + 비밀번호로 합류 → 변경 → revoke 뒤 새 코드), 앱 UI 4개(로그인 탭·검증, 첫 실행, 링크 열기·붙여넣기, 계정 칸).
+- **알려진 한계:** 실제 SMTP 발송은 이 세션에서 보내 보지 않았다(`folder` 로만 확인). 메일 설정 전까지 비밀번호 찾기는 "관리자에게 새 코드" 로 안내된다. 이메일 소유 확인(가입 확인 메일)은 없다: 초대 코드를 받은 사람이 그 멤버라고 본다.
 
 ## 부록 A: 처음 설계 (2026-11-14, 기록용)
 

@@ -42,6 +42,9 @@ pub enum Modal {
     /// `code`: an invite code typed in.
     Together { path: String, addr: String, code: String, result: String },
     WhoAmI { name: String, email: String },
+    /// The first start. `step`: 0 the choice, 1 your name, 2 join a team,
+    /// 3 set up a team server; `addr`: the server address typed in.
+    Welcome { step: u8, name: String, addr: String },
     Call { ch: u64, link: String },
     NewList { name: String, space: u64, folder: Option<u64>, private: bool },
     NewSpace { name: String, color: [u8; 3] },
@@ -636,6 +639,9 @@ impl App {
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
+            Modal::Welcome { step: 2, .. } => tr("Join your team").into(),
+            Modal::Welcome { step: 3, .. } => tr("Set up your team's server").into(),
+            Modal::Welcome { .. } => tr("Welcome to Workboard").into(),
             Modal::Call { .. } => tr("Start a call").into(),
             Modal::NewList { .. } => tr("Create List").into(),
             Modal::NewSpace { .. } => tr("Create a Space").into(),
@@ -686,6 +692,7 @@ impl App {
         match modal {
             Modal::Together { path, addr, code, result } => close = self.together_body(ui, t, path, addr, code, result),
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
+            Modal::Welcome { step, name, addr } => close = self.welcome_body(ui, t, step, name, addr),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList { name, space, folder, .. } => close = self.new_list_body(ui, t, name, space, folder),
             Modal::NewSpace { name, color } => close = self.new_space_body(ui, t, name, color),
@@ -726,7 +733,7 @@ impl App {
                 let shared = self.data.extra.shared.is_some();
                 let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(if on_server { tr("This workspace is on a server: after inviting, give each person their invite code (Work together > People).") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
+                    ui.label(RichText::new(if on_server { tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
                     if ui.link(if shared { tr("Sharing") } else { tr("Work together") }).clicked() {
                         self.modal = Some(self.together_modal());
                     }
@@ -740,7 +747,7 @@ impl App {
                         if send.clicked() {
                             self.invite_people(&valid, role);
                             let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
-                            self.toast = Some((if on_server { crate::trf!("Invited {} people. Get their invite codes in Work together > People.", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            self.toast = Some((if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
                             self.dirty = true;
                             close = true;
                         }
@@ -1531,6 +1538,10 @@ impl App {
                 .join(" ");
             let color = STATUS_PALETTE[1 + (id as usize % 13)];
             self.data.members.push(Member { id, name, color, email: e.to_string(), role: role.to_string(), invited: true, status_text: String::new() });
+            // on a server: ask for their invite code (emailed by the server) once it has them
+            if self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some()) {
+                self.sync_rt.auto_invite.push((id, if role == "Admin" { wb_net::Role::Admin } else { wb_net::Role::Member }));
+            }
             if let Some(g) = self.data.channels.iter_mut().find(|c| c.kind == ChannelKind::Channel && c.name == "general") {
                 g.members.push(id);
             }

@@ -40,3 +40,9 @@ opt-level = 2
 [[test]]
 name = "player"
 harness = false
+
+# password hashing (PBKDF2) runs 100k rounds: keep it quick in test builds too
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3

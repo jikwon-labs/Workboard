@@ -600,6 +600,9 @@ pub struct Extra {
     /// Space Overview cards turned off with Customize.
     #[serde(default)]
     pub hidden_cards: Vec<String>,
+    /// A first start: show the welcome (files from before read as false).
+    #[serde(default)]
+    pub welcome: bool,
 }
 
 impl Default for Extra {
@@ -638,6 +641,7 @@ impl Default for Extra {
             sync: Default::default(),
             demo_removed: false,
             hidden_cards: vec![],
+            welcome: false,
         }
     }
 }
@@ -817,7 +821,9 @@ impl Data {
         let user = std::env::var("USER").unwrap_or_default();
         let name = if user.is_empty() { "Me".to_string() } else { user[..1].to_uppercase() + &user[1..] };
         let owner = Member { id: 1, name, color: [0x5f, 0x55, 0xee], email: String::new(), role: "Owner".into(), ..Default::default() };
-        Self::blank("My Workspace", owner)
+        let mut d = Self::blank("My Workspace", owner);
+        d.extra.welcome = true;
+        d
     }
 
     /// Take out the example content (people, spaces, tasks, docs, chat...)

@@ -181,6 +181,36 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         v.push(("modal track time".into(), Box::new(move |a: &mut App| a.modal = Some(Modal::TrackTime { task: t }))));
         v.push(("modal move tasks".into(), Box::new(move |a: &mut App| a.modal = Some(Modal::MoveTasks { ids: vec![t], query: String::new() }))));
     }
+    // signing in: the first start, each sign-in tab, the account section
+    use super::together::{Form, Mode};
+    for step in 0..4u8 {
+        v.push((format!("welcome {}", step), Box::new(move |a: &mut App| {
+            a.sync_rt.form = Form::default();
+            a.modal = Some(Modal::Welcome { step, name: String::new(), addr: String::new() });
+        })));
+    }
+    for (name, mode, sent) in [("invite", Mode::Invite, false), ("new server", Mode::NewServer, false), ("forgot", Mode::Forgot, false), ("forgot sent", Mode::Forgot, true)] {
+        v.push((format!("sign in {}", name), Box::new(move |a: &mut App| {
+            a.sync_rt.form = Form { mode, sent, note: "x".into(), ..Default::default() };
+            a.modal = Some(a.together_modal());
+        })));
+    }
+    for (name, account, changing) in [("account none", None, false), ("account change", Some("me@team.io"), true)] {
+        v.push((format!("together {}", name), Box::new(move |a: &mut App| {
+            a.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+            a.sync_rt.net_status = Some(wb_net::Status::Connected);
+            a.sync_rt.role = Some(wb_net::Role::Member);
+            a.sync_rt.account = account.map(|e| e.to_string());
+            a.sync_rt.acct = Form { changing, ..Default::default() };
+            a.modal = Some(a.together_modal());
+        })));
+    }
+    v.push(("together signed out".into(), Box::new(move |a: &mut App| {
+        a.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+        a.sync_rt.net_status = Some(wb_net::Status::Refused("x".into()));
+        a.sync_rt.form = Form::default();
+        a.modal = Some(a.together_modal());
+    })));
     v
 }
 

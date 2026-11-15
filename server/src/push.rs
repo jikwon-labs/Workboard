@@ -508,7 +508,7 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
             to.dedup();
             let p = payload(&title(author), &body_of(m), cid, parent);
             for member in to {
-                if member == author || skip.contains(&member) || super::closed_to(ch, member) {
+                if member == author || skip.contains(&member) || wb_sync::closed_to(ch, member) {
                     continue;
                 }
                 out.push(Note {

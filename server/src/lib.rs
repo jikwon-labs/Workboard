@@ -1966,6 +1966,8 @@ mod tests {
             connections: AtomicUsize::new(0),
             max_file: MAX_FILE,
             claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
+            pusher: None,
+            online: Mutex::new(Default::default()),
         }
     }
 

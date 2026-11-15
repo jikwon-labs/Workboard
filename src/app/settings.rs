@@ -11,12 +11,12 @@ pub const SETTINGS: [(&str, &str); 15] = [
     ("Admin", "Spaces"),
     ("Admin", "Trash"),
     ("Features", "Apps"),
-    ("Features", "Custom Fields"),
-    ("Features", "Tag Manager"),
+    ("Features", "Custom fields"),
+    ("Features", "Tag manager"),
     ("Features", "Templates"),
     ("Features", "Automations"),
     ("Features", "Work together"),
-    ("Personal", "My Settings"),
+    ("Personal", "My settings"),
     ("Personal", "Notifications"),
     ("Personal", "Themes"),
     ("Personal", "Language"),
@@ -37,12 +37,12 @@ impl App {
             },
             "Trash" => Modal::Trash,
             "Apps" => Modal::ClickApps,
-            "Custom Fields" => Modal::CustomFields {
+            "Custom fields" => Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
                 opts: String::new(),
             },
-            "Tag Manager" => Modal::TagManager {
+            "Tag manager" => Modal::TagManager {
                 from: String::new(),
                 to: String::new(),
             },
@@ -54,7 +54,7 @@ impl App {
                 scope: None,
             },
             "Work together" => self.together_modal(),
-            "My Settings" => {
+            "My settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();
                 Modal::Profile {
                     name: m.name,
@@ -93,34 +93,42 @@ impl App {
         nui.add_space(6.0);
         let ws = self.data.workspace.clone();
         nui.label(RichText::new(ws).strong());
-        let mut last_group = "";
-        for (i, (group, label)) in SETTINGS.iter().enumerate() {
-            if *group != last_group {
-                last_group = group;
-                nui.add_space(8.0);
-                nui.label(RichText::new(tr(group)).small().color(t.text3));
-            }
-            let sel = self.settings_tab as usize == i;
-            let w = nui.available_width();
-            let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-            name_it(&resp, &format!("Settings {}", label));
-            if sel {
-                nui.painter().rect_filled(r, 6.0, t.selected_bg);
-            } else if resp.hovered() {
-                nui.painter().rect_filled(r, 6.0, t.hover);
-            }
-            nui.painter().text(
-                r.left_center() + vec2(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                tr(label),
-                FontId::proportional(13.5),
-                if sel { t.selected_text } else { t.text },
-            );
-            if resp.clicked() && !sel {
-                self.settings_tab = i as u8;
-                self.settings_state = None;
-            }
-        }
+        // a short window can't fit every section: the list scrolls
+        egui::ScrollArea::vertical()
+            .id_salt("settings_nav")
+            .auto_shrink([false, false])
+            .show(&mut nui, |nui| {
+                let mut last_group = "";
+                for (i, (group, label)) in SETTINGS.iter().enumerate() {
+                    if *group != last_group {
+                        last_group = group;
+                        nui.add_space(8.0);
+                        nui.label(RichText::new(tr(group)).small().color(t.text3));
+                    }
+                    let sel = self.settings_tab as usize == i;
+                    let w = nui.available_width();
+                    let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+                    name_it(&resp, &format!("Settings {}", label));
+                    if sel {
+                        nui.painter().rect_filled(r, 6.0, t.selected_bg);
+                    } else if resp.hovered() {
+                        nui.painter().rect_filled(r, 6.0, t.hover);
+                    }
+                    paint_fit(
+                        nui,
+                        r.left_center() + vec2(10.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        tr(label),
+                        FontId::proportional(13.5),
+                        if sel { t.selected_text } else { t.text },
+                        w - 14.0,
+                    );
+                    if resp.clicked() && !sel {
+                        self.settings_tab = i as u8;
+                        self.settings_state = None;
+                    }
+                }
+            });
         let label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
         let mut bui = ui.new_child(
             egui::UiBuilder::new()
@@ -148,7 +156,8 @@ impl App {
             .id_salt("settings_body")
             .auto_shrink([false, false])
             .show(&mut bui, |ui| {
-                ui.set_max_width(640.0);
+                // at most 640 wide, but never wider than a small window leaves
+                ui.set_max_width(ui.available_width().min(640.0));
                 let mut state = self
                     .settings_state
                     .take()
@@ -208,15 +217,19 @@ impl App {
             .open_spaces()
             .iter()
             .map(|s| {
-                let lists = self
+                // archived Lists and tasks are counted under Archived below
+                let lists: Vec<u64> = self
                     .data
                     .lists_in(Location::Space(s.id))
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|l| !self.data.list_archived(*l))
+                    .collect();
                 let tasks = self
                     .data
                     .tasks
                     .iter()
-                    .filter(|t| lists.contains(&t.list_id))
+                    .filter(|t| lists.contains(&t.list_id) && !t.archived)
                     .count();
                 (s.id, s.name.clone(), s.color, lists.len(), tasks)
             })
@@ -233,11 +246,23 @@ impl App {
             });
         });
         ui.add_space(8.0);
+        if spaces.is_empty() {
+            ui.label(
+                RichText::new(tr(
+                    "No spaces yet. A Space holds your Lists and their tasks: make one with + New Space.",
+                ))
+                .color(t.text3),
+            );
+        }
         egui::Grid::new("spaces_table")
             .num_columns(5)
             .striped(true)
             .spacing(vec2(24.0, 10.0))
             .show(ui, |ui| {
+                // no header over an empty table
+                if spaces.is_empty() {
+                    return;
+                }
                 for h in ["Name", "Lists", "Tasks", "", ""] {
                     ui.label(RichText::new(tr(h)).small().color(t.text3));
                 }
@@ -283,19 +308,24 @@ impl App {
             .filter(|s| s.archived && s.private_owner.is_none())
             .map(|s| (s.id, s.name.clone()))
             .collect();
-        let arch_lists: Vec<(u64, String)> = self
-            .data
-            .spaces
-            .iter()
-            .filter(|s| !s.archived)
-            .flat_map(|s| {
-                s.lists
-                    .iter()
-                    .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
-                    .filter(|l| l.archived)
-                    .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
-            })
-            .collect();
+        let arch_lists: Vec<(u64, String)> =
+            self.data
+                .spaces
+                .iter()
+                .filter(|s| !s.archived)
+                .flat_map(|s| {
+                    // a List in a Folder shows its Folder too, as Move tasks does
+                    s.lists
+                        .iter()
+                        .filter(|l| l.archived)
+                        .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
+                        .chain(s.folders.iter().flat_map(move |f| {
+                            f.lists.iter().filter(|l| l.archived).map(move |l| {
+                                (l.id, format!("{} / {} / {}", s.name, f.name, l.name))
+                            })
+                        }))
+                })
+                .collect();
         let arch_folders: Vec<(u64, String)> = self
             .data
             .spaces

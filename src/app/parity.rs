@@ -487,7 +487,11 @@ impl App {
                 (
                     s.id,
                     s.name.clone(),
-                    s.folders.iter().map(|f| (f.id, f.name.clone())).collect(),
+                    s.folders
+                        .iter()
+                        .filter(|f| !f.archived)
+                        .map(|f| (f.id, f.name.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -635,16 +639,27 @@ impl App {
         focus_once(ui, &r);
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(10.0);
-        for (on, label, help) in [
+        // a List needs a Space to go in: without one the switch is off and says so
+        let can_list = !self.open_spaces().is_empty();
+        if !can_list {
+            *add_list = false;
+        }
+        for (on, label, help, enabled) in [
             (
                 &mut *private,
                 "Make Private",
                 "Only invited people can find this channel.",
+                true,
             ),
             (
                 &mut *add_list,
                 "Add a List",
-                "Make a List with the same name, tied to this channel.",
+                if can_list {
+                    "Make a List with the same name, tied to this channel."
+                } else {
+                    "Needs a Space to put the List in. Make one from + Create > Space."
+                },
+                can_list,
             ),
         ] {
             ui.horizontal(|ui| {
@@ -653,7 +668,7 @@ impl App {
                     ui.label(RichText::new(tr(help)).small().color(t.text3));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    switch(ui, t, on, label);
+                    ui.add_enabled_ui(enabled, |ui| switch(ui, t, on, label));
                 });
             });
             ui.add_space(6.0);
@@ -989,7 +1004,8 @@ impl App {
         Some(nid)
     }
 
-    /// Every list as (id, "Space / Folder / List"), personal space included.
+    /// Every list as (id, "Space / Folder / List"), personal space included;
+    /// archived ones left out (tasks moved there would drop out of sight).
     pub(super) fn all_list_paths(&self) -> Vec<(u64, String)> {
         let mut out = vec![];
         for s in &self.data.spaces {
@@ -1005,6 +1021,7 @@ impl App {
                 }
             }
         }
+        out.retain(|(l, _)| !self.data.list_archived(*l));
         out
     }
 
@@ -1037,10 +1054,21 @@ impl App {
         focus_once(ui, &r);
         ui.add_space(4.0);
         let q = query.to_lowercase();
+        let paths = self.all_list_paths();
+        // only where the tasks already are: say there is nowhere else yet
+        if paths
+            .iter()
+            .all(|(l, _)| !here.is_empty() && here.iter().all(|h| h == l))
+        {
+            ui.label(
+                RichText::new(tr("There is no other List to move to yet. Make one first."))
+                    .color(t.text3),
+            );
+        }
         egui::ScrollArea::vertical()
             .max_height(300.0)
             .show(ui, |ui| {
-                for (lid, path) in self.all_list_paths() {
+                for (lid, path) in paths {
                     if !q.is_empty() && !path.to_lowercase().contains(&q) {
                         continue;
                     }
@@ -1068,7 +1096,11 @@ impl App {
                 (
                     s.id,
                     s.name.clone(),
-                    s.folders.iter().map(|f| (f.id, f.name.clone())).collect(),
+                    s.folders
+                        .iter()
+                        .filter(|f| !f.archived)
+                        .map(|f| (f.id, f.name.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -1083,6 +1115,19 @@ impl App {
                 .map(|f| f.id);
             (sp, f)
         };
+        // only where the List already is: say there is nowhere else yet
+        let elsewhere = spaces.iter().any(|(sid, _, folders)| {
+            !(*sid == cur_space && cur_folder.is_none())
+                || folders.iter().any(|(fid, _)| cur_folder != Some(*fid))
+        });
+        if !elsewhere {
+            ui.label(
+                RichText::new(tr(
+                    "There is no other Space or Folder to move it to yet. Make one first.",
+                ))
+                .color(t.text3),
+            );
+        }
         egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {
@@ -1444,7 +1489,7 @@ impl App {
                 close_any(ui);
             }
         }
-        if ui.button(tr("Custom Fields")).clicked() {
+        if ui.button(tr("Custom fields")).clicked() {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
@@ -1773,7 +1818,7 @@ impl App {
                     "Doc" => self.new_doc(sid),
                     "Dashboard" => {
                         self.modal = Some(Modal::NewDashboard {
-                            name: "New Dashboard".into(),
+                            name: tr("New Dashboard").into(),
                         })
                     }
                     "Whiteboard" => self.new_whiteboard(),
@@ -2119,7 +2164,7 @@ impl App {
             self.actions.push(Action::EditStatuses(sid));
             close_any(ui);
         }
-        if ui.button(tr("Custom Fields")).clicked() {
+        if ui.button(tr("Custom fields")).clicked() {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
@@ -2284,13 +2329,11 @@ impl App {
                 let ql = q.trim().to_lowercase();
                 let hit = |n: &str| ql.is_empty() || n.to_lowercase().contains(&ql);
                 let all: Vec<&str> = COLUMNS.iter().chain(PROPERTIES.iter()).copied().collect();
-                // shown properties that the List has no room to draw
-                let fits: Vec<&str> = if self.list_width > 0.0 {
-                    super::shell::col_layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.list_width, 30.0)), &self.hidden_cols, self.data.extra.apps.priorities).extra.iter().map(|c| c.0).collect()
-                } else {
-                    PROPERTIES.to_vec()
-                };
+                // shown properties and fields that the List has no room to
+                // draw, laid out the way the List does (custom field columns
+                // come before the properties and take their room)
                 let list_cols = self.list_cols(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.list_width.max(1.0), 30.0)));
+                let fits: Vec<&str> = if self.list_width > 0.0 { list_cols.extra.iter().map(|c| c.0).collect() } else { PROPERTIES.to_vec() };
                 let field_fits: Vec<u64> = if self.list_width > 0.0 { list_cols.fields.iter().map(|c| c.0).collect() } else { self.list_field_ids() };
                 let fields: Vec<(u64, String)> = self.list_field_ids().into_iter().filter_map(|id| self.data.extra.fields.iter().find(|f| f.id == id).map(|f| (id, f.name.clone()))).collect();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(rect.height() - 160.0).show(ui, |ui| {
@@ -2323,7 +2366,7 @@ impl App {
                     // custom fields: shown at first, each can be turned off here
                     let shown_fields: Vec<&(u64, String)> = fields.iter().filter(|(_, n)| hit(n)).collect();
                     if !shown_fields.is_empty() {
-                        ui.label(RichText::new(tr("Custom Fields")).small().color(t.text3));
+                        ui.label(RichText::new(tr("Custom fields")).small().color(t.text3));
                         for (fid, name) in shown_fields {
                             let key = super::shell::field_col_key(*fid);
                             ui.horizontal(|ui| {
@@ -3024,8 +3067,14 @@ impl App {
                                 for id in &ids {
                                     self.duplicate_task(*id);
                                 }
-                                self.toast =
-                                    Some((trf!("Duplicated {} tasks", ids.len()), now_ts()));
+                                self.toast = Some((
+                                    if ids.len() == 1 {
+                                        tr("Duplicated 1 task").to_string()
+                                    } else {
+                                        trf!("Duplicated {} tasks", ids.len())
+                                    },
+                                    now_ts(),
+                                ));
                                 self.selected.clear();
                             }
                             // archived tasks (Show archived tasks only) can be brought back
@@ -3324,7 +3373,7 @@ impl App {
             && self.palette.is_none()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma))
         {
-            self.open_settings("My Settings");
+            self.open_settings("My settings");
         }
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         if typing

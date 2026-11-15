@@ -6,7 +6,9 @@
 // milliseconds) and when each of its own fields did (`fields`): for each
 // field the newest change wins, so two people changing different fields of
 // one task both keep theirs. Reactions merge per (emoji, person), running
-// timers per person, whiteboard strokes and notes have ids (`fillBoardIds`).
+// timers per person, time entries per (person, start), custom field values
+// per field; whiteboard strokes and notes have ids (`fillBoardIds`), and
+// entries without an id in a list of items stay as they are beside them.
 // The items inside an item (messages in a channel, lists in a space) are merged one by one,
 // and an item that moved (a list to another space) sits only where its newest
 // copy puts it. Deleted items leave a tombstone (`tombs`); restoring one
@@ -154,12 +156,24 @@ extension Sync {
         return h
     }
 
-    static func idOf(_ v: JSON) -> UInt64? { v["id"]?.uint }
+    /// An item's id; 0 is no id (wb_sync id_of).
+    static func idOf(_ v: JSON) -> UInt64? {
+        guard let i = v["id"]?.uint, i != 0 else { return nil }
+        return i
+    }
 
-    /// A non-empty array whose entries are all objects with an id.
+    /// A non-empty array of objects of which at least one has an id: its
+    /// entries with ids are items, merged one by one; entries without one
+    /// stay as they are, part of the item the array sits in (wb_sync
+    /// is_id_array / loose_entries).
     static func isIdArray(_ v: JSON) -> Bool {
         guard let a = v.array, !a.isEmpty else { return false }
-        return a.allSatisfy { $0.object != nil && idOf($0) != nil }
+        return a.allSatisfy { $0.object != nil } && a.contains { idOf($0) != nil }
+    }
+
+    /// The entries without an id in an array of items.
+    static func looseEntries(_ v: JSON) -> [JSON] {
+        (v.array ?? []).filter { idOf($0) == nil }
     }
 
     /// Fingerprint of an item's own fields (not the items inside it, not personal fields).
@@ -168,7 +182,12 @@ extension Sync {
         for (k, v) in obj {
             if localKeys.contains(k) { continue }
             if let a = v.array, a.isEmpty { continue }
-            if isIdArray(v) { continue }
+            if isIdArray(v) {
+                // entries without an id are the item's own
+                let loose = looseEntries(v)
+                if !loose.isEmpty { own[k] = .array(loose) }
+                continue
+            }
             own[k] = v
         }
         return fnv(JSON.object(own).serialized().utf8)
@@ -209,6 +228,28 @@ extension Sync {
 
     static func isEmptyArr(_ v: JSON) -> Bool { v.array?.isEmpty == true }
 
+    /// Fields split into parts since field stamps began (wb_sync SPLIT_LATER).
+    static let splitLater: [String] = ["time_entries", "custom"]
+
+    static func utf8Less(_ a: String, _ b: String) -> Bool { Array(a.utf8).lexicographicallyPrecedes(Array(b.utf8)) }
+
+    /// The parts of a time_entries field, one per entry by whose it is and
+    /// when it started (wb_sync entry_parts). nil when it isn't a list of entries.
+    static func entryParts(_ v: JSON) -> [(String, JSON)]? {
+        guard let a = v.array else { return nil }
+        var out: [(String, JSON)] = []
+        struct Key: Hashable { let m: UInt64; let s: Int64 }
+        var seen: [Key: Int] = [:]
+        for e in a {
+            guard e.object != nil, let start = e["start"]?.int else { return nil }
+            let member = e["member"]?.uint ?? 0
+            let n = seen[Key(m: member, s: start), default: 0]
+            seen[Key(m: member, s: start)] = n + 1
+            out.append((n == 0 ? "time_entries/\(member)/\(start)" : "time_entries/\(member)/\(start)/\(n)", e))
+        }
+        return out
+    }
+
     /// The (emoji, member) pairs of a reactions field, in order.
     static func reactionPairs(_ v: JSON) -> [(String, UInt64)]? {
         guard let a = v.array else { return nil }
@@ -240,11 +281,24 @@ extension Sync {
     /// The parts of an item's own fields with their values (wb_sync parts_of).
     static func partsOf(_ obj: [String: JSON]) -> [(String, JSON)] {
         var out: [(String, JSON)] = []
-        for k in obj.keys.sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }) {
+        for k in obj.keys.sorted(by: utf8Less) {
             let v = obj[k]!
-            if localKeys.contains(k) || appendKeys.contains(k) || timerKeys.contains(k) || isEmptyArr(v) || isIdArray(v) { continue }
+            if localKeys.contains(k) || appendKeys.contains(k) || timerKeys.contains(k) || isEmptyArr(v) { continue }
+            if isIdArray(v) {
+                let loose = looseEntries(v)
+                if !loose.isEmpty { out.append((k, .array(loose))) }
+                continue
+            }
             if k == "reactions", let pairs = reactionPairs(v) {
                 for (e, u) in pairs { out.append(("reactions/\(e)/\(u)", .bool(true))) }
+                continue
+            }
+            if k == "time_entries", let parts = entryParts(v) {
+                out += parts
+                continue
+            }
+            if k == "custom", let o = v.object {
+                for key in o.keys.sorted(by: utf8Less) { out.append(("custom/\(key)", o[key]!)) }
                 continue
             }
             out.append((k, v))
@@ -368,6 +422,31 @@ extension Sync {
         meta.fields[id] = e
     }
 
+    /// Fingerprints saved before time entries and custom field values were
+    /// split have one for the whole field: when it still matches, it is
+    /// swapped for today's parts (wb_sync upgrade_split_hashes).
+    static func upgradeSplitHashes(_ meta: inout SyncMeta, _ data: JSON, _ parts: [UInt64: [String: UInt32]]) {
+        guard meta.fieldHashes.values.contains(where: { e in splitLater.contains { e[$0] != nil } }) else { return }
+        var fh = meta.fieldHashes
+        visit(data) { id, _, obj in
+            guard var old = fh[id] else { return }
+            let now = parts[id]
+            var touched = false
+            for k in splitLater {
+                guard let h = old[k] else { continue }
+                // a value that doesn't split is still one part
+                if now?[k] != nil { continue }
+                if let v = obj[k], partHash(v) == h {
+                    old[k] = nil
+                    for (p, ph) in now ?? [:] where partField(p) == k && p.count > k.count { old[p] = ph }
+                    touched = true
+                }
+            }
+            if touched { fh[id] = old }
+        }
+        meta.fieldHashes = fh
+    }
+
     static func tidyFields(_ e: inout [String: Int64], present: (String) -> Bool, base: Int64, stamp: Int64) {
         e = e.filter { $0.key.isEmpty || !(present($0.key) && $0.value == base) }
         if base == stamp { e[""] = nil } else { e[""] = base }
@@ -405,6 +484,7 @@ extension Sync {
         shrinkMoved(&meta.moved, data)
         meta.v = metaV
         let parts = partHashes(data)
+        upgradeSplitHashes(&meta, data, parts)
         for (id, h) in cur {
             let next = meta.stamps[id].map { max(now, $0 + 1) } ?? now
             if let old = meta.hashes[id] {
@@ -547,11 +627,17 @@ extension Sync {
     /// (wb_sync read_part).
     private static func readPart(_ sd: Side, _ part: String, present: Bool, inVec: Set<UInt64>) -> Int64? {
         if let t = sd.listed?[part] { return t }
+        let f = partField(part)
+        // a stamp for a whole field from before it was split stands for each element
+        if part != f, let t = sd.listed?[f] { return t }
         var counts = present
         if !counts {
-            let f = partField(part)
             if f == "reactions" && part != f {
                 counts = sd.omits || (sd.obj["reactions"].map { !isEmptyArr($0) } ?? false)
+            } else if f == "time_entries" && part != f {
+                counts = sd.omits || (sd.obj["time_entries"].map { !isEmptyArr($0) } ?? false)
+            } else if f == "custom" && part != f {
+                counts = sd.omits || (sd.obj["custom"]?.object.map { !$0.isEmpty } ?? false)
             } else if f == "timers" && part != f {
                 let m = UInt64(part.dropFirst("timers/".count)) ?? 0
                 // an app that doesn't know `timers` can't have stopped one there
@@ -564,8 +650,9 @@ extension Sync {
     }
 
     /// Merge the own fields of one item's copies part by part
-    /// (wb_sync merge_fields). Returns the fields and the field names decided.
-    private static func mergeFields(_ cx: Ctx, _ id: UInt64, _ list: [Cand], stamp: Int64, newest: [String: JSON]) -> ([String: JSON], Set<String>) {
+    /// (wb_sync merge_fields). Returns the fields, the field names decided,
+    /// and for lists of items the entries without an id that go after them.
+    private static func mergeFields(_ cx: Ctx, _ id: UInt64, _ list: [Cand], stamp: Int64, newest: [String: JSON]) -> ([String: JSON], Set<String>, [String: JSON]) {
         var child = Set<String>()
         for c in list {
             for (k, v) in c.value.object ?? [:] where isIdArray(v) { child.insert(k) }
@@ -574,7 +661,8 @@ extension Sync {
             guard let obj = c.value.object else { return nil }
             let s = cx.stamps[c.src][id] ?? 0
             let listed = cx.fields.indices.contains(c.src) ? cx.fields[c.src][id] : nil
-            return Side(obj: obj, parts: partsOf(obj).filter { !child.contains(partField($0.0)) }, base: listed?[""] ?? s, listed: listed,
+            // a list of items keeps only its entries without an id here
+            return Side(obj: obj, parts: partsOf(obj).filter { !child.contains(partField($0.0)) || child.contains($0.0) }, base: listed?[""] ?? s, listed: listed,
                         omits: cx.omitsDefaults.indices.contains(c.src) && cx.omitsDefaults[c.src], src: c.src)
         }
         let anyEntry = sides.contains { $0.listed != nil }
@@ -584,8 +672,9 @@ extension Sync {
         let first = sides.firstIndex(where: { $0.obj == newest }) ?? 0
         for sd in Array(sides[first...]) + Array(sides[..<first]) {
             for (p, _) in sd.parts where seen.insert(p).inserted { order.append(p) }
-            for p in (sd.listed?.keys ?? [String: Int64]().keys).sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) })
-            where !p.isEmpty && !child.contains(partField(p)) && seen.insert(p).inserted {
+            // (a whole split field's stamp is read for each of its elements)
+            for p in (sd.listed?.keys ?? [String: Int64]().keys).sorted(by: utf8Less)
+            where !p.isEmpty && (!child.contains(partField(p)) || child.contains(p)) && !splitLater.contains(p) && seen.insert(p).inserted {
                 order.append(p)
             }
         }
@@ -597,6 +686,9 @@ extension Sync {
         var decided = Set<String>()
         var reactions: [(String, UInt64)] = []
         var timers: [(UInt64, Int64)] = []
+        var entries: [(String, JSON)] = []
+        var custom: [String: JSON] = [:]
+        var loose: [String: JSON] = [:]
         for p in order {
             var win: (Int64, Side, JSON?)?
             for sd in sides {
@@ -606,8 +698,19 @@ extension Sync {
             }
             guard let (t, sd, val) = win else { continue }
             if anyEntry && (val == nil || t != baseOut) { entry[p] = t }
+            if child.contains(p) {
+                // the entries without an id of a list of items
+                if let v = val { loose[p] = v }
+                continue
+            }
             let f = partField(p)
-            if f == "reactions" && p != f {
+            if f == "time_entries" && p != f {
+                decided.insert("time_entries")
+                if let v = val { entries.append((p, v)) }
+            } else if f == "custom" && p != f {
+                decided.insert("custom")
+                if let v = val { custom[String(p.dropFirst("custom/".count))] = v }
+            } else if f == "reactions" && p != f {
                 decided.insert("reactions")
                 let rest = p.dropFirst("reactions/".count)
                 if val != nil, let slash = rest.lastIndex(of: "/"), let u = UInt64(rest[rest.index(after: slash)...]) {
@@ -627,6 +730,8 @@ extension Sync {
             }
         }
         if decided.contains("reactions") {
+            // the same order on every device: by emoji, then by person
+            reactions.sort { l, r in l.0 != r.0 ? utf8Less(l.0, r.0) : l.1 < r.1 }
             var out: [(String, [UInt64])] = []
             for (e, u) in reactions {
                 if let i = out.firstIndex(where: { $0.0 == e }) { out[i].1.append(u) } else { out.append((e, [u])) }
@@ -650,11 +755,24 @@ extension Sync {
             let rest = timers.dropFirst().map { JSON.object(["member": .id($0.0), "start": .int($0.1)]) }
             if !rest.isEmpty { obj["timers"] = .array(Array(rest)) }
         }
+        if decided.contains("time_entries") {
+            // the same order everywhere: by start, then whose
+            entries.sort { l, r in
+                let kl = (l.1["start"]?.int ?? 0, l.1["member"]?.uint ?? 0), kr = (r.1["start"]?.int ?? 0, r.1["member"]?.uint ?? 0)
+                return kl != kr ? kl < kr : utf8Less(l.0, r.0)
+            }
+            if !entries.isEmpty || sides.contains(where: { $0.obj["time_entries"] != nil }) {
+                obj["time_entries"] = .array(entries.map(\.1))
+            }
+        }
+        if decided.contains("custom") && (!custom.isEmpty || sides.contains(where: { $0.obj["custom"] != nil })) {
+            obj["custom"] = .object(custom)
+        }
         if anyEntry {
             if baseOut != stamp { entry[""] = baseOut }
             cx.outFields[id] = entry
         }
-        return (obj, decided)
+        return (obj, decided, loose)
     }
 
     private static func mergeArr(_ cx: Ctx, _ sources: [(Int, [JSON])], parent: UInt64?) -> [JSON] {
@@ -690,14 +808,15 @@ extension Sync {
                 for k in c.value.object?.keys ?? [String: JSON]().keys { keys.insert(k) }
             }
             // own fields first, field by field (see mergeFields)
-            var (obj, decided) = mergeFields(cx, id, list, stamp: bestStamp, newest: wobj)
+            var (obj, decided, loose) = mergeFields(cx, id, list, stamp: bestStamp, newest: wobj)
             for k in keys {
                 if decided.contains(k) || obj[k] != nil { continue }
                 let vals: [(Int, JSON)] = list.compactMap { c in c.value[k].map { (c.src, $0) } }
                 let value: JSON
                 if vals.contains(where: { isIdArray($0.1) }) {
                     let subs: [(Int, [JSON])] = vals.compactMap { s, v in v.array.map { (s, $0) } }
-                    value = .array(mergeArr(cx, subs, parent: id))
+                    // entries without an id stay as they are, after the items
+                    value = .array(mergeArr(cx, subs, parent: id) + (loose[k]?.array ?? []))
                 } else if appendKeys.contains(k) {
                     var all: [JSON] = []
                     for (_, v) in vals {
@@ -771,7 +890,9 @@ extension Sync {
         cx.fields = [lmeta.fields] + metas.map(\.fields)
         var merged: [(String, JSON)] = []
         for (path, sources) in perPath {
-            merged.append((path, .array(mergeArr(cx, sources, parent: nil))))
+            // this device's entries without an id stay as they are
+            let loose = sources[0].1.filter { idOf($0) == nil }
+            merged.append((path, .array(mergeArr(cx, sources, parent: nil) + loose)))
         }
         for (path, v) in merged { local.set(path, v) }
         // shared settings: the newest change wins; on a tie this device's stays
@@ -992,11 +1113,11 @@ extension Sync {
                 var inner = false
                 for (k, v) in obj {
                     if isIdArray(v) {
-                        let sub = prune(v.array ?? [])
-                        if !sub.isEmpty {
-                            inner = true
-                            o[k] = .array(sub)
-                        }
+                        var sub = prune(v.array ?? [])
+                        if !sub.isEmpty { inner = true }
+                        // entries without an id are the item's own
+                        sub += looseEntries(v)
+                        if !sub.isEmpty { o[k] = .array(sub) }
                     } else {
                         o[k] = v
                     }

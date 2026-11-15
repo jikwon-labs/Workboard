@@ -4,7 +4,9 @@
 // Every file sits in a cache folder named by its sha256 (the attachment's
 // `file`). Sending: the file is checked (kind, size, picture/video size),
 // hashed and copied into the cache on a worker thread, then put on the server
-// (or in the shared folder's files/), and only then can the message go.
+// (or in the shared folder's files/), and only then can the message go;
+// while the server can't be reached (or this computer isn't signed in) the
+// message goes anyway and its files follow from the backlog.
 // Showing: a message's file comes from the cache, else the server, else the
 // shared folder; pictures for the screen are decoded on a worker thread.
 //
@@ -21,9 +23,10 @@
 //
 // Cleaning up (`clean_cache`, `clean_shared_folder`): the cache drops files
 // no workspace on this computer refers to (the Trash counts) after a while,
-// and the least recently used shared ones past a size cap; the shared
-// folder's files/ drops files none of the members' copies refer to once
-// they're 30 days old.
+// and the least recently used shared ones past a size cap (never ones only a
+// Trash refers to); the shared folder's files/ drops files none of the
+// members' copies refer to once they're 30 days old and nothing has named
+// them for 60 days.
 
 use super::*;
 use crate::media::{self, Rgba};
@@ -60,6 +63,13 @@ pub(super) const CACHE_CAP: u64 = 2 << 30;
 /// A file in the shared folder no member's copy refers to is removed once
 /// it's this old.
 pub(super) const FOLDER_GRACE: Duration = Duration::from_secs(30 * 24 * 3600);
+/// ... and only once nothing has named it for this long (the team server's
+/// FILE_KEEP_DAYS): a deleted message's files outlast it a while, for a
+/// restore from someone's Trash.
+pub(super) const FOLDER_NAMED_GRACE: Duration = Duration::from_secs(60 * 24 * 3600);
+/// In the shared folder's files/: file -> when a member's copy last named
+/// it (unix seconds), as seen by `clean_shared_folder`.
+pub(super) const FOLDER_NAMED: &str = ".named.json";
 /// How often the cleaning runs (and the first time, after the start).
 const CLEAN_EVERY: Duration = Duration::from_secs(6 * 3600);
 const CLEAN_FIRST: Duration = Duration::from_secs(90);
@@ -74,6 +84,13 @@ pub(super) struct Pending {
     pub error: Option<String>,
 }
 
+/// A file waits for the server rather than failed for good: the server
+/// can't be reached, or this computer isn't signed in to it. It goes up by
+/// itself once it can.
+pub(super) fn waits_for_server(e: &str) -> bool {
+    e == NOT_SIGNED_IN || e.starts_with("Couldn't reach the server")
+}
+
 impl Pending {
     /// Ready to go out: checked, and on the server when there is one (with
     /// a video's still).
@@ -83,6 +100,22 @@ impl Pending {
                 parts(a)
                     .iter()
                     .all(|p| files.state(&p.file) == Some(Transfer::Done))
+            })
+    }
+
+    /// A message may go with it: ready, or in the cache while the server
+    /// can't be reached; then the file follows (`send_files` puts it in the
+    /// backlog).
+    pub fn sendable(&self, files: &Files) -> bool {
+        self.error.is_none()
+            && self.att.as_ref().is_some_and(|a| {
+                parts(a).iter().all(|p| match files.state(&p.file) {
+                    Some(Transfer::Done) => true,
+                    Some(Transfer::Failed(e)) => {
+                        waits_for_server(&e) && files.local(&p.file).is_some()
+                    }
+                    _ => false,
+                })
             })
     }
 
@@ -412,6 +445,19 @@ impl Files {
 
     pub fn state(&self, sha: &str) -> Option<Transfer> {
         self.states.lock().unwrap().get(sha).cloned()
+    }
+
+    /// A Pending for a file already in the cache (one read back after a
+    /// restart).
+    pub fn pending_for(&mut self, att: Attachment) -> Pending {
+        let local = self.next_local;
+        self.next_local += 1;
+        Pending {
+            local,
+            name: att.name.clone(),
+            att: Some(att),
+            error: None,
+        }
     }
 
     /// Start checking and copying a file (or pasted PNG) for the message box.
@@ -1302,7 +1348,9 @@ impl App {
                 }
             }
         }
+        self.restore_task_files(&remote);
         self.attach_ready_task_files();
+        self.save_task_files();
         self.clean_tick();
         // attachments that waited for a sign-in go up once there is one
         if matches!(remote, Remote::Server { .. }) {
@@ -1359,10 +1407,7 @@ impl App {
         if !self.persist || !self.files.clean_due() {
             return;
         }
-        let current = (
-            self.data.extra.shared.is_some(),
-            shas_in(&serde_json::to_value(&self.data).unwrap_or_default()),
-        );
+        let current = SpaceRefs::of(&serde_json::to_value(&self.data).unwrap_or_default());
         let keep: HashSet<String> = self
             .files
             .waiting()
@@ -1370,6 +1415,12 @@ impl App {
             .chain(
                 self.boxed_attachments()
                     .iter()
+                    // task attachments on their way in other workspaces too
+                    .chain(
+                        super::taskfields::read_task_files(self.files.dir())
+                            .iter()
+                            .map(|e| &e.att),
+                    )
                     .flat_map(parts)
                     .map(|p| p.file),
             )
@@ -1383,7 +1434,7 @@ impl App {
             let now = SystemTime::now();
             if let Some(f) = folder {
                 let refs = folder_refs(&f).map(|mut r| {
-                    r.extend(current.1.iter().cloned());
+                    r.extend(current.all.iter().cloned());
                     r
                 });
                 clean_shared_folder(&f.join("files"), &refs, now, FOLDER_GRACE);
@@ -1441,8 +1492,11 @@ impl App {
     /// Error text from the files and media threads, in the interface
     /// language (some carry a file name or a reason inside).
     pub(super) fn error_text(e: &str) -> String {
-        const WITH_VALUES: [&str; 6] = [
-            "Couldn't reach the server: {}",
+        if e.starts_with("Couldn't reach the server") {
+            // the system's own words would follow, untranslated
+            return tr("Can't reach the team server right now. It's tried again by itself.").into();
+        }
+        const WITH_VALUES: [&str; 5] = [
             "{} isn't a picture or a video.",
             "{} can't be read.",
             "{} is larger than 500 MB.",
@@ -1450,7 +1504,12 @@ impl App {
             "The server said {} {}",
         ];
         for pattern in WITH_VALUES {
-            if let Some(values) = fill_back(pattern, e) {
+            if let Some(mut values) = fill_back(pattern, e) {
+                if pattern == "The server said {} {}" {
+                    if let Some(body) = values.get_mut(1) {
+                        *body = server_body(body);
+                    }
+                }
                 return crate::i18n::fill(tr(pattern), &values);
             }
         }
@@ -1633,26 +1692,33 @@ impl App {
                     );
                 }
                 if let Some(why) = &failed {
-                    painter.rect_stroke(
-                        rect,
-                        8.0,
-                        Stroke::new(2.0, t.danger),
-                        egui::StrokeKind::Inside,
-                    );
+                    // waiting for the server isn't a failure: the message can go
+                    let waits = p.error.is_none() && waits_for_server(why);
+                    let c = if waits {
+                        super::together::WARN
+                    } else {
+                        t.danger
+                    };
+                    painter.rect_stroke(rect, 8.0, Stroke::new(2.0, c), egui::StrokeKind::Inside);
                     painter.text(
                         rect.center(),
                         Align2::CENTER_CENTER,
                         "!",
                         FontId::proportional(18.0),
-                        t.danger,
+                        c,
                     );
-                    let r =
-                        resp.clone()
-                            .on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN {
-                                format!("{}\n{}", App::error_text(why), tr("Click to try again"))
-                            } else {
-                                App::error_text(why)
-                            });
+                    let mut tip = App::error_text(why);
+                    if waits {
+                        tip = format!(
+                            "{}\n{}",
+                            tip,
+                            tr("You can send the message now. The file follows once the server is back.")
+                        );
+                    }
+                    if p.error.is_none() && why != NOT_SIGNED_IN {
+                        tip = format!("{}\n{}", tip, tr("Click to try again"));
+                    }
+                    let r = resp.clone().on_hover_text(tip);
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
@@ -1726,7 +1792,7 @@ impl App {
         } else {
             &self.chat_files
         };
-        let ok = list.iter().all(|p| p.ready(&self.files));
+        let ok = list.iter().all(|p| p.sendable(&self.files));
         (
             ok,
             if ok {
@@ -2277,6 +2343,25 @@ impl App {
 
 /// The values in `text` that fill the "{}"s of `pattern`, when it was made
 /// from it.
+/// What the team server's file route answers when it refuses (the short
+/// lowercase texts in server/src/files.rs), in the interface language; any
+/// other text as it is.
+pub(super) fn server_body(body: &str) -> String {
+    match body {
+        "upload broke off" => tr("upload broke off"),
+        "file is too large" => tr("file is too large"),
+        "can't write files" => tr("can't write files"),
+        "can't read the file" => tr("can't read the file"),
+        "contents don't match the name" => tr("contents don't match the name"),
+        "no such file" => tr("no such file"),
+        "sign in first" => tr("sign in first"),
+        "already here" => tr("already here"),
+        "stored" => tr("stored"),
+        _ => body,
+    }
+    .to_string()
+}
+
 pub(super) fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
     let parts: Vec<&str> = pattern.split("{}").collect();
     let mut rest = text.strip_prefix(parts[0])?;
@@ -2428,6 +2513,39 @@ pub(super) fn shas_in(v: &serde_json::Value) -> HashSet<String> {
     atts.iter().flat_map(parts).map(|p| p.file).collect()
 }
 
+/// What one workspace on this computer refers to, for cleaning the cache.
+#[derive(Clone, Debug, Default)]
+pub(super) struct SpaceRefs {
+    /// shared with a team (its files are on the server or in the folder)
+    pub shared: bool,
+    /// every file it refers to, the Trash included
+    pub all: HashSet<String>,
+    /// the ones only its Trash refers to: the team may have dropped them by
+    /// the time someone restores, so the cache may be the last copy
+    pub trash_only: HashSet<String>,
+}
+
+impl SpaceRefs {
+    pub fn of(v: &serde_json::Value) -> SpaceRefs {
+        let shared = v
+            .get("extra")
+            .and_then(|x| x.get("shared"))
+            .is_some_and(|s| !s.is_null());
+        let all = shas_in(v);
+        let mut rest = v.clone();
+        if let Some(e) = rest.get_mut("extra").and_then(|e| e.as_object_mut()) {
+            e.remove("trash");
+        }
+        let live = shas_in(&rest);
+        let trash_only = all.difference(&live).cloned().collect();
+        SpaceRefs {
+            shared,
+            all,
+            trash_only,
+        }
+    }
+}
+
 /// Every 64-hex-digit word in a text (for a file that can't be read as a
 /// workspace: anything that looks like a file name counts as used).
 fn hex_words(text: &str) -> HashSet<String> {
@@ -2438,8 +2556,8 @@ fn hex_words(text: &str) -> HashSet<String> {
 }
 
 /// The workspaces saved on this computer: whether each is shared, and the
-/// files it refers to.
-pub(super) fn workspaces_on_disk(dir: &Path) -> Vec<(bool, HashSet<String>)> {
+/// files it refers to (and which of those only its Trash does).
+pub(super) fn workspaces_on_disk(dir: &Path) -> Vec<SpaceRefs> {
     let mut out = vec![];
     let Ok(rd) = std::fs::read_dir(dir) else {
         return out;
@@ -2453,14 +2571,12 @@ pub(super) fn workspaces_on_disk(dir: &Path) -> Vec<(bool, HashSet<String>)> {
             continue;
         };
         match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(v) => {
-                let shared = v
-                    .get("extra")
-                    .and_then(|x| x.get("shared"))
-                    .is_some_and(|s| !s.is_null());
-                out.push((shared, shas_in(&v)));
-            }
-            Err(_) => out.push((false, hex_words(&text))),
+            Ok(v) => out.push(SpaceRefs::of(&v)),
+            Err(_) => out.push(SpaceRefs {
+                shared: false,
+                all: hex_words(&text),
+                trash_only: HashSet::new(),
+            }),
         }
     }
     out
@@ -2501,12 +2617,13 @@ fn age(m: &std::fs::Metadata, now: SystemTime) -> Duration {
 /// once it's older than `grace`; then, past `cap` bytes, the least recently
 /// used files that only shared workspaces refer to go (they're on the
 /// server or in the shared folder and come back when needed). Files in
-/// `keep` (waiting to go up, in a message box) and files a workspace that
-/// isn't shared refers to (the cache is their only copy) always stay.
+/// `keep` (waiting to go up, in a message box), files a workspace that
+/// isn't shared refers to (the cache is their only copy) and files only a
+/// Trash refers to (the team may drop them before a restore) always stay.
 /// Returns the hashes removed.
 pub(super) fn clean_cache(
     dir: &Path,
-    spaces: &[(bool, HashSet<String>)],
+    spaces: &[SpaceRefs],
     keep: &HashSet<String>,
     now: SystemTime,
     grace: Duration,
@@ -2515,12 +2632,18 @@ pub(super) fn clean_cache(
     let Ok(rd) = std::fs::read_dir(dir) else {
         return vec![];
     };
-    let used: HashSet<&String> = spaces.iter().flat_map(|(_, s)| s).collect();
+    let used: HashSet<&String> = spaces.iter().flat_map(|s| &s.all).collect();
+    // referred to outside a Trash somewhere: fetched again from there
+    let live: HashSet<&String> = spaces
+        .iter()
+        .flat_map(|s| s.all.iter().filter(|f| !s.trash_only.contains(*f)))
+        .collect();
     let only_here: HashSet<&String> = spaces
         .iter()
-        .filter(|(shared, _)| !shared)
-        .flat_map(|(_, s)| s)
+        .filter(|s| !s.shared)
+        .flat_map(|s| &s.all)
         .chain(keep)
+        .chain(used.iter().copied().filter(|f| !live.contains(f)))
         .collect();
     // hash -> (size, last used); links by the hash they belong to
     let mut bases: HashMap<String, (u64, SystemTime)> = HashMap::new();
@@ -2533,7 +2656,10 @@ pub(super) fn clean_cache(
         }
         if name.starts_with('.') {
             // a copy, paste or still left half made
-            if name != BACKLOG && age(&m, now) > Duration::from_secs(24 * 3600) {
+            if name != BACKLOG
+                && name != super::taskfields::TASK_FILES
+                && age(&m, now) > Duration::from_secs(24 * 3600)
+            {
                 let _ = std::fs::remove_file(e.path());
             }
             continue;
@@ -2603,8 +2729,14 @@ pub(super) fn clean_cache(
 
 /// Tidy a shared folder's files/: a file none of the members' copies refer
 /// to (`refs`, see `folder_refs`) goes once it's older than `grace` (it was
-/// put there that long ago, so every member's copy has long caught up).
-/// Any member's app may do this; a file still in use is never touched.
+/// put there that long ago, so every member's copy has long caught up) and
+/// nothing has named it for FOLDER_NAMED_GRACE (files/.named.json keeps when
+/// each was last named, like the team server's): a message deleted to
+/// someone's Trash, which stays on their computer, keeps its files a good
+/// while for a restore. The first clean up, or one that finds that record
+/// unreadable, starts every file's clock and deletes nothing it hasn't
+/// watched. Any member's app may do this; a file still in use is never
+/// touched.
 pub(super) fn clean_shared_folder(
     files: &Path,
     refs: &Option<HashSet<String>>,
@@ -2617,20 +2749,67 @@ pub(super) fn clean_shared_folder(
     let Ok(rd) = std::fs::read_dir(files) else {
         return vec![];
     };
+    let entries: Vec<std::fs::DirEntry> = rd.flatten().collect();
+    let secs = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let record = files.join(FOLDER_NAMED);
+    let all_now = || -> HashMap<String, i64> {
+        entries
+            .iter()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| wb_server_name_ok(n))
+            .map(|n| (n, secs))
+            .collect()
+    };
+    let mut last: HashMap<String, i64> = match std::fs::read(&record) {
+        // there but unreadable (cut short, or a sync conflict): start again
+        Ok(b) => serde_json::from_slice(&b).unwrap_or_else(|_| all_now()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => all_now(),
+        Err(_) => return vec![],
+    };
+    for n in refs {
+        last.insert(n.clone(), secs);
+    }
+    let named_lately = |n: &str| {
+        last.get(n)
+            .is_some_and(|t| secs - t < FOLDER_NAMED_GRACE.as_secs() as i64)
+    };
     let mut removed = vec![];
-    for e in rd.flatten() {
+    for e in &entries {
         let name = e.file_name().to_string_lossy().to_string();
         let Ok(m) = e.metadata() else { continue };
         if !m.is_file() || age(&m, now) <= grace {
             continue;
         }
-        if name.starts_with(".copy-") || name.starts_with(".still-") {
+        if name.starts_with(".copy-") || name.starts_with(".still-") || name.starts_with(".named-")
+        {
             let _ = std::fs::remove_file(e.path());
             continue;
         }
-        if wb_server_name_ok(&name) && !refs.contains(&name) {
-            let _ = std::fs::remove_file(e.path());
+        if wb_server_name_ok(&name)
+            && !refs.contains(&name)
+            && !named_lately(&name)
+            && std::fs::remove_file(e.path()).is_ok()
+        {
             removed.push(name);
+        }
+    }
+    // remember only files still here
+    last.retain(|n, _| files.join(n).is_file());
+    let sorted: std::collections::BTreeMap<&String, &i64> = last.iter().collect();
+    if let Ok(text) = serde_json::to_string(&sorted) {
+        let tmp = files.join(format!(".named-{:x}", wb_sync::random_u64()));
+        let ok = std::fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(text.as_bytes())?;
+            f.sync_all()
+        });
+        if ok.is_ok() {
+            let _ = std::fs::rename(&tmp, &record);
+        } else {
+            let _ = std::fs::remove_file(&tmp);
         }
     }
     removed

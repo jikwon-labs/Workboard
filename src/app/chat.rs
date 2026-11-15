@@ -3,6 +3,7 @@
 // reactions, saved messages and "Reply in thread", a thread panel on the
 // right, and turning a message into a task. Everything stays on this computer.
 
+use super::icons::{icon_button, icon_button_ex, line_icon};
 use super::*;
 
 const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F389}"];
@@ -219,6 +220,8 @@ impl App {
             .iter()
             .filter(|m| {
                 m.author != self.data.me
+                    // imported history isn't new to anyone
+                    && m.imported.is_none()
                     && match seen {
                         Some(s) => !s.has(m.id) && (m.ts >= s.floor || m.ts > c.last_read),
                         None => m.ts > c.last_read,
@@ -508,15 +511,15 @@ impl App {
                 ui.horizontal(|ui| {
                     let w = 170.0 * 2.0 + 150.0 + 16.0;
                     ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                    let b = ui.add(Tint(egui::Button::new(RichText::new(tr("#  Create a Channel")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(170.0, 34.0))));
+                    let b = ui.add(Tint(primary_btn(&t, tr("#  Create a Channel")).min_size(vec2(170.0, CONTROL_H))));
                     name_it(&b, "Create a Channel");
                     if b.clicked() {
                         make = true;
                     }
-                    if ui.add(egui::Button::new(tr("\u{1F464}  Message someone")).stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(170.0, 34.0))).clicked() {
+                    if icon_button_ex(ui, &t, "send", tr("Message someone"), "Message someone", true, 170.0, t.text, t.text2).clicked() {
                         self.new_message_open = true;
                     }
-                    if ui.add(egui::Button::new(tr("\u{1F465}  Work together")).stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(150.0, 34.0))).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
+                    if icon_button_ex(ui, &t, "teams", tr("Work together"), "Work together", true, 150.0, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
                         self.modal = Some(self.together_modal());
                     }
                 });
@@ -642,14 +645,12 @@ impl App {
         let dragging = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
 
         // ---- conversation (header with tabs, side panel, messages, composer)
-        let ws_name = self.data.workspace.clone();
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 0 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_height(30.0);
                     let title = match channel.kind {
-                        ChannelKind::Channel if channel.name == "general" => ws_name.clone(),
-                        ChannelKind::Channel if channel.private => format!("\u{1F512} {}", channel.name),
+                        ChannelKind::Channel if channel.private => channel.name.clone(),
                         ChannelKind::Channel => format!("# {}", channel.name),
                         ChannelKind::Direct => self.channel_label(&channel),
                     };
@@ -659,14 +660,16 @@ impl App {
                             paint_avatar(ui.painter(), r.center(), 10.0, m, t.bg);
                         }
                     }
+                    if channel.kind == ChannelKind::Channel && channel.private {
+                        let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                        line_icon(ui.painter(), "lock", r.center(), t.text2);
+                    }
                     ui.label(RichText::new(title).size(15.5).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let hb = |ui: &mut Ui, text: &str| ui.add(ghost(egui::Button::new(RichText::new(tr(text)).size(14.0).color(t.text2))));
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
                             let mode = self.data.extra.notify.channel_mode(cid).to_string();
-                            let bell = ui.add(ghost(egui::Button::new(RichText::new(if mode == "nothing" { "\u{1F515}" } else { "\u{1F514}" }).size(14.0).color(t.text2))));
-                            name_it(&bell, "Channel notifications");
+                            let bell = icon_button(ui, &t, if mode == "nothing" { "bell_off" } else { "bell" }, "", "Channel notifications", false);
                             let bell = bell.on_hover_text(tr("Notifications for this channel"));
                             popup(ui, &bell, ui.id().with(("chan_notify", cid)), 240.0, |ui| {
                                 ui.label(RichText::new(tr("Notify me about")).small().color(t.text2));
@@ -679,10 +682,10 @@ impl App {
                                 }
                             });
                         }
-                        if hb(ui, "\u{1F4DD}  Ask").clicked() {
+                        if icon_button_ex(ui, &t, "edit", tr("Ask"), "Ask", false, 0.0, t.text2, t.text2).clicked() {
                             self.section = Section::Ai;
                         }
-                        if hb(ui, "\u{260E}").on_hover_text(tr("Start a SyncUp")).clicked() {
+                        if icon_button(ui, &t, "phone", "", "Start a SyncUp", false).on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
                         }
                     });
@@ -719,11 +722,12 @@ impl App {
             });
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
-            // right panel
-            egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(230.0).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
+            // right panel: narrower in a small window so the messages keep room
+            let panel_w = (ui.available_width() * 0.3).clamp(170.0, 230.0);
+            egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in Channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned Messages", 1), ("\u{1F516}", "Saved", 4), ("\u{2611}", "Turned into tasks", 3), ("\u{2699}", "Settings", 12)];
+                    let rows: [(&str, &str, u8); 7] = [("person", "Followers", 10), ("search", "Find in channel", 11), ("reply", "Replies", 2), ("pin", "Pinned messages", 1), ("bookmark", "Saved", 4), ("task", "Turned into tasks", 3), ("settings", "Settings", 12)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -736,9 +740,10 @@ impl App {
                         if code == 10 {
                             paint_avatars(ui.painter(), r.left_center() + vec2(4.0, 0.0), 8.0, &channel.members.iter().take(1).copied().collect::<Vec<_>>(), &self.data, t.bg);
                         } else {
-                            ui.painter().text(r.left_center() + vec2(12.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
+                            line_icon(ui.painter(), icon, r.left_center() + vec2(12.0, 0.0), t.text2);
                         }
-                        ui.painter().text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text);
+                        let count_w = if code == 10 { 24.0 } else { 0.0 };
+                        paint_fit(ui, r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text, w - 32.0 - count_w);
                         if code == 10 {
                             ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
                         }
@@ -758,7 +763,7 @@ impl App {
                     self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                 }
                 if let Some(mut q) = self.channel_find.take() {
-                    ui.add(field(&mut q).hint_text(tr("\u{1F50D} Find in channel")).desired_width(200.0));
+                    ui.add(field(&mut q).hint_text(tr("Find in channel")).desired_width(200.0));
                     self.channel_find = Some(q);
                 }
                 if self.channel_panel != 0 {
@@ -773,6 +778,12 @@ impl App {
                     }
                 }
             });
+            // a gap and a hairline under the chips, so a message scrolled up
+            // under them reads as cut off by the list, not covered by a chip
+            ui.add_space(4.0);
+            let line = ui.available_rect_before_wrap();
+            ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5, t.border));
+            ui.add_space(2.0);
             let composer_h = 140.0 + if self.chat_files.is_empty() { 0.0 } else { 76.0 };
             let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
             let panel = self.channel_panel;
@@ -797,7 +808,7 @@ impl App {
                         let w = ui.available_width();
                         let cw = 400.0f32.min(w - 40.0);
                         let pad = ((w - cw) / 2.0).max(0.0);
-                        let name = if channel.kind == ChannelKind::Channel { format!("#{}", if channel.name == "general" { tr("General").to_string() } else { channel.name.clone() }) } else { self.channel_label(&channel) };
+                        let name = if channel.kind == ChannelKind::Channel { format!("#{}", channel.name) } else { self.channel_label(&channel) };
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
                             ui.vertical(|ui| {
@@ -805,20 +816,25 @@ impl App {
                                 ui.label(RichText::new(trf!("Chat in {}", name)).size(16.0).color(t.text));
                                 ui.label(RichText::new(tr("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.")).color(t.text2));
                                 ui.add_space(10.0);
-                                if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, 32.0))).clicked() {
+                                // alone in the workspace there is nobody to add: invite instead
+                                if self.data.solo() {
+                                    if ui.add(egui::Button::new(tr("+  Invite people")).min_size(vec2(cw, CONTROL_H))).clicked() {
+                                        self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
+                                    }
+                                } else if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, CONTROL_H))).clicked() {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
-                                if ui.add(egui::Button::new(tr("\u{2728}  Import from Slack")).min_size(vec2(cw, 32.0))).clicked() {
+                                if icon_button_ex(ui, &t, "download", tr("Import from Slack"), "Import from Slack", true, cw, t.text, t.text2).clicked() {
                                     self.start_slack_import();
                                 }
                                 ui.add_space(8.0);
                                 ui.separator();
-                                for (bg, icon, title, sub) in [([0xb6, 0x60, 0xe0], "\u{2630}", "Track Tasks", "Manage tasks, bugs, people, and more"), ([0x10, 0x90, 0xe0], "\u{1F4C4}", "Add Doc", "Take notes or create detailed documents"), ([0x00, 0x88, 0x44], "\u{260E}", "Start SyncUp", "Jump on a voice call or video call")] {
+                                for (bg, icon, title, sub) in [([0xb6, 0x60, 0xe0], "list", "Track Tasks", "Manage tasks, bugs, people, and more"), ([0x10, 0x90, 0xe0], "docs", "Add Doc", "Take notes or create detailed documents"), ([0x00, 0x88, 0x44], "phone", "Start SyncUp", "Jump on a voice call or video call")] {
                                     let (r, resp) = ui.allocate_exact_size(vec2(cw, 54.0), Sense::click());
                                     ui.painter().rect_filled(r, 8.0, rgb(bg).gamma_multiply(if resp.hovered() { 0.14 } else { 0.07 }));
                                     let ib = Rect::from_center_size(r.left_center() + vec2(26.0, 0.0), vec2(34.0, 34.0));
-                                    ui.painter().rect_filled(ib, 8.0, Color32::WHITE);
-                                    ui.painter().text(ib.center(), Align2::CENTER_CENTER, icon, FontId::proportional(15.0), rgb(bg));
+                                    ui.painter().rect_filled(ib, 8.0, t.card);
+                                    line_icon(ui.painter(), icon, ib.center(), rgb(bg));
                                     ui.painter().text(r.left_center() + vec2(54.0, -9.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(14.5), t.text);
                                     ui.painter().text(r.left_center() + vec2(54.0, 10.0), Align2::LEFT_CENTER, tr(sub), FontId::proportional(12.5), t.text2);
                                     if resp.clicked() {
@@ -863,7 +879,7 @@ impl App {
             });
             egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 10 }).show(ui, |ui| {
                 let target = match channel.kind {
-                    ChannelKind::Channel => if channel.name == "general" { tr("General").to_string() } else { channel.name.clone() },
+                    ChannelKind::Channel => channel.name.clone(),
                     ChannelKind::Direct => self.channel_label(&channel),
                 };
                 if let Some((text, title, files)) = self.channel_composer(ui, &target) {
@@ -928,29 +944,27 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (i, (icon, label)) in [
-                ("\u{1F4AC}", "Message"),
-                ("\u{1F4E2}", "Post"),
-                ("\u{2728}", "Ask"),
+                ("chat", "Message"),
+                ("megaphone", "Post"),
+                ("sparkle", "Ask"),
             ]
             .iter()
             .enumerate()
             {
                 let sel = self.composer_mode == i as u8;
-                let b = Tint(
-                    egui::Button::new(
-                        RichText::new(format!("{} {}", icon, tr(label)))
-                            .size(13.5)
-                            .color(if sel { t.text } else { t.text2 }),
-                    )
-                    .fill(if sel { t.bg } else { Color32::TRANSPARENT })
-                    .stroke(if sel {
-                        Stroke::new(1.0, t.border)
-                    } else {
-                        Stroke::NONE
-                    })
-                    .corner_radius(6),
+                // the chosen tab is outlined, the others plain
+                let b = icon_button_ex(
+                    ui,
+                    &t,
+                    icon,
+                    tr(label),
+                    label,
+                    sel,
+                    0.0,
+                    if sel { t.text } else { t.text2 },
+                    t.text2,
                 );
-                if ui.add(b).clicked() {
+                if b.clicked() {
                     if i == 2 {
                         self.section = Section::Ai;
                     } else {
@@ -1060,6 +1074,7 @@ impl App {
                         .filter(|m| !m.invited && m.id != me)
                         .cloned()
                         .collect();
+                    let mut picked = None;
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
                             ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
@@ -1071,25 +1086,33 @@ impl App {
                             .clicked()
                             {
                                 insert = Some(format!("@{} ", m.name));
+                                picked = Some(m.id);
                                 close_popup(ui);
                             }
                         }
                     });
-                    let em = tool(ui, "\u{263A}", "Emoji");
+                    if let Some(id) = picked {
+                        self.chat_picked.push(id);
+                    }
+                    let itool = |ui: &mut Ui, kind: &str, tip: &str| {
+                        icon_button(ui, &t, kind, "", tip, false).on_hover_text(tr(tip))
+                    };
+                    let em = itool(ui, "smile", "Emoji");
                     popup(ui, &em, egui::Id::new("chat_emoji_popup"), 248.0, |ui| {
                         if let Some(e) = emoji_grid(ui) {
                             insert = Some(e.to_string());
                             close_popup(ui);
                         }
                     });
-                    if tool(ui, "\u{2611}", "Create task").clicked() {
+                    if itool(ui, "task", "Create task").clicked() {
                         self.open_quick_add(None);
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Post in words; a message sends with the paper plane drawn on it
                         let label = if self.composer_mode == 1 {
                             tr("Post")
                         } else {
-                            "\u{27A4}"
+                            ""
                         };
                         let (files_ok, files) = self.pending_ready(false);
                         let ready = files_ok
@@ -1106,7 +1129,17 @@ impl App {
                             .corner_radius(6)
                             .min_size(vec2(34.0, 28.0)),
                         );
-                        if (ui.add(b).clicked() || enter) && ready {
+                        let sent = ui.add(b);
+                        if label.is_empty() {
+                            name_it(&sent, "Send");
+                            line_icon(
+                                ui.painter(),
+                                "send",
+                                sent.rect.center(),
+                                if ready { Color32::WHITE } else { t.text3 },
+                            );
+                        }
+                        if (sent.clicked() || enter) && ready {
                             let text = self.chat_text.trim().to_string();
                             let title = if self.composer_mode == 1 {
                                 Some(if self.post_title.trim().is_empty() {
@@ -1119,6 +1152,7 @@ impl App {
                             };
                             out = Some((text, title, files));
                             self.chat_text.clear();
+                            // the picks go with the message (see apply_chat)
                             self.post_title.clear();
                             self.chat_files.clear();
                         } else if enter && files_ok && self.chat_files.is_empty() {
@@ -1314,29 +1348,29 @@ impl App {
                             ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                         }
                         if m.saved {
-                            ui.label(
-                                RichText::new(tr("\u{1F516} Saved"))
-                                    .small()
-                                    .color(Color32::from_rgb(0xe1, 0x6b, 0x16)),
-                            );
+                            let c = Color32::from_rgb(0xe1, 0x6b, 0x16);
+                            small_icon(ui, "bookmark", c);
+                            ui.label(RichText::new(tr("Saved")).small().color(c));
                         }
                         if m.pinned {
-                            ui.label(RichText::new(tr("\u{1F4CC} Pinned")).small().color(t.text3));
+                            small_icon(ui, "pin", t.text3);
+                            ui.label(RichText::new(tr("Pinned")).small().color(t.text3));
                         }
                     });
                 }
                 if let Some(pt) = &m.post_title {
-                    ui.label(
-                        RichText::new(format!("\u{1F4E2} {}", pt))
-                            .size(16.0)
-                            .color(t.text),
-                    );
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
+                        line_icon(ui.painter(), "megaphone", r.center(), t.text2);
+                        ui.label(RichText::new(pt).size(16.0).color(t.text));
+                    });
                 }
                 if editing {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
-                    let job = self.mention_text(&m.text, 14.0);
-                    if let Some(link) = self.text_with_links(ui, job, &m.text) {
+                    let text = shown_text(m);
+                    let job = self.mention_text(&text, 14.0);
+                    if let Some(link) = self.text_with_links(ui, job, &text) {
                         self.link_pending = Some(link);
                     }
                     if compact && m.edited.is_some() {
@@ -1599,10 +1633,19 @@ impl App {
                 egui::StrokeKind::Inside,
             );
             let mut x = bar.left() + 2.0;
+            // a reaction shows its emoji; the other buttons a line icon (`label` is its kind)
             let mut button = |ui: &mut Ui, label: &str, tip: &str| -> egui::Response {
                 let r = Rect::from_min_size(pos2(x, bar.top() + 2.0), vec2(bw, 24.0));
                 x += bw;
-                let b = put_over(ui, r, ghost(egui::Button::new(label)));
+                let icon = super::icons::KINDS.contains(&label);
+                let b = put_over(
+                    ui,
+                    r,
+                    ghost(egui::Button::new(if icon { "" } else { label })),
+                );
+                if icon {
+                    line_icon(ui.painter(), label, r.center(), t.text2);
+                }
                 name_it(&b, tip);
                 b.on_hover_text(tr(tip))
             };
@@ -1618,7 +1661,7 @@ impl App {
                     });
                 }
             }
-            let eb = button(ui, "\u{263A}", "More reactions");
+            let eb = button(ui, "smile", "More reactions");
             popup(ui, &eb, emoji_id, 248.0, |ui| {
                 if let Some(e) = emoji_grid(ui) {
                     acts.push(ChatAction::React {
@@ -1630,26 +1673,21 @@ impl App {
                 }
             });
             if top_level {
-                if button(ui, "\u{1F4AC}", "Reply in thread").clicked() {
+                if button(ui, "reply", "Reply in thread").clicked() {
                     acts.push(ChatAction::Thread(m.id));
                 }
-                if button(ui, "\u{2611}", "Create task from message").clicked() {
+                if button(ui, "task", "Create task from message").clicked() {
                     acts.push(ChatAction::Task { ch: cid, msg: m.id });
                 }
             }
             if top_level
-                && button(
-                    ui,
-                    "\u{1F4CC}",
-                    if m.pinned { "Unpin" } else { "Pin message" },
-                )
-                .clicked()
+                && button(ui, "pin", if m.pinned { "Unpin" } else { "Pin message" }).clicked()
             {
                 acts.push(ChatAction::Pin { ch: cid, msg: m.id });
             }
             if button(
                 ui,
-                "\u{1F516}",
+                "bookmark",
                 if m.saved {
                     "Remove from saved"
                 } else {
@@ -1660,7 +1698,7 @@ impl App {
             {
                 acts.push(ChatAction::Save { ch: cid, msg: m.id });
             }
-            let mb = button(ui, "\u{22EF}", "More actions");
+            let mb = button(ui, "dots", "More actions");
             if mb.clicked() {
                 self.chat_delete = None;
             }
@@ -1968,9 +2006,12 @@ impl App {
                 } => {
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    let mentions = self.data.mentions_in(&text);
+                    // the channel's box: the people picked from its @ list
+                    let picked = std::mem::take(&mut self.chat_picked);
+                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {
                         edited: None,
+                        imported: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2216,9 +2257,17 @@ impl App {
                     }
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    let mentions = self.data.mentions_in(&text);
+                    // the channel's box (not a thread reply): the people
+                    // picked from its @ list
+                    let picked = if parent.is_none() {
+                        std::mem::take(&mut self.chat_picked)
+                    } else {
+                        vec![]
+                    };
+                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {
                         edited: None,
+                        imported: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2302,4 +2351,20 @@ impl App {
             }
         }
     }
+}
+
+/// Calls and huddles post a message whose text is kept in English, so every
+/// device and the iPhone app read the same thing; it is put in the reader's
+/// language where it is shown. Anything else is what the person wrote.
+pub(super) fn shown_text(m: &Message) -> String {
+    match m.text.as_str() {
+        t @ ("Started a call" | "Started a huddle") if m.call.is_some() => tr(t).to_string(),
+        t => t.to_string(),
+    }
+}
+
+/// A 16 pt line icon in a row of text (before "Saved", "Pinned").
+fn small_icon(ui: &mut Ui, kind: &str, color: Color32) {
+    let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+    line_icon(ui.painter(), kind, r.center(), color);
 }

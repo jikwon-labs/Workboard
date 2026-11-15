@@ -313,11 +313,9 @@ pub fn collect_garbage(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let record = dir.join(NAMED_FILE);
-    let mut last: BTreeMap<String, i64> = match std::fs::read_to_string(&record) {
-        Ok(t) => serde_json::from_str(&t).unwrap_or_default(),
-        // first run: nothing has been watched yet, so every file counts as
-        // named just now
-        Err(_) => std::fs::read_dir(&dir)
+    // every file here counts as named just now
+    let all_now = || -> BTreeMap<String, i64> {
+        std::fs::read_dir(&dir)
             .map(|rd| {
                 rd.flatten()
                     .map(|e| e.file_name().to_string_lossy().to_string())
@@ -325,7 +323,33 @@ pub fn collect_garbage(
                     .map(|n| (n, secs))
                     .collect()
             })
-            .unwrap_or_default(),
+            .unwrap_or_default()
+    };
+    let mut last: BTreeMap<String, i64> = match std::fs::read(&record) {
+        Ok(t) => match serde_json::from_slice(&t) {
+            Ok(m) => m,
+            // there but unreadable (cut short by a power loss, say): what
+            // was named lately is unknown, so start every file's clock again
+            // rather than deleting files a Trash may still need
+            Err(err) => {
+                eprintln!(
+                    "{} can't be read ({}); starting its clock again",
+                    record.display(),
+                    err
+                );
+                all_now()
+            }
+        },
+        // first run: nothing has been watched yet
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => all_now(),
+        Err(err) => {
+            eprintln!(
+                "not cleaning up files: couldn't read {}: {}",
+                record.display(),
+                err
+            );
+            return vec![];
+        }
     };
     for n in &named {
         last.insert(n.clone(), secs);
@@ -369,10 +393,34 @@ pub fn collect_garbage(
     // remember only files still here
     last.retain(|n, _| dir.join(n).is_file());
     if dir.is_dir() {
-        let tmp = dir.join(format!("{}.tmp", NAMED_FILE));
-        if std::fs::write(&tmp, serde_json::to_string(&last).unwrap_or_default()).is_ok() {
-            let _ = std::fs::rename(&tmp, &record);
+        if let Err(err) = write_durably(
+            &record,
+            serde_json::to_string(&last).unwrap_or_default().as_bytes(),
+        ) {
+            eprintln!("couldn't save {}: {}", record.display(), err);
         }
     }
     gone
+}
+
+/// Replace `path` with `bytes` so that a power loss leaves either the old
+/// contents or the new, never a cut-short file: write a temp file next to
+/// it, flush it to disk, rename it over, then flush the folder.
+fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!("{}.tmp", name));
+    let mut f = std::fs::File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, path)?;
+    if let Some(dir) = path.parent() {
+        // makes the rename itself last (not supported everywhere)
+        let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    }
+    Ok(())
 }

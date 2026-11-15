@@ -70,8 +70,8 @@ pub fn parse_estimate(s: &str) -> Option<u32> {
         let v: f64 = num.parse().ok()?;
         num.clear();
         let mult = match unit.as_str() {
-            "h" | "hr" | "hrs" | "hour" | "hours" => 60.0,
-            "m" | "min" | "mins" | "minute" | "minutes" => 1.0,
+            "h" | "hr" | "hrs" | "hour" | "hours" | "\u{c2dc}\u{ac04}" => 60.0,
+            "m" | "min" | "mins" | "minute" | "minutes" | "\u{bd84}" => 1.0,
             "d" | "day" | "days" => 480.0,
             "w" | "wk" | "week" | "weeks" => 2400.0,
             _ => return None,
@@ -314,7 +314,7 @@ impl App {
                 ui.label(RichText::new(tr("Tags in use")).small().color(t.text3));
                 for g in &sugg {
                     let c = tag_color(g);
-                    if menu_row(ui, t, &trf!("Tag {}", g), false, |p, at| {
+                    if menu_row_named(ui, t, &format!("Tag {}", g), g, false, |p, at| {
                         p.circle_filled(at, 5.0, c);
                     })
                     .clicked()
@@ -394,9 +394,14 @@ impl App {
             for m in data.members.iter().filter(|m| !m.invited) {
                 let sel = task.watchers.contains(&m.id);
                 let ring = t.card;
-                let r = menu_row(ui, t, &trf!("Watcher {}", m.name), sel, |p, c| {
-                    paint_avatar(p, c, 9.0, m, ring)
-                });
+                let r = menu_row_named(
+                    ui,
+                    t,
+                    &format!("Watcher {}", m.name),
+                    &m.name,
+                    sel,
+                    |p, c| paint_avatar(p, c, 9.0, m, ring),
+                );
                 if sel {
                     ui.painter().text(
                         r.rect.right_center() - vec2(12.0, 0.0),
@@ -898,6 +903,7 @@ impl App {
     }
 
     /// The picker dialog: search tasks, click one to set the relation.
+    /// It lists at most `PICK_ROWS` tasks and says how many more match.
     pub(super) fn pick_task_body(
         &mut self,
         ui: &mut Ui,
@@ -927,32 +933,63 @@ impl App {
         let q = query.trim().to_lowercase();
         let ids = self.pick_candidates(tid, mode);
         let mut picked = None;
-        egui::ScrollArea::vertical()
+        let more = egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {
                 let mut shown = 0;
+                let mut more = 0;
                 for oid in ids {
                     let Some(o) = self.task(oid) else { continue };
                     if !q.is_empty() && !o.name.to_lowercase().contains(&q) {
                         continue;
                     }
                     shown += 1;
-                    if shown > 200 {
-                        break;
+                    // the first 200; the rest are counted and found by searching
+                    if shown > PICK_ROWS {
+                        more += 1;
+                        continue;
                     }
                     let st = self.data.status_of(o);
-                    if menu_row(ui, t, &trf!("Pick {}", o.name), false, |p, c| {
-                        paint_status_circle(p, c, 6.0, &st)
-                    })
+                    if menu_row_named(
+                        ui,
+                        t,
+                        &format!("Pick {}", o.name),
+                        &o.name,
+                        false,
+                        |p, c| paint_status_circle(p, c, 6.0, &st),
+                    )
                     .clicked()
                     {
                         picked = Some(oid);
                     }
                 }
                 if shown == 0 {
-                    ui.label(RichText::new(tr("No tasks match")).color(t.text3));
+                    // nothing typed yet: say why there is nothing, not "no match"
+                    let text = if !q.is_empty() {
+                        tr("No tasks match")
+                    } else if self
+                        .data
+                        .tasks
+                        .iter()
+                        .any(|x| x.id != tid && !self.data.task_live(x))
+                    {
+                        tr("No other tasks to pick. Archived tasks are not offered here.")
+                    } else {
+                        tr("No other tasks to pick yet.")
+                    };
+                    ui.label(RichText::new(text).color(t.text3));
                 }
-            });
+                more
+            })
+            .inner;
+        if more > 0 {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(trf!("{} more not shown. Search to find them.", more))
+                    .small()
+                    .color(t.text3),
+            );
+        }
         if let Some(oid) = picked {
             self.set_relation(tid, mode, oid);
             close = true;
@@ -965,6 +1002,67 @@ impl App {
         let remote = self.media_remote();
         let p = self.files.add(Some(path), None, &remote);
         self.task_files.push((tid, p));
+    }
+
+    /// Read back the task attachments that were on their way in this
+    /// workspace when the app last quit (once per workspace), and send them
+    /// on: they join their task when they're up.
+    pub(super) fn restore_task_files(&mut self, remote: &files::Remote) {
+        if self.task_files_saved.is_some() {
+            return;
+        }
+        let mut saved = vec![];
+        for e in read_task_files(self.files.dir()) {
+            if e.ws != self.ws_file
+                || self.task_files.iter().any(|(t, p)| {
+                    *t == e.task && p.att.as_ref().is_some_and(|a| a.file == e.att.file)
+                })
+            {
+                continue;
+            }
+            // only files the cache still has
+            if files::parts(&e.att)
+                .iter()
+                .any(|p| self.files.local(&p.file).is_none())
+            {
+                continue;
+            }
+            self.files.upload(&e.att, remote);
+            self.files.upload_soon(&e.att, remote);
+            saved.push((e.task, e.att.file.clone()));
+            let p = self.files.pending_for(e.att);
+            self.task_files.push((e.task, p));
+        }
+        self.task_files_saved = Some(saved);
+    }
+
+    /// Write down the task attachments on their way when they changed
+    /// (only ones copied into the cache; this workspace's part of the file).
+    pub(super) fn save_task_files(&mut self) {
+        let Some(saved) = &self.task_files_saved else {
+            return;
+        };
+        let now: Vec<(u64, Attachment)> = self
+            .task_files
+            .iter()
+            .filter_map(|(t, p)| p.att.clone().map(|a| (*t, a)))
+            .collect();
+        let keys: Vec<(u64, String)> = now.iter().map(|(t, a)| (*t, a.file.clone())).collect();
+        if *saved == keys {
+            return;
+        }
+        let dir = self.files.dir().to_path_buf();
+        let mut all: Vec<TaskFileEntry> = read_task_files(&dir)
+            .into_iter()
+            .filter(|e| e.ws != self.ws_file)
+            .collect();
+        all.extend(now.into_iter().map(|(task, att)| TaskFileEntry {
+            ws: self.ws_file.clone(),
+            task,
+            att,
+        }));
+        write_task_files(&dir, &all);
+        self.task_files_saved = Some(keys);
     }
 
     /// Once a frame: task attachments that are ready join their task.
@@ -1183,3 +1281,41 @@ impl App {
         }
     }
 }
+
+/// In the cache folder: task attachments on their way, for every workspace
+/// on this computer (each person's own; never shared).
+pub(super) const TASK_FILES: &str = ".task-files.json";
+
+/// One task attachment on its way, as written down.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub(super) struct TaskFileEntry {
+    /// the workspace's file name (`App::ws_file`)
+    pub ws: String,
+    pub task: u64,
+    pub att: Attachment,
+}
+
+pub(super) fn read_task_files(dir: &std::path::Path) -> Vec<TaskFileEntry> {
+    std::fs::read_to_string(dir.join(TASK_FILES))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_task_files(dir: &std::path::Path, list: &[TaskFileEntry]) {
+    let path = dir.join(TASK_FILES);
+    if list.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let _ = std::fs::create_dir_all(dir);
+    if let Ok(s) = serde_json::to_string(list) {
+        let tmp = dir.join(format!(".task-files-{:x}", wb_sync::random_u64()));
+        if std::fs::write(&tmp, s).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
+/// How many tasks the task picker lists before "N more not shown".
+pub(super) const PICK_ROWS: usize = 200;

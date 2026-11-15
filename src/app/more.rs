@@ -27,14 +27,20 @@ fn list_panel_frame(t: &Theme) -> egui::Frame {
 /// Space Overview cards that Customize can turn off.
 pub const OV_CARDS: [&str; 5] = ["Recent", "Docs", "Bookmarks", "Folders", "Lists"];
 
-/// What the whiteboard's Undo takes back, newest last.
+/// What the whiteboard's Undo takes back, newest last. Only my own actions
+/// are kept here, by the id of the stroke or note, so a teammate's stroke
+/// or note merged in meanwhile is never the one taken back.
 pub enum WbUndo {
-    Stroke,
-    Note,
+    /// I drew this stroke.
+    Stroke(u64),
+    /// I added this note.
+    Note(u64),
+    /// I deleted this note; it sat at this place in the list.
     NoteGone(usize, Sticky),
+    /// I erased this stroke; it sat at this place in the list.
     StrokeGone(usize, WbStroke),
-    /// A note was dragged away from this spot.
-    NoteMoved(usize, [f32; 2]),
+    /// I dragged this note away from this spot.
+    NoteMoved(u64, [f32; 2]),
 }
 
 /// How a whiteboard is shown: board coordinates (where strokes and notes
@@ -96,6 +102,8 @@ pub struct SweepUi {
     /// Whiteboard pen width (0 = the standard 2.5).
     pub wb_width: f32,
     pub wb_undo: Vec<(u64, WbUndo)>,
+    /// The pen stroke being drawn: (whiteboard, stroke id).
+    pub wb_drawing: Option<(u64, u64)>,
     /// Each whiteboard's pan and zoom on screen (not saved).
     pub wb_view: HashMap<u64, WbView>,
     /// The form `form_fill` holds answers for.
@@ -239,10 +247,20 @@ impl App {
 
     pub(super) fn people_page(&mut self, ui: &mut Ui) {
         let t = self.t();
+        // in Settings the section title above already says "People", and the
+        // body lines up with the other sections
+        let in_settings = self.section == Section::Settings;
+        let margin = if in_settings {
+            egui::Margin::ZERO
+        } else {
+            egui::Margin::symmetric(24, 16)
+        };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
+            egui::Frame::new().inner_margin(margin).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("People")).size(20.0));
+                    if !in_settings {
+                        ui.label(RichText::new(tr("People")).size(20.0));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary_button(ui, &t, tr("Invite people")).clicked() {
                             self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
@@ -250,10 +268,19 @@ impl App {
                     });
                 });
                 ui.label(RichText::new(trf!("Manage who can access {}", self.data.workspace)).color(t.text2));
+                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                if server && self.sync_rt.role.is_none() {
+                    // the server says who may manage people, once it's reached
+                    ui.label(RichText::new(tr("Changing roles and removing people need the team's server. They come back once it's connected.")).small().color(super::together::WARN));
+                }
                 ui.add_space(12.0);
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
-                for (x, h) in [(0.0, "Name"), (0.32, "Email"), (0.6, "Role"), (0.76, "Status")] {
+                // column starts as parts of the width; the last 84 px are the
+                // Remove button, so a small window narrows the columns instead
+                let (ex, rx, sx) = (0.3, 0.52, 0.68);
+                let col_w = |from: f32, to: f32| w * (to - from) - 16.0;
+                for (x, h) in [(0.0, "Name"), (ex, "Email"), (rx, "Role"), (sx, "Status")] {
                     ui.painter().text(pos2(hr.left() + w * x + 8.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
                 }
                 ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
@@ -261,7 +288,6 @@ impl App {
                 let me = self.data.me;
                 // on a team server only its owner and admins manage people, and
                 // the server keeps the roles; alone or in a shared folder it's local
-                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
                 let manages = !server || self.sync_rt.role.is_some_and(|r| r.manages());
                 let mut remove = None;
                 for m in &members {
@@ -269,19 +295,21 @@ impl App {
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
                     let name = if m.id == me { trf!("{} (you)", m.name) } else { m.name.clone() };
-                    ui.painter().text(pos2(r.left() + 44.0, r.center().y - (if m.status_text.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, name, FontId::proportional(14.0), t.text);
+                    let name_w = w * ex - 44.0 - 8.0;
+                    paint_fit(ui, pos2(r.left() + 44.0, r.center().y - (if m.status_text.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text, name_w);
                     if !m.status_text.is_empty() {
-                        ui.painter().text(pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &m.status_text, FontId::proportional(12.0), t.text3);
+                        paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &m.status_text, FontId::proportional(12.0), t.text3, name_w);
                     }
-                    ui.painter().text(pos2(r.left() + w * 0.32 + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2);
-                    let role_rect = Rect::from_min_size(pos2(r.left() + w * 0.6, r.center().y - 13.0), vec2(w * 0.15, 26.0));
+                    paint_fit(ui, pos2(r.left() + w * ex + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2, col_w(ex, rx));
+                    let role_w = w * (sx - rx) - 8.0;
+                    let role_rect = Rect::from_min_size(pos2(r.left() + w * rx, r.center().y - 13.0), vec2(role_w, 26.0));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
                     let mut role = if m.role.is_empty() { "Member".to_string() } else { m.role.clone() };
                     if m.role == "Owner" || !manages || (server && m.id == me) {
                         child.label(super::menus::role_text(&role));
                     } else {
                         // Guest isn't offered: nothing limits what a guest can see yet
-                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
+                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(role_w.min(100.0)).show_ui(&mut child, |ui| {
                             for (n, _) in ROLES.iter().take(2) {
                                 ui.selectable_value(&mut role, n.to_string(), super::menus::role_text(n));
                             }
@@ -298,7 +326,8 @@ impl App {
                         }
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
-                    ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, tr(st), FontId::proportional(13.0), col);
+                    let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
+                    paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 84.0);
                     if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr("Remove")).color(t.danger)))).clicked() {
@@ -309,8 +338,16 @@ impl App {
                 if let Some((id, name)) = remove {
                     self.modal = Some(Modal::ConfirmRemove { kind: "person", id, name });
                 }
-                ui.add_space(12.0);
-                ui.label(RichText::new(tr("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.")).small().color(t.text3));
+                // how invited people get in, for where this workspace is kept
+                if members.iter().any(|m| m.invited) {
+                    let how = match &self.data.extra.shared {
+                        None => tr("Invited people can join once you share this workspace (Work together). Until then they can use this computer through Switch person in the profile menu."),
+                        Some(c) if c.server.is_some() => tr("Invited people sign in with the invite code the server emails them. Owners and admins also find the codes in Work together > People while connected."),
+                        Some(_) => tr("Invited people join from the shared folder: on their computer they open Work together, paste the folder's path, choose Join this workspace and pick their name."),
+                    };
+                    ui.add_space(12.0);
+                    ui.label(RichText::new(how).small().color(t.text3));
+                }
             });
         });
     }
@@ -485,24 +522,52 @@ impl App {
                             ui.add_space(ui.available_height() * 0.3);
                             ui.vertical_centered(|ui| {
                                 let alone = self.data.members.len() <= 1;
-                                let (title, sub) = match self.inbox_tab {
+                                // alone, the Inbox stays empty: point at what is due
+                                let me = self.data.me;
+                                let due_work = self
+                                    .data
+                                    .tasks
+                                    .iter()
+                                    .filter(|x| {
+                                        x.assignees.contains(&me)
+                                            && x.due.is_some_and(|d| d <= today())
+                                            && !self.data.is_closed(x)
+                                            && self.data.task_live(x)
+                                    })
+                                    .count();
+                                let point_to_due = self.inbox_tab == 0 && alone && due_work > 0;
+                                // the people icon only where it invites people
+                                let (title, sub, icon) = match self.inbox_tab {
+                                    0 if point_to_due => (
+                                        "Nothing from other people",
+                                        "The Inbox collects comments, mentions and assignments from others.",
+                                        "\u{2713}",
+                                    ),
                                     0 if alone => (
                                         "Looking to collaborate?",
                                         "Collaboration is one invite away.",
+                                        "\u{1F465}",
                                     ),
                                     0 => (
                                         "You're all caught up",
                                         "New comments, mentions and assignments show up here.",
+                                        "\u{2713}",
                                     ),
                                     1 => (
                                         "Nothing in Other",
                                         "Updates that don't need you show up here.",
+                                        "\u{1F4E5}",
                                     ),
                                     2 => (
                                         "Nothing saved for later",
                                         "Use Later on an item to come back to it.",
+                                        "\u{23F0}",
                                     ),
-                                    _ => ("Nothing cleared yet", "Cleared items show up here."),
+                                    _ => (
+                                        "Nothing cleared yet",
+                                        "Cleared items show up here.",
+                                        "\u{2713}",
+                                    ),
                                 };
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(60.0, 60.0), Sense::hover());
@@ -515,14 +580,47 @@ impl App {
                                 ui.painter().text(
                                     r.center(),
                                     Align2::CENTER_CENTER,
-                                    "\u{1F465}",
+                                    icon,
                                     FontId::proportional(22.0),
                                     Color32::from_rgb(0x5f, 0x55, 0xee),
                                 );
                                 ui.add_space(10.0);
                                 ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
                                 ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
-                                if self.inbox_tab == 0 {
+                                if point_to_due {
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        RichText::new(trf!(
+                                            "Tasks due today or overdue: {}",
+                                            due_work
+                                        ))
+                                        .size(14.0)
+                                        .color(t.text),
+                                    );
+                                    ui.add_space(6.0);
+                                    if ui
+                                        .add(Tint(
+                                            egui::Button::new(
+                                                RichText::new(tr("Open Today & Overdue"))
+                                                    .size(15.0)
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .fill(t.primary)
+                                            .corner_radius(7)
+                                            .min_size(vec2(0.0, 38.0)),
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.actions.push(Action::Go(Location::TodayOverdue));
+                                    }
+                                    ui.add_space(4.0);
+                                    if ui.button(tr("Invite people")).clicked() {
+                                        self.modal = Some(Modal::Invite {
+                                            emails: String::new(),
+                                            role: "Member".into(),
+                                        });
+                                    }
+                                } else if self.inbox_tab == 0 && alone {
                                     ui.add_space(10.0);
                                     if ui
                                         .add(Tint(
@@ -564,12 +662,23 @@ impl App {
                                     t.bg,
                                 );
                             }
+                            // a comment on an archived task: say the task is archived
+                            let archived = match it.src {
+                                super::nav::InboxSrc::Task(id) => {
+                                    self.task(id).is_some_and(|x| !self.data.task_live(x))
+                                }
+                                _ => false,
+                            };
                             ui.painter().text(
                                 r.left_top() + vec2(48.0, 18.0),
                                 Align2::LEFT_CENTER,
-                                &tname,
+                                if archived {
+                                    trf!("{} (archived)", tname)
+                                } else {
+                                    tname.clone()
+                                },
                                 FontId::proportional(14.0),
-                                t.text,
+                                if archived { t.text2 } else { t.text },
                             );
                             let line = self
                                 .inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
@@ -791,6 +900,7 @@ impl App {
                                             let me = self.data.me;
                                             let m = Message {
                                                 edited: None,
+                                                imported: None,
                                                 mentions: self
                                                     .data
                                                     .mentions_in(self.post_body.trim()),
@@ -1086,7 +1196,7 @@ impl App {
                             let id = self.data.new_id();
                             self.data.extra.meetings.push(Meeting {
                                 id,
-                                title: "New meeting".into(),
+                                title: tr("New meeting").into(),
                                 date: today(),
                                 time: "10:00".into(),
                                 attendees: vec![self.data.me],
@@ -1277,7 +1387,7 @@ impl App {
                                         STATUS_PALETTE[1 + self.data.extra.goals.len() % 13];
                                     self.data.extra.goals.push(Goal {
                                         id,
-                                        name: "New goal".into(),
+                                        name: tr("New goal").into(),
                                         color,
                                         due: None,
                                         owner: self.data.me,
@@ -1587,7 +1697,13 @@ impl App {
                 ui.label(RichText::new(tr("Create a form to collect requests; each answer becomes a task.")).color(t.text2));
                 return;
             };
-            let lists: Vec<(u64, String)> = self.data.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).map(move |l| (l.id, format!("{} / {}", s.name, l.name)))).collect();
+            // Lists answers can go to (not archived); an archived one already
+            // picked stays, marked, so the form says where answers go now
+            let mut lists: Vec<(u64, String)> = self.all_list_paths();
+            let picked = self.data.extra.forms[fi].list_id;
+            if self.data.list_archived(picked) && self.data.space_of_list(picked).is_some() {
+                lists.push((picked, trf!("{} (archived)", self.data.list_name(picked))));
+            }
             let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.name.clone())).collect();
             // answers typed into one form don't carry over to another
             let fid = self.data.extra.forms[fi].id;
@@ -1672,7 +1788,7 @@ impl App {
                 }
                 ui.horizontal(|ui| {
                     if ui.button(tr("+ Add question")).clicked() {
-                        f.fields.push(FormField { label: "Question".into(), map: "text".into(), ..Default::default() });
+                        f.fields.push(FormField { label: tr("Question").into(), map: "text".into(), ..Default::default() });
                         ch = true;
                     }
                     if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)))).clicked() {
@@ -2020,6 +2136,9 @@ impl App {
                         y += step;
                     }
                 }
+                // strokes and notes put in without an id (an older copy)
+                // get theirs before anything goes by id
+                self.data.fix_board_ids();
                 let wb = &mut self.data.extra.whiteboards[wi];
                 for s in &wb.strokes {
                     let pts: Vec<egui::Pos2> =
@@ -2034,6 +2153,10 @@ impl App {
                 let mut drop_note = None;
                 let mut recolor = None;
                 for (i, n) in wb.notes.iter_mut().enumerate() {
+                    // every widget of a note takes its id from the note, so
+                    // notes skipped off screen don't hand their ids (and the
+                    // typing focus) to another note
+                    let key = if n.id != 0 { n.id } else { (1 << 63) | i as u64 };
                     let r = Rect::from_min_size(view.to_screen(origin, n.pos), vec2(160.0, 120.0) * z);
                     // notes off the visible part of the board are not drawn
                     if !r.intersects(rect) {
@@ -2047,12 +2170,17 @@ impl App {
                     p.rect_filled(r, 4.0 * z, rgb(n.color).gamma_multiply(0.35).to_opaque());
                     let inner =
                         Rect::from_min_max(r.min + vec2(8.0, 18.0) * z, r.max - vec2(8.0, 8.0) * z);
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("wb_note", wid, key))
+                            .max_rect(inner),
+                    );
                     child.set_clip_rect(inner.intersect(rect));
                     if z >= 0.45
                         && child
                             .add(
                                 egui::TextEdit::multiline(&mut n.text)
+                                    .id(egui::Id::new(("wb_note_text", wid, key)))
                                     .frame(false)
                                     .font(FontId::proportional(13.0 * z))
                                     .desired_width(144.0 * z)
@@ -2073,9 +2201,9 @@ impl App {
                         );
                     }
                     if self.wb_tool == 2 && !space {
-                        let h = ui.interact(r.intersect(rect), ui.id().with(("note", i)), Sense::drag());
+                        let h = ui.interact(r.intersect(rect), ui.id().with(("note", wid, key)), Sense::drag());
                         if h.drag_started() {
-                            move_from = Some((i, n.pos));
+                            move_from = Some((n.id, n.pos));
                         }
                         if h.dragged() {
                             drag_note = Some((i, h.drag_delta() / z));
@@ -2086,7 +2214,7 @@ impl App {
                         Rect::from_center_size(r.left_top() + vec2(12.0, 10.0) * z, vec2(14.0, 14.0));
                     if rect.contains_rect(dot) {
                         let dr =
-                            ui.interact(dot, ui.id().with(("note_color", wid, i)), Sense::click());
+                            ui.interact(dot, ui.id().with(("note_color", wid, key)), Sense::click());
                         name_it(&dr, &format!("Note colour {}", i + 1));
                         p.circle_filled(dot.center(), 5.0, rgb(n.color));
                         hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
@@ -2098,7 +2226,7 @@ impl App {
                         popup(
                             ui,
                             &dr,
-                            ui.id().with(("note_color_pop", wid, i)),
+                            ui.id().with(("note_color_pop", wid, key)),
                             150.0,
                             |ui| {
                                 ui.horizontal_wrapped(|ui| {
@@ -2131,15 +2259,19 @@ impl App {
                     let xr =
                         Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0) * z, vec2(16.0, 16.0));
                     if rect.contains_rect(xr) {
-                        let x = ui
-                            .put(
-                                xr,
-                                ghost(egui::Button::new(
-                                    RichText::new("\u{2716}").size(9.0).color(t.text3),
-                                )
-                                .small()),
-                            )
-                            .on_hover_text(tr("Delete note"));
+                        let x = ui.interact(xr, ui.id().with(("note_x", wid, key)), Sense::click());
+                        hover_bg(ui, &x, xr, 4.0);
+                        p.text(
+                            xr.center(),
+                            Align2::CENTER_CENTER,
+                            "\u{2716}",
+                            FontId::proportional(9.0),
+                            if x.hovered() { t.text } else { t.text3 },
+                        );
+                        if x.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        let x = x.on_hover_text(tr("Delete note"));
                         name_it(&x, &format!("Delete note {}", i));
                         if x.clicked() {
                             drop_note = Some(i);
@@ -2156,8 +2288,8 @@ impl App {
                     self.sweep.wb_undo.push((wid, WbUndo::NoteGone(i, n)));
                     self.dirty = true;
                 }
-                if let Some((i, at)) = move_from {
-                    self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(i, at)));
+                if let Some((id, at)) = move_from {
+                    self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(id, at)));
                 }
                 if let Some((i, d)) = drag_note {
                     wb.notes[i].pos[0] += d.x;
@@ -2182,26 +2314,43 @@ impl App {
                                     .map(|o| view.to_board(origin, o));
                                 let mut points: Vec<[f32; 2]> = start.into_iter().collect();
                                 points.push([local.x, local.y]);
-                                wb.strokes.push(WbStroke {
-                                    id: 0,
+                                // a real id from the first point on: a merge
+                                // while the button is still down must see a
+                                // board whose every item has one (see
+                                // wb_sync::is_id_array)
+                                let id = self.data.new_id();
+                                self.data.extra.whiteboards[wi].strokes.push(WbStroke {
+                                    id,
                                     color: self.wb_color,
                                     width: self.sweep.wb_width,
                                     points,
                                 });
-                                self.sweep.wb_undo.push((wid, WbUndo::Stroke));
+                                self.sweep.wb_drawing = Some((wid, id));
+                                self.sweep.wb_undo.push((wid, WbUndo::Stroke(id)));
+                                self.dirty = true;
                             } else if resp.dragged() {
-                                if let Some(s) = wb.strokes.last_mut() {
+                                // the stroke being drawn, wherever a merge put
+                                // it (a teammate's strokes can come after it)
+                                let drawing = self.sweep.wb_drawing.filter(|d| d.0 == wid);
+                                if let Some(s) = drawing.and_then(|(_, sid)| {
+                                    self.data.extra.whiteboards[wi]
+                                        .strokes
+                                        .iter_mut()
+                                        .find(|s| s.id == sid)
+                                }) {
                                     s.points.push([local.x, local.y]);
                                 }
                             }
                             if resp.drag_stopped() {
+                                self.sweep.wb_drawing = None;
                                 self.dirty = true;
                             }
                         }
                         1 => {
                             if resp.clicked() {
-                                wb.notes.push(Sticky {
-                                    id: 0,
+                                let id = self.data.new_id();
+                                self.data.extra.whiteboards[wi].notes.push(Sticky {
+                                    id,
                                     pos: [local.x - 80.0, local.y - 60.0],
                                     text: String::new(),
                                     color: if self.wb_color == [32, 32, 32] {
@@ -2210,7 +2359,7 @@ impl App {
                                         self.wb_color
                                     },
                                 });
-                                self.sweep.wb_undo.push((wid, WbUndo::Note));
+                                self.sweep.wb_undo.push((wid, WbUndo::Note(id)));
                                 self.dirty = true;
                             }
                         }
@@ -2223,6 +2372,7 @@ impl App {
                                             < s.width + 6.0 / z
                                     })
                                 };
+                                let wb = &mut self.data.extra.whiteboards[wi];
                                 while let Some(i) = wb.strokes.iter().position(hit) {
                                     let s = wb.strokes.remove(i);
                                     self.sweep.wb_undo.push((wid, WbUndo::StrokeGone(i, s)));
@@ -2253,22 +2403,48 @@ impl App {
         let Some(wb) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) else {
             return;
         };
-        match op {
-            WbUndo::Stroke => {
-                wb.strokes.pop();
-            }
-            WbUndo::Note => {
-                wb.notes.pop();
-            }
-            WbUndo::NoteGone(i, n) => wb.notes.insert(i.min(wb.notes.len()), n),
-            WbUndo::StrokeGone(i, s) => wb.strokes.insert(i.min(wb.strokes.len()), s),
-            WbUndo::NoteMoved(i, at) => {
-                if let Some(n) = wb.notes.get_mut(i) {
-                    n.pos = at;
+        // by id: a stroke or note a teammate took away meanwhile is left
+        // alone (nothing happens), and theirs are never touched
+        let done = match op {
+            WbUndo::Stroke(id) => match wb.strokes.iter().position(|s| s.id == id) {
+                Some(i) => {
+                    wb.strokes.remove(i);
+                    true
                 }
+                None => false,
+            },
+            WbUndo::Note(id) => match wb.notes.iter().position(|n| n.id == id) {
+                Some(i) => {
+                    wb.notes.remove(i);
+                    true
+                }
+                None => false,
+            },
+            WbUndo::NoteGone(i, n) => {
+                let back = !wb.notes.iter().any(|x| x.id == n.id);
+                if back {
+                    wb.notes.insert(i.min(wb.notes.len()), n);
+                }
+                back
             }
+            WbUndo::StrokeGone(i, s) => {
+                let back = !wb.strokes.iter().any(|x| x.id == s.id);
+                if back {
+                    wb.strokes.insert(i.min(wb.strokes.len()), s);
+                }
+                back
+            }
+            WbUndo::NoteMoved(id, at) => match wb.notes.iter_mut().find(|n| n.id == id) {
+                Some(n) => {
+                    n.pos = at;
+                    true
+                }
+                None => false,
+            },
+        };
+        if done {
+            self.dirty = true;
         }
-        self.dirty = true;
     }
 
     // ---------------------------------------------------------------- reminders
@@ -2384,19 +2560,28 @@ impl App {
                             t.text3
                         }),
                 );
-                if !r.done {
+                // snoozing only ever moves a reminder later
+                let later: Vec<(&str, i64)> = [
+                    ("In 1 hour", now + 3600),
+                    (
+                        "Tomorrow 9 AM",
+                        reminder_ts(today() + Duration::days(1), "09:00"),
+                    ),
+                    (
+                        "Next week",
+                        reminder_ts(today() + Duration::days(7), "09:00"),
+                    ),
+                ]
+                .into_iter()
+                .filter(|(_, ts)| *ts > r.due_ts)
+                .collect();
+                if !r.done && !later.is_empty() {
                     let sz = ui.add(ghost(egui::Button::new(
                         RichText::new(tr("Snooze")).small(),
                     )));
                     name_it(&sz, &format!("Snooze {}", r.text));
                     popup(ui, &sz, ui.id().with(("rem_snooze", r.id)), 170.0, |ui| {
-                        let tomorrow = reminder_ts(today() + Duration::days(1), "09:00");
-                        let week = reminder_ts(today() + Duration::days(7), "09:00");
-                        for (label, ts) in [
-                            ("In 1 hour", now + 3600),
-                            ("Tomorrow 9 AM", tomorrow),
-                            ("Next week", week),
-                        ] {
+                        for (label, ts) in later {
                             if ui.button(tr(label)).clicked() {
                                 if let Some(x) =
                                     self.data.extra.reminders.iter_mut().find(|x| x.id == r.id)
@@ -2445,6 +2630,150 @@ impl App {
             .iter()
             .filter(|r| r.owner == self.data.me && !r.done && r.due_ts <= now)
             .count()
+    }
+
+    /// My reminders that are due and my meetings today and tomorrow, for
+    /// Home: (reminders, meetings), soonest first.
+    pub(super) fn home_due_extras(&self) -> (Vec<Reminder>, Vec<Meeting>) {
+        let (me, now, td) = (self.data.me, now_ts(), today());
+        let mut rs: Vec<Reminder> = self
+            .data
+            .extra
+            .reminders
+            .iter()
+            .filter(|r| r.owner == me && !r.done && r.due_ts <= now)
+            .cloned()
+            .collect();
+        rs.sort_by_key(|r| r.due_ts);
+        let mut ms: Vec<Meeting> = self
+            .data
+            .extra
+            .meetings
+            .iter()
+            .filter(|m| m.attendees.contains(&me) && (0..=1).contains(&(m.date - td).num_days()))
+            .cloned()
+            .collect();
+        ms.sort_by(|a, b| (a.date, &a.time).cmp(&(b.date, &b.time)));
+        (rs, ms)
+    }
+
+    /// The Reminders and Meetings rows under My Work on Home.
+    pub(super) fn home_extras_rows(&mut self, ui: &mut Ui, w: f32) {
+        let t = self.t();
+        let (rs, ms) = self.home_due_extras();
+        let td = today();
+        let mut go = None;
+        let rows: [(&str, Vec<(String, String, String)>); 2] = [
+            (
+                "Reminders",
+                rs.iter()
+                    .map(|r| {
+                        let when = chrono::DateTime::from_timestamp(r.due_ts, 0)
+                            .map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p"))
+                            .unwrap_or_default();
+                        (r.text.clone(), when, format!("reminder:{}", r.id))
+                    })
+                    .collect(),
+            ),
+            (
+                "Meetings",
+                ms.iter()
+                    .map(|m| {
+                        let day = if m.date == td { "Today" } else { "Tomorrow" };
+                        (
+                            m.title.clone(),
+                            format!("{} {}", tr(day), m.time),
+                            format!("meeting:{}", m.id),
+                        )
+                    })
+                    .collect(),
+            ),
+        ];
+        for (name, items) in rows {
+            if items.is_empty() {
+                continue;
+            }
+            let (r, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
+            ui.painter().text(
+                r.left_center() + vec2(18.0, 0.0),
+                Align2::LEFT_CENTER,
+                tr(name),
+                FontId::proportional(13.5),
+                t.text,
+            );
+            ui.painter().text(
+                r.left_center() + vec2(110.0, 0.0),
+                Align2::LEFT_CENTER,
+                items.len().to_string(),
+                FontId::proportional(12.0),
+                t.text3,
+            );
+            for (text, when, target) in items {
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                name_it(&resp, &text);
+                if resp.hovered() {
+                    ui.painter().rect_filled(r, 6.0, t.hover);
+                }
+                ui.painter()
+                    .with_clip_rect(Rect::from_min_max(
+                        r.min,
+                        pos2(r.right() - 140.0, r.bottom()),
+                    ))
+                    .text(
+                        r.left_center() + vec2(40.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        &text,
+                        FontId::proportional(13.0),
+                        t.text,
+                    );
+                ui.painter().text(
+                    r.right_center() - vec2(6.0, 0.0),
+                    Align2::RIGHT_CENTER,
+                    when,
+                    FontId::proportional(12.0),
+                    if name == "Reminders" {
+                        t.danger
+                    } else {
+                        t.text2
+                    },
+                );
+                if resp.clicked() {
+                    go = Some(target);
+                }
+            }
+        }
+        if let Some(target) = go {
+            self.open_target(&target);
+        }
+    }
+
+    /// My Work on Home with nothing assigned to me and nothing due: what
+    /// shows up here, and a way to add the first task.
+    pub(super) fn home_nothing_yet(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        ui.label(RichText::new(tr("Nothing assigned to you yet.")).color(t.text2));
+        ui.label(
+            RichText::new(tr(
+                "Tasks assigned to you show up here by due date, with your due reminders and upcoming meetings.",
+            ))
+            .small()
+            .color(t.text3),
+        );
+        ui.add_space(6.0);
+        if self.default_list().is_none() {
+            ui.label(
+                RichText::new(tr("Tasks live in Lists: make one in the Lists card first."))
+                    .small()
+                    .color(t.text3),
+            );
+        } else if ui.button(tr("+ Add a task for me")).clicked() {
+            self.open_quick_add(None);
+            if let Some(qa) = self.quick_add.as_mut() {
+                if !qa.assignees.contains(&self.data.me) {
+                    qa.assignees.push(self.data.me);
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------- AI
@@ -2586,7 +2915,7 @@ impl App {
                         s.dirty = true;
                     }
                     ui.add_space(6.0);
-                    if primary_button(ui, &s.t(), tr("Add Bookmark")).clicked() {
+                    if primary_button(ui, &s.t(), tr("Add bookmark")).clicked() {
                         s.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                     }
                 });
@@ -2605,7 +2934,8 @@ impl App {
                     }
                     ui.horizontal_wrapped(|ui| {
                         for (id, n, c) in &folders {
-                            if ui.add(egui::Button::new(trf!("\u{1F4C1} {}  ({} lists)", n, c)).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
+                            let label = if *c == 1 { trf!("\u{1F4C1} {}  (1 list)", n) } else { trf!("\u{1F4C1} {}  ({} lists)", n, c) };
+                            if ui.add(egui::Button::new(label).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
                                 s.actions.push(Action::Go(Location::Folder(*id)));
                             }
                         }
@@ -2961,9 +3291,9 @@ impl App {
     pub(super) fn planner_add_row(&mut self, ui: &mut Ui, d: NaiveDate, w: f32) {
         let t = self.t();
         let Some((_, text)) = self.sweep.planner_add.as_mut().filter(|p| p.0 == d) else {
-            let b = ui.add(ghost(egui::Button::new(
-                RichText::new(tr("+ Add task")).color(t.text3),
-            )));
+            let b = ui.add(ghost(
+                egui::Button::new(RichText::new(tr("+ Add task")).color(t.text3)).truncate(),
+            ));
             name_it(&b, &format!("Add task on {}", d.format("%a %-d")));
             if b.clicked() {
                 self.sweep.planner_add = Some((d, String::new()));
@@ -2979,21 +3309,26 @@ impl App {
             let name = text.trim().to_string();
             self.sweep.planner_add = None;
             if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.is_empty() {
-                if let Some(list) = self.default_list() {
-                    let me = self.data.me;
-                    self.actions.push(Action::Add {
-                        list,
-                        name,
-                        status: None,
-                        priority: 0,
-                        assignees: vec![me],
-                        due: Some(d),
-                        parent: None,
-                        open: false,
-                    });
-                }
+                let Some(list) = self.default_list() else {
+                    // no List to put it in: say why and keep the name typed
+                    self.sweep.planner_add = Some((d, name));
+                    self.need_a_list();
+                    return;
+                };
+                let me = self.data.me;
+                self.actions.push(Action::Add {
+                    list,
+                    name,
+                    status: None,
+                    priority: 0,
+                    assignees: vec![me],
+                    due: Some(d),
+                    parent: None,
+                    open: false,
+                });
             }
-        } else {
+        } else if self.modal.is_none() {
+            // (not over the dialog the next step opens)
             r.request_focus();
         }
     }
@@ -3026,6 +3361,43 @@ pub const SEARCH_KINDS: [&str; 8] = [
 impl App {
     /// Everything the search box finds, grouped, best first. A pasted
     /// workboard:// link (Copy link) or a task number finds that item.
+    /// Archived tasks and Lists (Spaces, Folders) whose names match: search
+    /// leaves them out, so it says how many. Kind as in SEARCH_KINDS.
+    pub(super) fn archived_matches(&self, q: &str, kind: u8) -> usize {
+        let ql = q.trim().to_lowercase();
+        if ql.is_empty() || super::nav::parse_link(q).is_some() {
+            return 0;
+        }
+        let mine = |sp: &Space| sp.private_owner.is_none_or(|o| o == self.data.me);
+        let tasks = if kind == 0 || kind == 1 {
+            self.data
+                .tasks
+                .iter()
+                .filter(|t| !self.data.task_live(t))
+                .filter(|t| self.data.space_of_list(t.list_id).is_some_and(mine))
+                .filter(|t| t.name.to_lowercase().contains(&ql))
+                .count()
+        } else {
+            0
+        };
+        let lists = if kind == 0 || kind == 2 {
+            self.data
+                .spaces
+                .iter()
+                .filter(|sp| mine(sp))
+                .flat_map(|sp| {
+                    sp.lists
+                        .iter()
+                        .chain(sp.folders.iter().flat_map(|f| f.lists.iter()))
+                })
+                .filter(|l| self.data.list_archived(l.id) && l.name.to_lowercase().contains(&ql))
+                .count()
+        } else {
+            0
+        };
+        tasks + lists
+    }
+
     pub(super) fn search_rows(&self, q: &str, kind: u8) -> Vec<SearchRow> {
         let ql = q.trim().to_lowercase();
         let show = |k: u8| kind == 0 || kind == k;
@@ -3244,7 +3616,7 @@ impl App {
                         rows.push((
                             "Messages",
                             "\u{1F4AC}",
-                            truncate(&m.text, 60),
+                            truncate(&super::chat::shown_text(m), 60),
                             place.clone(),
                             Hit::Chat(c.id),
                         ));
@@ -3467,28 +3839,25 @@ impl App {
                                 FontId::proportional(12.5),
                                 t.text3,
                             );
-                            let tg = ui.painter().layout_no_wrap(
-                                title.clone(),
+                            // the title keeps all but 200 for the grey place after
+                            // it; both are shortened with an ellipsis
+                            let title_r = paint_fit(
+                                ui,
+                                pos2(rr.left() + 28.0, rr.center().y),
+                                Align2::LEFT_CENTER,
+                                title,
                                 FontId::proportional(14.0),
                                 t.text,
+                                w - 200.0,
                             );
-                            let tw = tg.size().x.min(w - 200.0);
-                            ui.painter()
-                                .with_clip_rect(Rect::from_min_max(
-                                    rr.min,
-                                    pos2(rr.left() + 28.0 + tw, rr.bottom()),
-                                ))
-                                .galley(
-                                    pos2(rr.left() + 28.0, rr.center().y - tg.size().y / 2.0),
-                                    tg,
-                                    t.text,
-                                );
-                            ui.painter().with_clip_rect(rr).text(
-                                pos2(rr.left() + 40.0 + tw, rr.center().y),
+                            paint_fit(
+                                ui,
+                                pos2(title_r.right() + 12.0, rr.center().y),
                                 Align2::LEFT_CENTER,
                                 place,
                                 FontId::proportional(12.0),
                                 t.text3,
+                                rr.right() - 8.0 - (title_r.right() + 12.0),
                             );
                             if resp.clicked() {
                                 chosen = Some(hit.clone());
@@ -3496,6 +3865,20 @@ impl App {
                         }
                         if rows.is_empty() && !q.trim().is_empty() {
                             ui.label(RichText::new(tr("No results")).color(t.text3));
+                        }
+                        // archived ones are left out: say so rather than drop them silently
+                        let arch = self.archived_matches(&q, kind);
+                        if arch > 0 {
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(if arch == 1 {
+                                    tr("1 archived match is not shown").to_string()
+                                } else {
+                                    trf!("{} archived matches are not shown", arch)
+                                })
+                                .small()
+                                .color(t.text3),
+                            );
                         }
                     });
                 if enter && chosen.is_none() {

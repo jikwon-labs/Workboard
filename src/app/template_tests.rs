@@ -52,7 +52,7 @@ fn status_names(s: &Space) -> Vec<&str> {
 
 fn open_center(h: &mut Ui1) {
     h.click("Create");
-    h.click("\u{2728}  Templates");
+    h.click("Templates");
     center(h);
 }
 

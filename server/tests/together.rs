@@ -122,6 +122,8 @@ struct App {
     mailed: Vec<(u64, Option<String>, Option<String>)>,
     /// every copy (whole or delta) the server sent after the welcome
     updates: Vec<Value>,
+    /// roles (from Access) and copies, in the order they came
+    heard: Vec<String>,
 }
 
 impl App {
@@ -184,6 +186,7 @@ impl App {
             email: None,
             mailed: vec![],
             updates: vec![],
+            heard: vec![],
         }
     }
 
@@ -297,6 +300,7 @@ impl App {
                     self.push();
                 }
                 Event::Update { data, hidden, .. } => {
+                    self.heard.push(format!("copy {}", data.to_string().len()));
                     self.updates.push(data.clone());
                     self.take_in(data);
                     wb_sync::hide(&mut self.data, &hidden);
@@ -312,6 +316,7 @@ impl App {
                 }
                 Event::Account(e) => self.email = Some(e),
                 Event::Access { people, role } => {
+                    self.heard.push(format!("role {:?}", role));
                     self.people = people;
                     self.role = Some(role);
                 }
@@ -3452,6 +3457,78 @@ fn losing_access_to_a_space_deletes_nothing() {
         find_mut(d, "spaces", 70)["sharing"]["people"] = json!([{"member": 2, "level": "view"}])
     });
     b.wait("Plans back at Bo", has_all);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A folder moved out of a space closed to Cy into one Cy sees reaches Cy
+/// with the list in it (and the list's task and form), though none of them
+/// changed, so the change alone doesn't hold them.
+#[test]
+fn a_folder_moved_into_a_space_someone_sees_comes_with_its_lists() {
+    let home = temp_home("sharemove");
+    let server = Server::start(&home, 0);
+    let (mut a, _b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
+    assert!(has_none(&c.data), "Cy gets none of Plans: {}", c.data);
+    a.change(|d| {
+        let f = find_mut(d, "spaces", 70)["folders"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        find_mut(d, "spaces", 60)["folders"]
+            .as_array_mut()
+            .unwrap()
+            .push(f);
+    });
+    c.wait("the folder reaches Cy", |d| {
+        find(d, "spaces", 60).is_some_and(|s| s["folders"][0]["id"] == 73)
+    });
+    let team = find(&c.data, "spaces", 60).unwrap();
+    assert_eq!(
+        team["folders"][0]["lists"][0]["name"], "Folder list",
+        "with its list: {}",
+        team
+    );
+    assert!(find(&c.data, "tasks", 75).is_some(), "and the task on it");
+    assert!(
+        find(&c.data, "extra.forms", 96).is_some(),
+        "and the form on it"
+    );
+    assert!(find(&c.data, "spaces", 70).is_none(), "Plans stays closed");
+    let text = c.data.to_string();
+    for s in ["Secret list", "Secret task", "Secret doc"] {
+        assert!(!text.contains(s), "{} stays out", s);
+    }
+    // Cy's next change keeps it all for the team
+    round_trip(&mut c, &mut a, "after the move", 3040);
+    let team = find(&a.data, "spaces", 60).unwrap();
+    assert_eq!(team["folders"][0]["lists"][0]["id"], 74);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Made an admin, Cy hears the new role before the copy it opens up: an
+/// app goes by its role for what it may see, and the copy with Plans must
+/// not arrive while it still thinks it's a member.
+#[test]
+fn a_new_role_arrives_before_the_copy_it_opens_up() {
+    let home = temp_home("roleorder");
+    let server = Server::start(&home, 0);
+    let (a, _b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
+    assert!(has_none(&c.data));
+    c.heard.clear();
+    a.client.send(Msg::SetRole {
+        member: 3,
+        role: Role::Admin,
+    });
+    c.wait("Cy, now an admin, gets Plans", has_all);
+    let first_copy = c.heard.iter().position(|h| h.starts_with("copy")).unwrap();
+    let role = c
+        .heard
+        .iter()
+        .position(|h| h == "role Admin")
+        .expect("Cy hears the new role");
+    assert!(role < first_copy, "the role first: {:?}", c.heard);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

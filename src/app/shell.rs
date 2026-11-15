@@ -7,6 +7,8 @@ use super::*;
 use chrono::Datelike;
 use egui::{Pos2, Response};
 
+pub(super) use super::icons::line_icon;
+
 /// What is being dragged in the sidebar.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum SideDrag {
@@ -256,381 +258,8 @@ fn pill(ui: &mut Ui, t: &Theme, text: &str, shown: &str, active: bool, accent: b
     resp
 }
 
-/// Thin outline icons in the style of the original (1.5 px strokes).
-pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) -> bool {
-    let s = Stroke::new(1.5, color);
-    let line = |a: egui::Vec2, b: egui::Vec2| p.line_segment([c + a, c + b], s);
-    match kind {
-        "home" => {
-            let pts = vec![
-                c + vec2(-7.0, -1.0),
-                c + vec2(0.0, -7.5),
-                c + vec2(7.0, -1.0),
-                c + vec2(7.0, 7.0),
-                c + vec2(-7.0, 7.0),
-            ];
-            p.add(egui::Shape::closed_line(pts, s));
-            line(vec2(-2.5, 7.0), vec2(-2.5, 2.5));
-            line(vec2(-2.5, 2.5), vec2(2.5, 2.5));
-            line(vec2(2.5, 2.5), vec2(2.5, 7.0));
-        }
-        "planner" => {
-            let r = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(15.0, 14.0));
-            p.rect_stroke(r, 3.0, s, egui::StrokeKind::Middle);
-            line(vec2(-7.5, -3.0), vec2(7.5, -3.0));
-            line(vec2(-3.5, -8.5), vec2(-3.5, -5.0));
-            line(vec2(3.5, -8.5), vec2(3.5, -5.0));
-            p.text(
-                c + vec2(0.0, 2.8),
-                Align2::CENTER_CENTER,
-                today().day().to_string(),
-                FontId::proportional(7.5),
-                color,
-            );
-        }
-        "ai" => {
-            for k in 0..4 {
-                let a = std::f32::consts::FRAC_PI_2 * k as f32 + std::f32::consts::FRAC_PI_4;
-                let d = vec2(a.cos(), a.sin());
-                p.circle_stroke(c + d * 3.6, 3.6, s);
-            }
-            p.circle_filled(c, 1.6, color);
-        }
-        "teams" => {
-            p.circle_stroke(c + vec2(-2.5, -3.0), 3.0, s);
-            let mut arc = vec![];
-            for i in 0..=10 {
-                let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
-                arc.push(c + vec2(-2.5, 7.0) + vec2(a.cos() * 6.0, a.sin() * 5.0));
-            }
-            p.add(egui::Shape::line(arc, s));
-            p.circle_stroke(c + vec2(4.5, -2.0), 2.4, s);
-            line(vec2(4.5, 2.5), vec2(8.0, 6.5));
-        }
-        "more" => {
-            for i in 0..3 {
-                for j in 0..3 {
-                    p.circle_filled(
-                        c + vec2(-5.0 + 5.0 * i as f32, -5.0 + 5.0 * j as f32),
-                        1.5,
-                        color,
-                    );
-                }
-            }
-        }
-        "chat" => {
-            let r = Rect::from_center_size(c + vec2(0.0, -1.0), vec2(15.0, 11.0));
-            p.rect_stroke(r, 3.5, s, egui::StrokeKind::Middle);
-            line(vec2(-3.0, 4.5), vec2(-5.0, 8.0));
-            line(vec2(-5.0, 8.0), vec2(0.0, 4.5));
-        }
-        "docs" => {
-            let pts = vec![
-                c + vec2(-5.5, -7.5),
-                c + vec2(2.0, -7.5),
-                c + vec2(5.5, -4.0),
-                c + vec2(5.5, 7.5),
-                c + vec2(-5.5, 7.5),
-            ];
-            p.add(egui::Shape::closed_line(pts, s));
-            line(vec2(-2.5, 0.0), vec2(2.5, 0.0));
-            line(vec2(-2.5, 3.5), vec2(2.5, 3.5));
-        }
-        "dashboards" => {
-            p.rect_stroke(
-                Rect::from_center_size(c, vec2(15.0, 15.0)),
-                3.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            line(vec2(-3.0, 4.0), vec2(-3.0, 0.0));
-            line(vec2(0.5, 4.0), vec2(0.5, -3.5));
-            line(vec2(4.0, 4.0), vec2(4.0, 1.5));
-        }
-        "whiteboards" => {
-            p.rect_stroke(
-                Rect::from_center_size(c, vec2(15.0, 15.0)),
-                3.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            let pts = vec![
-                c + vec2(-4.0, 2.0),
-                c + vec2(-1.0, -2.0),
-                c + vec2(1.5, 2.0),
-                c + vec2(4.0, -2.5),
-            ];
-            p.add(egui::Shape::line(pts, s));
-        }
-        "forms" => {
-            p.rect_stroke(
-                Rect::from_center_size(c + vec2(0.0, 0.5), vec2(13.0, 15.0)),
-                3.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            line(vec2(-3.0, 1.0), vec2(-0.8, 3.2));
-            line(vec2(-0.8, 3.2), vec2(3.5, -1.5));
-            line(vec2(-2.5, -7.5), vec2(2.5, -7.5));
-        }
-        "goals" => {
-            let pts = vec![
-                c + vec2(-5.0, -7.0),
-                c + vec2(5.0, -7.0),
-                c + vec2(4.0, -1.0),
-                c + vec2(0.0, 2.0),
-                c + vec2(-4.0, -1.0),
-            ];
-            p.add(egui::Shape::closed_line(pts, s));
-            line(vec2(0.0, 2.0), vec2(0.0, 6.0));
-            line(vec2(-3.5, 7.0), vec2(3.5, 7.0));
-        }
-        "timesheets" | "clock" => {
-            p.circle_stroke(c + vec2(0.0, 1.0), 6.5, s);
-            line(vec2(0.0, 1.0), vec2(0.0, -2.5));
-            line(vec2(0.0, 1.0), vec2(2.5, 2.5));
-            line(vec2(-2.0, -7.5), vec2(2.0, -7.5));
-        }
-        "upgrade" => {
-            let pts = vec![
-                c + vec2(0.0, -8.0),
-                c + vec2(7.0, -1.0),
-                c + vec2(3.0, -1.0),
-                c + vec2(3.0, 6.0),
-                c + vec2(-3.0, 6.0),
-                c + vec2(-3.0, -1.0),
-                c + vec2(-7.0, -1.0),
-            ];
-            p.add(egui::Shape::convex_polygon(
-                pts,
-                Color32::from_rgb(171, 140, 255),
-                Stroke::NONE,
-            ));
-            p.rect_filled(
-                Rect::from_center_size(c + vec2(0.0, 8.0), vec2(6.0, 1.6)),
-                0.5,
-                Color32::from_rgb(171, 140, 255),
-            );
-        }
-        "check_plus" => {
-            let mut arc = vec![];
-            for i in 0..=22 {
-                let a = std::f32::consts::TAU * (0.1 + 0.75 * i as f32 / 22.0);
-                arc.push(c + vec2(a.cos(), a.sin()) * 7.0);
-            }
-            p.add(egui::Shape::line(arc, s));
-            line(vec2(-3.0, 0.0), vec2(-0.8, 2.3));
-            line(vec2(-0.8, 2.3), vec2(3.0, -2.0));
-            line(vec2(5.5, -8.0), vec2(5.5, -3.0));
-            line(vec2(3.0, -5.5), vec2(8.0, -5.5));
-        }
-        "video" => {
-            p.rect_stroke(
-                Rect::from_center_size(c + vec2(-2.0, 0.0), vec2(12.0, 10.0)),
-                2.5,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            let pts = vec![
-                c + vec2(4.0, -1.5),
-                c + vec2(8.0, -4.0),
-                c + vec2(8.0, 4.0),
-                c + vec2(4.0, 1.5),
-            ];
-            p.add(egui::Shape::line(pts, s));
-        }
-        "mic" => {
-            p.rect_stroke(
-                Rect::from_center_size(c + vec2(0.0, -2.5), vec2(6.0, 10.0)),
-                3.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            let mut arc = vec![];
-            for i in 0..=10 {
-                let a = std::f32::consts::PI * (i as f32 / 10.0);
-                arc.push(c + vec2(0.0, -1.0) + vec2(a.cos() * 5.5, a.sin() * 5.5));
-            }
-            p.add(egui::Shape::line(arc, s));
-            line(vec2(0.0, 4.5), vec2(0.0, 7.5));
-        }
-        "phone" => {
-            let pts = vec![
-                c + vec2(-6.0, -6.0),
-                c + vec2(-3.0, -7.0),
-                c + vec2(-1.0, -3.0),
-                c + vec2(-3.0, -1.5),
-                c + vec2(1.5, 3.0),
-                c + vec2(3.0, 1.0),
-                c + vec2(7.0, 3.0),
-                c + vec2(6.0, 6.0),
-                c + vec2(3.0, 7.0),
-                c + vec2(-6.5, -2.5),
-            ];
-            p.add(egui::Shape::closed_line(pts, s));
-        }
-        "robot" => {
-            p.rect_stroke(
-                Rect::from_center_size(c + vec2(0.0, 1.5), vec2(13.0, 10.0)),
-                3.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            p.circle_filled(c + vec2(-2.5, 1.5), 1.2, color);
-            p.circle_filled(c + vec2(2.5, 1.5), 1.2, color);
-            line(vec2(0.0, -3.5), vec2(0.0, -6.5));
-            p.circle_filled(c + vec2(0.0, -7.0), 1.2, color);
-        }
-        "edit" => {
-            p.rect_stroke(
-                Rect::from_center_size(c + vec2(-1.0, 1.0), vec2(12.0, 12.0)),
-                2.5,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            line(vec2(0.0, 0.0), vec2(6.5, -6.5));
-        }
-        "share" => {
-            p.circle_stroke(c + vec2(-1.5, -3.0), 3.0, s);
-            let mut arc = vec![];
-            for i in 0..=10 {
-                let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
-                arc.push(c + vec2(-1.5, 7.0) + vec2(a.cos() * 6.0, a.sin() * 5.0));
-            }
-            p.add(egui::Shape::line(arc, s));
-            p.circle_stroke(c + vec2(5.0, -2.0), 2.2, s);
-        }
-        "inbox" => {
-            p.rect_stroke(
-                Rect::from_center_size(c, vec2(15.0, 13.0)),
-                3.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-            let pts = vec![
-                c + vec2(-7.5, 1.0),
-                c + vec2(-3.0, 1.0),
-                c + vec2(-2.0, 3.0),
-                c + vec2(2.0, 3.0),
-                c + vec2(3.0, 1.0),
-                c + vec2(7.5, 1.0),
-            ];
-            p.add(egui::Shape::line(pts, s));
-        }
-        "reply" => {
-            let mut arc = vec![];
-            for i in 0..=10 {
-                let a = std::f32::consts::PI * (1.5 + 0.5 * i as f32 / 10.0);
-                arc.push(c + vec2(1.0, 4.0) + vec2(a.cos() * 6.0, a.sin() * 6.0));
-            }
-            arc.insert(0, c + vec2(-6.0, -2.0));
-            p.add(egui::Shape::line(arc, s));
-            line(vec2(-6.0, -2.0), vec2(-3.0, -5.0));
-            line(vec2(-6.0, -2.0), vec2(-3.0, 1.0));
-        }
-        "person" => {
-            p.circle_stroke(c + vec2(0.0, -3.5), 3.2, s);
-            let mut arc = vec![];
-            for i in 0..=10 {
-                let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
-                arc.push(c + vec2(0.0, 7.0) + vec2(a.cos() * 6.0, a.sin() * 5.0));
-            }
-            p.add(egui::Shape::line(arc, s));
-        }
-        "person_comment" => {
-            p.circle_stroke(c + vec2(-2.0, -3.5), 3.0, s);
-            let mut arc = vec![];
-            for i in 0..=10 {
-                let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
-                arc.push(c + vec2(-2.0, 7.0) + vec2(a.cos() * 5.5, a.sin() * 5.0));
-            }
-            p.add(egui::Shape::line(arc, s));
-            p.rect_stroke(
-                Rect::from_center_size(c + vec2(5.0, 3.0), vec2(5.0, 4.0)),
-                1.0,
-                Stroke::new(1.2, color),
-                egui::StrokeKind::Middle,
-            );
-        }
-        "megaphone" => {
-            let pts = vec![
-                c + vec2(-6.0, -2.0),
-                c + vec2(3.0, -6.5),
-                c + vec2(3.0, 6.5),
-                c + vec2(-6.0, 2.0),
-            ];
-            p.add(egui::Shape::closed_line(pts, s));
-            line(vec2(-4.0, 2.0), vec2(-2.5, 7.0));
-            line(vec2(5.5, -2.0), vec2(5.5, 2.0));
-        }
-        "bolt" => {
-            let pts = vec![
-                c + vec2(1.5, -8.0),
-                c + vec2(-5.0, 1.0),
-                c + vec2(0.0, 1.0),
-                c + vec2(-1.5, 8.0),
-                c + vec2(5.0, -1.0),
-                c + vec2(0.0, -1.0),
-            ];
-            p.add(egui::Shape::closed_line(pts, s));
-        }
-        "heart" => {
-            let col = Color32::from_rgb(233, 61, 130);
-            p.circle_filled(c + vec2(-3.0, -2.0), 3.6, Color32::from_rgb(171, 74, 186));
-            p.circle_filled(c + vec2(3.0, -2.0), 3.6, col);
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    c + vec2(-6.4, -0.8),
-                    c + vec2(6.4, -0.8),
-                    c + vec2(0.0, 6.5),
-                ],
-                col,
-                Stroke::NONE,
-            ));
-        }
-        "dots" => {
-            for k in -1..=1 {
-                p.circle_filled(c + vec2(5.0 * k as f32, 0.0), 1.4, color);
-            }
-        }
-        _ => return false,
-    }
-    true
-}
-
-/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
-pub(super) fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
-    let w = |s: &str| {
-        p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-    };
-    if w(text) <= max_w {
-        return text.to_string();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let (mut lo, mut hi) = (0usize, chars.len());
-    while lo < hi {
-        let mid = (lo + hi + 1) / 2;
-        let cand: String = chars[..mid]
-            .iter()
-            .collect::<String>()
-            .trim_end()
-            .to_string()
-            + "\u{2026}";
-        if w(&cand) <= max_w {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    chars[..lo]
-        .iter()
-        .collect::<String>()
-        .trim_end()
-        .to_string()
-        + "\u{2026}"
-}
+// moved to widgets.rs; kept here for code that names it `shell::fit_text`
+pub(super) use crate::widgets::fit_text;
 
 pub(super) struct Cols {
     pub assignee: Rect,
@@ -1061,6 +690,40 @@ impl App {
                         self.avatar_menu(ui)
                     });
                 }
+                // a team server that can't be reached (or won't let this
+                // computer in): a quiet word here, Work together on click
+                if let Some(word) = self.server_trouble() {
+                    ui.add_space(4.0);
+                    let g = ui.painter().layout_no_wrap(
+                        word,
+                        FontId::proportional(12.5),
+                        super::together::WARN,
+                    );
+                    let (r, resp) =
+                        ui.allocate_exact_size(vec2(g.size().x + 26.0, 26.0), Sense::click());
+                    name_it(&resp, "Server connection");
+                    if resp.hovered() {
+                        ui.painter().rect_filled(r, 13.0, t.hover);
+                    }
+                    ui.painter().circle_filled(
+                        r.left_center() + vec2(11.0, 0.0),
+                        3.5,
+                        super::together::WARN,
+                    );
+                    ui.painter().galley(
+                        pos2(r.left() + 19.0, r.center().y - g.size().y / 2.0),
+                        g,
+                        super::together::WARN,
+                    );
+                    let tip = super::together::net_problem(self.sync_rt.net_status.as_ref())
+                        .unwrap_or_default();
+                    if resp
+                        .on_hover_text(format!("{}\n{}", tip, tr("Click for Work together.")))
+                        .clicked()
+                    {
+                        self.modal = Some(self.together_modal());
+                    }
+                }
                 ui.add_space(6.0);
                 let pinned = self.data.extra.pinned_tools.clone();
                 for id in pinned.iter().rev() {
@@ -1071,26 +734,8 @@ impl App {
                         if resp.hovered() {
                             ui.painter().rect_filled(r, 6.0, t.hover);
                         }
-                        let kind = match *tid {
-                            "create_task" => "check_plus",
-                            "clip" => "video",
-                            "stt" => "mic",
-                            "track_time" => "clock",
-                            "doc" => "docs",
-                            "whiteboard" => "whiteboards",
-                            "dashboard" => "dashboards",
-                            "people" => "teams",
-                            _ => "",
-                        };
-                        if !line_icon(ui.painter(), kind, r.center(), t.text2) {
-                            ui.painter().text(
-                                r.center(),
-                                Align2::CENTER_CENTER,
-                                *icon,
-                                FontId::proportional(13.0),
-                                t.text2,
-                            );
-                        }
+                        // TOOLS names each tool's line icon
+                        line_icon(ui.painter(), icon, r.center(), t.text2);
                         if resp.on_hover_text(tr(label)).clicked() {
                             self.run_tool(tid);
                         }
@@ -1466,22 +1111,35 @@ impl App {
             pos2(x + 24.0, rect.top()),
             pos2(rect.right() - 28.0, rect.bottom()),
         );
-        let g = ui
-            .painter()
-            .layout_no_wrap(shown.to_string(), FontId::proportional(14.0), col);
-        let gw = g.size().x;
-        ui.painter().with_clip_rect(clip).galley(
-            pos2(x + 24.0, rect.center().y - g.size().y / 2.0),
-            g,
+        // too long for the row: shortened with an ellipsis, whole on hover;
+        // the grey note after the name keeps up to 40% of the room
+        let sub_font = FontId::proportional(12.0);
+        let sub_w = sub.map_or(0.0, |s| {
+            let w = ui
+                .painter()
+                .layout_no_wrap(s.to_string(), sub_font.clone(), t.text3)
+                .size()
+                .x;
+            (w + 4.0).min(clip.width() * 0.4)
+        });
+        let nr = paint_fit(
+            ui,
+            pos2(x + 24.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            shown,
+            FontId::proportional(14.0),
             col,
+            clip.width() - sub_w,
         );
         if let Some(s) = sub {
-            ui.painter().with_clip_rect(clip).text(
-                pos2(x + 28.0 + gw, rect.center().y + 1.0),
+            paint_fit(
+                ui,
+                pos2(nr.right() + 4.0, rect.center().y + 1.0),
                 Align2::LEFT_CENTER,
                 s,
-                FontId::proportional(12.0),
+                sub_font,
                 t.text3,
+                clip.right() - nr.right() - 4.0,
             );
         }
         if let Some(count) = trailing {
@@ -1809,6 +1467,11 @@ impl App {
                         let muted = self.data.extra.muted_until > now_ts();
                         if filter.is_empty() {
                             let inbox_n = if muted { 0 } else { self.inbox_badge() };
+                            let replies_n = if muted || self.hidden("Replies") {
+                                0
+                            } else {
+                                self.unread_replies()
+                            };
                             let nav: [(&str, &str); 9] = [
                                 ("Inbox", "\u{1F4E5}"),
                                 ("Replies", "\u{21A9}"),
@@ -1845,10 +1508,10 @@ impl App {
                                     "Meetings" => self.section == Section::Meetings,
                                     _ => false,
                                 };
-                                let badge = if label == "Inbox" && inbox_n > 0 {
-                                    Some(inbox_n.to_string())
-                                } else {
-                                    None
+                                let badge = match label {
+                                    "Inbox" if inbox_n > 0 => Some(inbox_n.to_string()),
+                                    "Replies" if replies_n > 0 => Some(replies_n.to_string()),
+                                    _ => None,
                                 };
                                 let kind = match label {
                                     "Inbox" => "inbox",
@@ -2052,15 +1715,22 @@ impl App {
 
                             // (while searching, the heading only shows with a match under it)
                             let fav_tasks: Vec<(u64, String)> = self.favorite_tasks();
-                            let fav_match = self
+                            // an archived Space, Folder or List leaves Favorites
+                            // until it is restored
+                            let favs: Vec<Location> = self
                                 .data
                                 .favorites
+                                .iter()
+                                .copied()
+                                .filter(|f| !self.data.location_archived(*f))
+                                .collect();
+                            let fav_match = favs
                                 .iter()
                                 .any(|f| self.matches_search(&self.data.location_name(*f)))
                                 || fav_tasks.iter().any(|(_, n)| self.matches_search(n));
                             if fav_match && !self.hidden("Favorites") {
                                 self.side_header(ui, "Favorites", &[]);
-                                for f in self.data.favorites.clone() {
+                                for f in favs {
                                     let name = self.data.location_name(f);
                                     if !self.matches_search(&name) {
                                         continue;
@@ -2307,7 +1977,7 @@ impl App {
                                         t.text2,
                                     );
                                 }
-                                if sresp.on_hover_text(tr("Channel Settings")).clicked() {
+                                if sresp.on_hover_text(tr("Channel settings")).clicked() {
                                     self.modal = Some(Modal::ChannelSettings(id));
                                 } else if r.clicked() {
                                     self.section = Section::Chat;
@@ -2539,13 +2209,13 @@ impl App {
         let lid = self.data.new_id();
         self.data.spaces.push(Space {
             id: sid,
-            name: "Personal".into(),
+            name: tr("Personal").into(),
             color: [100, 100, 100],
             statuses: default_statuses(),
             folders: vec![],
             lists: vec![ListItem {
                 id: lid,
-                name: "Personal List".into(),
+                name: tr("Personal List").into(),
                 ..Default::default()
             }],
             expanded: true,
@@ -2632,7 +2302,7 @@ impl App {
                         "Form" => self.new_form(),
                         "Dashboard" => {
                             self.modal = Some(Modal::NewDashboard {
-                                name: "New Dashboard".into(),
+                                name: tr("New Dashboard").into(),
                             })
                         }
                         _ => self.new_whiteboard(),
@@ -2796,8 +2466,12 @@ impl App {
                     .iter()
                     .filter(|l| !l.archived && self.matches_search(&l.name))
                     .collect();
+                let none_live = f.lists.iter().all(|l| l.archived);
                 for l in shown {
                     self.list_row(ui, 30.0, l);
+                }
+                if !searching && none_live {
+                    self.archived_lists_row(ui, 30.0, f.lists.len());
                 }
             }
         }
@@ -2817,6 +2491,15 @@ impl App {
             .filter(|d| d.space == Some(s.id) && d.parent.is_none() && self.doc_shown(d))
             .map(|d| (d.id, d.title.clone()))
             .collect();
+        // everything in the Space archived: say so rather than look empty
+        if !searching
+            && docs.is_empty()
+            && s.folders.iter().all(|f| f.archived)
+            && s.lists.iter().all(|l| l.archived)
+        {
+            let n = s.lists.len() + s.folders.iter().map(|f| f.lists.len()).sum::<usize>();
+            self.archived_lists_row(ui, 14.0, n);
+        }
         for (id, title) in docs {
             if !self.matches_search(&title) {
                 continue;
@@ -2948,9 +2631,114 @@ impl App {
             .iter()
             .filter_map(|s| s.strip_prefix("task:")?.parse::<u64>().ok())
             .filter_map(|id| self.task(id))
-            .filter(|t| !t.archived)
+            .filter(|t| self.data.task_live(t))
             .map(|t| (t.id, t.name.clone()))
             .collect()
+    }
+
+    /// Under a Folder or Space that shows nothing because its Lists are
+    /// archived: "N archived Lists", opening Settings > Spaces to restore them.
+    fn archived_lists_row(&mut self, ui: &mut Ui, indent: f32, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let text = if n == 1 {
+            tr("1 archived List").to_string()
+        } else {
+            trf!("{} archived Lists", n)
+        };
+        let r = self.side_row(ui, indent, false, |_, _| {}, &text, None, None, true);
+        if r.on_hover_text(tr("Restore them from Settings > Spaces"))
+            .clicked()
+        {
+            self.open_settings("Spaces");
+        }
+    }
+
+    /// Top-level tasks here hidden only because they are archived: (archived
+    /// tasks the Archived filter would show, tasks in archived Lists, which
+    /// come back with their List). Nothing while the Archived filter is on.
+    pub(super) fn archived_here(&mut self) -> (usize, usize) {
+        if self.filter.archived {
+            return (0, 0);
+        }
+        self.filter.archived = true;
+        let own = self.filtered().len();
+        self.filter.archived = false;
+        if matches!(self.loc, Location::List(_)) {
+            return (own, 0);
+        }
+        let lists = self.data.lists_in(self.loc);
+        let me = self.data.me;
+        let in_lists = self
+            .data
+            .tasks
+            .iter()
+            .filter(|t| t.parent.is_none() && self.data.list_archived(t.list_id))
+            .filter(|t| match self.loc {
+                Location::MyTasks => t.assignees.contains(&me),
+                Location::TodayOverdue => {
+                    t.assignees.contains(&me)
+                        && t.due.is_some_and(|d| d <= today())
+                        && !self.data.is_closed(t)
+                }
+                _ => lists.as_ref().is_none_or(|l| l.contains(&t.list_id)),
+            })
+            .filter(|t| {
+                self.data
+                    .space_of_list(t.list_id)
+                    .and_then(|s| s.private_owner)
+                    .is_none_or(|o| o == me)
+            })
+            .count();
+        (own, in_lists)
+    }
+
+    /// Beside the title of an archived Space, Folder or List: says so, and
+    /// restores it when it is archived itself (not only what it sits in).
+    fn archived_note(&mut self, ui: &mut Ui, t: &Theme) {
+        if !self.data.location_archived(self.loc) {
+            return;
+        }
+        let own = match self.loc {
+            Location::Space(id) => self.data.spaces.iter().any(|s| s.id == id && s.archived),
+            Location::Folder(id) => self
+                .data
+                .spaces
+                .iter()
+                .any(|s| s.folders.iter().any(|f| f.id == id && f.archived)),
+            Location::List(id) => self.data.list_item(id).is_some_and(|l| l.archived),
+            _ => false,
+        };
+        let hover = if own {
+            "Archived: hidden from the sidebar and from other views."
+        } else {
+            "What this sits in is archived. Restore it from Settings > Spaces."
+        };
+        egui::Frame::new()
+            .fill(t.hover)
+            .corner_radius(4)
+            .inner_margin(egui::Margin::symmetric(6, 1))
+            .show(ui, |ui| {
+                ui.label(RichText::new(tr("Archived")).small().color(t.text2))
+                    .on_hover_text(tr(hover));
+            });
+        if own {
+            let b = ui.small_button(tr("Restore"));
+            name_it(&b, "Restore archived here");
+            if b.clicked() {
+                match self.loc {
+                    Location::Space(id) => {
+                        self.set_space_archived(id, false);
+                        let name = self.data.location_name(self.loc);
+                        self.toast = Some((trf!("Restored \"{}\".", name), now_ts()));
+                    }
+                    Location::Folder(id) => self.set_folder_archived(id, false),
+                    Location::List(id) => self.set_list_archived(id, false),
+                    _ => {}
+                }
+            }
+        }
     }
 
     /// While a sidebar item is dragged over `rect`: marks the spot and, when
@@ -3163,6 +2951,7 @@ impl App {
                         }
                     }
                     self.level_note(ui, &t, self.loc_level(self.loc));
+                    self.archived_note(ui, &t);
                     let right_start = ui.max_rect().right();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -3232,7 +3021,7 @@ impl App {
                                             close_popup(ui);
                                         }
                                     }
-                                    if ui.button(tr("Custom Fields")).clicked() {
+                                    if ui.button(tr("Custom fields")).clicked() {
                                         self.modal = Some(Modal::CustomFields {
                                             name: String::new(),
                                             kind: "text".into(),
@@ -3296,9 +3085,14 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     // "Add Channel": a chat channel for this location (not on the
-                    // Personal List, as in the original)
+                    // Personal List, as in the original, nor on the views that
+                    // gather tasks from everywhere, which aren't a place to talk about)
                     let personal = self.on_personal_list();
-                    let ac = if personal {
+                    let gathered = matches!(
+                        self.loc,
+                        Location::TodayOverdue | Location::MyTasks | Location::Everything
+                    );
+                    let ac = if personal || gathered {
                         ui.allocate_response(vec2(0.0, 0.0), Sense::hover())
                     } else {
                         ui.add(
@@ -3332,7 +3126,7 @@ impl App {
                                 id,
                                 name: name.clone(),
                                 kind: ChannelKind::Channel,
-                                topic: format!(
+                                topic: trf!(
                                     "Conversations about {}",
                                     self.data.location_name(self.loc)
                                 ),
@@ -3995,6 +3789,12 @@ impl App {
                         self.show_closed = false;
                         n.saturating_sub(self.filtered().len())
                     };
+                    // archived ones are hidden too: say how many, and where they are
+                    let (arch_tasks, arch_in_lists) = if hidden > 0 {
+                        (0, 0)
+                    } else {
+                        self.archived_here()
+                    };
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {
                         if hidden > 0 {
@@ -4029,8 +3829,51 @@ impl App {
                                     self.open_quick_add(None);
                                 }
                             });
+                        } else if arch_tasks + arch_in_lists > 0 {
+                            let n = arch_tasks + arch_in_lists;
+                            ui.label(
+                                RichText::new(if n == 1 {
+                                    tr("The 1 task here is archived").to_string()
+                                } else {
+                                    trf!("All {} tasks here are archived", n)
+                                })
+                                .size(16.0)
+                                .color(t.text2),
+                            );
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
+                                let ghost_btn = |ui: &mut Ui, label: &str| {
+                                    ui.add(
+                                        egui::Button::new(label)
+                                            .stroke(Stroke::new(1.0, t.border))
+                                            .corner_radius(6),
+                                    )
+                                };
+                                // archived tasks in Lists that are not: the Archived filter
+                                if arch_tasks > 0 {
+                                    let b = ghost_btn(ui, tr("Show archived tasks"));
+                                    name_it(&b, "Show archived tasks");
+                                    if b.clicked() {
+                                        self.filter.archived = true;
+                                    }
+                                }
+                                // tasks in archived Lists come back with their List
+                                if arch_in_lists > 0 {
+                                    let b = ghost_btn(ui, tr("See archived Lists"));
+                                    name_it(&b, "See archived Lists");
+                                    if b.clicked() {
+                                        self.open_settings("Spaces");
+                                    }
+                                }
+                                if !self.on_personal_list()
+                                    && primary_button(ui, &t, tr("Add Task")).clicked()
+                                {
+                                    self.open_quick_add(None);
+                                }
+                            });
                         } else if self.on_personal_list() {
-                            // the inline "+ Add Task" row below is the empty state
+                            // the inline "+ Add task" row below is the empty state
                         } else {
                             ui.label(
                                 RichText::new(tr("No tasks here yet"))
@@ -4119,7 +3962,7 @@ impl App {
         if show_dots {
             if child
                 .add(ghost(egui::Button::new(
-                    RichText::new(tr("+ Add Task")).color(t.text3).size(12.5),
+                    RichText::new(tr("+ Add task")).color(t.text3).size(12.5),
                 )))
                 .clicked()
             {
@@ -4190,8 +4033,9 @@ impl App {
                 }
             });
             if submit && !text.trim().is_empty() {
-                self.add_from_group(g, text.clone(), false);
-                self.adding = Some((g.key.clone(), String::new()));
+                // no List to put it in: the name stays for after one is made
+                let added = self.add_from_group(g, text.clone(), false);
+                self.adding = Some((g.key.clone(), if added { String::new() } else { text }));
             } else if cancel || (submit && text.trim().is_empty()) {
                 self.adding = None;
             } else {
@@ -4206,7 +4050,7 @@ impl App {
             ui.painter().text(
                 r.left_center() + vec2(40.0, 0.0),
                 Align2::LEFT_CENTER,
-                tr("+ Add Task"),
+                tr("+ Add task"),
                 FontId::proportional(13.5),
                 t.text3,
             );
@@ -4313,7 +4157,45 @@ impl App {
             + if task.checklist.is_empty() { 0.0 } else { 42.0 }
             + 12.0
             + quick_w;
-        let max_name = (cols.left - x - after).max(60.0);
+        // tags follow the name: a name too long for the row leaves room for
+        // the first tag and a "+N" for the rest (or just "+N" when narrow)
+        let tag_font = FontId::proportional(11.5);
+        let tags: Vec<String> = if apps.tags {
+            task.tags
+                .iter()
+                .map(|tag| fit_text(ui.painter(), tag, &tag_font, 90.0))
+                .collect()
+        } else {
+            vec![]
+        };
+        let measure = ui.painter().clone();
+        let chip_w = |s: &str| {
+            measure
+                .layout_no_wrap(s.to_string(), tag_font.clone(), t.text)
+                .size()
+                .x
+                + 12.0
+        };
+        let plus_w = chip_w(&format!("+{}", tags.len().max(1)));
+        let room = cols.left - x - after;
+        let tag_room = match tags.len() {
+            0 => 0.0,
+            1 => chip_w(&tags[0]) + 4.0,
+            _ => chip_w(&tags[0]) + 4.0 + plus_w + 4.0,
+        };
+        let name_w = measure
+            .layout_no_wrap(task.name.clone(), FontId::proportional(14.0), t.text)
+            .size()
+            .x;
+        let tag_room = if tags.is_empty() || name_w <= room {
+            // the whole name fits: tags take what is left after it
+            0.0
+        } else if room - tag_room >= 240.0 {
+            tag_room
+        } else {
+            plus_w + 4.0
+        };
+        let max_name = (room - tag_room).max(60.0);
         if renaming {
             let nr = Rect::from_min_max(
                 pos2(x - 4.0, rect.top() + 4.0),
@@ -4368,20 +4250,42 @@ impl App {
             self.row_quick_actions(ui, rect, x, cols.left - 8.0, task);
             x += quick_w;
         }
-        for tag in task.tags.iter().take(if apps.tags { 2 } else { 0 }) {
-            let col = tag_color(tag);
+        // as many tags as fit, then "+N" for the rest (hover lists them all)
+        let tag_end = cols.left - 8.0;
+        let mut shown = 0;
+        for (k, (tag, full)) in tags.iter().zip(&task.tags).enumerate() {
+            let rest = tags.len() - k - 1;
+            let w = chip_w(tag);
+            let need = if rest > 0 { w + 4.0 + plus_w } else { w };
+            if x + need > tag_end {
+                break;
+            }
+            let col = tag_color(full);
             let g = ui
                 .painter()
-                .layout_no_wrap(tag.clone(), FontId::proportional(11.5), col);
-            let r = Rect::from_min_size(
-                pos2(x, rect.center().y - 9.0),
-                vec2(g.size().x + 12.0, 18.0),
-            );
-            if r.right() < cols.left - 8.0 {
-                ui.painter().rect_filled(r, 9.0, col.gamma_multiply(0.16));
-                ui.painter().galley(r.center() - g.size() / 2.0, g, col);
-            }
+                .layout_no_wrap(tag.clone(), tag_font.clone(), col);
+            let r = Rect::from_min_size(pos2(x, rect.center().y - 9.0), vec2(w, 18.0));
+            ui.painter().rect_filled(r, 9.0, col.gamma_multiply(0.16));
+            ui.painter().galley(r.center() - g.size() / 2.0, g, col);
             x = r.right() + 4.0;
+            shown += 1;
+        }
+        if shown < tags.len() && x + plus_w <= tag_end {
+            let more = format!("+{}", tags.len() - shown);
+            let r = Rect::from_min_size(pos2(x, rect.center().y - 9.0), vec2(plus_w, 18.0));
+            ui.painter().rect_filled(r, 9.0, t.hover);
+            ui.painter().text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                more,
+                tag_font.clone(),
+                t.text2,
+            );
+            if ui.rect_contains_pointer(r) {
+                egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), id.with("tags_tip"), |ui| {
+                    ui.label(task.tags.join(", "))
+                });
+            }
         }
         let icon_col = Color32::from_rgb(160, 160, 160);
         // assignee
@@ -4611,6 +4515,20 @@ impl App {
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let refs: Vec<&Task> = tasks.iter().collect();
         let groups = self.groups(&refs, true);
+        // closed tasks are hidden by default: their columns say how many
+        // instead of a plain 0
+        let mut hidden_closed: HashMap<String, usize> = HashMap::new();
+        if !self.show_closed {
+            self.show_closed = true;
+            for x in self.filtered() {
+                if self.data.is_closed(x) {
+                    *hidden_closed
+                        .entry(self.data.status_of(x).name.clone())
+                        .or_default() += 1;
+                }
+            }
+            self.show_closed = false;
+        }
         let mut dropped: Option<(u64, usize)> = None;
         egui::ScrollArea::horizontal()
             .auto_shrink([false, false])
@@ -4682,11 +4600,25 @@ impl App {
                                     }
                                     return;
                                 }
+                                let hidden = g
+                                    .status
+                                    .as_ref()
+                                    .filter(|_| g.tasks.is_empty())
+                                    .and_then(|s| hidden_closed.get(&s.name))
+                                    .copied()
+                                    .unwrap_or(0);
                                 ui.horizontal(|ui| {
                                     self.group_pill(ui, g);
-                                    ui.label(
-                                        RichText::new(g.tasks.len().to_string()).color(accent),
-                                    );
+                                    if hidden > 0 {
+                                        ui.label(
+                                            RichText::new(trf!("{} hidden", hidden)).color(t.text3),
+                                        )
+                                        .on_hover_text(tr("Closed tasks are hidden"));
+                                    } else {
+                                        ui.label(
+                                            RichText::new(g.tasks.len().to_string()).color(accent),
+                                        );
+                                    }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let b = ui
                                             .add(ghost(egui::Button::new(
@@ -4714,6 +4646,20 @@ impl App {
                                                 if resp.clicked() {
                                                     self.actions.push(Action::Open(task.id));
                                                 }
+                                            }
+                                        }
+                                        if hidden > 0 {
+                                            let label = if hidden == 1 {
+                                                tr("Show 1 closed task").to_string()
+                                            } else {
+                                                trf!("Show {} closed tasks", hidden)
+                                            };
+                                            let b = ui.add(ghost(egui::Button::new(
+                                                RichText::new(label).color(t.text2),
+                                            )));
+                                            name_it(&b, &format!("Show closed in {}", g.label));
+                                            if b.clicked() {
+                                                self.show_closed = true;
                                             }
                                         }
                                         self.board_add_task(ui, g, col_w - 16.0, accent);
@@ -4779,7 +4725,7 @@ impl App {
         }
     }
 
-    /// "+ Add Task" at the foot of a board column: a name field, as in the
+    /// "+ Add task" at the foot of a board column: a name field, as in the
     /// List (a task is only made once it has a name).
     fn board_add_task(&mut self, ui: &mut Ui, g: &Group, w: f32, accent: Color32) {
         let t = self.t();
@@ -4795,7 +4741,7 @@ impl App {
             ui.painter().text(
                 r.left_center() + vec2(10.0, 0.0),
                 Align2::LEFT_CENTER,
-                tr("+  Add Task"),
+                tr("+  Add task"),
                 FontId::proportional(14.0),
                 accent,
             );
@@ -4842,8 +4788,9 @@ impl App {
                 });
             });
         if submit && !text.trim().is_empty() {
-            self.add_from_group(g, text.trim().to_string(), false);
-            self.adding = Some((key, String::new()));
+            // no List to put it in: the name stays for after one is made
+            let added = self.add_from_group(g, text.trim().to_string(), false);
+            self.adding = Some((key, if added { String::new() } else { text }));
         } else if cancel || submit {
             self.adding = None;
         } else {

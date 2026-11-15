@@ -138,6 +138,9 @@ pub(super) struct InboxItem {
     pub reply: bool,
     /// 0 Primary, 1 Other, 2 Later, 3 Cleared.
     pub tab: u8,
+    /// From an imported message (old history): starts out Cleared and is
+    /// never announced.
+    pub imported: bool,
 }
 
 impl App {
@@ -166,6 +169,15 @@ impl App {
                 0
             } else {
                 1
+            }
+        };
+        // imported history is already cleared for everyone, unless saved
+        // for later
+        let imported_tab = |key: &str| {
+            if later.iter().any(|k| k == key) {
+                2
+            } else {
+                3
             }
         };
         let members = &self.data.members;
@@ -206,6 +218,7 @@ impl App {
                     assigned,
                     reply: false,
                     tab,
+                    imported: false,
                 });
             }
         }
@@ -225,7 +238,11 @@ impl App {
             for m in &c.messages {
                 if m.author != me && mentions(&m.text, &m.mentions) {
                     let key = format!("chat:{}:{}", c.id, m.id);
-                    let tab = tab_of(&key, n.mentions);
+                    let tab = if m.imported.is_some() {
+                        imported_tab(&key)
+                    } else {
+                        tab_of(&key, n.mentions)
+                    };
                     out.push(InboxItem {
                         key,
                         ts: m.ts,
@@ -242,6 +259,7 @@ impl App {
                         assigned: false,
                         reply: false,
                         tab,
+                        imported: m.imported.is_some(),
                     });
                 }
                 for (i, r) in m.replies.iter().enumerate() {
@@ -255,7 +273,11 @@ impl App {
                         continue;
                     }
                     let key = format!("chat:{}:{}", c.id, r.id);
-                    let tab = tab_of(&key, (mention && n.mentions) || reply);
+                    let tab = if r.imported.is_some() {
+                        imported_tab(&key)
+                    } else {
+                        tab_of(&key, (mention && n.mentions) || reply)
+                    };
                     out.push(InboxItem {
                         key,
                         ts: r.ts,
@@ -272,6 +294,7 @@ impl App {
                         assigned: false,
                         reply,
                         tab,
+                        imported: r.imported.is_some(),
                     });
                 }
             }
@@ -627,24 +650,31 @@ impl App {
             self.dirty = true;
             if self.data.extra.notify.reminders {
                 let key = format!("reminder:{}:{}", fired[0].id, now);
+                // came due a while ago (the app was closed): not "due now"
+                let late = fired.iter().any(|r| now - r.due_ts > 10 * 60);
                 let note = if fired.len() == 1 {
                     super::notify::Note {
                         key,
                         kind: super::notify::Kind::Reminder,
-                        title: tr("Reminder").into(),
+                        title: tr(if late { "Overdue reminder" } else { "Reminder" }).into(),
                         body: fired[0].text.clone(),
                         target: format!("reminder:{}", fired[0].id),
                     }
                 } else {
+                    // a toast shows the body on one line, so keep the names apart
                     let body = fired
                         .iter()
-                        .map(|r| r.text.clone())
+                        .map(|r| r.text.trim().replace('\n', " "))
                         .collect::<Vec<_>>()
-                        .join("\n");
+                        .join(", ");
                     super::notify::Note {
                         key,
                         kind: super::notify::Kind::Reminder,
-                        title: trf!("{} reminders are due", fired.len()),
+                        title: if late {
+                            trf!("{} reminders are overdue", fired.len())
+                        } else {
+                            trf!("{} reminders are due", fired.len())
+                        },
                         body,
                         target: "inbox".into(),
                     }

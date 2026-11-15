@@ -22,6 +22,7 @@ mod due_time_tests;
 mod files;
 mod hubs;
 mod huddle;
+mod icons;
 mod listview;
 mod menus;
 mod more;
@@ -357,6 +358,7 @@ struct Drafts {
     thread: DraftBox,
     chat_files: DraftBox<Vec<files::Pending>>,
     thread_files: DraftBox<Vec<files::Pending>>,
+    chat_picked: DraftBox<Vec<u64>>,
 }
 
 pub struct App {
@@ -381,12 +383,20 @@ pub struct App {
     rename: Option<(Target, String)>,
     confirm_delete: Option<Target>,
     edit_statuses: Option<u64>,
+    /// The open status editor's bookkeeping: (space, the names tasks carry
+    /// for each status (None: added in the editor), the names automations
+    /// were last pointed at). See `commit_status_renames`.
+    status_edit: Option<(u64, Vec<Option<String>>, Vec<Option<String>>)>,
     palette: Option<String>,
     quick_add: Option<QuickAdd>,
     comment_text: String,
     /// People picked from the @mention list while writing a comment, so a
     /// name two people share means the one picked.
     comment_picked: Vec<u64>,
+    /// People picked from the @mention list in the channel's message box
+    /// (kept with its draft), so a name two people share means the one
+    /// picked.
+    chat_picked: Vec<u64>,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -399,6 +409,8 @@ pub struct App {
     snap_pending: bool,
     actions: Vec<Action>,
     home_collapsed: HashSet<&'static str>,
+    /// Home "My Work" sections showing every task instead of the first few.
+    home_all: HashSet<&'static str>,
     section: Section,
     recent: Vec<u64>,
     doc_open: Option<u64>,
@@ -546,8 +558,13 @@ pub struct App {
     undo_trash: Option<(Vec<u64>, i64)>,
     /// Asking before deleting the selected tasks.
     confirm_bulk_delete: bool,
-    /// Pictures and videos on their way onto a task: (task, file).
+    /// Pictures and videos on their way onto a task: (task, file). Kept in
+    /// the cache folder too (`taskfields::TASK_FILES`), so ones still going
+    /// up when the app quits join their task after the next start.
     task_files: Vec<(u64, files::Pending)>,
+    /// What of `task_files` is written down (task, file), once read back
+    /// for this workspace; None until then.
+    task_files_saved: Option<Vec<(u64, String)>>,
     /// Page state of the apps (reminders, search, whiteboards, forms, ...).
     sweep: more::SweepUi,
     /// Interface language picked in Settings > Language (kept on this computer).
@@ -607,6 +624,7 @@ impl App {
         };
         let mut data = data;
         data.fix_activity_ids();
+        together::fill_sync_baseline(&mut data);
         let loc = data
             .first_list()
             .map(Location::List)
@@ -699,10 +717,12 @@ impl App {
             rename: None,
             confirm_delete: None,
             edit_statuses: None,
+            status_edit: None,
             palette: None,
             quick_add: None,
             comment_text: String::new(),
             comment_picked: vec![],
+            chat_picked: vec![],
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),
@@ -714,6 +734,7 @@ impl App {
             snap_pending: false,
             actions: vec![],
             home_collapsed: ["Done"].into_iter().collect(),
+            home_all: HashSet::new(),
             section: match arg("--section").as_deref() {
                 Some("planner") => Section::Planner,
                 Some("chat") => Section::Chat,
@@ -857,6 +878,7 @@ impl App {
             undo_trash: None,
             confirm_bulk_delete: false,
             task_files: vec![],
+            task_files_saved: None,
             sweep: Default::default(),
             lang_choice,
             reminder_about: (None, None),
@@ -1282,7 +1304,10 @@ impl App {
     /// The list new tasks go to from the current location.
     fn default_list(&self) -> Option<u64> {
         match self.loc {
-            Location::List(id) => Some(id),
+            // (a List that is gone: somewhere else)
+            Location::List(id) => (self.data.space_of_list(id).is_some())
+                .then_some(id)
+                .or_else(|| self.data.first_list()),
             _ => self
                 .data
                 .lists_in(self.loc)
@@ -1333,41 +1358,46 @@ impl App {
         }
     }
 
-    fn add_from_group(&mut self, g: &Group, name: String, open: bool) {
-        if let Some(list) = Self::group_list(g).or_else(|| self.default_list()) {
-            if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
-                self.pending_tags.push(tag.to_string());
-            }
-            let mut assignees = vec![];
-            if let Some(a) = g.assignee {
-                assignees.push(a);
-            }
-            // on the personal views a new task is mine (and due today on Today &
-            // Overdue), or it would leave the page as soon as it's made
-            let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
-            if personal && !assignees.contains(&self.data.me) {
-                // with Multiple Assignees off a task has one: me
-                if !self.data.extra.apps.multiple_assignees {
-                    assignees.clear();
-                }
-                assignees.push(self.data.me);
-            }
-            let due = if self.loc == Location::TodayOverdue {
-                g.due.filter(|d| *d <= today()).or(Some(today()))
-            } else {
-                g.due
-            };
-            self.actions.push(Action::Add {
-                list,
-                name,
-                status: g.status.as_ref().map(|s| s.name.clone()),
-                priority: g.priority.unwrap_or(0),
-                assignees,
-                due,
-                parent: None,
-                open,
-            });
+    /// Adds a task in the group; false (and the next step offered) when
+    /// there is no List for it.
+    fn add_from_group(&mut self, g: &Group, name: String, open: bool) -> bool {
+        let Some(list) = Self::group_list(g).or_else(|| self.default_list()) else {
+            self.need_a_list();
+            return false;
+        };
+        if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
+            self.pending_tags.push(tag.to_string());
         }
+        let mut assignees = vec![];
+        if let Some(a) = g.assignee {
+            assignees.push(a);
+        }
+        // on the personal views a new task is mine (and due today on Today &
+        // Overdue), or it would leave the page as soon as it's made
+        let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
+        if personal && !assignees.contains(&self.data.me) {
+            // with Multiple Assignees off a task has one: me
+            if !self.data.extra.apps.multiple_assignees {
+                assignees.clear();
+            }
+            assignees.push(self.data.me);
+        }
+        let due = if self.loc == Location::TodayOverdue {
+            g.due.filter(|d| *d <= today()).or(Some(today()))
+        } else {
+            g.due
+        };
+        self.actions.push(Action::Add {
+            list,
+            name,
+            status: g.status.as_ref().map(|s| s.name.clone()),
+            priority: g.priority.unwrap_or(0),
+            assignees,
+            due,
+            parent: None,
+            open,
+        });
+        true
     }
 
     // ---------------------------------------------------------------- actions
@@ -1663,7 +1693,7 @@ impl App {
                     list_id: list,
                     parent,
                     name: if name.trim().is_empty() {
-                        "Untitled task".into()
+                        tr("Untitled task").into()
                     } else {
                         name.trim().to_string()
                     },
@@ -1833,20 +1863,20 @@ impl App {
                 let color = STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13];
                 self.data.spaces.push(Space {
                     id,
-                    name: "New Space".into(),
+                    name: tr("New Space").into(),
                     color,
                     statuses: default_statuses(),
                     folders: vec![],
                     lists: vec![ListItem {
                         id: lid,
-                        name: "List".into(),
+                        name: tr("List").into(),
                         ..Default::default()
                     }],
                     expanded: true,
                     private_owner: None,
                     ..Default::default()
                 });
-                self.rename = Some((Target::Space(id), "New Space".into()));
+                self.rename = Some((Target::Space(id), tr("New Space").into()));
                 self.dirty = true;
             }
             Action::NewFolder(sid) => {
@@ -1855,10 +1885,10 @@ impl App {
                 if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
                     s.folders.push(Folder {
                         id,
-                        name: "New Folder".into(),
+                        name: tr("New Folder").into(),
                         lists: vec![ListItem {
                             id: lid,
-                            name: "List".into(),
+                            name: tr("List").into(),
                             ..Default::default()
                         }],
                         expanded: true,
@@ -1866,7 +1896,7 @@ impl App {
                     });
                     s.expanded = true;
                 }
-                self.rename = Some((Target::Folder(id), "New Folder".into()));
+                self.rename = Some((Target::Folder(id), tr("New Folder").into()));
                 self.dirty = true;
             }
             Action::NewList { space, folder } => {
@@ -1875,7 +1905,7 @@ impl App {
                     s.expanded = true;
                     let item = ListItem {
                         id,
-                        name: "New List".into(),
+                        name: tr("New List").into(),
                         ..Default::default()
                     };
                     match folder {
@@ -1889,7 +1919,7 @@ impl App {
                     }
                 }
                 self.loc = Location::List(id);
-                self.rename = Some((Target::List(id), "New List".into()));
+                self.rename = Some((Target::List(id), tr("New List").into()));
                 self.dirty = true;
             }
             Action::StartRename(tg) => {
@@ -1928,7 +1958,13 @@ impl App {
                 }
                 self.dirty = true;
             }
-            Action::EditStatuses(sid) => self.edit_statuses = Some(sid),
+            Action::EditStatuses(sid) => {
+                // another space's editor: the open one's edits are done first
+                if self.edit_statuses != Some(sid) {
+                    self.finish_status_edit();
+                }
+                self.edit_statuses = Some(sid);
+            }
             Action::SetSpaceColor(sid, c) => {
                 if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
                     s.color = c;
@@ -2181,6 +2217,64 @@ impl App {
         self.dirty = true;
     }
 
+    /// The status editor's bookkeeping for space `si`: what was kept while
+    /// it is open, or (just opened, or the statuses changed under it) the
+    /// names the statuses have now.
+    fn status_edit_lists(&self, si: usize) -> (Vec<Option<String>>, Vec<Option<String>>) {
+        let sp = &self.data.spaces[si];
+        if let Some((_, orig, rules)) = self
+            .status_edit
+            .as_ref()
+            .filter(|e| e.0 == sp.id && e.1.len() == sp.statuses.len() && e.2.len() == e.1.len())
+        {
+            return (orig.clone(), rules.clone());
+        }
+        let orig: Vec<Option<String>> = sp.statuses.iter().map(|s| Some(s.name.clone())).collect();
+        (orig.clone(), orig)
+    }
+
+    /// The status editor is done with its space (closed, switched to another
+    /// space, or the app quits): renames reach tasks and automations, and a
+    /// name left empty or taken goes back, so no task is left on a status
+    /// that doesn't exist.
+    fn finish_status_edit(&mut self) {
+        let Some(sid) = self.edit_statuses.take() else {
+            self.status_edit = None;
+            return;
+        };
+        let kept = self.status_edit.take().filter(|e| e.0 == sid);
+        let kept = kept.or_else(|| {
+            let si = self.data.spaces.iter().position(|s| s.id == sid)?;
+            let (o, r) = self.status_edit_lists(si);
+            Some((sid, o, r))
+        });
+        self.settle_status_edit(kept);
+    }
+
+    /// Commits and settles one space's status edits (see `finish_status_edit`).
+    fn settle_status_edit(
+        &mut self,
+        edit: Option<(u64, Vec<Option<String>>, Vec<Option<String>>)>,
+    ) {
+        let Some((sid, mut orig, mut rules)) = edit else {
+            return;
+        };
+        let Some(si) = self.data.spaces.iter().position(|s| s.id == sid) else {
+            return;
+        };
+        if orig.len() != self.data.spaces[si].statuses.len() || rules.len() != orig.len() {
+            return;
+        }
+        self.commit_status_renames(si, &mut orig, &mut rules);
+        if self.settle_status_names(si, &orig) {
+            self.toast = Some((
+                tr("A status name that was empty or already used went back to its last name")
+                    .into(),
+                now_ts(),
+            ));
+        }
+    }
+
     /// The status editor closes: a name still empty or taken goes back to
     /// the last name its tasks carry (a status added in the editor gets a
     /// free name), so no task is left on a status that doesn't exist.
@@ -2397,6 +2491,33 @@ impl App {
                 }
             }
             self.quick_add = Some(qa);
+        } else {
+            self.need_a_list();
+        }
+    }
+
+    /// No List a new task could go in: say why and open the next step, a
+    /// new List (or a new Space first, which comes with a List).
+    pub(super) fn need_a_list(&mut self) {
+        let msg = if self.open_spaces().is_empty() {
+            "Tasks live in a List. Make a Space first: it comes with one."
+        } else {
+            "Tasks live in a List. Make one first."
+        };
+        self.toast = Some((tr(msg).into(), now_ts()));
+        self.offer_new_list(self.current_space());
+    }
+
+    /// The New List dialog, or New Space when there is no Space to put a
+    /// List in yet (the Home Lists card does the same).
+    pub(super) fn offer_new_list(&mut self, space: Option<u64>) {
+        if self.open_spaces().is_empty() {
+            self.modal = Some(Modal::NewSpace {
+                name: String::new(),
+                color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
+            });
+        } else {
+            self.open_new_list(space, None);
         }
     }
 
@@ -2639,6 +2760,59 @@ impl App {
         let dragging = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx());
         let released = ui.input(|i| i.pointer.any_released());
         let mut drop_on: Option<NaiveDate> = None;
+        // bar labels: (room, x, text, font, colour), drawn over all the days
+        let mut labels: Vec<(Rect, f32, String, FontId, Color32)> = vec![];
+        // a task with a start and a due date shows on every day between
+        let span = |x: &Task| match (x.start, x.due) {
+            (Some(s), Some(e)) if s <= e => Some((s, e)),
+            (_, Some(e)) => Some((e, e)),
+            _ => None,
+        };
+        // the time a bar starts at: its start time, or a one-day task's due time
+        let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
+            Some(at) if x.start == Some(s) => Some(at),
+            _ if s == e => x.due_at(),
+            _ => None,
+        };
+        // each week row gives every bar one line for all its days, so a bar
+        // that runs over several days stays in one piece: earlier starts and
+        // longer bars take the top lines, then all-day before timed ones
+        let mut lanes: HashMap<(i64, u64), usize> = HashMap::new();
+        for w in 0..rows as i64 {
+            let ws = start + Duration::days(w * 7);
+            let we = ws + Duration::days(6);
+            let mut week: Vec<(&Task, NaiveDate, NaiveDate, NaiveDate, NaiveDate)> = tasks
+                .iter()
+                .filter_map(|x| {
+                    span(x)
+                        .filter(|(s, e)| *s <= we && *e >= ws)
+                        .map(|(s, e)| (x, s, e, s.max(ws), e.min(we)))
+                })
+                .collect();
+            week.sort_by_key(|(x, s, e, a, b)| {
+                let at = bar_time(x, *s, *e);
+                (
+                    *a,
+                    std::cmp::Reverse((*b - *a).num_days()),
+                    at.is_some(),
+                    at,
+                    x.id,
+                )
+            });
+            // the last day each line is taken up to
+            let mut until: Vec<NaiveDate> = vec![];
+            for (x, _, _, a, b) in week {
+                let lane = match until.iter().position(|u| *u < a) {
+                    Some(l) => l,
+                    None => {
+                        until.push(b);
+                        until.len() - 1
+                    }
+                };
+                until[lane] = b;
+                lanes.insert((w, x.id), lane);
+            }
+        }
         for i in 0..(rows * 7) as i64 {
             let d = start + Duration::days(i);
             let cell = Rect::from_min_size(
@@ -2700,43 +2874,27 @@ impl App {
                     self.open_quick_add(Some(d));
                 }
             }
-            // a task with a start and a due date shows on every day between
-            let span = |x: &Task| match (x.start, x.due) {
-                (Some(s), Some(e)) if s <= e => Some((s, e)),
-                (_, Some(e)) => Some((e, e)),
-                _ => None,
-            };
-            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate)> = tasks
+            let week_row = i / 7;
+            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate, usize)> = tasks
                 .iter()
                 .filter_map(|x| {
+                    let lane = *lanes.get(&(week_row, x.id))?;
                     span(x)
                         .filter(|(s, e)| *s <= d && d <= *e)
-                        .map(|(s, e)| (x, s, e))
+                        .map(|(s, e)| (x, s, e, lane))
                 })
                 .collect();
-            // the time a bar starts at: its start time, or a one-day task's due time
-            let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
-                Some(at) if x.start == Some(s) => Some(at),
-                _ if s == e => x.due_at(),
-                _ => None,
-            };
-            // longer spans first, so a bar keeps its line from day to day; in a
-            // day, ones without a time (all day) first, then by time
-            day_tasks.sort_by_key(|(x, s, e)| {
-                let at = bar_time(x, *s, *e);
-                (
-                    std::cmp::Reverse((*e - *s).num_days()),
-                    *s,
-                    at.is_some(),
-                    at,
-                    x.id,
-                )
-            });
-            let max = ((ch - 30.0) / 22.0).floor().max(1.0) as usize;
-            for (k, (task, s0, e0)) in day_tasks.iter().enumerate() {
+            day_tasks.sort_by_key(|x| x.3);
+            // lines of 22 that fit under the day number; when some don't, the
+            // last line that fits says "+N more" instead
+            let fit = ((ch - 24.0) / 22.0).floor().max(1.0) as usize;
+            let needed = day_tasks.last().map(|x| x.3 + 1).unwrap_or(0);
+            let max = if needed > fit { fit - 1 } else { fit };
+            for (task, s0, e0, k) in day_tasks.iter().copied() {
                 if k >= max {
+                    let hidden = day_tasks.iter().filter(|x| x.3 >= max).count();
                     let more = Rect::from_min_size(
-                        cell.left_top() + vec2(4.0, 26.0 + 22.0 * k as f32),
+                        cell.left_top() + vec2(4.0, 26.0 + 22.0 * max as f32),
                         vec2(cw - 8.0, 20.0),
                     );
                     let mr = ui.interact(more, ui.id().with(("calmore", i)), Sense::click());
@@ -2747,14 +2905,14 @@ impl App {
                     p.text(
                         more.left_center() + vec2(4.0, 0.0),
                         Align2::LEFT_CENTER,
-                        trf!("+{} more", day_tasks.len() - k),
+                        trf!("+{} more", hidden),
                         FontId::proportional(11.5),
                         if mr.hovered() { t.text } else { t.text3 },
                     );
                     // the day's whole list in a popup
                     let all: Vec<(u64, String, Status)> = day_tasks
                         .iter()
-                        .map(|(x, _, _)| (x.id, x.name.clone(), self.data.status_of(x)))
+                        .map(|(x, _, _, _)| (x.id, x.name.clone(), self.data.status_of(x)))
                         .collect();
                     popup(ui, &mr, ui.id().with(("calmore_pop", i)), 240.0, |ui| {
                         ui.label(RichText::new(d.text("%A, %b %-d")).strong());
@@ -2771,9 +2929,9 @@ impl App {
                     });
                     break;
                 }
-                let starts = d == *s0 || i % 7 == 0;
-                let goes_on = d < *e0 && i % 7 != 6;
-                let left = if d > *s0 && i % 7 != 0 {
+                let starts = d == s0 || i % 7 == 0;
+                let goes_on = d < e0 && i % 7 != 6;
+                let left = if d > s0 && i % 7 != 0 {
                     cell.left()
                 } else {
                     cell.left() + 4.0
@@ -2800,8 +2958,8 @@ impl App {
                 let st = self.data.status_of(task);
                 let col = rgb(st.color);
                 let round = egui::CornerRadius {
-                    nw: if d > *s0 && i % 7 != 0 { 0 } else { 4 },
-                    sw: if d > *s0 && i % 7 != 0 { 0 } else { 4 },
+                    nw: if d > s0 && i % 7 != 0 { 0 } else { 4 },
+                    sw: if d > s0 && i % 7 != 0 { 0 } else { 4 },
                     ne: if goes_on { 0 } else { 4 },
                     se: if goes_on { 0 } else { 4 },
                 };
@@ -2816,25 +2974,24 @@ impl App {
                 );
                 if starts {
                     p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
-                    let max_chars = ((cw - 24.0) / 6.5) as usize;
+                    // the label may use the bar's whole length in this week; it
+                    // is drawn after all days so later days don't paint over it
+                    let week_end = start + Duration::days(week_row * 7 + 6);
+                    let days = (e0.min(week_end) - d).num_days() as f32;
+                    let room = Rect::from_min_max(r.min, pos2(r.right() + cw * days, r.bottom()));
                     let mut label_x = r.left() + 8.0;
-                    if let Some(at) = bar_time(task, *s0, *e0).filter(|_| d == *s0) {
-                        let g = p.layout_no_wrap(fmt_time(at), FontId::proportional(11.0), t.text2);
-                        let w = g.size().x;
-                        p.with_clip_rect(r).galley(
-                            pos2(label_x, r.center().y - g.size().y / 2.0),
-                            g,
-                            t.text2,
-                        );
+                    if let Some(at) = bar_time(task, s0, e0).filter(|_| d == s0) {
+                        let font = FontId::proportional(11.0);
+                        let w = p
+                            .layout_no_wrap(fmt_time(at), font.clone(), t.text2)
+                            .size()
+                            .x;
+                        labels.push((room, label_x, fmt_time(at), font, t.text2));
                         label_x += w + 4.0;
                     }
-                    p.with_clip_rect(r).text(
-                        pos2(label_x, r.center().y),
-                        Align2::LEFT_CENTER,
-                        truncate(&task.name, max_chars.max(4)),
-                        FontId::proportional(12.0),
-                        t.text,
-                    );
+                    let font = FontId::proportional(12.0);
+                    let name = fit_text(&p, &task.name, &font, room.right() - 4.0 - label_x);
+                    labels.push((room, label_x, name, font, t.text));
                 }
                 name_it(&resp, &format!("Calendar {} {}", task.name, d));
                 let tid = task.id;
@@ -2843,6 +3000,15 @@ impl App {
                     self.actions.push(Action::Open(task.id));
                 }
             }
+        }
+        for (room, x, text, font, color) in labels {
+            p.with_clip_rect(room).text(
+                pos2(x, room.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                font,
+                color,
+            );
         }
         // Unscheduled / Overdue panel
         p.rect_filled(side, 8.0, t.column_bg);
@@ -3072,23 +3238,35 @@ impl App {
                                 6.5,
                                 &st,
                             );
-                            ui.painter().with_clip_rect(r.shrink(2.0)).text(
+                            // the name shortened to leave room for the subtask count
+                            let badge = format!("\u{2934} {}", nsub);
+                            let badge_w = if *nsub > 0 {
+                                ui.painter()
+                                    .layout_no_wrap(
+                                        badge.clone(),
+                                        FontId::proportional(11.5),
+                                        t.text3,
+                                    )
+                                    .size()
+                                    .x
+                                    + 6.0
+                            } else {
+                                0.0
+                            };
+                            let nr = paint_fit(
+                                ui,
                                 pos2(x0 + 26.0, r.center().y),
                                 Align2::LEFT_CENTER,
                                 &task.name,
                                 FontId::proportional(13.0),
                                 t.text,
+                                r.right() - 6.0 - badge_w - (x0 + 26.0),
                             );
                             if *nsub > 0 {
-                                let g = ui.painter().layout_no_wrap(
-                                    task.name.clone(),
-                                    FontId::proportional(13.0),
-                                    t.text,
-                                );
-                                ui.painter().with_clip_rect(r.shrink(2.0)).text(
-                                    pos2(x0 + 32.0 + g.size().x, r.center().y),
+                                ui.painter().text(
+                                    pos2(nr.right() + 6.0, r.center().y),
                                     Align2::LEFT_CENTER,
-                                    format!("\u{2934} {}", nsub),
+                                    badge,
                                     FontId::proportional(11.5),
                                     t.text3,
                                 );
@@ -3108,12 +3286,25 @@ impl App {
                         ui.painter().text(
                             r.left_center() + vec2(10.0, 0.0),
                             Align2::LEFT_CENTER,
-                            tr("+ Add Task"),
+                            tr("+ Add task"),
                             FontId::proportional(13.0),
                             t.text3,
                         );
                         if resp.clicked() {
                             self.open_quick_add(None);
+                        }
+                        if rows.is_empty() {
+                            ui.add_space(12.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(tr(
+                                        "No tasks here yet. Add one, then click or drag across the days in its row to give it dates.",
+                                    ))
+                                    .small()
+                                    .color(t.text3),
+                                )
+                                .wrap(),
+                            );
                         }
                     });
                     // the divider only runs as far as the rows (it used to run to the bottom)
@@ -3310,7 +3501,13 @@ impl App {
                 }
             });
         }
-        let widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        let mut widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        // Name takes the room the other columns leave (at least 200), so the
+        // last column and the "+" fit instead of running off the right edge
+        if let Some(ni) = cols.iter().position(|c| *c == TableCol::Name) {
+            let others: f32 = widths.iter().sum::<f32>() - widths[ni];
+            widths[ni] = (ui.available_width() - others - 36.0 - 12.0).max(200.0);
+        }
         let edit_id = egui::Id::new("table_rename");
         let mut renaming: Option<(u64, String)> = ui.data(|d| d.get_temp(edit_id));
         egui::ScrollArea::both()
@@ -3505,12 +3702,15 @@ impl App {
                                     }
                                     on_cell = true;
                                 } else {
-                                    ui.painter().with_clip_rect(cell.shrink(2.0)).text(
+                                    // shortened to leave room for the pencil
+                                    paint_fit(
+                                        ui,
                                         cell.left_center() + vec2(8.0, 0.0),
                                         Align2::LEFT_CENTER,
                                         &task.name,
                                         FontId::proportional(13.0),
                                         t.text,
+                                        cell.width() - 8.0 - 32.0,
                                     );
                                     // a pencil on hover renames in place
                                     let pen = Rect::from_center_size(
@@ -3628,8 +3828,38 @@ impl App {
                                         .layout(Layout::left_to_right(Align::Center)),
                                 );
                                 child.set_clip_rect(cell);
-                                for tag in &task.tags {
-                                    chip(&mut child, tag, tag_color(tag));
+                                // the tags that fit whole, then "+N" (hover lists all)
+                                let font = FontId::proportional(11.0);
+                                let gap = child.spacing().item_spacing.x;
+                                let measure = child.painter().clone();
+                                let width_of = |s: &str| {
+                                    measure
+                                        .layout_no_wrap(s.to_string(), font.clone(), t.text)
+                                        .size()
+                                        .x
+                                        + 12.0
+                                };
+                                let plus_w = width_of(&format!("+{}", task.tags.len()));
+                                let mut shown = 0;
+                                for (k, tag) in task.tags.iter().enumerate() {
+                                    let short = fit_text(&measure, tag, &font, 90.0);
+                                    let rest = task.tags.len() - k - 1;
+                                    let need = width_of(&short)
+                                        + if rest > 0 { gap + plus_w } else { 0.0 };
+                                    if need > child.available_width() {
+                                        break;
+                                    }
+                                    chip(&mut child, &short, tag_color(tag))
+                                        .on_hover_text(tag.as_str());
+                                    shown += 1;
+                                }
+                                if shown < task.tags.len() {
+                                    chip(
+                                        &mut child,
+                                        &format!("+{}", task.tags.len() - shown),
+                                        t.text3,
+                                    )
+                                    .on_hover_text(task.tags.join(", "));
                                 }
                             }
                             TableCol::Tracked => {
@@ -3709,7 +3939,7 @@ impl App {
                 ui.painter().text(
                     r.left_center() + vec2(8.0, 0.0),
                     Align2::LEFT_CENTER,
-                    tr("+ Add Task"),
+                    tr("+ Add task"),
                     FontId::proportional(13.0),
                     t.text3,
                 );
@@ -3808,11 +4038,21 @@ impl App {
                             ),
                             ("Done", done_mine.iter().collect()),
                         ];
-                        // today's in the order of their times
+                        // today's in the order of their times, overdue and next
+                        // by date (the oldest first)
                         sections[0].1.sort_by_key(|x| x.due_moment());
+                        sections[1].1.sort_by_key(|x| x.due_moment());
+                        sections[2].1.sort_by_key(|x| x.due_moment());
                         let avail = ui.available_width();
-                        let card_w = ((avail - 20.0) / 2.0).max(320.0);
-                        ui.horizontal_top(|ui| {
+                        // side by side when both fit, else one above the other
+                        let side = avail >= 2.0 * 320.0 + 20.0;
+                        let card_w = if side { (avail - 20.0) / 2.0 } else { avail };
+                        let layout = if side {
+                            Layout::left_to_right(Align::Min)
+                        } else {
+                            Layout::top_down(Align::Min)
+                        };
+                        ui.with_layout(layout, |ui| {
                             // My Work card
                             egui::Frame::new()
                                 .stroke(Stroke::new(1.0, t.border))
@@ -3823,7 +4063,15 @@ impl App {
                                         ui.set_width(card_w - 34.0);
                                         ui.label(RichText::new(tr("My Work")).size(16.0).strong());
                                         ui.add_space(6.0);
-                                        for (name, list) in &sections {
+                                        // nothing of mine at all: say so, not five rows of 0
+                                        let (rs, ms) = self.home_due_extras();
+                                        let nothing = sections.iter().all(|s| s.1.is_empty())
+                                            && rs.is_empty()
+                                            && ms.is_empty();
+                                        if nothing {
+                                            self.home_nothing_yet(ui);
+                                        }
+                                        for (name, list) in sections.iter().filter(|_| !nothing) {
                                             let collapsed = self.home_collapsed.contains(name);
                                             let (r, resp) = ui.allocate_exact_size(
                                                 vec2(card_w - 34.0, 28.0),
@@ -3863,7 +4111,11 @@ impl App {
                                                 }
                                             }
                                             if !collapsed {
-                                                for task in list {
+                                                // a long section shows the first few and
+                                                // a row to show the rest
+                                                let all = self.home_all.contains(name);
+                                                let cap = if all { list.len() } else { HOME_ROWS };
+                                                for task in list.iter().take(cap) {
                                                     let (r, resp) = ui.allocate_exact_size(
                                                         vec2(card_w - 34.0, 30.0),
                                                         Sense::click(),
@@ -3878,37 +4130,37 @@ impl App {
                                                         6.5,
                                                         &st,
                                                     );
-                                                    ui.painter()
-                                                        .with_clip_rect(Rect::from_min_max(
-                                                            r.min,
-                                                            pos2(r.right() - 140.0, r.bottom()),
-                                                        ))
-                                                        .text(
-                                                            r.left_center() + vec2(40.0, 0.0),
-                                                            Align2::LEFT_CENTER,
-                                                            &task.name,
-                                                            FontId::proportional(13.0),
-                                                            t.text,
-                                                        );
-                                                    ui.painter().text(
-                                                        r.right_center() - vec2(70.0, 0.0),
-                                                        Align2::RIGHT_CENTER,
-                                                        truncate(
-                                                            &self.data.list_name(task.list_id),
-                                                            14,
-                                                        ),
-                                                        FontId::proportional(11.5),
-                                                        t.text3,
-                                                    );
+                                                    // right to left: the date, the list
+                                                    // name, then the task name in what is left
+                                                    let mut list_right = r.right() - 70.0;
                                                     if let Some(d) = fmt_due(task) {
-                                                        ui.painter().text(
+                                                        let dr = ui.painter().text(
                                                             r.right_center() - vec2(6.0, 0.0),
                                                             Align2::RIGHT_CENTER,
                                                             d,
                                                             FontId::proportional(12.0),
                                                             due_color(task, false, &t),
                                                         );
+                                                        list_right = list_right.min(dr.left() - 10.0);
                                                     }
+                                                    let lr = paint_fit(
+                                                        ui,
+                                                        pos2(list_right, r.center().y),
+                                                        Align2::RIGHT_CENTER,
+                                                        &self.data.list_name(task.list_id),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                        ((r.width() - 40.0) * 0.3).min(120.0),
+                                                    );
+                                                    paint_fit(
+                                                        ui,
+                                                        r.left_center() + vec2(40.0, 0.0),
+                                                        Align2::LEFT_CENTER,
+                                                        &task.name,
+                                                        FontId::proportional(13.0),
+                                                        t.text,
+                                                        lr.left() - 10.0 - (r.left() + 40.0),
+                                                    );
                                                     // the status circle ticks the task done (or opens it again)
                                                     let cr = Rect::from_center_size(
                                                         r.left_center() + vec2(24.0, 0.0),
@@ -3939,8 +4191,28 @@ impl App {
                                                         self.actions.push(Action::Open(task.id));
                                                     }
                                                 }
+                                                if list.len() > HOME_ROWS {
+                                                    let label = if all {
+                                                        tr("Show fewer").to_string()
+                                                    } else {
+                                                        trf!("Show all {}", list.len())
+                                                    };
+                                                    let b = ui.add(ghost(egui::Button::new(
+                                                        RichText::new(label).size(12.5).color(t.text2),
+                                                    )));
+                                                    name_it(&b, &format!("Home show all {}", name));
+                                                    if b.clicked() {
+                                                        if all {
+                                                            self.home_all.remove(name);
+                                                        } else {
+                                                            self.home_all.insert(name);
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
+                                        // due reminders and today's and tomorrow's meetings
+                                        self.home_extras_rows(ui, card_w - 34.0);
                                     })
                                 });
                             ui.add_space(12.0);
@@ -3972,7 +4244,7 @@ impl App {
                                                         .iter()
                                                         .flat_map(|f| f.lists.iter().cloned()),
                                                 )
-                                                .filter(|l| !l.archived)
+                                                .filter(|l| !self.data.list_archived(l.id))
                                                 .collect();
                                             for l in lists {
                                                 shown += 1;
@@ -4012,36 +4284,57 @@ impl App {
                                                     4.0,
                                                     rgb(s.color),
                                                 );
-                                                ui.painter().text(
+                                                // right to left: the count and progress bar
+                                                // (or for an empty List just "No tasks yet"),
+                                                // then the name in what is left
+                                                let name_right = if total == 0 {
+                                                    let note = ui.painter().text(
+                                                        r.right_center() - vec2(6.0, 0.0),
+                                                        Align2::RIGHT_CENTER,
+                                                        tr("No tasks yet"),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                    );
+                                                    note.left() - 10.0
+                                                } else {
+                                                    let count = ui.painter().text(
+                                                        r.right_center() - vec2(6.0, 0.0),
+                                                        Align2::RIGHT_CENTER,
+                                                        format!("{}/{}", done, total),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                    );
+                                                    let bar_w =
+                                                        ((r.width() - 30.0) * 0.25).min(100.0);
+                                                    let bar = Rect::from_min_size(
+                                                        pos2(
+                                                            count.left().min(r.right() - 50.0)
+                                                                - 10.0
+                                                                - bar_w,
+                                                            r.center().y - 3.0,
+                                                        ),
+                                                        vec2(bar_w, 6.0),
+                                                    );
+                                                    ui.painter().rect_filled(bar, 3.0, t.hover);
+                                                    let f = done as f32 / total as f32;
+                                                    ui.painter().rect_filled(
+                                                        Rect::from_min_size(
+                                                            bar.min,
+                                                            vec2(bar_w * f, 6.0),
+                                                        ),
+                                                        3.0,
+                                                        rgb([0x00, 0x88, 0x44]),
+                                                    );
+                                                    bar.left() - 10.0
+                                                };
+                                                paint_fit(
+                                                    ui,
                                                     r.left_center() + vec2(30.0, 0.0),
                                                     Align2::LEFT_CENTER,
                                                     &l.name,
                                                     FontId::proportional(13.0),
                                                     t.text,
-                                                );
-                                                // progress bar
-                                                let bar = Rect::from_min_size(
-                                                    pos2(r.right() - 150.0, r.center().y - 3.0),
-                                                    vec2(100.0, 6.0),
-                                                );
-                                                ui.painter().rect_filled(bar, 3.0, t.hover);
-                                                if total > 0 {
-                                                    let f = done as f32 / total as f32;
-                                                    ui.painter().rect_filled(
-                                                        Rect::from_min_size(
-                                                            bar.min,
-                                                            vec2(100.0 * f, 6.0),
-                                                        ),
-                                                        3.0,
-                                                        rgb([0x00, 0x88, 0x44]),
-                                                    );
-                                                }
-                                                ui.painter().text(
-                                                    r.right_center() - vec2(6.0, 0.0),
-                                                    Align2::RIGHT_CENTER,
-                                                    format!("{}/{}", done, total),
-                                                    FontId::proportional(11.5),
-                                                    t.text3,
+                                                    name_right - (r.left() + 30.0),
                                                 );
                                                 if resp.clicked() {
                                                     self.actions
@@ -4051,33 +4344,55 @@ impl App {
                                         }
                                         // nothing to list yet: say so and offer the next step
                                         if shown == 0 {
-                                            ui.label(
-                                                RichText::new(tr(
-                                                    "No Lists yet. Lists keep a Space's tasks together.",
-                                                ))
-                                                .color(t.text2),
-                                            );
+                                            // Lists that are all archived are not "no Lists"
+                                            let archived = spaces
+                                                .iter()
+                                                .filter(|s| {
+                                                    s.private_owner
+                                                        .is_none_or(|o| o == self.data.me)
+                                                })
+                                                .flat_map(|s| {
+                                                    s.lists.iter().chain(
+                                                        s.folders.iter().flat_map(|f| f.lists.iter()),
+                                                    )
+                                                })
+                                                .count();
+                                            let text = match archived {
+                                                0 => tr("No Lists yet. Lists keep a Space's tasks together.")
+                                                    .to_string(),
+                                                1 => tr("The only List is archived.").to_string(),
+                                                n => trf!("All {} Lists are archived.", n),
+                                            };
+                                            ui.label(RichText::new(text).color(t.text2));
                                             ui.add_space(8.0);
-                                            let has_space = !self.open_spaces().is_empty();
-                                            let label =
-                                                if has_space { "+ New List" } else { "+ New Space" };
-                                            let b = ui.add(
-                                                egui::Button::new(tr(label))
-                                                    .stroke(Stroke::new(1.0, t.border))
-                                                    .corner_radius(7),
-                                            );
-                                            name_it(&b, "Home new list");
-                                            if b.clicked() {
-                                                if has_space {
-                                                    self.open_new_list(None, None);
-                                                } else {
-                                                    self.modal = Some(Modal::NewSpace {
-                                                        name: String::new(),
-                                                        color: STATUS_PALETTE
-                                                            [1 + (self.data.spaces.len() * 3) % 13],
-                                                    });
+                                            ui.horizontal(|ui| {
+                                                if archived > 0 {
+                                                    let b = ui.add(
+                                                        egui::Button::new(tr("See archived Lists"))
+                                                            .stroke(Stroke::new(1.0, t.border))
+                                                            .corner_radius(7),
+                                                    );
+                                                    name_it(&b, "Home archived lists");
+                                                    if b.clicked() {
+                                                        self.open_settings("Spaces");
+                                                    }
                                                 }
-                                            }
+                                                let has_space = !self.open_spaces().is_empty();
+                                                let label = if has_space {
+                                                    "+ New List"
+                                                } else {
+                                                    "+ New Space"
+                                                };
+                                                let b = ui.add(
+                                                    egui::Button::new(tr(label))
+                                                        .stroke(Stroke::new(1.0, t.border))
+                                                        .corner_radius(7),
+                                                );
+                                                name_it(&b, "Home new list");
+                                                if b.clicked() {
+                                                    self.offer_new_list(None);
+                                                }
+                                            });
                                         }
                                     })
                                 });
@@ -4086,14 +4401,33 @@ impl App {
             });
     }
 
+    /// The replies Replies lists under Unread, counted for the sidebar.
+    pub(super) fn unread_replies(&self) -> usize {
+        let seen = self.data.extra.replies_seen;
+        let read = &self.data.extra.replies_read;
+        let unread = |k: String| !read.contains(&k);
+        let me = self.data.me;
+        let on_tasks = self
+            .data
+            .tasks
+            .iter()
+            .flat_map(|t| t.activity.iter().map(move |a| (t.id, a)))
+            .filter(|(id, a)| {
+                a.comment
+                    && a.author != me
+                    && a.ts > seen
+                    && unread(reply_key(nav::InboxSrc::Task(*id), a.ts, a.author))
+            })
+            .count();
+        let in_chat = self
+            .chat_replies()
+            .into_iter()
+            .filter(|r| r.ts > seen && unread(reply_key(r.src, r.ts, r.author)))
+            .count();
+        on_tasks + in_chat
+    }
+
     fn inbox(&mut self, ui: &mut Ui, mode: u8) {
-        // what Replies' per-item "Mark read" keeps: "taskid:ts:author" or "chat:channel:message"
-        fn reply_key(src: nav::InboxSrc, ts: i64, author: u64) -> String {
-            match src {
-                nav::InboxSrc::Task(id) => format!("{}:{}:{}", id, ts, author),
-                nav::InboxSrc::Chat { ch, msg, .. } => format!("chat:{}:{}", ch, msg),
-            }
-        }
         let t = self.t();
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(24, 16))
@@ -4102,7 +4436,7 @@ impl App {
                     1 => ("Replies", "Comments from others on tasks and chat replies"),
                     2 => (
                         "Assigned Comments",
-                        "Comments assigned to someone, or that @mention them, until resolved",
+                        "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
                     ),
                     _ => ("Inbox", "Recent activity across your workspace"),
                 };
@@ -4125,8 +4459,15 @@ impl App {
                             }
                         }
                         if mode == 1 && tab == 0 {
+                            // off with nothing unread (known from the last frame's list)
+                            let any: bool = ui
+                                .data(|d| d.get_temp(egui::Id::new("replies_unread")))
+                                .unwrap_or(true);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.button(tr("Mark all as read")).clicked() {
+                                if ui
+                                    .add_enabled(any, egui::Button::new(tr("Mark all as read")))
+                                    .clicked()
+                                {
                                     self.data.extra.replies_seen = now_ts();
                                     self.dirty = true;
                                 }
@@ -4230,6 +4571,10 @@ impl App {
                     }
                 }
                 items.sort_by_key(|x| std::cmp::Reverse(x.0));
+                if mode == 1 && tab == 0 {
+                    let any = !items.is_empty();
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("replies_unread"), any));
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -5345,6 +5690,8 @@ impl App {
                 }
                 let has_comments = task.activity.iter().any(|a| a.comment);
                 let mut assign_resp: Option<egui::Response> = None;
+                // alone in the workspace: nobody to mention or hand it to
+                let alone = self.data.solo();
                 if !has_comments {
                     let r = right_ui.available_rect_before_wrap();
                     let c = pos2(r.left() + 10.0, r.top() + r.height() * 0.32);
@@ -5358,7 +5705,11 @@ impl App {
                     right_ui.painter().text(
                         c + vec2(0.0, 8.0),
                         Align2::LEFT_TOP,
-                        tr("Ask a question, share an update, or loop someone in."),
+                        tr(if alone {
+                            "Keep notes and updates on this task here."
+                        } else {
+                            "Ask a question, share an update, or loop someone in."
+                        }),
                         FontId::proportional(13.0),
                         t.text2,
                     );
@@ -5369,7 +5720,7 @@ impl App {
                             .max_rect(row)
                             .layout(Layout::left_to_right(Align::Center)),
                     );
-                    if bui.button(tr("@  Mention a teammate")).clicked() {
+                    if !alone && bui.button(tr("@  Mention a teammate")).clicked() {
                         if !self.comment_text.ends_with('@') {
                             if !self.comment_text.is_empty() && !self.comment_text.ends_with(' ') {
                                 self.comment_text.push(' ');
@@ -5379,7 +5730,9 @@ impl App {
                         bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
                         bui.memory_mut(|m| m.request_focus(comment_id));
                     }
-                    assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                    if !alone {
+                        assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                    }
                 }
                 if let Some(r) = assign_resp {
                     let data = &self.data;
@@ -5456,6 +5809,8 @@ impl App {
                         .id(comment_id)
                         .hint_text(if post {
                             tr("Write a post...")
+                        } else if alone {
+                            tr("Write a comment")
                         } else {
                             tr("Write a comment, @mention someone")
                         })
@@ -5715,28 +6070,16 @@ impl App {
             if let Some(si) = self.data.spaces.iter().position(|s| s.id == sid) {
                 let title = trf!("Statuses - {}", self.data.spaces[si].name);
                 let mut changed = false;
+                // the editor was switched to this space some other way: the
+                // other space's edits are done first
+                if self.status_edit.as_ref().is_some_and(|e| e.0 != sid) {
+                    let other = self.status_edit.take();
+                    self.settle_status_edit(other);
+                }
                 // the names tasks carry for each status (None: added here), so
-                // renames can be passed on to the tasks when an edit is done
-                let orig_id = egui::Id::new(("status_orig", sid));
-                let mut orig: Vec<Option<String>> = ctx
-                    .data(|d| d.get_temp(orig_id))
-                    .filter(|o: &Vec<Option<String>>| {
-                        o.len() == self.data.spaces[si].statuses.len()
-                    })
-                    .unwrap_or_else(|| {
-                        self.data.spaces[si]
-                            .statuses
-                            .iter()
-                            .map(|s| Some(s.name.clone()))
-                            .collect()
-                    });
-                // the names automations were last pointed at (see
-                // commit_status_renames)
-                let rules_id = egui::Id::new(("status_rules", sid));
-                let mut rules: Vec<Option<String>> = ctx
-                    .data(|d| d.get_temp(rules_id))
-                    .filter(|o: &Vec<Option<String>>| o.len() == orig.len())
-                    .unwrap_or_else(|| orig.clone());
+                // renames can be passed on to the tasks when an edit is done,
+                // and the names automations were last pointed at
+                let (mut orig, mut rules) = self.status_edit_lists(si);
                 let mut commit = false;
                 let mut removed: Option<(String, String, StatusKind)> = None;
                 egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
@@ -5804,7 +6147,7 @@ impl App {
                     self.commit_status_renames(si, &mut orig, &mut rules);
                     self.move_off_status_with(si, &old, &rule_old, kind, &orig);
                 }
-                if commit || !open {
+                if commit {
                     self.commit_status_renames(si, &mut orig, &mut rules);
                 } else if changed {
                     // tasks follow as names are typed, so closing the app
@@ -5812,22 +6155,10 @@ impl App {
                     // exists; automations wait for the rename to be done
                     self.follow_status_renames(si, &mut orig);
                 }
-                if !open && self.settle_status_names(si, &orig) {
-                    self.toast = Some((
-                        tr("A status name that was empty or already used went back to its last name")
-                            .into(),
-                        now_ts(),
-                    ));
+                self.status_edit = Some((sid, orig, rules));
+                if !open {
+                    self.finish_status_edit();
                 }
-                ctx.data_mut(|d| {
-                    if open {
-                        d.insert_temp(orig_id, orig);
-                        d.insert_temp(rules_id, rules);
-                    } else {
-                        d.remove::<Vec<Option<String>>>(orig_id);
-                        d.remove::<Vec<Option<String>>>(rules_id);
-                    }
-                });
                 if changed {
                     self.dirty = true;
                 }
@@ -6068,6 +6399,9 @@ impl App {
         self.drafts
             .thread_files
             .swap(self.thread_open, &mut self.thread_files);
+        self.drafts
+            .chat_picked
+            .swap(self.chat_open, &mut self.chat_picked);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
         self.sync_view_prefs();
@@ -6334,6 +6668,8 @@ impl App {
     /// right away (it may still be waiting out WRITE_SECS), a server gets it
     /// if the connection is up and else after the next start's welcome.
     fn finish_before_quit(&mut self) {
+        // a status editor still open: its edits are done like on closing it
+        self.finish_status_edit();
         self.data.stop_my_timers(now_ts());
         self.data.fix_activity_ids();
         if self.data.extra.shared.is_some() {
@@ -6352,6 +6688,9 @@ pub(crate) fn unreadable_note(copy: &std::path::Path) -> String {
             .unwrap_or_default()
     )
 }
+
+/// Home "My Work" shows this many tasks of a section until "Show all".
+const HOME_ROWS: usize = 10;
 
 /// Day offsets beyond this are grouped as "Future" (original: B$4 = 7).
 const DUE_GROUP_CAP: i64 = 7;
@@ -6507,6 +6846,14 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.waiting_on != b.waiting_on
         || a.linked != b.linked
         || a.attachments != b.attachments
+}
+
+/// What Replies' per-item "Mark read" keeps: "taskid:ts:author" or "chat:channel:message".
+fn reply_key(src: nav::InboxSrc, ts: i64, author: u64) -> String {
+    match src {
+        nav::InboxSrc::Task(id) => format!("{}:{}:{}", id, ts, author),
+        nav::InboxSrc::Chat { ch, msg, .. } => format!("chat:{}:{}", ch, msg),
+    }
 }
 
 fn kind_label(k: StatusKind) -> &'static str {

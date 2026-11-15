@@ -89,7 +89,8 @@ fn add(out: &mut Vec<(i64, Note)>, keys: &mut HashSet<String>, ts: i64, note: No
 
 /// A message's text cut to banner length (a picture or video says so).
 fn preview(m: &Message) -> String {
-    let text = m.text.trim();
+    let shown = super::chat::shown_text(m);
+    let text = shown.trim();
     let text = if text.is_empty() && !m.attachments.is_empty() {
         tr("Sent a picture or video").to_string()
     } else {
@@ -155,7 +156,7 @@ impl App {
             let place = self.channel_label(c);
             for m in &c.messages {
                 let key = format!("chat:{}:{}", c.id, m.id);
-                if m.author != me {
+                if m.author != me && m.imported.is_none() {
                     let who = self.who(m.author);
                     let target = format!("chat:{}", c.id);
                     if m.call.is_some() {
@@ -209,7 +210,11 @@ impl App {
                     }
                 }
                 if dm && n.direct {
-                    for r in m.replies.iter().filter(|r| r.author != me) {
+                    for r in m
+                        .replies
+                        .iter()
+                        .filter(|r| r.author != me && r.imported.is_none())
+                    {
                         let key = format!("chat:{}:{}", c.id, r.id);
                         add(
                             &mut out,
@@ -265,7 +270,7 @@ impl App {
             .map(|m| m.name.clone())
             .unwrap_or_default();
         for it in self.inbox_items() {
-            if it.author == me {
+            if it.author == me || it.imported {
                 continue;
             }
             let (key, target) = match it.src {
@@ -649,6 +654,7 @@ impl App {
                 let title = match (today_n, late) {
                     (1, 0) => tr("1 task is due today").to_string(),
                     (d, 0) => trf!("{} tasks are due today", d),
+                    (0, 1) => tr("1 overdue task").to_string(),
                     (0, l) => trf!("{} overdue tasks", l),
                     (d, l) => trf!("{} due today, {} overdue", d, l),
                 };

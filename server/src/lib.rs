@@ -669,6 +669,14 @@ fn copy_for(canon: &Value, member: u64, manages: bool) -> Option<(Value, Vec<u64
     Some((out, hidden))
 }
 
+/// What a connection remembers was left out of the copy it last sent: the
+/// hidden top-level items and everything inside them (a folder in a space
+/// closed to its person, with its lists), so whatever of it they may see
+/// later reaches them whole (see `Canon::delta_for`).
+fn left_out(canon: &Value, hidden: &[u64]) -> Vec<u64> {
+    wb_sync::ids_inside(canon, hidden)
+}
+
 /// Whether `member` may delete a channel and change who else is in it: the
 /// app's rule (`may_manage_channel`). Whoever made it, an owner or admin, or
 /// for one made before makers were kept (creator 0) anyone in it.
@@ -1035,32 +1043,40 @@ impl Canon {
         }
     }
 
-    /// The whole copy `member` gets, and what is hidden from them.
+    /// The whole copy `member` gets, and what is left out of it (`left_out`).
     fn update_for(&self, member: u64) -> (String, Vec<u64>) {
         match copy_for(&self.data, member, self.managers.contains(&member)) {
-            Some((data, hidden)) => (
-                Msg::Update {
-                    data,
-                    rev: self.rev,
-                    hidden: hidden.clone(),
-                }
-                .to_json(),
-                hidden,
-            ),
+            Some((data, hidden)) => {
+                let gone = left_out(&self.data, &hidden);
+                (
+                    Msg::Update {
+                        data,
+                        rev: self.rev,
+                        hidden,
+                    }
+                    .to_json(),
+                    gone,
+                )
+            }
             None => (self.json.clone(), vec![]),
         }
     }
 
-    /// What changed for `member`, who could not see `was_hidden` before:
-    /// the change without what they may not see, and whole the items they
-    /// may see again. None when this revision goes whole.
+    /// What changed for `member`, whose last copy left out `was_hidden`
+    /// (`left_out`): the change without what they may not see, and whole
+    /// (with everything inside) the items they may see now, top-level or
+    /// not: a folder moved out of a space closed to them comes with its
+    /// lists, which didn't change and so aren't in the change. None when
+    /// this revision goes whole.
     fn delta_for(&self, member: u64, was_hidden: &[u64]) -> Option<(String, Vec<u64>)> {
         let mut d = self.delta.clone()?;
         let hidden = wb_sync::hidden_from(&self.data, member, self.managers.contains(&member));
         wb_sync::hide(&mut d, &hidden);
+        let gone = left_out(&self.data, &hidden);
+        let still: std::collections::HashSet<u64> = gone.iter().copied().collect();
         let back: Vec<u64> = was_hidden
             .iter()
-            .filter(|i| !hidden.contains(i))
+            .filter(|i| !still.contains(i))
             .copied()
             .collect();
         wb_sync::include_whole(&mut d, &self.data, &back);
@@ -1069,10 +1085,10 @@ impl Canon {
                 data: d,
                 rev: self.rev,
                 base: self.rev - 1,
-                hidden: hidden.clone(),
+                hidden,
             }
             .to_json(),
-            hidden,
+            gone,
         ))
     }
 }
@@ -1550,6 +1566,11 @@ impl Hub {
             Some((s, h)) => (Some(s), h),
             None => (None, vec![]),
         };
+        let gone = g
+            .canon
+            .as_ref()
+            .map(|c| left_out(c, &hidden))
+            .unwrap_or_default();
         (
             Msg::Welcome {
                 tag,
@@ -1559,11 +1580,11 @@ impl Hub {
                 role,
                 token,
                 email,
-                hidden: hidden.clone(),
+                hidden,
                 deltas: true,
             }
             .to_json(),
-            hidden,
+            gone,
         )
     }
 
@@ -1705,14 +1726,15 @@ impl Hub {
             let manages = g.saved.role_of(member).manages();
             let (data, hidden) =
                 copy_for(c, member, manages).unwrap_or_else(|| (c.clone(), vec![]));
+            let gone = left_out(c, &hidden);
             (
                 Msg::Update {
                     data,
                     rev: g.saved.rev,
-                    hidden: hidden.clone(),
+                    hidden,
                 }
                 .to_json(),
-                hidden,
+                gone,
             )
         })
     }
@@ -1753,6 +1775,7 @@ impl Hub {
             return Reply::Denied("Only the owner or an admin can do that.".into());
         }
         let mut kicked: Vec<String> = vec![];
+        let mut told = false;
         let reply = match msg {
             Msg::AccessList => None,
             Msg::CreateInvite { member: who, role } => {
@@ -1792,6 +1815,10 @@ impl Hub {
                 }
                 g.saved.set_role(who, role);
                 g.dirty = true;
+                // their apps hear the new role before the copy it lets them
+                // see (an app goes by its role for what it may see)
+                let _ = self.access.send(());
+                told = true;
                 let relabeled = g.canon.as_mut().is_some_and(|c| label_role(c, who, role));
                 if relabeled {
                     self.broadcast_canon(&mut g, false);
@@ -1825,6 +1852,8 @@ impl Hub {
                 // removing access also takes back admin rights
                 g.saved.set_role(who, Role::Member);
                 g.dirty = true;
+                let _ = self.access.send(());
+                told = true;
                 if g.canon
                     .as_mut()
                     .is_some_and(|c| label_role(c, who, Role::Member))
@@ -1839,7 +1868,9 @@ impl Hub {
         if !kicked.is_empty() {
             let _ = self.kicks.send(Arc::new(kicked));
         }
-        let _ = self.access.send(());
+        if !told {
+            let _ = self.access.send(());
+        }
         match reply {
             Some(m) => Reply::To(m),
             None => Reply::To(self.access_for(member)),
@@ -2361,6 +2392,24 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     let mut told_put_back: Option<std::time::Instant> = None;
     loop {
         tokio::select! {
+            // in this order when several are ready: a new role (Access)
+            // reaches the app before the copy it changes, as the app goes
+            // by its role for what it may see
+            biased;
+            _ = stop.changed() => break,
+            k = kicks.recv() => {
+                if let Ok(list) = k {
+                    if list.contains(&device) {
+                        let _ = send(&mut socket, &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json()).await;
+                        break;
+                    }
+                }
+            }
+            a = access.recv() => {
+                if a.is_ok() && !send(&mut socket, &hub.access_for(member).to_json()).await {
+                    break;
+                }
+            }
             m = tokio::time::timeout(silent, socket.next()) => {
                 let m = match m {
                     Err(_) => break, // heard nothing for too long
@@ -2441,20 +2490,6 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                     break;
                 }
             }
-            k = kicks.recv() => {
-                if let Ok(list) = k {
-                    if list.contains(&device) {
-                        let _ = send(&mut socket, &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json()).await;
-                        break;
-                    }
-                }
-            }
-            a = access.recv() => {
-                if a.is_ok() && !send(&mut socket, &hub.access_for(member).to_json()).await {
-                    break;
-                }
-            }
-            _ = stop.changed() => break,
         }
     }
     let _ = socket.send(Message::Close(None)).await;
@@ -3492,6 +3527,50 @@ mod tests {
             })
             .is_ok());
         assert!(!hub.inner.lock().unwrap().saved.invites.contains_key(&third));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A record of what was named lately that got cut short (it was being
+    /// written when the power went) deletes nothing: every file's clock
+    /// starts again, and the record is whole again afterwards.
+    #[test]
+    fn a_broken_named_record_deletes_nothing_and_starts_the_clock_again() {
+        let home = std::env::temp_dir().join(format!("wb-gc3-{:x}", wb_sync::random_u64()));
+        let dir = home.join(FILES_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = |c: char| std::iter::repeat(c).take(64).collect::<String>();
+        let now = std::time::SystemTime::now();
+        let day = Duration::from_secs(86_400);
+        let old = now - day * (FILE_KEEP_DAYS as u32 + 100);
+        let trashed = name('a');
+        std::fs::write(dir.join(&trashed), b"x").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join(&trashed))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let without = json!({"channels": [{"messages": []}]}).to_string();
+        for broken in ["", "{\"aaaa", "\0\0\0\0"] {
+            std::fs::write(dir.join(files::NAMED_FILE), broken).unwrap();
+            assert!(
+                collect_garbage(&home, Some(&without), now).is_empty(),
+                "nothing goes with a record of {:?}",
+                broken
+            );
+            assert!(dir.join(&trashed).exists());
+            let record = std::fs::read_to_string(dir.join(files::NAMED_FILE)).unwrap();
+            let map: BTreeMap<String, i64> = serde_json::from_str(&record).unwrap();
+            assert!(map.contains_key(&trashed), "rebuilt: {}", record);
+            assert!(!dir.join(format!("{}.tmp", files::NAMED_FILE)).exists());
+        }
+        // the clock started at `now`: still here a while later, gone after
+        // FILE_KEEP_DAYS
+        assert!(collect_garbage(&home, Some(&without), now + day * 10).is_empty());
+        assert_eq!(
+            collect_garbage(&home, Some(&without), now + day * FILE_KEEP_DAYS as u32),
+            vec![trashed.clone()]
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 }

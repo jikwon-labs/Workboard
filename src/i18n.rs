@@ -174,15 +174,22 @@ fn history_ko(text: &str) -> Option<String> {
 }
 
 /// Picks the particle after a value by its last sound: "(으)로" becomes
-/// "로" or "으로", "을(를)" becomes "을" or "를". Left as written after a
-/// Latin letter, where the sound isn't known.
-fn particles(s: &str) -> String {
+/// "로" or "으로", "을(를)" becomes "을" or "를". After a Latin letter only
+/// the endings whose sound is plain are settled ("me@team.io로", "Kim으로");
+/// the rest are left as written.
+pub fn particles(s: &str) -> String {
     // Some(true): ends in a consonant other than ㄹ, Some(false): a vowel or ㄹ
     fn coda(c: char, for_ro: bool) -> Option<bool> {
         let code = c as u32;
         if (0xac00..=0xd7a3).contains(&code) {
             let f = (code - 0xac00) % 28;
             return Some(if for_ro { f != 0 && f != 8 } else { f != 0 });
+        }
+        match c.to_ascii_lowercase() {
+            'a' | 'i' | 'o' | 'u' | 'y' => return Some(false),
+            'm' | 'n' => return Some(true),
+            'l' => return Some(!for_ro),
+            _ => {}
         }
         // digits read in Korean: 0 영 1 일 3 삼 6 육 7 칠 8 팔 have a final consonant
         let d = c.to_digit(10)?;

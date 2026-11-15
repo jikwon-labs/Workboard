@@ -691,6 +691,7 @@ impl App {
         }
         if ui.button(tr("Remind me")).clicked() {
             self.modal = Some(Modal::Reminder { text: task.name.clone(), date: Some(today() + Duration::days(1)), time: "09:00".into() });
+            self.reminder_about = (Some(task.id), None);
             close_any(ui);
         }
         if ui.button(if task.timer_started.is_some() { tr("Stop timer") } else { tr("Start timer") }).clicked() {
@@ -1523,6 +1524,15 @@ impl App {
         }
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         if typing || self.modal.is_some() || self.quick_add.is_some() || self.palette.is_some() || self.rename.is_some() {
+            return;
+        }
+        // Cmd+[ / Cmd+]: back / forward, like the top bar arrows
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::OpenBracket)) {
+            self.go_back();
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::CloseBracket)) {
+            self.go_forward();
             return;
         }
         let plain = ctx.input(|i| !i.modifiers.command && !i.modifiers.alt && !i.modifiers.ctrl);

@@ -2086,3 +2086,63 @@ fn composer_mention_and_emoji_pickers() {
 
 #[path = "i18n_tests.rs"]
 mod i18n_tests;
+
+#[test]
+fn cmd_brackets_go_back_and_forward() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    let cmd = egui::Modifiers { command: true, mac_cmd: true, ..Default::default() };
+    let press = |h: &mut Ui1, key| {
+        h.frame(vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: cmd }]);
+        h.settle();
+    };
+    press(&mut h, egui::Key::OpenBracket);
+    assert_eq!(h.app.loc, start);
+    press(&mut h, egui::Key::CloseBracket);
+    assert_eq!(h.app.loc, Location::Inbox);
+}
+
+#[test]
+fn option_t_while_typing_and_enter_in_search() {
+    let mut h = Ui1::new();
+    h.app.palette = Some(String::new());
+    h.settle();
+    // Option+T types into the search box, it doesn't open Create Task
+    let alt = egui::Modifiers { alt: true, ..Default::default() };
+    h.frame(vec![egui::Event::Key { key: egui::Key::T, physical_key: None, pressed: true, repeat: false, modifiers: alt }]);
+    h.settle();
+    assert!(h.app.quick_add.is_none());
+    // a pasted task link opens the task on Enter
+    let tid = h.app.data.tasks[0].id;
+    h.app.palette = Some(format!("workboard://task/{}", tid));
+    h.settle();
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(h.app.palette.is_none());
+    assert_eq!(h.app.open_task, Some(tid));
+    // Enter on a search that only finds a channel opens the channel
+    h.app.open_task = None;
+    let ch = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    h.app.palette = Some("website-redesign".into());
+    h.settle();
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert_eq!((h.app.section, h.app.chat_open), (Section::Chat, Some(ch)));
+}
+
+#[test]
+fn search_leaves_out_other_peoples_personal_space_and_archived_lists() {
+    let mut h = Ui1::new();
+    let other = h.app.data.spaces.len() as u64 + 90_000;
+    h.app.data.spaces.push(Space { id: other, name: "Someone Private".into(), private_owner: Some(2), lists: vec![ListItem { id: other + 1, name: "Their Secret List".into(), ..Default::default() }], ..Default::default() });
+    if let Some(l) = h.app.data.spaces[0].lists.first_mut() {
+        l.name = "Old Archived List".into();
+        l.archived = true;
+    }
+    h.app.palette = Some(String::new());
+    h.settle();
+    // the palette names lists by their path
+    assert!(h.has("Team Space / Projects / Marketing"));
+    assert!(!h.has("Someone Private") && !h.has("Someone Private / Their Secret List") && !h.has("Team Space / Old Archived List"));
+}

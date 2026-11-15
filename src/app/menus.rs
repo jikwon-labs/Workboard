@@ -245,6 +245,7 @@ impl App {
             self.open_task = None;
             self.chat_open = None;
             self.recent.clear();
+            self.clear_history();
             self.sync_rt = Default::default();
             self.leave_huddle();
         }
@@ -602,6 +603,9 @@ impl App {
     // ---------------------------------------------------------------- dialogs
 
     pub(super) fn modals(&mut self, ctx: &egui::Context) {
+        if !matches!(self.modal, Some(Modal::Reminder { .. })) {
+            self.reminder_about = (None, None);
+        }
         let Some(mut modal) = self.modal.take() else { return };
         let t = self.t();
         let mut open = true;
@@ -1349,7 +1353,8 @@ impl App {
                         close = true;
                     }
                     if ui.button(tr("\u{1F517} Copy link")).clicked() {
-                        ui.ctx().copy_text(format!("workboard://{}/{}", self.data.workspace.replace(' ', "-"), name.replace(' ', "-")));
+                        // the same kind of link the app opens (search, messages, macOS)
+                        ui.ctx().copy_text(super::nav::location_link(self.loc));
                         self.toast = Some((tr("Link copied").into(), now_ts()));
                     }
                 });
@@ -1421,7 +1426,8 @@ impl App {
                     let (h, m) = time.split_once(':').map(|(h, m)| (h.trim().parse().unwrap_or(9), m.trim().parse().unwrap_or(0))).unwrap_or((9, 0));
                     let ts = d.and_hms_opt(h.min(23), m.min(59), 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or_else(now_ts);
                     let id = self.data.new_id();
-                    self.data.extra.reminders.push(Reminder { id, text: text.trim().to_string(), due_ts: ts, done: false, owner: self.data.me });
+                    let (task, message) = std::mem::take(&mut self.reminder_about);
+                    self.data.extra.reminders.push(Reminder { id, text: text.trim().to_string(), due_ts: ts, done: false, owner: self.data.me, task, message, ..Default::default() });
                     self.dirty = true;
                     self.toast = Some((tr("Reminder created").into(), now_ts()));
                     close = true;

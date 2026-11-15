@@ -344,9 +344,9 @@ fn due_date_groups_follow_the_rule() {
 fn reminders_count_when_due() {
     let mut a = app();
     let me = a.data.me;
-    a.data.extra.reminders.push(Reminder { id: 1, text: "Call".into(), due_ts: now_ts() - 60, done: false, owner: me });
-    a.data.extra.reminders.push(Reminder { id: 2, text: "Later".into(), due_ts: now_ts() + 3600, done: false, owner: me });
-    a.data.extra.reminders.push(Reminder { id: 3, text: "Done".into(), due_ts: now_ts() - 60, done: true, owner: me });
+    a.data.extra.reminders.push(Reminder { id: 1, text: "Call".into(), due_ts: now_ts() - 60, done: false, owner: me, ..Default::default() });
+    a.data.extra.reminders.push(Reminder { id: 2, text: "Later".into(), due_ts: now_ts() + 3600, done: false, owner: me, ..Default::default() });
+    a.data.extra.reminders.push(Reminder { id: 3, text: "Done".into(), due_ts: now_ts() - 60, done: true, owner: me, ..Default::default() });
     assert_eq!(a.due_reminders(), 1);
 }
 
@@ -1220,4 +1220,208 @@ fn one_message_takes_at_most_ten_pictures() {
     a.chat_files.pop();
     assert!(a.add_media(false, Some(pic), None));
     assert_eq!(a.chat_files.len(), 10);
+}
+
+// ---------------------------------------------------------------- getting around (nav.rs)
+
+#[test]
+fn workboard_links_are_read_back() {
+    use super::nav::{location_link, parse_link, Link};
+    assert_eq!(parse_link("workboard://task/42"), Some(Link::Task(42)));
+    assert_eq!(parse_link("  workboard://list/7/  "), Some(Link::Loc(Location::List(7))));
+    assert_eq!(parse_link("workboard://space/3."), Some(Link::Loc(Location::Space(3))));
+    assert_eq!(parse_link("workboard://folder/9"), Some(Link::Loc(Location::Folder(9))));
+    assert_eq!(parse_link("workboard://inbox"), Some(Link::Loc(Location::Inbox)));
+    assert_eq!(parse_link("workboard://task/abc"), None);
+    assert_eq!(parse_link("workboard://task"), None);
+    assert_eq!(parse_link("workboard://task/1/2"), None);
+    assert_eq!(parse_link("https://task/1"), None);
+    assert_eq!(parse_link("workboard://My-Workspace/Team-Space"), None);
+    for l in [Location::Home, Location::Inbox, Location::Replies, Location::Assigned, Location::MyTasks, Location::TodayOverdue, Location::Everything, Location::Space(1), Location::Folder(2), Location::List(3)] {
+        assert_eq!(parse_link(&location_link(l)), Some(Link::Loc(l)));
+    }
+    // links inside a message, by character (Korean text before one)
+    let found = super::nav::find_links("보세요 workboard://task/5, and (workboard://list/6) not workboard://x");
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0], (4, 22, "workboard://task/5".to_string()));
+    assert_eq!(found[1].2, "workboard://list/6");
+}
+
+#[test]
+fn opening_a_link_goes_there() {
+    let mut a = app();
+    let list = list_ids(&a)[1];
+    let tid = add_task(&mut a, list, "Linked");
+    assert!(a.open_link(&format!("workboard://task/{}", tid)));
+    a.apply_actions();
+    assert_eq!(a.open_task, Some(tid));
+    assert!(a.open_link(&format!("workboard://list/{}", list)));
+    a.apply_actions();
+    assert_eq!(a.loc, Location::List(list));
+    // a task that isn't here: a notice, nothing opens
+    a.open_task = None;
+    assert!(!a.open_link("workboard://task/999999"));
+    a.apply_actions();
+    assert_eq!(a.open_task, None);
+    assert!(a.toast.is_some());
+}
+
+#[test]
+fn back_returns_to_the_previous_channel() {
+    let mut a = app();
+    let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).collect();
+    a.section = Section::Chat;
+    a.chat_open = Some(chans[0]);
+    a.track_history();
+    a.chat_open = Some(chans[1]);
+    a.track_history();
+    a.go_back();
+    a.track_history();
+    assert_eq!((a.section, a.chat_open), (Section::Chat, Some(chans[0])));
+    a.go_forward();
+    a.track_history();
+    assert_eq!(a.chat_open, Some(chans[1]));
+}
+
+#[test]
+fn back_skips_deleted_pages_and_new_workspace_forgets_history() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    a.apply(Action::Go(Location::List(lists[0])));
+    a.track_history();
+    a.apply(Action::Go(Location::List(lists[1])));
+    a.track_history();
+    a.apply(Action::Go(Location::Inbox));
+    a.track_history();
+    // the list before goes away: Back lands on the one before it
+    for s in &mut a.data.spaces {
+        s.lists.retain(|l| l.id != lists[1]);
+        for f in &mut s.folders {
+            f.lists.retain(|l| l.id != lists[1]);
+        }
+    }
+    a.go_back();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[0]));
+    a.clear_history();
+    assert!(a.nav_back.is_empty() && a.nav_fwd.is_empty());
+}
+
+fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
+    Message { id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
+}
+
+#[test]
+fn inbox_primary_and_badge_follow_the_settings() {
+    let mut a = app();
+    a.data.tasks.clear();
+    a.data.channels.clear();
+    let list = list_ids(&a)[0];
+    let mine = add_task(&mut a, list, "Mine");
+    let theirs = add_task(&mut a, list, "Theirs");
+    // someone else made "Theirs" and I'm not on it
+    a.data.tasks.iter_mut().find(|t| t.id == theirs).unwrap().activity.iter_mut().for_each(|x| x.author = 2);
+    let now = now_ts();
+    let push = |a: &mut App, id: u64, ts: i64, author: u64, text: &str, comment: bool| {
+        a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().activity.push(Activity { ts, author, text: text.into(), comment, ..Default::default() });
+    };
+    push(&mut a, mine, now - 10, 2, "Looks good", true);
+    push(&mut a, theirs, now - 9, 3, "Not for you", true);
+    push(&mut a, theirs, now - 8, 3, "@Me can you check?", true);
+    push(&mut a, theirs, now - 7, 3, "assigned to Me", false);
+    push(&mut a, theirs, now - 6, 3, "assigned to Alex Kim", false);
+    push(&mut a, mine, now - 5, 1, "my own note", true);
+    let primary = |a: &App| a.inbox_items().into_iter().filter(|i| i.tab == 0).map(|i| i.text).collect::<Vec<_>>();
+    let mut p = primary(&a);
+    p.sort();
+    assert_eq!(p, vec!["@Me can you check?", "Looks good", "assigned to Me"]);
+    // my own actions are nowhere; the rest is Other
+    assert!(!a.inbox_items().iter().any(|i| i.text == "my own note"));
+    assert!(a.inbox_items().iter().any(|i| i.text == "Not for you" && i.tab == 1));
+    assert!(a.inbox_items().iter().any(|i| i.text == "assigned to Alex Kim" && i.tab == 1 && !i.assigned));
+    assert_eq!(a.inbox_badge(), 3);
+    // clearing and Later take rows off the badge
+    let keys: Vec<String> = a.inbox_items().into_iter().filter(|i| i.tab == 0).map(|i| i.key).collect();
+    a.data.extra.inbox_cleared.push(keys[0].clone());
+    a.data.extra.inbox_later.push(keys[1].clone());
+    assert_eq!(a.inbox_badge(), 1);
+    // turning comments off takes "Looks good" out of Primary
+    a.data.extra.inbox_cleared.clear();
+    a.data.extra.inbox_later.clear();
+    a.data.extra.notify.comments = false;
+    assert!(!primary(&a).contains(&"Looks good".to_string()));
+    a.data.extra.notify.assigned = false;
+    a.data.extra.notify.mentions = false;
+    assert_eq!(a.inbox_badge(), 0);
+}
+
+#[test]
+fn chat_mentions_and_thread_replies_reach_the_inbox() {
+    let mut a = app();
+    a.data.tasks.clear();
+    let now = now_ts();
+    let cid = a.data.channels.iter().find(|c| c.kind == ChannelKind::Channel).unwrap().id;
+    let c = a.data.channels.iter_mut().find(|c| c.id == cid).unwrap();
+    c.messages.clear();
+    let mut root = chat_msg(900, 1, "Plan for Friday?", now - 100);
+    root.replies.push(chat_msg(901, 2, "Sounds good", now - 50));
+    c.messages.push(root);
+    c.messages.push(chat_msg(902, 3, "@Me please look", now - 40));
+    c.messages.push(chat_msg(903, 3, "nothing for me", now - 30));
+    let items = a.inbox_items();
+    assert!(items.iter().any(|i| i.text == "Sounds good" && i.reply && i.tab == 0));
+    assert!(items.iter().any(|i| i.text == "@Me please look" && i.mention && i.tab == 0));
+    assert!(!items.iter().any(|i| i.text == "nothing for me"));
+    assert_eq!(a.inbox_badge(), 2);
+    assert_eq!(a.chat_replies().len(), 1);
+    // opening the reply shows its thread
+    let src = items.iter().find(|i| i.reply).unwrap().src;
+    a.open_inbox_src(src);
+    assert_eq!((a.section, a.chat_open, a.thread_open), (Section::Chat, Some(cid), Some(900)));
+}
+
+#[test]
+fn reminders_alert_once_when_due() {
+    let mut a = app();
+    let me = a.data.me;
+    let list = list_ids(&a)[0];
+    let tid = add_task(&mut a, list, "Call back");
+    a.data.extra.reminders.push(Reminder { id: 50, text: "Call back".into(), due_ts: now_ts() - 1, owner: me, task: Some(tid), ..Default::default() });
+    a.data.extra.reminders.push(Reminder { id: 51, text: "Later on".into(), due_ts: now_ts() + 3600, owner: me, ..Default::default() });
+    a.toast = None;
+    a.reminder_tick(None);
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("Call back")));
+    assert!(a.data.extra.reminders.iter().find(|r| r.id == 50).unwrap().alerted);
+    assert!(!a.data.extra.reminders.iter().find(|r| r.id == 51).unwrap().alerted);
+    // only once
+    a.toast = None;
+    a.reminder_tick(None);
+    assert!(a.toast.is_none());
+    // the reminder opens its task
+    let r = a.data.extra.reminders.iter().find(|r| r.id == 50).unwrap().clone();
+    a.open_reminder(&r);
+    a.apply_actions();
+    assert_eq!(a.open_task, Some(tid));
+    // with "A reminder is due" off there is no notice
+    a.data.extra.notify.reminders = false;
+    a.data.extra.reminders.push(Reminder { id: 52, text: "Quiet".into(), due_ts: now_ts() - 1, owner: me, ..Default::default() });
+    a.reminder_tick(None);
+    assert!(a.toast.is_none());
+}
+
+#[test]
+fn mentions_in_private_channels_i_am_not_in_stay_out() {
+    let mut a = app();
+    a.data.tasks.clear();
+    let now = now_ts();
+    for c in &mut a.data.channels {
+        c.messages.clear();
+    }
+    let c = a.data.channels.iter_mut().find(|c| c.kind == ChannelKind::Channel).unwrap();
+    c.private = true;
+    c.members = vec![2, 3];
+    c.messages.push(chat_msg(950, 3, "@Me secret", now - 10));
+    assert!(a.inbox_items().is_empty());
+    a.data.channels.iter_mut().find(|c| c.private).unwrap().members.push(1);
+    assert_eq!(a.inbox_badge(), 1);
 }

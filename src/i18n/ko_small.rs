@@ -1,7 +1,15 @@
 // Korean text for src/app/small (see src/i18n.rs): files.rs, huddle.rs,
-// together.rs, updater.rs and media.rs.
+// together.rs, updater.rs, media.rs and nav.rs.
 
 pub const T: &[(&str, &str)] = &[
+    // nav: workboard:// links, Inbox rows, reminders coming due
+    ("This link can't be opened in this Workspace", "이 워크스페이스에서 열 수 없는 링크입니다"),
+    ("Open link: {}", "링크 열기: {}"),
+    ("{} replied: {}", "{}님의 답글: {}"),
+    ("{} mentioned you: {}", "{}님이 나를 멘션함: {}"),
+    ("Reminder", "리마인더"),
+    ("Reminder: {}", "리마인더: {}"),
+    ("{} reminders are due", "리마인더 {}개의 시간이 되었습니다"),
     // files: attachments and the large viewer
     ("Loading {}%", "불러오는 중 {}%"),
     ("Can't show this file", "이 파일을 표시할 수 없습니다"),

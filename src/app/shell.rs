@@ -411,8 +411,11 @@ impl App {
     // ---------------------------------------------------------------- history
 
     pub(super) fn track_history(&mut self) {
-        let cur = (self.section, self.loc);
+        let cur = self.nav_spot();
         match self.nav_last {
+            // a page filling in its default item (Chat opening the first
+            // channel) is not a move
+            Some(last) if last != cur && last.section == cur.section && last.loc == cur.loc && last.item.is_none() => {}
             Some(last) if last != cur => {
                 if self.nav_skip {
                     self.nav_skip = false;
@@ -427,20 +430,27 @@ impl App {
     }
 
     pub(super) fn go_back(&mut self) {
-        if let Some(prev) = self.nav_back.pop() {
-            self.nav_fwd.push((self.section, self.loc));
-            self.section = prev.0;
-            self.loc = prev.1;
+        // pages deleted since are dropped from the history
+        while let Some(prev) = self.nav_back.pop() {
+            if !self.nav_spot_exists(&prev) {
+                continue;
+            }
+            self.nav_fwd.push(self.nav_spot());
+            self.show_nav_spot(prev);
             self.nav_skip = true;
+            break;
         }
     }
 
     pub(super) fn go_forward(&mut self) {
-        if let Some(next) = self.nav_fwd.pop() {
-            self.nav_back.push((self.section, self.loc));
-            self.section = next.0;
-            self.loc = next.1;
+        while let Some(next) = self.nav_fwd.pop() {
+            if !self.nav_spot_exists(&next) {
+                continue;
+            }
+            self.nav_back.push(self.nav_spot());
+            self.show_nav_spot(next);
             self.nav_skip = true;
+            break;
         }
     }
 
@@ -955,7 +965,7 @@ impl App {
                     let tc = t.text2;
                     let muted = self.data.extra.muted_until > now_ts();
                     if filter.is_empty() {
-                        let inbox_n = if muted { 0 } else { self.unseen_activity() + self.due_reminders() };
+                        let inbox_n = if muted { 0 } else { self.inbox_badge() };
                         let nav: [(&str, &str); 9] = [
                             ("Inbox", "\u{1F4E5}"),
                             ("Replies", "\u{21A9}"),
@@ -1337,11 +1347,6 @@ impl App {
             return 0;
         }
         c.messages.iter().filter(|m| m.ts > c.last_read && m.author != self.data.me).count()
-    }
-
-    fn unseen_activity(&self) -> usize {
-        let day = now_ts() - 86400;
-        self.data.tasks.iter().flat_map(|t| t.activity.iter()).filter(|a| a.comment && a.author != self.data.me && a.ts > day).count()
     }
 
     fn space_rows(&mut self, ui: &mut Ui, s: &Space) {

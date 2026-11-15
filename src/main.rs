@@ -4,6 +4,7 @@ mod model;
 use wb_sync as sync;
 mod theme;
 mod media;
+mod openurl;
 mod updater;
 mod widgets;
 
@@ -48,6 +49,10 @@ fn main() -> eframe::Result<()> {
             use winit::platform::macos::EventLoopBuilderExtMacOS;
             b.with_activate_ignoring_other_apps(false);
         }));
+    }
+
+    if !shot {
+        openurl::install();
     }
 
     eframe::run_native(

@@ -102,8 +102,6 @@ impl App {
 
     pub(super) fn inbox_page(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let me = self.data.me;
-        let my_name = self.data.member(me).map(|m| format!("@{}", m.name)).unwrap_or_default();
         // tabs
         let w = ui.available_width();
         let (tabs_r, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
@@ -129,36 +127,15 @@ impl App {
             }
         }
         ui.painter().hline(tabs_r.x_range(), tabs_r.bottom(), Stroke::new(1.0, t.border));
-        // collect items
-        let cleared = self.data.extra.inbox_cleared.clone();
-        let later = self.data.extra.inbox_later.clone();
-        let n = self.data.extra.notify.clone();
-        let mut items: Vec<(String, i64, u64, String, Activity)> = vec![];
-        for task in &self.data.tasks {
-            for a in &task.activity {
-                let key = format!("{}:{}:{}", task.id, a.ts, a.author);
-                let primary = a.author != me && ((a.comment && (n.comments || (n.mentions && a.text.contains(&my_name)))) || (n.assigned && a.text.contains("assigned to")));
-                let tab = if cleared.contains(&key) {
-                    3
-                } else if later.contains(&key) {
-                    2
-                } else if primary {
-                    0
-                } else {
-                    1
-                };
-                if tab == self.inbox_tab {
-                    items.push((key, a.ts, task.id, task.name.clone(), a.clone()));
-                }
-            }
-        }
+        // collect items (what is on which tab: inbox_items)
+        let mut items: Vec<super::nav::InboxItem> = self.inbox_items().into_iter().filter(|x| x.tab == self.inbox_tab).collect();
         match self.inbox_filter {
-            1 => items.retain(|x| x.4.comment),
-            2 => items.retain(|x| x.4.comment && x.4.text.contains(&my_name)),
-            3 => items.retain(|x| x.4.text.contains("assigned to")),
+            1 => items.retain(|x| x.comment),
+            2 => items.retain(|x| x.mention),
+            3 => items.retain(|x| x.assigned),
             _ => {}
         }
-        items.sort_by_key(|x| std::cmp::Reverse(x.1));
+        items.sort_by_key(|x| std::cmp::Reverse(x.ts));
         let mut clear_all = false;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(18, 10)).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -186,7 +163,7 @@ impl App {
             });
         });
         if clear_all {
-            for (k, ..) in &items {
+            for k in items.iter().map(|x| &x.key) {
                 self.data.extra.inbox_later.retain(|x| x != k);
                 self.data.extra.inbox_cleared.push(k.clone());
             }
@@ -222,19 +199,19 @@ impl App {
                         }
                     });
                 }
-                for (key, ts, tid, tname, a) in items {
+                for it in items {
+                    let (key, ts, tname) = (it.key.clone(), it.ts, it.title.clone());
                     let w = ui.available_width();
                     let (r, resp) = ui.allocate_exact_size(vec2(w, 58.0), Sense::click());
                     if resp.hovered() {
                         ui.painter().rect_filled(r, 8.0, t.hover);
                     }
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
-                    if let Some(m) = self.data.member(a.author) {
+                    if let Some(m) = self.data.member(it.author) {
                         paint_avatar(ui.painter(), r.left_center() + vec2(22.0, 0.0), 13.0, m, t.bg);
                     }
                     ui.painter().text(r.left_top() + vec2(48.0, 18.0), Align2::LEFT_CENTER, &tname, FontId::proportional(14.0), t.text);
-                    let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_default();
-                    let line = if a.comment { trf!("{} commented: {}", who, a.text) } else { crate::i18n::history_line(&who, &a.text) };
+                    let line = self.inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
                     ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()))).text(r.left_top() + vec2(48.0, 40.0), Align2::LEFT_CENTER, line, FontId::proportional(13.0), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(12.0), t.text3);
                     let mut handled = false;
@@ -259,7 +236,7 @@ impl App {
                         }
                     }
                     if resp.clicked() && !handled {
-                        self.actions.push(Action::Open(tid));
+                        self.open_inbox_src(it.src);
                     }
                 }
             });
@@ -1056,7 +1033,14 @@ impl App {
                         self.dirty = true;
                     }
                 }
-                ui.label(&r.text);
+                if r.task.is_some() || r.message.is_some() {
+                    // opens the task or message it is about
+                    if ui.link(&r.text).clicked() {
+                        self.open_reminder(&r);
+                    }
+                } else {
+                    ui.label(&r.text);
+                }
                 let when = chrono::DateTime::from_timestamp(r.due_ts, 0).map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p")).unwrap_or_default();
                 ui.label(RichText::new(when).small().color(if r.due_ts < now { t.danger } else { t.text3 }));
             });

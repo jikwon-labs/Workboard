@@ -50,6 +50,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key><string>Workboard uses the microphone for huddles and Talk to Text.</string>
   <key>NSCameraUsageDescription</key><string>Workboard uses the camera for huddles and clips.</string>
+  <!-- workboard:// links (Copy link) open in the app; src/openurl.rs receives them. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>local.workboard.link</string>
+      <key>CFBundleURLSchemes</key><array><string>workboard</string></array>
+    </dict>
+  </array>
   <!-- Sparkle: 업데이트는 팀 서버(GET /updates/appcast.xml)에서 받는다. 하루 한 번 스스로 확인한다. -->
   <key>SUPublicEDKey</key><string>DL5Ve/iIbEju0K4LeI9lffHyXPGWwExhA7/X0GZ8Y28=</string>
   <key>SUEnableAutomaticChecks</key><true/>

@@ -7581,3 +7581,50 @@ fn the_shared_folder_keeps_a_deleted_messages_file_while_it_was_named_lately() {
         serde_json::from_str(&std::fs::read_to_string(files.join(FOLDER_NAMED)).unwrap()).unwrap();
     assert!(record.contains_key(&sha('c')), "rebuilt");
 }
+
+/// The short lowercase answers of the team server's file route (which the
+/// app shows as "The server said 500 can't write files") read in Korean
+/// too, so a new one without a translation is caught.
+#[test]
+fn server_file_answers_are_shown_in_the_interface_language() {
+    let src = include_str!("../../server/src/files.rs");
+    let src = src.split("#[cfg(test)]").next().unwrap();
+    let mut bodies = vec![];
+    for (i, _) in src.match_indices("StatusCode::") {
+        let rest = &src[i + "StatusCode::".len()..];
+        let name_end = rest
+            .find(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+            .unwrap_or(0);
+        let after = rest[name_end..].trim_start();
+        let Some(after) = after.strip_prefix(',') else {
+            continue;
+        };
+        let Some(lit) = after.trim_start().strip_prefix('"') else {
+            continue;
+        };
+        let body = lit.split('"').next().unwrap();
+        if !bodies.contains(&body) {
+            bodies.push(body);
+        }
+    }
+    assert!(bodies.len() >= 6, "found the answers: {:?}", bodies);
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown: Vec<(String, String)> = bodies
+        .iter()
+        .map(|b| {
+            let e = format!("The server said 500 {}", b);
+            (b.to_string(), App::error_text(&e))
+        })
+        .collect();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let english: Vec<&(String, String)> = shown
+        .iter()
+        .filter(|(_, ko)| ko.chars().any(|c| c.is_ascii_alphabetic()))
+        .collect();
+    assert!(english.is_empty(), "no Korean for: {:#?}", english);
+    // and in English the server's words stay as they are
+    assert_eq!(
+        App::error_text("The server said 500 can't write files"),
+        "The server said 500 can't write files"
+    );
+}

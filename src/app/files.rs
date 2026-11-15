@@ -1476,7 +1476,12 @@ impl App {
             "The server said {} {}",
         ];
         for pattern in WITH_VALUES {
-            if let Some(values) = fill_back(pattern, e) {
+            if let Some(mut values) = fill_back(pattern, e) {
+                if pattern == "The server said {} {}" {
+                    if let Some(body) = values.get_mut(1) {
+                        *body = server_body(body);
+                    }
+                }
                 return crate::i18n::fill(tr(pattern), &values);
             }
         }
@@ -2303,6 +2308,25 @@ impl App {
 
 /// The values in `text` that fill the "{}"s of `pattern`, when it was made
 /// from it.
+/// What the team server's file route answers when it refuses (the short
+/// lowercase texts in server/src/files.rs), in the interface language; any
+/// other text as it is.
+pub(super) fn server_body(body: &str) -> String {
+    match body {
+        "upload broke off" => tr("upload broke off"),
+        "file is too large" => tr("file is too large"),
+        "can't write files" => tr("can't write files"),
+        "can't read the file" => tr("can't read the file"),
+        "contents don't match the name" => tr("contents don't match the name"),
+        "no such file" => tr("no such file"),
+        "sign in first" => tr("sign in first"),
+        "already here" => tr("already here"),
+        "stored" => tr("stored"),
+        _ => body,
+    }
+    .to_string()
+}
+
 pub(super) fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
     let parts: Vec<&str> = pattern.split("{}").collect();
     let mut rest = text.strip_prefix(parts[0])?;

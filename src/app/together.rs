@@ -2496,7 +2496,34 @@ impl App {
         link: &mut String,
     ) -> bool {
         let mut close = false;
+        // why it's a browser call rather than a huddle here
+        if self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some())
+            && self.sync_rt.net_status != Some(NetStatus::Connected)
+        {
+            ui.label(RichText::new(tr("The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.")).color(WARN));
+            ui.add_space(6.0);
+        }
         ui.label(RichText::new(tr("The call opens in your browser on Jitsi Meet (free). The person who starts it may be asked to sign in with Google, GitHub or Facebook; everyone else joins without an account. Everyone in the conversation gets a Join button.")).color(t.text2));
+        // nobody else to get the Join button
+        let me = self.data.me;
+        let alone = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == *ch)
+            .is_some_and(|c| {
+                !c.members
+                    .iter()
+                    .any(|id| *id != me && self.data.member(*id).is_some_and(|m| !m.invited))
+            });
+        if alone {
+            ui.label(RichText::new(tr("You're the only one in this conversation, so nobody else gets the Join button. Invite people first.")).small().color(t.text3));
+        }
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Call in")).color(t.text2));
         let chans: Vec<(u64, String)> = self

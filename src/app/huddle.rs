@@ -239,8 +239,19 @@ impl App {
             return;
         }
         if !self.huddles_on_server() {
+            let has_server = self
+                .data
+                .extra
+                .shared
+                .as_ref()
+                .is_some_and(|c| c.server.is_some());
             self.toast = Some((
-                tr("Huddles need the team's server. Connect in Work together.").into(),
+                if has_server {
+                    tr("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.")
+                } else {
+                    tr("Huddles need the team's server. Connect in Work together.")
+                }
+                .into(),
                 now_ts(),
             ));
             return;

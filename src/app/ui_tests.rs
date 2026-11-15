@@ -1332,6 +1332,54 @@ fn help_says_where_the_workspace_is_kept() {
 }
 
 #[test]
+fn calls_say_why_there_is_no_huddle_when_the_server_is_down_and_when_nobody_else_is_there() {
+    let alone_note = "You're the only one in this conversation, so nobody else gets the Join button. Invite people first.";
+    let down_note = "The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.";
+    let mut h = Ui1::new();
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(general);
+    // a team in #general, no server: the browser call, no extra words
+    h.app.open_call_dialog();
+    h.settle();
+    assert!(matches!(h.app.modal, Some(Modal::Call { .. })));
+    assert!(!h.has(alone_note) && !h.has(down_note));
+    h.key(egui::Key::Escape);
+    // the server is set up but down: says why it's a browser call
+    server_down(&mut h);
+    h.app.open_call_dialog();
+    h.settle();
+    assert!(matches!(h.app.modal, Some(Modal::Call { .. })));
+    assert!(h.has(down_note));
+    h.key(egui::Key::Escape);
+    // joining someone's huddle: not "huddles need a server" when there is one
+    h.app.join_huddle(general);
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.")
+    );
+    // alone in the conversation: nobody else gets the Join button
+    let mut solo = Ui1::new();
+    let me = solo.app.data.me;
+    solo.app.data.members.retain(|m| m.id == me);
+    for c in &mut solo.app.data.channels {
+        c.members.retain(|id| *id == me);
+    }
+    solo.app.section = Section::Chat;
+    solo.app.chat_open = Some(general);
+    solo.app.open_call_dialog();
+    solo.settle();
+    assert!(solo.has(alone_note));
+}
+
+#[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();
     let ch = h.app.data.channels[0].id;

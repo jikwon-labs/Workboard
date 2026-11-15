@@ -47,6 +47,9 @@ pub const T: &[(&str, &str)] = &[
     ("Choose pictures or videos to send", "보낼 사진이나 동영상을 고르세요"),
     // huddle
     ("Huddles need the team's server. Connect in Work together.", "허들은 팀 서버가 있어야 합니다. 함께 작업하기에서 연결하세요."),
+    ("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.", "허들은 팀 서버를 거치는데, 지금은 서버에 연결할 수 없습니다. 연결되면 다시 시도하세요."),
+    ("The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.", "팀 서버에 연결할 수 없어 앱 안 허들을 쓸 수 없습니다. 대신 이 통화는 브라우저에서 열리고, 다시 연결되면 다른 사람에게 참가 버튼이 보입니다."),
+    ("You're the only one in this conversation, so nobody else gets the Join button. Invite people first.", "이 대화에는 나만 있어서 참가 버튼을 받을 사람이 없습니다. 먼저 사람을 초대하세요."),
     ("The server didn't answer, so the huddle didn't start. Try again in a moment.", "서버가 응답하지 않아 허들을 시작하지 못했습니다. 잠시 후 다시 시도하세요."),
     ("Click to make smaller", "클릭하면 작게 보기"),
     ("Click to make larger", "클릭하면 크게 보기"),

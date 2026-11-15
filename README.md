@@ -32,7 +32,7 @@ Workspace menu > Work together offers two ways:
     new code. "Forgot password?" mails a reset code.
 
   Tasks, chat and docs show up for everyone within a second or two, and
-  Huddle starts a voice and video call inside the app. The server also keeps
+  Huddle starts a voice and video call, with screen sharing, inside the app. The server also keeps
   backups, hands out app updates and, once Apple's push service is set up,
   sends push notifications to iPhones.
   Running it: `deploy/README.md`.

@@ -11,7 +11,7 @@
 
 ## 지금 상태 (2026-11-16)
 
-- **1~7단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부, 계정·초대 메일, iPhone 푸시 알림(실제 APNs 발송은 미확인)까지 들어갔다. 2026-11-16 결함 수정 1·2차로 서버 로그인 잠금, 초대 코드·파일 저장 강화, 사람별로 보이는 대화·개인 공간 거르기가 더해졌다. `cargo test --workspace` 444개(WebRTC 소켓을 여는 `--ignored` 1개 빼고)와 재생 테스트(`tests/player.rs`) 통과.
+- **1~7단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부, 계정·초대 메일, iPhone 푸시 알림(실제 APNs 발송은 미확인)까지 들어갔다. 2026-11-16 에 허들 화면 공유와 화질 조절도 들어갔고, 결함 수정 1~3차로 서버 로그인 잠금, 초대 코드·파일 저장 강화, 사람별로 보이는 대화·개인 공간 거르기가 더해졌다. `cargo test --workspace` 498개(손으로 돌리는 `--ignored` 2개 빼고)와 재생 테스트(`tests/player.rs`) 통과.
 - **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. owner(Jikwon)와 멤버 한 명이 들어와 있고, 아직 아무도 비밀번호(계정)가 없다. 돌고 있는 서버 코드는 `8fee0c6`(5단계, 사진·영상 전송까지)라서 6단계 이후는 아직 들어가지 않았다(2026-11-16 확인, [`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md)).
 - **재부팅 자동 복구 확인:** 2026-11-15 03:37 macOS 업데이트(27.0.1 → 27.2.1) 재시동 뒤 Tailscale, 두 서버, Docker 와 컨테이너, ngrok, hermes, branchport 가 모두 저절로 다시 떴다(`deploy/check-after-boot.sh` 기록).
 - **실제 목소리:** 사용자가 확인했다("목소리 잘 나오더라").

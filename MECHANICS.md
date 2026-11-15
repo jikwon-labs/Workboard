@@ -81,7 +81,8 @@ Every menu and page was opened in the running app (pictures: app/shots/orig-*.pn
   Analytics, My Teams, Create Team.
 - Online-only (need an AI or other online service; shown, explained when clicked): AI,
   AI Chats, Skills, Artifacts, Super Agent, Clips, Talk to Text, AI Notetaker,
-  Import from Slack, Integrate, calendar connection in Planner/Meetings.
+  calendar connection in Planner/Meetings. Import from Slack was built later (it
+  reads a Slack export); Integrate was dropped.
   SyncUp/huddles work in the app on a team server (voice and video through LiveKit)
   and as a browser call link in a shared folder.
 
@@ -208,9 +209,9 @@ Invite, view tabs, channel messages, thread replies, hover reactions, Docs,
 Workspace and Profile menus with every settings dialog, search, back/forward,
 Whiteboard and Form templates, Inbox Later/Clear, Timesheets tabs, board card
 drag between columns, right-click Delete and Trash restore, Goals,
-Dashboards, Teams and every app in More. By Nov 16 the file had 183 of them,
+Dashboards, Teams and every app in More. By Nov 16 the file had 200 of them,
 adding the list view, task window fields, comments, chat actions and
-attachments, sign-in and huddles (notifications and the Korean interface have
+attachments, sign-in, huddles and screen sharing (notifications and the Korean interface have
 their own tests in notify_tests.rs and i18n_tests.rs).
 
 Bugs these found and fixed: Enter did not create a task in the Create Task

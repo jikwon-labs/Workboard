@@ -28,7 +28,7 @@ ios/
     Sources/WorkboardFakeServer/  테스트용 가짜 서버(합치기 없음)와 예제 작업공간
     Sources/wb-fake-server/    가짜 서버 실행 파일
     Sources/wb-cli/            손 검증용 명령줄 클라이언트(다른 기기 역할)
-    Tests/WorkboardKitTests/   단위·통합 테스트 66개
+    Tests/WorkboardKitTests/   단위·통합 테스트 67개
   Workboard/               SwiftUI 앱(화면, 통화, 알림)
   WorkboardUITests/        시뮬레이터에서 앱을 직접 조작하는 UI 테스트 17개
   Workboard.xcodeproj      손으로 쓴 프로젝트(폴더 동기화 그룹, objectVersion 77)
@@ -71,7 +71,7 @@ swift run wb-cli ws://127.0.0.1:8787 watch
 테스트:
 
 ```sh
-cd ios/WorkboardKit && swift test          # 66개 (2026-11-16)
+cd ios/WorkboardKit && swift test          # 67개 (2026-11-16)
 
 # UI 테스트용 가짜 서버 3개
 swift run wb-fake-server --port 18787 &

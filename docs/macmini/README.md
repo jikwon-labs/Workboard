@@ -6,7 +6,7 @@
 
 ## 할 일
 
-- [ ] **서버 코드 받고 다시 설치**: `cd ~/Documents/workboard && git pull && deploy/install-launchd.sh` 후 `/join` 이 200 인지 확인 (`accounts-and-mail.md` 1). 이 한 번으로 계정·초대 메일, iPhone 푸시, 2026-11-16 결함 수정 1·2차의 서버 변경(사람별 대화·개인 공간 숨김, 로그인 잠금, 파일 정리, ProcessType Standard)이 모두 들어간다. APNs 키를 두기 전에는 로그(`~/Library/Logs/workboard-server.log`)에 `iPhone notifications off: not set up ...` 한 줄이 찍히면 정상이다
+- [ ] **서버 코드 받고 다시 설치**: `cd ~/Documents/workboard && git pull && deploy/install-launchd.sh` 후 `/join` 이 200 인지 확인 (`accounts-and-mail.md` 1). 이 한 번으로 계정·초대 메일, iPhone 푸시, 2026-11-16 결함 수정 1~3차의 서버 변경(사람별 대화·개인 공간 숨김, 로그인 잠금, 파일 정리, ProcessType Standard, 비밀번호를 정하면 남은 초대 코드 끝내기, 채널 삭제·사람 바꾸기는 만든 사람과 admin 만, 지운 메시지 사진 휴지통 복원)이 모두 들어간다. APNs 키를 두기 전에는 로그(`~/Library/Logs/workboard-server.log`)에 `iPhone notifications off: not set up ...` 한 줄이 찍히면 정상이다
 - [ ] **메일 설정**: Gmail 앱 비밀번호 → MagicDNS 이름 확인 → `mail.json` 작성·`chmod 600` → `workboard-server mail-test` 로 시험 메일 (`accounts-and-mail.md` 2)
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
 - [ ] **팀원 초대**: Tailscale 초대 → Workboard 초대에 이메일 → 메일로 코드·링크 (`accounts-and-mail.md` 4)

@@ -359,10 +359,11 @@ impl App {
                     paint_status_circle(ui.painter(), r.center(), 5.5, &st);
                     ui.add(egui::Label::new(RichText::new(&task.name).size(12.5)).truncate());
                 });
-                ui.horizontal_wrapped(|ui| {
-                    // the list name gives up its room to the flag, time and
-                    // "Overdue" after it, and is shortened to fit the day;
-                    // in a very narrow day those go on a line of their own
+                ui.horizontal(|ui| {
+                    // one line: the list name gives up its room to the flag,
+                    // time and "Overdue" after it and is shortened to fit; in a
+                    // day too narrow for it, it is left out and the rest are
+                    // shortened in turn
                     let small = egui::TextStyle::Small.resolve(ui.style());
                     let gap = ui.spacing().item_spacing.x;
                     let width_of = |ui: &Ui, s: &str| {
@@ -382,21 +383,24 @@ impl App {
                     if task.is_overdue() {
                         extras += width_of(ui, tr("Overdue"));
                     }
-                    let mut room = ui.available_width() - extras;
-                    if room < 30.0 {
-                        room = ui.available_width();
+                    let room = ui.available_width() - extras;
+                    if room >= 30.0 || extras == 0.0 {
+                        ui.scope(|ui| {
+                            ui.set_max_width(room.max(0.0).max(if extras == 0.0 {
+                                ui.available_width()
+                            } else {
+                                0.0
+                            }));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(self.data.list_name(task.list_id))
+                                        .small()
+                                        .color(t.text3),
+                                )
+                                .truncate(),
+                            );
+                        });
                     }
-                    ui.scope(|ui| {
-                        ui.set_max_width(room);
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(self.data.list_name(task.list_id))
-                                    .small()
-                                    .color(t.text3),
-                            )
-                            .truncate(),
-                        );
-                    });
                     if task.priority > 0 {
                         let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
                         paint_flag(
@@ -407,10 +411,16 @@ impl App {
                         );
                     }
                     if let Some(at) = task.due_at() {
-                        ui.label(RichText::new(fmt_time(at)).small().color(t.text2));
+                        ui.add(
+                            egui::Label::new(RichText::new(fmt_time(at)).small().color(t.text2))
+                                .truncate(),
+                        );
                     }
                     if task.is_overdue() {
-                        ui.label(RichText::new(tr("Overdue")).small().color(t.danger));
+                        ui.add(
+                            egui::Label::new(RichText::new(tr("Overdue")).small().color(t.danger))
+                                .truncate(),
+                        );
                     }
                 });
             });

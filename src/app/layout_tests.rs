@@ -669,7 +669,7 @@ fn team_page_counts_open_tasks_it_does_not_list() {
     heavy(&mut h);
     h.app.section = Section::Teams;
     h.settle();
-    h.click_side("Create Team", true);
+    h.click_side("Create team", true);
     let id = h.app.team_open.unwrap();
     let me = h.app.data.me;
     let team = h

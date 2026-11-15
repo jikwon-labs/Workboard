@@ -914,4 +914,123 @@ final class FieldMergeTests: XCTestCase {
             XCTAssertNil(parts["custom"])
         }
     }
+
+    func slackMap(_ v: JSON) -> JSON { v.at("extra.slack_map") ?? .null }
+
+    func setSlack(_ v: inout JSON, _ key: String, _ x: JSON?) {
+        var m = v.at("extra.slack_map")?.object ?? [:]
+        m[key] = x
+        v.set("extra.slack_map", .object(m))
+    }
+
+    /// The same steps and results as wb_sync's
+    /// `shared_map_entries_merge_one_by_one`: the phone merges a shared map
+    /// exactly like a Mac.
+    func testSharedMapEntriesMergeOneByOne() {
+        var ma = SyncMeta()
+        var a = ws([], [], ma)
+        a.set("extra.slack_map", ["U0": 7])
+        save(&a, &ma, 10)
+        XCTAssertTrue(ma.values.isEmpty, "a copy stamped for the first time keeps no stamp")
+        var (b, mb) = (a, ma)
+        // A points UA at 2, then B points UA at 3 and UB at 2
+        setSlack(&a, "UA", 2)
+        save(&a, &ma, 20)
+        XCTAssertEqual(ma.values["extra.slack_map/UA"], 20)
+        setSlack(&b, "UA", 3)
+        setSlack(&b, "UB", 2)
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(slackMap(v), ["U0": 7, "UA": 3, "UB": 2])
+            XCTAssertEqual(SyncMeta(of: v).values["extra.slack_map/UA"], 30)
+        }
+        // at once: A moves U0, B moves UB; both stay
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        ma.valueHashes = Sync.valueHashes(a)
+        mb.valueHashes = Sync.valueHashes(b)
+        setSlack(&a, "U0", 9)
+        save(&a, &ma, 40)
+        setSlack(&b, "UB", 4)
+        save(&b, &mb, 41)
+        // and later B takes UA away
+        setSlack(&b, "UA", nil)
+        save(&b, &mb, 50)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(slackMap(v), ["U0": 9, "UB": 4])
+            XCTAssertEqual(SyncMeta(of: v).values["extra.slack_map/UA"], 50)
+        }
+        // a copy that never had UA set (stamp 0) doesn't bring it back, and
+        // one set again later does come back
+        var old = ws([], [], SyncMeta())
+        old.set("extra.slack_map", ["UA": 2, "UC": 5])
+        var x = a
+        Sync.merge(&x, [old])
+        XCTAssertEqual(slackMap(x), ["U0": 9, "UB": 4, "UC": 5])
+        // two copies that each worked out an entry nobody decided (stamp 0)
+        // end up with the same one
+        var p = ws([], [], SyncMeta())
+        p.set("extra.slack_map", ["UD": 2])
+        var q = ws([], [], SyncMeta())
+        q.set("extra.slack_map", ["UD": 3])
+        swap(&p, &q)
+        XCTAssertEqual(slackMap(p), ["UD": 3])
+        XCTAssertEqual(slackMap(q), ["UD": 3])
+        // a copy without the map gets none made up
+        var e = ws([], [], SyncMeta())
+        Sync.merge(&e, [ws([], [], SyncMeta())])
+        XCTAssertNil(e.at("extra.slack_map"))
+    }
+
+    func testACarriedMapEntryIsNotADecision() {
+        var m = SyncMeta()
+        var a = ws([], [], m)
+        save(&a, &m, 10)
+        // an upgrade works one out of older data
+        a.set("extra.slack_map", ["UA": 2])
+        Sync.carryMapEntry(&m, "extra.slack_map", "UA", 2)
+        save(&a, &m, 20)
+        XCTAssertNil(m.values["extra.slack_map/UA"], "not set now")
+        // a decision on another copy wins over it
+        var b = a
+        var mb = m
+        setSlack(&b, "UA", 3)
+        save(&b, &mb, 15)
+        Sync.merge(&a, [b])
+        XCTAssertEqual(slackMap(a), ["UA": 3])
+        // without the carry it would have counted as set now
+        var n = SyncMeta()
+        var c = ws([], [], n)
+        save(&c, &n, 10)
+        c.set("extra.slack_map", ["UA": 2])
+        save(&c, &n, 20)
+        XCTAssertEqual(n.values["extra.slack_map/UA"], 20)
+    }
+
+    func testADeltaCarriesOnlyTheChangedMapEntries() {
+        var m = SyncMeta()
+        var a = ws([], [], m)
+        a.set("extra.slack_map", ["UA": 2, "UB": 3])
+        save(&a, &m, 10)
+        let other = a
+        var sum = SyncSummary(of: Sync.outgoing(a))
+        XCTAssertNil(Sync.delta(since: sum, Sync.outgoing(a)))
+        setSlack(&a, "UA", 4)
+        setSlack(&a, "UC", 5)
+        setSlack(&a, "UB", nil)
+        save(&a, &m, 20)
+        let d = Sync.delta(since: sum, Sync.outgoing(a))!
+        XCTAssertEqual(d.at("extra.slack_map"), ["UA": 4, "UC": 5])
+        XCTAssertEqual(d.at("extra.sync")?["values"]?["extra.slack_map/UB"], 20)
+        var (x, y) = (other, other)
+        Sync.merge(&x, [d])
+        Sync.merge(&y, [Sync.outgoing(a)])
+        XCTAssertEqual(slackMap(x), ["UA": 4, "UC": 5])
+        XCTAssertEqual(slackMap(x), slackMap(y))
+        XCTAssertEqual(SyncMeta(of: x).values, SyncMeta(of: y).values)
+        sum.absorb(d)
+        XCTAssertNil(Sync.delta(since: sum, Sync.outgoing(a)))
+    }
 }

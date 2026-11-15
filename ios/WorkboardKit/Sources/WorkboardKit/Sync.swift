@@ -13,7 +13,8 @@
 // and an item that moved (a list to another space) sits only where its newest
 // copy puts it. Deleted items leave a tombstone (`tombs`); restoring one
 // records a revival. A few single settings (SHARED_VALUES) are shared too,
-// newest change wins. Task comments and activity lines get ids worked out
+// newest change wins, and a few maps entry by entry (SHARED_MAPS, newest
+// change per key wins). Task comments and activity lines get ids worked out
 // from their contents when they have none (`activityId`), bit for bit like
 // the Rust code, since those ids are shared.
 //
@@ -38,6 +39,23 @@ public enum Sync {
     public static let metaV: UInt32 = 4
     /// Single settings that belong to the whole team (SHARED_VALUES).
     public static let sharedValues: [String] = ["workspace", "extra.workspace_color", "extra.apps"]
+    /// Shared maps merged entry by entry, newest change per key wins
+    /// (SHARED_MAPS): `values` keeps a stamp per entry ("<path>/<key>").
+    /// `extra.slack_map`: Slack user id -> the member a Mac's Import from
+    /// Slack brings them in as.
+    public static let sharedMaps: [String] = ["extra.slack_map"]
+
+    /// The name of one entry of a shared map in `values` / `valueHashes`
+    /// (wb_sync::map_part).
+    public static func mapPart(_ path: String, _ key: String) -> String { path + "/" + key }
+
+    /// The shared map and key an entry name stands for (wb_sync map_entry).
+    static func mapEntry(_ part: String) -> (path: String, key: String)? {
+        for p in sharedMaps where part.hasPrefix(p + "/") {
+            return (p, String(part.dropFirst(p.count + 1)))
+        }
+        return nil
+    }
     /// Fields that are each person's own even inside shared items (LOCAL_KEYS).
     public static let localKeys: Set<String> = ["last_read", "saved", "expanded"]
     /// Lists that only ever grow (APPEND_KEYS).
@@ -456,10 +474,22 @@ extension Sync {
         if base == stamp { e[""] = nil } else { e[""] = base }
     }
 
+    /// Fingerprints of the shared settings and of each shared map entry
+    /// there is (wb_sync::value_hashes).
     static func valueHashes(_ data: JSON) -> [String: UInt64] {
         var out: [String: UInt64] = [:]
         for p in sharedValues { out[p] = fnv((data.at(p) ?? .null).serialized().utf8) }
+        for p in sharedMaps {
+            for (k, v) in data.at(p)?.object ?? [:] { out[mapPart(p, k)] = fnv(v.serialized().utf8) }
+        }
         return out
+    }
+
+    /// An entry an upgrade put into a shared map rather than anyone's
+    /// decision: noted as saved already, without a stamp, so `stamp`
+    /// doesn't take it as set now (wb_sync::carry_map_entry).
+    public static func carryMapEntry(_ meta: inout SyncMeta, _ path: String, _ key: String, _ value: JSON) {
+        meta.valueHashes[mapPart(path, key)] = fnv(value.serialized().utf8)
     }
 
     /// Record what changed since the last save: new stamps for edited items,
@@ -519,13 +549,26 @@ extension Sync {
         meta.hashes = cur
         meta.fieldHashes = parts
         // shared settings: a changed one gets a new stamp; one seen for the
-        // first time keeps none, so it wins only once someone changes it
-        for (path, h) in valueHashes(data) {
-            if let old = meta.valueHashes[path], old != h {
-                meta.values[path] = meta.values[path].map { max(now, $0 + 1) } ?? now
+        // first time keeps none, so it wins only once someone changes it. A
+        // shared map entry new since the last save was just set (on a copy
+        // never stamped before it keeps none), one gone was taken away.
+        let vh = valueHashes(data)
+        let stampedBefore = sharedValues.contains { meta.valueHashes[$0] != nil }
+        func bump(_ part: String) { meta.values[part] = meta.values[part].map { max(now, $0 + 1) } ?? now }
+        for (part, h) in vh {
+            let changed: Bool
+            if let old = meta.valueHashes[part] {
+                changed = old != h
+            } else {
+                changed = stampedBefore && mapEntry(part) != nil
             }
-            meta.valueHashes[path] = h
+            if changed { bump(part) }
         }
+        for part in meta.valueHashes.keys where mapEntry(part) != nil && vh[part] == nil {
+            bump(part)
+        }
+        meta.valueHashes = meta.valueHashes.filter { mapEntry($0.key) == nil }
+        meta.valueHashes.merge(vh) { _, new in new }
     }
 
     // MARK: merge (wb_sync::merge / merge_arr)
@@ -913,6 +956,7 @@ extension Sync {
             if let v = best { local.set(path, v) }
             if bestStamp > 0 { lmeta.values[path] = bestStamp }
         }
+        mergeMaps(&local, &lmeta, others, metas)
         lmeta.tombs = tombs
         lmeta.revived = revived
         lmeta.stamps = cx.out
@@ -926,6 +970,53 @@ extension Sync {
         lmeta.v = metaV
         local.set("extra.sync", lmeta.json)
         return stripSync(before) != stripSync(local)
+    }
+
+    /// Shared maps (wb_sync merge_maps): per key the newest change wins (0:
+    /// a copy that never had it changed); on a tie an entry beats none, then
+    /// the larger value, so every copy ends up the same; an entry left out
+    /// with the newest stamp was taken away.
+    static func mergeMaps(_ local: inout JSON, _ lmeta: inout SyncMeta, _ others: [JSON], _ metas: [SyncMeta]) {
+        for path in sharedMaps {
+            let mine = local.at(path)?.object
+            var sides: [(values: [String: Int64], obj: [String: JSON]?)] = [(lmeta.values, mine)]
+            for (o, m) in zip(others, metas) { sides.append((m.values, o.at(path)?.object)) }
+            var keys = Set<String>()
+            for sd in sides {
+                if let o = sd.obj { keys.formUnion(o.keys) }
+                for p in sd.values.keys {
+                    if let e = mapEntry(p), e.path == path { keys.insert(e.key) }
+                }
+            }
+            var out = mine ?? [:]
+            for key in keys.sorted(by: utf8Less) {
+                let part = mapPart(path, key)
+                var best: (stamp: Int64, value: JSON?)?
+                for sd in sides {
+                    let s = sd.values[part] ?? 0
+                    let v = sd.obj?[key]
+                    let better: Bool
+                    if let b = best {
+                        if s != b.stamp {
+                            better = s > b.stamp
+                        } else if (v != nil) != (b.value != nil) {
+                            better = v != nil
+                        } else if let x = v, let y = b.value {
+                            better = utf8Less(y.serialized(), x.serialized())
+                        } else {
+                            better = false
+                        }
+                    } else {
+                        better = true
+                    }
+                    if better { best = (s, v) }
+                }
+                guard let b = best else { continue }
+                out[key] = b.value
+                if b.stamp > 0 { lmeta.values[part] = b.stamp }
+            }
+            if mine != nil || !out.isEmpty { local.set(path, .object(out)) }
+        }
     }
 
     static func stripSync(_ v: JSON) -> JSON {
@@ -1107,7 +1198,11 @@ extension Sync {
         let revived = newer(meta.revived, since.revived)
         let vh = valueHashes(data)
         let values = sharedValues.filter { since.valueHashes[$0] != vh[$0] || since.values[$0] != meta.values[$0] }
-        if changed.isEmpty && tombs.isEmpty && revived.isEmpty && values.isEmpty { return nil }
+        // shared map entries set or taken away since
+        let entries = Set(vh.keys).union(meta.values.keys).filter {
+            mapEntry($0) != nil && (since.valueHashes[$0] != vh[$0] || since.values[$0] != meta.values[$0])
+        }.sorted(by: utf8Less)
+        if changed.isEmpty && tombs.isEmpty && revived.isEmpty && values.isEmpty && entries.isEmpty { return nil }
         var kept: [UInt64] = []
         func prune(_ arr: [JSON]) -> [JSON] {
             var out: [JSON] = []
@@ -1143,6 +1238,13 @@ extension Sync {
         for p in values {
             if let v = data.at(p) { out.set(p, v) }
         }
+        for p in entries {
+            // one taken away is only its stamp
+            guard let e = mapEntry(p), let v = data.at(e.path)?.object?[e.key] else { continue }
+            var m = out.at(e.path)?.object ?? [:]
+            m[e.key] = v
+            out.set(e.path, .object(m))
+        }
         var part = SyncMeta()
         for id in kept {
             part.stamps[id] = meta.stamps[id]
@@ -1151,7 +1253,7 @@ extension Sync {
         }
         part.tombs = tombs
         part.revived = revived
-        for p in values { part.values[p] = meta.values[p] }
+        for p in values + entries { part.values[p] = meta.values[p] }
         part.v = meta.v
         out.set("extra.sync", part.json)
         return out
@@ -1195,9 +1297,16 @@ public struct SyncSummary: Equatable, Sendable {
         }
         for (k, v) in m.tombs { tombs[k] = max(tombs[k] ?? v, v) }
         for (k, v) in m.revived { revived[k] = max(revived[k] ?? v, v) }
-        for (path, h) in Sync.valueHashes(part) where part.at(path) != nil {
+        let vh = Sync.valueHashes(part)
+        // a shared map's entries are there when they have a fingerprint
+        for (path, h) in vh where Sync.mapEntry(path) != nil || part.at(path) != nil {
             valueHashes[path] = h
             if let t = m.values[path] { values[path] = t }
+        }
+        // shared map entries it took away
+        for (p, t) in m.values where Sync.mapEntry(p) != nil && vh[p] == nil {
+            valueHashes[p] = nil
+            values[p] = t
         }
     }
 }

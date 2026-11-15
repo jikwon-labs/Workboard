@@ -21,7 +21,9 @@
 // (`fill_board_ids`) and merge like any other item. Deleted items leave a tombstone so they don't come back; restoring
 // one from the trash revives it. Task comments and activity lines have ids
 // too, so edits, deletes and reactions carry over; lines saved before they
-// had ids get one worked out from their contents (`activity_id`).
+// had ids get one worked out from their contents (`activity_id`). A few
+// single settings are shared too (`SHARED_VALUES`, newest change wins), and
+// a few maps entry by entry (`SHARED_MAPS`: newest change per key wins).
 
 pub mod mentions;
 
@@ -52,6 +54,32 @@ pub const SHARED: &[&str] = &[
 /// Single settings that belong to the whole team (not lists of items): the
 /// newest change wins, by the stamps in `SyncMeta::values`.
 pub const SHARED_VALUES: &[&str] = &["workspace", "extra.workspace_color", "extra.apps"];
+
+/// Shared maps whose entries each belong to the whole team on their own:
+/// `SyncMeta::values` keeps a stamp per entry ("<path>/<key>", see
+/// `map_part`) and for each key the newest change wins, so two people
+/// setting different keys at once both keep theirs, and the later of two
+/// settings of one key wins everywhere. An entry is taken away by leaving
+/// it out (its stamp stays as when that happened). `extra.slack_map`: Slack
+/// user id -> the member an Import from Slack brings them in as.
+pub const SHARED_MAPS: &[&str] = &["extra.slack_map"];
+
+/// The name of one entry of a shared map in `SyncMeta::values` and
+/// `value_hashes` ("extra.slack_map/U123").
+pub fn map_part(path: &str, key: &str) -> String {
+    format!("{}/{}", path, key)
+}
+
+/// The shared map and key an entry name stands for (see `map_part`).
+fn map_entry(part: &str) -> Option<(&'static str, &str)> {
+    SHARED_MAPS
+        .iter()
+        .find_map(|p| Some((*p, part.strip_prefix(p)?.strip_prefix('/')?)))
+}
+
+fn json_hash(v: &Value) -> u64 {
+    fnv(serde_json::to_string(v).unwrap_or_default().as_bytes())
+}
 
 /// Fields that are each person's own even inside shared items.
 const LOCAL_KEYS: &[&str] = &["last_read", "saved", "expanded"];
@@ -134,9 +162,11 @@ pub struct SyncMeta {
     /// id -> the item it sat in when last saved (this computer only).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub parents: BTreeMap<u64, u64>,
-    /// Shared setting (see `SHARED_VALUES`) -> when it last changed.
+    /// Shared setting (see `SHARED_VALUES`), or entry of a shared map
+    /// (`SHARED_MAPS`, "<path>/<key>") -> when it last changed.
     pub values: BTreeMap<String, i64>,
-    /// Shared setting -> fingerprint when last saved (this computer only).
+    /// Shared setting or map entry -> fingerprint when last saved (this
+    /// computer only).
     pub value_hashes: BTreeMap<String, u64>,
     /// id -> when each of its own fields last changed ("field stamps"; see
     /// `read_part`). A part is a field name, or for fields merged element
@@ -666,20 +696,37 @@ pub fn touch_fields(meta: &mut SyncMeta, id: u64, fields: &[&str], now: i64) -> 
     next
 }
 
+/// Fingerprints of the shared settings, and of each entry of the shared
+/// maps there is (`map_part`).
 fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
-    SHARED_VALUES
+    let mut out: BTreeMap<String, u64> = SHARED_VALUES
         .iter()
         .map(|p| {
             (
                 p.to_string(),
-                fnv(
-                    serde_json::to_string(get_path(data, p).unwrap_or(&Value::Null))
-                        .unwrap_or_default()
-                        .as_bytes(),
-                ),
+                json_hash(get_path(data, p).unwrap_or(&Value::Null)),
             )
         })
-        .collect()
+        .collect();
+    for path in SHARED_MAPS {
+        for (k, v) in get_path(data, path)
+            .and_then(|m| m.as_object())
+            .into_iter()
+            .flatten()
+        {
+            out.insert(map_part(path, k), json_hash(v));
+        }
+    }
+    out
+}
+
+/// An entry an upgrade put into a shared map (worked out from what an
+/// older version kept somewhere else) rather than anyone's decision: noted
+/// as saved already and without a stamp, so `stamp` doesn't take it as set
+/// now and any real decision, here or on another copy, wins over it.
+pub fn carry_map_entry(meta: &mut SyncMeta, path: &str, key: &str, value: &Value) {
+    meta.value_hashes
+        .insert(map_part(path, key), json_hash(value));
 }
 
 /// Only items inside a space (folders, lists) ever move; move times kept
@@ -773,14 +820,38 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     meta.hashes = cur;
     meta.field_hashes = parts;
     // shared settings: a changed one gets a new stamp; one seen for the first
-    // time keeps none, so it wins only once someone changes it
-    for (path, h) in value_hashes(data) {
-        if meta.value_hashes.get(&path).is_some_and(|old| *old != h) {
-            let next = meta.values.get(&path).map_or(now, |s| now.max(s + 1));
-            meta.values.insert(path.clone(), next);
+    // time keeps none, so it wins only once someone changes it. An entry of
+    // a shared map that is new since the last save was just set (but on a
+    // copy never stamped before, like a setting, it keeps none), and one
+    // gone since was just taken away.
+    let vh = value_hashes(data);
+    let stamped_before = SHARED_VALUES
+        .iter()
+        .any(|p| meta.value_hashes.contains_key(*p));
+    let bump = |values: &mut BTreeMap<String, i64>, part: &str| {
+        let next = values.get(part).map_or(now, |s| now.max(s + 1));
+        values.insert(part.to_string(), next);
+    };
+    for (part, h) in &vh {
+        let changed = match meta.value_hashes.get(part) {
+            Some(old) => old != h,
+            None => stamped_before && map_entry(part).is_some(),
+        };
+        if changed {
+            bump(&mut meta.values, part);
         }
-        meta.value_hashes.insert(path, h);
     }
+    let gone: Vec<String> = meta
+        .value_hashes
+        .keys()
+        .filter(|p| map_entry(p).is_some() && !vh.contains_key(*p))
+        .cloned()
+        .collect();
+    for part in gone {
+        bump(&mut meta.values, &part);
+    }
+    meta.value_hashes.retain(|p, _| map_entry(p).is_none());
+    meta.value_hashes.extend(vh);
 }
 
 type Cands<'a> = HashMap<u64, Vec<(usize, Option<u64>, &'a Value)>>;
@@ -1416,6 +1487,7 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
             lmeta.values.insert(path.to_string(), best_stamp);
         }
     }
+    merge_maps(local, &mut lmeta, others, &metas);
     lmeta.tombs = tombs;
     lmeta.revived = revived;
     lmeta.stamps = out_stamps;
@@ -1441,6 +1513,74 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         v
     };
     strip(&before) != strip(local)
+}
+
+/// Shared maps (`SHARED_MAPS`): for each key the newest change wins (a
+/// stamp of 0 is a copy that never had it changed). On a tie an entry
+/// beats none, then the larger value, so every copy ends up the same; an
+/// entry left out with a newer stamp than any copy's value was taken away.
+fn merge_maps(local: &mut Value, lmeta: &mut SyncMeta, others: &[Value], metas: &[SyncMeta]) {
+    for path in SHARED_MAPS {
+        let mine = get_path(local, path).and_then(|m| m.as_object()).cloned();
+        let mut sides: Vec<(&BTreeMap<String, i64>, Option<&Map<String, Value>>)> =
+            vec![(&lmeta.values, mine.as_ref())];
+        for (o, m) in others.iter().zip(metas) {
+            sides.push((&m.values, get_path(o, path).and_then(|x| x.as_object())));
+        }
+        let mut keys: std::collections::BTreeSet<String> = Default::default();
+        for (values, obj) in &sides {
+            keys.extend(obj.into_iter().flat_map(|o| o.keys().cloned()));
+            keys.extend(values.keys().filter_map(|p| match map_entry(p) {
+                Some((mp, k)) if mp == *path => Some(k.to_string()),
+                _ => None,
+            }));
+        }
+        let mut out = mine.clone().unwrap_or_default();
+        let mut stamps = vec![];
+        for key in keys {
+            let part = map_part(path, &key);
+            let mut best: Option<(i64, Option<&Value>)> = None;
+            for (values, obj) in &sides {
+                let s = values.get(&part).copied().unwrap_or(0);
+                let v = obj.and_then(|o| o.get(&key));
+                let better = match best {
+                    None => true,
+                    Some((bs, bv)) => match (s, v.is_some()).cmp(&(bs, bv.is_some())) {
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Less => false,
+                        std::cmp::Ordering::Equal => match (v, bv) {
+                            (Some(a), Some(b)) => {
+                                serde_json::to_string(a).unwrap_or_default()
+                                    > serde_json::to_string(b).unwrap_or_default()
+                            }
+                            _ => false,
+                        },
+                    },
+                };
+                if better {
+                    best = Some((s, v));
+                }
+            }
+            let Some((s, v)) = best else {
+                continue;
+            };
+            match v {
+                Some(v) => {
+                    out.insert(key.clone(), v.clone());
+                }
+                None => {
+                    out.remove(&key);
+                }
+            }
+            if s > 0 {
+                stamps.push((part, s));
+            }
+        }
+        lmeta.values.extend(stamps);
+        if mine.is_some() || !out.is_empty() {
+            set_path(local, path, Value::Object(out));
+        }
+    }
 }
 
 /// The app version a copy in a shared folder was written by (`"app"`,
@@ -1540,12 +1680,21 @@ impl Summary {
             let e = self.revived.entry(*k).or_insert(*v);
             *e = (*e).max(*v);
         }
-        for (path, h) in value_hashes(part) {
-            if get_path(part, &path).is_some() {
-                self.value_hashes.insert(path.clone(), h);
-                if let Some(t) = m.values.get(&path) {
-                    self.values.insert(path, *t);
+        let vh = value_hashes(part);
+        for (path, h) in &vh {
+            // a shared map's entries are there when they have a fingerprint
+            if map_entry(path).is_some() || get_path(part, path).is_some() {
+                self.value_hashes.insert(path.clone(), *h);
+                if let Some(t) = m.values.get(path) {
+                    self.values.insert(path.clone(), *t);
                 }
+            }
+        }
+        // shared map entries it took away
+        for (p, t) in &m.values {
+            if map_entry(p).is_some() && !vh.contains_key(p) {
+                self.value_hashes.remove(p);
+                self.values.insert(p.clone(), *t);
             }
         }
     }
@@ -1587,7 +1736,22 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
             since.value_hashes.get(*p) != vh.get(*p) || since.values.get(*p) != meta.values.get(*p)
         })
         .collect();
-    if changed.is_empty() && tombs.is_empty() && revived.is_empty() && values.is_empty() {
+    // shared map entries set or taken away since
+    let mut entries: std::collections::BTreeSet<&str> = vh
+        .keys()
+        .chain(meta.values.keys())
+        .filter(|p| map_entry(p).is_some())
+        .map(|p| p.as_str())
+        .collect();
+    entries.retain(|p| {
+        since.value_hashes.get(*p) != vh.get(*p) || since.values.get(*p) != meta.values.get(*p)
+    });
+    if changed.is_empty()
+        && tombs.is_empty()
+        && revived.is_empty()
+        && values.is_empty()
+        && entries.is_empty()
+    {
         return None;
     }
     // the changed items with the items they sit in
@@ -1638,6 +1802,21 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
             set_path(&mut out, p, v.clone());
         }
     }
+    for p in &entries {
+        let Some((path, key)) = map_entry(p) else {
+            continue;
+        };
+        // one taken away is only its stamp
+        let Some(v) = get_path(data, path).and_then(|m| m.get(key)) else {
+            continue;
+        };
+        if get_path(&out, path).is_none() {
+            set_path(&mut out, path, Value::Object(Map::new()));
+        }
+        if let Some(m) = get_path_mut(&mut out, path).and_then(|m| m.as_object_mut()) {
+            m.insert(key.to_string(), v.clone());
+        }
+    }
     let pick = |m: &BTreeMap<u64, i64>| -> BTreeMap<u64, i64> {
         kept.iter()
             .filter_map(|id| m.get(id).map(|t| (*id, *t)))
@@ -1654,6 +1833,7 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
         revived,
         values: values
             .iter()
+            .chain(&entries)
             .filter_map(|p| meta.values.get(*p).map(|t| (p.to_string(), *t)))
             .collect(),
         v: meta.v,
@@ -2348,6 +2528,7 @@ pub fn with_team_things(personal: &Value, team: &Value) -> Value {
     for path in SHARED
         .iter()
         .chain(SHARED_VALUES)
+        .chain(SHARED_MAPS)
         .chain(&["extra.sync", "next_id"])
     {
         if let Some(x) = get_path(team, path) {
@@ -3871,5 +4052,137 @@ mod tests {
             );
             assert_eq!(v["members"][1]["slack"], json!(["U1"]));
         }
+    }
+
+    fn slack_map(v: &Value) -> Value {
+        v["extra"].get("slack_map").cloned().unwrap_or(Value::Null)
+    }
+
+    /// The same steps and results as the Swift test of the same name
+    /// (`testSharedMapEntriesMergeOneByOne`), so the phone merges a shared
+    /// map exactly like a Mac.
+    #[test]
+    fn shared_map_entries_merge_one_by_one() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &ma);
+        a["extra"]["slack_map"] = json!({"U0": 7});
+        save(&mut a, &mut ma, 10);
+        assert!(
+            ma.values.is_empty(),
+            "a copy stamped for the first time keeps no stamp"
+        );
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        // A points UA at 2, then B points UA at 3 and UB at 2
+        a["extra"]["slack_map"]["UA"] = json!(2);
+        save(&mut a, &mut ma, 20);
+        assert_eq!(ma.values.get("extra.slack_map/UA"), Some(&20));
+        b["extra"]["slack_map"]["UA"] = json!(3);
+        b["extra"]["slack_map"]["UB"] = json!(2);
+        save(&mut b, &mut mb, 30);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(slack_map(v), json!({"U0": 7, "UA": 3, "UB": 2}));
+            assert_eq!(meta_of(v).values.get("extra.slack_map/UA"), Some(&30));
+        }
+        // at once: A moves U0, B moves UB; both stay
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        ma.value_hashes = value_hashes(&a);
+        mb.value_hashes = value_hashes(&b);
+        a["extra"]["slack_map"]["U0"] = json!(9);
+        save(&mut a, &mut ma, 40);
+        b["extra"]["slack_map"]["UB"] = json!(4);
+        save(&mut b, &mut mb, 41);
+        // and later B takes UA away
+        b["extra"]["slack_map"]
+            .as_object_mut()
+            .unwrap()
+            .remove("UA");
+        save(&mut b, &mut mb, 50);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(slack_map(v), json!({"U0": 9, "UB": 4}));
+            assert_eq!(meta_of(v).values.get("extra.slack_map/UA"), Some(&50));
+        }
+        // a copy that never had UA set (stamp 0) doesn't bring it back, and
+        // one set again later does come back
+        let mut old = ws(json!([]), json!([]), &SyncMeta::default());
+        old["extra"]["slack_map"] = json!({"UA": 2, "UC": 5});
+        let mut x = a.clone();
+        merge(&mut x, &[old.clone()]);
+        assert_eq!(slack_map(&x), json!({"U0": 9, "UB": 4, "UC": 5}));
+        // two copies that each worked out an entry nobody decided (stamp 0)
+        // end up with the same one
+        let mut p = ws(json!([]), json!([]), &SyncMeta::default());
+        p["extra"]["slack_map"] = json!({"UD": 2});
+        let mut q = ws(json!([]), json!([]), &SyncMeta::default());
+        q["extra"]["slack_map"] = json!({"UD": 3});
+        swap(&mut p, &mut q);
+        assert_eq!(slack_map(&p), json!({"UD": 3}));
+        assert_eq!(slack_map(&q), json!({"UD": 3}));
+        // a copy without the map gets none made up
+        let mut e = ws(json!([]), json!([]), &SyncMeta::default());
+        merge(&mut e, &[ws(json!([]), json!([]), &SyncMeta::default())]);
+        assert!(e["extra"].get("slack_map").is_none());
+    }
+
+    #[test]
+    fn a_carried_map_entry_is_not_a_decision() {
+        let mut m = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &m);
+        save(&mut a, &mut m, 10);
+        // an upgrade works one out of older data
+        a["extra"]["slack_map"] = json!({"UA": 2});
+        carry_map_entry(&mut m, "extra.slack_map", "UA", &json!(2));
+        save(&mut a, &mut m, 20);
+        assert!(m.values.get("extra.slack_map/UA").is_none(), "not set now");
+        // a decision on another copy wins over it
+        let mut b = a.clone();
+        let mut mb = m.clone();
+        b["extra"]["slack_map"]["UA"] = json!(3);
+        save(&mut b, &mut mb, 15);
+        merge(&mut a, &[b]);
+        assert_eq!(slack_map(&a), json!({"UA": 3}));
+        // without the carry it would have counted as set now
+        let mut n = SyncMeta::default();
+        let mut c = ws(json!([]), json!([]), &n);
+        save(&mut c, &mut n, 10);
+        c["extra"]["slack_map"] = json!({"UA": 2});
+        save(&mut c, &mut n, 20);
+        assert_eq!(n.values.get("extra.slack_map/UA"), Some(&20));
+    }
+
+    #[test]
+    fn a_delta_carries_only_the_changed_map_entries() {
+        let mut m = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &m);
+        a["extra"]["slack_map"] = json!({"UA": 2, "UB": 3});
+        save(&mut a, &mut m, 10);
+        let other = a.clone();
+        let mut sum = Summary::of(&shareable(&a));
+        assert_eq!(delta(&sum, &shareable(&a)), None);
+        a["extra"]["slack_map"]["UA"] = json!(4);
+        a["extra"]["slack_map"]["UC"] = json!(5);
+        a["extra"]["slack_map"]
+            .as_object_mut()
+            .unwrap()
+            .remove("UB");
+        save(&mut a, &mut m, 20);
+        let d = delta(&sum, &shareable(&a)).unwrap();
+        assert_eq!(d["extra"]["slack_map"], json!({"UA": 4, "UC": 5}));
+        assert_eq!(
+            d["extra"]["sync"]["values"]["extra.slack_map/UB"],
+            json!(20)
+        );
+        let (mut x, mut y) = (other.clone(), other.clone());
+        merge(&mut x, &[d.clone()]);
+        merge(&mut y, &[shareable(&a)]);
+        assert_eq!(slack_map(&x), json!({"UA": 4, "UC": 5}));
+        assert_eq!(slack_map(&x), slack_map(&y));
+        assert_eq!(meta_of(&x).values, meta_of(&y).values);
+        sum.absorb(&d);
+        assert_eq!(delta(&sum, &shareable(&a)), None);
+        // joining takes the team's map
+        let joined = with_team_things(&json!({"extra": {"slack_map": {"UZ": 1}}}), &a);
+        assert_eq!(joined["extra"]["slack_map"], json!({"UA": 4, "UC": 5}));
     }
 }

@@ -10,6 +10,8 @@ pub const T: &[(&str, &str)] = &[
     ("{} mentioned you: {}", "{}님이 나를 멘션함: {}"),
     ("Reminder", "리마인더"),
     ("{} reminders are due", "리마인더 {}개의 시간이 되었습니다"),
+    ("{} reminders are overdue", "기한 지난 리마인더 {}개"),
+    ("Overdue reminder", "기한 지난 리마인더"),
     // files: attachments and the large viewer
     ("Loading {}%", "불러오는 중 {}%"),
     ("Can't show this file", "이 파일을 표시할 수 없습니다"),

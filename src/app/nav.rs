@@ -627,24 +627,31 @@ impl App {
             self.dirty = true;
             if self.data.extra.notify.reminders {
                 let key = format!("reminder:{}:{}", fired[0].id, now);
+                // came due a while ago (the app was closed): not "due now"
+                let late = fired.iter().any(|r| now - r.due_ts > 10 * 60);
                 let note = if fired.len() == 1 {
                     super::notify::Note {
                         key,
                         kind: super::notify::Kind::Reminder,
-                        title: tr("Reminder").into(),
+                        title: tr(if late { "Overdue reminder" } else { "Reminder" }).into(),
                         body: fired[0].text.clone(),
                         target: format!("reminder:{}", fired[0].id),
                     }
                 } else {
+                    // a toast shows the body on one line, so keep the names apart
                     let body = fired
                         .iter()
-                        .map(|r| r.text.clone())
+                        .map(|r| r.text.trim().replace('\n', " "))
                         .collect::<Vec<_>>()
-                        .join("\n");
+                        .join(", ");
                     super::notify::Note {
                         key,
                         kind: super::notify::Kind::Reminder,
-                        title: trf!("{} reminders are due", fired.len()),
+                        title: if late {
+                            trf!("{} reminders are overdue", fired.len())
+                        } else {
+                            trf!("{} reminders are due", fired.len())
+                        },
                         body,
                         target: "inbox".into(),
                     }

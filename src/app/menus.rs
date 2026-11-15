@@ -984,17 +984,71 @@ impl App {
                 }
             }
             Modal::Notifications => {
-                ui.label(tr("Show in your Inbox when..."));
-                let n = &mut self.data.extra.notify;
-                let mut ch = false;
-                ch |= ui.checkbox(&mut n.comments, tr("Someone comments on my tasks")).changed();
-                ch |= ui.checkbox(&mut n.mentions, tr("Someone @mentions me")).changed();
-                ch |= ui.checkbox(&mut n.assigned, tr("A task is assigned to me")).changed();
-                ch |= ui.checkbox(&mut n.reminders, tr("A reminder is due")).changed();
-                ch |= ui.checkbox(&mut n.chat, tr("New chat messages (unread counts)")).changed();
-                if ch {
-                    self.dirty = true;
-                }
+                let max_h = (ui.ctx().screen_rect().height() - 200.0).max(240.0);
+                egui::ScrollArea::vertical().id_salt("notify_settings").max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                    let persist = self.persist;
+                    let manages = self.data.member(self.data.me).is_some_and(|m| m.role == "Owner" || m.role == "Admin");
+                    let n = &mut self.data.extra.notify;
+                    let mut ch = false;
+                    ui.label(RichText::new(tr("Show in your Inbox when...")).strong());
+                    ch |= ui.checkbox(&mut n.comments, tr("Someone comments on my tasks")).changed();
+                    ch |= ui.checkbox(&mut n.mentions, tr("Someone @mentions me")).changed();
+                    ch |= ui.checkbox(&mut n.assigned, tr("A task is assigned to me")).changed();
+                    ch |= ui.checkbox(&mut n.reminders, tr("A reminder is due")).changed();
+                    ch |= ui.checkbox(&mut n.chat, tr("New chat messages (unread counts)")).changed();
+                    ui.add_space(12.0);
+                    ui.label(RichText::new(tr("Desktop notifications")).strong());
+                    ch |= ui.checkbox(&mut n.desktop, tr("Show banners when Workboard isn't in front")).changed();
+                    ch |= ui.checkbox(&mut n.sound, tr("Play a sound")).changed();
+                    ch |= ui.checkbox(&mut n.dock_badge, tr("Show a count on the Dock icon")).changed();
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(tr("Mentions, assignments, comments and reminders follow the Inbox choices above. Also tell me about:")).small().color(t.text2));
+                    ch |= ui.checkbox(&mut n.direct, tr("Direct messages")).changed();
+                    ch |= ui.checkbox(&mut n.replies, tr("Replies in threads I'm in")).changed();
+                    ch |= ui.checkbox(&mut n.huddles, tr("Huddles and calls")).changed();
+                    ch |= ui.checkbox(&mut n.reactions, tr("Reactions to my messages")).changed();
+                    ch |= ui.checkbox(&mut n.task_changes, tr("Changes to my tasks (status, due date, priority)")).changed();
+                    ui.horizontal(|ui| {
+                        ch |= ui.checkbox(&mut n.due, tr("My tasks due today, each day at")).changed();
+                        let te = ui.add_enabled(n.due, egui::TextEdit::singleline(&mut n.due_time).hint_text("09:00").desired_width(54.0));
+                        name_it(&te, "Due notice time");
+                        ch |= te.changed();
+                    });
+                    ui.horizontal(|ui| {
+                        ch |= ui.checkbox(&mut n.meetings, tr("Meetings, this many minutes before:")).changed();
+                        let dv = ui.add_enabled(n.meetings, egui::DragValue::new(&mut n.meeting_minutes).range(1..=120));
+                        name_it(&dv, "Minutes before a meeting");
+                        ch |= dv.changed();
+                    });
+                    ch |= ui.checkbox(&mut n.goals, tr("My goals due tomorrow or today")).changed();
+                    if manages {
+                        ch |= ui.checkbox(&mut n.team, tr("Someone joins the workspace")).changed();
+                    }
+                    ch |= ui.checkbox(&mut n.forms, tr("Answers to my forms")).changed();
+                    ch |= ui.checkbox(&mut n.connection, tr("The team server connection drops and comes back")).changed();
+                    ui.add_space(12.0);
+                    ui.label(RichText::new(tr("Channel messages")).strong());
+                    for (mode, label) in [("all", "Every new message"), ("mentions", "Only @mentions and my threads"), ("nothing", "Nothing")] {
+                        if ui.radio(n.channel_default == mode, tr(label)).clicked() && n.channel_default != mode {
+                            n.channel_default = mode.into();
+                            // channels set the same way as the new default no longer stand apart
+                            n.channel_modes.retain(|(_, m)| m != mode);
+                            ch = true;
+                        }
+                    }
+                    ui.label(RichText::new(tr("Set one channel apart with the bell at the top of that channel. Direct messages follow \"Direct messages\" above.")).small().color(t.text2));
+                    ui.add_space(10.0);
+                    let test = ui.button(tr("Send a test notification"));
+                    if test.clicked() {
+                        if persist {
+                            crate::notifier::post("Workboard", &tr("Notifications are working."), "inbox", n.sound);
+                        }
+                        self.toast = Some((tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.").into(), now_ts()));
+                    }
+                    if ch {
+                        self.dirty = true;
+                    }
+                });
             }
             Modal::ClickApps => {
                 ui.label(tr("Turn features on or off for this Workspace."));
@@ -2156,13 +2210,25 @@ impl App {
             self.toast = None;
             return;
         }
-        let t = self.t();
+        // a notification's toast opens what it is about
+        let target = self.notify_rt.toast_target.as_ref().filter(|(text, _)| *text == msg).map(|(_, target)| target.clone());
+        let mut open = false;
         egui::Area::new(egui::Id::new("toast")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -24.0]).show(ctx, |ui| {
-            egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).corner_radius(8).inner_margin(egui::Margin::symmetric(16, 10)).show(ui, |ui| {
-                ui.label(RichText::new(msg).color(Color32::WHITE));
+            let r = egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).corner_radius(8).inner_margin(egui::Margin::symmetric(16, 10)).show(ui, |ui| {
+                ui.label(RichText::new(&msg).color(Color32::WHITE));
             });
+            if target.is_some() {
+                let resp = ui.interact(r.response.rect, ui.id().with("toast_open"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Open {}", msg)));
+                open = resp.clicked();
+            }
         });
-        let _ = t;
+        if let (true, Some(target)) = (open, target) {
+            self.toast = None;
+            self.notify_rt.toast_target = None;
+            self.open_target(&target);
+            return;
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 }

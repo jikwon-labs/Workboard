@@ -2,6 +2,7 @@ mod app;
 mod i18n;
 mod links;
 mod model;
+mod notifier;
 use wb_sync as sync;
 mod theme;
 mod media;

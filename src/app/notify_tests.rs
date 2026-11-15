@@ -1,0 +1,652 @@
+// Notification tests: a teammate's change lands in the data (as it does when
+// the team's changes are merged in), then `notify_scan` / `notify_clock`
+// decide what to announce. `notify_rt.sent` records every announcement.
+
+use super::notify::Kind;
+use super::*;
+
+fn app() -> App {
+    let mut a = App::build(None, Some(Data::seed()));
+    a.notify_scan(); // the first look only remembers what is there
+    a.notify_rt.sent.clear();
+    a
+}
+
+fn msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
+    serde_json::from_value(serde_json::json!({"id": id, "author": author, "text": text, "ts": ts}))
+        .unwrap()
+}
+
+fn dm_with_alex(a: &App) -> u64 {
+    a.data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .id
+}
+
+fn general(a: &App) -> u64 {
+    a.data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id
+}
+
+fn post(a: &mut App, ch: u64, author: u64, text: &str) -> u64 {
+    let id = a.data.new_id();
+    let m = msg(id, author, text, now_ts());
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == ch)
+        .unwrap()
+        .messages
+        .push(m);
+    id
+}
+
+fn kinds(a: &App) -> Vec<Kind> {
+    a.notify_rt.sent.iter().map(|n| n.kind).collect()
+}
+
+fn my_task(a: &mut App, name: &str) -> u64 {
+    let list = a.data.first_list().unwrap();
+    a.apply(Action::Add {
+        list,
+        name: name.into(),
+        status: None,
+        priority: 0,
+        assignees: vec![1],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    a.data.tasks.iter().find(|t| t.name == name).unwrap().id
+}
+
+fn teammate_line(a: &mut App, task: u64, author: u64, text: &str, comment: bool) {
+    let t = a.data.tasks.iter_mut().find(|t| t.id == task).unwrap();
+    t.activity.push(Activity {
+        ts: now_ts(),
+        author,
+        text: text.into(),
+        comment,
+        ..Default::default()
+    });
+}
+
+#[test]
+fn what_was_there_at_the_start_is_not_news() {
+    let a = app();
+    assert!(a.notify_rt.sent.is_empty());
+    assert!(a.notify_rt.seeded);
+}
+
+#[test]
+fn a_direct_message_is_announced_once_and_opens_the_conversation() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    post(&mut a, dm, 2, "Can you look at the draft?");
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Direct]);
+    let n = a.notify_rt.sent[0].clone();
+    assert_eq!(n.title, "Alex Kim");
+    assert_eq!(n.body, "Can you look at the draft?");
+    assert_eq!(n.target, format!("chat:{}", dm));
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 1, "announced once");
+    // the toast opens it
+    assert!(a
+        .toast
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Can you look at the draft?"));
+    let target = n.target.clone();
+    a.open_target(&target);
+    assert_eq!(a.section, Section::Chat);
+    assert_eq!(a.chat_open, Some(dm));
+}
+
+#[test]
+fn my_own_messages_are_never_news() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    post(&mut a, dm, 1, "Note to self");
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+}
+
+#[test]
+fn channels_notify_mentions_by_default_and_follow_their_bell() {
+    let mut a = app();
+    let g = general(&a);
+    post(&mut a, g, 3, "Lunch at noon");
+    a.notify_scan();
+    assert!(
+        a.notify_rt.sent.is_empty(),
+        "plain channel messages are quiet by default"
+    );
+    post(&mut a, g, 3, "@Me can you check this?");
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Mention]);
+    // every message
+    a.data.extra.notify.set_channel_mode(g, "all");
+    post(&mut a, g, 4, "New build is up");
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Mention, Kind::Channel]);
+    assert_eq!(a.notify_rt.sent[1].title, "Jordan Park in # general");
+    // nothing at all, not even mentions
+    a.data.extra.notify.set_channel_mode(g, "nothing");
+    post(&mut a, g, 4, "@Me ping");
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 2);
+    // back to the default: the channel no longer stands apart
+    a.data.extra.notify.set_channel_mode(g, "mentions");
+    assert!(a.data.extra.notify.channel_modes.is_empty());
+}
+
+#[test]
+fn a_reply_in_my_thread_is_announced_with_the_thread() {
+    let mut a = app();
+    let g = general(&a);
+    let mine = post(&mut a, g, 1, "Who has the slides?");
+    a.notify_scan();
+    let rid = a.data.new_id();
+    let r = msg(rid, 2, "I do", now_ts());
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == g)
+        .unwrap()
+        .messages
+        .iter_mut()
+        .find(|m| m.id == mine)
+        .unwrap()
+        .replies
+        .push(r);
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Reply]);
+    assert_eq!(a.notify_rt.sent[0].target, format!("chat:{}:{}", g, mine));
+}
+
+#[test]
+fn a_huddle_rings_but_an_old_one_does_not() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    let id = post(&mut a, dm, 2, "Started a huddle");
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == dm)
+        .unwrap()
+        .messages
+        .iter_mut()
+        .find(|m| m.id == id)
+        .unwrap()
+        .call = Some(format!("workboard-huddle:{}", dm));
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Huddle]);
+    assert_eq!(a.notify_rt.sent[0].title, "Alex Kim is calling you");
+    // one from ten minutes ago is probably over
+    let old = a.data.new_id();
+    let mut m = msg(old, 2, "Started a huddle", now_ts() - 600);
+    m.call = Some(format!("workboard-huddle:{}", dm));
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == dm)
+        .unwrap()
+        .messages
+        .push(m);
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 1);
+}
+
+#[test]
+fn assignments_comments_and_changes_on_my_tasks() {
+    let mut a = app();
+    let id = my_task(&mut a, "Ship the site");
+    a.notify_scan();
+    a.notify_rt.sent.clear();
+    // Alex assigns, comments, changes the status
+    let list = a.data.first_list().unwrap();
+    a.apply(Action::Add {
+        list,
+        name: "For me".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    let other = a.data.tasks.iter().find(|t| t.name == "For me").unwrap().id;
+    teammate_line(&mut a, other, 2, "assigned to Me", false);
+    teammate_line(&mut a, id, 2, "Looks good to me", true);
+    teammate_line(
+        &mut a,
+        id,
+        2,
+        "changed status from TO DO to IN PROGRESS",
+        false,
+    );
+    teammate_line(&mut a, id, 2, "added tag web", false);
+    a.notify_scan();
+    let k = kinds(&a);
+    assert!(k.contains(&Kind::Assigned), "{:?}", k);
+    assert!(k.contains(&Kind::Comment), "{:?}", k);
+    assert!(k.contains(&Kind::TaskChange), "{:?}", k);
+    assert_eq!(k.len(), 3, "a new tag is not worth a notice: {:?}", k);
+    let change = a
+        .notify_rt
+        .sent
+        .iter()
+        .find(|n| n.kind == Kind::TaskChange)
+        .unwrap();
+    assert_eq!(change.title, "Ship the site");
+    assert_eq!(
+        change.body,
+        "Alex Kim changed status from TO DO to IN PROGRESS"
+    );
+    assert_eq!(change.target, format!("task:{}", id));
+    // and the kinds can be turned off
+    a.notify_rt.sent.clear();
+    a.data.extra.notify.task_changes = false;
+    teammate_line(&mut a, id, 3, "changed due date to Dec 1", false);
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+}
+
+#[test]
+fn paused_notifications_announce_nothing() {
+    let mut a = app();
+    a.data.extra.muted_until = now_ts() + 3600;
+    let dm = dm_with_alex(&a);
+    post(&mut a, dm, 2, "hello?");
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+}
+
+#[test]
+fn what_i_am_looking_at_is_not_announced() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    a.open_chat_at(dm, None);
+    post(&mut a, dm, 2, "you're here");
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+    // with the window in the background it is
+    a.notify_rt.away = true;
+    post(&mut a, dm, 2, "still there?");
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Direct]);
+}
+
+#[test]
+fn a_big_batch_becomes_one_summary() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    for i in 0..6 {
+        post(&mut a, dm, 2, &format!("message {}", i));
+    }
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 1);
+    assert_eq!(a.notify_rt.sent[0].title, "6 new notifications");
+    assert_eq!(a.notify_rt.sent[0].target, "inbox");
+}
+
+#[test]
+fn stale_news_from_long_ago_is_skipped() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    let id = a.data.new_id();
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == dm)
+        .unwrap()
+        .messages
+        .push(msg(id, 2, "from last week", now_ts() - 7 * 86400));
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+}
+
+fn at(d: NaiveDate, hh: u32, mm: u32) -> i64 {
+    d.and_hms_opt(hh, mm, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .earliest()
+        .unwrap()
+        .timestamp()
+}
+
+#[test]
+fn tasks_due_today_are_announced_once_a_day_at_the_chosen_time() {
+    let mut a = app();
+    let day = today();
+    // only the tasks made here are mine
+    a.data.tasks.iter_mut().for_each(|t| t.assignees.retain(|m| *m != 1));
+    let id = my_task(&mut a, "File taxes");
+    a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().due = Some(day);
+    let late = my_task(&mut a, "Send invoice");
+    a.data.tasks.iter_mut().find(|t| t.id == late).unwrap().due = Some(day - Duration::days(2));
+    a.notify_clock(at(day, 8, 30));
+    assert!(a.notify_rt.sent.is_empty(), "not before 9:00");
+    a.notify_clock(at(day, 9, 1));
+    assert_eq!(kinds(&a), vec![Kind::Due]);
+    assert_eq!(a.notify_rt.sent[0].title, "1 due today, 1 overdue");
+    assert_eq!(a.notify_rt.sent[0].target, "today");
+    a.notify_clock(at(day, 15, 0));
+    assert_eq!(a.notify_rt.sent.len(), 1, "once a day");
+    // another time of day
+    let mut b = app();
+    b.data.tasks.iter_mut().for_each(|t| t.assignees.retain(|m| *m != 1));
+    b.data.extra.notify.due_time = "07:30".into();
+    let id = my_task(&mut b, "Early");
+    b.data.tasks.iter_mut().find(|t| t.id == id).unwrap().due = Some(day);
+    b.notify_clock(at(day, 7, 45));
+    assert_eq!(kinds(&b), vec![Kind::Due]);
+}
+
+#[test]
+fn a_meeting_is_announced_shortly_before_it_starts() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.meetings.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    a.data.extra.meetings.push(Meeting {
+        id,
+        title: "Standup".into(),
+        date: day,
+        time: "14:00".into(),
+        attendees: vec![1, 2],
+        agenda: String::new(),
+        notes: String::new(),
+    });
+    a.notify_clock(at(day, 13, 40));
+    assert!(a.notify_rt.sent.is_empty());
+    a.notify_clock(at(day, 13, 52));
+    assert_eq!(kinds(&a), vec![Kind::Meeting]);
+    assert_eq!(a.notify_rt.sent[0].title, "Standup starts in 8 minutes");
+    assert_eq!(a.notify_rt.sent[0].target, format!("meeting:{}", id));
+    a.notify_clock(at(day, 13, 55));
+    assert_eq!(a.notify_rt.sent.len(), 1);
+    // a meeting I'm not in is not mine
+    let other = a.data.new_id();
+    a.data.extra.meetings.push(Meeting {
+        id: other,
+        title: "Sales".into(),
+        date: day,
+        time: "14:05".into(),
+        attendees: vec![3],
+        agenda: String::new(),
+        notes: String::new(),
+    });
+    a.notify_clock(at(day, 14, 0));
+    assert_eq!(a.notify_rt.sent.len(), 1);
+}
+
+#[test]
+fn a_goal_due_tomorrow_is_announced() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.goals.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    a.data.extra.goals.push(Goal {
+        id,
+        name: "Launch".into(),
+        color: [0, 0, 0],
+        due: Some(day + Duration::days(1)),
+        owner: 1,
+        targets: vec![GoalTarget {
+            name: "Done".into(),
+            kind: TargetKind::TrueFalse { done: false },
+        }],
+    });
+    a.notify_clock(at(day, 10, 0));
+    assert_eq!(kinds(&a), vec![Kind::Goal]);
+    assert_eq!(a.notify_rt.sent[0].title, "Goal due tomorrow: Launch");
+    a.notify_clock(at(day, 11, 0));
+    assert_eq!(a.notify_rt.sent.len(), 1);
+}
+
+#[test]
+fn owners_hear_when_someone_joins() {
+    let mut a = app();
+    let id = a.data.new_id();
+    a.data.members.push(Member {
+        id,
+        name: "Riley".into(),
+        invited: true,
+        ..Default::default()
+    });
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty(), "invited, not joined yet");
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == id)
+        .unwrap()
+        .invited = false;
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Member]);
+    // a plain member doesn't
+    let mut b = app();
+    b.data.members.iter_mut().find(|m| m.id == 1).unwrap().role = "Member".into();
+    let id = b.data.new_id();
+    b.data.members.push(Member {
+        id,
+        name: "Kai".into(),
+        ..Default::default()
+    });
+    b.notify_scan();
+    assert!(b.notify_rt.sent.is_empty());
+}
+
+#[test]
+fn a_form_answer_is_logged_and_tells_the_forms_owner() {
+    let mut a = app();
+    let list = a.data.first_list().unwrap();
+    let fid = a.data.new_id();
+    a.data.extra.forms.push(Form {
+        id: fid,
+        name: "Bug report".into(),
+        list_id: list,
+        description: String::new(),
+        fields: vec![],
+        owner: 1,
+    });
+    // the submit button leaves this line on the new task
+    a.pending_log = Some("submitted the form Bug report".into());
+    a.apply(Action::Add {
+        list,
+        name: "Crash on start".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    let t = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.name == "Crash on start")
+        .unwrap();
+    assert!(t
+        .activity
+        .iter()
+        .any(|x| x.text == "submitted the form Bug report"));
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty(), "my own answer");
+    // a teammate's answer
+    a.apply(Action::Add {
+        list,
+        name: "Login fails".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    let tid = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.name == "Login fails")
+        .unwrap()
+        .id;
+    teammate_line(&mut a, tid, 3, "submitted the form Bug report", false);
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Form]);
+    assert_eq!(a.notify_rt.sent[0].title, "New answer to Bug report");
+    assert_eq!(a.notify_rt.sent[0].body, "Sam Lee answered: Login fails");
+}
+
+#[test]
+fn a_dropped_server_connection_is_announced_after_a_while_and_when_back() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "d".into(),
+        tag: 1,
+        server: Some("macmini".into()),
+    });
+    let t0 = now_ts();
+    a.sync_rt.net_status = Some(wb_net::Status::Connected);
+    a.notify_connection(t0);
+    a.sync_rt.net_status = Some(wb_net::Status::Reconnecting("timed out".into()));
+    a.notify_connection(t0 + 1);
+    a.notify_connection(t0 + 10);
+    assert!(
+        a.notify_rt.sent.is_empty(),
+        "a short drop is not worth a notice"
+    );
+    a.notify_connection(t0 + 40);
+    assert_eq!(kinds(&a), vec![Kind::Connection]);
+    a.sync_rt.net_status = Some(wb_net::Status::Connected);
+    a.notify_connection(t0 + 50);
+    assert_eq!(a.notify_rt.sent.len(), 2);
+    assert_eq!(
+        a.notify_rt.sent[1].title,
+        "Connected to the team server again"
+    );
+    // a short drop and back says nothing
+    a.sync_rt.net_status = Some(wb_net::Status::Reconnecting("x".into()));
+    a.notify_connection(t0 + 60);
+    a.sync_rt.net_status = Some(wb_net::Status::Connected);
+    a.notify_connection(t0 + 65);
+    assert_eq!(a.notify_rt.sent.len(), 2);
+}
+
+#[test]
+fn reactions_are_off_until_turned_on() {
+    let mut a = app();
+    let g = general(&a);
+    let mine = post(&mut a, g, 1, "Shipped!");
+    a.notify_scan();
+    let react = |a: &mut App, user: u64, emoji: &str| {
+        let m = a
+            .data
+            .channels
+            .iter_mut()
+            .find(|c| c.id == g)
+            .unwrap()
+            .messages
+            .iter_mut()
+            .find(|m| m.id == mine)
+            .unwrap();
+        m.reactions.push(Reaction {
+            emoji: emoji.into(),
+            users: vec![user],
+        });
+    };
+    react(&mut a, 2, "\u{1F389}");
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+    a.data.extra.notify.reactions = true;
+    a.notify_scan(); // the earlier reaction was already seen
+    assert!(a.notify_rt.sent.is_empty());
+    react(&mut a, 3, "\u{1F44D}");
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Reaction]);
+    assert_eq!(
+        a.notify_rt.sent[0].title,
+        "Sam Lee reacted \u{1F44D} to your message"
+    );
+}
+
+#[test]
+fn reminders_go_through_notifications_and_open_their_task() {
+    let mut a = app();
+    let id = my_task(&mut a, "Call the bank");
+    let rid = a.data.new_id();
+    a.data.extra.reminders.push(Reminder {
+        id: rid,
+        text: "Call the bank".into(),
+        due_ts: now_ts() - 5,
+        owner: 1,
+        task: Some(id),
+        ..Default::default()
+    });
+    a.reminder_tick(None);
+    assert_eq!(kinds(&a), vec![Kind::Reminder]);
+    assert_eq!(a.toast.as_ref().unwrap().0, "Reminder: Call the bank");
+    let target = a.notify_rt.sent[0].target.clone();
+    a.open_target(&target);
+    a.apply_actions();
+    assert_eq!(a.open_task, Some(id));
+}
+
+#[test]
+fn the_dock_count_adds_unread_direct_messages_to_the_inbox() {
+    let mut a = app();
+    let base = a.dock_count();
+    let dm = dm_with_alex(&a);
+    post(&mut a, dm, 2, "one");
+    post(&mut a, dm, 2, "two");
+    assert_eq!(a.dock_count(), base + 2);
+    a.data.extra.notify.dock_badge = false;
+    assert_eq!(a.dock_count(), 0);
+}
+
+#[test]
+fn notify_settings_from_older_files_get_the_new_defaults() {
+    let n: NotifySettings = serde_json::from_str(r#"{"comments": false, "mentions": true, "reminders": true, "chat": true, "assigned": true}"#).unwrap();
+    assert!(!n.comments);
+    assert!(n.desktop && n.direct && n.due && !n.reactions);
+    assert_eq!(n.channel_default, "mentions");
+    assert_eq!(n.due_time, "09:00");
+}
+
+#[test]
+fn notify_settings_stay_on_this_computer() {
+    // only wb_sync::SHARED paths go to teammates
+    assert!(!crate::sync::SHARED.iter().any(|p| p.contains("notify")));
+}
+
+#[test]
+fn a_mention_picked_from_the_list_is_announced_by_member_not_name() {
+    let mut a = app();
+    let g = general(&a);
+    // picked from the mention list: kept by id, whatever the text says
+    let id = a.data.new_id();
+    let m: Message = serde_json::from_value(serde_json::json!({"id": id, "author": 2, "text": "@Boss please review", "ts": now_ts(), "mentions": [1]})).unwrap();
+    a.data.channels.iter_mut().find(|c| c.id == g).unwrap().messages.push(m);
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Mention]);
+    // someone else picked: not me, even with my name in the text
+    let id = a.data.new_id();
+    let m: Message = serde_json::from_value(serde_json::json!({"id": id, "author": 2, "text": "@Me (the other one)", "ts": now_ts(), "mentions": [3]})).unwrap();
+    a.data.channels.iter_mut().find(|c| c.id == g).unwrap().messages.push(m);
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 1);
+}

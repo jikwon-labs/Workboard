@@ -6047,6 +6047,7 @@ name = "workboard"
 version = "0.1.6"
 dependencies = [
  "accesskit",
+ "block",
  "chrono",
  "eframe",
  "egui",

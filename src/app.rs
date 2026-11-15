@@ -21,6 +21,7 @@ mod listview;
 mod menus;
 mod more;
 mod nav;
+mod notify;
 mod pages;
 mod parity;
 mod comments;
@@ -30,6 +31,8 @@ mod taskfields;
 mod together;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod notify_tests;
 #[cfg(test)]
 mod account_tests;
 #[cfg(test)]
@@ -355,12 +358,15 @@ pub struct App {
     toast: Option<(String, i64)>,
     sync_rt: together::SyncRt,
     huddle: huddle::HuddleRt,
+    notify_rt: notify::NotifyRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
     ws_places: HashMap<String, &'static str>,
     create_text: String,
     new_message_open: bool,
     pending_template: Option<TaskTemplate>,
     pending_description: Option<String>,
+    /// A history line for the next task added (a form answer says which form).
+    pending_log: Option<String>,
     /// Tags for the next task created from the Create Task window.
     pending_tags: Vec<String>,
     wb_open: Option<u64>,
@@ -618,11 +624,13 @@ impl App {
             toast: if persist { Data::take_unreadable().map(|p| (unreadable_note(&p), now_ts() + 10)) } else { None },
             sync_rt: Default::default(),
             huddle: Default::default(),
+            notify_rt: Default::default(),
             ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
             pending_template: None,
             pending_description: None,
+            pending_log: None,
             pending_tags: vec![],
             wb_open: None,
             wb_tool: 0,
@@ -1241,6 +1249,11 @@ impl App {
                 if let Some(desc) = self.pending_description.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         t.description = desc;
+                    }
+                }
+                if let Some(line) = self.pending_log.take() {
+                    if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                        Self::log(t, me, line);
                     }
                 }
                 let tags = std::mem::take(&mut self.pending_tags);
@@ -3879,6 +3892,7 @@ impl App {
             self.sync_tick(ctx);
         }
         self.huddle_tick(Some(ctx));
+        self.notify_tick(Some(ctx));
         self.huddle_bar(ctx);
         // the first start: how do you want to start?
         if self.data.extra.welcome && self.persist && self.modal.is_none() {

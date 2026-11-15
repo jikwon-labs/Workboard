@@ -383,9 +383,6 @@ impl App {
             self.sync_rt.pending = true;
         }
         let me = self.data.me;
-        // (only in conversations I may see)
-        let count_new = |a: &Self| a.data.channels.iter().filter(|c| a.can_see(c)).flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
-        let before = count_new(self);
         let seen: Vec<u64> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (!c.private || c.members.contains(&me))).map(|c| c.id).collect();
         let mut v = self.data_value();
         let mut changed = sync::merge(&mut v, others);
@@ -419,10 +416,8 @@ impl App {
             self.left_channel(ch);
         }
         if changed {
-            let n = count_new(self).saturating_sub(before);
-            if n > 0 {
-                self.toast = Some((if n == 1 { tr("1 new message from your team").into() } else { trf!("{} new messages from your team", n) }, now_ts()));
-            }
+            // what's new for me is announced on the next frame (notify.rs)
+            self.notify_rt.pending = true;
             self.save_local();
             self.sync_rt.pending = true;
         }
@@ -826,6 +821,8 @@ impl App {
         self.chat_open = None;
         self.recent.clear();
         self.clear_history();
+        // a workspace I just joined: what is in it already isn't news
+        self.notify_rt.seeded = false;
         self.save_local();
     }
 

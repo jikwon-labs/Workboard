@@ -28,6 +28,8 @@ accesskit = "0.17"
 security-framework = "3"
 winit = "0.30"
 objc = "0.2"
+# blocks for UNUserNotificationCenter callbacks (src/notifier.rs); the version objc 0.2 pairs with
+block = "0.1"
 raw-window-handle = "0.6"
 
 # one-line fix in nokhwa's macOS camera bindings (see third_party/nokhwa-bindings-macos/README.md)

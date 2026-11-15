@@ -510,3 +510,37 @@ fn dark_mode_dialogs_and_theme_swatches_stand_out() {
         .count();
     assert_eq!(rings, crate::theme::ACCENTS.len());
 }
+
+#[test]
+fn a_new_workspace_shows_its_colour_chosen() {
+    let mut d = Data::fresh();
+    d.extra.welcome = false;
+    let start = d.extra.workspace_color;
+    let mut h = with(d, 1440.0, 900.0);
+    let text = h.app.t().text;
+    h.app.modal = Some(Modal::WorkspaceSettings {
+        name: "My Workspace".into(),
+    });
+    h.settle();
+    let chosen = |h: &Ui1| {
+        h.all_shapes()
+            .iter()
+            .filter_map(|s| match s {
+                egui::Shape::Rect(r)
+                    if r.stroke.width == 2.0
+                        && r.stroke.color == text
+                        && r.rect.width() == 22.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .count()
+    };
+    assert_eq!(chosen(&h), 1, "the colour it has is marked");
+    // a palette colour picked later is marked in its place
+    h.app.data.extra.workspace_color = STATUS_PALETTE[3];
+    h.settle();
+    assert_eq!(chosen(&h), 1);
+    assert_ne!(start, STATUS_PALETTE[3]);
+}

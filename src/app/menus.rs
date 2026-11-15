@@ -1334,8 +1334,15 @@ impl App {
                 ui.add(field(name).desired_width(f32::INFINITY));
                 ui.add_space(6.0);
                 ui.label(tr("Workspace color"));
+                // the current colour first when it isn't one of these (the
+                // default a new workspace starts with is not), so it shows chosen
+                let current = self.data.extra.workspace_color;
+                let mut colors: Vec<[u8; 3]> = STATUS_PALETTE[1..].to_vec();
+                if !colors.contains(&current) {
+                    colors.insert(0, current);
+                }
                 ui.horizontal_wrapped(|ui| {
-                    for c in STATUS_PALETTE.iter().skip(1) {
+                    for c in colors.iter() {
                         let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
                         ui.painter().rect_filled(r.shrink(2.0), 5.0, rgb(*c));
                         hover_ring(ui, &resp, r.shrink(1.0), 6.0);

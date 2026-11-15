@@ -1752,6 +1752,8 @@ impl App {
             ui.add_space(4.0);
         }
         let field = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
+            // a gap above each name, so a name groups with its own field
+            ui.add_space(4.0);
             ui.label(RichText::new(tr(label)).color(t.text2));
             let r = ui.add(
                 field(text)
@@ -1913,6 +1915,14 @@ impl App {
                         }),
                     )
                     .clicked();
+                    // the first-start dialog's Back goes beside the button
+                    // instead of on a line of its own below
+                    let back_id = egui::Id::new(LOGIN_BACK);
+                    if ui.data(|d| d.get_temp::<bool>(back_id)).unwrap_or(false)
+                        && ui.button(tr("Back")).clicked()
+                    {
+                        ui.data_mut(|d| d.insert_temp(back_id.with("clicked"), true));
+                    }
                 });
             });
         }
@@ -1976,11 +1986,17 @@ impl App {
         let mut form = std::mem::take(&mut self.sync_rt.acct);
         let field = |ui: &mut Ui, text: &mut String, label: &str, secret: bool| {
             ui.horizontal(|ui| {
-                ui.add_sized(
-                    [130.0, 20.0],
-                    egui::Label::new(RichText::new(tr(label)).color(t.text2)),
+                // names start at one left edge (add_sized centred them), and
+                // the field takes the rest of the row
+                ui.allocate_ui_with_layout(
+                    vec2(130.0, CONTROL_H),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.set_min_width(130.0);
+                        ui.label(RichText::new(tr(label)).color(t.text2));
+                    },
                 );
-                let r = ui.add(field(text).password(secret).desired_width(260.0));
+                let r = ui.add(field(text).password(secret).desired_width(f32::INFINITY));
                 let name = format!("{} entry", label);
                 r.widget_info(move || {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name)
@@ -2103,16 +2119,43 @@ impl App {
                     ),
                 ];
                 for (to, title, desc) in choices {
-                    let r = ui.add(
-                        egui::Button::new(
-                            RichText::new(format!("{}\n{}", tr(title), tr(desc))).color(t.text),
-                        )
-                        .min_size(vec2(ui.available_width(), 52.0))
-                        .corner_radius(8),
+                    // a card: the title, then the description smaller and grey,
+                    // with room inside the border (one button's text ran both
+                    // together at one size against the edge)
+                    let w = ui.available_width();
+                    let tg = ui.painter().layout_no_wrap(
+                        tr(title).to_string(),
+                        FontId::proportional(14.5),
+                        t.text,
                     );
-                    r.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title)
-                    });
+                    let dg = ui.painter().layout(
+                        tr(desc).to_string(),
+                        FontId::proportional(12.5),
+                        t.text2,
+                        w - 32.0,
+                    );
+                    let h = 12.0 + tg.size().y + 3.0 + dg.size().y + 12.0;
+                    let (cr, r) = ui.allocate_exact_size(vec2(w, h), Sense::click());
+                    name_it(&r, title);
+                    ui.painter().rect(
+                        cr,
+                        8.0,
+                        if r.hovered() { t.hover } else { t.bg },
+                        Stroke::new(
+                            1.0,
+                            if r.hovered() {
+                                hover_line(ui)
+                            } else {
+                                t.border
+                            },
+                        ),
+                        egui::StrokeKind::Inside,
+                    );
+                    let tx = cr.left() + 16.0;
+                    ui.painter()
+                        .galley(pos2(tx, cr.top() + 12.0), tg.clone(), t.text);
+                    ui.painter()
+                        .galley(pos2(tx, cr.top() + 12.0 + tg.size().y + 3.0), dg, t.text2);
                     if r.clicked() {
                         *step = to;
                         self.sync_rt.form = Form {
@@ -2180,9 +2223,19 @@ impl App {
                     "Type your team's server address. Then sign in with your email and password, or use the invite code you were sent."
                 })).color(t.text2));
                 ui.add_space(4.0);
+                let back_id = egui::Id::new(LOGIN_BACK);
+                let can_back = self.sync_rt.joining.is_none();
+                ui.data_mut(|d| {
+                    d.insert_temp(back_id, can_back);
+                    d.remove::<bool>(back_id.with("clicked"));
+                });
                 self.server_form(ui, t, addr, modes);
-                ui.add_space(4.0);
-                if self.sync_rt.joining.is_none() && ui.button(tr("Back")).clicked() {
+                let back = ui.data_mut(|d| {
+                    d.remove::<bool>(back_id);
+                    d.remove_temp::<bool>(back_id.with("clicked"))
+                        .unwrap_or(false)
+                });
+                if back {
                     *step = 0;
                     self.sync_rt.form = Form::default();
                 }
@@ -2644,3 +2697,7 @@ impl App {
         });
     }
 }
+
+/// Set while the first-start dialog draws the sign-in form, which then puts
+/// a Back button beside its own button.
+const LOGIN_BACK: &str = "__wb_login_back";

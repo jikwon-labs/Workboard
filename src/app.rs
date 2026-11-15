@@ -2688,14 +2688,15 @@ impl App {
                 self.cal_month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
                 week_anchor = td;
             }
-            if ui.button("<").clicked() {
+            let (back, fwd) = icons::period_arrows(ui, &t);
+            if back {
                 if self.cal_week {
                     week_anchor -= Duration::days(7);
                 } else {
                     self.cal_month = add_months(self.cal_month, -1);
                 }
             }
-            if ui.button(">").clicked() {
+            if fwd {
                 if self.cal_week {
                     week_anchor += Duration::days(7);
                 } else {
@@ -2705,11 +2706,7 @@ impl App {
             let title = if self.cal_week {
                 let ws = week_anchor
                     - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64);
-                format!(
-                    "{} \u{2013} {}",
-                    ws.text("%b %-d"),
-                    (ws + Duration::days(6)).text("%b %-d, %Y")
-                )
+                week_range(ws)
             } else {
                 self.cal_month.text("%B %Y")
             };

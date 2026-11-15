@@ -1121,7 +1121,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.dash_open = None;
@@ -1266,7 +1266,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.wb_open = None;
@@ -1339,7 +1339,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.form_open = None;
@@ -1637,10 +1637,10 @@ impl App {
                         }
                     }
                 });
+                ui.add_space(4.0);
+                // a framed button like Delete on dashboards and whiteboards
                 if ui
-                    .add(ghost(egui::Button::new(
-                        RichText::new(tr("Delete team")).color(t.danger),
-                    )))
+                    .button(RichText::new(tr("Delete team")).color(t.danger))
                     .clicked()
                 {
                     self.modal = Some(Modal::ConfirmRemove {
@@ -1713,13 +1713,18 @@ impl App {
 
     fn org_chart(&mut self, ui: &mut Ui) {
         let t = self.t();
-        self.page_bar(ui, "Org Chart", |_, _| {});
+        // titled like People and Analytics beside it (it had the smaller
+        // page bar with a line under it)
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(24, 24))
+                    .inner_margin(egui::Margin::symmetric(24, 16))
                     .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(tr("Org Chart")).size(20.0));
+                        });
+                        ui.add_space(8.0);
                         for role in ["Owner", "Admin", "Member", "Guest"] {
                             let people: Vec<Member> = self
                                 .data
@@ -1866,10 +1871,11 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.add(ghost(egui::Button::new(RichText::new("<").size(16.0)))).clicked() {
+                    let (back, fwd) = super::icons::period_arrows(ui, &t);
+                    if back {
                         self.sheet_week = ws - Duration::days(7);
                     }
-                    if ui.add(ghost(egui::Button::new(RichText::new(">").size(16.0)))).clicked() {
+                    if fwd {
                         self.sheet_week = ws + Duration::days(7);
                     }
                     let r = ui.add(ghost(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0))));

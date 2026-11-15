@@ -154,6 +154,19 @@ pub(super) fn icon_count(
     r.right() - at.x
 }
 
+/// The back and forward buttons beside a week or month (Calendar,
+/// Planner, Timesheets): framed, square, as tall as the other controls.
+/// Returns (back clicked, forward clicked).
+pub(super) fn period_arrows(ui: &mut Ui, t: &Theme) -> (bool, bool) {
+    let back = icon_button(ui, t, "chevron_left", "", "Previous period", true)
+        .on_hover_text(tr("Previous"))
+        .clicked();
+    let fwd = icon_button(ui, t, "chevron_right", "", "Next period", true)
+        .on_hover_text(tr("Next"))
+        .clicked();
+    (back, fwd)
+}
+
 /// The gap between an icon and the text after it.
 pub(super) const ICON_GAP: f32 = 6.0;
 
@@ -1227,6 +1240,14 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
             line(vec2(6.5, 0.0), vec2(2.5, -4.0));
             line(vec2(6.5, 0.0), vec2(2.5, 4.0));
+        }
+        "chevron_left" => {
+            line(vec2(2.5, -5.0), vec2(-2.5, 0.0));
+            line(vec2(-2.5, 0.0), vec2(2.5, 5.0));
+        }
+        "chevron_right" => {
+            line(vec2(-2.5, -5.0), vec2(2.5, 0.0));
+            line(vec2(2.5, 0.0), vec2(-2.5, 5.0));
         }
         _ => return false,
     }

@@ -153,7 +153,9 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
         Color32::from_rgb(200, 215, 250)
     };
     v.selection.stroke = egui::Stroke::new(1.0, t.text);
-    v.hyperlink_color = t.selected_text;
+    // links in the accent text colour, so they read as links (white or
+    // near-black bold looked like any label)
+    v.hyperlink_color = t.accent_text;
     v.window_stroke = egui::Stroke::new(1.0, t.border);
     v.window_corner_radius = egui::CornerRadius::same(12);
     v.menu_corner_radius = egui::CornerRadius::same(8);

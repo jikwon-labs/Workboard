@@ -162,4 +162,6 @@ pub const T: &[(&str, &str)] = &[
     ("No new comments, mentions or assignments.", "새 댓글, 멘션, 할당이 없습니다."),
     ("1 archived match is not shown", "보관된 항목 1개는 결과에 넣지 않았습니다"),
     ("{} archived matches are not shown", "보관된 항목 {}개는 결과에 넣지 않았습니다"),
+    // the post composer's title field
+    ("Add a title", "제목 입력"),
 ];

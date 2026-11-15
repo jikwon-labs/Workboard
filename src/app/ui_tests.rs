@@ -6976,10 +6976,10 @@ fn timesheet_rows_added_by_hand_stay_in_their_week() {
     h.click("+ Add task");
     h.click("Renew passport");
     assert!(h.has("Remove row Renew passport"));
-    h.click(">");
+    h.click("Next period");
     assert_eq!(h.app.sheet_week, ws + Duration::days(7));
     assert!(!h.has("Remove row Renew passport"), "not in the next week");
-    h.click("<");
+    h.click("Previous period");
     assert!(h.has("Remove row Renew passport"));
     h.click("Remove row Renew passport");
     assert!(!h.has("Remove row Renew passport"), "the x takes it off");
@@ -10346,4 +10346,20 @@ fn joining_a_team_finishes_the_status_edits_and_leaves_the_teams_statuses_alone(
     let names: Vec<String> = sp.statuses.iter().map(|s| s.name.clone()).collect();
     assert_eq!(names, team_names, "the team's statuses as they were");
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// The profile menu, opened at the right end of the top bar, keeps a margin
+/// from the window's edge instead of touching it.
+#[test]
+fn profile_menu_keeps_off_the_window_edge() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.settle();
+    let r = h.rect("Set status");
+    // 8 pt of margin outside the menu's own frame (about 7 pt)
+    assert!(
+        r.right() <= h.size.x - 14.0,
+        "Set status ends at {}",
+        r.right()
+    );
 }

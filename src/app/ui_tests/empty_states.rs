@@ -50,6 +50,19 @@ impl Ui1 {
         out
     }
 
+    /// Clicks the lowest control with this name (a dialog's button, not
+    /// its title).
+    fn click_lowest(&mut self, name: &str) {
+        let r = self
+            .tree
+            .iter()
+            .filter(|(n, _)| n == name)
+            .map(|(_, r)| *r)
+            .max_by(|a, b| a.center().y.total_cmp(&b.center().y))
+            .unwrap_or_else(|| panic!("nothing named {:?}", name));
+        self.click_at(r.center());
+    }
+
     fn count_named(&self, name: &str) -> usize {
         self.tree.iter().filter(|(n, _)| n == name).count()
     }
@@ -571,4 +584,31 @@ fn mark_all_as_read_is_off_with_nothing_unread() {
     h.settle();
     h.click("Mark all as read");
     assert!(h.app.data.extra.replies_seen >= ts);
+}
+
+#[test]
+fn new_dashboard_name_field_is_labelled_and_create_waits_for_a_name() {
+    let mut h = Ui1::new();
+    let n = h.app.data.extra.dashboards.len();
+    h.app.modal = Some(Modal::NewDashboard {
+        name: String::new(),
+    });
+    h.settle();
+    assert!(h.texts().iter().any(|x| x == "Dashboard name"));
+    assert!(h
+        .texts()
+        .iter()
+        .any(|x| x == "For example: Weekly overview"));
+    h.click_lowest("Create Dashboard");
+    assert_eq!(
+        h.app.data.extra.dashboards.len(),
+        n,
+        "no name, nothing made"
+    );
+    assert!(matches!(h.app.modal, Some(Modal::NewDashboard { .. })));
+    h.click("Dashboard name entry");
+    h.type_text("Weekly");
+    h.click_lowest("Create Dashboard");
+    assert_eq!(h.app.data.extra.dashboards.len(), n + 1);
+    assert_eq!(h.app.data.extra.dashboards.last().unwrap().name, "Weekly");
 }

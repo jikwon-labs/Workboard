@@ -2583,7 +2583,13 @@ impl App {
                 close = self.confirm_remove_body(ui, t, kind, *id, name)
             }
             Modal::NewDashboard { name } => {
-                ui.add(field(name).desired_width(f32::INFINITY));
+                ui.label(tr("Dashboard name"));
+                let r = ui.add(
+                    field(name)
+                        .hint_text(tr("For example: Weekly overview"))
+                        .desired_width(f32::INFINITY),
+                );
+                name_field(&r, "Dashboard name entry");
                 let spaces: Vec<(u64, String)> = self
                     .data
                     .spaces
@@ -2598,9 +2604,12 @@ impl App {
                     .color(t.text2),
                 );
                 let _ = spaces;
-                if primary_button(ui, t, tr("Create Dashboard")).clicked()
-                    && !name.trim().is_empty()
-                {
+                // off until it has a name, rather than doing nothing
+                let named = !name.trim().is_empty();
+                let create = ui
+                    .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create Dashboard")))
+                    .inner;
+                if create.clicked() && named {
                     self.new_dashboard(name.trim());
                     self.section = Section::Dashboards;
                     close = true;

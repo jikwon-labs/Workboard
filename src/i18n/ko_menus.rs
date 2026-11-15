@@ -42,6 +42,8 @@ pub const T: &[(&str, &str)] = &[
     ("Create Whiteboard", "화이트보드 만들기"),
     ("View People", "사람 보기"),
     ("Create Dashboard", "대시보드 만들기"),
+    ("Dashboard name", "대시보드 이름"),
+    ("For example: Weekly overview", "예: 주간 현황"),
     ("AI Notetaker", "AI 회의록"),
     ("Unpin from the top bar", "상단 막대에서 고정 해제"),
     ("Pin to the top bar", "상단 막대에 고정"),

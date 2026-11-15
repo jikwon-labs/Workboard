@@ -7142,3 +7142,83 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
     b.write_shared();
     net_until(&mut a, "A keeps it all", |a| a.task(task.id).is_some());
 }
+
+#[test]
+fn just_made_an_admin_my_copy_keeps_a_space_the_server_sent() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "d".into(),
+        tag: 1,
+        server: Some("127.0.0.1:1".into()),
+    });
+    // the server made me an admin, and the copy came before the word did
+    a.sync_rt.role = Some(wb_net::Role::Member);
+    let mut team = a.data.clone();
+    let mut plans = team.spaces[0].clone();
+    plans.id = 7400;
+    plans.name = "Plans".into();
+    plans.lists.clear();
+    plans.folders.clear();
+    plans.private_owner = None;
+    plans.sharing = Some(SpaceSharing {
+        everyone: false,
+        people: vec![SpaceGrant {
+            member: 999,
+            level: "view".into(),
+        }],
+    });
+    team.spaces.push(plans);
+    // a DM between two other people still leaves, whatever my role
+    team.channels.push(Channel {
+        id: 7401,
+        kind: ChannelKind::Direct,
+        members: vec![2, 3],
+        ..Default::default()
+    });
+    a.merge_in(&[serde_json::to_value(&team).unwrap()], &[]);
+    assert!(
+        a.data.spaces.iter().any(|s| s.id == 7400),
+        "the server's word on what I may see stands"
+    );
+    assert!(!a.data.channels.iter().any(|c| c.id == 7401));
+}
+
+#[test]
+fn an_older_file_notes_changes_before_the_first_sync_field_by_field() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "d".into(),
+        tag: 1,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let tid = a.data.tasks[0].id;
+    a.data.tasks[0].attachments = vec![Attachment {
+        file: "x".into(),
+        name: "x.png".into(),
+        ..Default::default()
+    }];
+    a.sync_note_change();
+    // saved by an app from before field fingerprints were kept
+    let m = &mut a.data.extra.sync;
+    m.field_hashes.clear();
+    m.fields.clear();
+    m.v = 2;
+    let team = serde_json::to_value(&a.data).unwrap();
+    // opened again: unchanged items get their field fingerprints
+    let mut b = App::build(None, Some(a.data.clone()));
+    assert!(b.data.extra.sync.field_hashes.contains_key(&tid));
+    // the last attachment removed before the first sync
+    b.data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == tid)
+        .unwrap()
+        .attachments
+        .clear();
+    b.sync_note_change();
+    b.merge_in(&[team], &[]);
+    let t = b.data.tasks.iter().find(|t| t.id == tid).unwrap();
+    assert!(t.attachments.is_empty(), "it stays removed");
+}

@@ -455,7 +455,8 @@ impl App {
         if let Some(p) = Data::take_unreadable() {
             self.toast = Some((super::unreadable_note(&p), now_ts()));
         }
-        if let Some(d) = d {
+        if let Some(mut d) = d {
+            super::together::fill_sync_baseline(&mut d);
             self.data = d;
             self.ws_file = file.to_string();
             if self.persist {

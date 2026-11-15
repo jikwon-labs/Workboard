@@ -369,6 +369,26 @@ pub(super) fn legacy_shape(v: &serde_json::Value) -> serde_json::Value {
     v
 }
 
+/// After opening a workspace: a copy saved before field fingerprints were
+/// kept gets them for every item unchanged since its last save, so changes
+/// made before the next sync are noted field by field (as the iPhone does
+/// when it opens an older copy). Without them a whole item counts as
+/// changed, and a field emptied offline (the last attachment removed) comes
+/// back from the team's copy.
+pub(super) fn fill_sync_baseline(data: &mut Data) {
+    if data.extra.shared.is_none() || data.extra.sync.hashes.is_empty() {
+        return;
+    }
+    let v = serde_json::to_value(&*data).unwrap_or_default();
+    let meta = &mut data.extra.sync;
+    if meta.v == 1 {
+        // fingerprints from before fields at their default were left out
+        // of the file: the new shape alone isn't an edit
+        sync::carry_hashes(meta, &legacy_shape(&v), &v);
+    }
+    sync::fill_field_hashes(meta, &v);
+}
+
 impl App {
     fn data_value(&self) -> serde_json::Value {
         serde_json::to_value(&self.data).unwrap_or_default()
@@ -496,9 +516,13 @@ impl App {
             .as_ref()
             .is_some_and(|c| c.server.is_some());
         let gone = if on_server {
+            // the server says what our role keeps from us (spaces shared
+            // with chosen people); our own copy adds only what no role
+            // opens (others' DMs, Personal spaces and private docs). Our
+            // role here may be a step behind the server's: just made an
+            // admin, a space that just came would go again.
             let mut ids = hidden.to_vec();
-            let manages = self.sync_rt.role.is_some_and(|r| r.manages());
-            ids.extend(sync::hidden_from(&v, me, manages));
+            ids.extend(sync::hidden_from(&v, me, true));
             sync::hide(&mut v, &ids)
         } else {
             vec![]

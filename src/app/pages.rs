@@ -1123,19 +1123,7 @@ impl App {
                     .collect();
                 let max = rows.iter().map(|r| r.1).max().unwrap_or(1).max(1) as f32;
                 for (name, secs, c) in rows {
-                    bar_row(
-                        ui,
-                        &t,
-                        &name,
-                        secs as f32,
-                        max,
-                        c,
-                        if secs > 0 {
-                            fmt_duration(secs)
-                        } else {
-                            "-".into()
-                        },
-                    );
+                    bar_row(ui, &t, &name, secs as f32, max, c, fmt_hm(secs));
                 }
             }
             "time" => {
@@ -1165,11 +1153,7 @@ impl App {
                         *secs as f32,
                         max,
                         t.primary,
-                        if *secs > 0 {
-                            fmt_duration(*secs)
-                        } else {
-                            "-".into()
-                        },
+                        fmt_hm(*secs),
                     );
                 }
             }

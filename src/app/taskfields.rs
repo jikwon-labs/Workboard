@@ -70,8 +70,8 @@ pub fn parse_estimate(s: &str) -> Option<u32> {
         let v: f64 = num.parse().ok()?;
         num.clear();
         let mult = match unit.as_str() {
-            "h" | "hr" | "hrs" | "hour" | "hours" => 60.0,
-            "m" | "min" | "mins" | "minute" | "minutes" => 1.0,
+            "h" | "hr" | "hrs" | "hour" | "hours" | "\u{c2dc}\u{ac04}" => 60.0,
+            "m" | "min" | "mins" | "minute" | "minutes" | "\u{bd84}" => 1.0,
             "d" | "day" | "days" => 480.0,
             "w" | "wk" | "week" | "weeks" => 2400.0,
             _ => return None,

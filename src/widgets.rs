@@ -278,6 +278,18 @@ pub fn fmt_duration(secs: i64) -> String {
     }
 }
 
+/// Tracked time in hours and minutes ("1h 20m", "40m", "2h"), the one way
+/// timesheets show it, in their cells and their totals; "-" for none.
+pub fn fmt_hm(secs: i64) -> String {
+    let min = (secs as f64 / 60.0).round() as i64;
+    match (min / 60, min % 60) {
+        (0, 0) => "-".into(),
+        (0, m) => crate::trf!("{}m", m),
+        (h, 0) => crate::trf!("{}h", h),
+        (h, m) => crate::trf!("{}h {}m", h, m),
+    }
+}
+
 pub fn fmt_ago(ts: i64) -> String {
     let d = now_ts() - ts;
     if d < 60 {

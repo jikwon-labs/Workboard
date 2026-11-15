@@ -2035,8 +2035,14 @@ impl App {
                                     .range(0.0..=24.0)
                                     .clamp_existing_to_range(false)
                                     .speed(0.05)
-                                    .max_decimals(2)
-                                    .suffix(tr("h")),
+                                    .custom_formatter(|h, _| fmt_hm((h * 3600.0).round() as i64))
+                                    .custom_parser(|s| {
+                                        if s.trim() == "-" {
+                                            return Some(0.0);
+                                        }
+                                        super::taskfields::parse_estimate(s)
+                                            .map(|m| m as f64 / 60.0)
+                                    }),
                             );
                             ui.add_space(8.0);
                             if r.changed() && hours != before {
@@ -2048,7 +2054,7 @@ impl App {
                         ui.painter().text(
                             tr.center(),
                             Align2::CENTER_CENTER,
-                            fmt_duration(sum),
+                            fmt_hm(sum),
                             FontId::proportional(13.0),
                             t.text,
                         );
@@ -2095,7 +2101,7 @@ impl App {
                             fr.center().y,
                         ),
                         Align2::CENTER_CENTER,
-                        if *v > 0 { fmt_duration(*v) } else { "-".into() },
+                        fmt_hm(*v),
                         FontId::proportional(12.5),
                         t.text2,
                     );
@@ -2103,7 +2109,7 @@ impl App {
                 ui.painter().text(
                     pos2(fr.left() + name_w + col * 7.5, fr.center().y),
                     Align2::CENTER_CENTER,
-                    fmt_duration(all),
+                    fmt_hm(all),
                     FontId::proportional(13.0),
                     t.text,
                 );

@@ -10,13 +10,24 @@
 //
 // Video (stage 4) goes into the same room: `set_camera(true)` publishes the
 // camera (or a test pattern) and everyone's pictures arrive as RGBA through
-// `new_pictures` (see video.rs).
+// `new_pictures` (see video.rs). `share_screen` publishes a display or a
+// window as a screen-share track (screen.rs); it arrives under
+// `screen_key(identity)`.
+//
+// Quality adapts (quality.rs): video goes out in simulcast layers, the app
+// tells `set_view_sizes` how large each picture is drawn and the call asks the
+// server for the layer that fits, dynacast stops layers nobody watches, and a
+// poor connection makes this computer send smaller, slower video.
 
+pub mod quality;
+pub mod screen;
 pub mod video;
+pub use screen::{ScreenTrouble, Share, Source, SourceKind};
 pub use video::{Picture, Video};
 
 use futures_util::StreamExt;
 use livekit::options::TrackPublishOptions;
+use livekit::track::VideoQuality;
 use livekit::prelude::*;
 use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -60,6 +71,8 @@ pub struct Person {
     pub heard: f32,
     /// Sending video.
     pub camera: bool,
+    /// Sharing their screen.
+    pub screen: bool,
 }
 
 impl Person {
@@ -75,18 +88,44 @@ pub enum Event {
     People(Vec<Person>),
     /// The call ended for this computer; holds why when it wasn't asked for.
     Left(Option<String>),
-    /// Something went wrong that doesn't end the call (the camera, say).
+    /// Something went wrong with the camera that doesn't end the call.
     Trouble(String),
+    /// Screen sharing stopped without being asked to: why, or None when it
+    /// was stopped from macOS's own controls.
+    ScreenEnded(Option<ScreenTrouble>),
 }
 
 enum Cmd {
     Mute(bool),
     Camera(bool),
+    Screen(Option<Share>),
+    Views(HashMap<String, f32>),
     Leave,
 }
 
 /// Whose picture: a participant identity, or ME for your own camera.
 pub const ME: &str = "";
+
+const SCREEN_SUFFIX: &str = "#screen";
+
+/// The picture key of someone's shared screen (identities never hold '#').
+pub fn screen_key(identity: &str) -> String {
+    format!("{}{}", identity, SCREEN_SUFFIX)
+}
+
+/// Whose screen a picture key is, if it is a shared screen.
+pub fn screen_owner(key: &str) -> Option<&str> {
+    key.strip_suffix(SCREEN_SUFFIX)
+}
+
+/// The picture key for a participant's video track of this source.
+fn picture_key(identity: &str, source: TrackSource) -> String {
+    if source == TrackSource::Screenshare {
+        screen_key(identity)
+    } else {
+        identity.to_string()
+    }
+}
 
 /// The latest picture of everyone sending video, with a counter that moves
 /// when a new one arrives; a missing entry means no video.
@@ -139,6 +178,17 @@ impl Call {
 
     pub fn set_camera(&self, on: bool) {
         let _ = self.tx.send(Cmd::Camera(on));
+    }
+
+    /// Share a screen or window (replacing one already shared), or stop with None.
+    pub fn share_screen(&self, share: Option<Share>) {
+        let _ = self.tx.send(Cmd::Screen(share));
+    }
+
+    /// How wide (physical pixels) each picture is drawn, by picture key;
+    /// pictures not listed get the smallest layer.
+    pub fn set_view_sizes(&self, sizes: HashMap<String, f32>) {
+        let _ = self.tx.send(Cmd::Views(sizes));
     }
 
     /// Pictures that changed since the last call: (identity or ME, picture),
@@ -257,16 +307,17 @@ fn unwatch(watchers: &mut Watchers, pictures: &Pictures, id: &str) {
     g.remove(id);
 }
 
-/// Turn received frames into pictures (at most video::FPS a second), until
-/// the stream ends or `alive` is cleared.
+/// Turn received frames into pictures (at most `fps` a second), until the
+/// stream ends or `alive` is cleared.
 async fn watch(
     track: RemoteVideoTrack,
     identity: String,
     pictures: Pictures,
     alive: Arc<AtomicBool>,
+    fps: u64,
 ) {
     let mut stream = NativeVideoStream::new(track.rtc_track());
-    let gap = Duration::from_millis(1000 / video::FPS);
+    let gap = Duration::from_millis(1000 / fps);
     let mut last = std::time::Instant::now() - gap;
     while let Some(frame) = stream.next().await {
         if last.elapsed() < gap {
@@ -287,11 +338,34 @@ async fn watch(
     }
 }
 
+/// Ask the server for the layer of each received video that fits how large
+/// it is drawn here (only when that changes).
+fn ask_layers(room: &Room, views: &HashMap<String, f32>, asked: &mut HashMap<String, VideoQuality>) {
+    for p in room.remote_participants().into_values() {
+        let id = p.identity().to_string();
+        for publication in p.track_publications().into_values() {
+            if publication.kind() != TrackKind::Video
+                || !publication.is_subscribed()
+                || !publication.simulcasted()
+            {
+                continue;
+            }
+            let key = picture_key(&id, publication.source());
+            let want = quality::layer_for(views.get(&key).copied().unwrap_or(0.0));
+            if asked.get(&key) != Some(&want) {
+                publication.set_video_quality(want);
+                asked.insert(key, want);
+            }
+        }
+    }
+}
+
 fn people(
     room: &Room,
     levels: &HashMap<String, f32>,
     speaking: &[String],
     camera_on: bool,
+    screen_on: bool,
 ) -> Vec<Person> {
     let me = room.local_participant();
     let mut out = vec![Person {
@@ -306,6 +380,7 @@ fn people(
             .all(|p| p.is_muted()),
         heard: 0.0,
         camera: camera_on,
+        screen: screen_on,
     }];
     let mut others: Vec<RemoteParticipant> = room.remote_participants().into_values().collect();
     others.sort_by_key(|p| p.identity().to_string());
@@ -320,6 +395,9 @@ fn people(
             camera: pubs
                 .values()
                 .any(|t| t.source() == TrackSource::Camera && !t.is_muted()),
+            screen: pubs
+                .values()
+                .any(|t| t.source() == TrackSource::Screenshare && !t.is_muted()),
             speaking: speaking.contains(&id),
             muted: mics.is_empty() || mics.iter().all(|t| t.is_muted()),
             heard: levels.get(&id).copied().unwrap_or(0.0),
@@ -353,8 +431,12 @@ async fn run(
         },
         Audio::Tone(_) => None,
     };
-    let (room, mut events) =
-        match Room::connect(&join.url, &join.token, RoomOptions::default()).await {
+    // adaptive stream: layers follow what is shown here (set_view_sizes);
+    // dynacast: layers no one watches aren't encoded at all
+    let mut options = RoomOptions::default();
+    options.adaptive_stream = true;
+    options.dynacast = true;
+    let (room, mut events) = match Room::connect(&join.url, &join.token, options).await {
             Ok(x) => x,
             Err(e) => return Some(format!("Couldn't join the call: {}", e)),
         };
@@ -390,6 +472,13 @@ async fn run(
     let mut speaking: Vec<String> = vec![];
     // the camera while it's on: what's published and what feeds it
     let mut camera: Option<(LocalTrackPublication, video::Feed)> = None;
+    let mut screen: Option<(LocalTrackPublication, video::Feed)> = None;
+    // how large and often to send, following this computer's connection
+    let camera_limits = video::Limits::new(quality::Kind::Camera);
+    let screen_limits = video::Limits::new(quality::Kind::Screen);
+    // how wide each picture is drawn here, and the layer asked for per track
+    let mut views: HashMap<String, f32> = HashMap::new();
+    let mut asked: HashMap<String, VideoQuality> = HashMap::new();
     let mut watchers: Watchers = HashMap::new();
     let mut last_people: Vec<Person> = vec![];
     let mut tick = tokio::time::interval(Duration::from_millis(200));
@@ -406,20 +495,34 @@ async fn run(
                         tokio::spawn(measure(t, participant.identity().to_string(), levels.clone()));
                     }
                 }
-                Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(t), participant, .. }) => {
-                    let id = participant.identity().to_string();
-                    unwatch(&mut watchers, &pictures, &id);
+                Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(t), publication, participant }) => {
+                    let source = publication.source();
+                    let key = picture_key(&participant.identity().to_string(), source);
+                    unwatch(&mut watchers, &pictures, &key);
                     let alive = Arc::new(AtomicBool::new(true));
-                    let task = tokio::spawn(watch(t, id.clone(), pictures.clone(), alive.clone()));
-                    watchers.insert(id, (alive, task));
+                    let fps = if source == TrackSource::Screenshare { quality::SCREEN_FPS as u64 } else { video::FPS };
+                    let task = tokio::spawn(watch(t, key.clone(), pictures.clone(), alive.clone(), fps));
+                    watchers.insert(key.clone(), (alive, task));
+                    asked.remove(&key);
+                    ask_layers(&room, &views, &mut asked);
                 }
-                Some(RoomEvent::TrackUnsubscribed { track: RemoteTrack::Video(_), participant, .. }) | Some(RoomEvent::TrackUnpublished { participant, .. }) => {
-                    if !participant.track_publications().values().any(|t| t.source() == TrackSource::Camera && t.is_subscribed()) {
-                        unwatch(&mut watchers, &pictures, &participant.identity().to_string());
+                Some(RoomEvent::TrackUnsubscribed { track: RemoteTrack::Video(_), publication, participant }) | Some(RoomEvent::TrackUnpublished { publication, participant }) => {
+                    let source = publication.source();
+                    if !participant.track_publications().values().any(|t| t.source() == source && t.is_subscribed()) {
+                        let key = picture_key(&participant.identity().to_string(), source);
+                        unwatch(&mut watchers, &pictures, &key);
+                        asked.remove(&key);
                     }
                 }
                 Some(RoomEvent::ParticipantDisconnected(p)) => {
-                    unwatch(&mut watchers, &pictures, &p.identity().to_string());
+                    let id = p.identity().to_string();
+                    unwatch(&mut watchers, &pictures, &id);
+                    unwatch(&mut watchers, &pictures, &screen_key(&id));
+                }
+                Some(RoomEvent::ConnectionQualityChanged { quality: q, participant: Participant::Local(_) }) => {
+                    let net = quality::Network::from(q);
+                    camera_limits.set(quality::limits(quality::Kind::Camera, net));
+                    screen_limits.set(quality::limits(quality::Kind::Screen, net));
                 }
                 Some(_) => {}
             },
@@ -429,13 +532,13 @@ async fn run(
                         Ok(Cmd::Mute(true)) => publication.mute(),
                         Ok(Cmd::Mute(false)) => publication.unmute(),
                         Ok(Cmd::Camera(true)) if camera.is_none() => {
-                            let source = NativeVideoSource::new(VideoResolution { width: video::SEND_WIDTH, height: video::SEND_WIDTH * 9 / 16 }, false);
+                            let source = NativeVideoSource::new(VideoResolution { width: quality::CAMERA_WIDTH, height: quality::CAMERA_WIDTH * 9 / 16 }, false);
                             let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
-                            match room.local_participant().publish_track(LocalTrack::Video(track), TrackPublishOptions { source: TrackSource::Camera, ..Default::default() }).await {
+                            match room.local_participant().publish_track(LocalTrack::Video(track), quality::camera_options()).await {
                                 Ok(p) => {
                                     let pics = pictures.clone();
                                     let (etx2, wake2) = (etx.clone(), wake.clone());
-                                    let feed = video::start_feed(video, source, move |pic| match pic {
+                                    let feed = video::start_feed(video, source, camera_limits.clone(), move |pic| match pic {
                                         Some(pic) => put_picture(&pics, ME, pic),
                                         None => {
                                             pics.lock().unwrap().remove(ME);
@@ -459,6 +562,40 @@ async fn run(
                             }
                         }
                         Ok(Cmd::Camera(_)) => {}
+                        Ok(Cmd::Screen(share)) => {
+                            if let Some((p, feed)) = screen.take() {
+                                drop(feed);
+                                let _ = room.local_participant().unpublish_track(&p.sid()).await;
+                            }
+                            // test pictures stand in for the screen too
+                            let share = match (share, video) {
+                                (Some(Share::Pattern(c)), _) => Some(Share::Pattern(c)),
+                                (Some(_), Video::Pattern(c)) => Some(Share::Pattern([255 - c[0], 255 - c[1], 255 - c[2]])),
+                                (s, _) => s,
+                            };
+                            if let Some(share) = share {
+                                let (w, h) = (quality::SCREEN_WIDTH, quality::SCREEN_WIDTH * 9 / 16);
+                                let source = NativeVideoSource::new(VideoResolution { width: w, height: h }, true);
+                                let track = LocalVideoTrack::create_video_track("screen", RtcVideoSource::Native(source.clone()));
+                                match room.local_participant().publish_track(LocalTrack::Video(track), quality::screen_options()).await {
+                                    Ok(p) => {
+                                        let (etx2, wake2) = (etx.clone(), wake.clone());
+                                        let feed = screen::start_screen(share, source, screen_limits.clone(), move |why| {
+                                            let _ = etx2.send(Event::ScreenEnded(why));
+                                            wake2();
+                                        });
+                                        screen = Some((p, feed));
+                                    }
+                                    Err(e) => {
+                                        emit(Event::ScreenEnded(Some(ScreenTrouble::Failed(format!("Couldn't send your screen: {}", e)))));
+                                    }
+                                }
+                            }
+                        }
+                        Ok(Cmd::Views(v)) => {
+                            views = v;
+                            ask_layers(&room, &views, &mut asked);
+                        }
                         Ok(Cmd::Leave) | Err(mpsc::TryRecvError::Disconnected) => {
                             let _ = room.close().await;
                             return None;
@@ -466,9 +603,15 @@ async fn run(
                         Err(mpsc::TryRecvError::Empty) => break,
                     }
                 }
-                let now = people(&room, &levels.lock().unwrap(), &speaking, camera.is_some());
+                // a screen share that ended by itself: take it down
+                if screen.as_ref().is_some_and(|(_, f)| f.stopped()) {
+                    if let Some((p, _)) = screen.take() {
+                        let _ = room.local_participant().unpublish_track(&p.sid()).await;
+                    }
+                }
+                let now = people(&room, &levels.lock().unwrap(), &speaking, camera.is_some(), screen.is_some());
                 // levels drift a little all the time: compare them coarsely
-                let coarse = |v: &[Person]| v.iter().map(|p| (p.identity.clone(), p.speaking, p.muted, p.camera, (p.heard * 20.0) as i32)).collect::<Vec<_>>();
+                let coarse = |v: &[Person]| v.iter().map(|p| (p.identity.clone(), p.speaking, p.muted, p.camera, p.screen, (p.heard * 20.0) as i32)).collect::<Vec<_>>();
                 if coarse(&now) != coarse(&last_people) {
                     last_people = now.clone();
                     if !emit(Event::People(now)) {

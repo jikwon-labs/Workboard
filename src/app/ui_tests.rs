@@ -1021,6 +1021,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
             muted: false,
             heard: 0.0,
             camera: false,
+            screen: false,
         },
         wb_voice::Person {
             identity: format!("{}-dev2", other.id),
@@ -1030,6 +1031,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
             muted: false,
             heard: 0.3,
             camera: true,
+            screen: false,
         },
     ];
     h.settle();

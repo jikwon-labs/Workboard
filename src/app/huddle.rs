@@ -271,6 +271,7 @@ impl App {
                     self.set_huddle_camera(false);
                     self.toast = Some((why, now_ts()));
                 }
+                VoiceEvent::ScreenEnded(_) => {}
                 VoiceEvent::Left(why) => {
                     if let Some(why) = why {
                         self.toast = Some((why, now_ts()));

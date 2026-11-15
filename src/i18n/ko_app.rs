@@ -116,6 +116,8 @@ pub const T: &[(&str, &str)] = &[
     ("No comments match", "일치하는 댓글이 없습니다"),
     ("Write a post...", "게시물 작성..."),
     ("Write a comment, @mention someone", "댓글을 쓰거나 @멘션하세요"),
+    ("Write a comment", "댓글 쓰기"),
+    ("Keep notes and updates on this task here.", "이 작업의 메모와 진행 상황을 여기에 남기세요."),
     ("Add a checklist item", "체크리스트 항목 추가"),
     // dialogs
     ("Space \"{}\"", "스페이스 \"{}\""),

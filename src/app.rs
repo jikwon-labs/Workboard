@@ -5447,6 +5447,8 @@ impl App {
                 }
                 let has_comments = task.activity.iter().any(|a| a.comment);
                 let mut assign_resp: Option<egui::Response> = None;
+                // alone in the workspace: nobody to mention or hand it to
+                let alone = self.data.solo();
                 if !has_comments {
                     let r = right_ui.available_rect_before_wrap();
                     let c = pos2(r.left() + 10.0, r.top() + r.height() * 0.32);
@@ -5460,7 +5462,11 @@ impl App {
                     right_ui.painter().text(
                         c + vec2(0.0, 8.0),
                         Align2::LEFT_TOP,
-                        tr("Ask a question, share an update, or loop someone in."),
+                        tr(if alone {
+                            "Keep notes and updates on this task here."
+                        } else {
+                            "Ask a question, share an update, or loop someone in."
+                        }),
                         FontId::proportional(13.0),
                         t.text2,
                     );
@@ -5471,7 +5477,7 @@ impl App {
                             .max_rect(row)
                             .layout(Layout::left_to_right(Align::Center)),
                     );
-                    if bui.button(tr("@  Mention a teammate")).clicked() {
+                    if !alone && bui.button(tr("@  Mention a teammate")).clicked() {
                         if !self.comment_text.ends_with('@') {
                             if !self.comment_text.is_empty() && !self.comment_text.ends_with(' ') {
                                 self.comment_text.push(' ');
@@ -5481,7 +5487,9 @@ impl App {
                         bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
                         bui.memory_mut(|m| m.request_focus(comment_id));
                     }
-                    assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                    if !alone {
+                        assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                    }
                 }
                 if let Some(r) = assign_resp {
                     let data = &self.data;
@@ -5558,6 +5566,8 @@ impl App {
                         .id(comment_id)
                         .hint_text(if post {
                             tr("Write a post...")
+                        } else if alone {
+                            tr("Write a comment")
                         } else {
                             tr("Write a comment, @mention someone")
                         })

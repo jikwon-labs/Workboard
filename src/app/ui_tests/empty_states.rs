@@ -332,3 +332,38 @@ fn empty_channel_alone_offers_invite_instead_of_add_people() {
     h.click("+  Add People");
     assert!(matches!(h.app.modal, Some(Modal::ChannelSettings(_))));
 }
+
+#[test]
+fn task_comments_alone_do_not_suggest_mentions_or_assigning() {
+    let d = solo();
+    let list = d.spaces[0].lists[0].id;
+    let mut h = with(d, 1440.0, 900.0);
+    h.app.apply(Action::Add {
+        list,
+        name: "Write report".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: true,
+    });
+    h.app.apply_actions();
+    h.settle();
+    assert!(h.app.open_task.is_some());
+    assert!(h
+        .texts()
+        .iter()
+        .any(|x| x == "Keep notes and updates on this task here."));
+    assert!(!h.has("@  Mention a teammate"));
+    assert!(!h.has("\u{1F464}  Assign this task"));
+    assert!(h.texts().iter().any(|x| x == "Write a comment"));
+    // with teammates they are there
+    let mut h = Ui1::new();
+    h.open_clean_task();
+    assert!(h.has("@  Mention a teammate"));
+    assert!(h
+        .texts()
+        .iter()
+        .any(|x| x == "Write a comment, @mention someone"));
+}

@@ -160,6 +160,7 @@ fn small_window_settings_people_columns_do_not_overlap() {
         role: "Admin".into(),
         invited: true,
         status_text: String::new(),
+        slack: vec![],
     });
     h.app.open_settings("People");
     h.settle();

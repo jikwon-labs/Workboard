@@ -522,6 +522,11 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
         };
         let mut add = |author: u64, m: &Value, parent: Option<u64>, mut to: Vec<u64>| {
             let Some(id) = num(m, "id") else { return };
+            // brought in by an import (Slack history, say): old history, not
+            // news, however recent its time (Message::imported in the app)
+            if m.get("imported").is_some_and(|i| !i.is_null()) {
+                return;
+            }
             if now_secs - secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0)) > MAX_AGE_SECS {
                 return;
             }
@@ -866,5 +871,26 @@ mod tests {
         c["extra"] = json!({"sync": {"revived": {"301": t * 1000}}});
         let n = notes(&c, &HashSet::new(), &[], t);
         assert_eq!(who(&n), vec![(1, 7), (3, 7)]);
+    }
+
+    #[test]
+    fn imported_messages_and_replies_send_no_push_however_recent() {
+        let mut m = msg(5, 1, "@Bo from the Slack export");
+        m["imported"] = json!("slack:C1:1700000000.000100");
+        let mut r = msg(6, 3, "@Bo an imported reply");
+        r["imported"] = json!("slack:C1:1700000000.000200");
+        m["replies"] = json!([r, msg(7, 4, "a new reply here")]);
+        let mut d = msg(9, 1, "imported DM");
+        d["imported"] = json!("slack:D1:1700000000.000300");
+        let c = ws(json!([
+            {"id": 300, "name": "general", "kind": "Channel", "members": [], "messages": [m]},
+            {"id": 301, "name": "", "kind": "Direct", "members": [1, 2], "messages": [d]}
+        ]));
+        let n = notes(&c, &HashSet::new(), &[], now());
+        assert_eq!(
+            who(&n),
+            vec![(1, 7), (3, 7)],
+            "only the reply written here notifies the thread's people"
+        );
     }
 }

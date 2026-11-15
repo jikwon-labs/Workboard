@@ -3532,3 +3532,91 @@ fn a_new_role_arrives_before_the_copy_it_opens_up() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_slack_import_of_the_last_day_sends_no_iphone_pushes() {
+    let home = temp_home("push-imported");
+    let fake = Arc::new(FakePush::default());
+    let server = Server::start_with(
+        &home,
+        0,
+        workboard_server::Options {
+            push: Some(fake.clone()),
+            ..Default::default()
+        },
+    );
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    let ann = "a1".repeat(32);
+    phone(&mut a, port, 1, &ann, &home);
+    // Bo imports a Slack export: a DM to Ann, a mention of her and a reply
+    // in her thread, all from the last hour
+    b.change(|d| {
+        let ts = now() / 1000 - 3600;
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 50, "name": "", "kind": "Direct", "topic": "", "members": [1, 2], "messages": [{"id": 51, "author": 2, "text": "from Slack", "ts": ts, "imported": "slack:D1:1.1"}], "last_read": 0}));
+        d["channels"][0]["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 52, "author": 2, "text": "@Ann from Slack", "ts": ts, "imported": "slack:C1:1.2"}));
+        d["channels"][0]["messages"][0]["replies"] =
+            json!([{"id": 53, "author": 2, "text": "old reply", "ts": ts, "imported": "slack:C1:1.3"}]);
+    });
+    a.wait("the import at Ann's computer", |d| channel(d, 50).is_some());
+    // then a message written here: only that one pushes
+    b.change(in_general("@Ann written here", 54, 2));
+    wait_for("the new mention pushed", || fake.to(&ann).len() == 1);
+    std::thread::sleep(Duration::from_millis(300));
+    let sent = fake.to(&ann);
+    assert_eq!(
+        sent.len(),
+        1,
+        "nothing for the imported messages: {:?}",
+        sent
+    );
+    assert_eq!(sent[0]["aps"]["alert"]["body"], "@Ann written here");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
+    // format 3 notes a whole time entry list or custom field map as one
+    // field, so its copy could undo a teammate's entry
+    assert_eq!(wb_net::OLDEST_SYNC, 4);
+    assert_eq!(wb_sync::META_V, wb_net::OLDEST_SYNC);
+    let home = temp_home("sync-3");
+    let server = Server::start(&home, 0);
+    let (mut a, b) = two_apps(server.port);
+    let token = b.token.clone();
+    let device = b.device.clone();
+    drop(b);
+    let mut old = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            app: Some("0.1.9".into()),
+            sync: Some(3),
+            ..Default::default()
+        },
+    );
+    old.wait("the round-3 app still gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    old.change(|d| d["tasks"][0]["name"] = json!("Plan (round 3)"));
+    old.until("the round-3 app is told to update", |o| {
+        o.denied.iter().any(|d| d == wb_net::UPDATE_NEEDED)
+    });
+    a.change(|d| d["tasks"][1]["name"] = json!("Ship (A)"));
+    old.wait("A's change at the round-3 app", |d| {
+        d["tasks"][1]["name"] == "Ship (A)"
+    });
+    a.wait("A's copy", |d| d["tasks"][1]["name"] == "Ship (A)");
+    assert_eq!(
+        a.data["tasks"][0]["name"], "Plan",
+        "the round-3 app's change was not taken"
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

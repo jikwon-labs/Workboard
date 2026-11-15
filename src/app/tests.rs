@@ -7000,6 +7000,7 @@ fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
         role: "Member".into(),
         invited: false,
         status_text: String::new(),
+        slack: vec![],
     });
     let before = a.data.members.len();
     let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
@@ -7426,6 +7427,7 @@ fn slack_people_are_not_merged_by_name_and_same_second_messages_all_come_in() {
         role: "Member".into(),
         invited: false,
         status_text: String::new(),
+        slack: vec![],
     });
     let export = [
         (
@@ -7807,4 +7809,138 @@ fn a_list_deleted_while_archived_comes_back_not_archived() {
         .toast
         .as_ref()
         .is_some_and(|t| t.0.contains("archived Folder or Space")));
+}
+
+#[test]
+fn importing_the_same_slack_export_again_makes_no_new_members() {
+    use serde_json::json;
+    let mut a = app();
+    // a second Sam Lee here, so Slack's Sam (no email) can't be matched
+    let sam2 = a.data.new_id();
+    a.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        ..Default::default()
+    });
+    let export = [
+        (
+            "users.json",
+            json!([
+                {"id": "US", "name": "sam", "real_name": "Sam Lee", "profile": {}},
+                {"id": "UZ", "name": "zed", "real_name": "Zed Nobody", "profile": {}},
+                {"id": "UQ", "name": "quiet", "real_name": "Quinn Quiet", "profile": {}},
+                {"id": "UO", "name": "old", "real_name": "Olga Old", "profile": {}}
+            ]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "again", "members": ["US", "UZ", "UQ", "UO"]}]),
+        ),
+        (
+            "again/2024-01-01.json",
+            json!([
+                {"type": "message", "user": "US", "text": "first", "ts": "1704100000.000100"},
+                {"type": "message", "user": "UZ", "text": "second", "ts": "1704100001.000100"},
+                {"type": "message", "user": "UO", "text": "third", "ts": "1704100002.000100"}
+            ]),
+        ),
+    ];
+    let (users, channels) = slack_from(&export);
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(plan.matched("US"), None);
+    // Olga comes in under my name
+    plan.assign.insert("UO".into(), super::slack::Assign::Me);
+    let members = a.data.members.len();
+    assert_eq!(a.import_slack(&plan), (1, 3));
+    assert_eq!(
+        a.data.members.len(),
+        members + 2,
+        "Sam and Zed are new; Quinn wrote nothing and Olga is under my name"
+    );
+    let sam = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.slack == vec!["US".to_string()])
+        .expect("the new Sam remembers the Slack id")
+        .id;
+    assert!(sam != sam2);
+    // Zed is renamed here before the next import
+    let zed = a
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.name == "Zed Nobody")
+        .unwrap();
+    assert_eq!(zed.slack, vec!["UZ".to_string()]);
+    zed.name = "Z".into();
+    let zed = zed.id;
+    let members = a.data.members.len();
+    for round in 0..2 {
+        let (users, channels) = slack_from(&export);
+        let plan = super::slack::plan(&a.data, users, channels);
+        assert_eq!(plan.matched("US"), Some(sam), "round {}", round);
+        assert_eq!(plan.matched("UZ"), Some(zed), "renamed, still found");
+        let saved = serde_json::to_string(&a.data.members).unwrap();
+        assert_eq!(a.import_slack(&plan), (0, 0), "round {}", round);
+        assert_eq!(a.data.members.len(), members, "round {}: nobody new", round);
+        assert_eq!(
+            serde_json::to_string(&a.data.members).unwrap(),
+            saved,
+            "round {}: members unchanged",
+            round
+        );
+    }
+    // a teammate's computer has the shared workspace: their import of the
+    // same export finds the same members
+    let mut b = App::build(None, Some(a.data.clone()));
+    let (users, channels) = slack_from(&export);
+    let plan = super::slack::plan(&b.data, users, channels);
+    assert_eq!(plan.matched("US"), Some(sam));
+    assert_eq!(b.import_slack(&plan), (0, 0));
+    assert_eq!(b.data.members.len(), members);
+    // an import from before Slack ids were kept: nothing to add, so nobody
+    // is made even though Sam can't be matched
+    for m in &mut b.data.members {
+        m.slack.clear();
+    }
+    let (users, channels) = slack_from(&export);
+    let plan = super::slack::plan(&b.data, users, channels);
+    assert_eq!(plan.matched("US"), None, "three Sams now");
+    assert_eq!(b.import_slack(&plan), (0, 0));
+    assert_eq!(
+        b.data.members.len(),
+        members,
+        "an empty import makes no one"
+    );
+}
+
+#[test]
+fn slack_member_choices_differ_for_members_of_one_name() {
+    let m = |id: u64, name: &str, email: &str, role: &str| Member {
+        id,
+        name: name.into(),
+        email: email.into(),
+        role: role.into(),
+        ..Default::default()
+    };
+    let list = super::slack::member_choices(&[
+        m(1, "Kim", "kim@a.com", "Member"),
+        m(2, "Kim", "", "Admin"),
+        m(10_003, "Kim", "", "Member"),
+        m(20_004, "Kim", "", "Member"),
+        m(5, "Lee", "", "Member"),
+    ]);
+    let labels: Vec<&str> = list.iter().map(|x| x.1.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec![
+            "Kim (kim@a.com)",
+            "Kim (Admin)",
+            "Kim (Member) #0003",
+            "Kim (Member) #0004",
+            "Lee"
+        ]
+    );
 }

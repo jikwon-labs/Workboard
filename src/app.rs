@@ -359,6 +359,7 @@ struct Drafts {
     chat_files: DraftBox<Vec<files::Pending>>,
     thread_files: DraftBox<Vec<files::Pending>>,
     chat_picked: DraftBox<Vec<u64>>,
+    thread_picked: DraftBox<Vec<u64>>,
 }
 
 pub struct App {
@@ -397,6 +398,8 @@ pub struct App {
     /// (kept with its draft), so a name two people share means the one
     /// picked.
     chat_picked: Vec<u64>,
+    /// The same for the open thread's reply box (kept with its draft).
+    thread_picked: Vec<u64>,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -723,6 +726,7 @@ impl App {
             comment_text: String::new(),
             comment_picked: vec![],
             chat_picked: vec![],
+            thread_picked: vec![],
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),
@@ -2684,14 +2688,15 @@ impl App {
                 self.cal_month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
                 week_anchor = td;
             }
-            if ui.button("<").clicked() {
+            let (back, fwd) = icons::period_arrows(ui, &t);
+            if back {
                 if self.cal_week {
                     week_anchor -= Duration::days(7);
                 } else {
                     self.cal_month = add_months(self.cal_month, -1);
                 }
             }
-            if ui.button(">").clicked() {
+            if fwd {
                 if self.cal_week {
                     week_anchor += Duration::days(7);
                 } else {
@@ -2701,11 +2706,7 @@ impl App {
             let title = if self.cal_week {
                 let ws = week_anchor
                     - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64);
-                format!(
-                    "{} \u{2013} {}",
-                    ws.text("%b %-d"),
-                    (ws + Duration::days(6)).text("%b %-d, %Y")
-                )
+                week_range(ws)
             } else {
                 self.cal_month.text("%B %Y")
             };
@@ -6468,6 +6469,9 @@ impl App {
         self.drafts
             .chat_picked
             .swap(self.chat_open, &mut self.chat_picked);
+        self.drafts
+            .thread_picked
+            .swap(self.thread_open, &mut self.thread_picked);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
         self.sync_view_prefs();

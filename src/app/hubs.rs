@@ -1121,7 +1121,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.dash_open = None;
@@ -1266,7 +1266,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.wb_open = None;
@@ -1339,7 +1339,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.form_open = None;
@@ -1637,10 +1637,10 @@ impl App {
                         }
                     }
                 });
+                ui.add_space(4.0);
+                // a framed button like Delete on dashboards and whiteboards
                 if ui
-                    .add(ghost(egui::Button::new(
-                        RichText::new(tr("Delete team")).color(t.danger),
-                    )))
+                    .button(RichText::new(tr("Delete team")).color(t.danger))
                     .clicked()
                 {
                     self.modal = Some(Modal::ConfirmRemove {
@@ -1713,13 +1713,18 @@ impl App {
 
     fn org_chart(&mut self, ui: &mut Ui) {
         let t = self.t();
-        self.page_bar(ui, "Org Chart", |_, _| {});
+        // titled like People and Analytics beside it (it had the smaller
+        // page bar with a line under it)
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(24, 24))
+                    .inner_margin(egui::Margin::symmetric(24, 16))
                     .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(tr("Org Chart")).size(20.0));
+                        });
+                        ui.add_space(8.0);
                         for role in ["Owner", "Admin", "Member", "Guest"] {
                             let people: Vec<Member> = self
                                 .data
@@ -1866,10 +1871,11 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.add(ghost(egui::Button::new(RichText::new("<").size(16.0)))).clicked() {
+                    let (back, fwd) = super::icons::period_arrows(ui, &t);
+                    if back {
                         self.sheet_week = ws - Duration::days(7);
                     }
-                    if ui.add(ghost(egui::Button::new(RichText::new(">").size(16.0)))).clicked() {
+                    if fwd {
                         self.sheet_week = ws + Duration::days(7);
                     }
                     let r = ui.add(ghost(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0))));
@@ -2325,9 +2331,32 @@ impl App {
 
     fn time_entries_list(&mut self, ui: &mut Ui, ws: NaiveDate) {
         let t = self.t();
-        let mut rows: Vec<(i64, i64, String, u64, usize)> = vec![];
+        // the entry being changed is found again by whose it is and when it
+        // starts: a merge since the last frame may have moved it in the list,
+        // changed it or taken it away
+        if let Some(ed) = &self.sweep.entry_edit {
+            let there = self
+                .data
+                .tasks
+                .iter()
+                .find(|x| x.id == ed.task)
+                .is_some_and(|x| {
+                    x.time_entries
+                        .iter()
+                        .any(|e| e.member == ed.member && e.start == ed.start)
+                });
+            if !there {
+                self.sweep.entry_edit = None;
+                self.toast = Some((
+                    tr("The time entry you were changing was changed somewhere else, so it was closed without saving.").into(),
+                    now_ts(),
+                ));
+            }
+        }
+        // (start, end, task name, task, whose as saved)
+        let mut rows: Vec<(i64, i64, String, u64, u64)> = vec![];
         for x in &self.data.tasks {
-            for (k, e) in x.time_entries.iter().enumerate() {
+            for e in &x.time_entries {
                 let i = (ts_day(e.start) - ws).num_days();
                 if (0..7).contains(&i) && self.data.is_my_entry(x, e) {
                     // time on an archived task still counts: mark the entry so
@@ -2336,7 +2365,7 @@ impl App {
                     } else {
                         trf!("{} (archived)", x.name)
                     };
-                    rows.push((e.start, e.end, name, x.id, k));
+                    rows.push((e.start, e.end, name, x.id, e.member));
                 }
             }
         }
@@ -2348,20 +2377,22 @@ impl App {
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                // (task, whose, start) of the entry to take away
                 let mut remove = None;
+                // (task, whose, old start, new start, hours)
                 let mut save = None;
-                for (s, e, name, id, k) in &rows {
+                for (s, e, name, id, member) in &rows {
                     ui.horizontal(|ui| {
                         let local = chrono::DateTime::from_timestamp(*s, 0)
                             .map(|d| d.with_timezone(&chrono::Local));
                         let when = local
                             .map(|d| d.text("%a %b %-d, %-I:%M %p"))
                             .unwrap_or_default();
-                        if let Some((_, _, start, hours)) = self
+                        if let Some(ed) = self
                             .sweep
                             .entry_edit
                             .as_mut()
-                            .filter(|x| x.0 == *id && x.1 == *k)
+                            .filter(|x| x.task == *id && x.member == *member && x.start == *s)
                         {
                             ui.label(
                                 RichText::new(
@@ -2369,10 +2400,11 @@ impl App {
                                 )
                                 .color(t.text2),
                             );
-                            let st = ui.add(field(start).hint_text("09:00").desired_width(54.0));
+                            let st =
+                                ui.add(field(&mut ed.at).hint_text("09:00").desired_width(54.0));
                             name_it(&st, "Entry start");
                             let hr = ui.add(
-                                egui::DragValue::new(hours)
+                                egui::DragValue::new(&mut ed.hours)
                                     .range(0.0..=24.0)
                                     .speed(0.05)
                                     .max_decimals(2)
@@ -2382,8 +2414,13 @@ impl App {
                             ui.label(name.as_str());
                             if ui.button(tr("Save")).clicked() {
                                 let day = local.map(|d| d.date_naive()).unwrap_or_else(today);
-                                save =
-                                    Some((*id, *k, super::more::reminder_ts(day, start), *hours));
+                                save = Some((
+                                    *id,
+                                    *member,
+                                    *s,
+                                    super::more::reminder_ts(day, &ed.at),
+                                    ed.hours,
+                                ));
                             }
                             if ui.button(tr("Cancel")).clicked() {
                                 self.sweep.entry_edit = None;
@@ -2401,17 +2438,22 @@ impl App {
                                 )))
                                 .clicked()
                             {
-                                remove = Some((*id, *k));
+                                remove = Some((*id, *member, *s));
                             }
                             let ed =
                                 ui.add(ghost(egui::Button::new(RichText::new(tr("Edit")).small())));
                             name_it(&ed, &format!("Edit entry {}", name));
                             if ed.clicked() {
-                                let start = local
+                                let at = local
                                     .map(|d| d.format("%H:%M").to_string())
                                     .unwrap_or_else(|| "09:00".into());
-                                self.sweep.entry_edit =
-                                    Some((*id, *k, start, (e - s) as f64 / 3600.0));
+                                self.sweep.entry_edit = Some(super::more::EntryEdit {
+                                    task: *id,
+                                    member: *member,
+                                    start: *s,
+                                    at,
+                                    hours: (e - s) as f64 / 3600.0,
+                                });
                             }
                             ui.label(fmt_duration(e - s));
                         });
@@ -2420,13 +2462,17 @@ impl App {
                 if rows.is_empty() {
                     ui.label(RichText::new(tr("No time entries this week")).color(t.text3));
                 }
-                if let Some((id, k, start, hours)) = save {
+                if let Some((id, member, old, start, hours)) = save {
                     if let Some(e) = self
                         .data
                         .tasks
                         .iter_mut()
                         .find(|x| x.id == id)
-                        .and_then(|x| x.time_entries.get_mut(k))
+                        .and_then(|x| {
+                            x.time_entries
+                                .iter_mut()
+                                .find(|e| e.member == member && e.start == old)
+                        })
                     {
                         e.start = start;
                         e.end = start + (hours * 3600.0).round() as i64;
@@ -2434,9 +2480,13 @@ impl App {
                     }
                     self.sweep.entry_edit = None;
                 }
-                if let Some((id, k)) = remove {
+                if let Some((id, member, start)) = remove {
                     if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == id) {
-                        if k < task.time_entries.len() {
+                        if let Some(k) = task
+                            .time_entries
+                            .iter()
+                            .position(|e| e.member == member && e.start == start)
+                        {
                             task.time_entries.remove(k);
                             self.sweep.entry_edit = None;
                             self.dirty = true;

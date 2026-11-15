@@ -120,7 +120,10 @@ pub struct SyncMeta {
     /// How `hashes` were made: 0 = before an item's place (the item it sits
     /// in) counted as one of its fields, 1 = since; 2 = also `moved` is kept,
     /// and fields left at their default are left out of the file (see the
-    /// app's `legacy_shape`); 3 = also `fields` is kept.
+    /// app's `legacy_shape`); 3 = also `fields` is kept; 4 = time entries
+    /// and custom field values are each a field of their own in `fields`
+    /// ("time_entries/<member>/<start>", "custom/<field id>"), not one for
+    /// the whole list or map.
     pub v: u32,
     /// id -> when it last moved into another item (a list into another space
     /// or folder). Where an item sits follows this, not `stamps`, so someone
@@ -492,8 +495,10 @@ fn parents_of(data: &Value) -> BTreeMap<u64, u64> {
     out
 }
 
-/// The `SyncMeta::v` this version writes.
-pub const META_V: u32 = 3;
+/// The `SyncMeta::v` this version writes. A copy of an older one is
+/// upgraded when stamped: fingerprints that still match are carried over
+/// (see `upgrade_split_hashes`), so the new format alone isn't an edit.
+pub const META_V: u32 = 4;
 
 /// After the app changed how items are written (`legacy` is the workspace as
 /// the old way wrote it, `current` the new way): fingerprints that still
@@ -3800,5 +3805,41 @@ mod tests {
         );
         assert!(part["spaces"][0].get("lists").is_none());
         assert_eq!(ids_inside(&d, &[80]), vec![73, 74, 80, 81]);
+    }
+
+    #[test]
+    fn a_format_3_copy_becomes_format_4_without_counting_as_an_edit() {
+        let t = json!([{"id": 1, "name": "t", "time_entries": [{"start": 1, "end": 5, "member": 2}], "custom": {"7": "x"}}]);
+        // saved by a round-3 app: one fingerprint for each whole field
+        let mut old = SyncMeta::default();
+        let v = ws(t.clone(), json!([]), &old);
+        stamp(&v, &mut old, 10);
+        let h = old.field_hashes.get_mut(&1).unwrap();
+        h.retain(|p, _| part_field(p) != "time_entries" && part_field(p) != "custom");
+        h.insert(
+            "time_entries".into(),
+            part_hash(&json!([{"start": 1, "end": 5, "member": 2}])),
+        );
+        h.insert("custom".into(), part_hash(&json!({"7": "x"})));
+        old.v = 3;
+        // and by a round-4 app, which split them already but wrote 3
+        let mut split = SyncMeta::default();
+        stamp(&v, &mut split, 10);
+        split.v = 3;
+        for mut m in [old, split] {
+            let before = (m.stamps.clone(), m.fields.clone());
+            stamp(&v, &mut m, 20);
+            assert_eq!(m.v, META_V);
+            assert_eq!(META_V, 4);
+            assert_eq!(
+                (m.stamps.clone(), m.fields.clone()),
+                before,
+                "the new format alone is no change"
+            );
+            let parts = &m.field_hashes[&1];
+            assert!(parts.contains_key("time_entries/2/1"), "{:?}", parts);
+            assert!(parts.contains_key("custom/7"));
+            assert!(!parts.contains_key("time_entries") && !parts.contains_key("custom"));
+        }
     }
 }

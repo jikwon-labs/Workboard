@@ -6309,7 +6309,7 @@ fn timesheet_entry_edits_and_week_picker() {
     h.app.sheet_entries = true;
     h.settle();
     h.click("Edit entry Renew passport");
-    h.app.sweep.entry_edit.as_mut().unwrap().3 = 2.0;
+    h.app.sweep.entry_edit.as_mut().unwrap().hours = 2.0;
     h.click("Save");
     let e = &h.app.data.tasks[i].time_entries[0];
     assert_eq!(e.end - e.start, 7200);
@@ -6976,10 +6976,10 @@ fn timesheet_rows_added_by_hand_stay_in_their_week() {
     h.click("+ Add task");
     h.click("Renew passport");
     assert!(h.has("Remove row Renew passport"));
-    h.click(">");
+    h.click("Next period");
     assert_eq!(h.app.sheet_week, ws + Duration::days(7));
     assert!(!h.has("Remove row Renew passport"), "not in the next week");
-    h.click("<");
+    h.click("Previous period");
     assert!(h.has("Remove row Renew passport"));
     h.click("Remove row Renew passport");
     assert!(!h.has("Remove row Renew passport"), "the x takes it off");
@@ -8824,6 +8824,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
         role: "Member".into(),
         invited: false,
         status_text: String::new(),
+        slack: vec![],
     });
     h.click("general");
     let before: Vec<egui::Rect> = h
@@ -9970,5 +9971,395 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
         "\"no room\" beside Created by: {:?} {:?}",
         created,
         marks
+    );
+}
+
+/// A shared workspace with one 30-minute entry of mine at 10:00 today on
+/// "Renew passport", the timesheet's entry list open. Returns the task's
+/// index and the entry's start.
+fn shared_timesheet(h: &mut Ui1) -> (usize, i64) {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let td = today();
+    let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+    let start = td
+        .and_hms_opt(10, 0, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .single()
+        .unwrap()
+        .timestamp();
+    let i = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .position(|t| t.name == "Renew passport")
+        .unwrap();
+    let me = h.app.data.me;
+    h.app.data.tasks[i].time_entries = vec![TimeEntry {
+        start,
+        end: start + 1800,
+        member: me,
+    }];
+    h.app.section = Section::Timesheets;
+    h.app.sheet_week = ws;
+    h.app.sheet_entries = true;
+    h.app.dirty = true;
+    h.settle();
+    h.app.sync_note_change();
+    (i, start)
+}
+
+#[test]
+fn a_teammates_earlier_entry_merging_in_mid_edit_does_not_move_my_change() {
+    let mut h = Ui1::new();
+    let (i, early) = shared_timesheet(&mut h);
+    // a second entry of mine at 13:00 the same day
+    let late = early + 3 * 3600;
+    h.app.data.tasks[i].time_entries.push(TimeEntry {
+        start: late,
+        end: late + 1800,
+        member: 1,
+    });
+    h.app.dirty = true;
+    h.settle();
+    h.app.sync_note_change();
+    let before = h.app.data.clone();
+    // the newest entry is listed first: change the 13:00 one to 2 hours
+    let top = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Edit entry Renew passport")
+        .map(|(_, r)| *r)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    h.click_at(top.center());
+    assert_eq!(h.app.sweep.entry_edit.as_ref().unwrap().start, late);
+    h.app.sweep.entry_edit.as_mut().unwrap().hours = 2.0;
+    h.settle();
+    // a teammate's entry from earlier that day merges in: the team merge
+    // sorts entries by start, so every entry of mine moves one place down
+    let theirs = early - 3600;
+    let team = teammate_copy(&before, |d| {
+        d.tasks[i].time_entries.push(TimeEntry {
+            start: theirs,
+            end: theirs + 900,
+            member: 2,
+        });
+    });
+    h.app.merge_in(&[team], &[]);
+    assert_eq!(
+        h.app.data.tasks[i].time_entries[0].member, 2,
+        "the merge put their entry first"
+    );
+    h.settle();
+    h.click("Save");
+    let es = &h.app.data.tasks[i].time_entries;
+    assert_eq!(es.len(), 3);
+    let t = es.iter().find(|e| e.member == 2).unwrap();
+    assert_eq!(
+        (t.start, t.end),
+        (theirs, theirs + 900),
+        "the teammate's entry is untouched"
+    );
+    let mut mine: Vec<(i64, i64)> = es
+        .iter()
+        .filter(|e| e.member == 1)
+        .map(|e| (e.start, e.end - e.start))
+        .collect();
+    mine.sort();
+    assert_eq!(
+        mine,
+        vec![(early, 1800), (late, 7200)],
+        "the 13:00 entry got the change and the 10:00 one is kept"
+    );
+    assert!(h.app.sweep.entry_edit.is_none());
+}
+
+#[test]
+fn an_entry_taken_away_elsewhere_mid_edit_closes_the_editor_with_a_note() {
+    let mut h = Ui1::new();
+    let (i, _) = shared_timesheet(&mut h);
+    let before = h.app.data.clone();
+    h.click("Edit entry Renew passport");
+    assert!(h.has("Entry hours"));
+    // my other device took the entry away
+    let team = teammate_copy(&before, |d| d.tasks[i].time_entries.clear());
+    h.app.merge_in(&[team], &[]);
+    assert!(h.app.data.tasks[i].time_entries.is_empty());
+    h.settle();
+    assert!(h.app.sweep.entry_edit.is_none(), "the editor closed");
+    assert!(!h.has("Entry hours"));
+    let note = h
+        .app
+        .toast
+        .as_ref()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
+    assert!(note.contains("closed without saving"), "{}", note);
+    assert!(h.app.data.tasks[i].time_entries.is_empty(), "nothing saved");
+}
+
+#[test]
+fn the_slack_matching_picker_tells_members_of_one_name_apart() {
+    let mut h = Ui1::new();
+    let sam2 = h.app.data.new_id();
+    h.app.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        role: "Guest".into(),
+        ..Default::default()
+    });
+    h.app.section = Section::Chat;
+    h.settle();
+    let root = std::env::temp_dir().join(format!("wb-ui-slack3-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"sam","real_name":"Sam Lee","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"hello","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    h.app.open_slack_export(&zip);
+    h.settle();
+    h.click("Messages from Sam Lee");
+    assert!(
+        h.has("Sam Lee (sam@example.com)"),
+        "the email next to the name"
+    );
+    assert!(h.has("Sam Lee (Guest)"), "no email: the role");
+    h.click("Sam Lee (Guest)");
+    match &h.app.modal {
+        Some(Modal::SlackImport(p)) => {
+            assert_eq!(
+                p.assign.get("U1"),
+                Some(&super::slack::Assign::Member(sam2))
+            )
+        }
+        _ => panic!("the dialog stays open"),
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
+    let mut h = Ui1::new();
+    let sam = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    let sam2 = h.app.data.new_id();
+    h.app.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        email: "sam2@example.com".into(),
+        role: "Member".into(),
+        ..Default::default()
+    });
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.click("1 reply");
+    let mid = h.app.thread_open.unwrap();
+    let before: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Sam Lee")
+        .map(|(_, r)| *r)
+        .collect();
+    h.click("Mention someone in the reply");
+    let mut rows: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Sam Lee" && !before.contains(r))
+        .map(|(_, r)| *r)
+        .collect();
+    rows.sort_by(|a, b| a.center().y.total_cmp(&b.center().y));
+    rows.dedup();
+    assert_eq!(rows.len(), 2, "both are offered in the thread's list");
+    h.click_at(rows[1].center());
+    assert_eq!(h.app.thread_text, "@Sam Lee ");
+    assert!(h.app.chat_text.is_empty(), "not into the channel's box");
+    assert_eq!(h.app.thread_picked, vec![sam2]);
+    h.type_text("see this");
+    h.key(egui::Key::Enter);
+    let reply = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .messages
+            .iter()
+            .find(|m| m.id == mid)
+            .unwrap()
+            .replies
+            .last()
+            .unwrap()
+            .clone()
+    };
+    let r = reply(&h);
+    assert_eq!(r.text, "@Sam Lee see this");
+    assert_eq!(r.mentions, vec![sam2], "the one picked, not both");
+    assert!(h.app.thread_picked.is_empty(), "used up by the reply");
+    // typing "@" opens the same list
+    h.click("Reply composer");
+    h.type_text("@");
+    let rows: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Sam Lee" && !before.contains(r))
+        .map(|(_, r)| *r)
+        .collect();
+    assert!(rows.len() >= 2, "the @ list opens on typing @");
+    let first = rows
+        .iter()
+        .min_by(|a, b| a.center().y.total_cmp(&b.center().y))
+        .unwrap();
+    h.click_at(first.center());
+    assert_eq!(h.app.thread_text, "@Sam Lee ", "the typed @ is replaced");
+    h.type_text("too");
+    h.key(egui::Key::Enter);
+    assert_eq!(reply(&h).mentions, vec![sam]);
+}
+
+/// Opens the first space's status editor and, mid-edit, renames "to do" to
+/// "backlog" and empties "in progress". Returns (space, a task on "to do",
+/// a task on "in progress").
+fn status_edit_half_done(h: &mut Ui1) -> (u64, u64, u64) {
+    let sid = h.app.data.spaces[0].id;
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let ids: Vec<u64> = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.list_id == list)
+        .map(|t| t.id)
+        .collect();
+    let (a, b) = (ids[0], ids[1]);
+    for (t, st) in [(a, "to do"), (b, "in progress")] {
+        h.app
+            .data
+            .tasks
+            .iter_mut()
+            .find(|x| x.id == t)
+            .unwrap()
+            .status = st.into();
+    }
+    h.app.apply(Action::EditStatuses(sid));
+    h.settle();
+    h.click("to do");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("backlog");
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.settle();
+    assert!(h.app.status_edit.is_some());
+    (sid, a, b)
+}
+
+#[test]
+fn switching_workspace_finishes_the_status_edits_first() {
+    let mut h = Ui1::new();
+    let (_, a, b) = status_edit_half_done(&mut h);
+    // a workspace whose file can't be read: the switch goes no further, so
+    // what the switch did first shows in this workspace
+    let file = format!("workspace-r5-gone-{:x}.json", crate::sync::random_u64());
+    h.app.switch_workspace(&file);
+    assert!(h.app.edit_statuses.is_none(), "the editor closed");
+    assert!(h.app.status_edit.is_none());
+    assert_eq!(
+        h.app.task(a).unwrap().status,
+        "backlog",
+        "the rename reached its tasks"
+    );
+    let names: Vec<String> = h.app.data.spaces[0]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert!(
+        names.contains(&"in progress".to_string()),
+        "the emptied name went back: {:?}",
+        names
+    );
+    assert_eq!(h.app.task(b).unwrap().status, "in progress");
+}
+
+#[test]
+fn joining_a_team_finishes_the_status_edits_and_leaves_the_teams_statuses_alone() {
+    let mut h = Ui1::new();
+    // the team's copy: the same spaces, with "to do" renamed to "queued"
+    let mut team = App::build(None, Some(h.app.data.clone()));
+    let st = team.data.spaces[0]
+        .statuses
+        .iter_mut()
+        .find(|s| s.name == "to do")
+        .unwrap();
+    st.name = "queued".into();
+    let folder = std::env::temp_dir().join(format!("wb-r5-join-{:x}", crate::sync::random_u64()));
+    team.share_here(folder.to_str().unwrap()).unwrap();
+    let team_names: Vec<String> = team.data.spaces[0]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let (sid, _, _) = status_edit_half_done(&mut h);
+    h.app.join_shared(folder.to_str().unwrap()).unwrap();
+    assert!(h.app.edit_statuses.is_none(), "the editor closed");
+    assert!(h.app.status_edit.is_none(), "and its bookkeeping is gone");
+    h.settle();
+    // closing anything status-related later puts no old names on the team's
+    h.app.finish_status_edit();
+    let sp = h.app.data.spaces.iter().find(|s| s.id == sid).unwrap();
+    let names: Vec<String> = sp.statuses.iter().map(|s| s.name.clone()).collect();
+    assert_eq!(names, team_names, "the team's statuses as they were");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// The profile menu, opened at the right end of the top bar, keeps a margin
+/// from the window's edge instead of touching it.
+#[test]
+fn profile_menu_keeps_off_the_window_edge() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.settle();
+    let r = h.rect("Set status");
+    // 8 pt of margin outside the menu's own frame (about 7 pt)
+    assert!(
+        r.right() <= h.size.x - 14.0,
+        "Set status ends at {}",
+        r.right()
     );
 }

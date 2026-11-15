@@ -3039,11 +3039,17 @@ impl App {
                             resp
                         };
                         if matches!(self.loc, Location::List(_)) {
-                            let r = ui.add(
-                                egui::Button::new(RichText::new(tr("Manage")).size(14.0))
-                                    .stroke(Stroke::new(1.0, t.border))
-                                    .corner_radius(7)
-                                    .min_size(vec2(0.0, 28.0)),
+                            // frameless like Share, Ask and Automate beside it
+                            let r = super::icons::icon_button_ex(
+                                ui,
+                                &t,
+                                "dots",
+                                tr("Manage"),
+                                "Manage",
+                                false,
+                                0.0,
+                                t.text2,
+                                t.text2,
                             );
                             if let Location::List(lid) = self.loc {
                                 popup(ui, &r, ui.id().with("manage_pop"), 200.0, |ui| {
@@ -3131,13 +3137,18 @@ impl App {
                     let ac = if personal || gathered {
                         ui.allocate_response(vec2(0.0, 0.0), Sense::hover())
                     } else {
-                        ui.add(
-                            egui::Button::new(
-                                RichText::new(tr("Add Channel")).size(13.5).color(t.text3),
-                            )
-                            .stroke(Stroke::new(1.0, t.border))
-                            .corner_radius(6)
-                            .min_size(vec2(0.0, 26.0)),
+                        // a button with an icon and text in the text colour (grey
+                        // text in a bare outline read as a disabled field)
+                        super::icons::icon_button_ex(
+                            ui,
+                            &t,
+                            "hash",
+                            tr("Add Channel"),
+                            "Add Channel",
+                            false,
+                            0.0,
+                            t.text2,
+                            t.text2,
                         )
                     };
                     if ac.clicked() {
@@ -4719,13 +4730,16 @@ impl App {
                             .and_then(|l| self.data.space_of_list(l))
                             .map(|s| s.id)
                         {
-                            if ui
-                                .add(ghost(egui::Button::new(
-                                    RichText::new(tr("+  Add group")).color(t.text2).size(14.0),
-                                )))
-                                .on_hover_text(tr("Edit statuses"))
-                                .clicked()
-                            {
+                            // level with the columns' heading row, not their top edge
+                            let add = ui
+                                .vertical(|ui| {
+                                    ui.add_space(14.0);
+                                    ui.add(ghost(egui::Button::new(
+                                        RichText::new(tr("+  Add group")).color(t.text2).size(14.0),
+                                    )))
+                                })
+                                .inner;
+                            if add.on_hover_text(tr("Edit statuses")).clicked() {
                                 self.actions.push(Action::EditStatuses(sid));
                             }
                         }

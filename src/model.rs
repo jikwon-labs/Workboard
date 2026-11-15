@@ -194,6 +194,11 @@ pub struct Member {
     pub invited: bool,
     #[serde(default)]
     pub status_text: String,
+    /// The Slack user ids whose messages an Import from Slack brought in as
+    /// this member, so importing again (from any teammate's computer) finds
+    /// them here even after a rename or with no email to match by.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slack: Vec<String>,
 }
 
 /// The people a text @mentions, by the rule the team server uses too

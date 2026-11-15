@@ -674,7 +674,7 @@ impl App {
                             popup(ui, &bell, ui.id().with(("chan_notify", cid)), 240.0, |ui| {
                                 ui.label(RichText::new(tr("Notify me about")).small().color(t.text2));
                                 for (m, label) in [("all", "Every new message"), ("mentions", "Only @mentions and my threads"), ("nothing", "Nothing")] {
-                                    if ui.radio(mode == m, tr(label)).clicked() {
+                                    if radio(ui, mode == m, tr(label)).clicked() {
                                         self.data.extra.notify.set_channel_mode(cid, m);
                                         self.dirty = true;
                                         close_popup(ui);

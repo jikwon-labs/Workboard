@@ -1359,6 +1359,66 @@ impl egui::Widget for Check<'_> {
     }
 }
 
+/// A radio button drawn like `Check`: an outlined circle that stands out from
+/// the page when off, the accent colour with a white dot when on (egui's
+/// own was the page colour with a border-grey ring and disappeared in the
+/// dark theme). `radio(ui, on, label)` in place of `ui.radio(on, label)`.
+pub fn radio(ui: &mut Ui, on: bool, text: impl Into<egui::WidgetText>) -> Response {
+    const D: f32 = 15.0;
+    let text: egui::WidgetText = text.into();
+    let gap = ui.spacing().icon_spacing + 2.0;
+    let galley = (!text.is_empty()).then(|| {
+        let wrap = ui.available_width() - D - gap;
+        text.into_galley(ui, None, wrap, egui::TextStyle::Button)
+    });
+    let mut size = vec2(D, 20.0);
+    if let Some(g) = &galley {
+        size.x += gap + g.size().x;
+        size.y = size.y.max(g.size().y);
+    }
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let label = galley
+        .as_ref()
+        .map_or(String::new(), |g| g.text().to_string());
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), on, &label)
+    });
+    if ui.is_rect_visible(rect) {
+        let dark = ui.visuals().dark_mode;
+        let c = pos2(rect.left() + D / 2.0, rect.center().y);
+        if on {
+            let accent: Color32 = ui
+                .ctx()
+                .data(|d| d.get_temp(egui::Id::new(ACCENT_ID)))
+                .unwrap_or(ui.visuals().selection.bg_fill);
+            ui.painter().circle_filled(c, D / 2.0, accent);
+            ui.painter().circle_filled(c, 2.8, Color32::WHITE);
+        } else {
+            let line = match (dark, resp.hovered()) {
+                (true, false) => Color32::from_gray(110),
+                (true, true) => Color32::from_gray(150),
+                (false, false) => Color32::from_gray(165),
+                (false, true) => Color32::from_gray(120),
+            };
+            ui.painter().circle(
+                c,
+                D / 2.0 - 0.6,
+                ui.visuals().extreme_bg_color,
+                Stroke::new(1.2, line),
+            );
+        }
+        if let Some(g) = galley {
+            let color = ui.style().interact(&resp).text_color();
+            ui.painter().galley(
+                pos2(c.x + D / 2.0 + gap, rect.center().y - g.size().y / 2.0),
+                g,
+                color,
+            );
+        }
+    }
+    resp
+}
+
 /// Names a text field by its hint so screen readers (and the click tests) can find it.
 pub fn name_field(resp: &Response, label: &str) {
     let l = label.to_string();

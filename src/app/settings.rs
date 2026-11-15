@@ -197,7 +197,7 @@ impl App {
             (Choice::En, "English"),
             (Choice::Ko, "\u{d55c}\u{ad6d}\u{c5b4}"),
         ] {
-            let r = ui.radio(self.lang_choice == c, label);
+            let r = radio(ui, self.lang_choice == c, label);
             name_it(&r, &format!("Language {}", crate::i18n::choice_key(c)));
             if r.clicked() && self.lang_choice != c {
                 self.lang_choice = c;

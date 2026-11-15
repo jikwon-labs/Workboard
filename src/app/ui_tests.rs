@@ -10440,3 +10440,43 @@ fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     assert_eq!(chosen(&h), Some(super::slack::Assign::Member(sam)));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Radio buttons that are off have a ring that shows on the page (egui's
+/// own was border grey on the page colour and vanished in the dark theme).
+#[test]
+fn radio_buttons_that_are_off_have_a_visible_ring() {
+    let mut h = Ui1::new();
+    h.app.data.dark = true;
+    // Settings > Language: three choices at the top of the page
+    h.app.open_settings("Language");
+    h.settle();
+    fn rings(s: &egui::Shape, out: &mut Vec<egui::epaint::CircleShape>) {
+        match s {
+            // grey rings of the radio size (status icons are coloured)
+            egui::Shape::Circle(c)
+                if (c.radius - 6.9).abs() < 0.2
+                    && c.stroke.color.r() == c.stroke.color.g()
+                    && c.stroke.color.g() == c.stroke.color.b() =>
+            {
+                out.push(*c)
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| rings(s, out)),
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for c in &h.shapes {
+        rings(&c.shape, &mut found);
+    }
+    assert!(found.len() >= 2, "the choices that are off draw rings");
+    let page = h.app.t().bg;
+    for r in &found {
+        assert!(r.stroke.width >= 1.0);
+        let d = (r.stroke.color.r() as i32 - page.r() as i32).abs();
+        assert!(
+            d >= 50,
+            "the ring stands out from the page: {:?}",
+            r.stroke.color
+        );
+    }
+}

@@ -166,6 +166,8 @@ pub const T: &[(&str, &str)] = &[
     ("Rename, delete, favorite, more", "이름 바꾸기, 삭제, 즐겨찾기 등"),
     // help, labs, notifications, apps
     ("This is your own copy of the work manager. Everything is saved on this computer.", "나만의 업무 관리 앱입니다. 모든 내용은 이 컴퓨터에 저장됩니다."),
+    ("This workspace is on your team's server. A copy is kept on this computer, so you can keep working while the server can't be reached.", "이 워크스페이스는 팀 서버에 있습니다. 이 컴퓨터에도 사본을 두므로 서버에 연결할 수 없을 때도 계속 작업할 수 있습니다."),
+    ("This workspace is shared through a folder your sync app keeps in step. Your copy is saved on this computer and in that folder.", "이 워크스페이스는 동기화 앱이 맞춰 주는 폴더로 공유됩니다. 내 사본은 이 컴퓨터와 그 폴더에 저장됩니다."),
     ("Saved in: {}", "저장 위치: {}"),
     ("Tip: right-click spaces, lists and tasks for more options.", "팁: 스페이스, 목록, 작업을 우클릭하면 더 많은 옵션이 나옵니다."),
     ("Try features early. Turn them on or off at any time.", "새 기능을 먼저 써 보세요. 언제든 켜고 끌 수 있습니다."),

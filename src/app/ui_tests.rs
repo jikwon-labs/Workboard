@@ -1308,6 +1308,30 @@ fn inviting_while_the_server_is_down_says_the_codes_wait_and_the_dialog_stays_na
 }
 
 #[test]
+fn help_says_where_the_workspace_is_kept() {
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::Help);
+    h.settle();
+    assert!(
+        h.has("This is your own copy of the work manager. Everything is saved on this computer.")
+    );
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: "/tmp/wb-help".into(),
+        device: "dev-help".into(),
+        tag: 1,
+        server: None,
+    });
+    h.settle();
+    assert!(h.has("This workspace is shared through a folder your sync app keeps in step. Your copy is saved on this computer and in that folder."));
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.settle();
+    assert!(h.has("This workspace is on your team's server. A copy is kept on this computer, so you can keep working while the server can't be reached."));
+    assert!(
+        !h.has("This is your own copy of the work manager. Everything is saved on this computer.")
+    );
+}
+
+#[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();
     let ch = h.app.data.channels[0].id;

@@ -1645,7 +1645,11 @@ impl App {
                     });
             }
             Modal::Help => {
-                ui.label(tr("This is your own copy of the work manager. Everything is saved on this computer."));
+                ui.label(match &self.data.extra.shared {
+                    None => tr("This is your own copy of the work manager. Everything is saved on this computer."),
+                    Some(c) if c.server.is_some() => tr("This workspace is on your team's server. A copy is kept on this computer, so you can keep working while the server can't be reached."),
+                    Some(_) => tr("This workspace is shared through a folder your sync app keeps in step. Your copy is saved on this computer and in that folder."),
+                });
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new(crate::trf!("Saved in: {}", Data::dir().display()))

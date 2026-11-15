@@ -580,3 +580,58 @@ fn list_rows_show_tags_that_fit_and_count_the_rest() {
     let over = overlapping(&h.texts_in(page));
     assert!(over.is_empty(), "overlapping {:?}", over);
 }
+
+#[test]
+fn dashboard_cards_line_up_and_overdue_is_capped() {
+    let mut h = Ui1::new();
+    heavy(&mut h);
+    // a long name among the overdue ones
+    if let Some(x) = h.app.data.tasks.iter_mut().find(|x| x.id == 20_000) {
+        x.name = LONG_TASK.into();
+    }
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Big board");
+    h.settle();
+    // the right column ends where the full-width cards end
+    let full = h.rect("Remove card Overdue tasks").right();
+    let right = h.rect("Remove card Tasks by priority").right();
+    assert!(
+        (full - right).abs() < 1.0,
+        "full {} vs right column {}",
+        full,
+        right
+    );
+    h.scroll_into_view("Remove card Overdue tasks");
+    let me = h.app.data.me;
+    let n = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|x| {
+            x.parent.is_none()
+                && x.is_overdue()
+                && !h.app.data.is_closed(x)
+                && h.app.data.task_live(x)
+        })
+        .count();
+    assert!(n > 10, "{} overdue for {}", n, me);
+    assert!(
+        h.painted_text(LONG_TASK).is_empty(),
+        "the long name is shortened"
+    );
+    for _ in 0..10 {
+        if !h.painted_text(&trf!("+{} more", n - 10)).is_empty() {
+            break;
+        }
+        let at = pos2(800.0, 450.0);
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -300.0),
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+    }
+    assert!(!h.painted_text(&trf!("+{} more", n - 10)).is_empty());
+}

@@ -901,7 +901,9 @@ impl App {
             ui.horizontal_top(|ui| {
                 for (k, &ci) in row.iter().enumerate() {
                     if k > 0 {
-                        ui.add_space(12.0);
+                        // 12 between the two, item spacing included, so the
+                        // pair is exactly as wide as a full-width card
+                        ui.add_space(12.0 - ui.spacing().item_spacing.x);
                     }
                     let cw = if full(&cards[ci].kind) { w } else { half };
                     egui::Frame::new()
@@ -1244,32 +1246,47 @@ impl App {
                     ui.label(RichText::new(tr("Nothing is overdue")).color(t.text3));
                 }
                 let mut open = None;
-                for task in overdue {
+                // the oldest first, and only so many: the count says the rest
+                let mut overdue = overdue;
+                overdue.sort_by_key(|x| x.due_moment());
+                const ROWS: usize = 10;
+                for task in overdue.iter().take(ROWS) {
                     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
                     if resp.hovered() {
                         ui.painter().rect_filled(r, 5.0, t.hover);
                     }
                     let st = self.data.status_of(task);
                     paint_status_circle(ui.painter(), r.left_center() + vec2(10.0, 0.0), 6.0, &st);
-                    ui.painter().text(
-                        r.left_center() + vec2(24.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        &task.name,
-                        FontId::proportional(13.0),
-                        t.text,
-                    );
+                    let mut name_right = r.right() - 6.0;
                     if let Some(d) = fmt_due(task) {
-                        ui.painter().text(
+                        let dr = ui.painter().text(
                             r.right_center() - vec2(6.0, 0.0),
                             Align2::RIGHT_CENTER,
                             d,
                             FontId::proportional(12.0),
                             t.danger,
                         );
+                        name_right = dr.left() - 10.0;
                     }
+                    paint_fit(
+                        ui,
+                        r.left_center() + vec2(24.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        &task.name,
+                        FontId::proportional(13.0),
+                        t.text,
+                        name_right - (r.left() + 24.0),
+                    );
                     if resp.clicked() {
                         open = Some(task.id);
                     }
+                }
+                if overdue.len() > ROWS {
+                    ui.label(
+                        RichText::new(trf!("+{} more", overdue.len() - ROWS))
+                            .small()
+                            .color(t.text3),
+                    );
                 }
                 return open;
             }

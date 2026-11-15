@@ -11,12 +11,12 @@ pub const SETTINGS: [(&str, &str); 15] = [
     ("Admin", "Spaces"),
     ("Admin", "Trash"),
     ("Features", "Apps"),
-    ("Features", "Custom Fields"),
-    ("Features", "Tag Manager"),
+    ("Features", "Custom fields"),
+    ("Features", "Tag manager"),
     ("Features", "Templates"),
     ("Features", "Automations"),
     ("Features", "Work together"),
-    ("Personal", "My Settings"),
+    ("Personal", "My settings"),
     ("Personal", "Notifications"),
     ("Personal", "Themes"),
     ("Personal", "Language"),
@@ -37,12 +37,12 @@ impl App {
             },
             "Trash" => Modal::Trash,
             "Apps" => Modal::ClickApps,
-            "Custom Fields" => Modal::CustomFields {
+            "Custom fields" => Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
                 opts: String::new(),
             },
-            "Tag Manager" => Modal::TagManager {
+            "Tag manager" => Modal::TagManager {
                 from: String::new(),
                 to: String::new(),
             },
@@ -54,7 +54,7 @@ impl App {
                 scope: None,
             },
             "Work together" => self.together_modal(),
-            "My Settings" => {
+            "My settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();
                 Modal::Profile {
                     name: m.name,

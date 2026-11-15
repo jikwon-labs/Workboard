@@ -12,7 +12,7 @@ pub const T: &[(&str, &str)] = &[
     ("Star a Form to see it here", "양식에 별표를 표시하면 여기에 나타납니다"),
     ("Star a Dashboard to see it here", "대시보드에 별표를 표시하면 여기에 나타납니다"),
     ("Most viewed and active Wikis appear here", "많이 보고 활발한 위키가 여기에 나타납니다"),
-    ("Once you join or create a Team you will see it here", "팀에 참가하거나 팀을 만들면 여기에 나타납니다"),
+    ("Once you join or create a team, you will see it here", "팀에 참가하거나 팀을 만들면 여기에 나타납니다"),
     ("All Docs", "모든 문서"),
     ("My Docs", "내 문서"),
     ("Shared with me", "나와 공유됨"),
@@ -107,7 +107,7 @@ pub const T: &[(&str, &str)] = &[
     ("Learn more", "자세히 알아보기"),
     ("Create a Goal, add targets (a number, done / not done, or a set of tasks) and the progress bar fills in as you go.", "목표를 만들고 지표(숫자, 완료 여부, 작업 묶음)를 추가하면 진행할수록 진행 막대가 채워집니다."),
     // teams
-    ("Create Team", "팀 만들기"),
+    ("Create team", "팀 만들기"),
     ("Manage teams and see their work", "팀을 관리하고 업무를 확인하세요"),
     ("Coordinate teams, organize members and see the details of their work.", "팀을 조율하고 멤버를 정리하며 업무를 자세히 확인하세요."),
     ("{} members", "멤버 {}명"),

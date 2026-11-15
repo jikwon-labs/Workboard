@@ -3143,7 +3143,7 @@ impl App {
                         ui.painter().text(
                             r.left_center() + vec2(10.0, 0.0),
                             Align2::LEFT_CENTER,
-                            tr("+ Add Task"),
+                            tr("+ Add task"),
                             FontId::proportional(13.0),
                             t.text3,
                         );
@@ -3744,7 +3744,7 @@ impl App {
                 ui.painter().text(
                     r.left_center() + vec2(8.0, 0.0),
                     Align2::LEFT_CENTER,
-                    tr("+ Add Task"),
+                    tr("+ Add task"),
                     FontId::proportional(13.0),
                     t.text3,
                 );

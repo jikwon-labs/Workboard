@@ -2604,7 +2604,7 @@ impl App {
                         s.dirty = true;
                     }
                     ui.add_space(6.0);
-                    if primary_button(ui, &s.t(), tr("Add Bookmark")).clicked() {
+                    if primary_button(ui, &s.t(), tr("Add bookmark")).clicked() {
                         s.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                     }
                 });

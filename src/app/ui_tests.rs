@@ -386,7 +386,7 @@ fn click_invite_in_rail_and_send() {
     h.click("Rail Invite");
     assert!(matches!(h.app.modal, Some(Modal::Invite { .. })));
     h.type_text("lee.jiwoo@team.kr");
-    h.click("Send free invite");
+    h.click("Send invite");
     assert_eq!(h.app.data.members.len(), n + 1);
     assert_eq!(
         h.app.data.members.last().unwrap().email,
@@ -623,7 +623,7 @@ fn click_goals_dashboards_teams_create() {
     h.click("Rail Teams");
     assert_eq!(h.app.section, Section::Teams);
     let n = h.app.data.extra.teams.len();
-    h.click("Create Team");
+    h.click("Create team");
     assert_eq!(h.app.data.extra.teams.len(), n + 1);
 }
 
@@ -633,9 +633,9 @@ fn click_settings_dialogs_open_and_close() {
     for item in [
         "Apps",
         "Templates",
-        "Custom Fields",
+        "Custom fields",
         "Automations",
-        "Tag Manager",
+        "Tag manager",
     ] {
         h.click("Workspace menu");
         h.click(item);
@@ -5724,7 +5724,7 @@ fn team_color_and_my_teams() {
     let mut h = Ui1::new();
     h.app.section = Section::Teams;
     h.settle();
-    h.click_side("Create Team", true);
+    h.click_side("Create team", true);
     let id = h.app.team_open.unwrap();
     h.click("Team color 3");
     assert_eq!(
@@ -7334,7 +7334,7 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     assert_eq!(custom(&h, 9002).as_deref(), Some("M"));
     // the Columns panel turns a field column off; the list remembers it
     h.click("\u{25A5}  Columns");
-    assert!(h.has("Custom Fields"));
+    assert!(h.has("Custom fields"));
     h.click("Field Billable");
     assert!(h.app.hidden_cols.contains("field:9001"));
     h.key(egui::Key::Escape);
@@ -7911,7 +7911,7 @@ fn painted_controls_get_the_hand_but_fields_and_backdrops_do_not() {
     let mut h = Ui1::new();
     h.app.section = Section::Teams;
     h.settle();
-    h.click_side("Create Team", true);
+    h.click_side("Create team", true);
     // a colour swatch is painted by hand, not an egui button
     let sw = h.find("Team color 3").unwrap();
     h.hover(sw);

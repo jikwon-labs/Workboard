@@ -2319,7 +2319,7 @@ impl App {
                                         t.text2,
                                     );
                                 }
-                                if sresp.on_hover_text(tr("Channel Settings")).clicked() {
+                                if sresp.on_hover_text(tr("Channel settings")).clicked() {
                                     self.modal = Some(Modal::ChannelSettings(id));
                                 } else if r.clicked() {
                                     self.section = Section::Chat;
@@ -3363,7 +3363,7 @@ impl App {
                                             close_popup(ui);
                                         }
                                     }
-                                    if ui.button(tr("Custom Fields")).clicked() {
+                                    if ui.button(tr("Custom fields")).clicked() {
                                         self.modal = Some(Modal::CustomFields {
                                             name: String::new(),
                                             kind: "text".into(),
@@ -4215,7 +4215,7 @@ impl App {
                                 }
                             });
                         } else if self.on_personal_list() {
-                            // the inline "+ Add Task" row below is the empty state
+                            // the inline "+ Add task" row below is the empty state
                         } else {
                             ui.label(
                                 RichText::new(tr("No tasks here yet"))
@@ -4304,7 +4304,7 @@ impl App {
         if show_dots {
             if child
                 .add(ghost(egui::Button::new(
-                    RichText::new(tr("+ Add Task")).color(t.text3).size(12.5),
+                    RichText::new(tr("+ Add task")).color(t.text3).size(12.5),
                 )))
                 .clicked()
             {
@@ -4392,7 +4392,7 @@ impl App {
             ui.painter().text(
                 r.left_center() + vec2(40.0, 0.0),
                 Align2::LEFT_CENTER,
-                tr("+ Add Task"),
+                tr("+ Add task"),
                 FontId::proportional(13.5),
                 t.text3,
             );
@@ -4965,7 +4965,7 @@ impl App {
         }
     }
 
-    /// "+ Add Task" at the foot of a board column: a name field, as in the
+    /// "+ Add task" at the foot of a board column: a name field, as in the
     /// List (a task is only made once it has a name).
     fn board_add_task(&mut self, ui: &mut Ui, g: &Group, w: f32, accent: Color32) {
         let t = self.t();
@@ -4981,7 +4981,7 @@ impl App {
             ui.painter().text(
                 r.left_center() + vec2(10.0, 0.0),
                 Align2::LEFT_CENTER,
-                tr("+  Add Task"),
+                tr("+  Add task"),
                 FontId::proportional(14.0),
                 accent,
             );

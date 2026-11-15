@@ -132,7 +132,7 @@ pub const T: &[(&str, &str)] = &[
     ("There are no Docs in this location yet.", "이 위치에는 아직 문서가 없습니다."),
     ("Add a Doc", "문서 추가"),
     ("Bookmarks make it easy to save items or any URL from around the web.", "북마크로 항목이나 웹 주소를 쉽게 저장할 수 있습니다."),
-    ("Add Bookmark", "북마크 추가"),
+    ("Add bookmark", "북마크 추가"),
     ("Add new Folder to your Space", "스페이스에 새 폴더를 추가하세요"),
     ("\u{1F4C1} {}  ({} lists)", "\u{1F4C1} {}  (목록 {}개)"),
     ("Add Folder", "폴더 추가"),

@@ -454,7 +454,7 @@ impl App {
                             ui,
                             &t,
                             "\u{1F465}",
-                            tr("Once you join or create a Team you will see it here"),
+                            tr("Once you join or create a team, you will see it here"),
                         );
                     }
                     for tm in teams {
@@ -1511,7 +1511,7 @@ impl App {
         let t = self.t();
         self.page_bar(ui, if mine { "My Teams" } else { "All Teams" }, |s, ui| {
             let tt = s.t();
-            if primary_button(ui, &tt, tr("Create Team")).clicked() {
+            if primary_button(ui, &tt, tr("Create team")).clicked() {
                 s.new_team();
             }
         });
@@ -1527,7 +1527,7 @@ impl App {
                         ui.label(RichText::new(tr("Manage teams and see their work")).size(24.0));
                         ui.label(RichText::new(tr("Coordinate teams, organize members and see the details of their work.")).color(t.text2));
                         ui.add_space(12.0);
-                        if primary_button(ui, &t, tr("Create Team")).clicked() {
+                        if primary_button(ui, &t, tr("Create team")).clicked() {
                             self.new_team();
                         }
                     });

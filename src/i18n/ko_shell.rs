@@ -54,7 +54,7 @@ pub const T: &[(&str, &str)] = &[
     ("All Tasks", "모든 작업"),
     ("New Space", "새 스페이스"),
     ("Create a Channel", "채널 만들기"),
-    ("Channel Settings", "채널 설정"),
+    ("Channel settings", "채널 설정"),
     ("channel-name", "채널-이름"),
     ("Add Channel", "채널 추가"),
     ("Direct Messages", "다이렉트 메시지"),
@@ -119,10 +119,9 @@ pub const T: &[(&str, &str)] = &[
     ("Show 1 closed task", "닫힌 작업 1개 보기"),
     ("Show {} closed tasks", "닫힌 작업 {}개 보기"),
     ("No tasks here yet", "아직 작업이 없습니다"),
-    ("+ Add Task", "+ 작업 추가"),
     ("Task Name", "작업 이름"),
     // board view
-    ("+  Add Task", "+  작업 추가"),
+    ("+  Add task", "+  작업 추가"),
     ("+  Add group", "+  그룹 추가"),
     (
         "The 1 task here is archived",

@@ -157,7 +157,7 @@ pub enum Modal {
 
 pub const ROLES: [(&str, &str); 4] = [
     ("Admin", "Can manage people, settings and all items."),
-    ("Member", "Can access all public items in your Workspace."),
+    ("Member", "Can access all public items in your workspace."),
     ("Guest", "Can only access items shared with them."),
     ("Owner", "Owns the Workspace."),
 ];
@@ -334,16 +334,16 @@ impl App {
         let items: [(&str, &str); 5] = [
             ("\u{25A6}", "Apps"),
             ("\u{25A4}", "Templates"),
-            ("\u{1F4DD}", "Custom Fields"),
+            ("\u{1F4DD}", "Custom fields"),
             ("\u{2699}", "Automations"),
-            ("\u{1F3F7}", "Tag Manager"),
+            ("\u{1F3F7}", "Tag manager"),
         ];
         for (icon, label) in items {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 self.modal = Some(match label {
                     "Apps" => Modal::ClickApps,
                     "Templates" => self.template_center(super::templates::Category::All, None),
-                    "Custom Fields" => Modal::CustomFields {
+                    "Custom fields" => Modal::CustomFields {
                         name: String::new(),
                         kind: "text".into(),
                         opts: String::new(),
@@ -604,7 +604,7 @@ impl App {
         for (icon, label) in rows {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 if label == "Settings" {
-                    self.open_settings("My Settings");
+                    self.open_settings("My settings");
                     close_popup(ui);
                     continue;
                 }
@@ -1112,10 +1112,10 @@ impl App {
         let mut open = true;
         let mut close = false;
         let title = match &modal {
-            Modal::Invite { .. } => tr("Invite people for free").to_string(),
+            Modal::Invite { .. } => tr("Invite people").to_string(),
             Modal::WorkspaceSettings { .. } => tr("Workspace settings").into(),
             Modal::NewWorkspace { .. } => tr("Create Workspace").into(),
-            Modal::Profile { .. } => tr("My Settings").into(),
+            Modal::Profile { .. } => tr("My settings").into(),
             Modal::SetStatus { .. } => tr("Set status").into(),
             Modal::Themes => tr("Themes").into(),
             Modal::Shortcuts => tr("Keyboard shortcuts").into(),
@@ -1123,12 +1123,12 @@ impl App {
             Modal::Labs => tr("Labs").into(),
             Modal::Notifications => tr("Notifications").into(),
             Modal::ClickApps => tr("Apps").into(),
-            Modal::CustomFields { .. } => tr("Custom Fields").into(),
+            Modal::CustomFields { .. } => tr("Custom fields").into(),
             Modal::Automations { .. } => tr("Automations").into(),
-            Modal::TagManager { .. } => tr("Tag Manager").into(),
+            Modal::TagManager { .. } => tr("Tag manager").into(),
             Modal::TemplateCenter(_) => tr("Template Center").into(),
             Modal::Import { .. } => tr("Import and export").into(),
-            Modal::ChannelSettings(_) => tr("Channel Settings").into(),
+            Modal::ChannelSettings(_) => tr("Channel settings").into(),
             Modal::SavedMessages => tr("Saved messages").into(),
             Modal::Share { .. } => tr("Share").into(),
             Modal::CustomizeNav => tr("Customize navigation").into(),
@@ -1138,7 +1138,7 @@ impl App {
             Modal::Trash => tr("Trash").into(),
             Modal::Unavailable { title, .. } => tr(title).to_string(),
             Modal::SlackImport(_) => tr("Import from Slack").into(),
-            Modal::Bookmark { .. } => tr("Add Bookmark").into(),
+            Modal::Bookmark { .. } => tr("Add bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::Together { .. } => tr("Work together").into(),
@@ -1309,7 +1309,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let valid: Vec<String> = emails.split(|c: char| c == ',' || c.is_whitespace()).map(|s| s.trim().to_string()).filter(|s| s.contains('@') && s.contains('.')).collect();
-                        let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send free invite"))));
+                        let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send invite"))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
                             let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
@@ -1379,7 +1379,7 @@ impl App {
                 }
             }
             Modal::NewWorkspace { name } => {
-                ui.label(tr("Name your Workspace"));
+                ui.label(tr("Name your workspace"));
                 let r = ui.add(
                     field(name)
                         .hint_text(tr("e.g. Acme Inc."))
@@ -1540,10 +1540,12 @@ impl App {
                                 Stroke::new(2.0, t.text),
                             );
                         }
+                        // the saved name is lower case ("black"); shown as a name ("Black")
+                        let label = name[..1].to_uppercase() + &name[1..];
                         ui.painter().text(
                             r.center_bottom() - vec2(0.0, 8.0),
                             Align2::CENTER_CENTER,
-                            tr(name),
+                            tr(&label),
                             FontId::proportional(11.5),
                             t.text2,
                         );
@@ -1703,7 +1705,7 @@ impl App {
                 ch |= check(ui, &mut a.tags, tr("Tags")).changed();
                 ch |= check(ui, &mut a.time_tracking, tr("Time Tracking")).changed();
                 ch |= check(ui, &mut a.time_estimates, tr("Time Estimates")).changed();
-                ch |= check(ui, &mut a.custom_fields, tr("Custom Fields")).changed();
+                ch |= check(ui, &mut a.custom_fields, tr("Custom fields")).changed();
                 ch |= check(ui, &mut a.multiple_assignees, tr("Multiple Assignees")).changed();
                 if ch {
                     self.dirty = true;
@@ -2502,7 +2504,7 @@ impl App {
                         .hint_text(tr("https://..."))
                         .desired_width(f32::INFINITY),
                 );
-                if primary_button(ui, t, tr("Add Bookmark")).clicked() && !url.trim().is_empty() {
+                if primary_button(ui, t, tr("Add bookmark")).clicked() && !url.trim().is_empty() {
                     let id = self.data.new_id();
                     let ttl = if title.trim().is_empty() {
                         url.trim().to_string()

@@ -1489,7 +1489,7 @@ impl App {
                 close_any(ui);
             }
         }
-        if ui.button(tr("Custom Fields")).clicked() {
+        if ui.button(tr("Custom fields")).clicked() {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
@@ -2164,7 +2164,7 @@ impl App {
             self.actions.push(Action::EditStatuses(sid));
             close_any(ui);
         }
-        if ui.button(tr("Custom Fields")).clicked() {
+        if ui.button(tr("Custom fields")).clicked() {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
@@ -2368,7 +2368,7 @@ impl App {
                     // custom fields: shown at first, each can be turned off here
                     let shown_fields: Vec<&(u64, String)> = fields.iter().filter(|(_, n)| hit(n)).collect();
                     if !shown_fields.is_empty() {
-                        ui.label(RichText::new(tr("Custom Fields")).small().color(t.text3));
+                        ui.label(RichText::new(tr("Custom fields")).small().color(t.text3));
                         for (fid, name) in shown_fields {
                             let key = super::shell::field_col_key(*fid);
                             ui.horizontal(|ui| {
@@ -3375,7 +3375,7 @@ impl App {
             && self.palette.is_none()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma))
         {
-            self.open_settings("My Settings");
+            self.open_settings("My settings");
         }
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         if typing

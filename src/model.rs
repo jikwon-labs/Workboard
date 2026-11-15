@@ -291,6 +291,9 @@ pub struct Message {
     /// shared folder); the message only says which ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// When its author last changed the text (shown as "(edited)").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited: Option<i64>,
 }
 
 pub use crate::media::MediaKind;
@@ -1291,6 +1294,7 @@ impl Data {
             pinned: false,
             call: None,
             attachments: vec![],
+            edited: None,
         };
         let c1 = d.new_id();
         let mut m1 = msg(&mut d, 2, "Morning everyone! The new homepage mockups are in the Website Redesign list.", 3 * 3600);

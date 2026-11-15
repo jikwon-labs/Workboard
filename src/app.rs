@@ -324,6 +324,12 @@ pub struct App {
     thread_open: Option<u64>,
     /// The reply being written in the open thread (`thread_open`).
     thread_text: String,
+    /// The message being changed in place: (channel, message, new text).
+    chat_edit: Option<(u64, u64, String)>,
+    /// A message waiting for a second click on "Delete message".
+    chat_delete: Option<u64>,
+    /// A channel marked unread while open: it stays unread until left.
+    chat_keep_unread: Option<u64>,
     /// Unsent messages and replies of the channels and threads not on
     /// screen, by channel / message id (kept until the app quits).
     drafts: Drafts,
@@ -525,6 +531,9 @@ impl App {
             chat_text: String::new(),
             thread_open: None,
             thread_text: String::new(),
+            chat_edit: None,
+            chat_delete: None,
+            chat_keep_unread: None,
             drafts: Drafts::default(),
             chat_files: vec![],
             thread_files: vec![],

@@ -626,7 +626,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     let my_name = h.app.data.member(me).unwrap().name.clone();
     // a huddle message in chat has a Join button
     let id = h.app.data.new_id();
-    h.app.data.channels[0].messages.push(Message { attachments: vec![], id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
+    h.app.data.channels[0].messages.push(Message { edited: None, attachments: vec![], id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
     h.app.section = Section::Chat;
     h.app.chat_open = Some(ch);
     h.settle();
@@ -1949,4 +1949,137 @@ fn drop_a_picture_send_it_and_open_it_large() {
     assert!(!h.app.pending_ready(false).0, "can't send with a refused file");
     h.click("Remove notes.txt");
     assert!(h.app.chat_files.is_empty());
+}
+
+// send a message in #general and show its hover toolbar
+fn general_with_my_message(text: &str) -> (Ui1, u64) {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.click("Message composer");
+    h.type_text(text);
+    h.key(egui::Key::Enter);
+    let p = h.find(text).unwrap();
+    h.hover(p);
+    (h, cid)
+}
+
+fn general_msg<'a>(h: &'a Ui1, cid: u64, start: &str) -> Option<&'a Message> {
+    h.app.data.channels.iter().find(|c| c.id == cid).unwrap().messages.iter().find(|m| m.text.starts_with(start))
+}
+
+#[test]
+fn click_more_actions_edit_my_message() {
+    let (mut h, cid) = general_with_my_message("first draft");
+    h.click("More actions");
+    h.click("Edit message");
+    assert!(h.app.chat_edit.is_some(), "the message turns into a text box");
+    h.click("Edit message");
+    for _ in 0.."first draft".len() {
+        h.key(egui::Key::Backspace);
+    }
+    h.type_text("final words");
+    h.key(egui::Key::Enter);
+    assert!(h.app.chat_edit.is_none());
+    let m = general_msg(&h, cid, "final words").expect("text changed");
+    assert!(m.edited.is_some(), "marked as edited");
+    assert!(h.has("(edited)"));
+}
+
+#[test]
+fn escape_cancels_an_edit_and_up_arrow_starts_one() {
+    let (mut h, cid) = general_with_my_message("keep me");
+    h.click("Message composer");
+    h.key(egui::Key::ArrowUp);
+    let mid = general_msg(&h, cid, "keep me").unwrap().id;
+    assert_eq!(h.app.chat_edit.as_ref().map(|e| e.1), Some(mid), "Up in an empty box edits my last message");
+    h.click("Edit message");
+    h.type_text(" changed");
+    h.key(egui::Key::Escape);
+    assert!(h.app.chat_edit.is_none());
+    let m = general_msg(&h, cid, "keep me").unwrap();
+    assert_eq!(m.text, "keep me", "Escape leaves the text as it was");
+    assert!(m.edited.is_none());
+}
+
+#[test]
+fn click_more_actions_delete_needs_two_clicks() {
+    let (mut h, cid) = general_with_my_message("oops wrong channel");
+    h.click("More actions");
+    h.click("Delete message");
+    assert!(general_msg(&h, cid, "oops").is_some(), "one click only asks");
+    h.click("Click again to delete");
+    assert!(general_msg(&h, cid, "oops").is_none(), "the second click deletes");
+}
+
+#[test]
+fn others_messages_cannot_be_edited_or_deleted() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let p = h.find("Reminder: newsletter draft is due Thursday.").unwrap();
+    h.hover(p);
+    h.click("More actions");
+    assert!(h.has("Copy text") && h.has("Mark unread"));
+    assert!(!h.has("Edit message") && !h.has("Delete message"));
+}
+
+#[test]
+fn click_more_reactions_picks_any_emoji() {
+    let (mut h, cid) = general_with_my_message("ship it");
+    h.click("More reactions");
+    h.click("\u{1F680}");
+    let m = general_msg(&h, cid, "ship it").unwrap();
+    assert!(m.reactions.iter().any(|r| r.emoji == "\u{1F680}" && r.users == vec![h.app.data.me]));
+}
+
+#[test]
+fn click_mark_unread_keeps_the_channel_unread() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    let text = "Reminder: newsletter draft is due Thursday.";
+    let p = h.find(text).unwrap();
+    h.hover(p);
+    h.click("More actions");
+    h.click("Mark unread");
+    h.settle();
+    let ts = general_msg(&h, cid, "Reminder:").unwrap().ts;
+    let c = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert!(c.last_read < ts, "still unread while the channel stays open");
+    // leaving and coming back reads it
+    h.click("website-redesign");
+    h.click("general");
+    let c = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert!(c.last_read >= ts);
+}
+
+#[test]
+fn click_remind_me_about_a_message() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let p = h.find("Reminder: newsletter draft is due Thursday.").unwrap();
+    h.hover(p);
+    h.click("More actions");
+    h.click("Remind me in 1 hour");
+    let r = h.app.data.extra.reminders.last().expect("a reminder is made");
+    assert!(r.text.starts_with("Message from Sam Lee: Reminder: newsletter"), "{}", r.text);
+    assert!((r.due_ts - now_ts() - 3600).abs() < 10);
+}
+
+#[test]
+fn composer_mention_and_emoji_pickers() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Mention someone");
+    h.click("Alex Kim");
+    assert_eq!(h.app.chat_text, "@Alex Kim ");
+    h.click("Emoji");
+    h.click("\u{1F525}");
+    assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525}");
+    // typing "@" opens the list by itself and the pick replaces the "@"
+    h.type_text(" @");
+    assert!(h.has("Jordan Park"), "typing @ offers people");
+    // (the right-most "Jordan Park" is the list's row, not a name in the feed)
+    h.click_side("Jordan Park", true);
+    assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
 }

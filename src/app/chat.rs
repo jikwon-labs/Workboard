@@ -7,6 +7,30 @@ use super::*;
 
 const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F389}"];
 
+/// The emoji grid behind "Add reaction" and the message box's emoji button.
+pub(super) const EMOJIS: [&str; 40] = [
+    "\u{1F44D}", "\u{1F44E}", "\u{2705}", "\u{1F440}", "\u{1F389}", "\u{2764}", "\u{1F525}", "\u{1F64F}",
+    "\u{1F604}", "\u{1F602}", "\u{1F60D}", "\u{1F914}", "\u{1F62E}", "\u{1F622}", "\u{1F621}", "\u{1F60E}",
+    "\u{1F44F}", "\u{1F64C}", "\u{1F4AA}", "\u{1F44B}", "\u{1F91D}", "\u{1F449}", "\u{270C}", "\u{1F44C}",
+    "\u{1F680}", "\u{1F4AF}", "\u{2B50}", "\u{1F4A1}", "\u{1F4CC}", "\u{1F4C5}", "\u{23F0}", "\u{1F6A7}",
+    "\u{2757}", "\u{2753}", "\u{274C}", "\u{2714}", "\u{1F3AF}", "\u{1F381}", "\u{2615}", "\u{1F355}",
+];
+
+/// A grid of emoji buttons; returns the one clicked.
+fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        for e in EMOJIS {
+            let b = ui.add(egui::Button::new(RichText::new(e).size(18.0)).frame(false).min_size(vec2(28.0, 28.0)));
+            if b.clicked() {
+                picked = Some(e);
+            }
+        }
+    });
+    picked
+}
+
 pub(super) enum ChatAction {
     Open(u64),
     JoinHuddle(u64),
@@ -22,6 +46,17 @@ pub(super) enum ChatAction {
     Pin { ch: u64, msg: u64 },
     /// Open a message's picture or video large.
     OpenMedia { ch: u64, msg: u64, index: usize },
+    /// Start changing one of my messages in place.
+    Edit { ch: u64, msg: u64 },
+    SaveEdit { ch: u64, msg: u64, text: String },
+    CancelEdit,
+    Delete { ch: u64, msg: u64 },
+    /// Show the channel as unread from this message on.
+    MarkUnread { ch: u64, ts: i64 },
+    /// Remind me about a message at this time (None: pick a time).
+    Remind { ch: u64, msg: u64, at: Option<i64> },
+    /// The text went to the clipboard.
+    Copied,
 }
 
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
@@ -118,6 +153,9 @@ impl App {
             self.chat_open = None;
             return;
         };
+        if self.chat_keep_unread.is_some_and(|k| k != cid) {
+            self.chat_keep_unread = None;
+        }
 
         // ---- thread panel
         let mut thread_rect: Option<Rect> = None;
@@ -387,8 +425,12 @@ impl App {
             p.text(r.center(), Align2::CENTER_CENTER, "Drop pictures or videos to send", FontId::proportional(18.0), t.text);
         }
 
-        // mark as read
+        // mark as read (unless the person just marked it unread and is still here)
         let now = now_ts();
+        if self.chat_keep_unread == Some(cid) {
+            self.apply_chat(acts);
+            return;
+        }
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == cid) {
             if c.messages.iter().any(|m| m.ts > c.last_read) {
                 c.last_read = now;
@@ -441,19 +483,55 @@ impl App {
             let r = ui.add(egui::TextEdit::multiline(&mut self.chat_text).id(text_id).hint_text(hint).frame(false).desired_rows(1).desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer"));
             let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+            // typing "@" at the start of a word offers the people to mention
+            let mention_popup = egui::Id::new("chat_mention_popup");
+            if r.changed() && self.chat_text.ends_with('@') {
+                let before = self.chat_text[..self.chat_text.len() - 1].chars().last();
+                if before.map_or(true, char::is_whitespace) {
+                    ui.memory_mut(|m| m.open_popup(mention_popup));
+                }
+            }
+            // Up in an empty box changes my last message here
+            if r.has_focus() && self.chat_text.is_empty() && self.composer_mode == 0 && ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                let me = self.data.me;
+                let last = self.chat_open.and_then(|cid| self.data.channels.iter().find(|c| c.id == cid)).and_then(|c| c.messages.iter().rev().find(|m| m.author == me && m.call.is_none() && m.post_title.is_none()).map(|m| (c.id, m.id, m.text.clone())));
+                if last.is_some() {
+                    self.chat_edit = last;
+                }
+            }
+            let mut insert: Option<String> = None;
             ui.horizontal(|ui| {
-                for (g, tip) in [("+", "Add pictures or videos"), ("@", "Mention someone"), ("\u{263A}", "Emoji"), ("\u{2611}", "Create task")] {
+                let tool = |ui: &mut Ui, g: &str, tip: &str| {
                     let b = ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tip);
-                    b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-                    if b.clicked() {
-                        match g {
-                            "+" => self.pick_media(false),
-                            "@" => self.chat_text.push('@'),
-                            "\u{263A}" => self.chat_text.push_str("\u{1F44D}"),
-                            "\u{2611}" => self.open_quick_add(None),
-                            _ => {}
+                    name_it(&b, tip);
+                    b
+                };
+                if tool(ui, "+", "Add pictures or videos").clicked() {
+                    self.pick_media(false);
+                }
+                let at = tool(ui, "@", "Mention someone");
+                let me = self.data.me;
+                let people: Vec<Member> = self.data.members.iter().filter(|m| !m.invited && m.id != me).cloned().collect();
+                popup(ui, &at, mention_popup, 210.0, |ui| {
+                    if people.is_empty() {
+                        ui.label(RichText::new("No one else here yet").color(t.text3));
+                    }
+                    for m in &people {
+                        if menu_row(ui, &t, &m.name, false, |p, c| paint_avatar(p, c, 8.0, m, t.card)).clicked() {
+                            insert = Some(format!("@{} ", m.name));
+                            close_popup(ui);
                         }
                     }
+                });
+                let em = tool(ui, "\u{263A}", "Emoji");
+                popup(ui, &em, egui::Id::new("chat_emoji_popup"), 248.0, |ui| {
+                    if let Some(e) = emoji_grid(ui) {
+                        insert = Some(e.to_string());
+                        close_popup(ui);
+                    }
+                });
+                if tool(ui, "\u{2611}", "Create task").clicked() {
+                    self.open_quick_add(None);
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let label = if self.composer_mode == 1 { "Post" } else { "\u{27A4}" };
@@ -472,6 +550,18 @@ impl App {
                     }
                 });
             });
+            if let Some(text) = insert {
+                // a picked @name replaces an "@" already typed
+                if text.starts_with('@') && self.chat_text.ends_with('@') {
+                    self.chat_text.pop();
+                }
+                self.chat_text.push_str(&text);
+                ui.memory_mut(|m| m.request_focus(text_id));
+                let n = self.chat_text.chars().count();
+                let mut st = egui::TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
+                st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(n))));
+                st.store(ui.ctx(), text_id);
+            }
         });
         ui.ctx().data_mut(|d| d.insert_temp(bg_id, frame_resp.response.rect));
         out
@@ -521,14 +611,16 @@ impl App {
         out
     }
 
-    fn message_row(&self, ui: &mut Ui, cid: u64, m: &Message, top_level: bool, acts: &mut Vec<ChatAction>) {
+    fn message_row(&mut self, ui: &mut Ui, cid: u64, m: &Message, top_level: bool, acts: &mut Vec<ChatAction>) {
         self.message_row_c(ui, cid, m, top_level, false, acts)
     }
 
     /// `compact`: a follow-up from the same person a moment later, shown
     /// without the avatar and name (as the original groups messages).
-    fn message_row_c(&self, ui: &mut Ui, cid: u64, m: &Message, top_level: bool, compact: bool, acts: &mut Vec<ChatAction>) {
+    fn message_row_c(&mut self, ui: &mut Ui, cid: u64, m: &Message, top_level: bool, compact: bool, acts: &mut Vec<ChatAction>) {
         let t = self.t();
+        let me = self.data.me;
+        let editing = matches!(&self.chat_edit, Some((c, id, _)) if *c == cid && *id == m.id);
         let w = ui.available_width();
         let start = ui.cursor().min;
         // the hover background goes underneath the message, not over it
@@ -552,6 +644,9 @@ impl App {
                     ui.label(RichText::new(name).strong());
                     let time = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).format("%-I:%M %p").to_string()).unwrap_or_default();
                     ui.label(RichText::new(time).small().color(t.text3));
+                    if m.edited.is_some() {
+                        ui.label(RichText::new("(edited)").small().color(t.text3));
+                    }
                     if m.saved {
                         ui.label(RichText::new("\u{1F516} Saved").small().color(Color32::from_rgb(0xe1, 0x6b, 0x16)));
                     }
@@ -563,8 +658,13 @@ impl App {
                 if let Some(pt) = &m.post_title {
                     ui.label(RichText::new(format!("\u{1F4E2} {}", pt)).size(16.0).color(t.text));
                 }
-                if !m.text.is_empty() {
+                if editing {
+                    self.edit_box(ui, cid, m.id, acts);
+                } else if !m.text.is_empty() {
                     ui.add(egui::Label::new(self.mention_text(&m.text, 14.0)).wrap());
+                    if compact && m.edited.is_some() {
+                        ui.label(RichText::new("(edited)").small().color(t.text3));
+                    }
                 }
                 if let Some(index) = self.attachment_tiles(ui, m) {
                     acts.push(ChatAction::OpenMedia { ch: cid, msg: m.id, index });
@@ -672,39 +772,126 @@ impl App {
         });
         let rect = Rect::from_min_max(start, pos2(start.x + w, inner.response.rect.bottom() + if compact { 1.0 } else { 4.0 }));
         ui.add_space(if compact { 2.0 } else { 8.0 });
-        // hover toolbar
-        if ui.rect_contains_pointer(rect) {
+        // hover toolbar; it stays while one of its menus is open
+        let more_id = egui::Id::new(("msg_more", cid, m.id, top_level));
+        let emoji_id = egui::Id::new(("msg_emoji", cid, m.id, top_level));
+        let menu_open = ui.memory(|mm| mm.is_popup_open(more_id) || mm.is_popup_open(emoji_id));
+        if !editing && (ui.rect_contains_pointer(rect) || menu_open) {
             ui.painter().set(bg, egui::Shape::rect_filled(rect.expand2(vec2(6.0, 2.0)), 6.0, t.hover));
-            let n = QUICK_REACTIONS.len() + if top_level { 4 } else { 1 };
+            let n = QUICK_REACTIONS.len() + 2 + if top_level { 4 } else { 1 };
             let bw = 30.0;
             let bar = Rect::from_min_size(pos2(rect.right() - bw * n as f32 - 8.0, rect.top() - 10.0), vec2(bw * n as f32 + 4.0, 28.0));
             ui.painter().rect_filled(bar, 7.0, t.card);
             ui.painter().rect_stroke(bar, 7.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             let mut x = bar.left() + 2.0;
-            let mut button = |ui: &mut Ui, label: &str, tip: &str| -> bool {
+            let mut button = |ui: &mut Ui, label: &str, tip: &str| -> egui::Response {
                 let r = Rect::from_min_size(pos2(x, bar.top() + 2.0), vec2(bw, 24.0));
                 x += bw;
-                put_over(ui, r, egui::Button::new(label).frame(false)).on_hover_text(tip).clicked()
+                let b = put_over(ui, r, egui::Button::new(label).frame(false));
+                name_it(&b, tip);
+                b.on_hover_text(tip)
             };
             for e in QUICK_REACTIONS {
-                if button(ui, e, "Add reaction") {
+                let b = button(ui, e, "Add reaction");
+                // (named by its emoji, so a test can pick one)
+                name_it(&b, e);
+                if b.clicked() {
                     acts.push(ChatAction::React { ch: cid, msg: m.id, emoji: e.to_string() });
                 }
             }
+            let eb = button(ui, "\u{263A}", "More reactions");
+            popup(ui, &eb, emoji_id, 248.0, |ui| {
+                if let Some(e) = emoji_grid(ui) {
+                    acts.push(ChatAction::React { ch: cid, msg: m.id, emoji: e.to_string() });
+                    close_popup(ui);
+                }
+            });
             if top_level {
-                if button(ui, "\u{1F4AC}", "Reply in thread") {
+                if button(ui, "\u{1F4AC}", "Reply in thread").clicked() {
                     acts.push(ChatAction::Thread(m.id));
                 }
-                if button(ui, "\u{2611}", "Create task from message") {
+                if button(ui, "\u{2611}", "Create task from message").clicked() {
                     acts.push(ChatAction::Task { ch: cid, msg: m.id });
                 }
             }
-            if top_level && button(ui, "\u{1F4CC}", if m.pinned { "Unpin" } else { "Pin message" }) {
+            if top_level && button(ui, "\u{1F4CC}", if m.pinned { "Unpin" } else { "Pin message" }).clicked() {
                 acts.push(ChatAction::Pin { ch: cid, msg: m.id });
             }
-            if button(ui, "\u{1F516}", if m.saved { "Remove from saved" } else { "Save for later" }) {
+            if button(ui, "\u{1F516}", if m.saved { "Remove from saved" } else { "Save for later" }).clicked() {
                 acts.push(ChatAction::Save { ch: cid, msg: m.id });
             }
+            let mb = button(ui, "\u{22EF}", "More actions");
+            if mb.clicked() {
+                self.chat_delete = None;
+            }
+            let now = now_ts();
+            let tomorrow = (today() + Duration::days(1)).and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or(now + 86400);
+            popup(ui, &mb, more_id, 220.0, |ui| {
+                let row = |ui: &mut Ui, label: &str| menu_row(ui, &t, label, false, |_, _| {});
+                if !m.text.is_empty() && row(ui, "Copy text").clicked() {
+                    ui.ctx().copy_text(m.text.clone());
+                    acts.push(ChatAction::Copied);
+                    close_popup(ui);
+                }
+                if top_level && m.author != me && row(ui, "Mark unread").clicked() {
+                    acts.push(ChatAction::MarkUnread { ch: cid, ts: m.ts });
+                    close_popup(ui);
+                }
+                ui.separator();
+                for (label, at) in [("Remind me in 1 hour", Some(now + 3600)), ("Remind me in 3 hours", Some(now + 3 * 3600)), ("Remind me tomorrow", Some(tomorrow)), ("Remind me at...", None)] {
+                    if row(ui, label).clicked() {
+                        acts.push(ChatAction::Remind { ch: cid, msg: m.id, at });
+                        close_popup(ui);
+                    }
+                }
+                if m.author == me {
+                    ui.separator();
+                    if m.call.is_none() && row(ui, "Edit message").clicked() {
+                        acts.push(ChatAction::Edit { ch: cid, msg: m.id });
+                        close_popup(ui);
+                    }
+                    // a second click deletes, so one slip doesn't lose a message
+                    let armed = self.chat_delete == Some(m.id);
+                    if row(ui, if armed { "Click again to delete" } else { "Delete message" }).clicked() {
+                        if armed {
+                            acts.push(ChatAction::Delete { ch: cid, msg: m.id });
+                            close_popup(ui);
+                        } else {
+                            self.chat_delete = Some(m.id);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    /// Changing one of my messages in place: Enter saves, Escape cancels.
+    fn edit_box(&mut self, ui: &mut Ui, cid: u64, mid: u64, acts: &mut Vec<ChatAction>) {
+        let t = self.t();
+        let Some((_, _, text)) = self.chat_edit.as_mut() else { return };
+        let id = egui::Id::new(("chat_edit", cid, mid));
+        let r = egui::Frame::new().stroke(Stroke::new(1.0, t.primary)).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 6)).fill(t.card).show(ui, |ui| {
+            ui.add(egui::TextEdit::multiline(text).id(id).frame(false).desired_rows(1).desired_width(f32::INFINITY))
+        }).inner;
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Edit message"));
+        focus_once(ui, &r);
+        let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+        let esc = (r.has_focus() || r.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut save = enter;
+        let mut cancel = esc;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Enter to save, Esc to cancel").small().color(t.text3));
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+            if primary_button(ui, &t, "Save").clicked() {
+                save = true;
+            }
+        });
+        if save {
+            acts.push(ChatAction::SaveEdit { ch: cid, msg: mid, text: text.trim().to_string() });
+        } else if cancel {
+            acts.push(ChatAction::CancelEdit);
         }
     }
 
@@ -749,7 +936,7 @@ impl App {
                 }
                 ChatAction::SendPost { ch, title, text, files } => {
                     let id = self.data.new_id();
-                    let m = Message { attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
+                    let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         c.messages.push(m);
                         c.last_read = now_ts();
@@ -786,12 +973,86 @@ impl App {
                     }
                     self.dirty = true;
                 }
+                ChatAction::Edit { ch, msg } => {
+                    let text = self.data.channels.iter_mut().find(|c| c.id == ch).and_then(|c| find_msg(&mut c.messages, msg)).filter(|m| m.author == me).map(|m| m.text.clone());
+                    if let Some(text) = text {
+                        self.chat_edit = Some((ch, msg, text));
+                    }
+                    self.chat_delete = None;
+                }
+                ChatAction::SaveEdit { ch, msg, text } => {
+                    self.chat_edit = None;
+                    if text.is_empty() {
+                        continue;
+                    }
+                    if let Some(m) = self.data.channels.iter_mut().find(|c| c.id == ch).and_then(|c| find_msg(&mut c.messages, msg)) {
+                        if m.author == me && m.text != text {
+                            m.text = text;
+                            m.edited = Some(now_ts());
+                            self.dirty = true;
+                        }
+                    }
+                }
+                ChatAction::CancelEdit => self.chat_edit = None,
+                ChatAction::Delete { ch, msg } => {
+                    self.chat_delete = None;
+                    if self.chat_edit.as_ref().is_some_and(|e| e.1 == msg) {
+                        self.chat_edit = None;
+                    }
+                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+                        if let Some(i) = c.messages.iter().position(|m| m.id == msg && m.author == me) {
+                            // a message with a thread takes its replies with it
+                            c.messages.remove(i);
+                            if self.thread_open == Some(msg) {
+                                self.thread_open = None;
+                            }
+                            self.dirty = true;
+                        } else {
+                            for p in c.messages.iter_mut() {
+                                if let Some(i) = p.replies.iter().position(|r| r.id == msg && r.author == me) {
+                                    p.replies.remove(i);
+                                    self.dirty = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                ChatAction::MarkUnread { ch, ts } => {
+                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+                        c.last_read = ts - 1;
+                        self.chat_keep_unread = Some(ch);
+                        if self.persist {
+                            self.dirty = true;
+                        }
+                    }
+                }
+                ChatAction::Remind { ch, msg, at } => {
+                    let found = self.data.channels.iter_mut().find(|c| c.id == ch).and_then(|c| find_msg(&mut c.messages, msg)).map(|m| (m.author, m.text.clone(), m.post_title.clone()));
+                    let Some((author, text, title)) = found else { continue };
+                    let who = self.data.member(author).map(|x| x.name.clone()).unwrap_or_else(|| "Someone".into());
+                    let body = title.filter(|x| !x.is_empty()).unwrap_or(text);
+                    let what = format!("Message from {}: {}", who, truncate(body.lines().next().unwrap_or(""), 60));
+                    match at {
+                        Some(ts) => {
+                            let id = self.data.new_id();
+                            self.data.extra.reminders.push(Reminder { id, text: what, due_ts: ts, done: false, owner: me });
+                            self.dirty = true;
+                            self.toast = Some(("Reminder created".into(), now_ts()));
+                        }
+                        None => self.modal = Some(Modal::Reminder { text: what, date: Some(today()), time: "09:00".into() }),
+                    }
+                }
+                ChatAction::Copied => self.toast = Some(("Copied".into(), now_ts())),
                 ChatAction::OpenMedia { ch, msg, index } => {
                     self.viewer = Some(super::files::Viewer::new(ch, msg, index));
                 }
                 ChatAction::Send { ch, text, parent, files } => {
+                    if self.chat_keep_unread == Some(ch) {
+                        self.chat_keep_unread = None;
+                    }
                     let id = self.data.new_id();
-                    let m = Message { attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
+                    let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         match parent {
                             Some(pid) => {

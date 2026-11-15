@@ -314,3 +314,21 @@ fn home_shows_due_reminders_and_tomorrows_meeting() {
     assert_eq!(h.app.section, Section::Meetings);
     assert_eq!(h.app.meeting_open, Some(6000));
 }
+
+#[test]
+fn empty_channel_alone_offers_invite_instead_of_add_people() {
+    let mut h = with(solo(), 1440.0, 900.0);
+    h.click("general");
+    assert_eq!(h.app.section, Section::Chat);
+    assert!(!h.has("+  Add People"), "nobody else to add");
+    h.click("+  Invite People");
+    assert!(matches!(h.app.modal, Some(Modal::Invite { .. })));
+    // with teammates it adds them to the channel as before
+    let mut h = Ui1::new();
+    for c in &mut h.app.data.channels {
+        c.messages.clear();
+    }
+    h.click("general");
+    h.click("+  Add People");
+    assert!(matches!(h.app.modal, Some(Modal::ChannelSettings(_))));
+}

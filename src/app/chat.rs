@@ -803,7 +803,12 @@ impl App {
                                 ui.label(RichText::new(trf!("Chat in {}", name)).size(16.0).color(t.text));
                                 ui.label(RichText::new(tr("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.")).color(t.text2));
                                 ui.add_space(10.0);
-                                if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, 32.0))).clicked() {
+                                // alone in the workspace there is nobody to add: invite instead
+                                if self.data.solo() {
+                                    if ui.add(egui::Button::new(tr("+  Invite People")).min_size(vec2(cw, 32.0))).clicked() {
+                                        self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
+                                    }
+                                } else if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, 32.0))).clicked() {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
                                 if ui.add(egui::Button::new(tr("\u{2728}  Import from Slack")).min_size(vec2(cw, 32.0))).clicked() {

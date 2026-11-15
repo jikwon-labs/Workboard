@@ -131,6 +131,7 @@ pub const T: &[(&str, &str)] = &[
     ("Board", "보드"),
     ("Calendar", "캘린더"),
     ("Gantt", "간트"),
+    ("Timeline", "타임라인"),
     ("Table", "표"),
     // priorities (model PRIORITIES)
     ("No Priority", "우선순위 없음"),

@@ -402,6 +402,7 @@ fn click_view_tabs() {
         ("View Board", ViewKind::Board),
         ("View Calendar", ViewKind::Calendar),
         ("View Gantt", ViewKind::Gantt),
+        ("View Timeline", ViewKind::Timeline),
         ("View Table", ViewKind::Table),
         ("View List", ViewKind::List),
     ] {
@@ -2159,6 +2160,128 @@ fn filter_builder_rows_are_joined_with_and() {
     assert_eq!(h.app.filter.count(), 0);
     h.key(egui::Key::Escape);
     assert!(!h.app.filter_open);
+}
+
+#[test]
+fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
+    use parity::Join;
+    let mut h = Ui1::new();
+    h.app.loc = Location::Everything;
+    h.settle();
+    h.click("\u{2261}  Filter");
+    // Priority is Urgent
+    h.click("+ Add filter");
+    h.click("Filter 1 field");
+    h.click("Priority");
+    h.click("Filter 1 values");
+    h.click("Urgent");
+    h.key(egui::Key::Escape);
+    // or a group: Status is TO DO or Priority is High
+    h.click("+ Add group");
+    assert_eq!(h.app.filter.groups.len(), 1);
+    h.click("Group 1 filter 1 field");
+    h.click("Status");
+    h.click("Group 1 filter 1 values");
+    h.click("TO DO");
+    h.key(egui::Key::Escape);
+    h.click("Add filter to group 1");
+    h.click("Group 1 filter 2 field");
+    h.click("Priority");
+    h.click("Group 1 filter 2 values");
+    h.click("High");
+    h.key(egui::Key::Escape);
+    assert!(h.app.filter_open, "the panel stays open");
+    assert_eq!(h.app.filter.groups[0].rows.len(), 2);
+    // And inside the group: TO DO and High
+    let and_inside = h.app.filtered().len();
+    h.click("Group 1 join");
+    assert_eq!(h.app.filter.groups[0].join, Join::Or);
+    h.click("Filter join");
+    assert_eq!(h.app.filter.join, Join::Or);
+    let shown: Vec<(u8, String)> = h
+        .app
+        .filtered()
+        .iter()
+        .map(|t| (t.priority, t.status.clone()))
+        .collect();
+    assert!(shown.len() > and_inside, "Or lets more through");
+    assert!(shown
+        .iter()
+        .all(|(p, s)| *p == 1 || s == "to do" || *p == 2));
+    assert!(shown.iter().any(|(p, _)| *p != 1), "not only Urgent");
+    // the badge counts every condition, the ones in the group too
+    assert_eq!(h.app.filter.count(), 3);
+    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    // removing a row in the group, then the group
+    h.click("Remove group 1 filter 2");
+    assert_eq!(h.app.filter.count(), 2);
+    h.click("Remove group 1");
+    assert!(h.app.filter.groups.is_empty());
+    assert_eq!(h.app.filter.count(), 1);
+    assert!(h.has("\u{2261}  Filter \u{00B7} 1"));
+}
+
+#[test]
+fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
+    use parity::{FilterField, FilterGroup, FilterRow, Join};
+    let mut h = Ui1::new();
+    h.app.loc = Location::Everything;
+    h.settle();
+    h.click("\u{2261}  Filter");
+    // nothing to save yet
+    h.click("Saved filter name");
+    h.type_text("Urgent or to do");
+    h.click("Save filter");
+    assert!(h.app.data.extra.saved_filters.is_empty(), "no conditions");
+    // Urgent, or (TO DO or High)
+    let row = |field, v: &str| FilterRow {
+        field: Some(field),
+        not: false,
+        values: vec![v.to_string()],
+    };
+    h.app.filter.rows = vec![row(FilterField::Priority, "1")];
+    h.app.filter.join = Join::Or;
+    h.app.filter.groups = vec![FilterGroup {
+        join: Join::Or,
+        rows: vec![
+            row(FilterField::Status, "to do"),
+            row(FilterField::Priority, "2"),
+        ],
+    }];
+    h.settle();
+    let shown = h.app.filtered().len();
+    h.click("Save filter");
+    assert_eq!(h.app.data.extra.saved_filters.len(), 1);
+    let saved = h.app.data.extra.saved_filters[0].clone();
+    assert_eq!(saved.name, "Urgent or to do");
+    assert_eq!(saved.groups[0].rows.len(), 2);
+    assert_eq!((saved.join, saved.groups[0].join), (Join::Or, Join::Or));
+    assert!(h.has("Urgent or to do"));
+    // clear, then bring it back by its name
+    h.click("Clear all");
+    assert_eq!(h.app.filter.count(), 0);
+    h.click("Urgent or to do");
+    assert_eq!(h.app.filter.count(), 3);
+    assert_eq!(h.app.filter.groups, saved.groups);
+    assert_eq!(h.app.filtered().len(), shown);
+    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    // rename
+    h.click("Rename saved filter Urgent or to do");
+    h.type_text(" soon");
+    h.click("Done renaming");
+    assert_eq!(
+        h.app.data.extra.saved_filters[0].name,
+        "Urgent or to do soon"
+    );
+    assert!(h.has("Urgent or to do soon"));
+    // changing the builder leaves the saved filter as it was
+    h.click("Remove group 1");
+    assert_eq!(h.app.filter.count(), 1);
+    assert_eq!(h.app.data.extra.saved_filters[0].groups.len(), 1);
+    // delete
+    h.click("Delete saved filter Urgent or to do soon");
+    assert!(h.app.data.extra.saved_filters.is_empty());
+    assert!(!h.has("Urgent or to do soon"));
 }
 
 #[test]
@@ -4816,6 +4939,103 @@ fn gantt_shows_subtasks_when_expanded() {
         h.has("Schedule Wireframe hero section"),
         "the subtask gets its own row"
     );
+}
+
+fn count_named(h: &Ui1, name: &str) -> usize {
+    h.tree.iter().filter(|(n, _)| n == name).count()
+}
+
+#[test]
+fn timeline_lanes_switch_grouping() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    assert!(h.app.view == ViewKind::Timeline);
+    // by assignee: the task Me and Alex share has a bar in both lanes
+    for lane in [
+        "Lane ME",
+        "Lane ALEX KIM",
+        "Lane SAM LEE",
+        "Lane UNASSIGNED",
+    ] {
+        assert!(h.has(lane), "{} is shown", lane);
+    }
+    assert_eq!(count_named(&h, "Bar Design new homepage layout"), 2);
+    // a task with only a due date gets a one-day bar in the Unassigned lane
+    let bar = rect_of(&h, "Bar Set up analytics dashboard");
+    assert!(bar.width() < 30.0, "one day wide: {}", bar.width());
+    let lane = rect_of(&h, "Lane UNASSIGNED");
+    assert!(bar.center().y > lane.top() && bar.center().y < lane.bottom());
+    h.click("Lanes by Status");
+    assert_eq!(h.app.timeline.by, GroupBy::Status);
+    assert!(h.has("Lane IN PROGRESS") && h.has("Lane TO DO"));
+    assert!(!h.has("Lane ALEX KIM"));
+    assert_eq!(count_named(&h, "Bar Design new homepage layout"), 1);
+    h.click("Lanes by Priority");
+    assert_eq!(h.app.timeline.by, GroupBy::Priority);
+    assert!(h.has("Lane URGENT"));
+    h.click("Lanes by List");
+    assert_eq!(h.app.timeline.by, GroupBy::List);
+    assert!(h.has("Lane WEBSITE REDESIGN"));
+    h.click("Lanes by Assignee");
+    assert!(h.has("Lane UNASSIGNED"));
+}
+
+#[test]
+fn timeline_bar_opens_and_drags_dates() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    let id = task_named(&h, "Write copy for landing page").id;
+    h.click("Bar Write copy for landing page");
+    assert_eq!(h.app.open_task, Some(id), "a click opens the task");
+    h.app.open_task = None;
+    h.settle();
+    let before = task_named(&h, "Write copy for landing page").clone();
+    // a day is 30 px wide at the Day scale, as in the Gantt
+    let r = rect_of(&h, "Bar Write copy for landing page");
+    drag_by(&mut h, r.center(), r.center() + vec2(60.0, 0.0));
+    let moved = task_named(&h, "Write copy for landing page").clone();
+    assert_eq!(moved.start, before.start.map(|d| d + Duration::days(2)));
+    assert_eq!(moved.due, before.due.map(|d| d + Duration::days(2)));
+    assert!(h.app.open_task.is_none(), "a drag doesn't open the task");
+    let r = rect_of(&h, "End of Write copy for landing page");
+    drag_by(&mut h, r.center(), r.center() + vec2(90.0, 0.0));
+    let after = task_named(&h, "Write copy for landing page").clone();
+    assert_eq!(after.due, moved.due.map(|d| d + Duration::days(3)));
+    assert_eq!(after.start, moved.start, "only the end moved");
+}
+
+#[test]
+fn timeline_tray_lists_tasks_without_dates() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    assert!(!h.has("Undated Collect feedback from beta users"));
+    h.click("Tasks without dates");
+    let id = task_named(&h, "Collect feedback from beta users").id;
+    h.click("Undated Collect feedback from beta users");
+    assert_eq!(h.app.open_task, Some(id));
+}
+
+#[test]
+fn timeline_follows_the_filter_and_zoom() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    assert!(h.has("Bar Design new homepage layout"));
+    h.app.search = "copy".into();
+    h.settle();
+    assert!(h.has("Bar Write copy for landing page"));
+    assert!(!h.has("Bar Design new homepage layout"), "filtered out");
+    h.app.search.clear();
+    h.app.me_mode = true;
+    h.settle();
+    assert!(h.has("Bar Fix navigation on mobile"));
+    assert!(!h.has("Bar Write copy for landing page"), "Me mode");
+    h.app.me_mode = false;
+    h.click("Month");
+    assert_eq!(h.app.timeline.zoom, 2);
+    h.click("Today");
+    let r = rect_of(&h, "Bar Write copy for landing page");
+    assert!(r.left() > 0.0 && r.right() < 1440.0, "today is in view");
+    assert!(r.width() < 30.0, "narrow at the Month scale");
 }
 
 #[test]

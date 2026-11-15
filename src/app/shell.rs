@@ -121,6 +121,27 @@ fn paint_view_icon(p: &egui::Painter, c: Pos2, v: ViewKind) {
         ViewKind::Board => (Color32::from_rgb(62, 99, 221), 1),
         ViewKind::Calendar => (Color32::from_rgb(247, 104, 8), 2),
         ViewKind::Gantt => (Color32::from_rgb(229, 72, 77), 3),
+        ViewKind::Timeline => {
+            // two staggered bars
+            let r = Rect::from_center_size(c, vec2(14.0, 14.0));
+            p.rect_filled(r, 3.0, Color32::from_rgb(124, 92, 230));
+            let w = Stroke::new(2.0_f32, Color32::WHITE);
+            p.line_segment(
+                [
+                    pos2(r.left() + 3.0, r.top() + 5.0),
+                    pos2(r.left() + 9.0, r.top() + 5.0),
+                ],
+                w,
+            );
+            p.line_segment(
+                [
+                    pos2(r.left() + 6.0, r.top() + 9.5),
+                    pos2(r.right() - 3.0, r.top() + 9.5),
+                ],
+                w,
+            );
+            return;
+        }
         ViewKind::Table => (Color32::from_rgb(48, 164, 108), 4),
     };
     let r = Rect::from_center_size(c, vec2(14.0, 14.0));

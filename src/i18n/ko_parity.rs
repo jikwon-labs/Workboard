@@ -107,6 +107,17 @@ pub const T: &[(&str, &str)] = &[
     ("+ Add filter", "+ 필터 추가"),
     ("Show archived tasks only", "보관된 작업만 표시"),
     ("Only my tasks", "내 작업만"),
+    // filter groups and saved filters
+    ("Or", "또는"),
+    ("Switch between And and Or", "그리고/또는 전환"),
+    ("+ Add group", "+ 그룹 추가"),
+    ("A group has its own And / Or and counts as one condition", "그룹은 자체 그리고/또는을 가지며 하나의 조건으로 계산됩니다"),
+    ("Remove group", "그룹 삭제"),
+    ("Saved filters", "저장된 필터"),
+    ("Show this filter", "이 필터 적용"),
+    ("Name this filter", "필터 이름"),
+    ("Save filter", "필터 저장"),
+    ("Pick a condition and type a name first", "먼저 조건을 고르고 이름을 입력하세요"),
     // bulk bar
     ("{} task selected", "작업 {}개 선택됨"),
     ("{} tasks selected", "작업 {}개 선택됨"),

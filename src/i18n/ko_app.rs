@@ -38,6 +38,10 @@ pub const T: &[(&str, &str)] = &[
     ("Save the tasks in this view as a CSV file", "이 보기의 작업을 CSV 파일로 저장합니다"),
     ("{} without dates", "날짜 없음 {}"),
     ("+ Add Task", "+ 작업 추가"),
+    // timeline
+    ("Lanes", "레인"),
+    ("Show the tasks that have no start or due date", "시작일과 마감일이 없는 작업을 보여 줍니다"),
+    ("No tasks with dates in this view yet", "이 보기에는 아직 날짜가 있는 작업이 없습니다"),
     // home
     ("Good morning", "좋은 아침이에요"),
     ("Good afternoon", "좋은 오후예요"),

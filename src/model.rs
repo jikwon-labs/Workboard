@@ -1067,6 +1067,10 @@ pub struct Extra {
     /// Space Overview cards turned off with Customize.
     #[serde(default)]
     pub hidden_cards: Vec<String>,
+    /// Filters I saved under a name (my own: left out of the copy
+    /// teammates get).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_filters: Vec<crate::filters::SavedFilter>,
     /// Replies marked read one by one: "taskid:ts:author" or "chat:CHANNEL:MESSAGE".
     #[serde(default)]
     pub replies_read: Vec<String>,
@@ -1131,6 +1135,7 @@ impl Default for Extra {
             sync: Default::default(),
             demo_removed: false,
             hidden_cards: vec![],
+            saved_filters: vec![],
             replies_read: vec![],
             welcome: false,
             closed_dms: vec![],

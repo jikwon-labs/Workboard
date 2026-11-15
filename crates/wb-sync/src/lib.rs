@@ -760,6 +760,8 @@ pub fn shareable(data: &Value) -> Value {
         e.insert("inbox_cleared".into(), Value::Array(vec![]));
         e.insert("inbox_later".into(), Value::Array(vec![]));
         e.insert("trash".into(), Value::Array(vec![]));
+        // filters saved under a name are each person's own and never merged
+        e.remove("saved_filters");
         if let Some(s) = e.get_mut("sync").and_then(|s| s.as_object_mut()) {
             s.insert("hashes".into(), Value::Object(Map::new()));
             s.insert("value_hashes".into(), Value::Object(Map::new()));
@@ -1588,6 +1590,26 @@ mod tests {
         assert_eq!(b["extra"]["bookmarks"][0]["title"], "Docs");
         let joined = with_team_things(&json!({"extra": {"bookmarks": []}}), &a);
         assert_eq!(joined["extra"]["bookmarks"][0]["id"], 5);
+    }
+
+    #[test]
+    fn saved_filters_stay_home_and_survive_a_merge() {
+        let saved = json!([{"id": 4, "name": "Urgent", "join": "Or",
+            "rows": [{"field": "Priority", "not": false, "values": ["1"]}]}]);
+        let mut mine = ws(json!([]), json!([]), &SyncMeta::default());
+        mine["extra"]["saved_filters"] = saved.clone();
+        // left out of the copy teammates and the server get
+        assert!(shareable(&mine)["extra"].get("saved_filters").is_none());
+        // a teammate's copy with their own saved filters doesn't replace mine
+        let mut theirs = ws(
+            json!([{"id": 7, "name": "T"}]),
+            json!([]),
+            &SyncMeta::default(),
+        );
+        theirs["extra"]["saved_filters"] = json!([{"id": 9, "name": "Theirs"}]);
+        merge(&mut mine, &[theirs]);
+        assert_eq!(mine["extra"]["saved_filters"], saved);
+        assert_eq!(mine["tasks"][0]["id"], 7);
     }
 
     #[test]

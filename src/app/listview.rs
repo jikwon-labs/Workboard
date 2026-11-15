@@ -3,7 +3,7 @@
 // menu, and deleting with an Undo.
 
 use super::*;
-use parity::FilterRow;
+use parity::{FilterGroup, FilterRow, Join};
 
 /// The view settings remembered for one location (List, Folder, Space...).
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -20,6 +20,10 @@ pub struct ViewPrefs {
     pub hidden_cols: Vec<String>,
     #[serde(default)]
     pub filter_rows: Vec<FilterRow>,
+    #[serde(default, skip_serializing_if = "Join::is_and")]
+    pub filter_join: Join,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_groups: Vec<FilterGroup>,
     #[serde(default)]
     pub archived: bool,
 }
@@ -65,6 +69,8 @@ impl App {
             subtasks_open: self.subtasks_open,
             hidden_cols: hidden,
             filter_rows: self.filter.rows.clone(),
+            filter_join: self.filter.join,
+            filter_groups: self.filter.groups.clone(),
             archived: self.filter.archived,
         }
     }
@@ -77,6 +83,8 @@ impl App {
         self.subtasks_open = p.subtasks_open;
         self.hidden_cols = p.hidden_cols.iter().cloned().collect();
         self.filter.rows = p.filter_rows.clone();
+        self.filter.join = p.filter_join;
+        self.filter.groups = p.filter_groups.clone();
         self.filter.archived = p.archived;
     }
 

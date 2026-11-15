@@ -402,6 +402,7 @@ fn click_view_tabs() {
         ("View Board", ViewKind::Board),
         ("View Calendar", ViewKind::Calendar),
         ("View Gantt", ViewKind::Gantt),
+        ("View Timeline", ViewKind::Timeline),
         ("View Table", ViewKind::Table),
         ("View List", ViewKind::List),
     ] {
@@ -4816,6 +4817,103 @@ fn gantt_shows_subtasks_when_expanded() {
         h.has("Schedule Wireframe hero section"),
         "the subtask gets its own row"
     );
+}
+
+fn count_named(h: &Ui1, name: &str) -> usize {
+    h.tree.iter().filter(|(n, _)| n == name).count()
+}
+
+#[test]
+fn timeline_lanes_switch_grouping() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    assert!(h.app.view == ViewKind::Timeline);
+    // by assignee: the task Me and Alex share has a bar in both lanes
+    for lane in [
+        "Lane ME",
+        "Lane ALEX KIM",
+        "Lane SAM LEE",
+        "Lane UNASSIGNED",
+    ] {
+        assert!(h.has(lane), "{} is shown", lane);
+    }
+    assert_eq!(count_named(&h, "Bar Design new homepage layout"), 2);
+    // a task with only a due date gets a one-day bar in the Unassigned lane
+    let bar = rect_of(&h, "Bar Set up analytics dashboard");
+    assert!(bar.width() < 30.0, "one day wide: {}", bar.width());
+    let lane = rect_of(&h, "Lane UNASSIGNED");
+    assert!(bar.center().y > lane.top() && bar.center().y < lane.bottom());
+    h.click("Lanes by Status");
+    assert_eq!(h.app.timeline.by, GroupBy::Status);
+    assert!(h.has("Lane IN PROGRESS") && h.has("Lane TO DO"));
+    assert!(!h.has("Lane ALEX KIM"));
+    assert_eq!(count_named(&h, "Bar Design new homepage layout"), 1);
+    h.click("Lanes by Priority");
+    assert_eq!(h.app.timeline.by, GroupBy::Priority);
+    assert!(h.has("Lane URGENT"));
+    h.click("Lanes by List");
+    assert_eq!(h.app.timeline.by, GroupBy::List);
+    assert!(h.has("Lane WEBSITE REDESIGN"));
+    h.click("Lanes by Assignee");
+    assert!(h.has("Lane UNASSIGNED"));
+}
+
+#[test]
+fn timeline_bar_opens_and_drags_dates() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    let id = task_named(&h, "Write copy for landing page").id;
+    h.click("Bar Write copy for landing page");
+    assert_eq!(h.app.open_task, Some(id), "a click opens the task");
+    h.app.open_task = None;
+    h.settle();
+    let before = task_named(&h, "Write copy for landing page").clone();
+    // a day is 30 px wide at the Day scale, as in the Gantt
+    let r = rect_of(&h, "Bar Write copy for landing page");
+    drag_by(&mut h, r.center(), r.center() + vec2(60.0, 0.0));
+    let moved = task_named(&h, "Write copy for landing page").clone();
+    assert_eq!(moved.start, before.start.map(|d| d + Duration::days(2)));
+    assert_eq!(moved.due, before.due.map(|d| d + Duration::days(2)));
+    assert!(h.app.open_task.is_none(), "a drag doesn't open the task");
+    let r = rect_of(&h, "End of Write copy for landing page");
+    drag_by(&mut h, r.center(), r.center() + vec2(90.0, 0.0));
+    let after = task_named(&h, "Write copy for landing page").clone();
+    assert_eq!(after.due, moved.due.map(|d| d + Duration::days(3)));
+    assert_eq!(after.start, moved.start, "only the end moved");
+}
+
+#[test]
+fn timeline_tray_lists_tasks_without_dates() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    assert!(!h.has("Undated Collect feedback from beta users"));
+    h.click("Tasks without dates");
+    let id = task_named(&h, "Collect feedback from beta users").id;
+    h.click("Undated Collect feedback from beta users");
+    assert_eq!(h.app.open_task, Some(id));
+}
+
+#[test]
+fn timeline_follows_the_filter_and_zoom() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    assert!(h.has("Bar Design new homepage layout"));
+    h.app.search = "copy".into();
+    h.settle();
+    assert!(h.has("Bar Write copy for landing page"));
+    assert!(!h.has("Bar Design new homepage layout"), "filtered out");
+    h.app.search.clear();
+    h.app.me_mode = true;
+    h.settle();
+    assert!(h.has("Bar Fix navigation on mobile"));
+    assert!(!h.has("Bar Write copy for landing page"), "Me mode");
+    h.app.me_mode = false;
+    h.click("Month");
+    assert_eq!(h.app.timeline.zoom, 2);
+    h.click("Today");
+    let r = rect_of(&h, "Bar Write copy for landing page");
+    assert!(r.left() > 0.0 && r.right() < 1440.0, "today is in view");
+    assert!(r.width() < 30.0, "narrow at the Month scale");
 }
 
 #[test]

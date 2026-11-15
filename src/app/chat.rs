@@ -707,7 +707,7 @@ impl App {
                     }
                     let vr = ui.add(ghost(egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2)).min_size(vec2(0.0, 30.0))));
                     popup(ui, &vr, ui.id().with(("chan_view", cid)), 180.0, |ui| {
-                        for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar), ("Gantt", ViewKind::Gantt), ("Table", ViewKind::Table)] {
+                        for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar), ("Gantt", ViewKind::Gantt), ("Timeline", ViewKind::Timeline), ("Table", ViewKind::Table)] {
                             if ui.button(tr(label)).clicked() {
                                 self.view = v;
                                 self.actions.push(Action::Go(Location::Everything));

@@ -125,6 +125,7 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         ("board", ViewKind::Board),
         ("calendar", ViewKind::Calendar),
         ("gantt", ViewKind::Gantt),
+        ("timeline", ViewKind::Timeline),
         ("table", ViewKind::Table),
     ] {
         v.push((

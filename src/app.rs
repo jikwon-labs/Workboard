@@ -1,5 +1,5 @@
 // The application window: global top bar, sidebar hierarchy, view tabs
-// (List, Board, Calendar, Gantt, Table), Home and Inbox pages, the task
+// (List, Board, Calendar, Gantt, Timeline, Table), Home and Inbox pages, the task
 // detail window, quick add and the command search.
 
 use crate::i18n::{tr, DateText};
@@ -36,6 +36,7 @@ mod taskfields;
 #[cfg(test)]
 mod tests;
 mod timebar;
+mod timeline;
 mod together;
 #[cfg(test)]
 mod ui_tests;
@@ -51,16 +52,18 @@ pub enum ViewKind {
     Board,
     Calendar,
     Gantt,
+    Timeline,
     Table,
 }
 
 impl ViewKind {
-    const ALL: [ViewKind; 6] = [
+    const ALL: [ViewKind; 7] = [
         ViewKind::Overview,
         ViewKind::List,
         ViewKind::Board,
         ViewKind::Calendar,
         ViewKind::Gantt,
+        ViewKind::Timeline,
         ViewKind::Table,
     ];
     fn label(self) -> &'static str {
@@ -70,6 +73,7 @@ impl ViewKind {
             ViewKind::Board => "Board",
             ViewKind::Calendar => "Calendar",
             ViewKind::Gantt => "Gantt",
+            ViewKind::Timeline => "Timeline",
             ViewKind::Table => "Table",
         }
     }
@@ -80,6 +84,7 @@ impl ViewKind {
             ViewKind::Board => "\u{25A6}",
             ViewKind::Calendar => "\u{1F4C5}",
             ViewKind::Gantt => "\u{2261}",
+            ViewKind::Timeline => "\u{2550}",
             ViewKind::Table => "\u{25A4}",
         }
     }
@@ -503,6 +508,7 @@ pub struct App {
     /// Gantt scale: 0 days, 1 weeks, 2 months.
     gantt_zoom: u8,
     gantt_jump: bool,
+    timeline: timeline::TimelineState,
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
@@ -613,6 +619,7 @@ impl App {
             Some("board") => ViewKind::Board,
             Some("calendar") => ViewKind::Calendar,
             Some("gantt") => ViewKind::Gantt,
+            Some("timeline") => ViewKind::Timeline,
             Some("table") => ViewKind::Table,
             _ => ViewKind::List,
         };
@@ -821,6 +828,7 @@ impl App {
             cal_week: false,
             gantt_zoom: 0,
             gantt_jump: true,
+            timeline: Default::default(),
             doc_preview: false,
             settings_tab: 0,
             settings_state: None,
@@ -2417,6 +2425,7 @@ impl App {
                                             ViewKind::Board => self.board_view(ui),
                                             ViewKind::Calendar => self.calendar_view(ui),
                                             ViewKind::Gantt => self.gantt_view(ui),
+                                            ViewKind::Timeline => self.timeline_view(ui),
                                             ViewKind::Table => self.table_view(ui),
                                         },
                                     );

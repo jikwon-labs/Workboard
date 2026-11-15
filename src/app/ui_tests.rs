@@ -115,6 +115,10 @@ impl Ui1 {
     }
 
     fn click(&mut self, name: &str) {
+        if !self.has(name) && self.app.modal.is_some() {
+            // maybe further down a dialog that scrolls
+            self.scroll_dialog_to(name);
+        }
         self.scroll_into_view(name);
         let pos = self.find(name).unwrap_or_else(|| {
             let mut names: Vec<&String> = self.tree.iter().map(|(n, _)| n).collect();
@@ -839,6 +843,22 @@ fn work_together_in_a_shared_folder_says_how_teammates_join_and_keeps_the_path_o
 }
 
 #[test]
+fn work_together_fits_a_small_window_and_scrolls() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.click("Workspace menu");
+    h.click("Work together");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    // the title and the close button stay on screen
+    let close = h.rect("Close");
+    assert!(close.top() >= 0.0 && close.bottom() <= 560.0, "{:?}", close);
+    // the bottom of the dialog is reached by scrolling inside it
+    h.scroll_into_view("Connect");
+    let connect = h.rect("Connect");
+    assert!(connect.bottom() <= 560.0, "{:?}", connect);
+    assert!(h.rect("Close").top() >= 0.0, "the title stays put");
+}
+
+#[test]
 fn work_together_connects_to_a_server_and_shows_the_status() {
     let mut h = Ui1::new();
     h.click("Workspace menu");
@@ -1052,6 +1072,39 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.app.data.extra.shared.is_none());
 }
 
+impl Ui1 {
+    // where the open dialog is on screen
+    fn modal_rect(&self) -> Rect {
+        self.try_modal_rect().expect("a dialog is drawn")
+    }
+
+    fn try_modal_rect(&self) -> Option<Rect> {
+        let m = self.app.modal.as_ref()?;
+        self.ctx
+            .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
+    }
+
+    // turn the mouse wheel over the open dialog until a control in it shows
+    fn scroll_dialog_to(&mut self, name: &str) {
+        for _ in 0..30 {
+            if self.has(name) {
+                break;
+            }
+            let Some(r) = self.try_modal_rect() else {
+                return;
+            };
+            let at = r.center();
+            self.frame(vec![egui::Event::PointerMoved(at)]);
+            self.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -120.0),
+                modifiers: Default::default(),
+            }]);
+            self.settle();
+        }
+    }
+}
+
 // a server workspace whose server can't be reached, waited on until the
 // app has tried and failed (nothing listens on port 1)
 fn server_down(h: &mut Ui1) {
@@ -1204,12 +1257,7 @@ fn people_says_why_roles_are_missing_offline_and_how_invited_people_join() {
 
 #[test]
 fn inviting_while_the_server_is_down_says_the_codes_wait_and_the_dialog_stays_narrow() {
-    let window = |h: &Ui1| {
-        let m = h.app.modal.as_ref().unwrap();
-        h.ctx
-            .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
-            .unwrap()
-    };
+    let window = |h: &Ui1| h.modal_rect();
     let bookmark = || Modal::Bookmark {
         title: String::new(),
         url: String::new(),
@@ -7808,7 +7856,10 @@ fn an_owner_without_a_server_manages_someone_elses_channel() {
         .creator = 2;
     h.app.modal = Some(Modal::ChannelSettings(cid));
     h.settle();
-    h.click("Sam Lee");
+    // the Sam Lee checkbox in the dialog, not a name on the page behind it
+    let dialog = h.modal_rect();
+    let sam = h.rect_in("Sam Lee", dialog);
+    h.click_at(sam.center());
     assert!(h
         .app
         .data

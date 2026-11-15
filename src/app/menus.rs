@@ -1207,7 +1207,22 @@ impl App {
                     open = false;
                 }
                 ui.add_space(10.0);
-                close |= self.modal_body(ui, &t, &mut modal);
+                // the server and sign-in dialogs can be taller than a small
+                // window: the title stays put and the rest scrolls (the
+                // others are short, or scroll their own lists)
+                if matches!(modal, Modal::Together { .. } | Modal::Welcome { .. }) {
+                    let tall = (screen.height() - 140.0).max(200.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("modal_body")
+                        .max_height(tall)
+                        .min_scrolled_height(tall)
+                        .show(ui, |ui| {
+                            ui.set_min_width(min_w - 20.0);
+                            close |= self.modal_body(ui, &t, &mut modal);
+                        });
+                } else {
+                    close |= self.modal_body(ui, &t, &mut modal);
+                }
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {

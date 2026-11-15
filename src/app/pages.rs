@@ -820,6 +820,18 @@ impl App {
             .filter(|x| x.parent.is_none())
             .cloned()
             .collect();
+        // time tracked stays counted after its task is archived (Timesheets
+        // shows it too), so the time cards take archived tasks as well
+        let tracked: Vec<Task> = self
+            .data
+            .tasks
+            .iter()
+            .filter(|x| {
+                space_lists.as_ref().is_none_or(|l| l.contains(&x.list_id))
+                    && (!x.time_entries.is_empty() || !x.running_timers().is_empty())
+            })
+            .cloned()
+            .collect();
         let w = ui.available_width();
         let half = (w - 12.0) / 2.0;
         let full = |k: &str| k == "stats" || k == "overdue";
@@ -894,7 +906,7 @@ impl App {
                                     &cards[ci].kind,
                                     cw - 34.0,
                                     &tops,
-                                    &scope,
+                                    &tracked,
                                 ) {
                                     open = Some(id);
                                 }
@@ -950,7 +962,8 @@ impl App {
     }
 
     /// One card's contents; returns a task clicked in it. `top` are the top
-    /// level tasks in view, `scope` every task in view (for tracked time).
+    /// level tasks in view, `scope` every task with tracked time, archived
+    /// ones included.
     fn dash_card_body(
         &self,
         ui: &mut Ui,

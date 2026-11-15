@@ -207,4 +207,5 @@ pub const T: &[(&str, &str)] = &[
     ("Mark as Wiki", "위키로 표시"),
     ("Unmark as Wiki", "위키 표시 해제"),
     ("{} views in the last 30 days", "최근 30일 조회 {}회"),
+    ("{} (archived)", "{} (보관됨)"),
 ];

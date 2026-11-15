@@ -1975,6 +1975,13 @@ impl App {
                             per[i as usize] += now - st;
                         }
                     }
+                    // time on an archived task still counts: mark the row so
+                    let archived = !self.data.task_live(&self.data.tasks[ti]);
+                    let shown = if archived {
+                        trf!("{} (archived)", name)
+                    } else {
+                        name.clone()
+                    };
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         let (nr, nresp) =
@@ -1984,9 +1991,9 @@ impl App {
                             .text(
                                 nr.left_center() + vec2(8.0, 0.0),
                                 Align2::LEFT_CENTER,
-                                &name,
+                                &shown,
                                 FontId::proportional(14.0),
-                                t.text,
+                                if archived { t.text3 } else { t.text },
                             );
                         // take the row off (and my time on it this week)
                         let xr = Rect::from_center_size(
@@ -2251,7 +2258,13 @@ impl App {
             for (k, e) in x.time_entries.iter().enumerate() {
                 let i = (ts_day(e.start) - ws).num_days();
                 if (0..7).contains(&i) && self.data.is_my_entry(x, e) {
-                    rows.push((e.start, e.end, x.name.clone(), x.id, k));
+                    // time on an archived task still counts: mark the entry so
+                    let name = if self.data.task_live(x) {
+                        x.name.clone()
+                    } else {
+                        trf!("{} (archived)", x.name)
+                    };
+                    rows.push((e.start, e.end, name, x.id, k));
                 }
             }
         }

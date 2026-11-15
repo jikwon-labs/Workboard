@@ -8480,3 +8480,67 @@ fn sidebar_says_when_a_folder_or_space_holds_only_archived_lists() {
     let h = Ui1::new();
     assert!(!h.tree.iter().any(|(n, _)| n.contains("archived List")));
 }
+
+#[test]
+fn time_on_archived_tasks_counts_on_the_dashboard_and_is_marked_in_timesheets() {
+    let mut h = archived_workspace();
+    // today at 00:01, so the entry is in this week whenever the test runs
+    let start = today()
+        .and_hms_opt(0, 1, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .single()
+        .unwrap()
+        .timestamp();
+    let i = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .position(|t| t.parent.is_none())
+        .unwrap();
+    let name = h.app.data.tasks[i].name.clone();
+    h.app.data.tasks[i].time_entries = vec![TimeEntry {
+        start,
+        end: start + 7200,
+        member: h.app.data.me,
+    }];
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Week");
+    let did = h.app.dash_open.unwrap();
+    let d = h
+        .app
+        .data
+        .extra
+        .dashboards
+        .iter_mut()
+        .find(|d| d.id == did)
+        .unwrap();
+    d.cards = Some(vec![DashCard {
+        kind: "time".into(),
+        title: String::new(),
+    }]);
+    h.settle();
+    fn texts(h: &Ui1) -> Vec<String> {
+        fn walk(s: &egui::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                _ => {}
+            }
+        }
+        let mut out = vec![];
+        for s in &h.shapes {
+            walk(&s.shape, &mut out);
+        }
+        out
+    }
+    // (the seed has some time of its own today too)
+    assert!(
+        texts(&h).iter().any(|x| x.starts_with("2h")),
+        "the dashboard counts the time Timesheets shows"
+    );
+    h.app.section = Section::Timesheets;
+    h.settle();
+    assert!(!h.painted_text(&format!("{} (archived)", name)).is_empty());
+}

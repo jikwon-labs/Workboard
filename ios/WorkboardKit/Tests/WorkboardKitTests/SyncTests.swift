@@ -714,4 +714,174 @@ final class FieldMergeTests: XCTestCase {
         XCTAssertEqual(Sync.boardSig("strokes", ["color": [0, 0, 0], "points": [[0.1, 1.25], [1.1, 2.0]]]), "0,0,0|1,13;11,20")
         XCTAssertEqual(Sync.boardSig("notes", ["color": [1, 2, 3], "text": "old", "pos": [1.0, 2.0]]), "1,2,3|old|10|20")
     }
+
+    // MARK: round 4 (wb_sync tests of the same names)
+
+    func testAStrokeWithoutAnIdLeavesTheKnownStrokesAlone() {
+        func stroke(_ id: UInt64, _ x: Double) -> JSON {
+            var s: JSON = ["color": [0, 0, 0], "width": 2.0, "points": [[.double(x), 1.0]]]
+            if id != 0 { s["id"] = .id(id) }
+            return s
+        }
+        var m = SyncMeta()
+        var a = ws([], [], m)
+        a.set("extra.whiteboards", [["id": 50, "name": "B", "strokes": [stroke(51, 1), stroke(52, 2)], "notes": []]])
+        Sync.stamp(a, &m, now: 10)
+        var withZero = stroke(0, 4)
+        withZero["id"] = 0
+        for fresh in [stroke(0, 3), withZero] {
+            var m2 = m
+            var b = a
+            var boards = b.at("extra.whiteboards")!.array!
+            boards[0]["strokes"] = .array(boards[0]["strokes"]!.array! + [fresh])
+            b.set("extra.whiteboards", .array(boards))
+            Sync.stamp(b, &m2, now: 20)
+            XCTAssertTrue(m2.tombs.isEmpty, "nothing deleted: \(m2.tombs)")
+            XCTAssertNotNil(m2.stamps[51])
+            XCTAssertNotNil(m2.stamps[52])
+            XCTAssertGreaterThan(m2.stamps[50]!, m.stamps[50]!, "the board changed")
+        }
+    }
+
+    func testEntriesWithoutAnIdStayBesideTheItemsTheySitWith() {
+        var ma = SyncMeta()
+        var a = ws([["id": 1, "name": "t", "things": [["id": 5, "name": "five"], ["id": 6, "name": "six"]]]], [], ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        setTask(&a, 0, "things", [["id": 5, "name": "five"], ["id": 6, "name": "six"], ["name": "loose"]])
+        save(&a, &ma, 20)
+        XCTAssertTrue(ma.tombs.isEmpty)
+        setTask(&b, 0, "things", [["id": 5, "name": "five"], ["id": 6, "name": "six by B"]])
+        setTask(&b, 0, "name", "renamed by B")
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["things"], [["id": 5, "name": "five"], ["id": 6, "name": "six by B"], ["name": "loose"]])
+            XCTAssertEqual(v["tasks"]?[0]?["name"], "renamed by B")
+        }
+        var since = SyncSummary(of: b)
+        var mb2 = SyncMeta(of: b)
+        mb2.fieldHashes = Sync.partHashes(b)
+        setTask(&b, 0, "name", "again")
+        save(&b, &mb2, 40)
+        let d = Sync.delta(since: since, b)!
+        XCTAssertEqual(d["tasks"]?[0]?["things"], [["name": "loose"]])
+        since.absorb(d)
+        XCTAssertNil(Sync.delta(since: since, b))
+    }
+
+    func entriesOf(_ v: JSON) -> [[Int64]] {
+        (v["tasks"]?[0]?["time_entries"]?.array ?? []).map { [Int64($0["member"]?.uint ?? 0), $0["start"]?.int ?? 0, $0["end"]?.int ?? 0] }
+    }
+
+    func testTwoPeopleStoppingTheirTimersAtOnceBothKeepTheirTime() {
+        var ma = SyncMeta()
+        var a = ws([["id": 1, "name": "t", "time_entries": [["start": 1, "end": 5]]]], [], ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        setTask(&a, 0, "time_entries", [["start": 1, "end": 5], ["start": 100, "end": 200, "member": 1]])
+        save(&a, &ma, 20)
+        setTask(&b, 0, "time_entries", [["start": 1, "end": 5], ["start": 90, "end": 201, "member": 2]])
+        save(&b, &mb, 21)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(entriesOf(v), [[0, 1, 5], [2, 90, 201], [1, 100, 200]])
+        }
+        XCTAssertEqual(a["tasks"], b["tasks"])
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        ma.fieldHashes = Sync.partHashes(a)
+        mb.fieldHashes = Sync.partHashes(b)
+        setTask(&a, 0, "time_entries", [["start": 90, "end": 150, "member": 2], ["start": 100, "end": 200, "member": 1]])
+        save(&a, &ma, 30)
+        setTask(&b, 0, "name", "renamed")
+        save(&b, &mb, 40)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["name"], "renamed")
+            XCTAssertEqual(entriesOf(v), [[2, 90, 150], [1, 100, 200]], "the deleted entry stays deleted")
+        }
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        ma.fieldHashes = Sync.partHashes(a)
+        mb.fieldHashes = Sync.partHashes(b)
+        setTask(&a, 0, "time_entries", [])
+        save(&a, &ma, 50)
+        setTask(&b, 0, "name", "again")
+        save(&b, &mb, 60)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["time_entries"], [])
+        }
+    }
+
+    func testAWholeFieldStampFromAnOlderAppCountsForEachEntry() {
+        var ma = SyncMeta()
+        var a = ws([["id": 1, "name": "t", "time_entries": [["start": 1, "end": 5]], "custom": ["7": "x"]]], [], ma)
+        save(&a, &ma, 10)
+        var old = a
+        setTask(&old, 0, "time_entries", [["start": 1, "end": 9]])
+        setTask(&old, 0, "custom", ["7": "y"])
+        old.set("extra.sync", ["v": 3, "stamps": ["1": 30], "fields": ["1": ["": 10, "time_entries": 30, "custom": 30]]])
+        setTask(&a, 0, "name", "A")
+        save(&a, &ma, 20)
+        Sync.merge(&a, [old])
+        XCTAssertEqual(entriesOf(a), [[0, 1, 9]])
+        XCTAssertEqual(a["tasks"]?[0]?["custom"], ["7": "y"])
+        XCTAssertEqual(a["tasks"]?[0]?["name"], "A")
+        // fingerprints kept from before: the new split alone is no change
+        var m = SyncMeta()
+        let v = ws([["id": 1, "name": "t", "time_entries": [["start": 1, "end": 5]], "custom": ["7": "x"]]], [], m)
+        Sync.stamp(v, &m, now: 10)
+        var h = m.fieldHashes[1]!.filter { Sync.partField($0.key) != "time_entries" && Sync.partField($0.key) != "custom" }
+        h["time_entries"] = Sync.partHash([["start": 1, "end": 5]])
+        h["custom"] = Sync.partHash(["7": "x"])
+        m.fieldHashes[1] = h
+        var v2 = v
+        setTask(&v2, 0, "name", "renamed")
+        Sync.stamp(v2, &m, now: 20)
+        XCTAssertTrue(m.fields[1]!.keys.allSatisfy { $0 == "name" || $0.isEmpty }, "only the name changed: \(m.fields[1]!)")
+    }
+
+    func testDifferentCustomFieldsChangedAtOnceBothStay() {
+        var ma = SyncMeta()
+        var a = ws([["id": 1, "name": "t", "custom": ["7": "x", "8": "y"]]], [], ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        setTask(&a, 0, "custom", ["7": "x by A", "8": "y"])
+        save(&a, &ma, 20)
+        setTask(&b, 0, "custom", ["7": "x", "8": "y", "9": "z by B"])
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["custom"], ["7": "x by A", "8": "y", "9": "z by B"])
+        }
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        ma.fieldHashes = Sync.partHashes(a)
+        mb.fieldHashes = Sync.partHashes(b)
+        setTask(&a, 0, "custom", ["7": "x by A", "9": "z by B"])
+        save(&a, &ma, 40)
+        setTask(&b, 0, "custom", ["7": "x by A", "8": "y", "9": "z again"])
+        save(&b, &mb, 50)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["custom"], ["7": "x by A", "9": "z again"])
+        }
+    }
+
+    func testReactionsEndUpInTheSameOrderEverywhere() {
+        var ma = SyncMeta()
+        var a = ws([], chat([]), ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        a["channels"] = chat([["emoji": "👍", "users": [2, 1]], ["emoji": "❤️", "users": [3]]])
+        save(&a, &ma, 20)
+        b["channels"] = chat([["emoji": "❤️", "users": [3]], ["emoji": "👍", "users": [1, 2]]])
+        save(&b, &mb, 20)
+        swap(&a, &b)
+        XCTAssertEqual(a.at("channels")?[0]?["messages"]?[0]?["reactions"], b.at("channels")?[0]?["messages"]?[0]?["reactions"])
+        XCTAssertEqual(Sync.fingerprints(a), Sync.fingerprints(b))
+        XCTAssertEqual(a.at("channels")?[0]?["messages"]?[0]?["reactions"], [["emoji": "❤️", "users": [3]], ["emoji": "👍", "users": [1, 2]]])
+    }
 }

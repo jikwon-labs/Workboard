@@ -12,9 +12,12 @@
 // fields of one task both keep their change, and for the same field the
 // newest change wins. The items inside it (messages in a channel, lists in a
 // space) are merged one by one, so two people chatting or editing different
-// tasks never overwrite each other. Reactions are merged per (emoji, person)
-// and running timers per person, so reacting or starting a timer at the same
-// moment as someone else keeps both; whiteboard strokes and notes have ids
+// tasks never overwrite each other. Reactions are merged per (emoji, person),
+// running timers per person, time entries per (person, start) and custom
+// field values per field, so reacting, starting or stopping a timer or
+// setting a custom field at the same moment as someone else keeps both;
+// entries without an id in a list of items stay as they are beside the
+// items; whiteboard strokes and notes have ids
 // (`fill_board_ids`) and merge like any other item. Deleted items leave a tombstone so they don't come back; restoring
 // one from the trash revives it. Task comments and activity lines have ids
 // too, so edits, deletes and reactions carry over; lines saved before they

@@ -80,6 +80,18 @@ public final class FakeServer: @unchecked Sendable {
         var password: String
     }
 
+    /// Tasks whose changes this server turns down, as the real server does
+    /// in a space shared with someone at a level that doesn't allow them:
+    /// the team's version stays with its stamp past the sender's (so their
+    /// copy takes it back), and the sender hears why.
+    public var putBack: Set<UInt64> {
+        get { queue.sync { putBackIds } }
+        set { queue.sync { putBackIds = newValue } }
+    }
+    private var putBackIds: Set<UInt64> = []
+    public static let putBackMessage =
+        "Some changes were put back because that space is shared with you at a level that doesn't allow them."
+
     /// Both run on the server's queue; they must not call back into the server.
     public var log: (String) -> Void = { _ in }
     public var onPush: (JSON) -> Void = { _ in }
@@ -524,7 +536,10 @@ public final class FakeServer: @unchecked Sendable {
         switch m {
         case .hello:
             break
-        case let .push(s):
+        case var .push(s):
+            if let before = snapshot, keepTeamVersions(&s, before) {
+                send(.error(code: "denied", message: Self.putBackMessage), to: p)
+            }
             onPush(s)
             if deltas, var snap = snapshot {
                 Sync.merge(&snap, [s])
@@ -764,6 +779,32 @@ public final class FakeServer: @unchecked Sendable {
         }
         tags[device] = t
         return t
+    }
+
+    /// The tasks in `putBackIds` that a pushed copy changed go back to the
+    /// team's version, stamped past the change. True when any did.
+    private func keepTeamVersions(_ s: inout JSON, _ before: JSON) -> Bool {
+        var theirs = SyncMeta(of: s)
+        let team = SyncMeta(of: before)
+        var tasks = s["tasks"]?.array ?? []
+        let teamTasks = before["tasks"]?.array ?? []
+        var refused = false
+        for id in putBackIds {
+            guard let t = teamTasks.first(where: { $0["id"]?.uint == id }) else { continue }
+            // their change: the item's stamp or the newest of its field stamps
+            let stamp = max(theirs.stamps[id] ?? 0, theirs.fields[id]?.values.max() ?? 0)
+            guard stamp > (team.stamps[id] ?? 0) else { continue }
+            if let i = tasks.firstIndex(where: { $0["id"]?.uint == id }) { tasks[i] = t } else { tasks.append(t) }
+            // without field stamps every field counts as changed at the stamp
+            theirs.fields[id] = nil
+            theirs.stamps[id] = stamp + 1
+            refused = true
+        }
+        if refused {
+            s.set("tasks", .array(tasks))
+            s.set("extra.sync", theirs.json)
+        }
+        return refused
     }
 
     private func broadcast(_ m: ServerMessage) {

@@ -447,6 +447,25 @@ final class ClientTests: XCTestCase {
         await until("new token registered") { server.registeredPushTokens[c.settings.device] == "ffee" }
     }
 
+    /// An edit the server turns down (a space shared to view only): the
+    /// server's words show, the team's version comes back and nothing is
+    /// left waiting to go up.
+    func testAnEditTheServerPutsBackGoesBackAndSaysWhy() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        server.putBack = [204]
+        let a = client("ws://127.0.0.1:\(port)", me: 1)
+        await until("connected") { a.canEdit }
+        let before = a.view.tasks.first { $0.id == 204 }?.name
+        XCTAssertNotNil(before)
+        a.edit { d, _ in Edits.rename(&d, task: 204, to: "Not allowed here", ts: nowTs()) }
+        await until("told why") { a.notice == FakeServer.putBackMessage }
+        await until("the team's version is back") { a.view.tasks.first { $0.id == 204 }?.name == before }
+        await until("nothing left waiting") { a.waitingCount == 0 }
+        XCTAssertTrue(a.canEdit, "still connected")
+    }
+
     func testEditNotYetOnServerSurvivesAnOlderUpdate() async throws {
         let sample = SampleWorkspace.make()
         let server = FakeServer(snapshot: sample)

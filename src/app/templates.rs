@@ -448,7 +448,8 @@ fn about_team(tp: &TaskTemplate) -> String {
     }
 }
 
-/// A template row: round coloured icon, name and a line under it.
+/// A template row: round coloured icon, name and a line under it. Text too
+/// long for the row ends in an ellipsis and shows in full on hover.
 #[allow(clippy::too_many_arguments)]
 fn template_row(
     ui: &mut Ui,
@@ -461,7 +462,7 @@ fn template_row(
     selected: bool,
     a11y: &str,
 ) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 46.0), Sense::click());
+    let (r, mut resp) = ui.allocate_exact_size(vec2(w, 46.0), Sense::click());
     name_it(&resp, a11y);
     if selected {
         ui.painter().rect_filled(r, 8.0, t.selected_bg);
@@ -478,21 +479,29 @@ fn template_row(
         FontId::proportional(13.0),
         rgb(color),
     );
+    let text_w = (r.width() - 42.0 - 8.0).max(0.0);
+    let (title_font, sub_font) = (FontId::proportional(13.5), FontId::proportional(11.5));
+    let shown_title = shell::fit_text(ui.painter(), title, &title_font, text_w);
+    let shown_sub = shell::fit_text(ui.painter(), sub, &sub_font, text_w);
+    let cut = shown_title != title || shown_sub != sub;
     let clip = ui.painter().with_clip_rect(r.shrink(2.0));
     clip.text(
         r.left_center() + vec2(42.0, -8.0),
         Align2::LEFT_CENTER,
-        title,
-        FontId::proportional(13.5),
+        shown_title,
+        title_font,
         if selected { t.selected_text } else { t.text },
     );
     clip.text(
         r.left_center() + vec2(42.0, 9.0),
         Align2::LEFT_CENTER,
-        sub,
-        FontId::proportional(11.5),
+        shown_sub,
+        sub_font,
         t.text3,
     );
+    if cut {
+        resp = resp.on_hover_text(format!("{}\n{}", title, sub));
+    }
     resp
 }
 

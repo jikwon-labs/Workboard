@@ -564,3 +564,45 @@ fn templates_keep_the_file_shape_older_apps_read() {
         );
     }
 }
+
+#[test]
+fn long_template_lines_end_in_an_ellipsis_and_show_in_full_on_hover() {
+    let mut h = Ui1::new();
+    open_center(&mut h);
+    let row = rect_of(&h, "Pick template Project tracker");
+    let about = "Plan a project from kickoff to wrap-up, with a review step";
+    let texts: Vec<(String, Rect)> = h
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Text(ts) => {
+                let r = ts.visual_bounding_rect();
+                row.contains(r.center())
+                    .then(|| (ts.galley.text().to_string(), r))
+            }
+            _ => None,
+        })
+        .collect();
+    let line = texts
+        .iter()
+        .find(|(s, _)| about.starts_with(s.trim_end_matches('\u{2026}')) && s.len() > 4)
+        .unwrap_or_else(|| panic!("the description is drawn: {:?}", texts));
+    assert!(
+        line.0.ends_with('\u{2026}'),
+        "a description too long for the row ends in an ellipsis: {:?}",
+        line.0
+    );
+    for (s, r) in &texts {
+        assert!(r.right() <= row.right(), "{:?} runs past the row", s);
+    }
+    // the tooltip comes up after the pointer rests a moment
+    h.hover(row.center());
+    for _ in 0..12 {
+        h.frame(vec![]);
+    }
+    let shown = h.shapes.iter().any(|c| match &c.shape {
+        egui::Shape::Text(ts) => ts.galley.text().contains(about),
+        _ => false,
+    });
+    assert!(shown, "hovering the row shows the whole description");
+}

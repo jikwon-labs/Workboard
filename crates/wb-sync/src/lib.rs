@@ -3842,4 +3842,32 @@ mod tests {
             assert!(!parts.contains_key("time_entries") && !parts.contains_key("custom"));
         }
     }
+
+    #[test]
+    fn a_slack_id_taken_off_a_member_stays_off() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &ma);
+        a["members"] = json!([{"id": 4, "name": "A", "color": [1, 2, 3], "slack": ["U1"]}, {"id": 5, "name": "B", "color": [1, 2, 3]}]);
+        save(&mut a, &mut ma, 10);
+        let mut b = a.clone();
+        let mut mb = meta_of(&b);
+        mb.field_hashes = part_hashes(&b);
+        // B's computer moves U1 from A to B (A's list is now empty: left out)
+        b["members"][0].as_object_mut().unwrap().remove("slack");
+        b["members"][1]["slack"] = json!(["U1"]);
+        save(&mut b, &mut mb, 20);
+        // meanwhile A's computer renames A
+        a["members"][0]["name"] = json!("A renamed");
+        save(&mut a, &mut ma, 30);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(v["members"][0]["name"], "A renamed");
+            assert!(
+                v["members"][0].get("slack").is_none(),
+                "{}",
+                v["members"][0]
+            );
+            assert_eq!(v["members"][1]["slack"], json!(["U1"]));
+        }
+    }
 }

@@ -197,8 +197,15 @@ pub struct Member {
     /// The Slack user ids whose messages an Import from Slack brought in as
     /// this member, so importing again (from any teammate's computer) finds
     /// them here even after a rename or with no email to match by.
+    /// A Slack user id is on one member at most: pointing them at another
+    /// member takes it off this one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack: Vec<String>,
+    /// The Slack user ids whose messages this member chose to bring in
+    /// under their own name ("Import under my name"), so their next import
+    /// keeps that choice instead of matching them to someone again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slack_mine: Vec<String>,
 }
 
 /// The people a text @mentions, by the rule the team server uses too

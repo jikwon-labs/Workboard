@@ -8825,6 +8825,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
         invited: false,
         status_text: String::new(),
         slack: vec![],
+        slack_mine: vec![],
     });
     h.click("general");
     let before: Vec<egui::Rect> = h
@@ -10362,4 +10363,80 @@ fn profile_menu_keeps_off_the_window_edge() {
         "Set status ends at {}",
         r.right()
     );
+}
+
+/// Choosing where a Slack person goes in the import dialog sticks: opened
+/// again, the dialog starts from that choice (my name, then another member),
+/// not from the match it proposed the first time.
+#[test]
+fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Chat;
+    h.settle();
+    let root = std::env::temp_dir().join(format!("wb-ui-slack3-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"alex","real_name":"Alex Kim","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    let chosen = |h: &Ui1| match &h.app.modal {
+        Some(Modal::SlackImport(p)) => p.assign.get("U1").copied(),
+        _ => panic!("the dialog is open"),
+    };
+    // proposed as the member Alex Kim (by name); I take them under my name
+    h.app.open_slack_export(&zip);
+    h.settle();
+    let alex = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    assert_eq!(chosen(&h), Some(super::slack::Assign::Member(alex)));
+    h.click("Messages from Alex Kim");
+    h.click("Import under my name");
+    h.click("Import");
+    // opened again: my name, as chosen
+    h.app.open_slack_export(&zip);
+    h.settle();
+    assert_eq!(chosen(&h), Some(super::slack::Assign::Me));
+    // now Sam Lee instead; the next time it's Sam Lee
+    h.click("Messages from Alex Kim");
+    h.click("Sam Lee (sam@example.com)");
+    let sam = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    assert_eq!(chosen(&h), Some(super::slack::Assign::Member(sam)));
+    h.click("Import");
+    h.app.open_slack_export(&zip);
+    h.settle();
+    assert_eq!(chosen(&h), Some(super::slack::Assign::Member(sam)));
+    let _ = std::fs::remove_dir_all(&root);
 }

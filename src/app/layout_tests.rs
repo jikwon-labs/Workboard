@@ -161,6 +161,7 @@ fn small_window_settings_people_columns_do_not_overlap() {
         invited: true,
         status_text: String::new(),
         slack: vec![],
+        slack_mine: vec![],
     });
     h.app.open_settings("People");
     h.settle();

@@ -11,7 +11,10 @@
 // the same member on their own. The dialog shows the matching and each person
 // can be pointed at a member (listed with their email, so two of one name
 // differ), added as a new member, or brought in under my name (their name in
-// front of their messages). A new member is made only when a message of
+// front of their messages). A Slack person is remembered on one member at
+// most: choosing another member (or a new one, or my name) moves them, and
+// "under my name" is remembered as my choice (`Member::slack_mine`), so the
+// next import starts from what was chosen. A new member is made only when a message of
 // theirs actually comes in. Messages keep their times,
 // thread replies go under their message, files come in as links (the files
 // themselves need a Slack sign-in to fetch). Imported messages are marked
@@ -393,12 +396,18 @@ pub(super) fn plain_text(text: &str, names: &HashMap<String, String>) -> String 
 /// Slack people would both match by email or name is left unmatched for both
 /// (the dialog lets someone choose), so nobody's messages end up under
 /// somebody else without anyone deciding so. Unmatched people who wrote
-/// something are added as new members unless changed.
+/// something are added as new members unless changed. People I brought in
+/// under my name before (`Member::slack_mine` on my member) are again.
 pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChannel>) -> SlackPlan {
     let low = |x: &str| x.trim().to_lowercase();
+    // under my name, as I chose at an earlier import
+    let mine: Vec<String> = data
+        .member(data.me)
+        .map(|m| m.slack_mine.clone())
+        .unwrap_or_default();
     // decided at an earlier import
     let mut known: HashMap<String, u64> = HashMap::new();
-    for u in &users {
+    for u in users.iter().filter(|u| !mine.contains(&u.id)) {
         if let Some(m) = data.members.iter().find(|m| m.slack.contains(&u.id)) {
             known.insert(u.id.clone(), m.id);
         }
@@ -407,7 +416,10 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     // Slack id -> a member, each way
     let mut by_mail: HashMap<String, u64> = HashMap::new();
     let mut by_name: HashMap<String, u64> = HashMap::new();
-    for u in users.iter().filter(|u| !known.contains_key(&u.id)) {
+    for u in users
+        .iter()
+        .filter(|u| !known.contains_key(&u.id) && !mine.contains(&u.id))
+    {
         if !u.email.trim().is_empty() {
             if let Some(m) = data.members.iter().find(|m| low(&m.email) == low(&u.email)) {
                 by_mail.insert(u.id.clone(), m.id);
@@ -466,6 +478,7 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
         .map(|id| {
             let a = match matched.get(id) {
                 Some(m) => Assign::Member(*m),
+                None if mine.contains(id) => Assign::Me,
                 None => Assign::New,
             };
             (id.clone(), a)
@@ -778,6 +791,7 @@ impl App {
                         invited: false,
                         status_text: String::new(),
                         slack: vec![],
+                        slack_mine: vec![],
                     });
                     people.insert(m.user.clone(), mid);
                     if existing.is_none() {
@@ -813,12 +827,35 @@ impl App {
             }
             count += added;
         }
-        // remember whose messages went to which member, for the next import
-        // (here or on a teammate's computer)
-        for (sid, mid) in &people {
-            if let Some(mem) = self.data.members.iter_mut().find(|x| x.id == *mid) {
-                if !mem.slack.contains(sid) {
-                    mem.slack.push(sid.clone());
+        // remember where each person went, for the next import (here or on
+        // a teammate's computer): a Slack person is on one member at most,
+        // so the one remembered before lets go when they're pointed at
+        // someone else, brought in under my name (kept as my choice) or
+        // made a new member
+        for sid in &plan.people {
+            let target = people.get(sid).copied();
+            let under_me = match plan.assign.get(sid).copied().unwrap_or(Assign::New) {
+                // a member no longer here: nothing was decided
+                Assign::Member(m) if target.is_none() && self.data.member(m).is_none() => continue,
+                a => a == Assign::Me,
+            };
+            for mem in self.data.members.iter_mut() {
+                let theirs = target == Some(mem.id);
+                if theirs != mem.slack.contains(sid) {
+                    if theirs {
+                        mem.slack.push(sid.clone());
+                    } else {
+                        mem.slack.retain(|x| x != sid);
+                    }
+                    self.dirty = true;
+                }
+                let mine = under_me && mem.id == me;
+                if mine != mem.slack_mine.contains(sid) {
+                    if mine {
+                        mem.slack_mine.push(sid.clone());
+                    } else {
+                        mem.slack_mine.retain(|x| x != sid);
+                    }
                     self.dirty = true;
                 }
             }

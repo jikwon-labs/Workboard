@@ -20,6 +20,9 @@ pub struct Theme {
     pub selected_text: Color32,
     pub primary: Color32,
     pub primary_hover: Color32,
+    /// Text and ticks drawn on a `primary` fill: white, except in the dark
+    /// black theme, where the fill is light so it does not read as disabled.
+    pub on_primary: Color32,
     pub card: Color32,
     pub column_bg: Color32,
     pub danger: Color32,
@@ -54,11 +57,24 @@ pub fn theme_accent(dark: bool, accent: &str) -> Theme {
             let base = rgb(*c);
             t.primary = base;
             t.primary_hover = base.gamma_multiply(0.85).to_opaque();
+            t.on_primary = Color32::WHITE;
             t.rail_top = base;
             t.rail_bottom = Color32::from_rgb(c[0] / 3, c[1] / 3, c[2] / 3);
         }
     }
     t
+}
+
+impl Theme {
+    /// The accent as a fill that white text reads on: `primary`, or a
+    /// mid-grey where the dark black theme's `primary` is light.
+    pub fn solid(&self) -> Color32 {
+        if self.on_primary == Color32::WHITE {
+            self.primary
+        } else {
+            Color32::from_rgb(80, 80, 80)
+        }
+    }
 }
 
 pub fn rgb(c: [u8; 3]) -> Color32 {
@@ -83,6 +99,7 @@ pub fn theme(dark: bool) -> Theme {
             selected_text: Color32::from_rgb(32, 32, 32),
             primary: Color32::from_rgb(32, 32, 32),
             primary_hover: Color32::from_rgb(64, 64, 64),
+            on_primary: Color32::WHITE,
             card: Color32::WHITE,
             column_bg: Color32::from_rgb(249, 249, 249),
             danger: Color32::from_rgb(0xd3, 0x3d, 0x44),
@@ -110,8 +127,11 @@ pub fn theme(dark: bool) -> Theme {
             hover: Color32::from_rgb(46, 46, 46),
             selected_bg: Color32::from_rgb(50, 50, 50),
             selected_text: Color32::from_rgb(240, 240, 240),
-            primary: Color32::from_rgb(80, 80, 80),
-            primary_hover: Color32::from_rgb(100, 100, 100),
+            // the black theme's buttons are light with dark text: a mid-grey
+            // fill with white text looked like a disabled button
+            primary: Color32::from_rgb(232, 232, 232),
+            primary_hover: Color32::from_rgb(208, 208, 208),
+            on_primary: Color32::from_rgb(32, 32, 32),
             card: Color32::from_rgb(40, 40, 40),
             column_bg: Color32::from_rgb(27, 27, 27),
             danger: Color32::from_rgb(0xe5, 0x48, 0x4d),
@@ -147,8 +167,10 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     v.widgets.noninteractive.fg_stroke.color = t.text;
     v.widgets.active.fg_stroke.color = t.text;
     v.widgets.open.fg_stroke.color = t.text;
+    // selected text keeps its light colour in dark mode, so the highlight
+    // stays a mid-grey even where the black theme's buttons are light
     v.selection.bg_fill = if t.dark {
-        t.primary
+        t.solid()
     } else {
         Color32::from_rgb(200, 215, 250)
     };
@@ -185,7 +207,10 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(v);
     let accent = t.primary;
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(crate::widgets::ACCENT_ID), accent));
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new(crate::widgets::ACCENT_ID), accent);
+        d.insert_temp(egui::Id::new(crate::widgets::ON_ACCENT_ID), t.on_primary);
+    });
     ctx.style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         // 5.5 above and below 14 px text (17 px tall) makes framed buttons

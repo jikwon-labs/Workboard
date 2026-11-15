@@ -797,7 +797,7 @@ fn date_menu_inner(
                     ui.painter().circle_filled(r.center(), cell * 0.42, t.hover);
                 }
                 let col = if sel {
-                    Color32::WHITE
+                    t.on_primary
                 } else if d.month() != month.month() {
                     t.text3.gamma_multiply(0.6)
                 } else if is_today {
@@ -863,7 +863,7 @@ pub fn primary_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
 /// The primary button's look, for `ui.add_enabled` or a wider minimum:
 /// `ui.add_enabled(ok, Tint(primary_btn(t, text)))`.
 pub fn primary_btn(t: &Theme, text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).strong())
+    egui::Button::new(egui::RichText::new(text).color(t.on_primary).strong())
         .fill(t.primary)
         .corner_radius(6)
         .min_size(vec2(0.0, CONTROL_H))
@@ -1244,14 +1244,22 @@ pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
     } else {
         r.left() + 10.0
     };
-    ui.painter()
-        .circle_filled(pos2(x, r.center().y), 7.0, Color32::WHITE);
+    let knob = if *on { t.on_primary } else { Color32::WHITE };
+    ui.painter().circle_filled(pos2(x, r.center().y), 7.0, knob);
     resp
 }
 
 /// Where `theme::apply` leaves the accent colour for widgets that are not
 /// handed the theme (the check box).
 pub const ACCENT_ID: &str = "__wb_accent";
+/// The colour of a tick or dot drawn on the accent fill (`Theme::on_primary`).
+pub const ON_ACCENT_ID: &str = "__wb_on_accent";
+
+fn on_accent(ui: &Ui) -> Color32 {
+    ui.ctx()
+        .data(|d| d.get_temp(egui::Id::new(ON_ACCENT_ID)))
+        .unwrap_or(Color32::WHITE)
+}
 
 /// A check box: a small square with slightly rounded corners, filled with
 /// the accent colour and a white tick when on, an outline that stands out
@@ -1332,7 +1340,7 @@ impl egui::Widget for Check<'_> {
                         c + vec2(-1.0, 2.8),
                         c + vec2(3.8, -2.6),
                     ],
-                    Stroke::new(1.8, fade(Color32::WHITE)),
+                    Stroke::new(1.8, fade(on_accent(ui))),
                 ));
             } else {
                 let line = match (dark, resp.hovered()) {
@@ -1392,7 +1400,7 @@ pub fn radio(ui: &mut Ui, on: bool, text: impl Into<egui::WidgetText>) -> Respon
                 .data(|d| d.get_temp(egui::Id::new(ACCENT_ID)))
                 .unwrap_or(ui.visuals().selection.bg_fill);
             ui.painter().circle_filled(c, D / 2.0, accent);
-            ui.painter().circle_filled(c, 2.8, Color32::WHITE);
+            ui.painter().circle_filled(c, 2.8, on_accent(ui));
         } else {
             let line = match (dark, resp.hovered()) {
                 (true, false) => Color32::from_gray(110),

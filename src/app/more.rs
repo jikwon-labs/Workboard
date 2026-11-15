@@ -621,7 +621,7 @@ impl App {
                                             egui::Button::new(
                                                 RichText::new(tr("Open Today & Overdue"))
                                                     .size(15.0)
-                                                    .color(Color32::WHITE),
+                                                    .color(t.on_primary),
                                             )
                                             .fill(t.primary)
                                             .corner_radius(7)
@@ -645,7 +645,7 @@ impl App {
                                             egui::Button::new(
                                                 RichText::new(tr("Invite people"))
                                                     .size(15.0)
-                                                    .color(Color32::WHITE),
+                                                    .color(t.on_primary),
                                             )
                                             .fill(t.primary)
                                             .corner_radius(7)
@@ -901,14 +901,15 @@ impl App {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let ready = !self.post_title.trim().is_empty()
                                             && self.post_channel != 0;
-                                        let b = Tint(
-                                            egui::Button::new(RichText::new(tr("Post")).color(
-                                                if ready { Color32::WHITE } else { t.text3 },
-                                            ))
-                                            .fill(if ready { t.primary } else { t.hover })
-                                            .corner_radius(6)
-                                            .min_size(vec2(56.0, 30.0)),
-                                        );
+                                        let b =
+                                            Tint(
+                                                egui::Button::new(RichText::new(tr("Post")).color(
+                                                    if ready { t.on_primary } else { t.text3 },
+                                                ))
+                                                .fill(if ready { t.primary } else { t.hover })
+                                                .corner_radius(6)
+                                                .min_size(vec2(56.0, 30.0)),
+                                            );
                                         if ui
                                             .add(b)
                                             .on_hover_text(if self.post_channel == 0 {

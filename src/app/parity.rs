@@ -3243,14 +3243,14 @@ impl App {
                         br.left_center() + vec2(3.0, 0.0),
                         br.center_bottom() + vec2(-1.0, -3.5),
                     ],
-                    Stroke::new(1.6, Color32::WHITE),
+                    Stroke::new(1.6, t.on_primary),
                 );
                 ui.painter().line_segment(
                     [
                         br.center_bottom() + vec2(-1.0, -3.5),
                         br.right_top() + vec2(-3.0, 3.5),
                     ],
-                    Stroke::new(1.6, Color32::WHITE),
+                    Stroke::new(1.6, t.on_primary),
                 );
             } else {
                 ui.painter().rect_stroke(

@@ -1294,7 +1294,7 @@ impl App {
                 out.push(Group {
                     key: "all".into(),
                     label: tr("ALL TASKS").into(),
-                    color: t.primary,
+                    color: t.solid(),
                     status: None,
                     priority: None,
                     assignee: None,

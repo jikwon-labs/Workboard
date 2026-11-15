@@ -460,14 +460,14 @@ impl App {
                                 bx.left_center() + vec2(3.5, 0.0),
                                 bx.center_bottom() + vec2(-1.0, -4.0),
                             ],
-                            Stroke::new(1.8_f32, Color32::WHITE),
+                            Stroke::new(1.8_f32, t.on_primary),
                         );
                         p.line_segment(
                             [
                                 bx.center_bottom() + vec2(-1.0, -4.0),
                                 bx.right_top() + vec2(-3.5, 4.0),
                             ],
-                            Stroke::new(1.8_f32, Color32::WHITE),
+                            Stroke::new(1.8_f32, t.on_primary),
                         );
                     } else {
                         p.rect_stroke(

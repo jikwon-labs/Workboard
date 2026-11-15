@@ -1362,6 +1362,7 @@ impl App {
                 checklist: task.checklist.iter().map(|c| c.text.clone()).collect(),
                 tags: task.tags.clone(),
                 priority: task.priority,
+                ..Default::default()
             });
             self.toast = Some((tr("Saved as a template").into(), now_ts()));
             self.dirty = true;

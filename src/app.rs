@@ -4456,6 +4456,7 @@ impl App {
                                                 .collect(),
                                             tags: task.tags.clone(),
                                             priority: task.priority,
+                                            ..Default::default()
                                         });
                                         self.toast =
                                             Some((tr("Saved as a template").into(), now_ts()));

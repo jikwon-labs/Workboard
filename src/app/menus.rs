@@ -2189,6 +2189,7 @@ impl App {
                                 checklist: items,
                                 tags: vec![],
                                 priority: *priority,
+                                ..Default::default()
                             });
                             name.clear();
                             desc.clear();

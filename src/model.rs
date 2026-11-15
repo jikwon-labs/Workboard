@@ -825,14 +825,46 @@ pub struct Automation {
     pub list: Option<u64>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// A team template (Template Center). The fields from before `kind` was
+/// kept describe a task; older apps read every template as one, so a List or
+/// Doc template there makes a task named `task_name` with `description`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct TaskTemplate {
     pub id: u64,
     pub name: String,
+    /// The name of what it makes (task name, List name or Doc title).
     pub task_name: String,
+    /// The task's description, or a Doc template's text.
     pub description: String,
     pub checklist: Vec<String>,
     pub tags: Vec<String>,
+    pub priority: u8,
+    /// What it makes: "" a task, "list" a List with statuses and tasks, "doc" a Doc.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
+    /// List templates: the statuses its Space uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statuses: Vec<Status>,
+    /// List templates: the tasks it starts with. No ids on purpose (see
+    /// `Attachment`): the template is one item to wb-sync.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<TemplateTask>,
+}
+
+/// A task a List template starts with.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct TemplateTask {
+    pub name: String,
+    /// The status by name; one the Space lacks becomes its first status.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checklist: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default)]
     pub priority: u8,
 }
 

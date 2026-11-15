@@ -980,12 +980,27 @@ pub fn pointer_over_clickables(ctx: &egui::Context) {
 }
 
 /// The soft fill behind a frameless control under the pointer. Translucent so it
-/// reads the same on the page, a card, the sidebar or a popup.
+/// reads the same on the page, a card, the sidebar or a popup; about as strong
+/// as the theme's `hover` grey on the page background.
 pub fn hover_fill(ui: &Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        Color32::from_white_alpha(22)
+    hover_fill_for(ui.visuals().dark_mode)
+}
+
+pub fn hover_fill_for(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_white_alpha(12)
     } else {
-        Color32::from_black_alpha(14)
+        Color32::from_black_alpha(10)
+    }
+}
+
+/// The outline drawn around a swatch or card under the pointer: a step above
+/// the border colour, not the bright grey egui uses for framed buttons.
+pub fn hover_line(ui: &Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_gray(88)
+    } else {
+        Color32::from_gray(190)
     }
 }
 
@@ -1015,7 +1030,7 @@ impl egui::Widget for Ghost<'_> {
         if r.enabled() && (r.hovered() || r.is_pointer_button_down_on()) {
             let fill = hover_fill(ui);
             let fill = if r.is_pointer_button_down_on() {
-                fill.gamma_multiply(1.8)
+                fill.gamma_multiply(1.5)
             } else {
                 fill
             };
@@ -1041,7 +1056,7 @@ impl<W: egui::Widget> egui::Widget for Tint<W> {
         let r = ui.add(self.0);
         if r.enabled() && r.hovered() {
             let tint = if r.is_pointer_button_down_on() {
-                hover_fill(ui).gamma_multiply(1.8)
+                hover_fill(ui).gamma_multiply(1.5)
             } else {
                 hover_fill(ui)
             };
@@ -1066,7 +1081,7 @@ pub fn hover_ring(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
         ui.painter().rect_stroke(
             rect,
             radius,
-            Stroke::new(1.5, ui.visuals().widgets.hovered.bg_stroke.color),
+            Stroke::new(1.5, hover_line(ui)),
             egui::StrokeKind::Outside,
         );
     }

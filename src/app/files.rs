@@ -1407,7 +1407,7 @@ impl App {
                     }
                 }
                 if resp.hovered() {
-                    painter.rect_filled(rect, 8.0, Color32::from_white_alpha(28));
+                    painter.rect_filled(rect, 8.0, Color32::from_white_alpha(16));
                 }
                 if resp.clicked() {
                     clicked = Some(i);

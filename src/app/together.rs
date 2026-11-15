@@ -179,6 +179,7 @@ impl App {
 
     pub(super) fn write_shared(&mut self) {
         let Some(cfg) = self.data.extra.shared.clone() else { return };
+        self.data.fix_activity_ids();
         let v = self.data_value();
         if cfg.server.is_some() {
             // sent when connected; after a reconnect the whole copy goes again anyway

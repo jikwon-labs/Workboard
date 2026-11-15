@@ -2083,3 +2083,156 @@ fn composer_mention_and_emoji_pickers() {
     h.click_side("Jordan Park", true);
     assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
+
+// ---- task comments and activity (sf-comments)
+
+impl Ui1 {
+    fn cmd_enter(&mut self) {
+        let m = egui::Modifiers::COMMAND;
+        self.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: m }]);
+        self.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: false, repeat: false, modifiers: m }]);
+        self.settle();
+    }
+
+    // open "Write copy for landing page" with no comments; returns its id
+    fn open_clean_task(&mut self) -> u64 {
+        self.click_left("Task Write copy for landing page", 120.0);
+        let id = self.app.open_task.unwrap();
+        self.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap().activity.retain(|a| !a.comment);
+        self.settle();
+        id
+    }
+
+    fn comments(&self, id: u64) -> Vec<Activity> {
+        self.app.task(id).unwrap().activity.iter().filter(|a| a.comment).cloned().collect()
+    }
+}
+
+#[test]
+fn comment_send_with_cmd_enter_then_react_edit_reply_delete() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    h.click("Comment box");
+    h.type_text("First thoughts");
+    h.cmd_enter();
+    let c = h.comments(id);
+    assert_eq!(c.len(), 1, "Cmd+Enter sends");
+    assert_eq!(c[0].text, "First thoughts");
+    assert_ne!(c[0].id, 0);
+    assert!(h.app.comment_text.is_empty());
+    // react
+    h.click("Add reaction");
+    h.click("\u{1F44D}");
+    assert_eq!(h.comments(id)[0].reactions[0].users, vec![1]);
+    // the reaction chip takes it back
+    h.click("\u{1F44D} 1");
+    assert!(h.comments(id)[0].reactions.is_empty());
+    // edit my comment
+    h.click("Comment actions");
+    h.click("Edit");
+    h.type_text(" (more)");
+    h.click("Save comment");
+    let c = h.comments(id);
+    assert_eq!(c[0].text, "First thoughts (more)");
+    assert!(c[0].edited.is_some());
+    assert!(h.has("(edited)"));
+    // reply
+    h.click("Comment actions");
+    h.click("Reply");
+    h.type_text("A reply");
+    h.click("Send reply");
+    let c = h.comments(id);
+    assert_eq!(c.len(), 2);
+    assert_eq!(c[1].parent, Some(c[0].id));
+    assert!(h.has("A reply"));
+    // deleting the comment takes its replies with it
+    h.click_side("Comment actions", false);
+    h.click("Delete comment");
+    assert!(h.comments(id).is_empty());
+}
+
+#[test]
+fn comment_assign_and_resolve_shows_in_assigned_comments() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    h.click("Comment box");
+    h.type_text("Please review");
+    h.click("Send Comment");
+    h.click("Comment actions");
+    h.click("Assign comment");
+    h.click("Me");
+    let c = h.comments(id);
+    assert_eq!(c[0].assignee, Some(1));
+    assert!(h.has("Assigned to Me"));
+    // it is on the Assigned Comments page until resolved there
+    h.app.open_task = None;
+    h.app.loc = Location::Assigned;
+    h.settle();
+    assert!(h.has("Resolve comment on Write copy for landing page"));
+    h.click("Resolve comment on Write copy for landing page");
+    assert!(h.comments(id)[0].resolved);
+    assert!(h.app.open_task.is_none(), "ticking does not open the task");
+    assert!(!h.has("Resolve comment on Write copy for landing page"), "resolved comments drop out");
+    // and it can be reopened from the task
+    h.app.apply(Action::Open(id));
+    h.settle();
+    h.click("Reopen comment");
+    assert!(!h.comments(id)[0].resolved);
+}
+
+#[test]
+fn comment_checklist_ticks_and_links_open() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let other = h.app.data.tasks.iter().find(|t| t.id != id && t.parent.is_none()).unwrap().id;
+    let link = format!("workboard://task/{}", other);
+    {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.activity.push(Activity { ts: now_ts(), author: 2, text: format!("To do:\n\u{2610} buy milk\nsee {}", link), comment: true, id: 77_001, ..Default::default() });
+    }
+    h.settle();
+    h.click("Tick buy milk");
+    assert!(h.comments(id)[0].text.contains("\u{2611} buy milk"));
+    assert!(h.comments(id)[0].edited.is_none(), "ticking is no edit");
+    h.click(&link);
+    assert_eq!(h.app.open_task, Some(other));
+}
+
+#[test]
+fn typing_at_opens_the_people_list() {
+    let mut h = Ui1::new();
+    h.open_clean_task();
+    h.click("Comment box");
+    h.type_text("hey @");
+    h.settle();
+    assert!(h.ctx.memory(|m| m.any_popup_open()), "the people list opens");
+    let alex = h.tree.iter().filter(|(n, _)| n == "Alex Kim").count();
+    h.type_text("Sa");
+    h.settle();
+    assert!(h.ctx.memory(|m| m.any_popup_open()), "still open while typing a name");
+    let alex_after = h.tree.iter().filter(|(n, _)| n == "Alex Kim").count();
+    assert!(h.has("Sam Lee") && alex_after < alex, "narrowed by what is typed");
+    // (the sidebar has a "Sam Lee" too, below the window)
+    let pick = h.tree.iter().find(|(n, r)| n == "Sam Lee" && r.center().y < 900.0).map(|(_, r)| r.center()).unwrap();
+    h.click_at(pick);
+    assert_eq!(h.app.comment_text, "hey @Sam Lee ");
+}
+
+#[test]
+fn mentions_stand_out_and_comments_only_hides_activity() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.activity.push(Activity { ts: now_ts(), author: 1, text: "ping @Alex Kim now".into(), comment: true, id: 77_002, ..Default::default() });
+    }
+    h.settle();
+    // the mention is its own piece of text
+    assert!(h.has("@Alex Kim"));
+    let line = h.app.task(id).unwrap().activity.iter().find(|a| !a.comment).map(|a| a.text.clone()).unwrap();
+    let shown = format!("\u{2022} Me {}", line);
+    assert!(h.has(&shown), "activity lines show by default");
+    h.click("Comments only");
+    assert!(!h.has(&shown), "hidden by Comments only");
+    assert!(h.has("@Alex Kim"));
+}

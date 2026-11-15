@@ -180,6 +180,29 @@ pub struct Activity {
     /// Written from the comment box's Post tab (shown as a post).
     #[serde(default)]
     pub post: bool,
+    /// So a comment can be edited, deleted, reacted to and replied to, and
+    /// so wb-sync merges comments one by one. 0 until `Data::fix_activity_ids`
+    /// gives it one (and then left out of the file, so an entry without an
+    /// id never looks like one with id 0 to wb-sync).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub id: u64,
+    /// When its author last changed the text (shown as "(edited)").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<Reaction>,
+    /// The comment this one replies to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<u64>,
+    /// Someone asked to act on this comment (Assigned Comments).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resolved: bool,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -225,6 +248,25 @@ pub struct Task {
     pub closed_at: Option<i64>,
 }
 
+/// `Data::fix_activity_ids` for one task.
+pub fn fix_task_activity_ids(t: &mut Task) {
+    let mut seen = std::collections::HashSet::new();
+    if t.activity.iter().all(|a| a.id != 0 && seen.insert(a.id)) {
+        return;
+    }
+    let mut counts: std::collections::HashMap<(i64, u64, bool, String), usize> = Default::default();
+    let mut seen = std::collections::HashSet::new();
+    let tid = t.id;
+    t.activity.retain_mut(|a| {
+        let n = counts.entry((a.ts, a.author, a.comment, a.text.clone())).or_insert(0);
+        if a.id == 0 {
+            a.id = wb_sync::activity_id(tid, a.ts, a.author, a.comment, &a.text, *n);
+        }
+        *n += 1;
+        seen.insert(a.id)
+    });
+}
+
 impl Task {
     pub fn tracked_secs(&self, now: i64) -> i64 {
         let mut s: i64 = self.time_entries.iter().map(|e| e.end - e.start).sum();
@@ -257,7 +299,7 @@ pub struct Doc {
     pub updated: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Reaction {
     pub emoji: String,
     pub users: Vec<u64>,
@@ -678,6 +720,16 @@ impl Data {
         }
         self.next_id += 1;
         self.next_id
+    }
+
+    /// Gives every activity entry without an id one: entries from files saved
+    /// before activity had ids, and lines just logged with `..Default::default()`.
+    /// The id comes from what the entry says (`wb_sync::activity_id`), so every
+    /// computer works out the same one. Repeats of an id are dropped.
+    pub fn fix_activity_ids(&mut self) {
+        for t in &mut self.tasks {
+            fix_task_activity_ids(t);
+        }
     }
 
     pub fn dir() -> PathBuf {

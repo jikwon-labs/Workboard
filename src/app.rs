@@ -19,6 +19,7 @@ mod menus;
 mod more;
 mod pages;
 mod parity;
+mod comments;
 mod settings;
 mod shell;
 mod together;
@@ -365,6 +366,10 @@ pub struct App {
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
+    /// Unsent comment text of tasks other than the one `comment_text` is for.
+    comment_drafts: HashMap<u64, String>,
+    /// The task `comment_text` belongs to.
+    comment_for: Option<u64>,
 }
 
 impl App {
@@ -390,6 +395,8 @@ impl App {
             },
             None => Data::fresh(),
         };
+        let mut data = data;
+        data.fix_activity_ids();
         let loc = data.first_list().map(Location::List).unwrap_or(Location::Home);
         let t = today();
         let args: Vec<String> = std::env::args().collect();
@@ -558,6 +565,8 @@ impl App {
             doc_preview: false,
             settings_tab: 0,
             settings_state: None,
+            comment_drafts: HashMap::new(),
+            comment_for: None,
         }
     }
 
@@ -769,6 +778,20 @@ impl App {
         task.activity.push(Activity { ts: now_ts(), author: me, text, comment: false, ..Default::default() });
     }
 
+    /// Logs a change, or updates my own line about the same change if I made
+    /// it in the last few minutes (`like` is part of that line).
+    fn log_edit(task: &mut Task, me: u64, like: &str, text: String) {
+        let now = now_ts();
+        if let Some(last) = task.activity.last_mut() {
+            if !last.comment && last.author == me && now - last.ts < 300 && last.text.contains(like) {
+                last.text = text;
+                last.ts = now;
+                return;
+            }
+        }
+        Self::log(task, me, text);
+    }
+
     fn apply(&mut self, a: Action) {
         let me = self.data.me;
         match a {
@@ -777,7 +800,7 @@ impl App {
                 self.recent.retain(|r| *r != id);
                 self.recent.insert(0, id);
                 self.recent.truncate(6);
-                self.comment_text.clear();
+                self.swap_comment_draft(id);
             }
             Action::Replace(mut new) => {
                 if let Some(idx) = self.data.tasks.iter().position(|t| t.id == new.id) {
@@ -824,8 +847,31 @@ impl App {
                             Self::log(&mut new, me, format!("removed assignee {}", n));
                         }
                     }
+                    // typed fields change on every key press: while I keep typing,
+                    // the line I logged a moment ago is updated instead of adding more
                     if old.name != new.name && !new.name.trim().is_empty() {
-                        // name edits are logged once editing settles; keep it light
+                        let m = format!("renamed this task to \"{}\"", new.name.trim());
+                        Self::log_edit(&mut new, me, "renamed this task to ", m);
+                    }
+                    if old.description != new.description {
+                        Self::log_edit(&mut new, me, "updated the description", "updated the description".into());
+                    }
+                    if old.estimate_min != new.estimate_min {
+                        let m = match new.estimate_min {
+                            Some(min) => format!("set the time estimate to {}", fmt_duration(min as i64 * 60)),
+                            None => "removed the time estimate".into(),
+                        };
+                        Self::log_edit(&mut new, me, "time estimate", m);
+                    }
+                    for tag in new.tags.clone() {
+                        if !old.tags.contains(&tag) {
+                            Self::log(&mut new, me, format!("added tag {}", tag));
+                        }
+                    }
+                    for tag in &old.tags {
+                        if !new.tags.contains(tag) {
+                            Self::log(&mut new, me, format!("removed tag {}", tag));
+                        }
                     }
                     if new.name.trim().is_empty() {
                         new.name = old.name.clone();
@@ -1847,7 +1893,7 @@ impl App {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
             let (title, sub) = match mode {
                 1 => ("Replies", "Comments from others on tasks and chat replies"),
-                2 => ("Assigned Comments", "Comments that @mention someone for them to act on"),
+                2 => ("Assigned Comments", "Comments assigned to someone, or that @mention them, until resolved"),
                 _ => ("Inbox", "Recent activity across your workspace"),
             };
             ui.label(RichText::new(title).size(20.0).strong());
@@ -1891,8 +1937,9 @@ impl App {
                     let keep = match (mode, tab) {
                         (1, 0) => a.comment && a.author != me && a.ts > seen,
                         (1, _) => a.comment && a.author != me && a.ts <= seen,
-                        (2, 0) => a.comment && !my_name.is_empty() && a.text.contains(&my_name),
-                        (2, _) => a.comment && a.author == me && a.text.contains('@'),
+                        // assigned to me, or (when assigned to no one) mentioning me
+                        (2, 0) => a.comment && !a.resolved && (a.assignee == Some(me) || (a.assignee.is_none() && !my_name.is_empty() && a.text.contains(&my_name))),
+                        (2, _) => a.comment && !a.resolved && a.author == me && (a.assignee.is_some_and(|x| x != me) || (a.assignee.is_none() && a.text.contains('@'))),
                         _ => true,
                     };
                     if keep {
@@ -1920,7 +1967,21 @@ impl App {
                     let line = if a.comment { format!("{} commented: {}", who, a.text) } else { format!("{} {}", who, a.text) };
                     ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 140.0, r.bottom()))).text(r.left_top() + vec2(48.0, 38.0), Align2::LEFT_CENTER, line, FontId::proportional(12.5), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(11.5), t.text3);
-                    if resp.clicked() {
+                    // tick off an assigned comment right here
+                    let mut resolved = false;
+                    if mode == 2 {
+                        let br = Rect::from_center_size(r.right_center() - vec2(118.0, 0.0), vec2(26.0, 26.0));
+                        let b = put_over(ui, br, egui::Button::new("\u{2610}").frame(false));
+                        name_it(&b, &format!("Resolve comment on {}", tname));
+                        if b.on_hover_text("Resolve").clicked() {
+                            if let Some(c) = self.data.tasks.iter_mut().find(|x| x.id == tid).and_then(|x| x.activity.iter_mut().find(|c| c.id == a.id && a.id != 0)) {
+                                c.resolved = true;
+                                self.dirty = true;
+                                resolved = true;
+                            }
+                        }
+                    }
+                    if resp.clicked() && !resolved {
                         self.actions.push(Action::Open(tid));
                     }
                 }
@@ -1932,6 +1993,11 @@ impl App {
 
     fn task_window(&mut self, ctx: &egui::Context) {
         let Some(tid) = self.open_task else { return };
+        self.swap_comment_draft(tid);
+        // comments need ids to be edited, reacted to and replied to
+        if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == tid) {
+            fix_task_activity_ids(t);
+        }
         let Some(orig) = self.task(tid).cloned() else {
             self.open_task = None;
             return;
@@ -2443,46 +2509,13 @@ impl App {
                 let input_h = 150.0;
                 let list_h = right_ui.available_height() - input_h;
                 let q = find.as_ref().map(|q| q.trim().to_lowercase()).filter(|q| !q.is_empty());
+                let only_id = win_id.with("comments_only");
+                let mut only_comments: bool = right_ui.data(|d| d.get_temp(only_id)).unwrap_or(false);
                 egui::ScrollArea::vertical().id_salt("activity").max_height(list_h).auto_shrink([false, false]).stick_to_bottom(true).show(&mut right_ui, |ui| {
                     if !has_comments {
                         return;
                     }
-                    let mut shown = 0;
-                    for a in &task.activity {
-                        if let Some(q) = &q {
-                            if !a.comment || !a.text.to_lowercase().contains(q) {
-                                continue;
-                            }
-                        }
-                        shown += 1;
-                        let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| "Someone".into());
-                        if a.comment {
-                            egui::Frame::new().fill(if a.post { t.accent_bg } else { t.card }).stroke(Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    if let Some(m) = self.data.member(a.author) {
-                                        let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                                        paint_avatar(ui.painter(), r.center(), 10.0, m, t.card);
-                                    }
-                                    ui.label(RichText::new(&who).strong());
-                                    if a.post {
-                                        chip(ui, "Post", if t.dark { t.accent_text } else { t.primary });
-                                    }
-                                    ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
-                                });
-                                ui.add(egui::Label::new(&a.text).wrap());
-                            });
-                            ui.add_space(6.0);
-                        } else {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new(format!("\u{2022} {} {}", who, a.text)).small().color(t.text2));
-                                ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
-                            });
-                        }
-                    }
-                    if q.is_some() && shown == 0 {
-                        ui.label(RichText::new("No comments match").color(t.text3));
-                    }
+                    self.comment_feed(ui, &mut task, q.as_deref(), only_comments, win_id);
                 });
                 right_ui.add_space(6.0);
                 // Comment / Post tabs, the box, then the tool row
@@ -2501,17 +2534,31 @@ impl App {
                         if r.on_hover_text("Search comments").clicked() {
                             find = if find.is_some() { None } else { Some(String::new()) };
                         }
+                        // hide the "changed status..." lines
+                        let only = ui.selectable_label(only_comments, RichText::new("Comments only").small());
+                        name_it(&only, "Comments only");
+                        if only.clicked() {
+                            only_comments = !only_comments;
+                        }
                     });
                 });
                 right_ui.data_mut(|d| {
+                    d.insert_temp(only_id, only_comments);
                     d.insert_temp(tab_id, post);
                     d.insert_temp(find_id, find.clone());
                 });
+                // Cmd+Enter sends (taken before the box sees it as a new line)
+                let send_key = right_ui.memory(|m| m.has_focus(comment_id)) && right_ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
                 let cr = right_ui.add(egui::TextEdit::multiline(&mut self.comment_text).id(comment_id).hint_text(if post { "Write a post..." } else { "Write a comment, @mention someone" }).desired_rows(3).desired_width(f32::INFINITY));
                 name_field(&cr, "Comment box");
+                let mention_id = win_id.with("mention_open");
+                // typing "@" (or a name after it) brings up the people list
+                let typed_at = mention_word(&self.comment_text).map(str::to_string);
+                if cr.changed() && typed_at.as_deref() == Some("") {
+                    right_ui.data_mut(|d| d.insert_temp(mention_id, true));
+                }
                 let mut insert: Option<String> = None;
                 right_ui.horizontal(|ui| {
-                    let mention_id = win_id.with("mention_open");
                     let at = ui.add(egui::Button::new("@").frame(false).min_size(vec2(24.0, 24.0)));
                     name_it(&at, "Mention someone");
                     let force: bool = ui.data(|d| d.get_temp(mention_id)).unwrap_or(false);
@@ -2520,8 +2567,12 @@ impl App {
                         ui.memory_mut(|m| m.open_popup(win_id.with("mention_popup")));
                         ui.data_mut(|d| d.remove::<bool>(mention_id));
                     }
-                    let members: Vec<(u64, String)> = self.data.members.iter().filter(|m| !m.invited).map(|m| (m.id, m.name.clone())).collect();
+                    let typed = typed_at.as_deref().unwrap_or("").to_lowercase();
+                    let members: Vec<(u64, String)> = self.data.members.iter().filter(|m| !m.invited && m.name.to_lowercase().starts_with(&typed)).map(|m| (m.id, m.name.clone())).collect();
                     popup(ui, &at, win_id.with("mention_popup"), 200.0, |ui| {
+                        if members.is_empty() {
+                            ui.label(RichText::new("No one by that name").color(t.text3));
+                        }
                         for (id, name) in &members {
                             let m = self.data.member(*id).cloned().unwrap_or_default();
                             let ring = t.card;
@@ -2553,16 +2604,21 @@ impl App {
                         let label = if post { "Post" } else { "Comment" };
                         let send = primary_button(ui, &t, label);
                         name_it(&send, &format!("Send {}", label));
-                        if send.clicked() && !self.comment_text.trim().is_empty() {
-                            task.activity.push(Activity { ts: now_ts(), author: self.data.me, text: self.comment_text.trim().to_string(), comment: true, post });
+                        if (send.clicked() || send_key) && !self.comment_text.trim().is_empty() {
+                            let id = self.data.new_id();
+                            task.activity.push(Activity { ts: now_ts(), author: self.data.me, text: self.comment_text.trim().to_string(), comment: true, post, id, ..Default::default() });
                             self.comment_text.clear();
+                            close_popup(ui);
                         }
                     });
                 });
                 if let Some(text) = insert {
-                    // a picked @name replaces an "@" already typed
-                    if text.starts_with('@') && self.comment_text.ends_with('@') {
-                        self.comment_text.pop();
+                    // a picked @name replaces the "@" (and part of a name) already typed
+                    if text.starts_with('@') {
+                        if let Some(w) = mention_word(&self.comment_text) {
+                            let keep = self.comment_text.len() - w.len() - 1;
+                            self.comment_text.truncate(keep);
+                        }
                     }
                     self.comment_text.push_str(&text);
                     right_ui.memory_mut(|m| m.request_focus(comment_id));
@@ -3124,6 +3180,8 @@ impl App {
         self.track_history();
         self.note_recent();
         if self.dirty {
+            // lines logged with `..Default::default()` get their ids before saving
+            self.data.fix_activity_ids();
             self.sync_note_change();
         }
         if self.dirty && self.persist {
@@ -3340,6 +3398,15 @@ fn place_traffic_lights(frame: &eframe::Frame) {
     }
 }
 
+/// The name being typed after an "@" at the end of a comment ("" right
+/// after the "@"), if the text ends in one.
+fn mention_word(text: &str) -> Option<&str> {
+    let at = text.rfind('@')?;
+    let w = &text[at + 1..];
+    let starts_word = text[..at].chars().last().map_or(true, char::is_whitespace);
+    (starts_word && !w.contains(char::is_whitespace)).then_some(w)
+}
+
 fn task_changed(a: &Task, b: &Task) -> bool {
     a.name != b.name
         || a.status != b.status
@@ -3352,6 +3419,7 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.estimate_min != b.estimate_min
         || a.recur != b.recur
         || a.activity.len() != b.activity.len()
+        || a.activity.iter().zip(b.activity.iter()).any(|(x, y)| x.id != y.id || x.text != y.text || x.edited != y.edited || x.reactions != y.reactions || x.assignee != y.assignee || x.resolved != y.resolved)
         || a.checklist.len() != b.checklist.len()
         || a.custom.iter().filter(|(_, v)| !v.is_empty()).ne(b.custom.iter().filter(|(_, v)| !v.is_empty()))
         || a.checklist.iter().zip(b.checklist.iter()).any(|(x, y)| x.done != y.done || x.text != y.text)

@@ -364,3 +364,42 @@ final class HideTests: XCTestCase {
         XCTAssertEqual(w.hidden, [5, 6])
     }
 }
+
+/// A field set back to its default by a Mac copy that leaves defaults out
+/// (SyncMeta.v 2) stays at its default here too (wb_sync Ctx::omits_defaults).
+final class DefaultFieldTests: XCTestCase {
+    func testAStoppedTimerDoesNotComeBack() throws {
+        var phone = SampleWorkspace.make()
+        var task = phone["tasks"]?.array?.first ?? [:]
+        let id = task["id"]?.uint ?? 0
+        task["timer_by"] = 2
+        phone.set("tasks", .array([task]))
+        var pm = SyncMeta()
+        Sync.stamp(phone, &pm, now: 10)
+        phone.set("extra.sync", pm.json)
+        // the Mac stopped the timer later: the field left its copy
+        var mac = phone
+        var mo = task.object ?? [:]
+        mo.removeValue(forKey: "timer_by")
+        let mtask = JSON.object(mo)
+        mac.set("tasks", .array([mtask]))
+        var mm = SyncMeta(stamps: [id: 50], v: 2)
+        mm.hashes = pm.hashes
+        mac.set("extra.sync", mm.json)
+        Sync.merge(&phone, [mac])
+        XCTAssertNil(phone["tasks"]?.array?.first?["timer_by"], "a stopped timer doesn't come back")
+        // a copy from an app that doesn't leave defaults out still keeps what it doesn't know
+        var phone2 = SampleWorkspace.make()
+        var t2 = phone2["tasks"]?.array?.first ?? [:]
+        t2["watchers"] = [4]
+        phone2.set("tasks", .array([t2]))
+        var old = phone2
+        var oo = t2.object ?? [:]
+        oo.removeValue(forKey: "watchers")
+        let ot = JSON.object(oo)
+        old.set("tasks", .array([ot]))
+        old.set("extra.sync", SyncMeta(stamps: [id: 50], v: 1).json)
+        Sync.merge(&phone2, [old])
+        XCTAssertEqual(phone2["tasks"]?.array?.first?["watchers"], [4])
+    }
+}

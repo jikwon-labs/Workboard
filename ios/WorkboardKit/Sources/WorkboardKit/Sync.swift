@@ -220,6 +220,12 @@ extension Sync {
         var cands: [UInt64: [Cand]] = [:]
         /// id -> the item it sits in, in the newest copy (nil at the top).
         var home: [UInt64: UInt64?] = [:]
+        /// source -> whether that copy leaves fields at their default out of
+        /// the file (the Mac app from SyncMeta.v 2 on). When such a copy wins
+        /// and lacks a field, the field is at its default there (a stopped
+        /// timer, an unpinned message) and is not filled back in from another
+        /// copy (wb_sync Ctx::omits_defaults).
+        var omitsDefaults: [Bool] = []
 
         init(stamps: [[UInt64: Int64]], tombs: [UInt64: Int64], revived: [UInt64: Int64], all: [UInt64: [(src: Int, parent: UInt64?, value: JSON)]]) {
             self.stamps = stamps
@@ -307,6 +313,9 @@ extension Sync {
                     value = lv
                 } else if let v = wobj[k] {
                     value = v
+                } else if cx.omitsDefaults.indices.contains(best.src) && cx.omitsDefaults[best.src] {
+                    // the newest copy has it at its default (see omitsDefaults)
+                    continue
                 } else {
                     value = vals[0].1
                 }
@@ -361,6 +370,7 @@ extension Sync {
             perPath.append((path, sources))
         }
         let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), tombs: tombs, revived: revived, all: all)
+        cx.omitsDefaults = [lmeta.v >= 2] + metas.map { $0.v >= 2 }
         var merged: [(String, JSON)] = []
         for (path, sources) in perPath {
             merged.append((path, .array(mergeArr(cx, sources, parent: nil))))

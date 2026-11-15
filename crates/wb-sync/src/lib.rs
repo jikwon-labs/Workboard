@@ -323,6 +323,12 @@ struct Ctx<'a> {
     /// id -> when it moved there (0: not known)
     home_moved: HashMap<u64, i64>,
     out_moved: BTreeMap<u64, i64>,
+    /// source -> whether that copy leaves fields at their default out of
+    /// the file (apps that keep move times, `SyncMeta.v` 2 and later). When
+    /// such a copy wins and lacks a field, the field is at its default there
+    /// (a stopped timer, an unpinned message) and is not filled back in from
+    /// an older copy.
+    omits_defaults: Vec<bool>,
 }
 
 /// Every item with an id in one source, with the item it sits in.
@@ -341,6 +347,7 @@ fn collect<'a>(src: usize, arr: &'a [Value], parent: Option<u64>, out: &mut Cand
 
 impl<'a> Ctx<'a> {
     fn new(stamps: Vec<&'a BTreeMap<u64, i64>>, moved: Vec<Option<&'a BTreeMap<u64, i64>>>, tombs: BTreeMap<u64, i64>, revived: BTreeMap<u64, i64>, all: Cands<'a>) -> Self {
+        let omits_defaults: Vec<bool> = moved.iter().map(|m| m.is_some()).collect();
         let mut cands = HashMap::new();
         let mut home = HashMap::new();
         let mut home_moved = HashMap::new();
@@ -369,7 +376,7 @@ impl<'a> Ctx<'a> {
             home_moved.insert(id, best_key.0);
             cands.insert(id, list.into_iter().map(|(s, _, v)| (s, v)).collect());
         }
-        Ctx { stamps, tombs, revived, out: BTreeMap::new(), cands, home, home_moved, out_moved: BTreeMap::new() }
+        Ctx { stamps, tombs, revived, out: BTreeMap::new(), cands, home, home_moved, out_moved: BTreeMap::new(), omits_defaults }
     }
 
     fn alive(&self, id: u64) -> bool {
@@ -451,6 +458,9 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
                 local.unwrap()[&k].clone()
             } else if let Some(v) = wobj.get(&k) {
                 v.clone()
+            } else if cx.omits_defaults.get(best.0).copied().unwrap_or(false) {
+                // the newest copy has it at its default (see `omits_defaults`)
+                continue;
             } else {
                 vals[0].1.clone()
             };
@@ -1161,5 +1171,38 @@ mod tests {
         assert_eq!(b["extra"]["bookmarks"][0]["title"], "Docs");
         let joined = with_team_things(&json!({"extra": {"bookmarks": []}}), &a);
         assert_eq!(joined["extra"]["bookmarks"][0]["id"], 5);
+    }
+
+    #[test]
+    fn a_field_set_back_to_its_default_stays_there() {
+        // a task with a running timer (fields left out at their default)
+        let (mut a, mut ma, mut b, mut mb) = pair(json!([]));
+        a["tasks"] = json!([{"id": 7, "name": "T", "timer_by": 2, "timers": [{"member": 3, "start": 5}]}]);
+        stamp(&a.clone(), &mut ma, 20);
+        a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+        merge(&mut b, &[a.clone()]);
+        stamp(&b.clone(), &mut mb, 21);
+        b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
+        assert_eq!(b["tasks"][0]["timer_by"], 2);
+        // B stops both timers: the fields go back to their default and leave the file
+        b["tasks"] = json!([{"id": 7, "name": "T"}]);
+        stamp(&b.clone(), &mut mb, 30);
+        b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
+        merge(&mut a, &[b.clone()]);
+        assert!(a["tasks"][0].get("timer_by").is_none(), "a stopped timer doesn't come back: {}", a["tasks"][0]);
+        assert!(a["tasks"][0].get("timers").is_none());
+        // a copy from an app that doesn't leave defaults out (v below 2) still
+        // keeps fields it doesn't know about
+        let mut old = b.clone();
+        let mut mo = mb.clone();
+        mo.v = 1;
+        old["tasks"] = json!([{"id": 7, "name": "T renamed"}]);
+        mo.stamps.insert(7, 40);
+        old["extra"]["sync"] = serde_json::to_value(&mo).unwrap();
+        let mut c = b.clone();
+        c["tasks"] = json!([{"id": 7, "name": "T", "watchers": [4]}]);
+        merge(&mut c, &[old]);
+        assert_eq!(c["tasks"][0]["name"], "T renamed");
+        assert_eq!(c["tasks"][0]["watchers"], json!([4]), "an older app's copy doesn't drop what it can't know");
     }
 }

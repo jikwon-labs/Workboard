@@ -635,3 +635,55 @@ fn dashboard_cards_line_up_and_overdue_is_capped() {
     }
     assert!(!h.painted_text(&trf!("+{} more", n - 10)).is_empty());
 }
+
+#[test]
+fn team_page_counts_open_tasks_it_does_not_list() {
+    let mut h = Ui1::new();
+    heavy(&mut h);
+    h.app.section = Section::Teams;
+    h.settle();
+    h.click_side("Create Team", true);
+    let id = h.app.team_open.unwrap();
+    let me = h.app.data.me;
+    let team = h
+        .app
+        .data
+        .extra
+        .teams
+        .iter_mut()
+        .find(|x| x.id == id)
+        .unwrap();
+    if !team.members.contains(&me) {
+        team.members.push(me);
+    }
+    h.settle();
+    let open = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|x| {
+            x.assignees.contains(&me) && !h.app.data.is_closed(x) && h.app.data.task_live(x)
+        })
+        .count();
+    assert!(open > 6);
+    let more = format!("      {}", trf!("+{} more", open - 6));
+    assert!(!h.painted_text(&more).is_empty(), "{:?}", more);
+}
+
+#[test]
+fn org_chart_cards_in_a_row_line_up() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 2;
+    h.settle();
+    let sam = h.painted_text("Sam Lee");
+    let jordan = h.painted_text("Jordan Park");
+    assert!(!sam.is_empty() && !jordan.is_empty());
+    assert!(
+        (sam[0].0.bottom() - jordan[0].0.bottom()).abs() < 1.0,
+        "Sam {:?} and Jordan {:?} on one line",
+        sam[0].0,
+        jordan[0].0
+    );
+}

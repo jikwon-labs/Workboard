@@ -8934,3 +8934,106 @@ fn a_carried_slack_match_falls_back_to_an_older_list_that_came_later() {
     assert!(!shared.contains("slack_carried"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A Slack match I carried over, then a teammate's real decision for the
+/// same person arriving by a real merge: that decision isn't "carried"
+/// here any more, so when its member is deleted my computer doesn't fall
+/// back to the older list against it (both computers agree).
+#[test]
+fn a_teammates_decision_merged_in_stops_my_carried_fallback() {
+    use super::slack::{plan, Assign};
+    let dir = temp_folder("slack-stale");
+    let folder = dir.to_str().unwrap().to_string();
+    let (alex, sam, jordan) = (2, 3, 4);
+    let mut a = app();
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == alex)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    a.data.fold_legacy_slack();
+    a.share_here(&folder).unwrap();
+    let mut b = slack_joiner(&folder, jordan);
+    let (u, c) = slack_moves(&[(1, "UX")]);
+    let mut p = plan(&b.data, u, c);
+    p.assign.insert("UX".into(), Assign::Member(sam));
+    b.import_slack(&p);
+    slack_push(&mut b);
+    assert!(a.sync_pull());
+    assert_eq!(a.data.extra.slack_map.get("UX"), Some(&sam));
+    assert!(!a.data.extra.slack_carried.contains(&"UX".to_string()));
+    b.data.members.retain(|m| m.id != sam);
+    slack_push(&mut b);
+    assert!(a.sync_pull());
+    for (who, x) in [("A", &a), ("B", &b)] {
+        assert_eq!(x.data.slack_member("UX"), None, "{}", who);
+        assert_eq!(slack_next(x, "UX"), Some(Assign::New), "{}", who);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A carried match coming to a teammate's computer by merge (no stamp)
+/// counts as carried there too: with its member deleted, both computers
+/// fall back to the other older list.
+#[test]
+fn a_carried_slack_match_from_a_teammate_falls_back_on_my_computer_too() {
+    use super::slack::Assign;
+    let dir = temp_folder("slack-carried-b");
+    let folder = dir.to_str().unwrap().to_string();
+    let (alex, sam, jordan) = (2, 3, 4);
+    let mut a = app();
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == alex)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    a.data.fold_legacy_slack();
+    a.share_here(&folder).unwrap();
+    let mut b = slack_joiner(&folder, jordan);
+    assert_eq!(
+        b.data.extra.slack_carried,
+        ["UX"],
+        "joined: the team's carried match"
+    );
+    b.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == sam)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    b.data.members.retain(|m| m.id != alex);
+    slack_push(&mut b);
+    assert!(a.sync_pull());
+    for (who, x) in [("A", &a), ("B", &b)] {
+        assert_eq!(x.data.slack_member("UX"), Some(sam), "{}", who);
+        assert_eq!(slack_next(x, "UX"), Some(Assign::Member(sam)), "{}", who);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Joining a team doesn't bring along Slack matches this computer carried
+/// in the workspace it left.
+#[test]
+fn joining_a_team_forgets_my_old_carried_slack_matches() {
+    let dir = temp_folder("slack-join-carried");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(
+        None,
+        Some(Data::blank(
+            "Theirs",
+            Member {
+                id: 1,
+                name: "B".into(),
+                ..Default::default()
+            },
+        )),
+    );
+    b.data.extra.slack_carried = vec!["UOLD".into()];
+    b.join_shared(&folder).unwrap();
+    assert!(!b.data.extra.slack_carried.contains(&"UOLD".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

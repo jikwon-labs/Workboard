@@ -1634,9 +1634,15 @@ impl Data {
             {
                 return Some(m);
             }
-            // only carried over from the older lists here, never decided:
-            // with that member gone, another member they name still counts
-            if self.extra.slack_carried.iter().any(|x| x == sid) {
+            // only carried over from the older lists, never decided (no
+            // stamp: a teammate's decision coming in has one): with that
+            // member gone, another member they name still counts
+            let stamped = self
+                .extra
+                .sync
+                .values
+                .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+            if !stamped && self.extra.slack_carried.iter().any(|x| x == sid) {
                 return legacy();
             }
             return None;
@@ -1645,6 +1651,28 @@ impl Data {
         // members (`fold_legacy_slack` leaves those out of the map), and the
         // first member still here wins
         legacy()
+    }
+
+    /// After a merge or a join: a Slack match that came in with a stamp is
+    /// somebody's decision, so it is no longer only carried here; one that
+    /// came in new without a stamp was carried over from older lists on a
+    /// teammate's computer (every decision is stamped as it is shared), so
+    /// it counts as carried here too. `before`: the Slack ids this copy had
+    /// before.
+    pub fn note_carried_slack(&mut self, before: &std::collections::BTreeSet<String>) {
+        let keys: Vec<String> = self.extra.slack_map.keys().cloned().collect();
+        for sid in keys {
+            let stamped = self
+                .extra
+                .sync
+                .values
+                .contains_key(&crate::sync::map_part(SLACK_MAP, &sid));
+            if stamped {
+                self.extra.slack_carried.retain(|x| *x != sid);
+            } else if !before.contains(&sid) && !self.extra.slack_carried.contains(&sid) {
+                self.extra.slack_carried.push(sid);
+            }
+        }
     }
 
     /// The Slack matches an older version kept on the members

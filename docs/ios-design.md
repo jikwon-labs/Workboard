@@ -352,7 +352,6 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 
 ## 사용자가 정할 것
 
-- **번들 ID:** 지금은 `com.example.workboard.temporary`. 푸시를 켜려면 실제 ID 가 필요하다.
-- **서명 팀(`DEVELOPMENT_TEAM`):** 맥 앱과 같은 `K6599UJ4KM` 을 쓸지.
+- **번들 ID와 서명 팀:** 2026-11-16 에 정했다. `com.seojigwon.workboard`, 팀 `K6599UJ4KM`("푸시 설정" 참고).
 - **스크린샷을 레포에 넣을지:** `ios/screenshots/`. 맥 앱의 `/shots` 는 `.gitignore` 에 있다.
 - **livekit-server 를 어디서 시험할지:** 서버 세션의 Mac mini 에서 할지, 이 맥에 설치해서 할지.

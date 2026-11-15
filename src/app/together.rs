@@ -595,6 +595,8 @@ impl App {
             .filter(|c| c.kind == ChannelKind::Channel && (!c.private || c.members.contains(&me)))
             .map(|c| c.id)
             .collect();
+        let slack_before: std::collections::BTreeSet<String> =
+            self.data.extra.slack_map.keys().cloned().collect();
         let mut v = self.data_value();
         let mut changed = sync::merge(&mut v, others);
         let on_server = self
@@ -619,6 +621,7 @@ impl App {
         match serde_json::from_value::<Data>(v) {
             Ok(d) => {
                 self.data = d;
+                self.data.note_carried_slack(&slack_before);
                 // fingerprints of what the app writes, which can differ a
                 // little from what came in (fields an older app left out)
                 let v = self.data_value();
@@ -1236,6 +1239,10 @@ impl App {
         d.extra.inbox_later.clear();
         d.extra.starred.clear();
         d.extra.closed_dms.clear();
+        // Slack matches this computer carried belong to the workspace left;
+        // the team's own carried ones (no stamp) count as carried here
+        d.extra.slack_carried.clear();
+        d.note_carried_slack(&Default::default());
         d.extra.shared = Some(cfg);
         d.extra.sync.hashes.clear();
         d.extra.sync.field_hashes.clear();

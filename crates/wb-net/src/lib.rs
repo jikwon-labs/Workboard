@@ -256,6 +256,18 @@ pub enum Msg {
     },
     Ping,
     Pong,
+    /// iPhone: this device's Apple push token (hex), so the server can notify
+    /// it of new messages while the app isn't connected. `env` is
+    /// "development" or "production" (which APNs host the token belongs to).
+    /// An empty token stops notifications to this device. Servers from before
+    /// it ignore the message.
+    PushToken {
+        token: String,
+        #[serde(default)]
+        platform: String,
+        #[serde(default)]
+        env: String,
+    },
     /// Owner or admin: a one-time code that signs someone in as `member`.
     CreateInvite {
         member: u64,
@@ -762,6 +774,10 @@ mod tests {
         assert!(matches!(Msg::parse(r#"{"type":"welcome","tag":1,"snapshot":null,"rev":0,"member":2,"role":"member"}"#), Some(Msg::Welcome { email: None, .. })));
         assert_eq!(Msg::parse(r#"{"type":"ping"}"#), Some(Msg::Ping));
         assert_eq!(Msg::parse(r#"{"type":"set_role","member":5,"role":"admin"}"#), Some(Msg::SetRole { member: 5, role: Role::Admin }));
+        // what the iPhone app sends (ios/WorkboardKit Protocol.swift)
+        let t = Msg::PushToken { token: "ab12".into(), platform: "ios".into(), env: "development".into() };
+        assert_eq!(Msg::parse(r#"{"type":"push_token","token":"ab12","platform":"ios","env":"development"}"#), Some(t.clone()));
+        assert_eq!(Msg::parse(&t.to_json()), Some(t));
     }
 
     #[test]

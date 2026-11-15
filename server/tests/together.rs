@@ -1463,3 +1463,165 @@ fn a_server_whose_workspace_file_went_missing_is_not_up_for_grabs() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+
+// ------------------------------------------------------------ iPhone pushes
+
+/// Stands in for APNs: notes what would have gone out, and answers "gone"
+/// for the tokens in `gone`.
+#[derive(Debug, Default)]
+struct FakePush {
+    sent: std::sync::Mutex<Vec<(String, String, Value)>>,
+    gone: std::sync::Mutex<Vec<String>>,
+}
+
+impl workboard_server::push::Sender for FakePush {
+    fn send(&self, env: &str, token: &str, payload: &Value) -> workboard_server::push::Outcome {
+        self.sent.lock().unwrap().push((env.to_string(), token.to_string(), payload.clone()));
+        if self.gone.lock().unwrap().iter().any(|t| t == token) {
+            workboard_server::push::Outcome::Gone
+        } else {
+            workboard_server::push::Outcome::Sent
+        }
+    }
+}
+
+impl FakePush {
+    /// What went to `token` so far.
+    fn to(&self, token: &str) -> Vec<Value> {
+        self.sent.lock().unwrap().iter().filter(|(_, t, _)| t == token).map(|(_, _, p)| p.clone()).collect()
+    }
+}
+
+fn wait_for(what: &str, cond: impl Fn() -> bool) {
+    let until = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < until {
+        if cond() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for: {}", what);
+}
+
+fn connections(port: u16) -> u64 {
+    let (_, body) = http_get(port, "/health");
+    serde_json::from_slice::<Value>(&body).unwrap()["connections"].as_u64().unwrap()
+}
+
+/// The push tokens server.json holds: device id -> token.
+fn saved_tokens(home: &PathBuf) -> Vec<(String, String)> {
+    workboard_server::load_saved(home).map(|s| s.push.into_iter().map(|(d, t)| (d, t.token)).collect()).unwrap_or_default()
+}
+
+/// An iPhone signing in as `member` (with a code from `owner`), sending its
+/// push token the way the iOS app does, then going away (app in the background).
+fn phone(owner: &mut App, port: u16, member: u64, token: &str, home: &PathBuf) -> (String, Option<String>) {
+    let code = owner.invite(member, Role::Member);
+    let mut p = App::join(port, &code);
+    p.wait("the phone gets the team's copy", |_| true);
+    p.client.send(Msg::PushToken { token: token.to_string(), platform: "ios".into(), env: "development".into() });
+    let device = p.device.clone();
+    wait_for("the token in server.json", || saved_tokens(home).contains(&(device.clone(), token.to_string())));
+    let before = connections(port);
+    let t = p.token.clone();
+    drop(p);
+    wait_for("the phone's connection gone", || connections(port) < before);
+    (device, t)
+}
+
+fn in_general(text: &str, id: u64, author: u64) -> impl FnOnce(&mut Value) + '_ {
+    move |d: &mut Value| {
+        d["channels"][0]["messages"].as_array_mut().unwrap().push(json!({"id": id, "author": author, "text": text, "ts": now() / 1000}));
+    }
+}
+
+#[test]
+fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
+    let home = temp_home("push");
+    let fake = Arc::new(FakePush::default());
+    let opts = || workboard_server::Options { push: Some(fake.clone()), ..Default::default() };
+    let server = Server::start_with(&home, 0, opts());
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    let (ann, bo) = ("a1".repeat(32), "b2".repeat(32));
+    phone(&mut a, port, 1, &ann, &home);
+    let (bo_device, bo_token) = phone(&mut a, port, 2, &bo, &home);
+    assert!(fake.sent.lock().unwrap().is_empty(), "joining and sending tokens notifies no one");
+
+    // a DM from Ann to Bo: Bo's phone, in the payload the iPhone app reads; never Ann's own
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2], "messages": [{"id": 21, "author": 1, "text": "lunch?", "ts": now() / 1000}], "last_read": 0}));
+    });
+    wait_for("the DM pushed to Bo's phone", || fake.to(&bo).len() == 1);
+    let sent = fake.sent.lock().unwrap().clone();
+    assert_eq!(sent[0].0, "development", "the env the phone said");
+    assert_eq!(sent[0].2, json!({"aps": {"alert": {"title": "Ann", "body": "lunch?"}, "sound": "default", "thread-id": "ch-20"}, "channel": 20}));
+
+    // in a channel only who is mentioned; a message without mentions notifies no one
+    b.change(in_general("hi everyone", 30, 2));
+    b.change(in_general("@Ann can you look", 31, 2));
+    wait_for("the mention pushed to Ann's phone", || fake.to(&ann).len() == 1);
+    assert_eq!(fake.to(&ann)[0]["aps"]["alert"], json!({"title": "Bo in #general", "body": "@Ann can you look"}));
+    assert_eq!(fake.to(&bo).len(), 1, "Bo wrote it");
+
+    // a reply in Ann's thread (message 11 is hers): Ann's phone, with the thread
+    b.change(|d| {
+        d["channels"][0]["messages"][0]["replies"] = json!([{"id": 40, "author": 2, "text": "on it", "ts": now() / 1000}]);
+    });
+    wait_for("the reply pushed to Ann's phone", || fake.to(&ann).len() == 2);
+    assert_eq!(fake.to(&ann)[1]["parent"], 11);
+    assert_eq!(fake.to(&ann)[1]["channel"], 10);
+
+    // Bo's phone back online: it shows notifications itself, so no push
+    let mut p = App::start(port, Value::Null, SignIn { token: bo_token, device: bo_device.clone(), ..Default::default() });
+    p.wait_status(|s| matches!(s, Status::Connected), "the phone connected");
+    a.change(|d| d["channels"][1]["messages"].as_array_mut().unwrap().push(json!({"id": 22, "author": 1, "text": "you there?", "ts": now() / 1000})));
+    b.wait("the DM at Bo's computer", |d| channel(d, 20).is_some_and(|c| c["messages"].as_array().unwrap().len() == 2));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(fake.to(&bo).len(), 1, "nothing to a connected phone");
+    let before = connections(port);
+    drop(p);
+    wait_for("the phone's connection gone", || connections(port) < before);
+
+    // APNs says the token is gone (app removed): the server forgets it
+    fake.gone.lock().unwrap().push(bo.clone());
+    a.change(|d| d["channels"][1]["messages"].as_array_mut().unwrap().push(json!({"id": 23, "author": 1, "text": "ok later", "ts": now() / 1000})));
+    wait_for("the token dropped", || !saved_tokens(&home).iter().any(|(_, t)| *t == bo));
+    assert_eq!(fake.to(&bo).len(), 2);
+
+    // tokens survive a restart: after it Ann's phone still gets her mentions
+    server.stop();
+    assert!(saved_tokens(&home).iter().any(|(_, t)| *t == ann), "kept in server.json");
+    let server = Server::start_with(&home, port, opts());
+    a.wait_status(|s| matches!(s, Status::Connected), "A back after the restart");
+    b.wait_status(|s| matches!(s, Status::Connected), "B back after the restart");
+    b.change(in_general("@Ann after the restart", 32, 2));
+    wait_for("the mention after the restart", || fake.to(&ann).len() == 3);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
+    let home = temp_home("nopush");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let bo = "b2".repeat(32);
+    phone(&mut a, server.port, 2, &bo, &home);
+    // a token that isn't hex is ignored
+    let code = a.invite(3, Role::Member);
+    let mut cy = App::join(server.port, &code);
+    cy.wait("Cy's copy", |_| true);
+    cy.client.send(Msg::PushToken { token: "not a token".into(), platform: "ios".into(), env: "production".into() });
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2], "messages": [{"id": 21, "author": 1, "text": "lunch?", "ts": now() / 1000}], "last_read": 0}));
+    });
+    b.wait("the DM at Bo's computer", |d| channel(d, 20).is_some());
+    cy.change(in_general("still fine", 30, 3));
+    a.wait("Cy's message at A", |d| texts(d).contains(&"still fine".to_string()));
+    let tokens = saved_tokens(&home);
+    assert_eq!(tokens.len(), 1, "only the good token: {:?}", tokens);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

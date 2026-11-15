@@ -33,6 +33,16 @@ The first run makes an API key and secret and keeps them in the data folder
 `livekit.json` to hand out call tokens. Log: `~/Library/Logs/livekit-server.log`.
 Stop and remove: `deploy/install-livekit.sh uninstall`.
 
+## iPhone notifications (APNs)
+
+The server pushes new DMs, @mentions and thread replies to iPhones that are
+not connected, once Apple's push service is set up: put the APNs key (`.p8`)
+and an `apns.json` (`key`, `key_id`, `team_id`, `topic` = the iPhone app's
+bundle id) in the data folder, both mode 600, and restart the server
+(`launchctl kickstart -k gui/$(id -u)/com.jikwon-labs.workboard-server`).
+The log says `iPhone notifications on` or `off: <why>` once at start.
+Details: the top of `server/src/push.rs`; steps: `docs/macmini/README.md`.
+
 ## Keep the Mac mini reachable
 
 Run once in Terminal on the Mac mini (asks for your password):

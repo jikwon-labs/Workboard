@@ -6,8 +6,10 @@
 //   workspace.json        the team's copy
 //   server.json           devices (hashed tokens, member, id tag), roles,
 //                         open invites, accounts (email, salted password
-//                         hash), revision number
+//                         hash), iPhone push tokens, revision number
 //   mail.json             how to send email (see mail.rs); optional
+//   apns.json             how to reach Apple's push service, for
+//                         notifications on iPhones (see push.rs); optional
 //   outbox/               mails written here instead of sent (mail.json
 //                         "transport": "folder")
 //   backups/              hourly-YYYYMMDD-HH.json (48 kept),
@@ -61,6 +63,8 @@ mod files;
 pub use files::{collect_garbage, file_name_ok, parse_range, FILES_DIR, FILE_KEEP_DAYS, MAX_FILE};
 pub mod mail;
 pub use mail::{load_mail, MailCfg, MAIL_FILE, OUTBOX_DIR};
+pub mod push;
+pub use push::{load_apns, ApnsCfg, APNS_FILE};
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
@@ -287,6 +291,8 @@ pub struct Saved {
     pub invites: BTreeMap<String, InviteRec>,
     /// member -> account
     pub accounts: BTreeMap<u64, Account>,
+    /// device id -> its push token (iPhones; see push.rs)
+    pub push: BTreeMap<String, push::PushToken>,
 }
 
 impl Saved {
@@ -321,6 +327,27 @@ impl Saved {
         let token = hex(&random_bytes::<32>());
         self.devices.insert(device.to_string(), Device { tag, member, token: hash_token(&token), created: now_ms() });
         (tag, token)
+    }
+
+    /// Keep (or with an empty token, forget) `device`'s push token. True when
+    /// that changed anything.
+    fn set_push_token(&mut self, device: &str, token: &str, platform: &str, env: &str) -> bool {
+        let token = token.trim().to_ascii_lowercase();
+        if token.is_empty() {
+            return self.push.remove(device).is_some();
+        }
+        if !self.devices.contains_key(device) || !push::token_ok(&token) || !platform.trim().eq_ignore_ascii_case("ios") {
+            return false;
+        }
+        let env = push::norm_env(env);
+        if self.push.get(device).is_some_and(|t| t.token == token && t.env == env) {
+            return false;
+        }
+        // one phone, one entry: a token that moved to a new device id (the app
+        // was installed again) leaves the old one
+        self.push.retain(|d, t| d == device || t.token != token);
+        self.push.insert(device.to_string(), push::PushToken { token, platform: "ios".into(), env: env.into(), updated: now_ms() });
+        true
     }
 
     fn drop_expired_invites(&mut self, now: i64) {
@@ -697,6 +724,10 @@ struct Hub {
     /// the largest file /files takes
     max_file: u64,
     claim_wait: Duration,
+    /// sends iPhone notifications; None when push isn't set up
+    pusher: Option<Arc<dyn push::Sender>>,
+    /// device id -> its open connections (connected devices get no pushes)
+    online: Mutex<std::collections::HashMap<String, usize>>,
 }
 
 impl Hub {
@@ -1026,7 +1057,7 @@ impl Hub {
 
     /// Merge the copy `member` sent from `device` into the team's copy; tell
     /// everyone when it changed.
-    fn push(&self, member: u64, device: &str, data: Value) {
+    fn push(self: &Arc<Self>, member: u64, device: &str, data: Value) {
         if !copy_shape_ok(&data) {
             eprintln!("ignored a copy from member {} that isn't a workspace", member);
             return;
@@ -1034,6 +1065,12 @@ impl Hub {
         let mut data = wb_sync::shareable(&data);
         let mut g = self.inner.lock().unwrap();
         let members_before = member_ids(g.canon.as_ref());
+        // the messages already there, to tell which ones are new (only when
+        // someone could be notified)
+        let before = match &g.canon {
+            Some(c) if self.pusher.is_some() && !g.saved.push.is_empty() => Some(push::message_ids(c)),
+            _ => None,
+        };
         if let Some(c) = &g.canon {
             guard_push(c, &mut data, member);
         }
@@ -1061,12 +1098,65 @@ impl Hub {
             }
         };
         if changed {
+            if let (Some(before), Some(canon)) = (&before, &g.canon) {
+                let notes = push::notes(canon, before, &[member], now_ms() / 1000);
+                self.notify(&g.saved, notes);
+            }
             self.broadcast_canon(&mut g);
             // someone added or removed people: owners and admins see the new list
             if member_ids(g.canon.as_ref()) != members_before {
                 drop(g);
                 let _ = self.access.send(());
             }
+        }
+    }
+
+    /// Send `notes` to the devices of their members that have a push token
+    /// and aren't connected, MAX_PER_DEVICE each at most, on another thread.
+    fn notify(self: &Arc<Self>, saved: &Saved, notes: Vec<push::Note>) {
+        let Some(sender) = self.pusher.clone() else { return };
+        if notes.is_empty() {
+            return;
+        }
+        let online = self.online.lock().unwrap().clone();
+        let mut jobs: Vec<(String, push::PushToken, Value)> = vec![];
+        for (device, tok) in &saved.push {
+            let Some(d) = saved.devices.get(device) else { continue };
+            if online.get(device).is_some_and(|n| *n > 0) {
+                continue;
+            }
+            let mine: Vec<&push::Note> = notes.iter().filter(|n| n.member == d.member).collect();
+            for p in push::batch(&mine) {
+                jobs.push((device.clone(), tok.clone(), p));
+            }
+        }
+        if jobs.is_empty() {
+            return;
+        }
+        let hub = self.clone();
+        std::thread::spawn(move || {
+            for (device, tok, payload) in jobs {
+                match sender.send(&tok.env, &tok.token, &payload) {
+                    push::Outcome::Sent => {}
+                    push::Outcome::Gone => {
+                        // the app was removed (or the token was never good): forget it
+                        let mut g = hub.inner.lock().unwrap();
+                        if g.saved.push.get(&device).is_some_and(|t| t.token == tok.token) {
+                            g.saved.push.remove(&device);
+                            g.dirty = true;
+                        }
+                    }
+                    push::Outcome::Failed(why) => eprintln!("couldn't send a notification to device {}: {}", device, why),
+                }
+            }
+        });
+    }
+
+    /// An iPhone's push token (`push_token`).
+    fn set_push_token(&self, device: &str, token: &str, platform: &str, env: &str) {
+        let mut g = self.inner.lock().unwrap();
+        if g.saved.set_push_token(device, token, platform, env) {
+            g.dirty = true;
         }
     }
 
@@ -1147,6 +1237,9 @@ impl Hub {
                 }
                 kicked = g.saved.devices.iter().filter(|(_, d)| d.member == who).map(|(id, _)| id.clone()).collect();
                 g.saved.devices.retain(|_, d| d.member != who);
+                let devices = &g.saved.devices;
+                let push: BTreeMap<String, push::PushToken> = g.saved.push.iter().filter(|(d, _)| devices.contains_key(*d)).map(|(d, t)| (d.clone(), t.clone())).collect();
+                g.saved.push = push;
                 g.saved.invites.retain(|_, i| i.member != who);
                 // and the password that would let them back in
                 g.saved.accounts.remove(&who);
@@ -1424,6 +1517,28 @@ impl Drop for Counted {
     }
 }
 
+/// A signed-in device's connection, counted in Hub::online while it lasts.
+struct Online(Arc<Hub>, String);
+
+impl Online {
+    fn new(hub: &Arc<Hub>, device: &str) -> Online {
+        *hub.online.lock().unwrap().entry(device.to_string()).or_insert(0) += 1;
+        Online(hub.clone(), device.to_string())
+    }
+}
+
+impl Drop for Online {
+    fn drop(&mut self) {
+        let mut o = self.0.online.lock().unwrap();
+        if let Some(n) = o.get_mut(&self.1) {
+            *n -= 1;
+            if *n == 0 {
+                o.remove(&self.1);
+            }
+        }
+    }
+}
+
 async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) {
     hub.connections.fetch_add(1, Ordering::Relaxed);
     let _count = Counted(hub.clone());
@@ -1450,6 +1565,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             return;
         }
     };
+    let _online = Online::new(&hub, &device);
     // signed in: from now on a message may hold a whole workspace. The app
     // sends nothing between hello and welcome, so nothing read ahead is lost.
     let mut socket = WebSocketStream::from_raw_socket(socket.into_inner(), WsRole::Server, Some(ws_config(wb_net::MAX_MESSAGE))).await;
@@ -1483,6 +1599,10 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                         None
                     }
                     Some(Msg::Ping) => Some(Msg::Pong.to_json()),
+                    Some(Msg::PushToken { token, platform, env }) => {
+                        hub.set_push_token(&device, &token, &platform, &env);
+                        None
+                    }
                     Some(Msg::CallJoin { channel }) => Some(match hub.call(member, &device, channel) {
                         Ok(m) => m.to_json(),
                         Err(why) => Msg::call_denied(&why, channel).to_json(),
@@ -1550,11 +1670,28 @@ pub struct Options {
     pub max_file: u64,
     /// How long a claim on an empty server holds without its workspace.
     pub claim_wait: Duration,
+    /// What sends iPhone notifications. None: APNs as apns.json or WB_APNS_*
+    /// say (or nothing when they don't).
+    pub push: Option<Arc<dyn push::Sender>>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { max_file: MAX_FILE, claim_wait: Duration::from_secs(CLAIM_WAIT_SECS) }
+        Options { max_file: MAX_FILE, claim_wait: Duration::from_secs(CLAIM_WAIT_SECS), push: None }
+    }
+}
+
+/// APNs from the server folder's setup; None (said once) when it isn't set up.
+fn apns_sender(home: &Path) -> Option<Arc<dyn push::Sender>> {
+    match push::load_apns(home).and_then(push::Apns::new) {
+        Ok(a) => {
+            println!("iPhone notifications on (APNs, topic {})", a.topic());
+            Some(Arc::new(a))
+        }
+        Err(why) => {
+            println!("iPhone notifications off: {}", why);
+            None
+        }
     }
 }
 
@@ -1568,6 +1705,7 @@ pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, option
     std::fs::create_dir_all(&home)?;
     let canon = read_json(&home.join(WORKSPACE_FILE))?;
     let saved = load_saved(&home)?;
+    let pusher = options.push.clone().or_else(|| apns_sender(&home));
     let (stop_tx, stop_rx) = watch::channel(false);
     let hub = Arc::new(Hub {
         home,
@@ -1579,6 +1717,8 @@ pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, option
         connections: AtomicUsize::new(0),
         max_file: options.max_file,
         claim_wait: options.claim_wait,
+        pusher,
+        online: Mutex::new(Default::default()),
     });
     // a request left while the server was off
     hub.admin_file();

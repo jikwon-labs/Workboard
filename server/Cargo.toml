@@ -23,3 +23,5 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 tokio-tungstenite = { version = "0.29", default-features = false }
 sha1 = "0.10"
 base64 = "0.22"
+# Apple push notifications: the ES256 JWT for APNs (see src/push.rs)
+ring = "0.17"

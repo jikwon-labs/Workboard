@@ -6449,3 +6449,46 @@ fn a_reply_notice_from_a_duplicate_dm_copy_opens_its_thread() {
     );
     assert!(h.has("Thread"), "the thread panel is on screen");
 }
+
+#[test]
+fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-ui-task-fail".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    super::together::save_token("127.0.0.1:9", "dev-ui-task-fail", "tok");
+    let id = open_design_task(&mut h);
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("refused.png", 40, 30)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    // the server can't be reached: not "Adding..." for ever, but why, and
+    // a way to try again
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has("Try again refused.png") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(h.has("Try again refused.png"));
+    assert!(h.app.task(id).unwrap().attachments.is_empty());
+    let sha = h.app.task_files[0].1.att.clone().unwrap().file;
+    assert!(h.app.files.is_waiting(&sha), "also tried again by itself");
+    h.click("Try again refused.png");
+    assert_eq!(h.app.task_files.len(), 1);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has("Dismiss refused.png") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.click("Dismiss refused.png");
+    super::together::forget_token("127.0.0.1:9", "dev-ui-task-fail");
+    assert!(h.app.task_files.is_empty());
+    assert!(
+        !h.app.files.is_waiting(&sha),
+        "and no longer waits to go up"
+    );
+}

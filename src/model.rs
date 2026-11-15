@@ -170,56 +170,14 @@ pub struct Member {
     pub status_text: String,
 }
 
-/// The people a text @mentions. At each "@" that starts a word the longest
-/// matching name wins, so "@Alex Kim" is Alex Kim and not Alex. A Latin name
-/// running on into more letters or digits ("@Alexander") is not that name;
-/// anything else may follow it, so "@지원님" still mentions 지원. When several
-/// people share the name, the ones in `picked` (chosen from the mention list)
-/// are meant, else all of them.
+/// The people a text @mentions, by the rule the team server uses too
+/// (`wb_sync::mentions`): at each "@" that starts a word the longest
+/// matching name wins, so "@Alex Kim" is Alex Kim and not Alex; "@Alexander"
+/// is not Alex but "@지원님" is 지원. When several people share the name, the
+/// ones in `picked` (chosen from the mention list) are meant, else all.
 pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64> {
-    let mut out: Vec<u64> = vec![];
-    for (i, _) in text.match_indices('@') {
-        if i > 0 && !text[..i].ends_with(char::is_whitespace) {
-            continue;
-        }
-        let rest = &text[i + 1..];
-        let fits = |name: &str| {
-            !name.is_empty()
-                && rest.starts_with(name)
-                && !(name
-                    .chars()
-                    .last()
-                    .is_some_and(|c| c.is_ascii_alphanumeric())
-                    && rest[name.len()..]
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_alphanumeric()))
-        };
-        let Some(best) = members
-            .iter()
-            .filter(|m| fits(&m.name))
-            .map(|m| m.name.len())
-            .max()
-        else {
-            continue;
-        };
-        let named: Vec<u64> = members
-            .iter()
-            .filter(|m| m.name.len() == best && fits(&m.name))
-            .map(|m| m.id)
-            .collect();
-        let chosen: Vec<u64> = named
-            .iter()
-            .copied()
-            .filter(|id| picked.contains(id))
-            .collect();
-        for id in if chosen.is_empty() { named } else { chosen } {
-            if !out.contains(&id) {
-                out.push(id);
-            }
-        }
-    }
-    out
+    let people: Vec<(u64, &str)> = members.iter().map(|m| (m.id, m.name.as_str())).collect();
+    wb_sync::mentions::mentioned_ids(text, &people, picked)
 }
 
 impl Member {
@@ -446,6 +404,44 @@ pub struct Doc {
     /// Labels shown in the Docs list's Tags column and used by its filter.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Marked as a Wiki (Popular Wikis, the Wikis filter). Left out until
+    /// first marked; unmarking writes `false` rather than leaving it out, so
+    /// it never goes back to missing and needs no wb-sync default rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wiki: Option<bool>,
+    /// Who opened the doc and when: one entry per person (and device), each
+    /// changed only by its owner, so wb-sync merges them one by one and no
+    /// view is lost when two people read the doc at once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<DocViews>,
+}
+
+/// One person's recent opens of a doc (see `Doc::views`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DocViews {
+    pub id: u64,
+    pub member: u64,
+    /// When the doc was opened, oldest first; opens older than
+    /// `DOC_VIEW_DAYS` are dropped the next time this person opens it.
+    #[serde(default)]
+    pub at: Vec<i64>,
+}
+
+/// How far back Popular Wikis counts views.
+pub const DOC_VIEW_DAYS: i64 = 30;
+
+impl Doc {
+    pub fn is_wiki(&self) -> bool {
+        self.wiki == Some(true)
+    }
+
+    /// Opens by everyone since `since`.
+    pub fn views_since(&self, since: i64) -> usize {
+        self.views
+            .iter()
+            .map(|v| v.at.iter().filter(|t| **t >= since).count())
+            .sum()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -513,6 +509,11 @@ pub struct Attachment {
     /// Length of a video in seconds; 0 for a picture.
     #[serde(default)]
     pub secs: f32,
+    /// A video's still (a small JPEG, its own file by sha256 like `file`),
+    /// so others can show the video without fetching all of it. None for
+    /// pictures and for videos sent before stills were made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -1668,6 +1669,22 @@ impl Data {
         })
     }
 
+    /// My time on a task: my time entries plus my running timer (not my
+    /// teammates' time, which `Task::tracked_secs` adds in).
+    pub fn my_tracked_secs(&self, t: &Task, now: i64) -> i64 {
+        let solo = self.solo();
+        let done: i64 = t
+            .time_entries
+            .iter()
+            .filter(|e| {
+                let owner = t.entry_owner(e);
+                owner == self.me || (owner == 0 && solo)
+            })
+            .map(|e| e.end - e.start)
+            .sum();
+        done + self.my_timer_start(t).map(|st| now - st).unwrap_or(0)
+    }
+
     /// A timer from an older app that didn't record who started it, in a
     /// workspace with more people: nobody's to stop, so it is offered to
     /// stop by hand.
@@ -2305,6 +2322,8 @@ impl Data {
             private: false,
             archived: false,
             meeting_note: false,
+            wiki: None,
+            views: vec![],
             parent: None,
             title: "Project brief".into(),
             body: "Goals\n- Launch the new website\n- Grow the newsletter\n\nNotes\nKeep the design light and simple.".into(),

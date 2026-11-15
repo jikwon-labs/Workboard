@@ -104,7 +104,66 @@ fn gallery_card(
     resp
 }
 
+/// The small "Wiki" label after a doc's title.
+pub(super) fn wiki_badge(p: &egui::Painter, t: &Theme, left_center: egui::Pos2) {
+    let c = Color32::from_rgb(0x44, 0x66, 0xff);
+    let g = p.layout_no_wrap(tr("Wiki").to_string(), FontId::proportional(11.0), c);
+    let r = Rect::from_min_size(
+        pos2(left_center.x + 8.0, left_center.y - 9.0),
+        vec2(g.size().x + 12.0, 18.0),
+    );
+    p.rect_filled(r, 4.0, c.gamma_multiply(if t.dark { 0.3 } else { 0.14 }));
+    p.galley(r.center() - g.size() / 2.0, g, c);
+}
+
 impl App {
+    /// The Wikis I can see, most popular first: views in the last 30 days,
+    /// then the latest edit. (id, title, views)
+    pub(super) fn popular_wikis(&self, now: i64) -> Vec<(u64, String, usize)> {
+        let since = now - DOC_VIEW_DAYS * 86_400;
+        let mut v: Vec<(u64, String, usize, i64)> = self
+            .data
+            .docs
+            .iter()
+            .filter(|d| d.is_wiki() && self.doc_shown(d))
+            .map(|d| (d.id, d.title.clone(), d.views_since(since), d.updated))
+            .collect();
+        v.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
+        v.into_iter().map(|(id, t, n, _)| (id, t, n)).collect()
+    }
+
+    /// Counts an open of a doc by me (for Popular Wikis), once each time it
+    /// is opened, not every frame. Opens older than 30 days are dropped.
+    pub(super) fn count_doc_view(&mut self, id: u64, now: i64) {
+        let me = self.data.me;
+        let fresh = if self
+            .data
+            .docs
+            .iter()
+            .any(|d| d.id == id && d.views.iter().all(|v| v.member != me))
+        {
+            Some(self.data.new_id())
+        } else {
+            None
+        };
+        let Some(d) = self.data.docs.iter_mut().find(|d| d.id == id) else {
+            return;
+        };
+        if let Some(nid) = fresh {
+            d.views.push(DocViews {
+                id: nid,
+                member: me,
+                at: vec![],
+            });
+        }
+        if let Some(v) = d.views.iter_mut().find(|v| v.member == me) {
+            let since = now - DOC_VIEW_DAYS * 86_400;
+            v.at.retain(|t| *t >= since);
+            v.at.push(now);
+        }
+        self.dirty = true;
+    }
+
     /// The sidebar used by every app hub. Returns (clicked item, plus clicked).
     fn hub_sidebar(
         &mut self,
@@ -341,12 +400,51 @@ impl App {
                             .size(13.0)
                             .color(t.text2),
                     );
-                    empty_card(
-                        ui,
-                        &t,
-                        "\u{2714}",
-                        tr("Most viewed and active Wikis appear here"),
-                    );
+                    let wikis = self.popular_wikis(now_ts());
+                    if wikis.is_empty() {
+                        empty_card(
+                            ui,
+                            &t,
+                            "\u{2714}",
+                            tr("Most viewed and active Wikis appear here"),
+                        );
+                    }
+                    for (wid, title, views) in wikis.into_iter().take(5) {
+                        let w = ui.available_width();
+                        let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+                        name_it(&resp, &format!("Popular Wiki {}", title));
+                        if self.doc_open == Some(wid) {
+                            ui.painter().rect_filled(r, 7.0, t.row_selected);
+                        } else if resp.hovered() {
+                            ui.painter().rect_filled(r, 7.0, t.hover);
+                        }
+                        ui.painter().text(
+                            r.left_center() + vec2(16.0, 0.0),
+                            Align2::CENTER_CENTER,
+                            "\u{1F4D3}",
+                            FontId::proportional(12.0),
+                            t.text2,
+                        );
+                        let p = ui.painter().with_clip_rect(r.shrink2(vec2(50.0, 0.0)));
+                        p.text(
+                            r.left_center() + vec2(34.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            &title,
+                            FontId::proportional(13.5),
+                            t.text,
+                        );
+                        ui.painter().text(
+                            r.right_center() - vec2(10.0, 0.0),
+                            Align2::RIGHT_CENTER,
+                            views.to_string(),
+                            FontId::proportional(12.0),
+                            t.text3,
+                        );
+                        let resp = resp.on_hover_text(trf!("{} views in the last 30 days", views));
+                        if resp.clicked() {
+                            self.doc_open = Some(wid);
+                        }
+                    }
                 }
                 if id == "teams" {
                     ui.add_space(4.0);
@@ -434,20 +532,26 @@ impl App {
     pub(super) fn docs_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        let counts = [None, Some(self.my_docs_count()), None, None, None, None];
-        let items: [(&str, &str, Option<usize>); 6] = [
-            ("\u{1F4C4}", "All Docs", counts[0]),
-            ("@me", "My Docs", counts[1]),
+        let items: [(&str, &str, Option<usize>); 7] = [
+            ("\u{1F4C4}", "All Docs", None),
+            ("@me", "My Docs", Some(self.my_docs_count())),
             ("\u{1F465}", "Shared with me", None),
             ("\u{1F512}", "Private", None),
             ("\u{1F4DD}", "Meeting Notes", None),
+            ("\u{1F4D3}", "Wikis", None),
             ("\u{1F5D1}", "Archived", None),
         ];
         let sel = if self.doc_open.is_some() {
             99
         } else {
-            self.hub_filter.min(5)
+            self.hub_filter.min(6)
         };
+        if self.doc_open != self.doc_viewed {
+            self.doc_viewed = self.doc_open;
+            if let Some(id) = self.doc_open {
+                self.count_doc_view(id, now_ts());
+            }
+        }
         let (clicked, plus) = self.hub_sidebar(ui, "docs", "Docs", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -463,7 +567,7 @@ impl App {
                     self.doc_editor(ui);
                     return;
                 }
-                let title = items[self.hub_filter.min(5) as usize].1;
+                let title = items[self.hub_filter.min(6) as usize].1;
                 self.page_bar(ui, title, |s, ui| {
                     let tt = s.t();
                     if primary_button(ui, &tt, tr("New Doc")).clicked() {
@@ -683,16 +787,19 @@ impl App {
                                     .data
                                     .docs
                                     .iter()
-                                    .filter(|d| match filter {
+                                    .filter(|d| match filter.min(6) {
                                         1 => d.owner == me && !d.archived,
                                         2 => d.owner != me && !d.private && !d.archived,
                                         3 => d.private && !d.archived,
                                         4 => d.meeting_note && !d.archived,
-                                        5 => d.archived,
+                                        5 => d.is_wiki() && !d.archived,
+                                        6 => d.archived,
                                         _ => !d.archived,
                                     })
-                                    // someone's Private docs are for them alone
-                                    .filter(|d| !d.private || d.owner == me)
+                                    // someone's Private docs are for them alone, and
+                                    // docs in archived spaces or other people's
+                                    // Personal spaces stay out, as in the sidebar
+                                    .filter(|d| self.doc_reachable(d))
                                     .filter(|d| d.parent.is_none())
                                     .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                                     .filter(|d| !mine_only || d.owner == me)
@@ -732,13 +839,16 @@ impl App {
                                         2.0,
                                         Color32::from_rgb(16, 144, 224),
                                     );
-                                    ui.painter().text(
+                                    let tr_ = ui.painter().text(
                                         r.left_center() + vec2(60.0, 0.0),
                                         Align2::LEFT_CENTER,
                                         &d.title,
                                         FontId::proportional(14.5),
                                         t.text,
                                     );
+                                    if d.is_wiki() {
+                                        wiki_badge(ui.painter(), &t, tr_.right_center());
+                                    }
                                     let loc = d
                                         .space
                                         .and_then(|sid| {
@@ -887,6 +997,11 @@ impl App {
                             }
                         }
                     });
+                    if self.data.docs[idx].is_wiki() {
+                        let (r, br) = ui.allocate_exact_size(vec2(44.0, 18.0), Sense::hover());
+                        name_it(&br, "Wiki badge");
+                        wiki_badge(ui.painter(), &t, r.left_center() - vec2(8.0, 0.0));
+                    }
                     if self.data.docs[idx].meeting_note {
                         ui.label(
                             RichText::new(format!("\u{1F4DD} {}", tr("Meeting Note")))
@@ -1040,9 +1155,9 @@ impl App {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Dashboards")).size(15.0));
                         // My: the ones I made (older ones without a maker show in both)
-                        for d in self.data.extra.dashboards.clone().into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0)
-                            // someone else's private dashboard stays out of the list
-                            .filter(|d| !d.private || d.owner == me || d.owner == 0) {
+                        // someone else's private dashboard stays out of the list
+                        let shown: Vec<Dashboard> = self.data.extra.dashboards.iter().filter(|d| self.dash_shown(d)).cloned().collect();
+                        for d in shown.into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("dash:{}", d.id));
                                 if ui.add(ghost(egui::Button::new(format!("\u{1F4CA}  {}", d.name)))).clicked() {
@@ -1255,7 +1370,7 @@ impl App {
                         let me = self.data.me;
                         let mine_only = self.hub_filter.min(1) == 1;
                         // My: the ones I made (older ones without a maker show in both)
-                        for f in self.data.extra.forms.clone().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
+                        for f in self.data.extra.forms.clone().into_iter().filter(|f| self.form_shown(f)).collect::<Vec<_>>().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("form:{}", f.id));
                                 if ui.add(ghost(egui::Button::new(format!("\u{1F4CB}  {}", f.name)))).clicked() {

@@ -1,5 +1,5 @@
 // Who a text @mentions: a byte-for-byte port of mentioned_ids in
-// src/model.rs, so a message written or edited on the iPhone carries the
+// crates/wb-sync/src/mentions.rs (the rule the Mac app and the server share), so a message written or edited on the iPhone carries the
 // same `mentions` the Mac app would give it.
 
 import Foundation
@@ -46,7 +46,7 @@ public enum Mentions {
         (data["members"]?.array ?? []).map { (id: $0["id"]?.uint ?? 0, name: $0["name"]?.string ?? "") }
     }
 
-    /// mentions_in in src/model.rs.
+    /// mentions_in in src/model.rs (all members, nothing picked).
     public static func ids(in text: String, data: JSON, picked: [UInt64] = []) -> [UInt64] {
         ids(in: text, members: members(of: data), picked: picked)
     }

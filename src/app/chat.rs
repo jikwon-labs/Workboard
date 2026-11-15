@@ -163,25 +163,6 @@ fn take_enter(ui: &Ui, id: egui::Id) -> bool {
     })
 }
 
-/// Whether `text` mentions `name`: "@" and the whole name, not the start
-/// of a longer one ("@Bo" doesn't mention Bob).
-pub(super) fn mentions(text: &str, name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let at = format!("@{}", name);
-    text.match_indices(&at)
-        .any(|(i, _)| name_ends(&text[i + at.len()..]))
-}
-
-/// What follows a name in a mention: the end, a space or punctuation, not
-/// more letters of a longer name.
-fn name_ends(rest: &str) -> bool {
-    rest.chars()
-        .next()
-        .map_or(true, |c| !(c.is_alphanumeric() || c == '_'))
-}
-
 /// The people in a direct message, sorted, each once.
 fn dm_people(c: &Channel) -> Vec<u64> {
     let mut v = c.members.clone();
@@ -232,7 +213,7 @@ impl App {
             .sum()
     }
 
-    fn unread_here(&self, c: &Channel) -> usize {
+    pub(super) fn unread_here(&self, c: &Channel) -> usize {
         let seen = self.data.extra.chat_seen.get(&c.id);
         c.messages
             .iter()
@@ -333,12 +314,24 @@ impl App {
 
     /// Whether I may delete a channel and change who else is in it: whoever
     /// made it (any member for one made before that was kept), or an owner
-    /// or admin of the team server.
+    /// or admin: of the team server on a server (it checks too), by the
+    /// role in People alone or in a shared folder.
     pub(super) fn may_manage_channel(&self, c: &Channel) -> bool {
         let me = self.data.me;
-        self.sync_rt.role.is_some_and(|r| r.manages())
-            || c.creator == me
-            || (c.creator == 0 && c.members.contains(&me))
+        let server = self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some());
+        let admin = if server {
+            self.sync_rt.role.is_some_and(|r| r.manages())
+        } else {
+            self.data
+                .member(me)
+                .is_some_and(|m| m.role == "Owner" || m.role == "Admin")
+        };
+        admin || c.creator == me || (c.creator == 0 && c.members.contains(&me))
     }
 
     /// Whether a channel shows in my lists: one I may see and, for a direct
@@ -430,7 +423,8 @@ impl App {
     }
 
     /// Message text with mentions marked: "@" and a member's name (names
-    /// may have spaces), else "@" and the word after it.
+    /// may have spaces; the same rule as `mentioned_ids`), else "@" and the
+    /// word after it.
     pub(super) fn mention_text(&self, text: &str, size: f32) -> egui::text::LayoutJob {
         let t = self.t();
         let mut job = egui::text::LayoutJob::default();
@@ -445,27 +439,21 @@ impl App {
             background: t.selected_bg,
             ..Default::default()
         };
-        let mut names: Vec<&str> = self
+        let names: Vec<&str> = self
             .data
             .members
             .iter()
             .map(|m| m.name.as_str())
             .filter(|n| !n.is_empty())
             .collect();
-        names.sort_by_key(|n| std::cmp::Reverse(n.len()));
         let (mut from, mut i) = (0, 0);
         while i < text.len() {
             let rest = &text[i..];
             if rest.starts_with('@') && (i == 0 || text[..i].ends_with(char::is_whitespace)) {
                 let after = &rest[1..];
-                let len = names
-                    .iter()
-                    .find(|n| after.starts_with(**n) && name_ends(&after[n.len()..]))
-                    .map(|n| n.len())
-                    .or_else(|| {
-                        Some(after.find(char::is_whitespace).unwrap_or(after.len()))
-                            .filter(|w| *w > 0)
-                    });
+                let len = wb_sync::mentions::name_at(after, names.iter().copied()).or_else(|| {
+                    Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0)
+                });
                 if let Some(len) = len {
                     if from < i {
                         job.append(&text[from..i], 0.0, plain.clone());
@@ -546,7 +534,16 @@ impl App {
         let primary = self.dm_primary(&channel);
         if primary != cid {
             self.chat_open = Some(primary);
-            self.thread_open = None;
+            // a thread opened in that copy (from a notification or the
+            // Inbox) stays open: the shown copy has its messages too
+            let keep = self.thread_open.is_some_and(|tid| {
+                self.conversation(&channel)
+                    .iter()
+                    .any(|d| d.messages.iter().any(|m| m.id == tid))
+            });
+            if !keep {
+                self.thread_open = None;
+            }
             return;
         }
         // with the messages of its duplicates, in time order
@@ -685,9 +682,6 @@ impl App {
                         if hb(ui, "\u{1F4DD}  Ask").clicked() {
                             self.section = Section::Ai;
                         }
-                        if hb(ui, "\u{2699}  Integrate").clicked() {
-                            self.modal = Some(super::menus::unavailable("Integrations"));
-                        }
                         if hb(ui, "\u{260E}").on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
                         }
@@ -815,7 +809,7 @@ impl App {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
                                 if ui.add(egui::Button::new(tr("\u{2728}  Import from Slack")).min_size(vec2(cw, 32.0))).clicked() {
-                                    self.modal = Some(super::menus::unavailable("Import from Slack"));
+                                    self.start_slack_import();
                                 }
                                 ui.add_space(8.0);
                                 ui.separator();

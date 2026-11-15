@@ -80,6 +80,8 @@ pub enum Modal {
         title: String,
         body: String,
     },
+    /// A Slack export read and waiting for Import (slack.rs).
+    SlackImport(Box<super::slack::SlackPlan>),
     Bookmark {
         title: String,
         url: String,
@@ -759,6 +761,8 @@ impl App {
                 private: false,
                 archived: false,
                 meeting_note: false,
+                wiki: None,
+                views: vec![],
                 parent: None,
                 title: "Untitled".into(),
                 body: String::new(),
@@ -1132,6 +1136,7 @@ impl App {
             Modal::Reminder { .. } => tr("Create Reminder").into(),
             Modal::Trash => tr("Trash").into(),
             Modal::Unavailable { title, .. } => tr(title).to_string(),
+            Modal::SlackImport(_) => tr("Import from Slack").into(),
             Modal::Bookmark { .. } => tr("Add Bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
@@ -2209,6 +2214,10 @@ impl App {
                         *result = self.export_csv();
                     }
                 });
+                ui.add_space(6.0);
+                if ui.button(tr("Import from Slack")).clicked() {
+                    self.start_slack_import();
+                }
                 if !result.is_empty() {
                     ui.label(RichText::new(result.clone()).color(t.text2));
                 }
@@ -2608,6 +2617,11 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Modal::SlackImport(plan) => {
+                if self.slack_modal(ui, t, plan) {
+                    close = true;
+                }
+            }
             Modal::Unavailable { body, .. } => {
                 ui.label(tr(body.as_str()));
                 ui.add_space(8.0);
@@ -2940,6 +2954,9 @@ impl App {
 
     pub(super) fn restore_trash(&mut self, i: usize) {
         let item = self.data.extra.trash.remove(i);
+        // the server may have cleaned up files only the trash still named
+        // (Trash stays on this computer): put this computer's copies back
+        self.reupload_files(&super::files::trash_attachments(&item.payload));
         match item.kind.as_str() {
             "Task" => {
                 if let Ok(mut tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {

@@ -156,13 +156,24 @@ public enum FileAPI {
         return dest
     }
 
-    /// An Attachment object as the Mac app writes it (src/model.rs).
-    public static func attachment(sha: String, name: String, isVideo: Bool, bytes: Int, w: Int, h: Int, secs: Double) -> JSON {
-        [
+    /// An Attachment object as the Mac app writes it (src/model.rs). A
+    /// video's `thumb` names its still (left out when there is none).
+    public static func attachment(sha: String, name: String, isVideo: Bool, bytes: Int, w: Int, h: Int, secs: Double, thumb: String? = nil) -> JSON {
+        var o: JSON = [
             "file": .string(sha), "name": .string(name), "kind": .string(isVideo ? "Video" : "Image"),
             "bytes": .int(Int64(bytes)), "w": .int(Int64(w)), "h": .int(Int64(h)), "secs": .double(secs),
         ]
+        if isVideo, let thumb, isFileName(thumb) { o["thumb"] = .string(thumb) }
+        return o
     }
+
+    /// A sha256 in hex, the only names files have on the server.
+    public static func isFileName(_ s: String) -> Bool {
+        s.count == 64 && s.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+    }
+
+    /// Longer side of the still sent along with a video (media::STILL).
+    public static let stillSide = 480
 }
 
 extension SyncClient {

@@ -125,6 +125,10 @@ pub const T: &[(&str, &str)] = &[
     ("Statuses - {}", "상태 - {}"),
     ("+ Add status", "+ 상태 추가"),
     ("Renamed statuses are renamed on their tasks too; tasks of a deleted status move to a status of the same kind.", "상태 이름을 바꾸면 그 상태의 작업에도 반영됩니다. 상태를 삭제하면 그 작업은 같은 종류의 상태로 옮겨집니다."),
+    (
+        "A status name that was empty or already used went back to its last name",
+        "비어 있거나 이미 쓰는 상태 이름은 마지막 이름으로 돌아갔습니다",
+    ),
     ("Create Task", "작업 만들기"),
     ("Choose list", "목록 선택"),
     ("\u{1F464} Assignee", "\u{1F464} 담당자"),

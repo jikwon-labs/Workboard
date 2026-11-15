@@ -262,11 +262,7 @@ impl Ui1 {
 
     /// Whether the soft hover fill (`widgets::hover_fill`) is painted under `pos`.
     fn hover_fill_at(&self, pos: Pos2) -> bool {
-        let fill = if self.ctx.style().visuals.dark_mode {
-            Color32::from_white_alpha(22)
-        } else {
-            Color32::from_black_alpha(14)
-        };
+        let fill = crate::widgets::hover_fill_for(self.ctx.style().visuals.dark_mode);
         self.shapes.iter().any(|c| match &c.shape {
             egui::Shape::Rect(r) => r.fill == fill && r.rect.contains(pos),
             _ => false,
@@ -1038,6 +1034,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
             muted: false,
             heard: 0.0,
             camera: false,
+            screen: false,
         },
         wb_voice::Person {
             identity: format!("{}-dev2", other.id),
@@ -1047,6 +1044,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
             muted: false,
             heard: 0.3,
             camera: true,
+            screen: false,
         },
     ];
     h.settle();
@@ -3702,6 +3700,8 @@ fn docs_delete_keeps_sub_pages_and_restore_brings_them_back() {
         private: false,
         archived: false,
         meeting_note: false,
+        wiki: None,
+        views: vec![],
         parent: Some(424242),
         title: "Old".into(),
         body: String::new(),
@@ -5894,6 +5894,15 @@ fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
         .find(|c| c.id == cid)
         .unwrap()
         .creator = 2;
+    // a plain member (an owner or admin may manage anyone's channel)
+    let me = h.app.data.me;
+    h.app
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .role = "Member".into();
     h.app.modal = Some(Modal::ChannelSettings(cid));
     h.settle();
     // Alex Kim (2) is in it and Sam Lee (3) isn't: neither checkbox changes
@@ -6415,6 +6424,994 @@ fn click_a_notification_toast_to_open_the_conversation() {
     h.click(&format!("Open {}", toast));
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat_open, Some(dm));
+}
+
+// ---- wikis, doc links and the Docs hub list (r3-work)
+
+fn doc_id(h: &Ui1, title: &str) -> u64 {
+    h.app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == title)
+        .map(|d| d.id)
+        .expect("doc exists")
+}
+
+#[test]
+fn docs_marked_as_wiki_show_in_popular_wikis_and_the_wikis_tab() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let a = h.app.doc_open.unwrap();
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == a)
+        .unwrap()
+        .title = "Handbook".into();
+    h.app.new_doc(None);
+    let b = h.app.doc_open.unwrap();
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == b)
+        .unwrap()
+        .title = "Onboarding".into();
+    h.settle();
+    // opening a doc counts one view, not one per frame
+    let views = |h: &Ui1, id: u64| {
+        h.app
+            .data
+            .docs
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap()
+            .views_since(0)
+    };
+    assert_eq!(views(&h, b), 1);
+    h.settle();
+    assert_eq!(views(&h, b), 1);
+    // mark both as Wikis from the doc menu
+    h.click("Doc options");
+    h.click("Mark as Wiki");
+    assert!(h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.id == b)
+        .unwrap()
+        .is_wiki());
+    assert!(h.has("Wiki badge"), "the doc header shows the Wiki badge");
+    h.app.doc_open = Some(a);
+    h.settle();
+    h.click("Doc options");
+    h.click("Mark as Wiki");
+    // open the handbook twice more: it becomes the most popular
+    for _ in 0..2 {
+        h.app.doc_open = None;
+        h.settle();
+        h.app.doc_open = Some(a);
+        h.settle();
+    }
+    assert_eq!(views(&h, a), 3);
+    let order: Vec<u64> = h.app.popular_wikis(now_ts()).iter().map(|w| w.0).collect();
+    assert_eq!(order, vec![a, b]);
+    assert!(h.has("Popular Wiki Handbook") && h.has("Popular Wiki Onboarding"));
+    // the card opens a wiki
+    h.click("Popular Wiki Onboarding");
+    assert_eq!(h.app.doc_open, Some(b));
+    // the Wikis tab lists only wikis
+    h.open_docs_list();
+    h.click("Wikis");
+    assert!(h.has("Doc Handbook") && h.has("Doc Onboarding"));
+    assert!(!h.has("Doc Project brief"));
+    // unmarking takes it out (and writes false, never back to missing)
+    h.right_click("Doc Onboarding", 60.0);
+    h.click("Unmark as Wiki");
+    let d = h.app.data.docs.iter().find(|d| d.id == b).unwrap();
+    assert_eq!(d.wiki, Some(false));
+    h.settle();
+    assert!(!h.has("Doc Onboarding") && !h.has("Popular Wiki Onboarding"));
+}
+
+#[test]
+fn doc_views_and_wiki_flag_round_trip_and_old_docs_still_load() {
+    let old: Doc =
+        serde_json::from_str(r#"{"id":5,"title":"T","body":"","created":0,"updated":0}"#).unwrap();
+    assert!(!old.is_wiki() && old.views.is_empty());
+    let out = serde_json::to_value(&old).unwrap();
+    assert!(out.get("wiki").is_none() && out.get("views").is_none());
+    let mut a = App::build(None, Some(Data::seed()));
+    let id = a.data.docs[0].id;
+    a.count_doc_view(id, 1000);
+    a.count_doc_view(id, 1000 + DOC_VIEW_DAYS * 86_400 + 5);
+    let d = a.data.docs[0].clone();
+    // the first open fell out of the 30 days
+    assert_eq!(d.views.len(), 1);
+    assert_eq!(d.views[0].at.len(), 1);
+    let back: Doc = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
+    assert_eq!(back.views, d.views);
+    // a duplicate starts unread, so no view entry id is used twice
+    let copy = a.duplicate_doc(id).unwrap();
+    assert!(a
+        .data
+        .docs
+        .iter()
+        .find(|d| d.id == copy)
+        .unwrap()
+        .views
+        .is_empty());
+}
+
+#[test]
+fn doc_copy_link_opens_the_doc_from_a_comment_chat_or_search() {
+    let mut h = Ui1::new();
+    let id = doc_id(&h, "Project brief");
+    let url = format!("workboard://doc/{}", id);
+    assert_eq!(
+        super::nav::parse_link(&url),
+        Some(super::nav::Link::Doc(id))
+    );
+    // comments read links with the same parser
+    assert_eq!(
+        super::comments::parse_link(&format!("{}, see", url)).map(|x| x.0),
+        Some(super::nav::Link::Doc(id))
+    );
+    assert!(h.app.open_link(&url));
+    h.settle();
+    assert_eq!((h.app.section, h.app.doc_open), (Section::Docs, Some(id)));
+    // a doc in someone else's Personal space is not opened
+    h.app.section = Section::Home;
+    h.app.doc_open = None;
+    let sid = h.app.data.spaces[0].id;
+    h.app.data.spaces[0].private_owner = Some(h.app.data.me + 1000);
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == id)
+        .unwrap()
+        .space = Some(sid);
+    assert!(!h.app.open_link(&url));
+    assert_eq!(h.app.doc_open, None);
+    // search finds the doc from its pasted link
+    h.app.data.spaces[0].private_owner = None;
+    let rows = h.app.search_rows(&url, 0);
+    assert!(rows
+        .iter()
+        .any(|r| matches!(r.4, super::more::Hit::Doc(x) if x == id)));
+}
+
+#[test]
+fn docs_hub_leaves_out_docs_in_archived_or_other_peoples_spaces() {
+    let mut h = Ui1::new();
+    let id = doc_id(&h, "Project brief");
+    h.open_docs_list();
+    assert!(h.has("Doc Project brief"));
+    let sid = h.app.data.spaces[0].id;
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == id)
+        .unwrap()
+        .space = Some(sid);
+    h.app.data.spaces[0].archived = true;
+    h.settle();
+    assert!(!h.has("Doc Project brief"), "archived space");
+    h.app.data.spaces[0].archived = false;
+    h.app.data.spaces[0].private_owner = Some(h.app.data.me + 1000);
+    h.settle();
+    assert!(!h.has("Doc Project brief"), "someone else's Personal space");
+    h.app.data.spaces[0].private_owner = None;
+    h.settle();
+    assert!(h.has("Doc Project brief"));
+}
+
+// ---- the status editor: renames reach automations once done, and closing
+// never leaves tasks on a missing status (r3-work)
+
+#[test]
+fn status_editor_retargets_automations_only_when_a_rename_is_done() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    h.app.data.spaces[0]
+        .statuses
+        .insert(1, Status::new("triage", [1, 2, 3], StatusKind::Custom));
+    h.app.data.spaces[1]
+        .statuses
+        .insert(1, Status::new("review", [1, 2, 3], StatusKind::Custom));
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == list)
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == tid)
+        .unwrap()
+        .status = "triage".into();
+    let rule = |id, s: &str| Automation {
+        id,
+        enabled: true,
+        trigger_status: s.into(),
+        action: "priority".into(),
+        value: "1".into(),
+        list: None,
+    };
+    h.app.data.extra.automations = vec![rule(1, "review"), rule(2, "triage")];
+    h.app.edit_statuses = Some(sid);
+    h.settle();
+    let status = |h: &Ui1| h.app.task(tid).unwrap().status.clone();
+    let triggers = |h: &Ui1| {
+        h.app
+            .data
+            .extra
+            .automations
+            .iter()
+            .map(|a| a.trigger_status.clone())
+            .collect::<Vec<_>>()
+    };
+    // type a name through the other space's "review": tasks follow live
+    h.click("triage");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("review");
+    assert_eq!(status(&h), "review");
+    assert_eq!(
+        triggers(&h),
+        ["review", "triage"],
+        "rules wait for the rename"
+    );
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("reviewed");
+    assert_eq!(status(&h), "reviewed");
+    h.key(egui::Key::Enter);
+    assert_eq!(
+        triggers(&h),
+        ["review", "reviewed"],
+        "the other space's rule stays; this status's rule follows to the final name"
+    );
+}
+
+#[test]
+fn closing_the_status_editor_puts_back_an_empty_or_taken_name() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == list)
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == tid)
+        .unwrap()
+        .status = "in progress".into();
+    h.app.edit_statuses = Some(sid);
+    h.settle();
+    // "in progress" typed into "to do": taken, so its tasks wait
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("to do");
+    assert_eq!(h.app.task(tid).unwrap().status, "in progress");
+    h.click("Close window");
+    assert!(h.app.edit_statuses.is_none());
+    let names: Vec<String> = h.app.data.spaces[0]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert!(names.contains(&"in progress".to_string()), "{:?}", names);
+    let st = h.app.task(tid).unwrap().status.clone();
+    assert!(names.contains(&st), "the task's status exists: {}", st);
+    assert!(h.app.toast.is_some());
+    // an empty name goes back too
+    h.app.edit_statuses = Some(sid);
+    h.settle();
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.click("Close window");
+    assert!(h.app.data.spaces[0]
+        .statuses
+        .iter()
+        .any(|s| s.name == "in progress"));
+    assert_eq!(h.app.task(tid).unwrap().status, "in progress");
+}
+
+// ---- whiteboard pan and zoom (r3-work)
+
+fn drag_with(h: &mut Ui1, from: Pos2, to: Pos2, button: egui::PointerButton) {
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![egui::Event::PointerButton {
+        pos: from,
+        button,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    for i in 1..=12 {
+        h.frame(vec![egui::Event::PointerMoved(
+            from + (to - from) * (i as f32 / 12.0),
+        )]);
+    }
+    h.frame(vec![egui::Event::PointerButton {
+        pos: to,
+        button,
+        pressed: false,
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+}
+
+#[test]
+fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    let board = |h: &Ui1| {
+        h.app
+            .data
+            .extra
+            .whiteboards
+            .iter()
+            .find(|w| w.id == wid)
+            .cloned()
+            .unwrap()
+    };
+    // a note far beyond the window, like a big template's
+    h.app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap()
+        .notes
+        .push(Sticky {
+            pos: [2400.0, 1600.0],
+            text: "Far".into(),
+            color: [0xf8, 0xae, 0x00],
+        });
+    h.settle();
+    assert!(!h.has("Delete note 0"), "the far note is off screen");
+    let canvas = rect_of(&h, "Whiteboard canvas");
+    let view = |h: &Ui1| h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    // two-finger scroll moves the view until the note shows
+    h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
+    for _ in 0..40 {
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(-7.0, -5.0) * 10.0,
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+        if h.has("Delete note 0") {
+            break;
+        }
+    }
+    assert!(h.has("Delete note 0"), "scrolling reaches the far note");
+    assert!(view(&h).pan.x < -1000.0);
+    // Reset view comes back
+    h.click("Reset view");
+    assert_eq!(view(&h), super::more::WbView::default());
+    assert!(!h.has("Delete note 0"));
+    // the buttons zoom around the canvas centre
+    h.click("Zoom in");
+    assert!((view(&h).zoom - 1.25).abs() < 1e-3);
+    h.click("Zoom out");
+    assert!((view(&h).zoom - 1.0).abs() < 1e-3);
+    // Cmd+scroll zooms at the pointer
+    let at = canvas.center() + vec2(100.0, 50.0);
+    h.frame(vec![egui::Event::PointerMoved(at)]);
+    let before = view(&h).to_board(canvas.min, at);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, 5.0),
+        modifiers: egui::Modifiers::COMMAND,
+    }]);
+    h.settle();
+    let v = view(&h);
+    assert!(v.zoom > 1.0, "zoomed in: {}", v.zoom);
+    let after = v.to_board(canvas.min, at);
+    assert!((before[0] - after[0]).abs() < 0.5 && (before[1] - after[1]).abs() < 0.5);
+    // a pen stroke is stored in board coordinates
+    h.app.wb_tool = 0;
+    let from = canvas.center();
+    let to = from + vec2(80.0, 40.0);
+    drag_by(&mut h, from, to);
+    let s = board(&h).strokes.last().cloned().expect("a stroke");
+    let want = v.to_board(canvas.min, from);
+    assert!((s.points[0][0] - want[0]).abs() < 2.0 && (s.points[0][1] - want[1]).abs() < 2.0);
+    // the middle button pans and doesn't draw
+    let n = board(&h).strokes.len();
+    let pan = view(&h).pan;
+    drag_with(
+        &mut h,
+        from,
+        from + vec2(60.0, 30.0),
+        egui::PointerButton::Middle,
+    );
+    assert_eq!(board(&h).strokes.len(), n);
+    assert!((view(&h).pan - pan - vec2(60.0, 30.0)).length() < 2.0);
+    // Space + drag pans too
+    let pan = view(&h).pan;
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    }]);
+    drag_with(
+        &mut h,
+        from,
+        from - vec2(50.0, 20.0),
+        egui::PointerButton::Primary,
+    );
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: false,
+        repeat: false,
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    assert_eq!(board(&h).strokes.len(), n, "Space + drag doesn't draw");
+    assert!((view(&h).pan - pan + vec2(50.0, 20.0)).length() < 2.0);
+}
+
+#[test]
+fn whiteboard_view_keeps_the_anchor_point_when_zooming() {
+    use super::more::WbView;
+    let o = pos2(100.0, 50.0);
+    let mut v = WbView::default();
+    let anchor = pos2(400.0, 300.0);
+    let b = v.to_board(o, anchor);
+    v.zoom_at(o, anchor, 2.0);
+    assert_eq!(v.zoom, 2.0);
+    let b2 = v.to_board(o, anchor);
+    assert!((b[0] - b2[0]).abs() < 1e-3 && (b[1] - b2[1]).abs() < 1e-3);
+    v.zoom_at(o, anchor, 100.0);
+    assert_eq!(v.zoom, WbView::MAX_ZOOM);
+    let p = v.to_screen(o, [10.0, 20.0]);
+    let back = v.to_board(o, p);
+    assert!((back[0] - 10.0).abs() < 1e-3 && (back[1] - 20.0).abs() < 1e-3);
+}
+
+// ---- custom field columns in the List view (r3-work)
+
+#[test]
+fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them() {
+    let mut h = Ui1::new();
+    h.app.data.extra.apps.custom_fields = true;
+    let field = |id, name: &str, kind: &str, options: &[&str]| CustomField {
+        id,
+        name: name.into(),
+        kind: kind.into(),
+        options: options.iter().map(|s| s.to_string()).collect(),
+    };
+    h.app.data.extra.fields = vec![
+        field(9001, "Billable", "checkbox", &[]),
+        field(9002, "Size", "dropdown", &["S", "M", "L"]),
+    ];
+    let name = "Write copy for landing page";
+    let tid = task_named(&h, name).id;
+    let list = task_named(&h, name).list_id;
+    h.app.apply(Action::Go(Location::List(list)));
+    h.app.view = ViewKind::List;
+    h.settle();
+    // make room for two field columns next to the name
+    h.app.hidden_cols.insert("Comments".into());
+    h.app.hidden_cols.insert("Assignee".into());
+    h.settle();
+    let custom = |h: &Ui1, f: u64| h.app.task(tid).unwrap().custom.get(&f).cloned();
+    // a checkbox ticks in place, without opening the task
+    h.click(&format!("Billable of {}", name));
+    assert_eq!(custom(&h, 9001).as_deref(), Some("true"));
+    assert!(h.app.open_task.is_none());
+    // a dropdown opens its options
+    h.click(&format!("Size of {}", name));
+    h.click("M");
+    assert_eq!(custom(&h, 9002).as_deref(), Some("M"));
+    // the Columns panel turns a field column off; the list remembers it
+    h.click("\u{25A5}  Columns");
+    assert!(h.has("Custom Fields"));
+    h.click("Field Billable");
+    assert!(h.app.hidden_cols.contains("field:9001"));
+    h.key(egui::Key::Escape);
+    assert!(!h.has(&format!("Billable of {}", name)));
+    let other = list_of_other(&h, list);
+    h.app.apply(Action::Go(Location::List(other)));
+    h.settle();
+    h.app.hidden_cols.remove("field:9001");
+    h.settle();
+    h.app.apply(Action::Go(Location::List(list)));
+    h.settle();
+    assert!(
+        h.app.hidden_cols.contains("field:9001"),
+        "the first list still hides it"
+    );
+    // text and number fields open a box; a number takes only numbers
+    h.app.data.extra.fields = vec![
+        field(9003, "Notes", "text", &[]),
+        field(9004, "Points", "number", &[]),
+    ];
+    h.settle();
+    h.click(&format!("Notes of {}", name));
+    h.type_text("hello");
+    assert_eq!(custom(&h, 9003).as_deref(), Some("hello"));
+    h.key(egui::Key::Enter);
+    h.click(&format!("Points of {}", name));
+    h.type_text("abc");
+    assert_eq!(custom(&h, 9004), None);
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("5");
+    assert_eq!(custom(&h, 9004).as_deref(), Some("5"));
+    // with the Custom Fields ClickApp off the columns go away
+    h.key(egui::Key::Enter);
+    h.app.data.extra.apps.custom_fields = false;
+    h.settle();
+    assert!(!h.has(&format!("Notes of {}", name)));
+}
+
+fn list_of_other(h: &Ui1, not: u64) -> u64 {
+    h.app
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| {
+            s.lists
+                .iter()
+                .map(|l| l.id)
+                .chain(s.folders.iter().flat_map(|f| f.lists.iter().map(|l| l.id)))
+        })
+        .find(|l| *l != not)
+        .unwrap()
+}
+
+#[test]
+fn a_shared_folder_says_private_items_are_readable_from_its_files() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("Work together");
+    assert!(h.has(together::FOLDER_PRIVACY), "said before sharing");
+    let dir = std::env::temp_dir().join(format!("wb-folder-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: dir.to_string_lossy().into(),
+        device: "dev1".into(),
+        tag: 5,
+        server: None,
+    });
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(h.has("This workspace is shared"));
+    assert!(h.has(together::FOLDER_PRIVACY), "and while sharing");
+    // on a server, other people's copies leave private items out: no note
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(!h.has(together::FOLDER_PRIVACY));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn comment_links_to_private_or_archived_places_do_not_open() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let me = h.app.data.me;
+    let task_list = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .list_id;
+    // a list in another space, made someone else's Personal space
+    let (sid, lid) = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .filter(|s| s.lists.iter().all(|l| l.id != task_list))
+        .find_map(|s| s.lists.first().map(|l| (s.id, l.id)))
+        .unwrap();
+    h.app
+        .data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me + 100);
+    let link = format!("workboard://list/{}", lid);
+    let folder_link = "workboard://folder/987654".to_string();
+    {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.activity.push(Activity {
+            ts: now_ts(),
+            author: 2,
+            text: format!("see {}\nand {}", link, folder_link),
+            comment: true,
+            id: 77_002,
+            ..Default::default()
+        });
+    }
+    h.settle();
+    let loc = h.app.loc;
+    h.click(&link);
+    assert_eq!(h.app.open_task, Some(id), "the task stays open");
+    assert_eq!(h.app.loc, loc);
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("archived or private")));
+    // a folder link is a link too, and one this workspace doesn't have says so
+    h.app.toast = None;
+    h.click(&folder_link);
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("can't be opened")));
+    // my own Personal space opens like a link in chat: task window closed
+    h.app
+        .data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me);
+    h.click(&link);
+    assert_eq!(h.app.open_task, None);
+    assert_eq!(h.app.loc, Location::List(lid));
+}
+
+#[test]
+fn an_owner_without_a_server_manages_someone_elses_channel() {
+    let mut h = Ui1::new();
+    let cid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "website-redesign")
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .creator = 2;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Sam Lee");
+    assert!(h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .members
+        .contains(&3));
+}
+
+#[test]
+fn an_admin_sees_code_buttons_only_for_members_without_a_password() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    let me = h.app.data.me;
+    let others: Vec<u64> = h
+        .app
+        .data
+        .members
+        .iter()
+        .map(|m| m.id)
+        .filter(|id| *id != me)
+        .take(3)
+        .collect();
+    let person = |member, role, account| wb_net::Person {
+        member,
+        role,
+        devices: 0,
+        invite: None,
+        account,
+    };
+    h.app.sync_rt.people = vec![
+        person(me, wb_net::Role::Admin, true),
+        person(others[0], wb_net::Role::Admin, false),
+        person(others[1], wb_net::Role::Member, true),
+        person(others[2], wb_net::Role::Member, false),
+    ];
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    let codes = |h: &Ui1| h.tree.iter().filter(|(n, _)| n == "Invite code").count();
+    assert_eq!(codes(&h), 1, "only the member without a password");
+    // the owner makes codes for everyone else
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.sync_rt.people[0].role = wb_net::Role::Owner;
+    h.settle();
+    assert_eq!(codes(&h), 3);
+}
+
+#[test]
+fn a_reply_notice_from_a_duplicate_dm_copy_opens_its_thread() {
+    let mut h = Ui1::new();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .clone();
+    // the shown copy has a message; a second copy (made on another
+    // computer at the same time) holds a thread with a reply
+    let first = h.app.data.new_id();
+    let mut primary = dm.clone();
+    primary.messages.push(
+        serde_json::from_value(
+            serde_json::json!({"id": first, "author": 1, "text": "hello", "ts": now_ts() - 100}),
+        )
+        .unwrap(),
+    );
+    let pid = primary.id;
+    *h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == pid)
+        .unwrap() = primary;
+    let dup_id = h.app.data.new_id();
+    let parent = h.app.data.new_id();
+    let reply = h.app.data.new_id();
+    let mut dup = dm.clone();
+    dup.id = dup_id;
+    dup.messages = vec![serde_json::from_value(serde_json::json!({
+        "id": parent, "author": 2, "text": "question in the other copy", "ts": now_ts() - 50,
+        "replies": [{"id": reply, "author": 2, "text": "the answer", "ts": now_ts() - 10}]
+    }))
+    .unwrap()];
+    h.app.data.channels.push(dup);
+    h.app.open_target(&format!("chat:{}:{}", dup_id, parent));
+    h.settle();
+    assert_eq!(h.app.chat_open, Some(pid), "the shown copy opens");
+    assert_eq!(
+        h.app.thread_open,
+        Some(parent),
+        "with the thread still open"
+    );
+    assert!(h.has("Thread"), "the thread panel is on screen");
+}
+
+#[test]
+fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-ui-task-fail".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    super::together::save_token("127.0.0.1:9", "dev-ui-task-fail", "tok");
+    let id = open_design_task(&mut h);
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("refused.png", 40, 30)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    // the server can't be reached: not "Adding..." for ever, but why, and
+    // a way to try again
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has("Try again refused.png") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(h.has("Try again refused.png"));
+    assert!(h.app.task(id).unwrap().attachments.is_empty());
+    let sha = h.app.task_files[0].1.att.clone().unwrap().file;
+    assert!(h.app.files.is_waiting(&sha), "also tried again by itself");
+    h.click("Try again refused.png");
+    assert_eq!(h.app.task_files.len(), 1);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has("Dismiss refused.png") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.click("Dismiss refused.png");
+    super::together::forget_token("127.0.0.1:9", "dev-ui-task-fail");
+    assert!(h.app.task_files.is_empty());
+    assert!(
+        !h.app.files.is_waiting(&sha),
+        "and no longer waits to go up"
+    );
+}
+
+#[test]
+fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
+    let mut h = Ui1::new();
+    h.app
+        .apply_chat(vec![super::chat::ChatAction::NewChannel("fresh".into())]);
+    h.app.section = Section::Chat;
+    h.settle();
+    assert!(!h.has("\u{2699}  Integrate"), "no button that does nothing");
+    // a Slack export zip, "chosen" in the file picker
+    let root = std::env::temp_dir().join(format!("wb-ui-slack-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"alex","real_name":"Alex Kim","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    super::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
+    h.click("\u{2728}  Import from Slack");
+    assert!(matches!(h.app.modal, Some(Modal::SlackImport(_))));
+    h.click("Import");
+    let design = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .expect("the channel came in");
+    assert_eq!(design.messages[0].text, "first sketch");
+    assert_eq!(design.messages[0].ts, 1_704_189_600);
+    h.click("OK");
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
+fn huddle_shares_a_screen_and_shows_others_screens_large() {
+    let mut h = Ui1::new();
+    let ch = h.app.data.channels[0].id;
+    let me = h.app.data.me;
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.id != me)
+        .unwrap()
+        .clone();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let person = |id: u64, dev: &str, me: bool, screen: bool| wb_voice::Person {
+        identity: format!("{}-{}", id, dev),
+        name: String::new(),
+        me,
+        speaking: false,
+        muted: false,
+        heard: 0.0,
+        camera: true,
+        screen,
+    };
+    h.app.huddle.channel = Some(ch);
+    h.app.huddle.joined = true;
+    h.app.huddle.people = vec![person(me, "dev1", true, false)];
+    h.settle();
+
+    // Share screen offers the displays and the windows
+    h.click("Share screen");
+    assert!(h.app.huddle.share_menu);
+    assert!(h.has("Share Test display") && h.has("Share Notes: Plan"));
+    h.click("Share Notes: Plan");
+    assert_eq!(h.app.huddle.screen, Some(wb_voice::Share::Window(7)));
+    assert!(!h.app.huddle.share_menu);
+    assert!(h.has("Stop sharing screen") && h.has("Sharing your screen"));
+    h.click("Stop sharing screen");
+    assert!(h.app.huddle.screen.is_none());
+    h.click("Share screen");
+    h.click("Share Test display");
+    assert_eq!(h.app.huddle.screen, Some(wb_voice::Share::Display(1)));
+    h.click("Stop sharing screen");
+
+    // without the Screen Recording permission: how to turn it on
+    h.app.huddle.screen_env = huddle::ScreenEnv::Fake {
+        allowed: false,
+        sources: vec![],
+    };
+    h.click("Share screen");
+    assert!(h.has("Workboard needs the Screen Recording permission to share your screen."));
+    assert!(!h.has("Share Test display"));
+    h.click("Open System Settings");
+    assert!(h.app.huddle.opened_settings);
+    h.click("Cancel");
+    assert!(!h.app.huddle.share_menu);
+    // capture refused once sharing started: the same guidance comes up
+    h.app.huddle.screen = Some(wb_voice::Share::Display(1));
+    h.app.huddle.screen_problem = Some(wb_voice::ScreenTrouble::NotAllowed);
+    h.app.huddle.share_menu = true;
+    h.settle();
+    assert!(h.has("Open System Settings"));
+    h.click("Cancel");
+
+    // someone else shares: their screen shows large with their name, their
+    // camera small, and each picture asks for the layer that fits its size
+    let them = person(other.id, "dev2", false, true);
+    h.app.huddle.people.push(them.clone());
+    let pic = |w: u32, hh: u32| wb_voice::Picture {
+        width: w,
+        height: hh,
+        rgba: vec![120u8; (w * hh * 4) as usize],
+    };
+    let screen = wb_voice::screen_key(&them.identity);
+    h.app
+        .huddle
+        .pictures
+        .insert(screen.clone(), (pic(192, 108), true));
+    h.app
+        .huddle
+        .pictures
+        .insert(them.identity.clone(), (pic(64, 36), true));
+    h.settle();
+    assert!(h.has(&format!("Screen of {}", other.name)));
+    assert!(h.has(&format!("{}'s screen", other.name)));
+    let big = h.rect(&format!("Screen of {}", other.name));
+    let small = h.rect(&format!("Video of {}", other.name));
+    assert!(big.width() > small.width() * 3.0, "{:?} {:?}", big, small);
+    let views = h.app.huddle.views.clone();
+    assert_eq!(views.len(), 2, "{:?}", views);
+    assert_eq!(
+        wb_voice::quality::layer_for(views[&them.identity]),
+        wb_voice::quality::VideoQuality::Low
+    );
+    assert!(wb_voice::quality::layer_for(views[&screen]) != wb_voice::quality::VideoQuality::Low);
+    // the screen share ends: back to normal-sized video
+    h.app.huddle.drop_picture(&screen);
+    h.settle();
+    assert!(!h.has(&format!("Screen of {}", other.name)));
+    assert!(h.rect(&format!("Video of {}", other.name)).width() > small.width() * 1.5);
+    assert_eq!(h.app.huddle.views.len(), 1);
 }
 
 #[test]

@@ -3043,7 +3043,7 @@ mod tests {
     }
 
     #[test]
-    fn files_nothing_names_go_after_30_days_but_not_while_a_backup_names_them() {
+    fn files_nothing_names_go_after_a_while_but_not_while_a_backup_names_them() {
         let home = std::env::temp_dir().join(format!("wb-gc-{:x}", wb_sync::random_u64()));
         let dir = home.join(FILES_DIR);
         std::fs::create_dir_all(&dir).unwrap();
@@ -3080,6 +3080,8 @@ mod tests {
         )
         .unwrap();
 
+        // a server that has been cleaning up already (none of these was named lately)
+        std::fs::write(dir.join(files::NAMED_FILE), "{}").unwrap();
         // no team copy: nothing goes
         assert!(collect_garbage(&home, None, now).is_empty());
         assert_eq!(
@@ -3098,17 +3100,62 @@ mod tests {
                 &n[..4]
             );
         }
-        // once the backup that named it is gone, it goes too
+        // once the backup that named it is gone, it goes too, FILE_KEEP_DAYS
+        // after it was last named
         std::fs::remove_file(home.join(BACKUP_DIR).join("daily-20261101.json")).unwrap();
-        assert_eq!(
-            collect_garbage(&home, Some(&canon), now),
-            vec![in_backup.clone()]
-        );
+        assert!(collect_garbage(&home, Some(&canon), now).is_empty());
+        let later = now + Duration::from_secs(FILE_KEEP_DAYS * 86_400);
+        let mut gone = collect_garbage(&home, Some(&canon), later);
+        gone.sort();
+        // (by then the recent upload nothing named is old enough too)
+        assert_eq!(gone, vec![in_backup.clone(), recent.clone()]);
+        assert!(dir.join(&in_canon).exists());
         // a backup that can't be read: nothing is deleted
         put(&orphan, old);
         std::fs::create_dir_all(home.join(BACKUP_DIR).join("odd.json")).unwrap();
-        assert!(collect_garbage(&home, Some(&canon), now).is_empty());
+        assert!(collect_garbage(&home, Some(&canon), later).is_empty());
         assert!(dir.join(&orphan).exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A message deleted to someone's Trash (which the server never sees)
+    /// keeps its file on the server for FILE_KEEP_DAYS after the team's copy
+    /// last named it, however old the file is; and a server's first clean
+    /// up deletes nothing it hasn't watched for that long.
+    #[test]
+    fn a_file_stays_a_while_after_its_message_is_deleted() {
+        let home = std::env::temp_dir().join(format!("wb-gc2-{:x}", wb_sync::random_u64()));
+        let dir = home.join(FILES_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = |c: char| std::iter::repeat(c).take(64).collect::<String>();
+        let now = std::time::SystemTime::now();
+        let day = Duration::from_secs(86_400);
+        let old = now - day * (FILE_KEEP_DAYS as u32 + 100);
+        let (pic, orphan) = (name('e'), name('f'));
+        for n in [&pic, &orphan] {
+            std::fs::write(dir.join(n), b"x").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(dir.join(n))
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        let with =
+            json!({"channels": [{"messages": [{"attachments": [{"file": pic}]}]}]}).to_string();
+        let without = json!({"channels": [{"messages": []}]}).to_string();
+        // the first clean up only starts watching
+        assert!(collect_garbage(&home, Some(&with), now).is_empty());
+        assert!(dir.join(files::NAMED_FILE).is_file());
+        // the message is deleted: the file stays while it was named lately
+        let soon = now + day * 3;
+        assert!(collect_garbage(&home, Some(&without), soon).is_empty());
+        assert!(dir.join(&pic).exists());
+        let mut late = collect_garbage(&home, Some(&without), now + day * FILE_KEEP_DAYS as u32);
+        late.sort();
+        assert_eq!(late, vec![pic.clone(), orphan.clone()]);
+        let record = std::fs::read_to_string(dir.join(files::NAMED_FILE)).unwrap();
+        assert!(!record.contains(&pic), "forgotten once gone: {}", record);
         let _ = std::fs::remove_dir_all(&home);
     }
 }

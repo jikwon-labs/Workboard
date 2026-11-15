@@ -5907,3 +5907,50 @@ fn search_leaves_out_other_peoples_private_dashboards_and_personal_forms() {
     assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
     assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
 }
+
+#[test]
+fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
+    let mut a = app();
+    let folder = temp_folder("trash-reupload");
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    a.add_media(false, Some(picture_file("trash.png", 24, 24)), None);
+    let files = until_ready(&mut a, false);
+    let ch = a.data.channels[0].id;
+    a.apply_chat(vec![ChatAction::Send {
+        ch,
+        text: "with a picture".into(),
+        parent: None,
+        files: files.clone(),
+    }]);
+    let dest = folder.join("files").join(&files[0].file);
+    let wait = |ok: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !ok() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    wait(&|| dest.is_file());
+    assert!(dest.is_file());
+    // the channel goes to Trash, and the shared copy of its picture is cleaned up
+    let gone = a.data.channels.remove(0);
+    a.data.extra.trash.push(TrashItem {
+        id: 990_001,
+        kind: "Channel".into(),
+        title: format!("#{}", gone.name),
+        deleted: now_ts(),
+        payload: serde_json::to_string(&gone).unwrap(),
+    });
+    assert_eq!(
+        super::files::trash_attachments(&a.data.extra.trash.last().unwrap().payload)
+            .iter()
+            .map(|x| x.file.clone())
+            .collect::<Vec<_>>(),
+        vec![files[0].file.clone()]
+    );
+    std::fs::remove_file(&dest).unwrap();
+    let i = a.data.extra.trash.len() - 1;
+    a.restore_trash(i);
+    assert!(a.data.channels.iter().any(|c| c.id == ch));
+    wait(&|| dest.is_file());
+    assert!(dest.is_file(), "the picture is back in the shared folder");
+}

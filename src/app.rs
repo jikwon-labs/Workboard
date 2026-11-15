@@ -546,8 +546,13 @@ pub struct App {
     undo_trash: Option<(Vec<u64>, i64)>,
     /// Asking before deleting the selected tasks.
     confirm_bulk_delete: bool,
-    /// Pictures and videos on their way onto a task: (task, file).
+    /// Pictures and videos on their way onto a task: (task, file). Kept in
+    /// the cache folder too (`taskfields::TASK_FILES`), so ones still going
+    /// up when the app quits join their task after the next start.
     task_files: Vec<(u64, files::Pending)>,
+    /// What of `task_files` is written down (task, file), once read back
+    /// for this workspace; None until then.
+    task_files_saved: Option<Vec<(u64, String)>>,
     /// Page state of the apps (reminders, search, whiteboards, forms, ...).
     sweep: more::SweepUi,
     /// Interface language picked in Settings > Language (kept on this computer).
@@ -857,6 +862,7 @@ impl App {
             undo_trash: None,
             confirm_bulk_delete: false,
             task_files: vec![],
+            task_files_saved: None,
             sweep: Default::default(),
             lang_choice,
             reminder_about: (None, None),

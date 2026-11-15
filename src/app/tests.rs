@@ -7425,3 +7425,60 @@ fn slack_people_are_not_merged_by_name_and_same_second_messages_all_come_in() {
     again.assign.insert("US".into(), super::slack::Assign::Me);
     assert_eq!(a.import_slack(&again), (0, 0));
 }
+
+#[test]
+fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
+    let mut a = app();
+    // a server this computer isn't signed in to: it can't go up yet
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-task-restart".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    let tid = a.data.tasks[0].id;
+    a.add_task_file(tid, picture_file("restart.png", 20, 22));
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
+        a.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    a.files_tick(None);
+    let att = a.task_files[0].1.att.clone().unwrap();
+    let dir = a.files.dir().to_path_buf();
+    let saved = super::taskfields::read_task_files(&dir);
+    assert_eq!(saved.len(), 1, "written down");
+    assert_eq!((saved[0].task, &saved[0].att.file), (tid, &att.file));
+    // and one from another workspace on this computer
+    let mut other = saved[0].clone();
+    other.ws = "other.json".into();
+    other.task = 424_242;
+    let mut both = saved.clone();
+    both.push(other);
+    std::fs::write(
+        dir.join(super::taskfields::TASK_FILES),
+        serde_json::to_string(&both).unwrap(),
+    )
+    .unwrap();
+    // the app quits before it goes up; the next start (signed in this time,
+    // here: no server, so it is ready at once) attaches it to the task
+    let mut data = a.data.clone();
+    data.extra.shared = None;
+    drop(a);
+    let mut b = App::build(None, Some(data));
+    b.files = super::files::Files::new(dir.clone());
+    assert!(b.task(tid).unwrap().attachments.is_empty());
+    b.files_tick(None);
+    b.files_tick(None);
+    let t = b.task(tid).unwrap();
+    assert_eq!(t.attachments.len(), 1, "joined its task");
+    assert_eq!(t.attachments[0].file, att.file);
+    assert!(b.task_files.is_empty());
+    let left = super::taskfields::read_task_files(&dir);
+    assert_eq!(
+        left.len(),
+        1,
+        "the other workspace's one stays written down"
+    );
+    assert_eq!(left[0].ws, "other.json");
+}

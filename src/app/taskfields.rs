@@ -967,6 +967,67 @@ impl App {
         self.task_files.push((tid, p));
     }
 
+    /// Read back the task attachments that were on their way in this
+    /// workspace when the app last quit (once per workspace), and send them
+    /// on: they join their task when they're up.
+    pub(super) fn restore_task_files(&mut self, remote: &files::Remote) {
+        if self.task_files_saved.is_some() {
+            return;
+        }
+        let mut saved = vec![];
+        for e in read_task_files(self.files.dir()) {
+            if e.ws != self.ws_file
+                || self.task_files.iter().any(|(t, p)| {
+                    *t == e.task && p.att.as_ref().is_some_and(|a| a.file == e.att.file)
+                })
+            {
+                continue;
+            }
+            // only files the cache still has
+            if files::parts(&e.att)
+                .iter()
+                .any(|p| self.files.local(&p.file).is_none())
+            {
+                continue;
+            }
+            self.files.upload(&e.att, remote);
+            self.files.upload_soon(&e.att, remote);
+            saved.push((e.task, e.att.file.clone()));
+            let p = self.files.pending_for(e.att);
+            self.task_files.push((e.task, p));
+        }
+        self.task_files_saved = Some(saved);
+    }
+
+    /// Write down the task attachments on their way when they changed
+    /// (only ones copied into the cache; this workspace's part of the file).
+    pub(super) fn save_task_files(&mut self) {
+        let Some(saved) = &self.task_files_saved else {
+            return;
+        };
+        let now: Vec<(u64, Attachment)> = self
+            .task_files
+            .iter()
+            .filter_map(|(t, p)| p.att.clone().map(|a| (*t, a)))
+            .collect();
+        let keys: Vec<(u64, String)> = now.iter().map(|(t, a)| (*t, a.file.clone())).collect();
+        if *saved == keys {
+            return;
+        }
+        let dir = self.files.dir().to_path_buf();
+        let mut all: Vec<TaskFileEntry> = read_task_files(&dir)
+            .into_iter()
+            .filter(|e| e.ws != self.ws_file)
+            .collect();
+        all.extend(now.into_iter().map(|(task, att)| TaskFileEntry {
+            ws: self.ws_file.clone(),
+            task,
+            att,
+        }));
+        write_task_files(&dir, &all);
+        self.task_files_saved = Some(keys);
+    }
+
     /// Once a frame: task attachments that are ready join their task.
     pub(super) fn attach_ready_task_files(&mut self) {
         let files = &self.files;
@@ -1180,6 +1241,41 @@ impl App {
                     self.files.forget(&a);
                 }
             }
+        }
+    }
+}
+
+/// In the cache folder: task attachments on their way, for every workspace
+/// on this computer (each person's own; never shared).
+pub(super) const TASK_FILES: &str = ".task-files.json";
+
+/// One task attachment on its way, as written down.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub(super) struct TaskFileEntry {
+    /// the workspace's file name (`App::ws_file`)
+    pub ws: String,
+    pub task: u64,
+    pub att: Attachment,
+}
+
+pub(super) fn read_task_files(dir: &std::path::Path) -> Vec<TaskFileEntry> {
+    std::fs::read_to_string(dir.join(TASK_FILES))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_task_files(dir: &std::path::Path, list: &[TaskFileEntry]) {
+    let path = dir.join(TASK_FILES);
+    if list.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let _ = std::fs::create_dir_all(dir);
+    if let Ok(s) = serde_json::to_string(list) {
+        let tmp = dir.join(format!(".task-files-{:x}", wb_sync::random_u64()));
+        if std::fs::write(&tmp, s).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
         }
     }
 }

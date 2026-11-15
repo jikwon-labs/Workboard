@@ -414,6 +414,19 @@ impl Files {
         self.states.lock().unwrap().get(sha).cloned()
     }
 
+    /// A Pending for a file already in the cache (one read back after a
+    /// restart).
+    pub fn pending_for(&mut self, att: Attachment) -> Pending {
+        let local = self.next_local;
+        self.next_local += 1;
+        Pending {
+            local,
+            name: att.name.clone(),
+            att: Some(att),
+            error: None,
+        }
+    }
+
     /// Start checking and copying a file (or pasted PNG) for the message box.
     pub fn add(&mut self, path: Option<PathBuf>, png: Option<Vec<u8>>, remote: &Remote) -> Pending {
         let local = self.next_local;
@@ -1302,7 +1315,9 @@ impl App {
                 }
             }
         }
+        self.restore_task_files(&remote);
         self.attach_ready_task_files();
+        self.save_task_files();
         self.clean_tick();
         // attachments that waited for a sign-in go up once there is one
         if matches!(remote, Remote::Server { .. }) {
@@ -1370,6 +1385,12 @@ impl App {
             .chain(
                 self.boxed_attachments()
                     .iter()
+                    // task attachments on their way in other workspaces too
+                    .chain(
+                        super::taskfields::read_task_files(self.files.dir())
+                            .iter()
+                            .map(|e| &e.att),
+                    )
                     .flat_map(parts)
                     .map(|p| p.file),
             )

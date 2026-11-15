@@ -6309,7 +6309,7 @@ fn timesheet_entry_edits_and_week_picker() {
     h.app.sheet_entries = true;
     h.settle();
     h.click("Edit entry Renew passport");
-    h.app.sweep.entry_edit.as_mut().unwrap().3 = 2.0;
+    h.app.sweep.entry_edit.as_mut().unwrap().hours = 2.0;
     h.click("Save");
     let e = &h.app.data.tasks[i].time_entries[0];
     assert_eq!(e.end - e.start, 7200);
@@ -9971,4 +9971,135 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
         created,
         marks
     );
+}
+
+/// A shared workspace with one 30-minute entry of mine at 10:00 today on
+/// "Renew passport", the timesheet's entry list open. Returns the task's
+/// index and the entry's start.
+fn shared_timesheet(h: &mut Ui1) -> (usize, i64) {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let td = today();
+    let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+    let start = td
+        .and_hms_opt(10, 0, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .single()
+        .unwrap()
+        .timestamp();
+    let i = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .position(|t| t.name == "Renew passport")
+        .unwrap();
+    let me = h.app.data.me;
+    h.app.data.tasks[i].time_entries = vec![TimeEntry {
+        start,
+        end: start + 1800,
+        member: me,
+    }];
+    h.app.section = Section::Timesheets;
+    h.app.sheet_week = ws;
+    h.app.sheet_entries = true;
+    h.app.dirty = true;
+    h.settle();
+    h.app.sync_note_change();
+    (i, start)
+}
+
+#[test]
+fn a_teammates_earlier_entry_merging_in_mid_edit_does_not_move_my_change() {
+    let mut h = Ui1::new();
+    let (i, early) = shared_timesheet(&mut h);
+    // a second entry of mine at 13:00 the same day
+    let late = early + 3 * 3600;
+    h.app.data.tasks[i].time_entries.push(TimeEntry {
+        start: late,
+        end: late + 1800,
+        member: 1,
+    });
+    h.app.dirty = true;
+    h.settle();
+    h.app.sync_note_change();
+    let before = h.app.data.clone();
+    // the newest entry is listed first: change the 13:00 one to 2 hours
+    let top = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Edit entry Renew passport")
+        .map(|(_, r)| *r)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    h.click_at(top.center());
+    assert_eq!(h.app.sweep.entry_edit.as_ref().unwrap().start, late);
+    h.app.sweep.entry_edit.as_mut().unwrap().hours = 2.0;
+    h.settle();
+    // a teammate's entry from earlier that day merges in: the team merge
+    // sorts entries by start, so every entry of mine moves one place down
+    let theirs = early - 3600;
+    let team = teammate_copy(&before, |d| {
+        d.tasks[i].time_entries.push(TimeEntry {
+            start: theirs,
+            end: theirs + 900,
+            member: 2,
+        });
+    });
+    h.app.merge_in(&[team], &[]);
+    assert_eq!(
+        h.app.data.tasks[i].time_entries[0].member, 2,
+        "the merge put their entry first"
+    );
+    h.settle();
+    h.click("Save");
+    let es = &h.app.data.tasks[i].time_entries;
+    assert_eq!(es.len(), 3);
+    let t = es.iter().find(|e| e.member == 2).unwrap();
+    assert_eq!(
+        (t.start, t.end),
+        (theirs, theirs + 900),
+        "the teammate's entry is untouched"
+    );
+    let mut mine: Vec<(i64, i64)> = es
+        .iter()
+        .filter(|e| e.member == 1)
+        .map(|e| (e.start, e.end - e.start))
+        .collect();
+    mine.sort();
+    assert_eq!(
+        mine,
+        vec![(early, 1800), (late, 7200)],
+        "the 13:00 entry got the change and the 10:00 one is kept"
+    );
+    assert!(h.app.sweep.entry_edit.is_none());
+}
+
+#[test]
+fn an_entry_taken_away_elsewhere_mid_edit_closes_the_editor_with_a_note() {
+    let mut h = Ui1::new();
+    let (i, _) = shared_timesheet(&mut h);
+    let before = h.app.data.clone();
+    h.click("Edit entry Renew passport");
+    assert!(h.has("Entry hours"));
+    // my other device took the entry away
+    let team = teammate_copy(&before, |d| d.tasks[i].time_entries.clear());
+    h.app.merge_in(&[team], &[]);
+    assert!(h.app.data.tasks[i].time_entries.is_empty());
+    h.settle();
+    assert!(h.app.sweep.entry_edit.is_none(), "the editor closed");
+    assert!(!h.has("Entry hours"));
+    let note = h
+        .app
+        .toast
+        .as_ref()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
+    assert!(note.contains("closed without saving"), "{}", note);
+    assert!(h.app.data.tasks[i].time_entries.is_empty(), "nothing saved");
 }

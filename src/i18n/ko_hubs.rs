@@ -134,6 +134,10 @@ pub const T: &[(&str, &str)] = &[
     ("h", "시간"),
     ("+ Add task", "+ 작업 추가"),
     ("No time entries this week", "이번 주 시간 항목이 없습니다"),
+    (
+        "The time entry you were changing was changed somewhere else, so it was closed without saving.",
+        "고치던 시간 항목이 다른 곳에서 바뀌어 저장하지 않고 닫았습니다.",
+    ),
     // doc editor (docs.rs)
     ("Untitled", "제목 없음"),
     ("Add sub page", "하위 페이지 추가"),

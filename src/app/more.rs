@@ -112,8 +112,23 @@ pub struct SweepUi {
     pub form_error: Option<String>,
     /// Dashboard card being renamed: (index, text).
     pub card_rename: Option<(usize, String)>,
-    /// Time entry being changed: (task, index, start "HH:MM", hours).
-    pub entry_edit: Option<(u64, usize, String, f64)>,
+    /// Time entry being changed.
+    pub entry_edit: Option<EntryEdit>,
+}
+
+/// A time entry open for changing in the timesheet list. The entry is found
+/// again on every frame by whose it is and when it starts (what the team
+/// merge knows an entry by), not by its place in the list: a merge can put a
+/// teammate's earlier entry in front of it.
+#[derive(Clone, Debug, Default)]
+pub struct EntryEdit {
+    pub task: u64,
+    /// The entry's `member` as saved (0 on entries older apps wrote).
+    pub member: u64,
+    pub start: i64,
+    /// The start time being typed, "HH:MM".
+    pub at: String,
+    pub hours: f64,
 }
 
 /// Pen and note colours on a whiteboard.

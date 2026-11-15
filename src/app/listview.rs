@@ -371,7 +371,7 @@ impl App {
                 if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
-                let del = ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger));
+                let del = ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)));
                 name_it(&del, "Confirm delete");
                 if del.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     for id in self.selected.drain() {
@@ -416,14 +416,11 @@ impl App {
                                 .color(Color32::WHITE),
                             );
                             ui.add_space(8.0);
-                            let b = ui.add(
-                                egui::Button::new(
-                                    RichText::new(tr("Undo"))
-                                        .color(Color32::from_rgb(140, 170, 255))
-                                        .strong(),
-                                )
-                                .frame(false),
-                            );
+                            let b = ui.add(ghost(egui::Button::new(
+                                RichText::new(tr("Undo"))
+                                    .color(Color32::from_rgb(140, 170, 255))
+                                    .strong(),
+                            )));
                             name_it(&b, "Undo delete");
                             if b.clicked() {
                                 undo = true;

@@ -3559,6 +3559,7 @@ impl App {
                             }
                             TableCol::Status => {
                                 let sr = ui.interact(cell, id.with("s"), Sense::click());
+                                hover_bg(ui, &sr, cell.shrink(2.0), 4.0);
                                 let mut child = ui.new_child(
                                     egui::UiBuilder::new()
                                         .max_rect(cell.shrink2(vec2(8.0, 6.0)))
@@ -3574,6 +3575,7 @@ impl App {
                             }
                             TableCol::Assignee => {
                                 let ar = ui.interact(cell, id.with("a"), Sense::click());
+                                hover_bg(ui, &ar, cell.shrink(2.0), 4.0);
                                 paint_avatars(
                                     ui.painter(),
                                     cell.left_center() + vec2(8.0, 0.0),
@@ -3591,6 +3593,7 @@ impl App {
                             }
                             TableCol::Due => {
                                 let dr = ui.interact(cell, id.with("d"), Sense::click());
+                                hover_bg(ui, &dr, cell.shrink(2.0), 4.0);
                                 if let Some(d) = task.due {
                                     ui.painter().text(
                                         cell.left_center() + vec2(8.0, 0.0),
@@ -3608,6 +3611,7 @@ impl App {
                             }
                             TableCol::Priority => {
                                 let pr = ui.interact(cell, id.with("p"), Sense::click());
+                                hover_bg(ui, &pr, cell.shrink(2.0), 4.0);
                                 if task.priority > 0 {
                                     paint_flag(
                                         ui.painter(),
@@ -3830,6 +3834,7 @@ impl App {
                                                 vec2(card_w - 34.0, 28.0),
                                                 Sense::click(),
                                             );
+                                            hover_bg(ui, &resp, r, 5.0);
                                             paint_triangle(
                                                 ui.painter(),
                                                 r.left_center() + vec2(6.0, 0.0),
@@ -3919,6 +3924,7 @@ impl App {
                                                         ui.id().with(("home_tick", task.id)),
                                                         Sense::click(),
                                                     );
+                                                    hover_ring(ui, &tick, cr.shrink(2.0), 8.0);
                                                     let closed = self.data.is_closed(task);
                                                     name_it(
                                                         &tick,
@@ -3954,6 +3960,7 @@ impl App {
                                         ui.label(RichText::new(tr("Lists")).size(16.0).strong());
                                         ui.add_space(6.0);
                                         let spaces = self.data.spaces.clone();
+                                        let mut shown = 0;
                                         for s in &spaces {
                                             if s.archived
                                                 || s.private_owner
@@ -3973,6 +3980,7 @@ impl App {
                                                 .filter(|l| !l.archived)
                                                 .collect();
                                             for l in lists {
+                                                shown += 1;
                                                 let total = self
                                                     .data
                                                     .tasks
@@ -4043,6 +4051,36 @@ impl App {
                                                 if resp.clicked() {
                                                     self.actions
                                                         .push(Action::Go(Location::List(l.id)));
+                                                }
+                                            }
+                                        }
+                                        // nothing to list yet: say so and offer the next step
+                                        if shown == 0 {
+                                            ui.label(
+                                                RichText::new(tr(
+                                                    "No Lists yet. Lists keep a Space's tasks together.",
+                                                ))
+                                                .color(t.text2),
+                                            );
+                                            ui.add_space(8.0);
+                                            let has_space = !self.open_spaces().is_empty();
+                                            let label =
+                                                if has_space { "+ New List" } else { "+ New Space" };
+                                            let b = ui.add(
+                                                egui::Button::new(tr(label))
+                                                    .stroke(Stroke::new(1.0, t.border))
+                                                    .corner_radius(7),
+                                            );
+                                            name_it(&b, "Home new list");
+                                            if b.clicked() {
+                                                if has_space {
+                                                    self.open_new_list(None, None);
+                                                } else {
+                                                    self.modal = Some(Modal::NewSpace {
+                                                        name: String::new(),
+                                                        color: STATUS_PALETTE
+                                                            [1 + (self.data.spaces.len() * 3) % 13],
+                                                    });
                                                 }
                                             }
                                         }
@@ -4254,8 +4292,7 @@ impl App {
                                     r.right_center() - vec2(118.0, 0.0),
                                     vec2(26.0, 26.0),
                                 );
-                                let b =
-                                    put_over(ui, br, egui::Button::new("\u{2610}").frame(false));
+                                let b = put_over(ui, br, ghost(egui::Button::new("\u{2610}")));
                                 name_it(&b, &format!("Resolve comment on {}", tname));
                                 if b.on_hover_text(tr("Resolve")).clicked() {
                                     if let Some(c) =
@@ -4331,6 +4368,7 @@ impl App {
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
                 let r = ui.allocate_rect(screen, Sense::click());
+                crate::widgets::no_pointer(&r);
                 ui.painter().rect_filled(screen, 0.0, t.overlay);
                 if r.clicked() {
                     close = true;
@@ -4364,10 +4402,7 @@ impl App {
                             // previous / next task in the current view
                             let (prev, next) = self.neighbours(tid);
                             if ui
-                                .add_enabled(
-                                    prev.is_some(),
-                                    egui::Button::new("\u{2191}").frame(false),
-                                )
+                                .add_enabled(prev.is_some(), ghost(egui::Button::new("\u{2191}")))
                                 .on_hover_text(tr("Previous task"))
                                 .clicked()
                             {
@@ -4376,10 +4411,7 @@ impl App {
                                 }
                             }
                             if ui
-                                .add_enabled(
-                                    next.is_some(),
-                                    egui::Button::new("\u{2193}").frame(false),
-                                )
+                                .add_enabled(next.is_some(), ghost(egui::Button::new("\u{2193}")))
                                 .on_hover_text(tr("Next task"))
                                 .clicked()
                             {
@@ -4389,10 +4421,7 @@ impl App {
                             }
                             let path = self.data.list_path(task.list_id).join("  /  ");
                             if ui
-                                .add(
-                                    egui::Button::new(RichText::new(path).color(t.text2))
-                                        .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(RichText::new(path).color(t.text2))))
                                 .on_hover_text(tr("Move to another List"))
                                 .clicked()
                             {
@@ -4414,24 +4443,19 @@ impl App {
                             }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui
-                                    .add(
-                                        egui::Button::new(RichText::new("\u{2716}").size(14.0))
-                                            .frame(false),
-                                    )
+                                    .add(ghost(egui::Button::new(
+                                        RichText::new("\u{2716}").size(14.0),
+                                    )))
                                     .on_hover_text(tr("Close"))
                                     .clicked()
                                 {
                                     close = true;
                                 }
-                                let r = ui.add(
-                                    egui::Button::new(RichText::new("\u{2026}").size(16.0))
-                                        .frame(false),
-                                );
+                                let r = ui.add(ghost(egui::Button::new(
+                                    RichText::new("\u{2026}").size(16.0),
+                                )));
                                 if ui
-                                    .add(
-                                        egui::Button::new(RichText::new("ID").size(12.0))
-                                            .frame(false),
-                                    )
+                                    .add(ghost(egui::Button::new(RichText::new("ID").size(12.0))))
                                     .on_hover_text(tr("Copy task ID"))
                                     .clicked()
                                 {
@@ -4616,7 +4640,7 @@ impl App {
                                         } else {
                                             "\u{2714}"
                                         };
-                                        let b =
+                                        let b = Tint(
                                             egui::Button::new(RichText::new(txt).color(
                                                 if is_done { Color32::WHITE } else { t.text2 },
                                             ))
@@ -4625,7 +4649,8 @@ impl App {
                                             } else {
                                                 Color32::TRANSPARENT
                                             })
-                                            .stroke(Stroke::new(1.0, t.border));
+                                            .stroke(Stroke::new(1.0, t.border)),
+                                        );
                                         if ui.add(b).on_hover_text(tr("Mark complete")).clicked() {
                                             task.status = if is_done {
                                                 statuses[0].name.clone()
@@ -4676,16 +4701,13 @@ impl App {
                                         .start
                                         .map(fmt_date)
                                         .unwrap_or_else(|| tr("Start").into());
-                                    let r = ui.add(
-                                        egui::Button::new(RichText::new(s_txt).color(
-                                            if task.start.is_some() {
-                                                t.text
-                                            } else {
-                                                t.text3
-                                            },
-                                        ))
-                                        .frame(false),
-                                    );
+                                    let r = ui.add(ghost(egui::Button::new(
+                                        RichText::new(s_txt).color(if task.start.is_some() {
+                                            t.text
+                                        } else {
+                                            t.text3
+                                        }),
+                                    )));
                                     if r.clicked() {
                                         ui.data_mut(|d| {
                                             d.insert_temp(win_id.with("dates").with("which"), 0u8)
@@ -4713,10 +4735,9 @@ impl App {
                                         Some(d) => (fmt_date(d), date_color(d, closed, &t)),
                                         None => (tr("Due").into(), t.text3),
                                     };
-                                    let r = ui.add(
-                                        egui::Button::new(RichText::new(d_txt).color(d_col))
-                                            .frame(false),
-                                    );
+                                    let r = ui.add(ghost(egui::Button::new(
+                                        RichText::new(d_txt).color(d_col),
+                                    )));
                                     popup(ui, &r, win_id.with("dd"), 380.0, |ui| {
                                         dates_menu(
                                             ui,
@@ -4826,14 +4847,14 @@ impl App {
                                             ("\u{25B6}", t.primary)
                                         };
                                         if ui
-                                            .add(
+                                            .add(Tint(
                                                 egui::Button::new(
                                                     RichText::new(txt).color(Color32::WHITE),
                                                 )
                                                 .fill(fill)
                                                 .corner_radius(12)
                                                 .min_size(vec2(24.0, 24.0)),
-                                            )
+                                            ))
                                             .on_hover_text(if running {
                                                 tr("Stop timer")
                                             } else {
@@ -4844,14 +4865,11 @@ impl App {
                                             self.actions.push(Action::ToggleTimer(tid));
                                         }
                                         let secs = task.tracked_secs(now);
-                                        let te = ui.add(
-                                            egui::Button::new(if secs > 0 {
-                                                fmt_duration(secs)
-                                            } else {
-                                                tr("Start").into()
-                                            })
-                                            .frame(false),
-                                        );
+                                        let te = ui.add(ghost(egui::Button::new(if secs > 0 {
+                                            fmt_duration(secs)
+                                        } else {
+                                            tr("Start").into()
+                                        })));
                                         name_it(&te, "Time entries");
                                         let te =
                                             te.on_hover_text(tr("Time entries, add time by hand"));
@@ -4948,21 +4966,17 @@ impl App {
                                             "date" => {
                                                 let mut d =
                                                     NaiveDate::parse_from_str(v, "%Y-%m-%d").ok();
-                                                let r = ui.add(
-                                                    egui::Button::new(
-                                                        RichText::new(
-                                                            d.map(fmt_date).unwrap_or_else(|| {
-                                                                tr("Empty").into()
-                                                            }),
-                                                        )
-                                                        .color(if d.is_some() {
-                                                            t.text
-                                                        } else {
-                                                            t.text3
-                                                        }),
+                                                let r = ui.add(ghost(egui::Button::new(
+                                                    RichText::new(
+                                                        d.map(fmt_date)
+                                                            .unwrap_or_else(|| tr("Empty").into()),
                                                     )
-                                                    .frame(false),
-                                                );
+                                                    .color(if d.is_some() {
+                                                        t.text
+                                                    } else {
+                                                        t.text3
+                                                    }),
+                                                )));
                                                 if let Some(true) = popup(
                                                     ui,
                                                     &r,
@@ -5148,10 +5162,9 @@ impl App {
                                         pos2(r.right() - 162.0, r.center().y),
                                         vec2(22.0, 22.0),
                                     ),
-                                    egui::Button::new(
+                                    ghost(egui::Button::new(
                                         RichText::new("\u{2B11}").size(12.0).color(t.text2),
-                                    )
-                                    .frame(false),
+                                    )),
                                 );
                                 name_it(&b, &format!("Make top-level {}", s.name));
                                 top = b.on_hover_text(tr("Make it a task of its own")).clicked();
@@ -5160,10 +5173,9 @@ impl App {
                                         pos2(r.right() - 186.0, r.center().y),
                                         vec2(22.0, 22.0),
                                     ),
-                                    egui::Button::new(
+                                    ghost(egui::Button::new(
                                         RichText::new("\u{2716}").size(10.0).color(t.text2),
-                                    )
-                                    .frame(false),
+                                    )),
                                 );
                                 name_it(&b, &format!("Delete subtask {}", s.name));
                                 del = b.on_hover_text(tr("Delete")).clicked();
@@ -5322,7 +5334,7 @@ impl App {
                         name_field(&r, "Search comments");
                         focus_once(ui, &r);
                         if ui
-                            .add(egui::Button::new("\u{2716}").frame(false))
+                            .add(ghost(egui::Button::new("\u{2716}")))
                             .on_hover_text(tr("Close search"))
                             .clicked()
                         {
@@ -5409,7 +5421,7 @@ impl App {
                         post = true;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let r = ui.add(egui::Button::new("\u{1F50D}").frame(false));
+                        let r = ui.add(ghost(egui::Button::new("\u{1F50D}")));
                         name_it(&r, "Search comments button");
                         if r.on_hover_text(tr("Search comments")).clicked() {
                             find = if find.is_some() {
@@ -5458,11 +5470,7 @@ impl App {
                 }
                 let mut insert: Option<String> = None;
                 right_ui.horizontal(|ui| {
-                    let at = ui.add(
-                        egui::Button::new("@")
-                            .frame(false)
-                            .min_size(vec2(24.0, 24.0)),
-                    );
+                    let at = ui.add(ghost(egui::Button::new("@").min_size(vec2(24.0, 24.0))));
                     name_it(&at, "Mention someone");
                     let force: bool = ui.data(|d| d.get_temp(mention_id)).unwrap_or(false);
                     // (opened a pass after the click, or that click would close it again)
@@ -5496,11 +5504,9 @@ impl App {
                             }
                         }
                     });
-                    let em = ui.add(
-                        egui::Button::new("\u{263A}")
-                            .frame(false)
-                            .min_size(vec2(24.0, 24.0)),
-                    );
+                    let em = ui.add(ghost(
+                        egui::Button::new("\u{263A}").min_size(vec2(24.0, 24.0)),
+                    ));
                     name_it(&em, "Emoji");
                     popup(ui, &em, win_id.with("emoji_popup"), 180.0, |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -5519,9 +5525,7 @@ impl App {
                                 "\u{1F44F}",
                             ] {
                                 if ui
-                                    .add(
-                                        egui::Button::new(RichText::new(e).size(18.0)).frame(false),
-                                    )
+                                    .add(ghost(egui::Button::new(RichText::new(e).size(18.0))))
                                     .clicked()
                                 {
                                     insert = Some(e.to_string());
@@ -5530,11 +5534,9 @@ impl App {
                             }
                         });
                     });
-                    let ck = ui.add(
-                        egui::Button::new("\u{2611}")
-                            .frame(false)
-                            .min_size(vec2(24.0, 24.0)),
-                    );
+                    let ck = ui.add(ghost(
+                        egui::Button::new("\u{2611}").min_size(vec2(24.0, 24.0)),
+                    ));
                     name_it(&ck, "Checklist item in comment");
                     if ck.on_hover_text(tr("Add a checklist item")).clicked() {
                         let lead =
@@ -5696,7 +5698,7 @@ impl App {
                     _ => trf!("Delete {}? It goes to Trash with everything inside it, where you can restore it.", what),
                 });
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() {
+                    if ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger))).clicked() {
                         self.do_delete(tg);
                         self.confirm_delete = None;
                     }
@@ -5736,6 +5738,7 @@ impl App {
                     for (i, st) in sts.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                            hover_bg(ui, &resp, r, 10.0);
                             paint_status_circle(ui.painter(), r.center(), 7.0, st);
                             let pid = ui.id().with(("stc", i));
                             popup(ui, &resp, pid, 170.0, |ui| {
@@ -5743,6 +5746,7 @@ impl App {
                                     for c in STATUS_PALETTE {
                                         let (rr, cr) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                                         ui.painter().circle_filled(rr.center(), 8.0, rgb(c));
+                                        hover_ring(ui, &cr, rr.shrink(1.0), 9.0);
                                         if cr.clicked() {
                                             st.color = c;
                                             changed = true;
@@ -5765,7 +5769,7 @@ impl App {
                                     }
                                 }
                             });
-                            if n > 1 && ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
+                            if n > 1 && ui.add(ghost(egui::Button::new(RichText::new("\u{2716}").color(t.text3)))).clicked() {
                                 remove = Some(i);
                             }
                         });
@@ -6024,6 +6028,11 @@ impl App {
 
     /// One frame of the whole interface (everything except the native window buttons).
     pub(crate) fn ui_frame(&mut self, ctx: &egui::Context) {
+        self.ui_frame_inner(ctx);
+        crate::widgets::pointer_over_clickables(ctx);
+    }
+
+    fn ui_frame_inner(&mut self, ctx: &egui::Context) {
         self.menu_was_open = any_menu_was_open(ctx);
         self.drafts.chat.swap(self.chat_open, &mut self.chat_text);
         self.drafts

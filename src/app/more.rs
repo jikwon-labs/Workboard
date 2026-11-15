@@ -260,7 +260,7 @@ impl App {
                     ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, tr(st), FontId::proportional(13.0), col);
                     if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
-                        if put_over(ui, br, egui::Button::new(RichText::new(tr("Remove")).color(t.danger)).frame(false)).clicked() {
+                        if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr("Remove")).color(t.danger)))).clicked() {
                             remove = Some((m.id, m.name.clone()));
                         }
                     }
@@ -426,7 +426,21 @@ impl App {
                         if self.inbox_tab == 0 {
                             self.reminders_block(ui);
                         }
-                        if items.is_empty() {
+                        // reminders are waiting above: not "all caught up"
+                        let reminders_shown = self.inbox_tab == 0
+                            && self
+                                .data
+                                .extra
+                                .reminders
+                                .iter()
+                                .any(|r| r.owner == self.data.me && !r.done);
+                        if items.is_empty() && reminders_shown {
+                            ui.add_space(16.0);
+                            ui.label(
+                                RichText::new(tr("No new comments, mentions or assignments."))
+                                    .color(t.text3),
+                            );
+                        } else if items.is_empty() {
                             ui.add_space(ui.available_height() * 0.3);
                             ui.vertical_centered(|ui| {
                                 let alone = self.data.members.len() <= 1;
@@ -470,7 +484,7 @@ impl App {
                                 if self.inbox_tab == 0 {
                                     ui.add_space(10.0);
                                     if ui
-                                        .add(
+                                        .add(Tint(
                                             egui::Button::new(
                                                 RichText::new(tr("Invite people"))
                                                     .size(15.0)
@@ -479,7 +493,7 @@ impl App {
                                             .fill(t.primary)
                                             .corner_radius(7)
                                             .min_size(vec2(0.0, 38.0)),
-                                        )
+                                        ))
                                         .clicked()
                                     {
                                         self.modal = Some(Modal::Invite {
@@ -698,10 +712,9 @@ impl App {
                                         ("\u{2611}", "Create task"),
                                     ] {
                                         if ui
-                                            .add(
-                                                egui::Button::new(RichText::new(g).color(t.text2))
-                                                    .frame(false),
-                                            )
+                                            .add(ghost(egui::Button::new(
+                                                RichText::new(g).color(t.text2),
+                                            )))
                                             .on_hover_text(tr(tip))
                                             .clicked()
                                         {
@@ -715,13 +728,14 @@ impl App {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let ready = !self.post_title.trim().is_empty()
                                             && self.post_channel != 0;
-                                        let b =
+                                        let b = Tint(
                                             egui::Button::new(RichText::new(tr("Post")).color(
                                                 if ready { Color32::WHITE } else { t.text3 },
                                             ))
                                             .fill(if ready { t.primary } else { t.hover })
                                             .corner_radius(6)
-                                            .min_size(vec2(56.0, 30.0));
+                                            .min_size(vec2(56.0, 30.0)),
+                                        );
                                         if ui
                                             .add(b)
                                             .on_hover_text(if self.post_channel == 0 {
@@ -780,21 +794,23 @@ impl App {
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     ui.add_space(pad);
-                    let fol = egui::Button::new(
-                        RichText::new(tr("\u{1F514}  Channels I'm Following")).color(
-                            if self.post_following {
-                                t.accent_text
-                            } else {
-                                t.text2
-                            },
-                        ),
-                    )
-                    .fill(if self.post_following {
-                        t.accent_bg
-                    } else {
-                        t.bg
-                    })
-                    .corner_radius(13);
+                    let fol = Tint(
+                        egui::Button::new(
+                            RichText::new(tr("\u{1F514}  Channels I'm Following")).color(
+                                if self.post_following {
+                                    t.accent_text
+                                } else {
+                                    t.text2
+                                },
+                            ),
+                        )
+                        .fill(if self.post_following {
+                            t.accent_bg
+                        } else {
+                            t.bg
+                        })
+                        .corner_radius(13),
+                    );
                     if ui.add(fol).clicked() {
                         self.post_following = !self.post_following;
                     }
@@ -1100,7 +1116,7 @@ impl App {
                     ui.label(tr("at"));
                     ch |= ui.add(egui::TextEdit::singleline(&mut m.time).desired_width(60.0)).changed();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
+                        if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)))).clicked() {
                             delete = true;
                         }
                     });
@@ -1298,14 +1314,13 @@ impl App {
                                             .fill(rgb(g.color)),
                                     );
                                 });
-                            if ui
-                                .interact(
-                                    resp.response.rect,
-                                    ui.id().with(("goal", g.id)),
-                                    Sense::click(),
-                                )
-                                .clicked()
-                            {
+                            let card = ui.interact(
+                                resp.response.rect,
+                                ui.id().with(("goal", g.id)),
+                                Sense::click(),
+                            );
+                            hover_bg(ui, &card, card.rect, 8.0);
+                            if card.clicked() {
                                 self.goal_open = if open { None } else { Some(g.id) };
                                 self.sweep.confirm = None;
                             }
@@ -1375,10 +1390,9 @@ impl App {
                         ch = true;
                     }
                     if ui
-                        .add(
-                            egui::Button::new(RichText::new(tr("Delete goal")).color(t.danger))
-                                .frame(false),
-                        )
+                        .add(ghost(egui::Button::new(
+                            RichText::new(tr("Delete goal")).color(t.danger),
+                        )))
                         .clicked()
                     {
                         delete = true;
@@ -1402,6 +1416,7 @@ impl App {
                     for c in STATUS_PALETTE.iter().skip(1) {
                         let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
                         ui.painter().circle_filled(r.center(), 7.0, rgb(*c));
+                        hover_ring(ui, &resp, r.shrink(1.0), 8.0);
                         if g.color == *c {
                             ui.painter()
                                 .circle_stroke(r.center(), 9.0, Stroke::new(1.5, t.text));
@@ -1469,10 +1484,9 @@ impl App {
                             }
                         }
                         if ui
-                            .add(
-                                egui::Button::new(RichText::new("\u{2716}").color(t.text3))
-                                    .frame(false),
-                            )
+                            .add(ghost(egui::Button::new(
+                                RichText::new("\u{2716}").color(t.text3),
+                            )))
                             .clicked()
                         {
                             remove = Some(i);
@@ -1586,17 +1600,17 @@ impl App {
                         let rq = ui.checkbox(&mut fld.required, tr("Required"));
                         name_it(&rq, &format!("Required {}", i + 1));
                         ch |= rq.changed();
-                        let up = ui.add_enabled(i > 0, egui::Button::new("\u{2191}").frame(false));
+                        let up = ui.add_enabled(i > 0, ghost(egui::Button::new("\u{2191}")));
                         name_it(&up, &format!("Move question {} up", i + 1));
                         if up.clicked() {
                             swap = Some((i, i - 1));
                         }
-                        let down = ui.add_enabled(i + 1 < count, egui::Button::new("\u{2193}").frame(false));
+                        let down = ui.add_enabled(i + 1 < count, ghost(egui::Button::new("\u{2193}")));
                         name_it(&down, &format!("Move question {} down", i + 1));
                         if down.clicked() {
                             swap = Some((i, i + 1));
                         }
-                        if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
+                        if ui.add(ghost(egui::Button::new(RichText::new("\u{2716}").color(t.text3)))).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -1628,7 +1642,7 @@ impl App {
                         f.fields.push(FormField { label: "Question".into(), map: "text".into(), ..Default::default() });
                         ch = true;
                     }
-                    if ui.add(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)).frame(false)).clicked() {
+                    if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)))).clicked() {
                         delete = true;
                     }
                 });
@@ -1809,6 +1823,7 @@ impl App {
                     for c in WB_COLORS {
                         let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                         ui.painter().circle_filled(r.center(), 8.0, rgb(c));
+                        hover_ring(ui, &resp, r.shrink(1.0), 9.0);
                         if self.wb_color == c {
                             ui.painter()
                                 .circle_stroke(r.center(), 10.0, Stroke::new(1.5, t.text));
@@ -1859,10 +1874,9 @@ impl App {
                                 self.sweep.confirm = Some(format!("wb_clear:{}", wid));
                             }
                             if ui
-                                .add(
-                                    egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
-                                        .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(
+                                    RichText::new(tr("Delete")).color(t.danger),
+                                )))
                                 .clicked()
                             {
                                 delete = true;
@@ -1874,6 +1888,7 @@ impl App {
                 });
                 let (rect, resp) =
                     ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+                crate::widgets::no_pointer(&resp);
                 let p = ui.painter_at(rect);
                 p.rect_filled(rect, 8.0, t.column_bg);
                 // dot grid
@@ -1936,6 +1951,7 @@ impl App {
                     let dr = ui.interact(dot, ui.id().with(("note_color", wid, i)), Sense::click());
                     name_it(&dr, &format!("Note colour {}", i + 1));
                     p.circle_filled(dot.center(), 5.0, rgb(n.color));
+                    hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
                     p.circle_stroke(
                         dot.center(),
                         5.0,
@@ -1956,6 +1972,7 @@ impl App {
                                     let (cr, cresp) =
                                         ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                                     ui.painter().circle_filled(cr.center(), 8.0, rgb(*c));
+                                    hover_ring(ui, &cresp, cr.shrink(1.0), 9.0);
                                     if *c == n.color {
                                         ui.painter().circle_stroke(
                                             cr.center(),
@@ -1977,8 +1994,9 @@ impl App {
                     let x = ui
                         .put(
                             xr,
-                            egui::Button::new(RichText::new("\u{2716}").size(9.0).color(t.text3))
-                                .frame(false),
+                            ghost(egui::Button::new(
+                                RichText::new("\u{2716}").size(9.0).color(t.text3),
+                            )),
                         )
                         .on_hover_text(tr("Delete note"));
                     name_it(&x, &format!("Delete note {}", i));
@@ -2120,18 +2138,15 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("Reminders")).strong());
             if n_done > 0 {
-                let b = ui.add(
-                    egui::Button::new(
-                        RichText::new(if show_done {
-                            tr("Hide done").to_string()
-                        } else {
-                            trf!("Show done ({})", n_done)
-                        })
-                        .small()
-                        .color(t.text2),
-                    )
-                    .frame(false),
-                );
+                let b = ui.add(ghost(egui::Button::new(
+                    RichText::new(if show_done {
+                        tr("Hide done").to_string()
+                    } else {
+                        trf!("Show done ({})", n_done)
+                    })
+                    .small()
+                    .color(t.text2),
+                )));
                 name_it(&b, "Show done reminders");
                 if b.clicked() {
                     self.sweep.reminders_done = !show_done;
@@ -2217,8 +2232,9 @@ impl App {
                         }),
                 );
                 if !r.done {
-                    let sz =
-                        ui.add(egui::Button::new(RichText::new(tr("Snooze")).small()).frame(false));
+                    let sz = ui.add(ghost(egui::Button::new(
+                        RichText::new(tr("Snooze")).small(),
+                    )));
                     name_it(&sz, &format!("Snooze {}", r.text));
                     popup(ui, &sz, ui.id().with(("rem_snooze", r.id)), 170.0, |ui| {
                         let tomorrow = reminder_ts(today() + Duration::days(1), "09:00");
@@ -2241,7 +2257,7 @@ impl App {
                         }
                     });
                 }
-                let ed = ui.add(egui::Button::new(RichText::new(tr("Edit")).small()).frame(false));
+                let ed = ui.add(ghost(egui::Button::new(RichText::new(tr("Edit")).small())));
                 name_it(&ed, &format!("Edit {}", r.text));
                 if ed.clicked() {
                     let local = chrono::DateTime::from_timestamp(r.due_ts, 0)
@@ -2252,10 +2268,9 @@ impl App {
                         .unwrap_or_else(|| "09:00".into());
                     self.sweep.reminder_edit = Some((r.id, r.text.clone(), date, time));
                 }
-                let del = ui.add(
-                    egui::Button::new(RichText::new("\u{2716}").small().color(t.text3))
-                        .frame(false),
-                );
+                let del = ui.add(ghost(egui::Button::new(
+                    RichText::new("\u{2716}").small().color(t.text3),
+                )));
                 name_it(&del, &format!("Delete {}", r.text));
                 if del.clicked() {
                     delete = Some(r.id);
@@ -2408,7 +2423,7 @@ impl App {
                             if ui.link(format!("\u{1F516} {}", b.title)).on_hover_text(&b.url).clicked() {
                                 ui.ctx().open_url(egui::OpenUrl::new_tab(&b.url));
                             }
-                            if ui.add(egui::Button::new(RichText::new("\u{2716}").size(10.0).color(s.t().text3)).frame(false)).clicked() {
+                            if ui.add(ghost(egui::Button::new(RichText::new("\u{2716}").size(10.0).color(s.t().text3)))).clicked() {
                                 remove = Some(b.id);
                             }
                         });
@@ -2523,6 +2538,7 @@ impl App {
             // color
             let c0 = cell(r, 1);
             let cr = ui.interact(c0, ui.id().with(("ov_color", lid)), Sense::click());
+            hover_bg(ui, &cr, c0.shrink(2.0), 4.0);
             name_it(&cr, &format!("Color of {}", item.name));
             match item.color {
                 Some(c) => {
@@ -2541,6 +2557,7 @@ impl App {
                     for c in STATUS_PALETTE.iter().skip(1) {
                         let (b, br) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                         ui.painter().circle_filled(b.center(), 8.0, rgb(*c));
+                        hover_ring(ui, &br, b.shrink(1.0), 9.0);
                         if br.clicked() {
                             edited.color = Some(*c);
                             close_popup(ui);
@@ -2580,6 +2597,7 @@ impl App {
             for (i, which) in [(3usize, 0u8), (4, 1)] {
                 let c = cell(r, i);
                 let dr = ui.interact(c, ui.id().with(("ov_date", lid, which)), Sense::click());
+                hover_bg(ui, &dr, c.shrink(2.0), 4.0);
                 name_it(
                     &dr,
                     &format!(
@@ -2627,6 +2645,7 @@ impl App {
             // priority
             let c5 = cell(r, 5);
             let prr = ui.interact(c5, ui.id().with(("ov_pr", lid)), Sense::click());
+            hover_bg(ui, &prr, c5.shrink(2.0), 4.0);
             name_it(&prr, &format!("Priority of {}", item.name));
             if item.priority > 0 {
                 paint_flag(
@@ -2705,7 +2724,9 @@ impl App {
         }
         ui.add_space(6.0);
         if ui
-            .add(egui::Button::new(RichText::new(tr("+ New List")).color(tt.text2)).frame(false))
+            .add(ghost(egui::Button::new(
+                RichText::new(tr("+ New List")).color(tt.text2),
+            )))
             .clicked()
         {
             let space = self.current_space();
@@ -2787,9 +2808,9 @@ impl App {
     pub(super) fn planner_add_row(&mut self, ui: &mut Ui, d: NaiveDate, w: f32) {
         let t = self.t();
         let Some((_, text)) = self.sweep.planner_add.as_mut().filter(|p| p.0 == d) else {
-            let b = ui.add(
-                egui::Button::new(RichText::new(tr("+ Add task")).color(t.text3)).frame(false),
-            );
+            let b = ui.add(ghost(egui::Button::new(
+                RichText::new(tr("+ Add task")).color(t.text3),
+            )));
             name_it(&b, &format!("Add task on {}", d.format("%a %-d")));
             if b.clicked() {
                 self.sweep.planner_add = Some((d, String::new()));
@@ -3374,7 +3395,9 @@ impl App {
                 tr("Delete")
             };
             if ui
-                .add(egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(t.danger))
+                .add(Tint(
+                    egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(t.danger),
+                ))
                 .clicked()
             {
                 self.remove_item(kind, id);

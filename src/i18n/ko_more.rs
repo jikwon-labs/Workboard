@@ -154,4 +154,5 @@ pub const T: &[(&str, &str)] = &[
     ("Tasks created from the meeting notes in {}", "회의록에서 {}에 작업을 만들었습니다"),
     ("This form has no List for its answers. Choose one under Edit.", "이 양식에는 답변을 넣을 목록이 없습니다. 편집에서 목록을 고르세요."),
     ("\"{}\" isn't a date. Write it as YYYY-MM-DD.", "\"{}\"은(는) 날짜가 아닙니다. YYYY-MM-DD 형식으로 적어 주세요."),
+    ("No new comments, mentions or assignments.", "새 댓글, 멘션, 할당이 없습니다."),
 ];

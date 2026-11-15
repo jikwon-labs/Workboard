@@ -15,6 +15,8 @@ struct Ui1 {
     shapes: Vec<egui::epaint::ClippedShape>,
     /// files dropped on the window in the next frame
     dropped: Vec<egui::DroppedFile>,
+    /// the mouse cursor the last frame asked for
+    cursor: egui::CursorIcon,
 }
 
 impl Ui1 {
@@ -34,6 +36,7 @@ impl Ui1 {
             size: vec2(w, h),
             shapes: vec![],
             dropped: vec![],
+            cursor: egui::CursorIcon::Default,
         };
         h.frame(vec![]);
         h.frame(vec![]);
@@ -52,6 +55,7 @@ impl Ui1 {
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
         self.shapes = out.shapes;
+        self.cursor = out.platform_output.cursor_icon;
         if let Some(update) = out.platform_output.accesskit_update {
             self.tree.clear();
             for (_, node) in update.nodes {
@@ -254,6 +258,19 @@ impl Ui1 {
     fn hover(&mut self, pos: Pos2) {
         self.frame(vec![egui::Event::PointerMoved(pos)]);
         self.settle();
+    }
+
+    /// Whether the soft hover fill (`widgets::hover_fill`) is painted under `pos`.
+    fn hover_fill_at(&self, pos: Pos2) -> bool {
+        let fill = if self.ctx.style().visuals.dark_mode {
+            Color32::from_white_alpha(22)
+        } else {
+            Color32::from_black_alpha(14)
+        };
+        self.shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Rect(r) => r.fill == fill && r.rect.contains(pos),
+            _ => false,
+        })
     }
 
     fn type_text(&mut self, text: &str) {
@@ -6398,4 +6415,138 @@ fn click_a_notification_toast_to_open_the_conversation() {
     h.click(&format!("Open {}", toast));
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat_open, Some(dm));
+}
+
+#[test]
+fn home_lists_card_says_when_there_are_no_lists_and_offers_one() {
+    let mut h = Ui1::new();
+    // a workspace without Spaces or Lists, as a first start has
+    h.app.data.spaces.retain(|s| s.private_owner.is_some());
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.has("No Lists yet. Lists keep a Space's tasks together."));
+    h.click("Home new list");
+    assert!(
+        matches!(h.app.modal, Some(Modal::NewSpace { .. })),
+        "no Space yet: make one first"
+    );
+    h.key(egui::Key::Escape);
+    // with a Space, the button makes a List in it
+    let mut h = Ui1::new();
+    for s in h.app.data.spaces.iter_mut() {
+        s.lists.clear();
+        s.folders.clear();
+    }
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    h.click("Home new list");
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+}
+
+#[test]
+fn inbox_with_reminders_waiting_is_not_all_caught_up() {
+    let mut h = Ui1::new();
+    h.click("Inbox");
+    h.app.data.extra.inbox_cleared = h.app.inbox_items().into_iter().map(|i| i.key).collect();
+    h.settle();
+    assert!(h.has("You're all caught up") || h.has("Looking to collaborate?"));
+    let id = h.app.data.new_id();
+    h.app.data.extra.reminders.push(Reminder {
+        id,
+        text: "Call the bank".into(),
+        due_ts: now_ts() - 60,
+        owner: h.app.data.me,
+        ..Default::default()
+    });
+    h.settle();
+    assert!(h.has("Call the bank"));
+    assert!(!h.has("You're all caught up"), "a reminder is waiting");
+    assert!(h.has("No new comments, mentions or assignments."));
+}
+
+// ---------------------------------------------------------------- hover feedback
+
+#[test]
+fn frameless_buttons_show_the_hand_and_a_hover_fill() {
+    let mut h = Ui1::new();
+    let g = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(g);
+    h.settle();
+    // the channel header's bell, like Ask and Integrate next to it
+    let bell = h.find("Channel notifications").unwrap();
+    h.hover(pos2(bell.x, bell.y + 200.0));
+    assert!(
+        !h.hover_fill_at(bell),
+        "no fill while the pointer is elsewhere"
+    );
+    h.hover(bell);
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand);
+    assert!(h.hover_fill_at(bell), "a fill appears under the pointer");
+}
+
+#[test]
+fn reaction_bar_buttons_show_which_one_is_under_the_pointer() {
+    let (mut h, _) = general_with_my_message("hover the bar");
+    let thumbs = h.find("\u{1F44D}").unwrap();
+    h.hover(thumbs);
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand);
+    assert!(h.hover_fill_at(thumbs));
+    // only the button under the pointer is lit
+    let other = h.find("More reactions").unwrap();
+    assert!(!h.hover_fill_at(other));
+}
+
+#[test]
+fn painted_controls_get_the_hand_but_fields_and_backdrops_do_not() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Teams;
+    h.settle();
+    h.click_side("Create Team", true);
+    // a colour swatch is painted by hand, not an egui button
+    let sw = h.find("Team color 3").unwrap();
+    h.hover(sw);
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand);
+
+    // a text field keeps its I-beam
+    let mut h = Ui1::new();
+    h.click("general");
+    let field = h.find("Message composer").unwrap();
+    h.hover(field);
+    assert_eq!(h.cursor, egui::CursorIcon::Text);
+
+    // the dim backdrop behind an open task is clickable (it closes the task)
+    // but is not a control
+    let mut h = Ui1::new();
+    h.open_clean_task();
+    h.hover(pos2(6.0, 450.0));
+    assert!(h.app.open_task.is_some());
+    assert_eq!(h.cursor, egui::CursorIcon::Default);
+}
+
+#[test]
+fn filled_buttons_tint_on_hover() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    h.type_text("ready to send");
+    // the channel composer's send arrow turns solid once there is text
+    let send = h.find("\u{27A4}").unwrap();
+    h.hover(pos2(send.x, send.y + 200.0));
+    assert!(!h.hover_fill_at(send));
+    h.hover(send);
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand);
+    assert!(
+        h.hover_fill_at(send),
+        "a tint goes over the button's own fill"
+    );
 }

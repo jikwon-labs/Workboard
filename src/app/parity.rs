@@ -479,10 +479,12 @@ impl App {
                 if (ui
                     .add_enabled(
                         ok,
-                        egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE))
-                            .fill(t.primary)
-                            .corner_radius(7)
-                            .min_size(vec2(90.0, 32.0)),
+                        Tint(
+                            egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE))
+                                .fill(t.primary)
+                                .corner_radius(7)
+                                .min_size(vec2(90.0, 32.0)),
+                        ),
                     )
                     .clicked()
                     || (enter && ok))
@@ -541,6 +543,7 @@ impl App {
             for c in STATUS_PALETTE.iter().skip(1) {
                 let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
                 ui.painter().circle_filled(r.center(), 9.0, rgb(*c));
+                hover_ring(ui, &resp, r.shrink(1.0), 10.0);
                 if *color == *c {
                     ui.painter()
                         .circle_stroke(r.center(), 11.0, Stroke::new(1.5, t.text));
@@ -617,10 +620,12 @@ impl App {
                 let ok = !name.trim().is_empty();
                 let b = ui.add_enabled(
                     ok,
-                    egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE))
-                        .fill(t.primary)
-                        .corner_radius(7)
-                        .min_size(vec2(90.0, 32.0)),
+                    Tint(
+                        egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE))
+                            .fill(t.primary)
+                            .corner_radius(7)
+                            .min_size(vec2(90.0, 32.0)),
+                    ),
                 );
                 if (b.clicked() || (enter && ok)) && ok {
                     self.create_channel(name, *private, *add_list);
@@ -1370,6 +1375,7 @@ impl App {
                         &format!("List color {:02x}{:02x}{:02x}", c[0], c[1], c[2]),
                     );
                     ui.painter().circle_filled(rr.center(), 8.0, rgb(*c));
+                    hover_ring(ui, &resp, rr.shrink(0.5), 8.5);
                     if cur == Some(*c) {
                         ui.painter()
                             .circle_stroke(rr.center(), 9.5, Stroke::new(1.5_f32, t.text));
@@ -1989,6 +1995,7 @@ impl App {
                         &format!("Space color {:02x}{:02x}{:02x}", c[0], c[1], c[2]),
                     );
                     ui.painter().circle_filled(rr.center(), 8.0, rgb(*c));
+                    hover_ring(ui, &resp, rr.shrink(0.5), 8.5);
                     if resp.clicked() {
                         self.actions.push(Action::SetSpaceColor(sid, *c));
                         close_any(ui);
@@ -2027,6 +2034,7 @@ impl App {
                         &format!("Space icon {}", if ic.is_empty() { "letter" } else { ic }),
                     );
                     ui.painter().rect_filled(rr.shrink(2.0), 5.0, rgb(color));
+                    hover_ring(ui, &resp, rr.shrink(1.0), 6.0);
                     ui.painter().text(
                         rr.center(),
                         Align2::CENTER_CENTER,
@@ -2484,7 +2492,7 @@ impl App {
                                         });
                                     name_it(&vr.response, &format!("Filter {} values", i + 1));
                                 });
-                                let x = ui.add(egui::Button::new("\u{2716}").frame(false));
+                                let x = ui.add(ghost(egui::Button::new("\u{2716}")));
                                 name_it(&x, &format!("Remove filter {}", i + 1));
                                 if x.clicked() {
                                     drop = Some(i);
@@ -2498,10 +2506,9 @@ impl App {
                             self.filter.rows.remove(i);
                         }
                         if ui
-                            .add(
-                                egui::Button::new(RichText::new(tr("+ Add filter")).color(t.text2))
-                                    .frame(false),
-                            )
+                            .add(ghost(egui::Button::new(
+                                RichText::new(tr("+ Add filter")).color(t.text2),
+                            )))
                             .clicked()
                         {
                             self.filter.rows.push(FilterRow::default());

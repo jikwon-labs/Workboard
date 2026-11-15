@@ -1048,9 +1048,11 @@ impl App {
                         fmt_duration(task.tracked_secs(now)),
                         truncate(&task.name, 22)
                     );
-                    let b = egui::Button::new(RichText::new(txt).color(Color32::WHITE))
-                        .fill(t.danger)
-                        .corner_radius(14);
+                    let b = Tint(
+                        egui::Button::new(RichText::new(txt).color(Color32::WHITE))
+                            .fill(t.danger)
+                            .corner_radius(14),
+                    );
                     let id = task.id;
                     ui.add_space(8.0);
                     if ui.add(b).on_hover_text(tr("Stop timer")).clicked() {
@@ -1572,7 +1574,9 @@ impl App {
                 )
                 .show_inside(ui, |ui| {
                     if ui
-                        .add(egui::Button::new(RichText::new("\u{00BB}").size(16.0)).frame(false))
+                        .add(ghost(egui::Button::new(
+                            RichText::new("\u{00BB}").size(16.0),
+                        )))
                         .on_hover_text(tr("Open sidebar"))
                         .clicked()
                     {
@@ -1836,14 +1840,11 @@ impl App {
                                                 ("People", "\u{1F465}"),
                                             ] {
                                                 if ui
-                                                    .add(
-                                                        egui::Button::new(format!(
-                                                            "{}  {}",
-                                                            ic,
-                                                            tr(l)
-                                                        ))
-                                                        .frame(false),
-                                                    )
+                                                    .add(ghost(egui::Button::new(format!(
+                                                        "{}  {}",
+                                                        ic,
+                                                        tr(l)
+                                                    ))))
                                                     .clicked()
                                                 {
                                                     match l {
@@ -1858,12 +1859,9 @@ impl App {
                                             }
                                             ui.separator();
                                             if ui
-                                                .add(
-                                                    egui::Button::new(tr(
-                                                        "\u{25A6}  Customize your sidebar",
-                                                    ))
-                                                    .frame(false),
-                                                )
+                                                .add(ghost(egui::Button::new(tr(
+                                                    "\u{25A6}  Customize your sidebar",
+                                                ))))
                                                 .clicked()
                                             {
                                                 self.modal = Some(Modal::CustomizeSidebar);
@@ -2564,7 +2562,7 @@ impl App {
                 ("\u{1F3A8}", "Whiteboard"),
             ] {
                 if ui
-                    .add(egui::Button::new(format!("{}  {}", icon, tr(label))).frame(false))
+                    .add(ghost(egui::Button::new(format!("{}  {}", icon, tr(label)))))
                     .clicked()
                 {
                     match label {
@@ -3097,7 +3095,7 @@ impl App {
                                 t.text2
                             });
                         if ui
-                            .add(egui::Button::new(star).frame(false))
+                            .add(ghost(egui::Button::new(star)))
                             .on_hover_text(tr("Favorite"))
                             .clicked()
                         {
@@ -3345,11 +3343,10 @@ impl App {
                         }
                     }
                     ui.add_space(6.0);
-                    let vr = ui.add(
+                    let vr = ui.add(ghost(
                         egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2))
-                            .frame(false)
                             .min_size(vec2(0.0, 30.0)),
-                    );
+                    ));
                     popup(ui, &vr, ui.id().with("add_view"), 200.0, |ui| {
                         ui.label(RichText::new(tr("Views")).small().color(t.text3));
                         for v in ViewKind::ALL {
@@ -3512,14 +3509,16 @@ impl App {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
-                        let b = egui::Button::new(
-                            RichText::new(tr("Add Task"))
-                                .color(Color32::WHITE)
-                                .size(13.0),
-                        )
-                        .fill(t.primary)
-                        .corner_radius(6)
-                        .min_size(vec2(0.0, 26.0));
+                        let b = Tint(
+                            egui::Button::new(
+                                RichText::new(tr("Add Task"))
+                                    .color(Color32::WHITE)
+                                    .size(13.0),
+                            )
+                            .fill(t.primary)
+                            .corner_radius(6)
+                            .min_size(vec2(0.0, 26.0)),
+                        );
                         if ui.add(b).clicked() {
                             self.open_quick_add(None);
                         }
@@ -3572,6 +3571,9 @@ impl App {
                                 );
                             }
                             paint_avatar(ui.painter(), r.center(), 10.5, &m, t.bg);
+                            if !self.me_mode {
+                                hover_ring(ui, &resp, r.shrink(1.5), 11.5);
+                            }
                             if resp.on_hover_text(tr("Me mode: only my tasks")).clicked() {
                                 self.me_mode = !self.me_mode;
                             }
@@ -3743,8 +3745,9 @@ impl App {
             t.bg,
         );
         p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-        if ui
-            .interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click())
+        let add_col = ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click());
+        hover_bg(ui, &add_col, add_col.rect, 5.0);
+        if add_col
             .on_hover_text(tr("Add a column (Custom Field)"))
             .clicked()
         {
@@ -3891,10 +3894,9 @@ impl App {
         click_menu(&dresp, |ui| self.group_menu(ui, g));
         if show_dots {
             if child
-                .add(
-                    egui::Button::new(RichText::new(tr("+ Add Task")).color(t.text3).size(12.5))
-                        .frame(false),
-                )
+                .add(ghost(egui::Button::new(
+                    RichText::new(tr("+ Add Task")).color(t.text3).size(12.5),
+                )))
                 .clicked()
             {
                 self.adding = Some((g.key.clone(), String::new()));
@@ -4183,6 +4185,7 @@ impl App {
         }
         // due date
         let dr = ui.interact(cols.due, id.with("du"), Sense::click());
+        hover_bg(ui, &dr, cols.due.expand2(vec2(4.0, -6.0)), 4.0);
         name_it(&dr, &format!("Due date of {}", task.name));
         match task.due {
             Some(d) => {
@@ -4223,6 +4226,7 @@ impl App {
         }
         // priority
         let pr = ui.interact(cols.priority, id.with("pr"), Sense::click());
+        hover_bg(ui, &pr, cols.priority.expand2(vec2(4.0, -6.0)), 4.0);
         if !apps.priorities {
             // Priorities are turned off in Apps
         } else if task.priority > 0 {
@@ -4255,6 +4259,7 @@ impl App {
         }
         // status pill column
         let sr = ui.interact(cols.status, id.with("stcol"), Sense::click());
+        hover_bg(ui, &sr, cols.status.expand2(vec2(4.0, -6.0)), 4.0);
         if cols.status.width() > 0.0 {
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
@@ -4453,14 +4458,9 @@ impl App {
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let b = ui
-                                            .add(
-                                                egui::Button::new(
-                                                    RichText::new("\u{2039}")
-                                                        .color(t.text3)
-                                                        .size(15.0),
-                                                )
-                                                .frame(false),
-                                            )
+                                            .add(ghost(egui::Button::new(
+                                                RichText::new("\u{2039}").color(t.text3).size(15.0),
+                                            )))
                                             .on_hover_text(tr("Collapse group"));
                                         name_it(&b, &format!("Collapse group {}", g.label));
                                         if b.clicked() {
@@ -4502,12 +4502,9 @@ impl App {
                             .map(|s| s.id)
                         {
                             if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new(tr("+  Add group")).color(t.text2).size(14.0),
-                                    )
-                                    .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(
+                                    RichText::new(tr("+  Add group")).color(t.text2).size(14.0),
+                                )))
                                 .on_hover_text(tr("Edit statuses"))
                                 .clicked()
                             {
@@ -4653,6 +4650,15 @@ impl App {
             .interact(rect, id, Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
         let drawn = self.card(ui, task, w, true);
+        if body.hovered() {
+            // a darker outline says the card can be opened or picked up
+            ui.painter().rect_stroke(
+                drawn,
+                8.0,
+                Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
         ui.add_space(6.0);
         if (drawn.height() - h).abs() > 0.5 {
             ui.data_mut(|d| d.insert_temp(h_id, drawn.height()));
@@ -4782,6 +4788,7 @@ impl App {
                 }
                 // the same pickers as a List row's cells
                 let ar = ui.interact(a_rect, cid.with("as"), Sense::click());
+                hover_bg(ui, &ar, a_rect, 4.0);
                 name_it(&ar, &format!("Card assignees {}", task.name));
                 let data = &self.data;
                 if let Some(true) = popup(ui, &ar, cid.with("asp"), 220.0, |ui| {
@@ -4790,6 +4797,7 @@ impl App {
                     changed = true;
                 }
                 let dr = ui.interact(d_rect, cid.with("du"), Sense::click());
+                hover_bg(ui, &dr, d_rect, 4.0);
                 name_it(&dr, &format!("Card due date {}", task.name));
                 if let Some(true) = popup(ui, &dr, cid.with("dup"), 380.0, |ui| {
                     dates_menu(
@@ -4805,6 +4813,7 @@ impl App {
                 }
                 if show_pr {
                     let pr = ui.interact(b, cid.with("pr"), Sense::click());
+                    hover_bg(ui, &pr, b, 4.0);
                     name_it(&pr, &format!("Card priority {}", task.name));
                     if let Some(true) = popup(ui, &pr, cid.with("prp"), 180.0, |ui| {
                         priority_menu(ui, &t, &mut edited.priority)

@@ -57,11 +57,9 @@ fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
         for e in EMOJIS {
-            let b = ui.add(
-                egui::Button::new(RichText::new(e).size(18.0))
-                    .frame(false)
-                    .min_size(vec2(28.0, 28.0)),
-            );
+            let b = ui.add(ghost(
+                egui::Button::new(RichText::new(e).size(18.0)).min_size(vec2(28.0, 28.0)),
+            ));
             if b.clicked() {
                 picked = Some(e);
             }
@@ -522,7 +520,7 @@ impl App {
                 ui.horizontal(|ui| {
                     let w = 170.0 * 2.0 + 150.0 + 16.0;
                     ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                    let b = ui.add(egui::Button::new(RichText::new(tr("#  Create a Channel")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(170.0, 34.0)));
+                    let b = ui.add(Tint(egui::Button::new(RichText::new(tr("#  Create a Channel")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(170.0, 34.0))));
                     name_it(&b, "Create a Channel");
                     if b.clicked() {
                         make = true;
@@ -589,7 +587,7 @@ impl App {
                             ui.label(RichText::new(tr("Thread")).size(15.0).strong());
                             ui.label(RichText::new(self.channel_label(&channel)).color(t.text3));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(egui::Button::new("\u{2716}").frame(false)).clicked() {
+                                if ui.add(ghost(egui::Button::new("\u{2716}"))).clicked() {
                                     acts.push(ChatAction::CloseThread);
                                 }
                             });
@@ -666,11 +664,11 @@ impl App {
                     }
                     ui.label(RichText::new(title).size(15.5).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let hb = |ui: &mut Ui, text: &str| ui.add(egui::Button::new(RichText::new(tr(text)).size(14.0).color(t.text2)).frame(false));
+                        let hb = |ui: &mut Ui, text: &str| ui.add(ghost(egui::Button::new(RichText::new(tr(text)).size(14.0).color(t.text2))));
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
                             let mode = self.data.extra.notify.channel_mode(cid).to_string();
-                            let bell = ui.add(egui::Button::new(RichText::new(if mode == "nothing" { "\u{1F515}" } else { "\u{1F514}" }).size(14.0).color(t.text2)).frame(false));
+                            let bell = ui.add(ghost(egui::Button::new(RichText::new(if mode == "nothing" { "\u{1F515}" } else { "\u{1F514}" }).size(14.0).color(t.text2))));
                             name_it(&bell, "Channel notifications");
                             let bell = bell.on_hover_text(tr("Notifications for this channel"));
                             popup(ui, &bell, ui.id().with(("chan_notify", cid)), 240.0, |ui| {
@@ -706,14 +704,14 @@ impl App {
                     ui.painter().galley(pos2(r.left() + 26.3, r.center().y - g.size().y / 2.0), g, t.text);
                     ui.painter().rect_filled(Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), r.max), 1.0, t.text);
                     for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar)] {
-                        if ui.add(egui::Button::new(RichText::new(tr(label)).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0))).clicked() {
+                        if ui.add(ghost(egui::Button::new(RichText::new(tr(label)).size(14.0).color(t.text2)).min_size(vec2(0.0, 30.0)))).clicked() {
                             self.view = v;
                             // a channel made with "Add a List" opens its own List
                             let to = channel.list.filter(|l| self.data.location_exists(Location::List(*l))).map(Location::List).unwrap_or(Location::Everything);
                             self.actions.push(Action::Go(to));
                         }
                     }
-                    let vr = ui.add(egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0)));
+                    let vr = ui.add(ghost(egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2)).min_size(vec2(0.0, 30.0))));
                     popup(ui, &vr, ui.id().with(("chan_view", cid)), 180.0, |ui| {
                         for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar), ("Gantt", ViewKind::Gantt), ("Table", ViewKind::Table)] {
                             if ui.button(tr(label)).clicked() {
@@ -944,18 +942,20 @@ impl App {
             .enumerate()
             {
                 let sel = self.composer_mode == i as u8;
-                let b = egui::Button::new(
-                    RichText::new(format!("{} {}", icon, tr(label)))
-                        .size(13.5)
-                        .color(if sel { t.text } else { t.text2 }),
-                )
-                .fill(if sel { t.bg } else { Color32::TRANSPARENT })
-                .stroke(if sel {
-                    Stroke::new(1.0, t.border)
-                } else {
-                    Stroke::NONE
-                })
-                .corner_radius(6);
+                let b = Tint(
+                    egui::Button::new(
+                        RichText::new(format!("{} {}", icon, tr(label)))
+                            .size(13.5)
+                            .color(if sel { t.text } else { t.text2 }),
+                    )
+                    .fill(if sel { t.bg } else { Color32::TRANSPARENT })
+                    .stroke(if sel {
+                        Stroke::new(1.0, t.border)
+                    } else {
+                        Stroke::NONE
+                    })
+                    .corner_radius(6),
+                );
                 if ui.add(b).clicked() {
                     if i == 2 {
                         self.section = Section::Ai;
@@ -1049,7 +1049,7 @@ impl App {
                 ui.horizontal(|ui| {
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
                         let b = ui
-                            .add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false))
+                            .add(ghost(egui::Button::new(RichText::new(g).color(t.text2))))
                             .on_hover_text(tr(tip));
                         name_it(&b, tip);
                         b
@@ -1102,14 +1102,16 @@ impl App {
                             && (!self.chat_text.trim().is_empty()
                                 || !files.is_empty()
                                 || (self.composer_mode == 1 && !self.post_title.trim().is_empty()));
-                        let b = egui::Button::new(RichText::new(label).color(if ready {
-                            Color32::WHITE
-                        } else {
-                            t.text3
-                        }))
-                        .fill(if ready { t.primary } else { t.hover })
-                        .corner_radius(6)
-                        .min_size(vec2(34.0, 28.0));
+                        let b = Tint(
+                            egui::Button::new(RichText::new(label).color(if ready {
+                                Color32::WHITE
+                            } else {
+                                t.text3
+                            }))
+                            .fill(if ready { t.primary } else { t.hover })
+                            .corner_radius(6)
+                            .min_size(vec2(34.0, 28.0)),
+                        );
                         if (ui.add(b).clicked() || enter) && ready {
                             let text = self.chat_text.trim().to_string();
                             let title = if self.composer_mode == 1 {
@@ -1207,7 +1209,7 @@ impl App {
                 let mut pick = false;
                 ui.horizontal(|ui| {
                     let b = ui
-                        .add(egui::Button::new(RichText::new("+").color(t.text2)).frame(false))
+                        .add(ghost(egui::Button::new(RichText::new("+").color(t.text2))))
                         .on_hover_text(tr("Add pictures or videos"));
                     b.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -1390,14 +1392,14 @@ impl App {
                                 });
                                 ui.add_space(16.0);
                                 if !here {
-                                    let join = ui.add(
+                                    let join = ui.add(Tint(
                                         egui::Button::new(
                                             RichText::new(tr("Join")).color(Color32::WHITE),
                                         )
                                         .fill(Color32::from_rgb(0x00, 0x88, 0x44))
                                         .corner_radius(6)
                                         .min_size(vec2(64.0, 28.0)),
-                                    );
+                                    ));
                                     name_it(&join, "Join huddle");
                                     if join.clicked() {
                                         acts.push(ChatAction::JoinHuddle(ch));
@@ -1433,14 +1435,14 @@ impl App {
                                     );
                                 });
                                 ui.add_space(16.0);
-                                let join = ui.add(
+                                let join = ui.add(Tint(
                                     egui::Button::new(
                                         RichText::new(tr("Join")).color(Color32::WHITE),
                                     )
                                     .fill(Color32::from_rgb(0x00, 0x88, 0x44))
                                     .corner_radius(6)
                                     .min_size(vec2(64.0, 28.0)),
-                                );
+                                ));
                                 name_it(&join, "Join call");
                                 if join.clicked() {
                                     ui.ctx().open_url(egui::OpenUrl::new_tab(link));
@@ -1471,14 +1473,13 @@ impl App {
                                     );
                                 });
                             });
-                        if ui
-                            .interact(
-                                r.response.rect,
-                                ui.id().with(("msgtask", m.id)),
-                                Sense::click(),
-                            )
-                            .clicked()
-                        {
+                        let card = ui.interact(
+                            r.response.rect,
+                            ui.id().with(("msgtask", m.id)),
+                            Sense::click(),
+                        );
+                        hover_bg(ui, &card, card.rect, 8.0);
+                        if card.clicked() {
                             // open the linked task through the main action queue
                             acts.push(ChatAction::Task {
                                 ch: u64::MAX,
@@ -1492,10 +1493,15 @@ impl App {
                         for rc in &m.reactions {
                             let mine = rc.users.contains(&self.data.me);
                             let txt = format!("{} {}", rc.emoji, rc.users.len());
-                            let b = egui::Button::new(RichText::new(txt).size(12.0))
-                                .fill(if mine { t.selected_bg } else { t.hover })
-                                .stroke(Stroke::new(1.0, if mine { t.primary } else { t.border }))
-                                .corner_radius(10);
+                            let b = Tint(
+                                egui::Button::new(RichText::new(txt).size(12.0))
+                                    .fill(if mine { t.selected_bg } else { t.hover })
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        if mine { t.primary } else { t.border },
+                                    ))
+                                    .corner_radius(10),
+                            );
                             let names: Vec<String> = rc
                                 .users
                                 .iter()
@@ -1602,7 +1608,7 @@ impl App {
             let mut button = |ui: &mut Ui, label: &str, tip: &str| -> egui::Response {
                 let r = Rect::from_min_size(pos2(x, bar.top() + 2.0), vec2(bw, 24.0));
                 x += bw;
-                let b = put_over(ui, r, egui::Button::new(label).frame(false));
+                let b = put_over(ui, r, ghost(egui::Button::new(label)));
                 name_it(&b, tip);
                 b.on_hover_text(tr(tip))
             };

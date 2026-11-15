@@ -31,6 +31,14 @@ pub const T: &[(&str, &str)] = &[
         "Their subtasks go too. You can undo right after, or restore them from Trash.",
         "하위 작업도 함께 삭제됩니다. 바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
     ),
+    (
+        "You can undo right after, or restore it from Trash.",
+        "바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
+    ),
+    (
+        "You can undo right after, or restore them from Trash.",
+        "바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
+    ),
     ("Task deleted", "작업을 삭제했습니다"),
     ("{} tasks deleted", "작업 {}개를 삭제했습니다"),
     // filters

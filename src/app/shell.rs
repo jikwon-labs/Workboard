@@ -4800,6 +4800,20 @@ impl App {
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let refs: Vec<&Task> = tasks.iter().collect();
         let groups = self.groups(&refs, true);
+        // closed tasks are hidden by default: their columns say how many
+        // instead of a plain 0
+        let mut hidden_closed: HashMap<String, usize> = HashMap::new();
+        if !self.show_closed {
+            self.show_closed = true;
+            for x in self.filtered() {
+                if self.data.is_closed(x) {
+                    *hidden_closed
+                        .entry(self.data.status_of(x).name.clone())
+                        .or_default() += 1;
+                }
+            }
+            self.show_closed = false;
+        }
         let mut dropped: Option<(u64, usize)> = None;
         egui::ScrollArea::horizontal()
             .auto_shrink([false, false])
@@ -4871,11 +4885,25 @@ impl App {
                                     }
                                     return;
                                 }
+                                let hidden = g
+                                    .status
+                                    .as_ref()
+                                    .filter(|_| g.tasks.is_empty())
+                                    .and_then(|s| hidden_closed.get(&s.name))
+                                    .copied()
+                                    .unwrap_or(0);
                                 ui.horizontal(|ui| {
                                     self.group_pill(ui, g);
-                                    ui.label(
-                                        RichText::new(g.tasks.len().to_string()).color(accent),
-                                    );
+                                    if hidden > 0 {
+                                        ui.label(
+                                            RichText::new(trf!("{} hidden", hidden)).color(t.text3),
+                                        )
+                                        .on_hover_text(tr("Closed tasks are hidden"));
+                                    } else {
+                                        ui.label(
+                                            RichText::new(g.tasks.len().to_string()).color(accent),
+                                        );
+                                    }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let b = ui
                                             .add(ghost(egui::Button::new(
@@ -4903,6 +4931,20 @@ impl App {
                                                 if resp.clicked() {
                                                     self.actions.push(Action::Open(task.id));
                                                 }
+                                            }
+                                        }
+                                        if hidden > 0 {
+                                            let label = if hidden == 1 {
+                                                tr("Show 1 closed task").to_string()
+                                            } else {
+                                                trf!("Show {} closed tasks", hidden)
+                                            };
+                                            let b = ui.add(ghost(egui::Button::new(
+                                                RichText::new(label).color(t.text2),
+                                            )));
+                                            name_it(&b, &format!("Show closed in {}", g.label));
+                                            if b.clicked() {
+                                                self.show_closed = true;
                                             }
                                         }
                                         self.board_add_task(ui, g, col_w - 16.0, accent);

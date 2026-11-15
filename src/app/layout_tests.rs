@@ -475,3 +475,37 @@ fn calendar_more_line_fits_inside_the_day() {
         cell_bottom
     );
 }
+
+#[test]
+fn board_closed_column_says_how_many_are_hidden() {
+    let mut h = Ui1::new();
+    h.click("View Board");
+    assert!(!h.app.show_closed);
+    // the seed's list has closed tasks; count them in its done status
+    let list = task_named(&h, "Write copy for landing page").list_id;
+    let closed: Vec<&Task> = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|x| {
+            x.list_id == list && x.parent.is_none() && !x.archived && h.app.data.is_closed(x)
+        })
+        .collect();
+    assert!(!closed.is_empty(), "the seed has a closed task");
+    let st = h.app.data.status_of(closed[0]).name.clone();
+    let n = closed
+        .iter()
+        .filter(|x| h.app.data.status_of(x).name == st)
+        .count();
+    let first = closed[0].name.clone();
+    assert!(
+        !h.painted_text(&trf!("{} hidden", n)).is_empty(),
+        "{} hidden",
+        n
+    );
+    let label = crate::i18n::status_text(&st).to_uppercase();
+    h.click(&format!("Show closed in {}", label));
+    assert!(h.app.show_closed);
+    assert!(h.has(&format!("Card {}", first)));
+}

@@ -118,6 +118,8 @@ pub const T: &[(&str, &str)] = &[
     ),
     ("Show 1 closed task", "닫힌 작업 1개 보기"),
     ("Show {} closed tasks", "닫힌 작업 {}개 보기"),
+    ("{} hidden", "{}개 숨김"),
+    ("Closed tasks are hidden", "닫힌 작업은 숨겨져 있습니다"),
     ("No tasks here yet", "아직 작업이 없습니다"),
     ("Task Name", "작업 이름"),
     // board view

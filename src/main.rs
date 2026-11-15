@@ -22,6 +22,8 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Workboard")
+        // no runtime icon: otherwise eframe puts its own "e" icon in the Dock over the bundle's AppIcon
+        .with_icon(egui::IconData::default())
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([900.0, 560.0])
         // like the original: no separate title bar, window buttons sit in the header

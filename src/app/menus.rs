@@ -181,7 +181,7 @@ pub fn unavailable(what: &str) -> Modal {
     Modal::Unavailable {
         title: what.to_string(),
         body: crate::trf!(
-            "{} needs an online service (AI, video or voice processing). It will work once the shared server is set up; everything else in this app already works on this computer.",
+            "{} needs an online service for AI, video or voice processing, which Workboard doesn't have. Everything else in the app works, on your own or with your team.",
             tr(what)
         ),
     }

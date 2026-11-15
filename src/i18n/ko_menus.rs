@@ -90,7 +90,7 @@ pub const T: &[(&str, &str)] = &[
     ("Import from Slack", "Slack에서 가져오기"),
     ("AI Team Center", "AI 팀 센터"),
     ("AI Personal Center", "AI 개인 센터"),
-    ("{} needs an online service (AI, video or voice processing). It will work once the shared server is set up; everything else in this app already works on this computer.", "{}에는 온라인 서비스(AI, 영상 또는 음성 처리)가 필요합니다. 공유 서버를 설정하면 쓸 수 있으며, 그 밖의 기능은 이미 이 컴퓨터에서 모두 작동합니다."),
+    ("{} needs an online service for AI, video or voice processing, which Workboard doesn't have. Everything else in the app works, on your own or with your team.", "{}에는 AI, 영상 또는 음성을 처리하는 온라인 서비스가 필요한데, Workboard 에는 그런 서비스가 없습니다. 그 밖의 기능은 혼자 쓸 때도, 팀과 함께 쓸 때도 모두 작동합니다."),
     // invite
     ("Email", "이메일"),
     ("Enter email, comma or space separated", "이메일 입력 (쉼표나 공백으로 구분)"),

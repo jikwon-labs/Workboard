@@ -675,6 +675,26 @@ fn check_for_updates_explains_why_it_cannot_run_outside_the_installed_app() {
 }
 
 #[test]
+fn an_online_only_tool_says_workboard_has_no_such_service() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.click("Talk to Text");
+    // the team server exists now, so the note must not promise that setting
+    // one up makes AI, video or voice processing work
+    match &h.app.modal {
+        Some(Modal::Unavailable { title, body }) => {
+            assert_eq!(title, "Talk to Text");
+            assert!(body.starts_with("Talk to Text needs an online service"), "{}", body);
+            assert!(body.contains("Workboard doesn't have"), "{}", body);
+            assert!(!body.contains("server"), "{}", body);
+        }
+        other => panic!("expected an explanation, got {:?}", other.is_some()),
+    }
+    h.key(egui::Key::Escape);
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
 fn click_message_replies_opens_thread() {
     let mut h = Ui1::new();
     h.click("general");

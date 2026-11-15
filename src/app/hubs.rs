@@ -1638,9 +1638,7 @@ impl App {
                     }
                 });
                 if ui
-                    .add(ghost(egui::Button::new(
-                        RichText::new(tr("Delete team")).color(t.danger),
-                    )))
+                    .button(RichText::new(tr("Delete team")).color(t.danger))
                     .clicked()
                 {
                     self.modal = Some(Modal::ConfirmRemove {

@@ -3131,13 +3131,18 @@ impl App {
                     let ac = if personal || gathered {
                         ui.allocate_response(vec2(0.0, 0.0), Sense::hover())
                     } else {
-                        ui.add(
-                            egui::Button::new(
-                                RichText::new(tr("Add Channel")).size(13.5).color(t.text3),
-                            )
-                            .stroke(Stroke::new(1.0, t.border))
-                            .corner_radius(6)
-                            .min_size(vec2(0.0, 26.0)),
+                        // a button with an icon and text in the text colour (grey
+                        // text in a bare outline read as a disabled field)
+                        super::icons::icon_button_ex(
+                            ui,
+                            &t,
+                            "hash",
+                            tr("Add Channel"),
+                            "Add Channel",
+                            false,
+                            0.0,
+                            t.text2,
+                            t.text2,
                         )
                     };
                     if ac.clicked() {

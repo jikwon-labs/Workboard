@@ -846,9 +846,11 @@ impl App {
                                     ui.add(
                                         egui::TextEdit::singleline(&mut self.post_title)
                                             .frame(false)
+                                            .hint_text(tr("Add a title"))
                                             .desired_width(f32::INFINITY),
                                     );
                                 });
+                                    name_field(&r, "Post title");
                                 ui.separator();
                                 ui.add(
                                     egui::TextEdit::multiline(&mut self.post_body)

@@ -2596,11 +2596,19 @@ impl App {
                         for (i, item) in self.data.extra.trash.iter().enumerate().rev() {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(tr(&item.kind)).small().color(t.text3));
-                                ui.label(&item.title);
+                                // something deleted without a name still says what it was
+                                if item.title.trim().is_empty() {
+                                    ui.label(
+                                        RichText::new(tr("Untitled")).italics().color(t.text2),
+                                    );
+                                } else {
+                                    ui.label(&item.title);
+                                }
                                 ui.label(
                                     RichText::new(fmt_ago(item.deleted)).small().color(t.text3),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    // both framed buttons, the second in red
                                     if ui
                                         .add(ghost(egui::Button::new(
                                             RichText::new(tr("Delete forever")).color(t.danger),

@@ -823,6 +823,7 @@ impl App {
                                             cards.push(DashCard {
                                                 kind: k.into(),
                                                 title: String::new(),
+                                // framed like the other controls in this row
                                             });
                                             self.data.extra.dashboards[di].cards = Some(cards);
                                             self.dirty = true;

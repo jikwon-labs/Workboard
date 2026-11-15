@@ -3039,11 +3039,17 @@ impl App {
                             resp
                         };
                         if matches!(self.loc, Location::List(_)) {
-                            let r = ui.add(
-                                egui::Button::new(RichText::new(tr("Manage")).size(14.0))
-                                    .stroke(Stroke::new(1.0, t.border))
-                                    .corner_radius(7)
-                                    .min_size(vec2(0.0, 28.0)),
+                            // frameless like Share, Ask and Automate beside it
+                            let r = super::icons::icon_button_ex(
+                                ui,
+                                &t,
+                                "dots",
+                                tr("Manage"),
+                                "Manage",
+                                false,
+                                0.0,
+                                t.text2,
+                                t.text2,
                             );
                             if let Location::List(lid) = self.loc {
                                 popup(ui, &r, ui.id().with("manage_pop"), 200.0, |ui| {

@@ -1713,13 +1713,18 @@ impl App {
 
     fn org_chart(&mut self, ui: &mut Ui) {
         let t = self.t();
-        self.page_bar(ui, "Org Chart", |_, _| {});
+        // titled like People and Analytics beside it (it had the smaller
+        // page bar with a line under it)
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(24, 24))
+                    .inner_margin(egui::Margin::symmetric(24, 16))
                     .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(tr("Org Chart")).size(20.0));
+                        });
+                        ui.add_space(8.0);
                         for role in ["Owner", "Admin", "Member", "Guest"] {
                             let people: Vec<Member> = self
                                 .data

@@ -425,9 +425,10 @@ impl App {
     pub(super) fn teams_workload(&mut self, ui: &mut Ui) {
         let t = self.t();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
+            // the same margin and title as People and Org Chart
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Analytics")).size(20.0).strong());
+                    ui.label(RichText::new(tr("Analytics")).size(20.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if super::icons::icon_button(ui, &t, "teams", tr("Manage people"), "Manage people", true)
                             .clicked()

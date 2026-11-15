@@ -39,6 +39,8 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 - 검증(`scripts/wt verify`)을 통과하지 않은 커밋, fast-forward 가 아닌 push, main 삭제 (`.githooks/pre-push`)
 - `--no-verify`, `core.hooksPath` 로 훅을 우회하는 명령
 
+Claude 가 `.rs` 파일을 고치면 rustfmt 가 그 파일만 정리한다(`.claude/hooks/fmt.sh`). 단, 커밋된 버전이 이미 정리돼 있던 파일(과 새 파일)만. 아직 대부분의 파일이 정리 전이라, 작은 수정에 파일 전체가 바뀌어 진짜 변경이 묻히는 것을 막는다. 손으로 `cargo fmt` 를 돌리지 않는다(전체 정리는 `docs/macbook/README.md` 의 할 일).
+
 git 훅은 `CLAUDECODE` 환경 변수가 있을 때(Claude Code 세션)만 동작한다. 사람이 직접 하는 커밋·push 는 막지 않는다. 새로 clone 한 곳에서는 한 번 `git config core.hooksPath .githooks` 를 해야 git 훅이 켜진다.
 
 ## 기기별 할 일 체크리스트

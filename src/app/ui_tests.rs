@@ -8463,3 +8463,20 @@ fn settings_counts_leave_out_archived_and_say_how_many() {
         people, n
     )));
 }
+
+#[test]
+fn sidebar_says_when_a_folder_or_space_holds_only_archived_lists() {
+    let mut h = archived_workspace();
+    for s in h.app.data.spaces.iter_mut() {
+        s.expanded = true;
+    }
+    h.settle();
+    // the Projects folder (2 Lists) and Side Projects (1 List) look empty otherwise
+    assert!(h.has("2 archived Lists"));
+    assert!(h.has("1 archived List"));
+    h.click("2 archived Lists");
+    assert_eq!(h.app.section, Section::Settings);
+    // nothing archived: no such rows
+    let h = Ui1::new();
+    assert!(!h.tree.iter().any(|(n, _)| n.contains("archived List")));
+}

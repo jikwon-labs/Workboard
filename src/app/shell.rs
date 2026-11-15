@@ -2803,8 +2803,12 @@ impl App {
                     .iter()
                     .filter(|l| !l.archived && self.matches_search(&l.name))
                     .collect();
+                let none_live = f.lists.iter().all(|l| l.archived);
                 for l in shown {
                     self.list_row(ui, 30.0, l);
+                }
+                if !searching && none_live {
+                    self.archived_lists_row(ui, 30.0, f.lists.len());
                 }
             }
         }
@@ -2824,6 +2828,15 @@ impl App {
             .filter(|d| d.space == Some(s.id) && d.parent.is_none() && self.doc_shown(d))
             .map(|d| (d.id, d.title.clone()))
             .collect();
+        // everything in the Space archived: say so rather than look empty
+        if !searching
+            && docs.is_empty()
+            && s.folders.iter().all(|f| f.archived)
+            && s.lists.iter().all(|l| l.archived)
+        {
+            let n = s.lists.len() + s.folders.iter().map(|f| f.lists.len()).sum::<usize>();
+            self.archived_lists_row(ui, 14.0, n);
+        }
         for (id, title) in docs {
             if !self.matches_search(&title) {
                 continue;
@@ -2958,6 +2971,25 @@ impl App {
             .filter(|t| self.data.task_live(t))
             .map(|t| (t.id, t.name.clone()))
             .collect()
+    }
+
+    /// Under a Folder or Space that shows nothing because its Lists are
+    /// archived: "N archived Lists", opening Settings > Spaces to restore them.
+    fn archived_lists_row(&mut self, ui: &mut Ui, indent: f32, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let text = if n == 1 {
+            tr("1 archived List").to_string()
+        } else {
+            trf!("{} archived Lists", n)
+        };
+        let r = self.side_row(ui, indent, false, |_, _| {}, &text, None, None, true);
+        if r.on_hover_text(tr("Restore them from Settings > Spaces"))
+            .clicked()
+        {
+            self.open_settings("Spaces");
+        }
     }
 
     /// Top-level tasks here hidden only because they are archived: (archived

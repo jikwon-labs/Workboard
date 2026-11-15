@@ -140,4 +140,10 @@ pub const T: &[(&str, &str)] = &[
         "What this sits in is archived. Restore it from Settings > Spaces.",
         "이 항목이 들어 있는 곳이 보관되어 있습니다. 설정 > 스페이스에서 복원하세요.",
     ),
+    ("1 archived List", "보관된 목록 1개"),
+    ("{} archived Lists", "보관된 목록 {}개"),
+    (
+        "Restore them from Settings > Spaces",
+        "설정 > 스페이스에서 복원할 수 있습니다",
+    ),
 ];

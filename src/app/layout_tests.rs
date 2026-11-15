@@ -841,3 +841,14 @@ fn small_window_chat_chip_stays_above_the_messages() {
         followers
     );
 }
+
+#[test]
+fn small_window_doc_template_cards_fit_and_shorten() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.open_docs_list();
+    let wiki = h.rect("Template Wiki");
+    assert!(wiki.right() <= h.size.x, "the third card {:?} fits", wiki);
+    let page = Rect::from_min_max(pos2(60.0, 40.0), h.size.to_pos2());
+    let cut = h.cut_texts(page);
+    assert!(cut.is_empty(), "cut: {:?}", cut);
+}

@@ -596,7 +596,8 @@ impl App {
                                 });
                                 ui.add_space(4.0);
                                 let w = ui.available_width();
-                                let cw = ((w - 24.0) / 3.0).min(430.0);
+                                let gap = ui.spacing().item_spacing.x;
+                                let cw = ((w - 2.0 * gap) / 3.0).floor().min(430.0);
                                 ui.horizontal(|ui| {
                                     for b in super::templates::builtins()
                                         .into_iter()
@@ -630,19 +631,24 @@ impl App {
                                             FontId::proportional(14.0),
                                             rgb(color),
                                         );
-                                        ui.painter().text(
+                                        // shortened with an ellipsis in a narrow card
+                                        paint_fit(
+                                            ui,
                                             r.left_center() + vec2(62.0, -10.0),
                                             Align2::LEFT_CENTER,
                                             &b.tpl.name,
                                             FontId::proportional(15.0),
                                             t.text,
+                                            cw - 62.0 - 10.0,
                                         );
-                                        ui.painter().with_clip_rect(r.shrink(4.0)).text(
+                                        paint_fit(
+                                            ui,
                                             r.left_center() + vec2(62.0, 12.0),
                                             Align2::LEFT_CENTER,
                                             b.about,
                                             FontId::proportional(12.5),
                                             t.text2,
+                                            cw - 62.0 - 10.0,
                                         );
                                         if resp.clicked() {
                                             self.use_builtin_doc(b.key, self.current_space());

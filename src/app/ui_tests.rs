@@ -801,6 +801,44 @@ fn click_work_together_opens_sharing() {
 }
 
 #[test]
+fn work_together_in_a_shared_folder_says_how_teammates_join_and_keeps_the_path_on_one_line() {
+    let mut h = Ui1::new();
+    // no sync folder found on this computer: nothing "above" to pick
+    h.click("Workspace menu");
+    h.click("Work together");
+    let hint = |h: &Ui1, s: &str| !h.painted_text(s).is_empty();
+    if crate::sync::suggested_folders().is_empty() {
+        assert!(hint(&h, "Paste a folder path"));
+        assert!(!hint(&h, "Paste a folder path, or pick one above"));
+    } else {
+        assert!(h.has("Found on this computer"));
+        assert!(hint(&h, "Paste a folder path, or pick one above"));
+    }
+    h.key(egui::Key::Escape);
+    let dir = std::env::temp_dir()
+        .join(format!("wb-ui-{:x}", crate::sync::random_u64()))
+        .join("audit-states-shared-folder")
+        .join("team-workspace-folder")
+        .join("_shared");
+    std::fs::create_dir_all(&dir).unwrap();
+    let full = dir.to_str().unwrap().to_string();
+    h.app.share_here(&full).unwrap();
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    // the long path is cut from the front at folder names, on one line
+    let short = super::together::short_path(&full, 48);
+    assert!(short.starts_with('\u{2026}') && short.ends_with("/team-workspace-folder/_shared"));
+    assert!(h.has(&short), "{}", short);
+    let at = h.painted_text(&short);
+    assert_eq!(at.len(), 1, "one line: {:?}", at);
+    assert!(at[0].0.height() < 24.0, "{:?}", at);
+    // counts computers, and says what teammates do on theirs
+    assert!(h.has("No other computer is working in this folder yet. Share the folder with your teammates in your sync app. On their computer they open Work together, paste the folder's path and choose Join this workspace."));
+    assert!(h.has("Tasks, chat and docs show up for everyone a few seconds after their sync app copies the folder. Calls open in the browser from a link posted in chat."));
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap().parent().unwrap());
+}
+
+#[test]
 fn work_together_connects_to_a_server_and_shows_the_status() {
     let mut h = Ui1::new();
     h.click("Workspace menu");

@@ -6415,6 +6415,21 @@ fn a_server_that_cannot_be_reached_is_said_plainly() {
 }
 
 #[test]
+fn a_long_folder_path_is_cut_from_the_front_at_folder_names() {
+    use super::together::short_path;
+    assert_eq!(short_path("/Users/me/Dropbox", 48), "/Users/me/Dropbox");
+    let p = "/Users/someone/Library/Mobile Documents/com~apple~CloudDocs/team-shared/_shared";
+    let s = short_path(p, 42);
+    assert_eq!(s, "\u{2026}/com~apple~CloudDocs/team-shared/_shared");
+    assert!(s.chars().count() <= 42);
+    // one folder name longer than the room is kept whole
+    assert_eq!(
+        short_path("/a/a-very-long-folder-name-that-will-not-fit", 10),
+        "\u{2026}/a-very-long-folder-name-that-will-not-fit"
+    );
+}
+
+#[test]
 fn back_and_forward_to_another_place_clear_the_selection() {
     let mut a = app();
     let lists = list_ids(&a);

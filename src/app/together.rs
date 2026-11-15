@@ -389,6 +389,27 @@ pub(super) fn folder_people(folder: &str) -> usize {
     sync::other_files(Path::new(folder.trim()), "").len()
 }
 
+/// A long folder path cut down from the front to whole folder names
+/// ("\u{2026}/Dropbox/Team/_shared"), so it fits on one line.
+pub(super) fn short_path(p: &str, max: usize) -> String {
+    if p.chars().count() <= max {
+        return p.to_string();
+    }
+    let mut out = String::new();
+    for part in p.rsplit('/').filter(|s| !s.is_empty()) {
+        let next = if out.is_empty() {
+            part.to_string()
+        } else {
+            format!("{}/{}", part, out)
+        };
+        if !out.is_empty() && next.chars().count() + 2 > max {
+            break;
+        }
+        out = next;
+    }
+    format!("\u{2026}/{}", out)
+}
+
 /// This app's version, written into the shared folder and sent in hello.
 pub(super) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -2301,15 +2322,20 @@ impl App {
                     .size(15.0)
                     .strong(),
             );
-            ui.label(RichText::new(&cfg.folder).color(t.text2));
+            ui.add(
+                egui::Label::new(RichText::new(short_path(&cfg.folder, 48)).color(t.text2))
+                    .wrap_mode(egui::TextWrapMode::Truncate),
+            )
+            .on_hover_text(&cfg.folder);
+            // computers, not people: the people list counts everyone added
             let n = sync::other_files(Path::new(&cfg.folder), &cfg.device).len();
             ui.label(RichText::new(match n {
-                0 => tr("Nobody else has joined yet. Share this folder with your teammates in your sync app, then they choose Work together > Join.").to_string(),
+                0 => tr("No other computer is working in this folder yet. Share the folder with your teammates in your sync app. On their computer they open Work together, paste the folder's path and choose Join this workspace.").to_string(),
                 1 => tr("1 other computer is working in it.").to_string(),
                 n => trf!("{} other computers are working in it.", n),
             }).color(t.text2));
             ui.add_space(8.0);
-            ui.label(RichText::new(tr("Tasks, chat, docs and calls show up for everyone within a few seconds of their sync app copying the folder.")).small().color(t.text3));
+            ui.label(RichText::new(tr("Tasks, chat and docs show up for everyone a few seconds after their sync app copies the folder. Calls open in the browser from a link posted in chat.")).small().color(t.text3));
             ui.label(RichText::new(tr(FOLDER_PRIVACY)).small().color(t.text2));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -2361,7 +2387,11 @@ impl App {
             ui.label(RichText::new(tr("Folder")).color(t.text2));
             ui.add(
                 field(path)
-                    .hint_text(tr("Paste a folder path, or pick one above"))
+                    .hint_text(if sugg.is_empty() {
+                        tr("Paste a folder path")
+                    } else {
+                        tr("Paste a folder path, or pick one above")
+                    })
                     .desired_width(f32::INFINITY),
             );
             let n = folder_people(path);

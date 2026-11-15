@@ -86,7 +86,7 @@ public final class FakeServer: @unchecked Sendable {
     /// What /auth/forgot answers for "mail" (false: this server can't send email).
     public var canMail = true
     /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
-    /// /admin/revoke?member=N, /admin/say?channel=C&author=A&text=T,
+    /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T,
     /// /admin/reset-code?email=E, /admin/drop-account?member=N), so UI
     /// tests in the simulator can drive sign-in and incoming messages.
     public var adminHTTP = false
@@ -326,6 +326,13 @@ public final class FakeServer: @unchecked Sendable {
             case "/admin/drop-account":
                 accounts[member] = nil
                 log("admin: dropped the account of member \(member)")
+                respond(p, 200, ["ok": true])
+            case "/admin/backup":
+                // a backup of the current snapshot, for the owner to restore
+                let name = comps?.queryItems?.first { $0.name == "name" }?.value ?? "hourly-20261116-03.json"
+                backupFiles.removeAll { $0.name == name }
+                backupFiles.insert((name, snapshot ?? [:]), at: 0)
+                log("admin: backup \(name)")
                 respond(p, 200, ["ok": true])
             case "/admin/revoke":
                 revokeOnQueue(member)

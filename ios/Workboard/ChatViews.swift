@@ -478,8 +478,9 @@ struct Composer: View {
     @State private var pending: [PendingFile] = []
     /// People chosen from the @ list for this message.
     @State private var mentioned: [UInt64] = []
-    /// Where the "@" just completed from the list is (no list for it again).
-    @State private var completedAt: Int?
+    /// The text right after a pick from the list: no list again for that
+    /// "@" while the text still starts with it.
+    @State private var completed: String?
     @FocusState private var focused: Bool
 
     init(placeholder: String, send: @escaping (String, [UInt64]) -> Bool) {
@@ -497,7 +498,8 @@ struct Composer: View {
     /// The people the @ list shows now (none: no list).
     var mentionChoices: [MemberView] {
         guard let q = Mentions.query(in: text), let at = text.lastIndex(of: "@") else { return [] }
-        if text.distance(from: text.startIndex, to: at) == completedAt { return [] }
+        if let c = completed, text.hasPrefix(c), let cAt = c.lastIndex(of: "@"),
+           text.distance(from: text.startIndex, to: at) == c.distance(from: c.startIndex, to: cAt) { return [] }
         return Mentions.candidates(q, members: client.view.members, me: client.me)
     }
 
@@ -513,8 +515,8 @@ struct Composer: View {
                     HStack(spacing: 8) {
                         ForEach(choices) { m in
                             Button {
-                                if let at = text.lastIndex(of: "@") { completedAt = text.distance(from: text.startIndex, to: at) }
                                 text = Mentions.complete(text, with: m.name)
+                                completed = text
                                 if !mentioned.contains(m.id) { mentioned.append(m.id) }
                             } label: {
                                 HStack(spacing: 6) {
@@ -569,7 +571,7 @@ struct Composer: View {
                         text = ""
                         pending = []
                         mentioned = []
-                        completedAt = nil
+                        completed = nil
                     }
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")

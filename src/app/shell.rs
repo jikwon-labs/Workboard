@@ -598,39 +598,8 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
     true
 }
 
-/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
-pub(super) fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
-    let w = |s: &str| {
-        p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-    };
-    if w(text) <= max_w {
-        return text.to_string();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let (mut lo, mut hi) = (0usize, chars.len());
-    while lo < hi {
-        let mid = (lo + hi + 1) / 2;
-        let cand: String = chars[..mid]
-            .iter()
-            .collect::<String>()
-            .trim_end()
-            .to_string()
-            + "\u{2026}";
-        if w(&cand) <= max_w {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    chars[..lo]
-        .iter()
-        .collect::<String>()
-        .trim_end()
-        .to_string()
-        + "\u{2026}"
-}
+// moved to widgets.rs; kept here for code that names it `shell::fit_text`
+pub(super) use crate::widgets::fit_text;
 
 pub(super) struct Cols {
     pub assignee: Rect,

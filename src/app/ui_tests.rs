@@ -6322,6 +6322,8 @@ fn timesheet_entry_edits_and_week_picker() {
 }
 #[path = "i18n_tests.rs"]
 mod i18n_tests;
+#[path = "layout_tests.rs"]
+mod layout_tests;
 #[path = "template_tests.rs"]
 mod template_tests;
 #[path = "wording_tests.rs"]

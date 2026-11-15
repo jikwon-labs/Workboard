@@ -268,7 +268,11 @@ impl App {
                 ui.add_space(12.0);
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
-                for (x, h) in [(0.0, "Name"), (0.32, "Email"), (0.6, "Role"), (0.76, "Status")] {
+                // column starts as parts of the width; the last 84 px are the
+                // Remove button, so a small window narrows the columns instead
+                let (ex, rx, sx) = (0.3, 0.52, 0.68);
+                let col_w = |from: f32, to: f32| w * (to - from) - 16.0;
+                for (x, h) in [(0.0, "Name"), (ex, "Email"), (rx, "Role"), (sx, "Status")] {
                     ui.painter().text(pos2(hr.left() + w * x + 8.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
                 }
                 ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
@@ -283,19 +287,21 @@ impl App {
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
                     let name = if m.id == me { trf!("{} (you)", m.name) } else { m.name.clone() };
-                    ui.painter().text(pos2(r.left() + 44.0, r.center().y - (if m.status_text.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, name, FontId::proportional(14.0), t.text);
+                    let name_w = w * ex - 44.0 - 8.0;
+                    paint_fit(ui, pos2(r.left() + 44.0, r.center().y - (if m.status_text.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text, name_w);
                     if !m.status_text.is_empty() {
-                        ui.painter().text(pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &m.status_text, FontId::proportional(12.0), t.text3);
+                        paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &m.status_text, FontId::proportional(12.0), t.text3, name_w);
                     }
-                    ui.painter().text(pos2(r.left() + w * 0.32 + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2);
-                    let role_rect = Rect::from_min_size(pos2(r.left() + w * 0.6, r.center().y - 13.0), vec2(w * 0.15, 26.0));
+                    paint_fit(ui, pos2(r.left() + w * ex + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2, col_w(ex, rx));
+                    let role_w = w * (sx - rx) - 8.0;
+                    let role_rect = Rect::from_min_size(pos2(r.left() + w * rx, r.center().y - 13.0), vec2(role_w, 26.0));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
                     let mut role = if m.role.is_empty() { "Member".to_string() } else { m.role.clone() };
                     if m.role == "Owner" || !manages || (server && m.id == me) {
                         child.label(super::menus::role_text(&role));
                     } else {
                         // Guest isn't offered: nothing limits what a guest can see yet
-                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
+                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(role_w.min(100.0)).show_ui(&mut child, |ui| {
                             for (n, _) in ROLES.iter().take(2) {
                                 ui.selectable_value(&mut role, n.to_string(), super::menus::role_text(n));
                             }
@@ -313,7 +319,7 @@ impl App {
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
-                    ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col);
+                    paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 84.0);
                     if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr("Remove")).color(t.danger)))).clicked() {

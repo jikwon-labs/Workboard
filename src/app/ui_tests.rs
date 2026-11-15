@@ -2083,3 +2083,185 @@ fn composer_mention_and_emoji_pickers() {
     h.click_side("Jordan Park", true);
     assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
+
+// ---------------------------------------------------------------- list view slice (sf-listview)
+
+impl Ui1 {
+    // one frame with modifier keys held (egui reads them from the raw input)
+    fn frame_held(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        self.time += 0.05;
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)), time: Some(self.time), events, modifiers, ..Default::default() };
+        let app = &mut self.app;
+        let _ = self.ctx.run(input, |ctx| app.ui_frame(ctx));
+    }
+
+    fn click_with(&mut self, name: &str, modifiers: egui::Modifiers, dx: Option<f32>) {
+        self.scroll_into_view(name);
+        let r = self.rect(name);
+        let pos = dx.map(|d| pos2(r.left() + d, r.center().y)).unwrap_or(r.center());
+        self.frame_held(vec![egui::Event::PointerMoved(pos)], modifiers);
+        self.frame_held(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers }], modifiers);
+        self.frame_held(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers }], modifiers);
+        self.settle();
+    }
+
+    fn key_with(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+        self.frame(vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
+        self.frame(vec![egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }]);
+        self.settle();
+    }
+
+    fn task_id(&self, name: &str) -> u64 {
+        self.app.data.tasks.iter().find(|t| t.name == name).map(|t| t.id).unwrap_or_else(|| panic!("no task {:?}", name))
+    }
+}
+
+#[test]
+fn drag_a_row_into_a_new_place() {
+    let mut h = Ui1::new();
+    let row_y = |h: &Ui1, n: &str| h.rect(&format!("Task {}", n)).center().y;
+    assert!(row_y(&h, "Collect feedback from beta users") > row_y(&h, "Write copy for landing page"));
+    h.drag("Task Collect feedback from beta users", "Task Write copy for landing page");
+    assert!(h.app.open_task.is_none(), "a drag does not open the task");
+    assert!(row_y(&h, "Collect feedback from beta users") < row_y(&h, "Write copy for landing page"), "the dragged row now comes first");
+    // dropped into another status group, it takes that status
+    h.drag("Task Set up analytics dashboard", "Task Fix navigation on mobile");
+    let t = h.app.task(h.task_id("Set up analytics dashboard")).unwrap();
+    assert_eq!(t.status, "in progress");
+}
+
+#[test]
+fn shift_click_selects_a_range_and_cmd_a_selects_all() {
+    let mut h = Ui1::new();
+    h.hover(h.find("Task Design new homepage layout").unwrap());
+    h.click("Select Design new homepage layout");
+    h.click_with("Task Set up analytics dashboard", egui::Modifiers::SHIFT, Some(60.0));
+    // to do: Write copy, Set up analytics, Collect feedback; in progress: Design, Fix navigation
+    assert_eq!(h.app.selected.len(), 3, "{:?}", h.app.selected);
+    assert!(!h.app.selected.contains(&h.task_id("Write copy for landing page")));
+    assert!(h.app.selected.contains(&h.task_id("Collect feedback from beta users")));
+    h.key(egui::Key::Escape);
+    assert!(h.app.selected.is_empty());
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.selected.len(), 5, "every row shown");
+}
+
+#[test]
+fn delete_key_asks_then_undo_brings_tasks_back() {
+    let mut h = Ui1::new();
+    let n = h.app.data.tasks.len();
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Select Write copy for landing page");
+    h.click("Select Set up analytics dashboard");
+    h.key(egui::Key::Backspace);
+    assert!(h.app.confirm_bulk_delete, "Delete asks first");
+    assert_eq!(h.app.data.tasks.len(), n);
+    h.click("Confirm delete");
+    assert_eq!(h.app.data.tasks.len(), n - 2);
+    assert!(h.has("2 tasks deleted"));
+    h.click("Undo delete");
+    assert_eq!(h.app.data.tasks.len(), n);
+    assert!(h.app.data.extra.trash.is_empty());
+    // the row menu deletes at once, with the same Undo
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Task options Write copy for landing page");
+    h.click("Delete");
+    assert_eq!(h.app.data.tasks.len(), n - 1);
+    h.click("Undo delete");
+    assert_eq!(h.app.data.tasks.len(), n);
+}
+
+#[test]
+fn group_menu_selects_and_collapses() {
+    let mut h = Ui1::new();
+    h.hover(h.find("Group options TO DO").unwrap());
+    h.click("Group options TO DO");
+    h.click("Select all in group");
+    assert_eq!(h.app.selected.len(), 3);
+    h.key(egui::Key::Escape);
+    h.hover(h.find("Group options TO DO").unwrap());
+    h.click("Group options TO DO");
+    h.click("Collapse all groups");
+    assert!(!h.has("Task Write copy for landing page") && !h.has("Task Design new homepage layout"));
+    h.hover(h.find("Group options TO DO").unwrap());
+    h.click("Group options TO DO");
+    h.click("Expand all groups");
+    assert!(h.has("Task Write copy for landing page"));
+}
+
+#[test]
+fn row_quick_actions_rename_subtask_and_tag() {
+    let mut h = Ui1::new();
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Rename Write copy for landing page");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("Landing page copy");
+    h.key(egui::Key::Enter);
+    let id = h.task_id("Landing page copy");
+    assert!(h.app.open_task.is_none());
+    h.hover(h.find("Task Landing page copy").unwrap());
+    h.click("Add subtask Landing page copy");
+    h.type_text("Headline");
+    h.key(egui::Key::Enter);
+    let sub = h.app.task(h.task_id("Headline")).unwrap();
+    assert_eq!(sub.parent, Some(id));
+    h.key(egui::Key::Escape);
+    h.hover(h.find("Task Landing page copy").unwrap());
+    h.click("Add tag Landing page copy");
+    h.click("design");
+    assert!(h.app.task(id).unwrap().tags.contains(&"design".to_string()));
+    // the row menu's Rename also renames in place
+    h.key(egui::Key::Escape);
+    h.right_click("Task Set up analytics dashboard", 60.0);
+    h.click("Rename");
+    assert!(h.app.row_rename.is_some() && h.app.rename.is_none());
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("Analytics");
+    h.key(egui::Key::Enter);
+    h.task_id("Analytics");
+}
+
+#[test]
+fn arrow_keys_and_enter_open_a_row() {
+    let mut h = Ui1::new();
+    h.key(egui::Key::ArrowDown);
+    h.key(egui::Key::ArrowDown);
+    h.key(egui::Key::Enter);
+    // the second row: TO DO comes first
+    assert_eq!(h.app.open_task, Some(h.task_id("Set up analytics dashboard")));
+}
+
+#[test]
+fn bulk_bar_tags_unassign_start_date_and_unarchive() {
+    let mut h = Ui1::new();
+    let a = "Write copy for landing page";
+    let b = "Design new homepage layout";
+    h.hover(h.find(&format!("Task {}", a)).unwrap());
+    h.click(&format!("Select {}", a));
+    h.click(&format!("Select {}", b));
+    h.click("Tags");
+    h.type_text("launch");
+    h.key(egui::Key::Enter);
+    for n in [a, b] {
+        assert!(h.app.task(h.task_id(n)).unwrap().tags.contains(&"launch".to_string()), "{}", n);
+    }
+    h.key(egui::Key::Escape);
+    h.click("Assignees");
+    h.click("Unassign all");
+    for n in [a, b] {
+        assert!(h.app.task(h.task_id(n)).unwrap().assignees.is_empty());
+    }
+    h.click("Start date");
+    h.click("Today");
+    for n in [a, b] {
+        assert_eq!(h.app.task(h.task_id(n)).unwrap().start, Some(today()));
+    }
+    h.click("Archive");
+    h.app.filter.archived = true;
+    h.settle();
+    h.hover(h.find(&format!("Task {}", a)).unwrap());
+    h.click(&format!("Select {}", a));
+    h.click(&format!("Select {}", b));
+    h.click("Unarchive");
+    assert!(!h.app.task(h.task_id(a)).unwrap().archived);
+}

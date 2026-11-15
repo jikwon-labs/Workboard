@@ -1813,7 +1813,7 @@ impl App {
                 if grouped {
                     let r = chip(ui, &group_label, "\u{2261}", false, true);
                     popup(ui, &r, ui.id().with("group_pop"), 160.0, |ui| {
-                        for g in [GroupBy::Status, GroupBy::Priority, GroupBy::Assignee, GroupBy::DueDate, GroupBy::None] {
+                        for g in GroupBy::ALL {
                             if ui.selectable_label(self.group_by == g, g.label()).clicked() {
                                 self.group_by = g;
                                 close_popup(ui);
@@ -1901,7 +1901,7 @@ impl App {
                     }
                     let sr = chip(ui, &slabel, &format!("\u{21C5}{}", sort_arrow), self.sort_by != SortBy::Manual, false);
                     popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
-                        for s in [SortBy::Manual, SortBy::DueDate, SortBy::Priority, SortBy::Name, SortBy::Created] {
+                        for s in SortBy::ALL {
                             if ui.selectable_label(self.sort_by == s, s.label()).clicked() {
                                 self.sort_by = s;
                                 close_popup(ui);
@@ -1928,6 +1928,9 @@ impl App {
 
     pub(super) fn list_view(&mut self, ui: &mut Ui) {
         let t = self.t();
+        self.list_keys(ui.ctx());
+        self.row_order = self.row_spots.drain(..).map(|s| s.id).collect();
+        self.row_groups.clear();
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let refs: Vec<&Task> = tasks.iter().collect();
         let groups = self.groups(&refs, false);
@@ -1998,6 +2001,7 @@ impl App {
                 self.list_group(ui, g, &tasks);
                 ui.add_space(12.0);
             }
+            self.finish_row_drag(ui);
             ui.add_space(40.0);
         });
     }
@@ -2016,9 +2020,11 @@ impl App {
 
     fn list_group(&mut self, ui: &mut Ui, g: &Group, tasks: &[Task]) {
         let t = self.t();
+        self.row_groups.push(g.clone());
         let collapsed = self.collapsed.contains(&g.key);
         let w = ui.available_width();
-        let (hr, hresp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
+        let (hr, hresp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+        hresp.context_menu(|ui| self.group_menu(ui, g));
         let arrow = Rect::from_center_size(hr.left_center() + vec2(14.0, 0.0), vec2(18.0, 18.0));
         let ar = ui.interact(arrow, ui.id().with(("garrow", &g.key)), Sense::click());
         paint_triangle(ui.painter(), arrow.center(), !collapsed, if ar.hovered() { t.text } else { t.text2 });
@@ -2032,7 +2038,19 @@ impl App {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_max(pos2(hr.left() + 28.0, hr.top()), hr.max)).layout(Layout::left_to_right(Align::Center)));
         self.group_pill(&mut child, g);
         child.label(RichText::new(g.tasks.len().to_string()).color(t.text2));
-        if hresp.hovered() || child.ui_contains_pointer() {
+        // "..." group menu: always laid out so its menu stays open while
+        // the pointer moves into it, drawn only on hover
+        let (dr, dresp) = child.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+        name_it(&dresp, &format!("Group options {}", g.label));
+        let show_dots = hresp.hovered() || child.ui_contains_pointer();
+        if show_dots {
+            if dresp.hovered() {
+                child.painter().rect_filled(dr, 5.0, t.hover);
+            }
+            child.painter().text(dr.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(14.0), t.text2);
+        }
+        click_menu(&dresp, |ui| self.group_menu(ui, g));
+        if show_dots {
             if child.add(egui::Button::new(RichText::new("+ Add Task").color(t.text3).size(12.5)).frame(false)).clicked() {
                 self.adding = Some((g.key.clone(), String::new()));
                 self.collapsed.remove(&g.key);
@@ -2049,6 +2067,9 @@ impl App {
                 for s in &subs {
                     self.task_row(ui, s, 1);
                 }
+            }
+            if self.sub_adding.as_ref().is_some_and(|(p, _)| *p == task.id) {
+                self.sub_add_row(ui, task);
             }
         }
         let w = ui.available_width();
@@ -2103,15 +2124,25 @@ impl App {
         let t = self.t();
         let w = ui.available_width();
         let row_h = if self.data.extra.labs.iter().any(|l| l == "compact") { 30.0 } else { 36.0 };
-        let (rect, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::click());
+        // drag a row to put it in a new place (Sort: Manual) or group
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::click_and_drag());
         name_it(&resp, &format!("Task {}", task.name));
         let id = ui.id().with(("row", task.id));
         let apps = self.data.extra.apps.clone();
+        self.row_spots.push(super::listview::RowSpot { id: task.id, parent: task.parent, rect, group: self.row_groups.len().saturating_sub(1) });
+        if resp.drag_started() && self.row_rename.is_none() {
+            self.row_drag = Some(task.id);
+        }
         if self.selected.contains(&task.id) {
             ui.painter().rect_filled(rect, 0.0, t.selected_bg);
-        } else if resp.hovered() {
+        } else if resp.hovered() || self.row_drag == Some(task.id) {
             ui.painter().rect_filled(rect, 0.0, t.hover);
         }
+        if self.row_focus == Some(task.id) {
+            ui.painter().rect_stroke(rect.shrink(1.0), 3.0, Stroke::new(1.5_f32, t.primary), egui::StrokeKind::Inside);
+        }
+        let row_hover = (ui.rect_contains_pointer(rect) && self.row_drag.is_none()) || Self::quick_tags_open(ui, task.id);
+        let renaming = self.row_rename.as_ref().is_some_and(|(r, _)| *r == task.id);
         ui.painter().hline(rect.left() + 28.0..=rect.right(), rect.bottom() - 0.5, Stroke::new(1.0, t.border));
         let cols = col_layout(rect, &self.hidden_cols, self.data.extra.apps.priorities);
         let st = self.data.status_of(task);
@@ -2149,16 +2180,24 @@ impl App {
         let name_col = if closed { t.text3 } else { t.text };
         // the name takes the room up to the columns, minus the counts drawn
         // after it; cut by measured width, not by a guessed character count
-        let after = if nsub > 0 { 34.0 } else { 0.0 } + if task.checklist.is_empty() { 0.0 } else { 42.0 } + 12.0;
+        // (room for the quick action buttons while hovered)
+        let quick_w = if row_hover && !renaming { 72.0 } else { 0.0 };
+        let after = if nsub > 0 { 34.0 } else { 0.0 } + if task.checklist.is_empty() { 0.0 } else { 42.0 } + 12.0 + quick_w;
         let max_name = (cols.left - x - after).max(60.0);
-        let name = fit_text(ui.painter(), &task.name, &FontId::proportional(14.0), max_name);
-        let galley = ui.painter().layout_no_wrap(name, FontId::proportional(14.0), name_col);
-        let gw = galley.size().x;
-        ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, name_col);
-        if closed {
-            ui.painter().hline(x..=x + gw, rect.center().y, Stroke::new(1.0, t.text3));
+        if renaming {
+            let nr = Rect::from_min_max(pos2(x - 4.0, rect.top() + 4.0), pos2((cols.left - 12.0).max(x + 120.0), rect.bottom() - 4.0));
+            self.row_rename_field(ui, nr, task);
+            x = nr.right() + 10.0;
+        } else {
+            let name = fit_text(ui.painter(), &task.name, &FontId::proportional(14.0), max_name);
+            let galley = ui.painter().layout_no_wrap(name, FontId::proportional(14.0), name_col);
+            let gw = galley.size().x;
+            ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, name_col);
+            if closed {
+                ui.painter().hline(x..=x + gw, rect.center().y, Stroke::new(1.0, t.text3));
+            }
+            x += gw + 10.0;
         }
-        x += gw + 10.0;
         if nsub > 0 {
             ui.painter().text(pos2(x, rect.center().y), Align2::LEFT_CENTER, format!("\u{2934} {}", nsub), FontId::proportional(12.0), t.text3);
             x += 34.0;
@@ -2167,6 +2206,10 @@ impl App {
             let done = task.checklist.iter().filter(|c| c.done).count();
             ui.painter().text(pos2(x, rect.center().y), Align2::LEFT_CENTER, format!("\u{2611} {}/{}", done, task.checklist.len()), FontId::proportional(12.0), t.text3);
             x += 42.0;
+        }
+        if quick_w > 0.0 {
+            self.row_quick_actions(ui, rect, x, cols.left - 8.0, task);
+            x += quick_w;
         }
         for tag in task.tags.iter().take(if apps.tags { 2 } else { 0 }) {
             let col = tag_color(tag);
@@ -2273,10 +2316,10 @@ impl App {
         let ticked = self.row_checkbox(ui, rect, tid, resp.hovered());
         resp.context_menu(|ui| self.task_menu(ui, tid));
         if resp.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.shift) {
-            // Cmd/Shift click adds the row to the selection
-            if !self.selected.remove(&tid) {
-                self.selected.insert(tid);
-            }
+            // Cmd click toggles the row; Shift click selects the range from
+            // the last clicked row
+            let shift = ui.input(|i| i.modifiers.shift);
+            self.select_click(tid, shift);
             return;
         }
         if ticked {
@@ -2370,6 +2413,7 @@ impl App {
                     GroupBy::Assignee => task.assignees = g.assignee.into_iter().collect(),
                     GroupBy::DueDate => task.due = g.due,
                     GroupBy::None => {}
+                    GroupBy::Tags | GroupBy::List => self.move_to_group(&mut task, g),
                 }
                 self.actions.push(Action::Replace(task));
             }

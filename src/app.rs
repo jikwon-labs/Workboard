@@ -15,6 +15,7 @@ mod docs;
 mod files;
 mod hubs;
 mod huddle;
+mod listview;
 mod menus;
 mod more;
 mod pages;
@@ -64,16 +65,19 @@ impl ViewKind {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum GroupBy {
     Status,
     Priority,
     Assignee,
     DueDate,
     None,
+    Tags,
+    List,
 }
 
 impl GroupBy {
+    const ALL: [GroupBy; 7] = [GroupBy::Status, GroupBy::Priority, GroupBy::Assignee, GroupBy::DueDate, GroupBy::Tags, GroupBy::List, GroupBy::None];
     fn label(self) -> &'static str {
         match self {
             GroupBy::Status => "Status",
@@ -81,20 +85,28 @@ impl GroupBy {
             GroupBy::Assignee => "Assignee",
             GroupBy::DueDate => "Due date",
             GroupBy::None => "None",
+            GroupBy::Tags => "Tags",
+            GroupBy::List => "List",
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum SortBy {
     Manual,
     DueDate,
     Priority,
     Name,
     Created,
+    Status,
+    Assignee,
+    Updated,
+    StartDate,
+    Estimate,
 }
 
 impl SortBy {
+    const ALL: [SortBy; 10] = [SortBy::Manual, SortBy::Status, SortBy::Name, SortBy::Assignee, SortBy::Priority, SortBy::DueDate, SortBy::StartDate, SortBy::Created, SortBy::Updated, SortBy::Estimate];
     fn label(self) -> &'static str {
         match self {
             SortBy::Manual => "Manual",
@@ -102,6 +114,11 @@ impl SortBy {
             SortBy::Priority => "Priority",
             SortBy::Name => "Task name",
             SortBy::Created => "Date created",
+            SortBy::Status => "Status",
+            SortBy::Assignee => "Assignee",
+            SortBy::Updated => "Date updated",
+            SortBy::StartDate => "Start date",
+            SortBy::Estimate => "Time estimate",
         }
     }
 }
@@ -134,6 +151,7 @@ pub enum Action {
     SetSpaceColor(u64, [u8; 3]),
 }
 
+#[derive(Clone)]
 struct Group {
     key: String,
     label: String,
@@ -365,6 +383,29 @@ pub struct App {
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
+    /// View settings per location (see listview.rs), and the location they
+    /// were last brought in for with what was showing then.
+    view_prefs: HashMap<String, listview::ViewPrefs>,
+    view_prefs_at: Option<(String, listview::ViewPrefs)>,
+    /// The last row clicked into the selection (Shift-click selects from it).
+    select_anchor: Option<u64>,
+    /// The row the Up / Down keys highlight (Enter opens it).
+    row_focus: Option<u64>,
+    /// Rows of the List in the order drawn last frame.
+    row_order: Vec<u64>,
+    /// Rows and groups drawn this frame (for dropping a dragged row).
+    row_spots: Vec<listview::RowSpot>,
+    row_groups: Vec<Group>,
+    /// The List row being dragged to a new place.
+    row_drag: Option<u64>,
+    /// A List row being renamed in place: (task, new name).
+    row_rename: Option<(u64, String)>,
+    /// The inline new-subtask field: (parent, name).
+    sub_adding: Option<(u64, String)>,
+    /// Trash entries of the tasks just deleted, for the Undo bar.
+    undo_trash: Option<(Vec<u64>, i64)>,
+    /// Asking before deleting the selected tasks.
+    confirm_bulk_delete: bool,
 }
 
 impl App {
@@ -558,6 +599,18 @@ impl App {
             doc_preview: false,
             settings_tab: 0,
             settings_state: None,
+            view_prefs: if persist { listview::load_prefs() } else { HashMap::new() },
+            view_prefs_at: None,
+            select_anchor: None,
+            row_focus: None,
+            row_order: vec![],
+            row_spots: vec![],
+            row_groups: vec![],
+            row_drag: None,
+            row_rename: None,
+            sub_adding: None,
+            undo_trash: None,
+            confirm_bulk_delete: false,
         }
     }
 
@@ -577,7 +630,8 @@ impl App {
         v
     }
 
-    /// Tasks matching the current location and filters (top level only).
+    /// Tasks matching the current location and filters (top level only,
+    /// plus the subtasks a search finds).
     fn filtered(&self) -> Vec<&Task> {
         let lists = self.data.lists_in(self.loc);
         let q = self.search.to_lowercase();
@@ -585,7 +639,7 @@ impl App {
             .data
             .tasks
             .iter()
-            .filter(|t| t.parent.is_none())
+            .filter(|t| t.parent.is_none() || !q.is_empty())
             .filter(|t| match self.loc {
                 Location::MyTasks => t.assignees.contains(&self.data.me),
                 Location::TodayOverdue => t.assignees.contains(&self.data.me) && t.due.map(|d| d <= today()).unwrap_or(false) && !self.data.is_closed(t),
@@ -610,6 +664,19 @@ impl App {
             SortBy::Priority => v.sort_by_key(|t| (if t.priority == 0 { 9 } else { t.priority }, t.order)),
             SortBy::Name => v.sort_by_key(|t| t.name.to_lowercase()),
             SortBy::Created => v.sort_by_key(|t| std::cmp::Reverse(t.created)),
+            SortBy::Updated => v.sort_by_key(|t| std::cmp::Reverse(t.updated)),
+            SortBy::StartDate => v.sort_by_key(|t| (t.start.is_none(), t.start, t.order)),
+            SortBy::Estimate => v.sort_by_key(|t| (t.estimate_min.is_none(), t.estimate_min, t.order)),
+            SortBy::Status => {
+                // in the order the statuses are set up (open first, closed last)
+                let order: Vec<String> = self.location_statuses().into_iter().map(|s| s.name).collect();
+                v.sort_by_key(|t| (order.iter().position(|n| *n == self.data.status_of(t).name).unwrap_or(usize::MAX), t.order));
+            }
+            SortBy::Assignee => {
+                // by the first assignee's name; unassigned last
+                let key = |t: &Task| t.assignees.iter().filter_map(|a| self.data.member(*a)).map(|m| m.name.to_lowercase()).min();
+                v.sort_by_key(|t| (key(t).is_none(), key(t), t.order));
+            }
         }
         if self.sort_desc && self.sort_by != SortBy::Manual {
             v.reverse();
@@ -719,6 +786,36 @@ impl App {
                     out.push(Group { key: format!("d:{}", k), label, color, status: None, priority: None, assignee: None, due, tasks: ids });
                 }
             }
+            GroupBy::Tags => {
+                // a task with several tags shows under each of them
+                let mut tags: Vec<String> = tasks.iter().flat_map(|x| x.tags.iter().cloned()).collect();
+                tags.sort_by_key(|g| g.to_lowercase());
+                tags.dedup();
+                for tag in tags {
+                    let ids: Vec<u64> = tasks.iter().filter(|x| x.tags.contains(&tag)).map(|x| x.id).collect();
+                    out.push(Group { key: format!("t:{}", tag), label: tag.to_uppercase(), color: tag_color(&tag), status: None, priority: None, assignee: None, due: None, tasks: ids });
+                }
+                let ids: Vec<u64> = tasks.iter().filter(|x| x.tags.is_empty()).map(|x| x.id).collect();
+                if !ids.is_empty() || include_empty {
+                    out.push(Group { key: "t:".into(), label: "NO TAGS".into(), color: t.text3, status: None, priority: None, assignee: None, due: None, tasks: ids });
+                }
+            }
+            GroupBy::List => {
+                let mut lists: Vec<u64> = self.data.lists_in(self.loc).unwrap_or_default();
+                for x in tasks {
+                    if !lists.contains(&x.list_id) {
+                        lists.push(x.list_id);
+                    }
+                }
+                for l in lists {
+                    let ids: Vec<u64> = tasks.iter().filter(|x| x.list_id == l).map(|x| x.id).collect();
+                    if ids.is_empty() && !include_empty {
+                        continue;
+                    }
+                    let color = self.data.list_item(l).and_then(|li| li.color).map(rgb).unwrap_or(t.text2);
+                    out.push(Group { key: format!("l:{}", l), label: self.data.list_name(l).to_uppercase(), color, status: None, priority: None, assignee: None, due: None, tasks: ids });
+                }
+            }
             GroupBy::None => {
                 out.push(Group { key: "all".into(), label: "ALL TASKS".into(), color: t.primary, status: None, priority: None, assignee: None, due: None, tasks: tasks.iter().map(|x| x.id).collect() });
             }
@@ -734,8 +831,48 @@ impl App {
         }
     }
 
+    /// The list a group stands for (Group: List), or None.
+    fn group_list(g: &Group) -> Option<u64> {
+        g.key.strip_prefix("l:").and_then(|x| x.parse().ok())
+    }
+
+    /// The tag a group stands for (Group: Tags; "" for No tags), or None.
+    fn group_tag(g: &Group) -> Option<&str> {
+        g.key.strip_prefix("t:")
+    }
+
+    /// Gives a task the field value of the group it is dropped into.
+    fn move_to_group(&self, task: &mut Task, g: &Group) {
+        match self.group_by {
+            GroupBy::Status => {
+                if let Some(st) = &g.status {
+                    if self.data.statuses_for_list(task.list_id).iter().any(|s| s.name == st.name) {
+                        task.status = st.name.clone();
+                    }
+                }
+            }
+            GroupBy::Priority => task.priority = g.priority.unwrap_or(0),
+            GroupBy::Assignee => task.assignees = g.assignee.into_iter().collect(),
+            GroupBy::DueDate => task.due = g.due,
+            GroupBy::Tags => match Self::group_tag(g) {
+                Some("") => task.tags.clear(),
+                Some(tag) if !task.tags.iter().any(|x| x == tag) => task.tags.push(tag.to_string()),
+                _ => {}
+            },
+            GroupBy::List => {
+                if let Some(l) = Self::group_list(g) {
+                    task.list_id = l;
+                }
+            }
+            GroupBy::None => {}
+        }
+    }
+
     fn add_from_group(&mut self, g: &Group, name: String, open: bool) {
-        if let Some(list) = self.default_list() {
+        if let Some(list) = Self::group_list(g).or_else(|| self.default_list()) {
+            if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
+                self.pending_tags.push(tag.to_string());
+            }
             let mut assignees = vec![];
             if let Some(a) = g.assignee {
                 assignees.push(a);
@@ -760,6 +897,10 @@ impl App {
 
     fn apply_actions(&mut self) {
         let actions = std::mem::take(&mut self.actions);
+        if actions.iter().any(|a| matches!(a, Action::DeleteTask(_))) {
+            // a new delete: the Undo bar offers this one only
+            self.undo_trash = Some((vec![], now_ts()));
+        }
         for a in actions {
             self.apply(a);
         }
@@ -942,6 +1083,9 @@ impl App {
                     let tid = self.data.new_id();
                     let title = first.name.clone();
                     self.data.extra.trash.push(TrashItem { id: tid, kind: "Task".into(), title, deleted: now_ts(), payload: serde_json::to_string(&removed).unwrap_or_default() });
+                    if let Some((v, _)) = self.undo_trash.as_mut() {
+                        v.push(tid);
+                    }
                 }
                 self.data.tasks.retain(|t| !kill.contains(&t.id));
                 if self.open_task.map(|o| kill.contains(&o)).unwrap_or(false) {
@@ -3080,6 +3224,7 @@ impl App {
         self.drafts.thread_files.swap(self.thread_open, &mut self.thread_files);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
+        self.sync_view_prefs();
         if let Ok(p) = std::env::var("WORKBOARD_EVENT_LOG") {
             let evs: Vec<String> = ctx.input(|i| i.raw.events.iter().filter(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_))).map(|e| format!("{:?}", e)).collect());
             if !evs.is_empty() {

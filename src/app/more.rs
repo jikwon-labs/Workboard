@@ -2421,19 +2421,28 @@ impl App {
                             t.text3
                         }),
                 );
-                if !r.done {
+                // snoozing only ever moves a reminder later
+                let later: Vec<(&str, i64)> = [
+                    ("In 1 hour", now + 3600),
+                    (
+                        "Tomorrow 9 AM",
+                        reminder_ts(today() + Duration::days(1), "09:00"),
+                    ),
+                    (
+                        "Next week",
+                        reminder_ts(today() + Duration::days(7), "09:00"),
+                    ),
+                ]
+                .into_iter()
+                .filter(|(_, ts)| *ts > r.due_ts)
+                .collect();
+                if !r.done && !later.is_empty() {
                     let sz = ui.add(ghost(egui::Button::new(
                         RichText::new(tr("Snooze")).small(),
                     )));
                     name_it(&sz, &format!("Snooze {}", r.text));
                     popup(ui, &sz, ui.id().with(("rem_snooze", r.id)), 170.0, |ui| {
-                        let tomorrow = reminder_ts(today() + Duration::days(1), "09:00");
-                        let week = reminder_ts(today() + Duration::days(7), "09:00");
-                        for (label, ts) in [
-                            ("In 1 hour", now + 3600),
-                            ("Tomorrow 9 AM", tomorrow),
-                            ("Next week", week),
-                        ] {
+                        for (label, ts) in later {
                             if ui.button(tr(label)).clicked() {
                                 if let Some(x) =
                                     self.data.extra.reminders.iter_mut().find(|x| x.id == r.id)

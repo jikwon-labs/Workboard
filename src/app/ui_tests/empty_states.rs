@@ -1,6 +1,7 @@
 // Click-through tests for screens with little or nothing in them: a new
 // workspace, one person alone, no spaces, no tasks. Each screen should say
-// what is going on and offer a next step that works.
+// what is going on and offer a next step that works. Also small details
+// that made such screens read wrong (counts, reminders, dark mode).
 
 use super::*;
 
@@ -197,4 +198,29 @@ fn teams_page_alone_leads_with_inviting_people() {
     h.app.hub_filter = 0;
     h.settle();
     assert!(h.has("Manage teams and see their work"));
+}
+
+#[test]
+fn snooze_never_moves_a_reminder_earlier() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    for (id, text, days) in [(601, "Pay rent", 3), (602, "Renew lease", 30)] {
+        h.app.data.extra.reminders.push(Reminder {
+            id,
+            text: text.into(),
+            due_ts: now_ts() + days * 86400,
+            owner: me,
+            ..Default::default()
+        });
+    }
+    h.click("Inbox");
+    h.click("Snooze Pay rent");
+    assert!(!h.has("In 1 hour"), "earlier than it is due");
+    assert!(!h.has("Tomorrow 9 AM"));
+    h.click("Next week");
+    let r = h.app.data.extra.reminders.iter().find(|r| r.id == 601);
+    assert!(r.unwrap().due_ts > now_ts() + 3 * 86400);
+    // nothing on offer is later than a month away
+    assert!(!h.has("Snooze Renew lease"));
+    assert!(h.has("Edit Renew lease"));
 }

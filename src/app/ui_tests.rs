@@ -8378,3 +8378,20 @@ fn views_with_only_archived_tasks_say_so_and_show_the_way_back() {
     assert!(h.app.filter.archived);
     assert!(h.has("Task Design new homepage layout"));
 }
+
+#[test]
+fn home_lists_card_tells_archived_lists_from_none_and_empty_lists_have_no_bar() {
+    let mut h = archived_workspace();
+    assert!(!h.has("No Lists yet. Lists keep a Space's tasks together."));
+    assert!(h.has("All 4 Lists are archived."));
+    h.click("Home archived lists");
+    assert_eq!(h.app.section, Section::Settings);
+    // an empty List says so instead of "0/0" beside an empty bar
+    let mut h = Ui1::new();
+    h.app.data.tasks.clear();
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.painted_text("0/0").is_empty());
+    assert!(!h.painted_text("No tasks yet").is_empty());
+}

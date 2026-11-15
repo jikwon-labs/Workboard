@@ -174,4 +174,7 @@ pub const T: &[(&str, &str)] = &[
     ("No Lists yet. Lists keep a Space's tasks together.", "아직 목록이 없습니다. 목록은 스페이스의 작업을 한데 모아 둡니다."),
     ("Tasks live in a List. Make a Space first: it comes with one.", "작업은 목록 안에 들어갑니다. 먼저 스페이스를 만드세요. 목록이 함께 생깁니다."),
     ("Tasks live in a List. Make one first.", "작업은 목록 안에 들어갑니다. 먼저 목록을 만드세요."),
+    ("The only List is archived.", "하나뿐인 목록이 보관되어 있습니다."),
+    ("All {} Lists are archived.", "목록 {}개가 모두 보관되어 있습니다."),
+    ("No tasks yet", "아직 작업 없음"),
 ];

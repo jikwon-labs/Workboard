@@ -4007,7 +4007,7 @@ impl App {
                                                         .iter()
                                                         .flat_map(|f| f.lists.iter().cloned()),
                                                 )
-                                                .filter(|l| !l.archived)
+                                                .filter(|l| !self.data.list_archived(l.id))
                                                 .collect();
                                             for l in lists {
                                                 shown += 1;
@@ -4054,23 +4054,33 @@ impl App {
                                                     FontId::proportional(13.0),
                                                     t.text,
                                                 );
+                                                // an empty List: no bar and "0/0", just say so
+                                                if total == 0 {
+                                                    ui.painter().text(
+                                                        r.right_center() - vec2(6.0, 0.0),
+                                                        Align2::RIGHT_CENTER,
+                                                        tr("No tasks yet"),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                    );
+                                                    if resp.clicked() {
+                                                        self.actions
+                                                            .push(Action::Go(Location::List(l.id)));
+                                                    }
+                                                    continue;
+                                                }
                                                 // progress bar
                                                 let bar = Rect::from_min_size(
                                                     pos2(r.right() - 150.0, r.center().y - 3.0),
                                                     vec2(100.0, 6.0),
                                                 );
                                                 ui.painter().rect_filled(bar, 3.0, t.hover);
-                                                if total > 0 {
-                                                    let f = done as f32 / total as f32;
-                                                    ui.painter().rect_filled(
-                                                        Rect::from_min_size(
-                                                            bar.min,
-                                                            vec2(100.0 * f, 6.0),
-                                                        ),
-                                                        3.0,
-                                                        rgb([0x00, 0x88, 0x44]),
-                                                    );
-                                                }
+                                                let f = done as f32 / total as f32;
+                                                ui.painter().rect_filled(
+                                                    Rect::from_min_size(bar.min, vec2(100.0 * f, 6.0)),
+                                                    3.0,
+                                                    rgb([0x00, 0x88, 0x44]),
+                                                );
                                                 ui.painter().text(
                                                     r.right_center() - vec2(6.0, 0.0),
                                                     Align2::RIGHT_CENTER,
@@ -4086,33 +4096,55 @@ impl App {
                                         }
                                         // nothing to list yet: say so and offer the next step
                                         if shown == 0 {
-                                            ui.label(
-                                                RichText::new(tr(
-                                                    "No Lists yet. Lists keep a Space's tasks together.",
-                                                ))
-                                                .color(t.text2),
-                                            );
+                                            // Lists that are all archived are not "no Lists"
+                                            let archived = spaces
+                                                .iter()
+                                                .filter(|s| {
+                                                    s.private_owner
+                                                        .is_none_or(|o| o == self.data.me)
+                                                })
+                                                .flat_map(|s| {
+                                                    s.lists.iter().chain(
+                                                        s.folders.iter().flat_map(|f| f.lists.iter()),
+                                                    )
+                                                })
+                                                .count();
+                                            let text = match archived {
+                                                0 => tr("No Lists yet. Lists keep a Space's tasks together.")
+                                                    .to_string(),
+                                                1 => tr("The only List is archived.").to_string(),
+                                                n => trf!("All {} Lists are archived.", n),
+                                            };
+                                            ui.label(RichText::new(text).color(t.text2));
                                             ui.add_space(8.0);
-                                            let has_space = !self.open_spaces().is_empty();
-                                            let label =
-                                                if has_space { "+ New List" } else { "+ New Space" };
-                                            let b = ui.add(
-                                                egui::Button::new(tr(label))
-                                                    .stroke(Stroke::new(1.0, t.border))
-                                                    .corner_radius(7),
-                                            );
-                                            name_it(&b, "Home new list");
-                                            if b.clicked() {
-                                                if has_space {
-                                                    self.open_new_list(None, None);
-                                                } else {
-                                                    self.modal = Some(Modal::NewSpace {
-                                                        name: String::new(),
-                                                        color: STATUS_PALETTE
-                                                            [1 + (self.data.spaces.len() * 3) % 13],
-                                                    });
+                                            ui.horizontal(|ui| {
+                                                if archived > 0 {
+                                                    let b = ui.add(
+                                                        egui::Button::new(tr("See archived Lists"))
+                                                            .stroke(Stroke::new(1.0, t.border))
+                                                            .corner_radius(7),
+                                                    );
+                                                    name_it(&b, "Home archived lists");
+                                                    if b.clicked() {
+                                                        self.open_settings("Spaces");
+                                                    }
                                                 }
-                                            }
+                                                let has_space = !self.open_spaces().is_empty();
+                                                let label = if has_space {
+                                                    "+ New List"
+                                                } else {
+                                                    "+ New Space"
+                                                };
+                                                let b = ui.add(
+                                                    egui::Button::new(tr(label))
+                                                        .stroke(Stroke::new(1.0, t.border))
+                                                        .corner_radius(7),
+                                                );
+                                                name_it(&b, "Home new list");
+                                                if b.clicked() {
+                                                    self.offer_new_list(None);
+                                                }
+                                            });
                                         }
                                     })
                                 });

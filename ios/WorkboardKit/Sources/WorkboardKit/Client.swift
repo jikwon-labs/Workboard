@@ -207,7 +207,17 @@ public final class SyncClient {
         cfg.waitsForConnectivity = false
         cfg.timeoutIntervalForRequest = 15
         self.session = URLSession(configuration: cfg)
-        if let snap = storage.loadSnapshot() {
+        if var snap = storage.loadSnapshot() {
+            // a copy saved by an older build: give activity lines their ids
+            // and take today's fingerprints as the baseline (every edit made
+            // here was stamped when it was made), so nothing reads as edited
+            if Sync.fillActivityIds(&snap) || SyncMeta(of: snap).v < 1 {
+                var meta = SyncMeta(of: snap)
+                meta.hashes = Sync.fingerprints(snap)
+                meta.valueHashes = Sync.valueHashes(snap)
+                meta.v = 1
+                snap.set("extra.sync", meta.json)
+            }
             self.data = snap
             self.view = WorkspaceView(snap)
         }
@@ -503,8 +513,11 @@ public final class SyncClient {
             data = local
         } else {
             var fresh = snapshot
+            Sync.fillActivityIds(&fresh)
             var meta = SyncMeta(of: fresh)
             meta.hashes = Sync.fingerprints(fresh)
+            meta.valueHashes = Sync.valueHashes(fresh)
+            meta.v = 1
             fresh.set("extra.sync", meta.json)
             data = fresh
         }
@@ -612,9 +625,12 @@ public final class SyncClient {
     public func edit(_ change: (inout JSON, _ me: UInt64) -> Void) -> Bool {
         guard canEdit, var d = data, let me = settings.me else { return false }
         change(&d, me)
+        // activity lines are written without ids; give them theirs before
+        // stamping, as the Mac app does before it saves
+        Sync.fillActivityIds(&d)
         let old = SyncMeta(of: d)
         var meta = old
-        Sync.stamp(d, &meta, now: nowTs(), pastSeen: true)
+        Sync.stamp(d, &meta, now: nowMs())
         for (id, t) in meta.stamps where old.stamps[id] != t { settings.waitingStamps[id] = t }
         for (id, t) in meta.tombs where old.tombs[id] != t {
             settings.waitingTombs[id] = t

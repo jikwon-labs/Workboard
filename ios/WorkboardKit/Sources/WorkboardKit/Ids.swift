@@ -24,5 +24,10 @@ public struct IdMaker: Sendable {
     }
 }
 
-/// Seconds since 1970, like now_ts() in src/model.rs.
+/// Seconds since 1970, like now_ts() in src/model.rs: message `ts`, task
+/// `created`/`updated`, activity lines.
 public func nowTs() -> Int64 { Int64(Date().timeIntervalSince1970) }
+
+/// Milliseconds since 1970: sync stamps (the Mac app and the server stamp in
+/// milliseconds, so a stamp in seconds would always lose).
+public func nowMs() -> Int64 { Int64((Date().timeIntervalSince1970 * 1000).rounded(.down)) }

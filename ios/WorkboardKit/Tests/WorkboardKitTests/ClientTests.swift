@@ -195,12 +195,12 @@ final class ClientTests: XCTestCase {
         XCTAssertTrue(a.canEdit, "edits work offline")
         XCTAssertTrue(a.edit { d, me in Edits.sendMessage(&d, channel: 301, text: "written offline", me: me, id: a.newId(), ts: nowTs()) })
         XCTAssertTrue(a.edit { d, me in Edits.setStatus(&d, task: 205, to: "in progress", me: me, ts: nowTs()) })
-        XCTAssertEqual(a.waitingCount, 2, "a new message (counted on the channel) and a task change")
+        XCTAssertEqual(a.waitingCount, 3, "a new message, a task change and its activity line (which has an id now)")
 
         // a fresh launch while the server is down shows the saved copy with the offline edits
         let relaunch = SyncClient(storage: s, tokens: MemoryTokenStore())
         XCTAssertEqual(relaunch.view.channels.first { $0.id == 301 }?.messages.last?.text, "written offline")
-        XCTAssertEqual(relaunch.waitingCount, 2, "waiting marks are saved")
+        XCTAssertEqual(relaunch.waitingCount, 3, "waiting marks are saved")
 
         // the server comes back on the same port; the client finds it alone and sends the edits
         let again = FakeServer(snapshot: server.current)

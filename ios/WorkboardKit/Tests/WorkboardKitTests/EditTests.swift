@@ -53,7 +53,7 @@ final class EditTests: XCTestCase {
         Edits.setStatus(&phone, task: 201, to: "review", me: 1, ts: 20)
         Edits.sendMessage(&phone, channel: 301, text: "hi", me: 1, id: 9100, ts: 20)
         Edits.setDocBody(&phone, doc: 401, to: "changed", ts: 20)
-        Sync.stamp(phone, &meta, now: 20, pastSeen: true)
+        Sync.stamp(phone, &meta, now: 20)
         phone.set("extra.sync", meta.json)
         let pushed = Sync.outgoing(phone)
 

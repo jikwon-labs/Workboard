@@ -56,10 +56,17 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
     public var accountEmail: String?
     /// The role the server gave ("member", "admin", "owner").
     public var role: String?
+    /// The server the push token was last sent to (the registration a
+    /// sign-out or a server switch takes back).
+    public var pushSentTo: String?
+    /// Servers that still have to be told to stop notifying this device
+    /// (they couldn't be reached at sign-out); their device tokens wait in
+    /// the token store under `SyncClient.unregisterKey`.
+    public var pushUnregister: [String] = []
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case server, device, tag, lastId, me, meFromServer, waitingStamps, waitingTombs, pushToken, pushEnv, accountEmail, role }
+    enum CodingKeys: String, CodingKey { case server, device, tag, lastId, me, meFromServer, waitingStamps, waitingTombs, pushToken, pushEnv, accountEmail, role, pushSentTo, pushUnregister }
 
     // every field optional, so settings from an older build still load
     public init(from decoder: Decoder) throws {
@@ -76,6 +83,8 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
         pushEnv = try c.decodeIfPresent(String.self, forKey: .pushEnv) ?? "development"
         accountEmail = try c.decodeIfPresent(String.self, forKey: .accountEmail)
         role = try c.decodeIfPresent(String.self, forKey: .role)
+        pushSentTo = try c.decodeIfPresent(String.self, forKey: .pushSentTo)
+        pushUnregister = try c.decodeIfPresent([String].self, forKey: .pushUnregister) ?? []
     }
 }
 
@@ -151,7 +160,7 @@ public final class SyncClient {
     /// Read-only view of `data` for the screens.
     public private(set) var view: WorkspaceView = .empty
     public private(set) var rev: Int64 = 0
-    public private(set) var settings: DeviceSettings
+    public internal(set) var settings: DeviceSettings
     public private(set) var lastError: String?
     /// The sign-in screen is up: set when the server refuses with "auth",
     /// cleared by a welcome. Stays up while a sign-in attempt connects.
@@ -168,6 +177,22 @@ public final class SyncClient {
     public private(set) var updatesReceived = 0
     /// Bumped every time a copy is pushed.
     public private(set) var pushesSent = 0
+    /// This iPhone's Trash (personal, never shared; see Trash.swift).
+    public internal(set) var trash: [TrashItem] = []
+
+    // owners and admins (see Admin.swift)
+    /// Everyone's access, from the server's last `access` (nil: not asked yet).
+    public internal(set) var people: [Person]?
+    /// The server's backups (owner only; nil: not asked yet).
+    public internal(set) var backups: [Backup]?
+    /// The newest invite code made here, with where it was emailed.
+    public internal(set) var lastInvite: InviteResult?
+    /// An access or backup request is on its way.
+    public internal(set) var adminPending = 0
+    /// The last access or backup request the server turned down.
+    public internal(set) var adminError: String?
+    /// Said after a restore ("Restored the team's workspace to ...").
+    public internal(set) var adminNotice: String?
 
     public var me: UInt64? { settings.me }
     /// Changes made here that the server has not shown back yet.
@@ -181,8 +206,8 @@ public final class SyncClient {
 
     @ObservationIgnored let storage: Storage
     @ObservationIgnored let tokens: TokenStore
-    @ObservationIgnored private let session: URLSession
-    @ObservationIgnored private var socket: URLSessionWebSocketTask?
+    @ObservationIgnored let session: URLSession
+    @ObservationIgnored private(set) var socket: URLSessionWebSocketTask?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var pushTask: Task<Void, Never>?
     @ObservationIgnored private var pingTask: Task<Void, Never>?
@@ -225,6 +250,7 @@ public final class SyncClient {
             self.data = snap
             self.view = WorkspaceView(snap)
         }
+        self.trash = storage.loadTrash()
         storage.save(settings)
     }
 
@@ -247,6 +273,8 @@ public final class SyncClient {
         let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard a != settings.server else { return }
         let freshCopy = freshCopy ?? isDifferentServer(a)
+        // the server left behind stops sending this device notifications
+        if isDifferentServer(a) { stopPushes(from: settings.server, token: tokens.token(for: settings.server)) }
         settings.server = a
         if settings.meFromServer {
             settings.me = nil
@@ -266,9 +294,12 @@ public final class SyncClient {
             settings.waitingStamps = [:]
             settings.waitingTombs = [:]
             try? FileManager.default.removeItem(at: storage.snapshotURL)
+            // Trash holds the other workspace's items
+            setTrash([])
         }
         settings.accountEmail = nil
         settings.role = nil
+        clearAdmin()
         pendingSignIn = nil
         signInMessage = nil
         storage.save(settings)
@@ -288,7 +319,115 @@ public final class SyncClient {
         settings.pushToken = token
         settings.pushEnv = env
         storage.save(settings)
-        if state.isConnected, let ws = socket { send(.pushToken(token: token, platform: "ios", env: env), on: ws) }
+        if state.isConnected, let ws = socket { sendPushToken(on: ws) }
+    }
+
+    private func sendPushToken(on ws: URLSessionWebSocketTask) {
+        guard let t = settings.pushToken else { return }
+        send(.pushToken(token: t, platform: "ios", env: settings.pushEnv), on: ws)
+        settings.pushSentTo = settings.server
+        storage.save(settings)
+    }
+
+    /// Where a device token waits until its server is told to stop pushes.
+    nonisolated static func unregisterKey(_ server: String) -> String { "push-unregister|" + server }
+
+    /// Tell `server` to stop notifying this device (push_token with an
+    /// empty token, which the server takes as "forget it") and forget that
+    /// it was registered there. Over the open connection when there is
+    /// one; else, and when that fails, over a short connection of its own
+    /// signed in with `token`, tried again on every connect until it works.
+    private func stopPushes(from server: String, token: String?) {
+        guard let sent = settings.pushSentTo, ServerAddress.same(sent, server) else { return }
+        settings.pushSentTo = nil
+        storage.save(settings)
+        guard state.isConnected, let ws = socket, ServerAddress.same(settings.server, server) else {
+            return queueUnregister(server, token: token)
+        }
+        // keep this socket out of closeSocket() until the message is out
+        socket = nil
+        ws.send(.string(ClientMessage.pushToken(token: "", platform: "ios", env: settings.pushEnv).text)) { [weak self] error in
+            ws.cancel(with: .goingAway, reason: nil)
+            if error != nil { Task { @MainActor in self?.queueUnregister(server, token: token) } }
+        }
+    }
+
+    private func queueUnregister(_ server: String, token: String?) {
+        if !settings.pushUnregister.contains(server) { settings.pushUnregister.append(server) }
+        tokens.setToken(token ?? "", for: Self.unregisterKey(server))
+        storage.save(settings)
+        flushUnregisters()
+    }
+
+    /// Servers whose unregister is running now.
+    @ObservationIgnored private var unregistering: Set<String> = []
+
+    /// Try the waiting unregisters (see stopPushes).
+    func flushUnregisters() {
+        for server in settings.pushUnregister where !unregistering.contains(server) {
+            guard let url = Self.url(from: server) else {
+                finishUnregister(server)
+                continue
+            }
+            unregistering.insert(server)
+            let token = tokens.token(for: Self.unregisterKey(server)).flatMap { $0.isEmpty ? nil : $0 }
+            let hello = ClientMessage.hello(Hello(device: settings.device, token: token)).text
+            let stop = ClientMessage.pushToken(token: "", platform: "ios", env: settings.pushEnv).text
+            let session = self.session
+            Task { [weak self] in
+                let done = await Self.unregister(url: url, hello: hello, stop: stop, session: session)
+                guard let self else { return }
+                self.unregistering.remove(server)
+                guard done else { return }
+                self.finishUnregister(server)
+                // signed in there again meanwhile: that sign-in's registration stands
+                if self.state.isConnected, ServerAddress.same(self.settings.server, server), let ws = self.socket { self.sendPushToken(on: ws) }
+            }
+        }
+    }
+
+    private func finishUnregister(_ server: String) {
+        settings.pushUnregister.removeAll { $0 == server }
+        tokens.setToken(nil, for: Self.unregisterKey(server))
+        storage.save(settings)
+    }
+
+    /// One unregister connection: hello, wait for welcome, push_token "".
+    /// True when it's done (or there's nothing left to do: the server
+    /// doesn't know this device any more); false to try again later.
+    nonisolated static func unregister(url: URL, hello: String, stop: String, session: URLSession) async -> Bool {
+        let ws = session.webSocketTask(with: url)
+        ws.maximumMessageSize = 64 * 1024 * 1024
+        ws.resume()
+        defer { ws.cancel(with: .goingAway, reason: nil) }
+        do {
+            try await ws.send(.string(hello))
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                let text: String
+                switch try await ws.receive() {
+                case .string(let s): text = s
+                case .data(let d): text = String(decoding: d, as: UTF8.self)
+                @unknown default: continue
+                }
+                switch ServerMessage(text: text) {
+                case .welcome:
+                    try await ws.send(.string(stop))
+                    // a ping answered means the server has read the message before it
+                    try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                        ws.sendPing { e in if let e { c.resume(throwing: e) } else { c.resume() } }
+                    }
+                    return true
+                case let .error(code, _, _):
+                    // signed out there for good (token unknown, access removed): the
+                    // server dropped this device's notifications with it
+                    return code == ServerErrorCode.auth.rawValue
+                default:
+                    continue
+                }
+            }
+        } catch {}
+        return false
     }
 
     /// The device token for the current server (for calls).
@@ -312,6 +451,7 @@ public final class SyncClient {
 
     /// Forget the token and who I am (the "Sign out" button).
     public func signOut() {
+        stopPushes(from: settings.server, token: tokens.token(for: settings.server))
         tokens.setToken(nil, for: settings.server)
         if settings.meFromServer {
             settings.me = nil
@@ -319,6 +459,7 @@ public final class SyncClient {
         }
         settings.accountEmail = nil
         settings.role = nil
+        clearAdmin()
         storage.save(settings)
         pendingSignIn = nil
         needsSignIn = true
@@ -362,6 +503,7 @@ public final class SyncClient {
         generation += 1
         let gen = generation
         state = .connecting
+        flushUnregisters()
         let ws = session.webSocketTask(with: url)
         ws.maximumMessageSize = 64 * 1024 * 1024
         socket = ws
@@ -418,7 +560,7 @@ public final class SyncClient {
         socket = nil
     }
 
-    private func send(_ m: ClientMessage, on ws: URLSessionWebSocketTask) {
+    func send(_ m: ClientMessage, on ws: URLSessionWebSocketTask) {
         ws.send(.string(m.text)) { _ in }
     }
 
@@ -466,7 +608,11 @@ public final class SyncClient {
             self.rev = w.rev
             if let snapshot = w.snapshot { take(snapshot, announce: false, hidden: w.hidden) }
             state = .connected
-            if let t = settings.pushToken { send(.pushToken(token: t, platform: "ios", env: settings.pushEnv), on: ws) }
+            // signed in here again: this welcome's registration replaces the old one
+            if settings.pushUnregister.contains(where: { ServerAddress.same($0, settings.server) }) && !unregistering.contains(settings.server) {
+                for old in settings.pushUnregister where ServerAddress.same(old, settings.server) { finishUnregister(old) }
+            }
+            sendPushToken(on: ws)
             // after (re)connecting the whole copy goes up, as the server design says
             if data != nil { pushNow() }
         case let .update(snapshot, rev, hidden):
@@ -478,6 +624,8 @@ public final class SyncClient {
             accountRequest = .done
         case let .callToken(channel, url, token):
             finishCall(channel, .success(CallGrant(url: url, token: token, room: CallAPI.room(channel: channel))))
+        case .invite, .access, .backups, .restored:
+            handleAdmin(m)
         case .ping:
             send(.pong, on: ws)
         case .pong:
@@ -506,6 +654,9 @@ public final class SyncClient {
             retryTask = nil
             pendingSignIn = nil
             if wasIn || helloUsedToken { tokens.setToken(nil, for: settings.server) }
+            // a server that signed this device out dropped its notifications too
+            if let sent = settings.pushSentTo, ServerAddress.same(sent, settings.server) { settings.pushSentTo = nil }
+            clearAdmin()
             if settings.meFromServer {
                 settings.me = nil
                 settings.meFromServer = false
@@ -522,6 +673,9 @@ public final class SyncClient {
             let m = message.isEmpty ? "The server turned that down." : message
             if accountRequest == .sending {
                 accountRequest = .failed(m)
+            } else if adminPending > 0 {
+                adminPending -= 1
+                adminError = m
             } else {
                 notice = m
             }
@@ -618,6 +772,7 @@ public final class SyncClient {
         generation += 1
         closeSocket()
         if accountRequest == .sending { accountRequest = .failed(why) }
+        adminPending = 0
         if pendingSignIn != nil {
             // a sign-in attempt that couldn't reach the server: say so and
             // let the person try again, rather than retrying it on our own

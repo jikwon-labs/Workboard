@@ -6748,12 +6748,19 @@ fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size()
     put('9', 1000, 40); // a workspace only on this computer: never goes
     std::fs::write(dir.join(format!("{}.mov", sha('a'))), b"x").unwrap();
     std::fs::write(dir.join(".uploads.json"), b"[]").unwrap();
+    std::fs::write(dir.join(".task-files.json"), b"[]").unwrap();
+    old_file(&dir.join(".task-files.json"), 3);
     let local: HashSet<String> = [sha('c'), sha('9')].into_iter().collect();
     let shared: HashSet<String> = [sha('e'), sha('f')].into_iter().collect();
     let keep: HashSet<String> = [sha('d')].into_iter().collect();
+    let space = |shared: bool, all: HashSet<String>| super::files::SpaceRefs {
+        shared,
+        all,
+        trash_only: HashSet::new(),
+    };
     let removed = clean_cache(
         &dir,
-        &[(false, local), (true, shared)],
+        &[space(false, local), space(true, shared)],
         &keep,
         std::time::SystemTime::now(),
         super::files::CACHE_GRACE,
@@ -6770,6 +6777,10 @@ fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size()
         "its link goes too"
     );
     assert!(dir.join(".uploads.json").is_file(), "the backlog stays");
+    assert!(
+        dir.join(".task-files.json").is_file(),
+        "and the task attachments on their way"
+    );
 }
 
 #[test]
@@ -6796,6 +6807,8 @@ fn the_shared_folder_drops_files_nobody_refers_to_once_they_are_a_month_old() {
             .to_string(),
     )
     .unwrap();
+    // a folder that has been cleaned up before (none named lately)
+    std::fs::write(files.join(super::files::FOLDER_NAMED), "{}").unwrap();
     let refs = folder_refs(&folder);
     let removed = clean_shared_folder(
         &files,
@@ -6841,13 +6854,12 @@ fn every_workspace_on_this_computer_counts_for_the_cache() {
         format!("{{ \"file\": \"{}\"", sha('d')),
     )
     .unwrap();
-    let mut spaces = super::files::workspaces_on_disk(&dir);
-    spaces.sort_by_key(|(_, s)| s.iter().min().cloned());
+    let spaces = super::files::workspaces_on_disk(&dir);
     let find = |c: char| {
         spaces
             .iter()
-            .find(|(_, s)| s.contains(&sha(c)))
-            .map(|(sh, _)| *sh)
+            .find(|s| s.all.contains(&sha(c)))
+            .map(|s| s.shared)
     };
     assert_eq!(find('a'), Some(false), "the Trash counts");
     assert_eq!(find('b'), Some(true));
@@ -7481,4 +7493,91 @@ fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
         "the other workspace's one stays written down"
     );
     assert_eq!(left[0].ws, "other.json");
+}
+
+#[test]
+fn the_cache_never_drops_files_only_a_trash_refers_to_to_stay_under_its_size() {
+    use super::files::{clean_cache, SpaceRefs};
+    use std::collections::HashSet;
+    let dir = temp_folder("clean-trash");
+    std::fs::create_dir_all(&dir).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    for (c, days) in [('a', 50), ('b', 40), ('c', 30)] {
+        let p = dir.join(sha(c));
+        std::fs::write(&p, vec![0u8; 1000]).unwrap();
+        old_file(&p, days);
+    }
+    // a shared workspace: a (least recently used) only in its Trash, b in
+    // a message, c in another workspace's message but this one's Trash
+    let ws = serde_json::json!({
+        "extra": {"shared": {"device": "d", "tag": 1}, "trash": [
+            {"payload": serde_json::json!({"attachments": [{"file": sha('a'), "name": "a.png"}]}).to_string()},
+            {"payload": serde_json::json!({"attachments": [{"file": sha('c'), "name": "c.png"}]}).to_string()}
+        ]},
+        "channels": [{"messages": [{"attachments": [{"file": sha('b'), "name": "b.png"}]}]}]
+    });
+    let refs = SpaceRefs::of(&ws);
+    assert!(refs.shared);
+    assert_eq!(refs.all.len(), 3);
+    let only: HashSet<String> = [sha('a'), sha('c')].into_iter().collect();
+    assert_eq!(refs.trash_only, only);
+    let other = SpaceRefs {
+        shared: true,
+        all: [sha('c')].into_iter().collect(),
+        trash_only: HashSet::new(),
+    };
+    let removed = clean_cache(
+        &dir,
+        &[refs, other],
+        &HashSet::new(),
+        std::time::SystemTime::now(),
+        super::files::CACHE_GRACE,
+        1000,
+    );
+    // over the cap: the old Trash-only file stays; the others can be fetched
+    // again from where the live messages are
+    let mut removed = removed;
+    removed.sort();
+    assert_eq!(removed, vec![sha('b'), sha('c')]);
+    assert!(dir.join(sha('a')).is_file());
+}
+
+#[test]
+fn the_shared_folder_keeps_a_deleted_messages_file_while_it_was_named_lately() {
+    use super::files::{clean_shared_folder, FOLDER_GRACE, FOLDER_NAMED, FOLDER_NAMED_GRACE};
+    use std::collections::HashSet;
+    let folder = temp_folder("clean-named");
+    let files = folder.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    let day = std::time::Duration::from_secs(86_400);
+    let now = std::time::SystemTime::now();
+    for c in ['a', 'b'] {
+        let p = files.join(sha(c));
+        std::fs::write(&p, b"x").unwrap();
+        old_file(&p, 100);
+    }
+    let named: Option<HashSet<String>> = Some([sha('a')].into_iter().collect());
+    let nothing: Option<HashSet<String>> = Some(HashSet::new());
+    // the first clean up only starts watching
+    assert!(clean_shared_folder(&files, &named, now, FOLDER_GRACE).is_empty());
+    assert!(files.join(FOLDER_NAMED).is_file());
+    // a's message is deleted (to someone's Trash): it stays a while
+    let soon = now + day * 40;
+    assert!(clean_shared_folder(&files, &nothing, soon, FOLDER_GRACE).is_empty());
+    assert!(files.join(sha('a')).is_file());
+    let later = now + FOLDER_NAMED_GRACE + day;
+    let mut gone = clean_shared_folder(&files, &nothing, later, FOLDER_GRACE);
+    gone.sort();
+    assert_eq!(gone, vec![sha('a'), sha('b')]);
+    // a record cut short (or a sync conflict) deletes nothing and starts again
+    let p = files.join(sha('c'));
+    std::fs::write(&p, b"x").unwrap();
+    old_file(&p, 100);
+    std::fs::write(files.join(FOLDER_NAMED), "{\"cc").unwrap();
+    assert!(clean_shared_folder(&files, &nothing, later, FOLDER_GRACE).is_empty());
+    assert!(p.is_file());
+    let record: std::collections::BTreeMap<String, i64> =
+        serde_json::from_str(&std::fs::read_to_string(files.join(FOLDER_NAMED)).unwrap()).unwrap();
+    assert!(record.contains_key(&sha('c')), "rebuilt");
 }

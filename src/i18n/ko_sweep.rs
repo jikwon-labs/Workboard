@@ -215,7 +215,7 @@ pub const T: &[(&str, &str)] = &[
     ("Nobody", "없음"),
     // whiteboards
     ("width ", "굵기 "),
-    ("\u{232B} Eraser", "\u{232B} 지우개"),
+    ("Eraser", "지우개"),
     ("Clear the whole board?", "보드 전체를 지울까요?"),
     ("Reset view", "보기 초기화"),
     (

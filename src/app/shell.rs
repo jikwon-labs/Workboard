@@ -233,8 +233,18 @@ fn paint_view_icon(p: &egui::Painter, c: Pos2, v: ViewKind) {
     }
 }
 
-/// A rounded pill button with an outline, like the original's toolbar.
-fn pill(ui: &mut Ui, t: &Theme, text: &str, shown: &str, active: bool, accent: bool) -> Response {
+/// A toolbar chip with an outline: a line icon (`icon`), then `shown` (empty
+/// in a narrow window), named `text`. As tall as the other controls and
+/// rounded like them, so it matches the buttons beside it.
+fn pill(
+    ui: &mut Ui,
+    t: &Theme,
+    text: &str,
+    shown: &str,
+    active: bool,
+    accent: bool,
+    icon: &str,
+) -> Response {
     let font = FontId::proportional(13.0);
     let (fg, bg, stroke) = if accent {
         (t.accent_text, t.accent_bg, t.accent_bg)
@@ -244,17 +254,33 @@ fn pill(ui: &mut Ui, t: &Theme, text: &str, shown: &str, active: bool, accent: b
         (t.text2, t.bg, t.border)
     };
     let g = ui.painter().layout_no_wrap(shown.to_string(), font, fg);
-    let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 20.0, 26.0), Sense::click());
+    let text_w = if shown.is_empty() {
+        0.0
+    } else {
+        g.size().x + 6.0
+    };
+    let (r, resp) = ui.allocate_exact_size(
+        vec2(16.0 + text_w + 18.0, crate::widgets::CONTROL_H),
+        Sense::click(),
+    );
     name_it(&resp, text);
     let fill = if resp.hovered() && !accent {
         t.hover
     } else {
         bg
     };
-    ui.painter().rect_filled(r, 13.0, fill);
+    ui.painter().rect_filled(r, 6.0, fill);
     ui.painter()
-        .rect_stroke(r, 13.0, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
-    ui.painter().galley(r.center() - g.size() / 2.0, g, fg);
+        .rect_stroke(r, 6.0, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+    let ic = pos2(r.left() + 9.0 + 8.0, r.center().y);
+    line_icon(ui.painter(), icon, ic, fg);
+    if !shown.is_empty() {
+        ui.painter().galley(
+            pos2(ic.x + 8.0 + 6.0, r.center().y - g.size().y / 2.0),
+            g,
+            fg,
+        );
+    }
     resp
 }
 
@@ -808,23 +834,24 @@ impl App {
                 let mut items: Vec<String> = vec!["Home".into()];
                 items.extend(self.data.extra.rail_items.iter().cloned());
                 let mut y = rect.top() + 4.0;
+                // the line icon of each item the rail can hold
                 let icon_of = |l: &str| -> &'static str {
                     match l {
-                        "Home" => "\u{1F3E0}",
-                        "Planner" => "\u{1F4C5}",
-                        "AI" => "\u{2728}",
-                        "Teams" => "\u{1F465}",
-                        "Chat" => "\u{1F4AC}",
-                        "Docs" => "\u{1F4C4}",
-                        "Dashboards" => "\u{1F4CA}",
-                        "Whiteboards" => "\u{1F3A8}",
-                        "Forms" => "\u{1F4CB}",
-                        "Goals" => "\u{1F3AF}",
-                        "Timesheets" => "\u{23F1}",
-                        "Clips" => "\u{1F3A5}",
-                        "Apps" => "\u{25A6}",
-                        "Spaces" => "\u{25CE}",
-                        _ => "\u{2022}",
+                        "Home" => "home",
+                        "Planner" => "planner",
+                        "AI" => "ai",
+                        "Teams" => "teams",
+                        "Chat" => "chat",
+                        "Docs" => "docs",
+                        "Dashboards" => "dashboards",
+                        "Whiteboards" => "whiteboards",
+                        "Forms" => "forms",
+                        "Goals" => "goals",
+                        "Timesheets" => "timesheets",
+                        "Clips" => "video",
+                        "Apps" => "apps",
+                        "Spaces" => "space",
+                        _ => "dots",
                     }
                 };
                 let section_of = |l: &str| -> Option<Section> {
@@ -869,15 +896,7 @@ impl App {
                     } else if resp.hovered() {
                         p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                     }
-                    if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
-                        p.text(
-                            ibox.center(),
-                            Align2::CENTER_CENTER,
-                            icon_of(label),
-                            FontId::proportional(17.0),
-                            white,
-                        );
-                    }
+                    line_icon(&p, icon_of(label), ibox.center(), white);
                     p.text(
                         pos2(cx, ibox.bottom() + 10.0),
                         Align2::CENTER_CENTER,
@@ -915,15 +934,7 @@ impl App {
                         } else if resp.hovered() {
                             p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                         }
-                        if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
-                            p.text(
-                                ibox.center(),
-                                Align2::CENTER_CENTER,
-                                icon_of(label),
-                                FontId::proportional(17.0),
-                                white,
-                            );
-                        }
+                        line_icon(&p, icon_of(label), ibox.center(), white);
                         let shown = tr(label);
                         let short = if shown.chars().count() > 8 {
                             format!("{}..", shown.chars().take(7).collect::<String>())
@@ -1548,22 +1559,19 @@ impl App {
                                     "More" => {
                                         popup(ui, &r, ui.id().with("side_more"), 220.0, |ui| {
                                             for (l, ic) in [
-                                                ("Overview", "\u{1F3E0}"),
-                                                ("Docs", "\u{1F4C4}"),
-                                                ("Dashboards", "\u{1F4CA}"),
-                                                ("Whiteboards", "\u{1F3A8}"),
-                                                ("Forms", "\u{1F4CB}"),
-                                                ("Goals", "\u{1F3AF}"),
-                                                ("Timesheets", "\u{23F1}"),
-                                                ("People", "\u{1F465}"),
+                                                ("Overview", "home"),
+                                                ("Docs", "docs"),
+                                                ("Dashboards", "dashboards"),
+                                                ("Whiteboards", "whiteboards"),
+                                                ("Forms", "forms"),
+                                                ("Goals", "goals"),
+                                                ("Timesheets", "timesheets"),
+                                                ("People", "teams"),
                                             ] {
-                                                if ui
-                                                    .add(ghost(egui::Button::new(format!(
-                                                        "{}  {}",
-                                                        ic,
-                                                        tr(l)
-                                                    ))))
-                                                    .clicked()
+                                                if menu_row(ui, &t, tr(l), false, |p, c| {
+                                                    line_icon(p, ic, c, t.text2);
+                                                })
+                                                .clicked()
                                                 {
                                                     match l {
                                                         "Overview" => self
@@ -1576,11 +1584,16 @@ impl App {
                                                 }
                                             }
                                             ui.separator();
-                                            if ui
-                                                .add(ghost(egui::Button::new(tr(
-                                                    "\u{25A6}  Customize your sidebar",
-                                                ))))
-                                                .clicked()
+                                            if menu_row(
+                                                ui,
+                                                &t,
+                                                tr("Customize your sidebar"),
+                                                false,
+                                                |p, c| {
+                                                    line_icon(p, "sidebar", c, t.text2);
+                                                },
+                                            )
+                                            .clicked()
                                             {
                                                 self.modal = Some(Modal::CustomizeSidebar);
                                                 close_popup(ui);
@@ -3236,58 +3249,61 @@ impl App {
                     // full chip labels, and whether they all fit in one row; if
                     // not (a narrow window) the chips show only their icon
                     let grouped = matches!(self.view, ViewKind::List | ViewKind::Board);
-                    let group_label = format!("\u{2261}  Group: {}", self.group_by.label());
+                    let group_label = format!("Group: {}", self.group_by.label());
                     let alabel = match self.assignee_filter.and_then(|a| self.data.member(a)) {
-                        Some(m) => format!("\u{1F464}  {}", m.name),
-                        None => "\u{1F464}  Assignee".into(),
+                        Some(m) => m.name.clone(),
+                        None => "Assignee".into(),
                     };
                     let nf = self.filter.count()
                         + usize::from(!self.search.is_empty())
                         + usize::from(self.me_mode);
                     let flabel = if nf > 0 {
-                        format!("\u{2261}  Filter \u{00B7} {}", nf)
+                        format!("Filter \u{00B7} {}", nf)
                     } else {
-                        "\u{2261}  Filter".to_string()
+                        "Filter".to_string()
                     };
                     let sort_arrow = if self.sort_desc && self.sort_by != SortBy::Manual {
                         " \u{2193}"
                     } else {
                         ""
                     };
-                    let slabel = format!("\u{21C5}  Sort: {}{}", self.sort_by.label(), sort_arrow);
+                    let slabel = format!("Sort: {}{}", self.sort_by.label(), sort_arrow);
                     // the same labels in the interface language (the English ones name the chips)
-                    let group_shown = trf!("\u{2261}  Group: {}", tr(self.group_by.label()));
+                    let group_shown = trf!("Group: {}", tr(self.group_by.label()));
                     let ashown = match self.assignee_filter.and_then(|a| self.data.member(a)) {
                         Some(_) => alabel.clone(),
-                        None => tr("\u{1F464}  Assignee").to_string(),
+                        None => tr("Assignee").to_string(),
                     };
                     let fshown = if nf > 0 {
-                        trf!("\u{2261}  Filter \u{00B7} {}", nf)
+                        trf!("Filter \u{00B7} {}", nf)
                     } else {
-                        tr("\u{2261}  Filter").to_string()
+                        tr("Filter").to_string()
                     };
-                    let sshown = trf!("\u{21C5}  Sort: {}{}", tr(self.sort_by.label()), sort_arrow);
+                    let sshown = trf!("Sort: {}{}", tr(self.sort_by.label()), sort_arrow);
+                    let closed_shown = crate::i18n::tr_ctx("Closed (tasks)", "Closed");
                     let compact = {
                         let pw = |s: &str| {
                             ui.painter()
                                 .layout_no_wrap(s.to_string(), FontId::proportional(13.0), t.text)
                                 .size()
                                 .x
-                                + 20.0
+                                + 16.0
+                                + 6.0
+                                + 18.0
                                 + 6.0
                         };
                         let mut need = pw(&ashown)
-                            + pw(tr("\u{2714}  Closed"))
+                            + pw(closed_shown)
                             + pw(&fshown)
                             + pw(&sshown)
                             + 90.0
                             + 32.0
                             + 32.0;
                         if grouped {
-                            need += pw(&group_shown) + pw(tr("\u{2934}  Subtasks"));
+                            need += pw(&group_shown) + pw(tr("Subtasks"));
                         }
                         if self.view == ViewKind::List {
-                            need += pw(tr("\u{25A5}  Columns"));
+                            need += pw(tr("Columns"));
                         }
                         if self.show_search {
                             need += 186.0;
@@ -3295,23 +3311,24 @@ impl App {
                         need > ui.available_width()
                     };
                     // `full` names the chip (English), `shown` is what it says
+                    // compact: the icon alone (and a count where there is one)
                     let chip = |ui: &mut Ui,
                                 full: &str,
                                 shown: &str,
                                 short: &str,
                                 active: bool,
-                                accent: bool|
+                                accent: bool,
+                                icon: &str|
                      -> Response {
                         if compact {
-                            let r = pill(ui, &t, short, short, active, accent);
-                            name_it(&r, full);
+                            let r = pill(ui, &t, full, short, active, accent, icon);
                             r.on_hover_text(shown)
                         } else {
-                            pill(ui, &t, full, shown, active, accent)
+                            pill(ui, &t, full, shown, active, accent, icon)
                         }
                     };
                     if grouped {
-                        let r = chip(ui, &group_label, &group_shown, "\u{2261}", false, true);
+                        let r = chip(ui, &group_label, &group_shown, "", false, true, "list");
                         popup(ui, &r, ui.id().with("group_pop"), 160.0, |ui| {
                             for g in GroupBy::ALL {
                                 if ui
@@ -3325,11 +3342,12 @@ impl App {
                         });
                         if chip(
                             ui,
-                            "\u{2934}  Subtasks",
-                            tr("\u{2934}  Subtasks"),
-                            "\u{2934}",
+                            "Subtasks",
+                            tr("Subtasks"),
+                            "",
                             self.subtasks_open,
                             false,
+                            "subtasks",
                         )
                         .on_hover_text(tr("Show all subtasks"))
                         .clicked()
@@ -3353,11 +3371,12 @@ impl App {
                         let extra = parity::PROPERTIES.iter().filter(|p| self.col_on(p)).count();
                         let cr = chip(
                             ui,
-                            "\u{25A5}  Columns",
-                            tr("\u{25A5}  Columns"),
-                            "\u{25A5}",
+                            "Columns",
+                            tr("Columns"),
+                            "",
                             n > 0 || extra > 0 || self.fields_open,
                             false,
+                            "columns",
                         );
                         if cr.clicked() {
                             self.fields_open = !self.fields_open;
@@ -3376,13 +3395,14 @@ impl App {
                             )
                             .fill(t.primary)
                             .corner_radius(6)
-                            .min_size(vec2(0.0, 26.0)),
+                            .min_size(vec2(0.0, CONTROL_H)),
                         );
                         if ui.add(b).clicked() {
                             self.open_quick_add(None);
                         }
                         // search toggle
-                        let (sr, sresp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+                        let (sr, sresp) =
+                            ui.allocate_exact_size(vec2(CONTROL_H, CONTROL_H), Sense::click());
                         ui.painter().rect_stroke(
                             sr,
                             6.0,
@@ -3392,13 +3412,7 @@ impl App {
                         if sresp.hovered() || self.show_search {
                             ui.painter().rect_filled(sr.shrink(1.0), 6.0, t.hover);
                         }
-                        ui.painter().text(
-                            sr.center(),
-                            Align2::CENTER_CENTER,
-                            "\u{1F50D}",
-                            FontId::proportional(12.0),
-                            t.text2,
-                        );
+                        line_icon(ui.painter(), "search", sr.center(), t.text2);
                         name_it(&sresp, "Search tasks");
                         if sresp.on_hover_text(tr("Search tasks")).clicked() {
                             self.show_search = !self.show_search;
@@ -3441,9 +3455,10 @@ impl App {
                             ui,
                             &alabel,
                             &ashown,
-                            "\u{1F464}",
+                            "",
                             self.assignee_filter.is_some(),
                             false,
+                            "person",
                         );
                         let data = self.data.clone();
                         popup(ui, &ar, ui.id().with("asg_filter"), 200.0, |ui| {
@@ -3466,11 +3481,12 @@ impl App {
                         });
                         if chip(
                             ui,
-                            "\u{2714}  Closed",
-                            tr("\u{2714}  Closed"),
-                            "\u{2714}",
+                            "Closed",
+                            closed_shown,
+                            "",
                             self.show_closed,
                             false,
+                            "check",
                         )
                         .on_hover_text(tr("Show closed tasks"))
                         .clicked()
@@ -3478,9 +3494,9 @@ impl App {
                             self.show_closed = !self.show_closed;
                         }
                         let fshort = if nf > 0 {
-                            format!("\u{2261} {}", nf)
+                            nf.to_string()
                         } else {
-                            "\u{2261}".to_string()
+                            String::new()
                         };
                         let fr = chip(
                             ui,
@@ -3489,6 +3505,7 @@ impl App {
                             &fshort,
                             nf > 0 || self.filter_open,
                             false,
+                            "filter",
                         );
                         if fr.clicked() {
                             self.filter_open = !self.filter_open;
@@ -3504,9 +3521,10 @@ impl App {
                             ui,
                             &slabel,
                             &sshown,
-                            &format!("\u{21C5}{}", sort_arrow),
+                            sort_arrow.trim(),
                             self.sort_by != SortBy::Manual,
                             false,
+                            "sort",
                         );
                         popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
                             for s in SortBy::ALL {

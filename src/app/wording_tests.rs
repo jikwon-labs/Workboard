@@ -324,7 +324,9 @@ fn inbox_tabs_without_anything_to_invite_for_use_their_own_icon() {
     h.app.inbox_tab = 2;
     h.settle();
     assert!(shows(&h, "Nothing saved for later"));
-    assert!(shows(&h, "\u{23F0}") && !shows(&h, "\u{1F465}"));
+    // the icons are drawn lines now; the people icon comes only with the
+    // invite text, which this tab does not show
+    assert!(!shows(&h, "Looking to collaborate?"));
 }
 
 #[test]

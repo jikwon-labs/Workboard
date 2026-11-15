@@ -370,12 +370,12 @@ fn click_task_row_opens_it_then_complete_and_timer() {
     let mut h = Ui1::new();
     h.click_left("Task Write copy for landing page", 120.0);
     let id = h.app.open_task.expect("task window opens");
-    h.click("\u{25B6}");
+    h.click("Start timer");
     assert!(
         h.app.task(id).unwrap().timer_started.is_some(),
         "the play button starts the timer"
     );
-    h.click("\u{2714}");
+    h.click("Mark complete");
     assert_eq!(
         h.app.task(id).unwrap().status,
         "complete",
@@ -2132,7 +2132,7 @@ fn create_task_window_has_description_status_and_tags() {
     h.type_text("Some details");
     h.click("Task status");
     h.click("IN PROGRESS");
-    h.click("\u{1F3F7} Tags");
+    h.click("Tags");
     h.type_text("urgent-fix");
     h.key(egui::Key::Enter);
     h.key(egui::Key::Escape);
@@ -2392,7 +2392,7 @@ fn task_window_comment_post_tabs_tools_and_search() {
         .retain(|a| !a.comment);
     h.settle();
     // empty: the two shortcut buttons
-    assert!(h.has("@  Mention a teammate") && h.has("\u{1F464}  Assign this task"));
+    assert!(h.has("@  Mention a teammate") && h.has("Assign this task"));
     h.click("@  Mention a teammate");
     assert!(
         h.ctx.memory(|m| m.any_popup_open()),
@@ -2442,7 +2442,7 @@ fn task_window_assign_this_task_button() {
         t.assignees.clear();
     }
     h.settle();
-    h.click("\u{1F464}  Assign this task");
+    h.click("Assign this task");
     h.click_side("Sam Lee", true);
     h.settle();
     assert!(h.app.task(id).unwrap().assignees.contains(&3));
@@ -2452,7 +2452,7 @@ fn task_window_assign_this_task_button() {
 fn fields_panel_searches_and_adds_property_columns() {
     let mut h = Ui1::new();
     assert!(!h.app.col_on("Created by"), "properties start hidden");
-    h.click("\u{25A5}  Columns");
+    h.click("Columns");
     assert!(h.app.fields_open);
     assert!(h.has("Shown") && h.has("Properties"));
     h.click("Search fields");
@@ -2524,7 +2524,7 @@ fn filter_builder_rows_are_joined_with_and() {
     let mut h = Ui1::new();
     h.app.loc = Location::Everything;
     h.settle();
-    h.click("\u{2261}  Filter");
+    h.click("Filter");
     assert!(h.app.filter_open);
     h.click("+ Add filter");
     h.click("Filter 1 field");
@@ -2569,7 +2569,7 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
     let mut h = Ui1::new();
     h.app.loc = Location::Everything;
     h.settle();
-    h.click("\u{2261}  Filter");
+    h.click("Filter");
     // Priority is Urgent
     h.click("+ Add filter");
     h.click("Filter 1 field");
@@ -2612,14 +2612,14 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
     assert!(shown.iter().any(|(p, _)| *p != 1), "not only Urgent");
     // the badge counts every condition, the ones in the group too
     assert_eq!(h.app.filter.count(), 3);
-    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    assert!(h.has("Filter \u{00B7} 3"));
     // removing a row in the group, then the group
     h.click("Remove group 1 filter 2");
     assert_eq!(h.app.filter.count(), 2);
     h.click("Remove group 1");
     assert!(h.app.filter.groups.is_empty());
     assert_eq!(h.app.filter.count(), 1);
-    assert!(h.has("\u{2261}  Filter \u{00B7} 1"));
+    assert!(h.has("Filter \u{00B7} 1"));
 }
 
 #[test]
@@ -2628,7 +2628,7 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
     let mut h = Ui1::new();
     h.app.loc = Location::Everything;
     h.settle();
-    h.click("\u{2261}  Filter");
+    h.click("Filter");
     // nothing to save yet
     h.click("Saved filter name");
     h.type_text("Urgent or to do");
@@ -2665,7 +2665,7 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
     assert_eq!(h.app.filter.count(), 3);
     assert_eq!(h.app.filter.groups, saved.groups);
     assert_eq!(h.app.filtered().len(), shown);
-    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    assert!(h.has("Filter \u{00B7} 3"));
     // rename
     h.click("Rename saved filter Urgent or to do");
     h.type_text(" soon");
@@ -3090,8 +3090,8 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
         if open {
             h.click("Search tasks");
         }
-        let cols_chip = h.rect("\u{25A5}  Columns");
-        let sort = h.rect("\u{21C5}  Sort: Manual");
+        let cols_chip = h.rect("Columns");
+        let sort = h.rect("Sort: Manual");
         assert!(
             cols_chip.right() <= sort.left(),
             "search open {}: Columns {:?} Sort {:?}",
@@ -3110,7 +3110,7 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
     }
     // the wide window still shows every label in full
     let w = Ui1::new();
-    assert!(w.rect("\u{25A5}  Columns").width() > 60.0 && w.has("Team Space") && w.has("Projects"));
+    assert!(w.rect("Columns").width() > 60.0 && w.has("Team Space") && w.has("Projects"));
 }
 
 #[test]
@@ -3454,10 +3454,10 @@ fn narrow_task_window_fields_stay_left_of_the_comments() {
     for name in [
         "Time entries",
         "Time estimate value",
-        "\u{23F1}  Track time",
-        "\u{2691}  Priority",
-        "\u{1F464}  Assignees",
-        "\u{231B}  Time estimate",
+        "Track time",
+        "Priority",
+        "Assignees",
+        "Time estimate",
     ] {
         let r = h.rect(name);
         assert!(
@@ -3471,7 +3471,7 @@ fn narrow_task_window_fields_stay_left_of_the_comments() {
     // the wide window keeps two fields per row
     let mut w = Ui1::new();
     w.click_left("Task Write copy for landing page", 120.0);
-    let (st, asg) = (w.rect("\u{25CE}  Status"), w.rect("\u{1F464}  Assignees"));
+    let (st, asg) = (w.rect("Status"), w.rect("Assignees"));
     assert!(
         (st.center().y - asg.center().y).abs() < 4.0,
         "Status and Assignees share a row: {:?} {:?}",
@@ -3600,10 +3600,10 @@ fn narrow_task_window_has_no_blank_rows_when_fields_are_off() {
     h.app.data.extra.apps.time_tracking = false;
     h.settle();
     h.click_left("Task Write copy for landing page", 60.0);
-    let dates = h.rect("\u{1F4C5}  Dates");
-    let est = h.rect("\u{231B}  Time estimate");
-    let tags = h.rect("\u{1F3F7}  Tags");
-    let step = h.rect("\u{1F464}  Assignees").center().y - h.rect("\u{25CE}  Status").center().y;
+    let dates = h.rect("Dates");
+    let est = h.rect("Time estimate");
+    let tags = h.rect("Tags");
+    let step = h.rect("Assignees").center().y - h.rect("Status").center().y;
     assert!(
         est.center().y - dates.center().y < step * 1.5,
         "no gap after Dates: {:?} {:?} (row step {})",
@@ -6996,7 +6996,7 @@ fn ownerless_old_timer_can_be_stopped_from_the_task() {
     h.app.apply(Action::Open(id));
     h.settle();
     // it isn't mine, so my play button starts my own timer beside it
-    h.click("\u{25B6}");
+    h.click("Start timer");
     let t = task_named(&h, "Write copy for landing page");
     assert_eq!(t.timer_started, Some(started));
     assert!(h.app.data.is_my_timer(t));
@@ -7868,7 +7868,7 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     h.click("M");
     assert_eq!(custom(&h, 9002).as_deref(), Some("M"));
     // the Columns panel turns a field column off; the list remembers it
-    h.click("\u{25A5}  Columns");
+    h.click("Columns");
     assert!(h.has("Custom fields"));
     h.click("Field Billable");
     assert!(h.app.hidden_cols.contains("field:9001"));
@@ -9955,7 +9955,7 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
         "without the fields it would fit"
     );
     h.settle();
-    h.click("\u{25A5}  Columns");
+    h.click("Columns");
     let created = rect_of(&h, "Created by");
     let marks: Vec<Rect> = h
         .tree

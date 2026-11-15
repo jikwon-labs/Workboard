@@ -1373,3 +1373,34 @@ final class Round4ClientTests: XCTestCase {
         await until("sent after reconnecting", timeout: 10) { back.storedFile(sha) == picture && c.settings.reuploads.isEmpty }
     }
 }
+
+/// The fake server going away at the same address (what the offline UI test uses).
+@MainActor
+final class OfflineServerTests: XCTestCase {
+    func testAnEditMadeWhileTheServerIsAwayGoesUpWhenItIsBack() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
+        defer { server.stop() }
+        let c = SyncClient(storage: Storage(folder: FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")), tokens: MemoryTokenStore())
+        c.maxRetryDelay = 0.3
+        c.setMe(1)
+        c.setServer(url)
+        func until(_ what: String, _ cond: () -> Bool) async {
+            let end = Date().addingTimeInterval(8)
+            while !cond() {
+                if Date() > end { XCTFail("timed out waiting for \(what)"); return }
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+        }
+        await until("connected") { c.state.isConnected && c.canEdit }
+        server.goOffline(for: 30)
+        await until("offline") { if case .waiting = c.state { return true } else { return false } }
+        try await Task.sleep(nanoseconds: 700_000_000)
+        XCTAssertFalse(c.state.isConnected, "turned away while offline")
+        c.edit { d, me in Edits.sendMessage(&d, channel: 302, text: "Written on the train", me: me, id: c.newId(), ts: nowTs()) }
+        XCTAssertEqual(c.waitingCount, 1)
+        server.goOnline()
+        await until("sent and shown back") { c.state.isConnected && c.waitingCount == 0 }
+        XCTAssertTrue(server.current!.serialized().contains("Written on the train"))
+    }
+}

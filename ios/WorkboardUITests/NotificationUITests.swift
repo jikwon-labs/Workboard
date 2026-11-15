@@ -21,7 +21,7 @@ final class NotificationUITests: XCTestCase {
 
     func testBannerForNewMessageOpensConversation() {
         let app = XCUIApplication()
-        app.launchArguments = ["-wbReset", "YES", "-wbServer", server, "-wbMe", "1", "-wbTab", "chat"]
+        app.launchArguments = ["-wbReset", "YES", "-wbServer", server, "-wbMe", "1", "-wbTab", "chat"] + testArgs
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 

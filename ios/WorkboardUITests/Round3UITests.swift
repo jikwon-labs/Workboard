@@ -10,7 +10,7 @@ final class Round3UITests: XCTestCase {
 
     func launch(_ args: [String]) -> XCUIApplication {
         let a = XCUIApplication()
-        a.launchArguments = args
+        a.launchArguments = args + testArgs
         a.launch()
         return a
     }

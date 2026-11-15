@@ -194,20 +194,20 @@ struct PasswordView: View {
             Section {
                 TextField("Email", text: $email)
                     .keyboardType(.emailAddress)
-                    .textContentType(.username)
+                    .usernameField()
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("accountEmailField")
                 if hasAccount {
                     SecureField("Current password", text: $old)
-                        .textContentType(.password)
+                        .passwordField(.current)
                         .accessibilityIdentifier("oldPasswordField")
                 }
                 SecureField("New password (at least \(minPasswordLength) characters)", text: $password)
-                    .textContentType(.newPassword)
+                    .passwordField(.new)
                     .accessibilityIdentifier("accountPasswordField")
                 SecureField("New password again", text: $confirm)
-                    .textContentType(.newPassword)
+                    .passwordField(.new)
                     .onSubmit(save)
                     .accessibilityIdentifier("accountConfirmField")
             } footer: {

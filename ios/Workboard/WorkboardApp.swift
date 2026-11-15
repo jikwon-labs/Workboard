@@ -10,6 +10,8 @@
 //   -wbOpen channel:301  also task:ID, doc:ID, thread:CHANNEL:MESSAGE,
 //                        list:SPACE:LIST, settings
 //   -wbOpenURL URL       open a link at launch, as if tapped (workboard://join?...)
+//   -wbNoPasswordAutoFill YES  no saved or strong passwords offered in the
+//                        sign-in fields (UI tests type passwords themselves)
 //
 // Links: workboard://join?server=HOST[:PORT]&code=XXXX-XXXX-XXXX&email=...
 // (the URL scheme is registered in Config/Info.plist) opens the invite form.

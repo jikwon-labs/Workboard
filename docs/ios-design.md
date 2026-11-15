@@ -83,11 +83,11 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
 
-`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
+`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.
 
-앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbTab home|chat|tasks|docs`, `-wbOpen channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | settings`, `-wbOpenURL workboard://join?...`.
+앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbTab home|chat|tasks|docs`, `-wbOpen channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | settings`, `-wbOpenURL workboard://join?...`, `-wbNoPasswordAutoFill YES`(로그인 칸에 저장된 비밀번호·강한 비밀번호를 내놓지 않는다. iOS 의 "Use Strong Password" 시트가 타이핑 도중 키보드를 가로채서 UI 테스트가 흔들렸다. 모든 UI 테스트가 이것으로 띄운다).
 
 ## 데이터 다루는 방식
 
@@ -243,6 +243,16 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **자동화:** 상태 자동화의 "move"(하위 작업과 상태 맞추기), Multiple Assignees 꺼짐이면 담당자 바꾸기, "assigned to" 줄에 `target`.
 - **멘션:** 메시지·답글·댓글을 쓸 때와 메시지를 고칠 때 `mentioned_ids` 와 같은 규칙으로 `mentions` 를 채운다(`Mentions.swift`).
 - 허들·통화 카드는 고칠 수 없다. 새 채널에 `creator`. 영상은 파일에서 바로 올리고(sha256 도 조금씩 읽어서 계산) 통째로 메모리에 읽지 않는다.
+
+## 4차 고침 (2026-11-16)
+
+- **휴지통은 지운 사람 것:** 로그아웃할 때, 서버가 로그아웃시킬 때(`auth`), 다른 사람이 로그인하거나 골라질 때 비운다. 누가 지웠는지는 `settings.trashOwner` 에 둔다(예전 빌드의 휴지통은 지금의 "나" 것으로 본다).
+- **되살리면 파일도 다시 올린다:** 휴지통에서 되살린 항목의 사진·영상·스틸을 이 iPhone 캐시에서 찾아, 서버에 `HEAD` 로 있는지(크기까지) 묻고 없으면 `PUT` 한다(맥의 `reupload_files`). 서버에 닿지 못하면 `settings.reuploads` 에 남겨 다음 연결 때 다시 한다. 이를 위해 여기서 보낸 파일도 캐시(`WorkboardFiles`, 다운로드와 같은 이름)에 남긴다.
+- **로컬 알림 규칙:** 방금(10분 안에) 쓴 메시지만 알리고, 휴지통에서 돌아온 것(`extra.sync.revived` 에 id 가 있거나, 돌아온 대화보다 5분 넘게 먼저 쓴 것)은 뺀다. 서버 푸시 규칙(`push::notes`)과 같고 나이 제한만 짧다. 되살아난 대화나 새로 공유된 대화의 옛 메시지로 알림이 쏟아지지 않는다.
+- **관리 요청 답 맞추기:** 보낸 요청을 순서대로 기억하고(`asks`), 서버가 한 연결의 요청에 차례로 답하는 것을 이용해 답과 거절을 그 요청에 붙인다. 아무도 묻지 않은 `access`(누군가 바꾼 뒤 모두에게 감)는 그 요청의 답처럼 보일 때만(역할 바꾸기면 그 역할이 보일 때 등) 답으로 친다. `put_back` 거절과 "too old" 거절은 요청의 답이 아니라 화면 위 알림이다.
+- **영상 스틸은 덤:** 스틸 올리기가 실패해도 영상은 `thumb` 없이 간다(맥과 같음).
+- **멘션 고르기:** 메시지 칸에서 단어 첫머리에 `@` 를 치면 사람 목록(나와 초대 중인 사람은 빼고, 친 글자로 시작하는 이름, 동명이인은 이메일로 구별)이 뜬다. 고른 사람의 id 를 `picked` 로 넘겨 `mentions` 에 남기므로, 같은 이름이 여럿이어도 고른 사람만 멘션된다. 메시지·답글·작업 댓글 모두.
+- **UI 테스트:** 오프라인 테스트는 주소를 바꾸지 않고 18789 서버를 `/admin/offline` 으로 잠깐 없앴다가 되돌린다(주소를 바꾸면 앱이 사본을 버리는 게 맞다). 비밀번호 칸은 `-wbNoPasswordAutoFill` 로 강한 비밀번호 시트를 끄고, 칸에 글자 수가 다 찰 때까지 기다린다.
 
 ## 설계와 달라진 점
 

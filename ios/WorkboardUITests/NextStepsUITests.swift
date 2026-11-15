@@ -1,9 +1,10 @@
 // UI tests for the steps after phase 1: offline edits, being signed out by
 // an admin, huddles, reactions, comments, task fields and new docs. Signing
 // in itself is in AccountUITests.
-// Needs two fake servers (from ios/WorkboardKit):
+// Needs three fake servers (from ios/WorkboardKit):
 //   swift run wb-fake-server --port 18787
 //   swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev
+//   swift run wb-fake-server --port 18789 --admin-http
 // (no LiveKit server is running, so joining a huddle on 18788 fails on purpose)
 
 import XCTest
@@ -11,40 +12,46 @@ import XCTest
 final class NextStepsUITests: XCTestCase {
     let open = "ws://127.0.0.1:18787"
     let locked = "ws://127.0.0.1:18788"
-    let dead = "ws://127.0.0.1:18799"
+    /// --admin-http: the test takes it offline and back (/admin/offline, /admin/online)
+    let away = "ws://127.0.0.1:18789"
 
     override func setUp() { continueAfterFailure = false }
 
     func app(_ args: [String]) -> XCUIApplication {
         let a = XCUIApplication()
-        a.launchArguments = args
+        a.launchArguments = args + testArgs
         a.launch()
         return a
     }
 
     func testOfflineEditGoesUpAfterReconnect() {
-        // load the workspace once, then come back with the server unreachable
-        var a = app(["-wbReset", "YES", "-wbServer", open, "-wbMe", "1"])
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10))
-        a.terminate()
-        a = app(["-wbServer", dead, "-wbOpen", "channel:302"])
-        let banner = a.descendants(matching: .any)["offlineBanner"]
-        XCTAssertTrue(banner.waitForExistence(timeout: 10))
+        // the server goes away and comes back at the same address (a new
+        // address would rightly make the app start from a fresh copy)
+        let a = app(["-wbReset", "YES", "-wbServer", away, "-wbMe", "1", "-wbOpen", "channel:302"])
+        addTeardownBlock { self.admin(port: 18789, "online") }
         let box = a.textFields["composer"]
-        XCTAssertTrue(box.waitForExistence(timeout: 5))
-        XCTAssertTrue(box.isEnabled, "the message box works offline")
-        box.tap()
-        box.typeText("Written on the train")
-        a.buttons["sendButton"].tap()
-        XCTAssertTrue(a.staticTexts["Written on the train"].waitForExistence(timeout: 5))
-        waitLabel(banner, contains: "1 change waiting")
-        a.terminate()
+        XCTAssertTrue(box.waitForExistence(timeout: 10))
+        let banner = a.descendants(matching: .any)["offlineBanner"]
+        let connected = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: banner)
+        wait(for: [connected], timeout: 10)
 
-        // back in reach: the banner goes away and nothing is left waiting
-        a = app(["-wbServer", open, "-wbOpen", "channel:302"])
-        XCTAssertTrue(a.staticTexts["Written on the train"].waitForExistence(timeout: 10))
-        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: a.descendants(matching: .any)["offlineBanner"])
-        wait(for: [gone], timeout: 10)
+        admin(port: 18789, "offline?secs=90")
+        XCTAssertTrue(banner.waitForExistence(timeout: 10), "the app notices the server is gone")
+        XCTAssertTrue(box.isEnabled, "the message box works offline")
+        let text = "Written on the train \(Int(Date().timeIntervalSince1970))"
+        box.tap()
+        box.typeText(text)
+        a.buttons["sendButton"].tap()
+        XCTAssertTrue(a.staticTexts[text].waitForExistence(timeout: 5))
+        waitLabel(banner, contains: "1 change waiting")
+        XCTAssertEqual(admin(port: 18789, "find?text=\(text.replacingOccurrences(of: " ", with: "%20"))")["found"] as? Bool, false)
+
+        // back in reach: the app reconnects on its own, the waiting edit goes
+        // up and the banner goes away once the server shows it back
+        admin(port: 18789, "online")
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: banner)
+        wait(for: [gone], timeout: 45)
+        XCTAssertEqual(admin(port: 18789, "find?text=\(text.replacingOccurrences(of: " ", with: "%20"))")["found"] as? Bool, true, "the edit is on the server")
     }
 
     func testRevokedDeviceIsSignedOut() {

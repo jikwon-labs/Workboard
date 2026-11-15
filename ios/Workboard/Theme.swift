@@ -116,3 +116,21 @@ struct WMark: View {
         .accessibilityHidden(true)
     }
 }
+
+/// Content types for sign-in fields, so iOS offers saved and strong
+/// passwords. UI tests launch with `-wbNoPasswordAutoFill YES`: iOS's "Use
+/// Strong Password" sheet then never takes the keyboard over halfway through
+/// typing (it comes up at its own pace, which made those tests flaky).
+enum PasswordKind { case current, new }
+
+private let passwordAutoFillOff = UserDefaults.standard.bool(forKey: "wbNoPasswordAutoFill")
+
+extension View {
+    func passwordField(_ kind: PasswordKind) -> some View {
+        textContentType(passwordAutoFillOff ? .oneTimeCode : kind == .new ? .newPassword : .password)
+    }
+
+    func usernameField() -> some View {
+        textContentType(passwordAutoFillOff ? .emailAddress : .username)
+    }
+}

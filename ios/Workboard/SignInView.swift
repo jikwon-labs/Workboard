@@ -113,12 +113,12 @@ struct SignInView: View {
         Section {
             TextField("Email", text: $email)
                 .keyboardType(.emailAddress)
-                .textContentType(.username)
+                .usernameField()
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("emailField")
             SecureField("Password", text: $password)
-                .textContentType(.password)
+                .passwordField(.current)
                 .onSubmit(signIn)
                 .accessibilityIdentifier("passwordField")
             Button(action: signIn) { busyLabel("Sign in") }
@@ -147,7 +147,7 @@ struct SignInView: View {
                 .onChange(of: code) { old, new in readPastedLink(old: old, new: new) }
             TextField("Email (optional)", text: $inviteEmail)
                 .keyboardType(.emailAddress)
-                .textContentType(.username)
+                .usernameField()
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("inviteEmailField")
@@ -158,10 +158,10 @@ struct SignInView: View {
         }
         Section {
             SecureField("Password (at least \(minPasswordLength) characters)", text: $newPassword)
-                .textContentType(.newPassword)
+                .passwordField(.new)
                 .accessibilityIdentifier("newPasswordField")
             SecureField("Password again", text: $confirm)
-                .textContentType(.newPassword)
+                .passwordField(.new)
                 .onSubmit(join)
                 .accessibilityIdentifier("confirmPasswordField")
             Button(action: join) { busyLabel("Join") }
@@ -182,7 +182,7 @@ struct SignInView: View {
         Section {
             TextField("Email", text: $resetEmail)
                 .keyboardType(.emailAddress)
-                .textContentType(.username)
+                .usernameField()
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("forgotEmailField")
@@ -208,10 +208,10 @@ struct SignInView: View {
                     .font(.title3.monospaced())
                     .accessibilityIdentifier("resetCodeField")
                 SecureField("New password (at least \(minPasswordLength) characters)", text: $resetPassword)
-                    .textContentType(.newPassword)
+                    .passwordField(.new)
                     .accessibilityIdentifier("resetPasswordField")
                 SecureField("New password again", text: $resetConfirm)
-                    .textContentType(.newPassword)
+                    .passwordField(.new)
                     .onSubmit(reset)
                     .accessibilityIdentifier("resetConfirmField")
                 Button(action: reset) { busyLabel("Set password and sign in") }

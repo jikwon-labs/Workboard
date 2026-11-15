@@ -9,12 +9,19 @@
 import XCTest
 
 let signInServer = "ws://127.0.0.1:18788"
+/// Added to every launch: no saved or strong passwords offered, so iOS's
+/// "Use Strong Password" sheet never takes over the keyboard mid-typing.
+let testArgs = ["-wbNoPasswordAutoFill", "YES"]
 
 extension XCTestCase {
     /// Test-only admin call on the sign-in server (blocking; UI tests run on the main thread).
     @discardableResult
-    func admin(_ path: String) -> [String: Any] {
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:18788/admin/\(path)")!)
+    func admin(_ path: String) -> [String: Any] { admin(port: 18788, path) }
+
+    /// Test-only admin call on a fake server started with --admin-http.
+    @discardableResult
+    func admin(port: Int, _ path: String) -> [String: Any] {
+        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/admin/\(path)")!)
         req.httpMethod = "POST"
         var out: [String: Any] = [:]
         let done = expectation(description: "admin \(path)")
@@ -41,17 +48,24 @@ extension XCTestCase {
             field.typeText(text)
             return
         }
-        // iOS offers a strong password in place of the keyboard once typing
-        // starts in a new-password field, which swallows the rest of the
-        // typing; close it and type again until the field holds it all
+        // launched with -wbNoPasswordAutoFill (testArgs), the app asks for
+        // no strong password, so the typing lands whole; wait until the
+        // field shows every character. Should iOS still offer one, close it
+        // once it is up and type again.
         field.typeText(text)
         let app = XCUIApplication()
-        for _ in 0..<4 {
-            if app.buttons["GenerateStrongPasswordButton"].waitForExistence(timeout: 1) { app.buttons["xmark"].tap() }
-            let now = (field.value as? String).flatMap { $0 == field.placeholderValue ? nil : $0 } ?? ""
-            if now.count == text.count { return }
+        func count() -> Int { ((field.value as? String).flatMap { $0 == field.placeholderValue ? nil : $0 } ?? "").count }
+        let full = NSPredicate { _, _ in count() == text.count }
+        for _ in 0..<3 {
+            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: full, object: field)], timeout: 3) == .completed { return }
+            let offer = app.buttons["GenerateStrongPasswordButton"]
+            if offer.exists {
+                app.buttons["xmark"].tap()
+                let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: offer)
+                _ = XCTWaiter().wait(for: [closed], timeout: 3)
+            }
             if !((field.value(forKey: "hasKeyboardFocus") as? Bool) ?? false) { field.tap() }
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(now.count, 1)) + text)
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(count(), 1)) + text)
         }
         XCTFail("could not type into \(field)")
     }
@@ -84,7 +98,7 @@ final class AccountUITests: XCTestCase {
 
     func app(_ args: [String]) -> XCUIApplication {
         let a = XCUIApplication()
-        a.launchArguments = args
+        a.launchArguments = args + testArgs
         a.launch()
         return a
     }

@@ -15,7 +15,7 @@ final class WorkboardUITests: XCTestCase {
 
     func launch(_ extra: [String] = [], connect: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-wbReset", "YES"] + (connect ? ["-wbServer", server, "-wbMe", "1"] : []) + extra
+        app.launchArguments = ["-wbReset", "YES"] + (connect ? ["-wbServer", server, "-wbMe", "1"] : []) + extra + testArgs
         app.launch()
         return app
     }

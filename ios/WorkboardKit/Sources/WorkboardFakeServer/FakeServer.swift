@@ -111,9 +111,27 @@ public final class FakeServer: @unchecked Sendable {
     public var canMail = true
     /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
     /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T,
-    /// /admin/reset-code?email=E, /admin/drop-account?member=N), so UI
-    /// tests in the simulator can drive sign-in and incoming messages.
+    /// /admin/reset-code?email=E, /admin/drop-account?member=N,
+    /// /admin/offline?secs=N, /admin/online, /admin/find?text=T), so UI
+    /// tests in the simulator can drive sign-in, incoming messages and the
+    /// server going away.
     public var adminHTTP = false
+    /// Until when the server acts as gone: its WebSocket connections were
+    /// dropped and new ones are turned away (HTTP still answers, so a test
+    /// can bring it back). The address stays the same.
+    private var offlineUntil: Date?
+
+    /// Tests: drop every connection and turn new ones away for `secs`.
+    public func goOffline(for secs: TimeInterval) { queue.sync { offlineOnQueue(secs) } }
+
+    /// Tests: take connections again.
+    public func goOnline() { queue.sync { offlineUntil = nil } }
+
+    private func offlineOnQueue(_ secs: TimeInterval) {
+        offlineUntil = Date().addingTimeInterval(secs)
+        for p in peers.values where p.isWebSocket { drop(p) }
+        log("offline for \(Int(secs))s")
+    }
 
     final class Peer {
         let conn: NWConnection
@@ -310,6 +328,9 @@ public final class FakeServer: @unchecked Sendable {
         let method = request.first ?? ""
         let path = request.count > 1 ? request[1] : "/"
 
+        if headers["upgrade"]?.lowercased() == "websocket", let until = offlineUntil, until > Date() {
+            return respond(p, 503, ["error": "offline"])
+        }
         if headers["upgrade"]?.lowercased() == "websocket", let key = headers["sec-websocket-key"] {
             let accept = Data(Insecure.SHA1.hash(data: Data((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
             let resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
@@ -360,6 +381,21 @@ public final class FakeServer: @unchecked Sendable {
                 backupFiles.insert((name, snapshot ?? [:]), at: 0)
                 log("admin: backup \(name)")
                 respond(p, 200, ["ok": true])
+            case "/admin/offline":
+                let secs = comps?.queryItems?.first { $0.name == "secs" }?.value.flatMap { Double($0) } ?? 30
+                offlineOnQueue(secs)
+                respond(p, 200, ["ok": true])
+            case "/admin/online":
+                offlineUntil = nil
+                log("online")
+                respond(p, 200, ["ok": true])
+            case "/admin/find":
+                // whether a message or reply with this text is on the server
+                let text = comps?.queryItems?.first { $0.name == "text" }?.value ?? ""
+                let found = WorkspaceView(snapshot ?? [:]).channels.contains { c in
+                    c.messages.contains { $0.text == text || $0.replies.contains { $0.text == text } }
+                }
+                respond(p, 200, ["found": .bool(found)])
             case "/admin/revoke":
                 revokeOnQueue(member)
                 log("admin: revoked member \(member)")
@@ -387,7 +423,7 @@ public final class FakeServer: @unchecked Sendable {
 
     private func respond(_ p: Peer, _ status: Int, _ body: JSON) {
         let text = body.serialized()
-        let reason = [200: "OK", 201: "Created", 401: "Unauthorized", 404: "Not Found", 400: "Bad Request", 501: "Not Implemented"][status] ?? "Error"
+        let reason = [200: "OK", 201: "Created", 401: "Unauthorized", 404: "Not Found", 400: "Bad Request", 501: "Not Implemented", 503: "Service Unavailable"][status] ?? "Error"
         let resp = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(text.utf8.count)\r\nConnection: close\r\n\r\n\(text)"
         p.conn.send(content: Data(resp.utf8), completion: .contentProcessed { _ in p.conn.cancel() })
     }

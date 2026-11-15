@@ -13,8 +13,10 @@
 // While running, type "invite 2" or "revoke 2" and press return.
 // --admin-http (tests only) also takes POST /admin/invite?member=N,
 // /admin/revoke?member=N, /admin/say?channel=C&author=A&text=T,
-// /admin/reset-code?email=E and /admin/drop-account?member=N over HTTP,
-// for UI tests running in the simulator.
+// /admin/reset-code?email=E, /admin/drop-account?member=N,
+// /admin/offline?secs=N (drop the app connections and turn new ones away),
+// /admin/online and /admin/find?text=T over HTTP, for UI tests running in
+// the simulator.
 
 import Foundation
 import WorkboardFakeServer

@@ -1348,15 +1348,24 @@ impl App {
                     }
                 });
                 ui.add_space(6.0);
-                ui.label(
-                    RichText::new(crate::trf!(
-                        "{} people \u{2022} {} spaces \u{2022} {} tasks",
-                        self.data.members.len(),
-                        self.data.spaces.len(),
-                        self.data.tasks.len()
-                    ))
-                    .color(t.text2),
+                // archived tasks are not in the count, but say how many there are
+                let live = self
+                    .data
+                    .tasks
+                    .iter()
+                    .filter(|x| self.data.task_live(x))
+                    .count();
+                let archived = self.data.tasks.len() - live;
+                let mut counts = crate::trf!(
+                    "{} people \u{2022} {} spaces \u{2022} {} tasks",
+                    self.data.members.len(),
+                    self.open_spaces().len(),
+                    live
                 );
+                if archived > 0 {
+                    counts += &crate::trf!(" \u{2022} {} archived", archived);
+                }
+                ui.label(RichText::new(counts).color(t.text2));
                 ui.add_space(8.0);
                 if primary_button(ui, t, tr("Save")).clicked() && !name.trim().is_empty() {
                     self.data.workspace = name.trim().to_string();

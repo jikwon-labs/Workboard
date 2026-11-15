@@ -208,15 +208,19 @@ impl App {
             .open_spaces()
             .iter()
             .map(|s| {
-                let lists = self
+                // archived Lists and tasks are counted under Archived below
+                let lists: Vec<u64> = self
                     .data
                     .lists_in(Location::Space(s.id))
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|l| !self.data.list_archived(*l))
+                    .collect();
                 let tasks = self
                     .data
                     .tasks
                     .iter()
-                    .filter(|t| lists.contains(&t.list_id))
+                    .filter(|t| lists.contains(&t.list_id) && !t.archived)
                     .count();
                 (s.id, s.name.clone(), s.color, lists.len(), tasks)
             })
@@ -283,19 +287,24 @@ impl App {
             .filter(|s| s.archived && s.private_owner.is_none())
             .map(|s| (s.id, s.name.clone()))
             .collect();
-        let arch_lists: Vec<(u64, String)> = self
-            .data
-            .spaces
-            .iter()
-            .filter(|s| !s.archived)
-            .flat_map(|s| {
-                s.lists
-                    .iter()
-                    .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
-                    .filter(|l| l.archived)
-                    .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
-            })
-            .collect();
+        let arch_lists: Vec<(u64, String)> =
+            self.data
+                .spaces
+                .iter()
+                .filter(|s| !s.archived)
+                .flat_map(|s| {
+                    // a List in a Folder shows its Folder too, as Move tasks does
+                    s.lists
+                        .iter()
+                        .filter(|l| l.archived)
+                        .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
+                        .chain(s.folders.iter().flat_map(move |f| {
+                            f.lists.iter().filter(|l| l.archived).map(move |l| {
+                                (l.id, format!("{} / {} / {}", s.name, f.name, l.name))
+                            })
+                        }))
+                })
+                .collect();
         let arch_folders: Vec<(u64, String)> = self
             .data
             .spaces

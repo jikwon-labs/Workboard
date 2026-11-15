@@ -2462,7 +2462,7 @@ fn list_menu_info_archive_and_restore_from_settings() {
     h.app.section = Section::Settings;
     h.settle();
     h.click("Settings Spaces");
-    h.click("Restore Team Space / Marketing");
+    h.click("Restore Team Space / Projects / Marketing");
     assert!(!h.app.data.list_item(mk).unwrap().archived);
 }
 
@@ -8428,4 +8428,38 @@ fn create_list_or_channel_list_without_a_space_says_so() {
             ..
         })
     ));
+}
+
+#[test]
+fn settings_counts_leave_out_archived_and_say_how_many() {
+    let mut h = archived_workspace();
+    h.app.open_settings("Spaces");
+    h.settle();
+    // nothing live is left to count; the archived List shows its Folder
+    assert!(h.has("Team Space / Projects / Website Redesign"));
+    let team = h
+        .app
+        .data
+        .lists_in(Location::Space(h.app.data.spaces[0].id))
+        .unwrap();
+    let before = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| team.contains(&t.list_id))
+        .count();
+    assert!(before > 4);
+    assert!(
+        !h.has(&before.to_string()),
+        "archived tasks are not counted in the Spaces table"
+    );
+    h.app.open_settings("General");
+    h.settle();
+    let n = h.app.data.tasks.len();
+    let people = h.app.data.members.len();
+    assert!(h.has(&format!(
+        "{} people \u{2022} 2 spaces \u{2022} 0 tasks \u{2022} {} archived",
+        people, n
+    )));
 }

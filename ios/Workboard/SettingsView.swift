@@ -94,7 +94,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("Messages from others show up while the app is open or was just closed. The server can't send push notifications yet, so nothing arrives while the app has been closed for a while.")
+                    Text("Messages from others show up while the app is open or was just closed. Push notifications also need the team server's Apple push key and an app build with push turned on; until both are set up, nothing arrives while the app has been closed for a while.")
                         .accessibilityIdentifier("notifyFooter")
                 }
                 Section("Workspace") {

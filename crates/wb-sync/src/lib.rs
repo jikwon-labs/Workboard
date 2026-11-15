@@ -716,11 +716,43 @@ pub fn read_json(p: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// The copy other people get: personal notes, reminders and this computer's
-/// fingerprints left out.
+/// Each person's own settings and reading state in `extra`, left out of the
+/// copy other people get: what they've read and closed in chat, starred and
+/// recent items, notification and sidebar settings, their timesheet rows and
+/// where their copy is shared. None of it is merged from other copies, and
+/// the app fills in its default when one is missing.
+const PERSONAL_EXTRA: &[&str] = &[
+    "chat_seen",
+    "closed_dm_seen",
+    "closed_dms",
+    "replies_seen",
+    "replies_read",
+    "starred",
+    "recent",
+    "notify",
+    "muted_until",
+    "pinned_tools",
+    "rail_items",
+    "hidden_nav",
+    "hidden_views",
+    "hidden_cards",
+    "accent",
+    "auto_theme",
+    "labs",
+    "shared",
+    "sheet_rows",
+    "sheet_week_rows",
+];
+
+/// The copy other people get: personal notes, reminders, settings and
+/// reading state (`PERSONAL_EXTRA`) and this computer's fingerprints left
+/// out.
 pub fn shareable(data: &Value) -> Value {
     let mut v = data.clone();
     if let Some(e) = v.get_mut("extra").and_then(|e| e.as_object_mut()) {
+        for k in PERSONAL_EXTRA {
+            e.remove(*k);
+        }
         e.insert("notepad".into(), Value::String(String::new()));
         e.insert("reminders".into(), Value::Array(vec![]));
         e.insert("inbox_cleared".into(), Value::Array(vec![]));
@@ -1642,5 +1674,31 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["b", "c", "d", "f"]);
         assert_eq!(out["extra"]["forms"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn personal_settings_and_reading_state_stay_home() {
+        let mut m = SyncMeta::default();
+        m.hashes.insert(1, 2);
+        let d = json!({"workspace": "W", "me": 1, "tasks": [{"id": 7, "name": "T"}],
+            "extra": {"sync": m, "notepad": "secret note", "reminders": [{"id": 1}],
+                "chat_seen": {"10": {"floor": 5, "ids": [11]}}, "closed_dm_seen": {"20": {"floor": 1, "ids": []}},
+                "closed_dms": [[20, 5]], "starred": ["doc:1"], "recent": ["task:7"], "replies_seen": 9,
+                "replies_read": ["chat:1:2"], "notify": {"comments": false}, "muted_until": 99,
+                "shared": {"folder": "/Users/ann/Dropbox/team", "device": "d1", "tag": 1},
+                "sheet_rows": [[1, 7]], "accent": "pink", "labs": ["x"],
+                "dashboards": [{"id": 8, "name": "D"}], "workspace_color": [1, 2, 3]}});
+        let out = shareable(&d);
+        let e = out["extra"].as_object().unwrap();
+        for k in PERSONAL_EXTRA {
+            assert!(!e.contains_key(*k), "{} left out", k);
+        }
+        assert!(!out.to_string().contains("secret note"));
+        assert!(!out.to_string().contains("Dropbox"));
+        assert_eq!(out["extra"]["sync"]["hashes"], json!({}));
+        // what the team shares is all there
+        assert_eq!(out["extra"]["dashboards"][0]["name"], "D");
+        assert_eq!(out["extra"]["workspace_color"], json!([1, 2, 3]));
+        assert_eq!(out["tasks"], d["tasks"]);
     }
 }

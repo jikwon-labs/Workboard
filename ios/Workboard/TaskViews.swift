@@ -376,8 +376,8 @@ struct DueRow: View {
     var body: some View {
         Button { picking = true } label: {
             LabeledContent("Due") {
-                Text(task.due.map(Fmt.due) ?? "None")
-                    .foregroundStyle(task.due.map { $0 < dayString() } == true ? .red : .secondary)
+                Text(Fmt.due(task) ?? "None")
+                    .foregroundStyle(task.isOverdue(today: dayString(), now: timeString()) ? .red : .secondary)
             }
         }
         .foregroundStyle(.primary)

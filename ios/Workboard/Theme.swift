@@ -73,6 +73,12 @@ enum Fmt {
         Date(timeIntervalSince1970: TimeInterval(ts)).formatted(.relative(presentation: .named))
     }
 
+    /// A task's due date with its time when it has one: "Today 2:30 PM".
+    static func due(_ task: TaskView) -> String? {
+        guard let d = task.due else { return nil }
+        return [due(d), task.dueTimeLabel].compactMap { $0 }.joined(separator: " ")
+    }
+
     /// "YYYY-MM-DD" -> "Today", "Tomorrow", "Mar 3".
     static func due(_ day: String) -> String {
         let today = dayString()

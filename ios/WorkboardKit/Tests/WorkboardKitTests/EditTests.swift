@@ -122,6 +122,42 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(t["assignees"], [])
     }
 
+    func testDueTimeFromTheMacIsShownKeptAndClearedWithTheDate() {
+        var d = SampleWorkspace.make()
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        let today = f.date(from: "2026-11-14")!
+        // the Mac app set a due date with a time
+        d.updateItem(at: "tasks", id: 205) { j in
+            j["due"] = "2026-11-14"
+            j["due_time"] = "14:30"
+        }
+        var t = WorkspaceView(d).tasks.first { $0.id == 205 }!
+        XCTAssertEqual(t.dueTime, "14:30")
+        XCTAssertEqual(t.dueTimeLabel, "2:30 PM")
+        XCTAssertFalse(t.isOverdue(today: "2026-11-14", now: "14:29"))
+        XCTAssertTrue(t.isOverdue(today: "2026-11-14", now: "14:30"))
+        XCTAssertTrue(t.isOverdue(today: "2026-11-15", now: "08:00"))
+        // moving the day keeps the time, and the history says so
+        XCTAssertTrue(Edits.setDue(&d, task: 205, to: "2026-11-15", me: 1, ts: 95, today: today))
+        t = WorkspaceView(d).tasks.first { $0.id == 205 }!
+        XCTAssertEqual(t.dueTime, "14:30")
+        XCTAssertEqual(t.activity.last?.text, "changed due date to Tomorrow at 2:30 PM")
+        // clearing the date clears the time, written as null so a merge keeps it gone
+        XCTAssertTrue(Edits.setDue(&d, task: 205, to: nil, me: 1, ts: 96, today: today))
+        var raw = d["tasks"]!.array!.first { $0["id"] == 205 }!
+        XCTAssertEqual(raw["due_time"], .null)
+        XCTAssertNil(WorkspaceView(d).tasks.first { $0.id == 205 }!.dueTime)
+        // a new date afterwards starts without a time
+        XCTAssertTrue(Edits.setDue(&d, task: 205, to: "2026-11-20", me: 1, ts: 97, today: today))
+        raw = d["tasks"]!.array!.first { $0["id"] == 205 }!
+        XCTAssertEqual(raw["due_time"], .null)
+        // a task that never had a time gets no field
+        XCTAssertTrue(Edits.setDue(&d, task: 204, to: nil, me: 1, ts: 98, today: today))
+        XCTAssertNil(d["tasks"]!.array!.first { $0["id"] == 204 }!["due_time"])
+    }
+
     func testMacDateLabels() {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"

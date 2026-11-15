@@ -5794,6 +5794,8 @@ fn timesheet_entry_edits_and_week_picker() {
 mod i18n_tests;
 #[path = "template_tests.rs"]
 mod template_tests;
+#[path = "wording_tests.rs"]
+mod wording_tests;
 
 #[test]
 fn the_first_start_offers_working_alone_joining_or_a_new_server() {

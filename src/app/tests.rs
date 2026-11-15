@@ -6043,7 +6043,6 @@ fn server_refusals_are_shown_in_the_interface_language() {
     assert!(tries.contains("15분"), "{}", tries);
 }
 
-
 #[test]
 fn back_and_forward_to_another_place_clear_the_selection() {
     let mut a = app();
@@ -6164,7 +6163,6 @@ fn a_status_name_another_status_still_carries_waits_and_closing_settles_names() 
     sorted.dedup();
     assert_eq!(sorted.len(), names.len());
 }
-
 
 fn dead_server() -> super::files::Remote {
     super::files::Remote::Server {

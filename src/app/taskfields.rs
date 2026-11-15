@@ -1132,9 +1132,9 @@ impl App {
                             }),
                     );
                     if p.error.is_none() && e != files::NOT_SIGNED_IN {
-                        let r = ui.add(
-                            ghost(egui::Button::new(RichText::new(tr("Try again")).small())),
-                        );
+                        let r = ui.add(ghost(egui::Button::new(
+                            RichText::new(tr("Try again")).small(),
+                        )));
                         name_it(&r, &format!("Try again {}", p.name));
                         if r.clicked() {
                             retry = p.att.clone();

@@ -695,7 +695,6 @@ fn comments_on_a_task_i_duplicated_notify_like_the_inbox_shows_them() {
     assert_eq!(kinds(&a), vec![Kind::Comment]);
 }
 
-
 #[test]
 fn the_dock_count_follows_the_sidebar_seen_rule() {
     let mut a = app();

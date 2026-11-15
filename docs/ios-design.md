@@ -93,7 +93,8 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 
 - **정본은 원본 JSON 트리 그대로** (`JSON.swift`). 정수, u64(`hashes`), 실수를 구분해 보관한다. 화면용 구조체는 읽기 전용이고, 편집(`Edits.swift`)은 해당 필드만 바꾼다. 그래서 iOS 가 모르는 필드는 남는다.
 - **새 항목은 맥 앱 구조체의 필수 필드를 전부 넣는다.** 맥 앱은 합친 결과가 `Data` 로 읽히지 않으면 그 사본을 조용히 버린다(`sync_pull`). 새 작업·메시지·답글·문서·통화 메시지 모두 맥 앱이 쓰는 모양 그대로 만든다.
-- **활동 기록 문구는 맥 앱과 같다.** "changed status from X to Y", "set priority to Urgent", "changed due date to Tomorrow"(`fmt_date` 규칙), "assigned to ...", "removed assignee ...". 댓글은 `comment: true`.
+- **활동 기록 문구는 맥 앱과 같다.** "changed status from X to Y", "set priority to Urgent", "changed due date to Tomorrow"(`fmt_date` 규칙, 마감 시각이 있으면 "Tomorrow at 2:30 PM"), "assigned to ...", "removed assignee ...". 댓글은 `comment: true`.
+- **마감 시각(`due_time`, "14:30")은 맥 앱에서만 정한다.** iPhone 은 My Tasks 와 작업 화면에 "Today 2:30 PM" 처럼 보여 주고, 그 시각부터 빨갛게 표시한다. 마감일을 지우면 `due_time` 을 `null` 로 쓴다(맥 앱처럼 빼지 않고 null 로 남겨야 합칠 때 예전 시각이 돌아오지 않는다). 날짜가 없던 작업에 날짜를 넣을 때도 남아 있던 시각을 지운다. 날짜만 옮기면 시각은 그대로다. 시작 시각(`start_time`)은 iPhone 이 아직 시작일을 다루지 않아 건드리지 않는다.
 - **지문은 키를 정렬한 직렬화로 만든다.** iOS 안에서는 항상 같고, Rust 와 바이트까지 같을 필요는 없다.
 - **새 id** 는 `밀리초 * 1024 + tag`, 직전 id 보다 크게. tag 는 `welcome` 에서 받는다.
 - **"나는 누구"**: 로그인 없는 서버에서는 직접 고르고 기기에만 저장한다. 로그인 서버에서는 `welcome.member` 가 정하고, 그동안 직접 고르기는 막는다.

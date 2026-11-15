@@ -455,6 +455,10 @@ impl App {
 
     pub(super) fn switch_workspace(&mut self, file: &str) {
         self.ws_places.clear();
+        // a status editor still open: its edits are done (and saved with
+        // this workspace) like on closing it, and it doesn't stay open on
+        // the next workspace
+        self.finish_status_edit();
         if self.persist {
             self.data.save_file(&self.ws_file);
         }

@@ -1236,6 +1236,11 @@ impl App {
         d.extra.sync.hashes.clear();
         d.extra.sync.field_hashes.clear();
         d.me = 0;
+        // a status editor still open: its edits are done (and saved with the
+        // workspace being left) like on closing it, and it doesn't stay open
+        // on the joined workspace, where it would put its names on a space
+        // of the same id
+        self.finish_status_edit();
         if self.persist {
             self.data.save_file(&self.ws_file);
             let mut list = Data::workspaces();

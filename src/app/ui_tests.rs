@@ -10251,3 +10251,99 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
     h.key(egui::Key::Enter);
     assert_eq!(reply(&h).mentions, vec![sam]);
 }
+
+/// Opens the first space's status editor and, mid-edit, renames "to do" to
+/// "backlog" and empties "in progress". Returns (space, a task on "to do",
+/// a task on "in progress").
+fn status_edit_half_done(h: &mut Ui1) -> (u64, u64, u64) {
+    let sid = h.app.data.spaces[0].id;
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let ids: Vec<u64> = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.list_id == list)
+        .map(|t| t.id)
+        .collect();
+    let (a, b) = (ids[0], ids[1]);
+    for (t, st) in [(a, "to do"), (b, "in progress")] {
+        h.app
+            .data
+            .tasks
+            .iter_mut()
+            .find(|x| x.id == t)
+            .unwrap()
+            .status = st.into();
+    }
+    h.app.apply(Action::EditStatuses(sid));
+    h.settle();
+    h.click("to do");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("backlog");
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.settle();
+    assert!(h.app.status_edit.is_some());
+    (sid, a, b)
+}
+
+#[test]
+fn switching_workspace_finishes_the_status_edits_first() {
+    let mut h = Ui1::new();
+    let (_, a, b) = status_edit_half_done(&mut h);
+    // a workspace whose file can't be read: the switch goes no further, so
+    // what the switch did first shows in this workspace
+    let file = format!("workspace-r5-gone-{:x}.json", crate::sync::random_u64());
+    h.app.switch_workspace(&file);
+    assert!(h.app.edit_statuses.is_none(), "the editor closed");
+    assert!(h.app.status_edit.is_none());
+    assert_eq!(
+        h.app.task(a).unwrap().status,
+        "backlog",
+        "the rename reached its tasks"
+    );
+    let names: Vec<String> = h.app.data.spaces[0]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert!(
+        names.contains(&"in progress".to_string()),
+        "the emptied name went back: {:?}",
+        names
+    );
+    assert_eq!(h.app.task(b).unwrap().status, "in progress");
+}
+
+#[test]
+fn joining_a_team_finishes_the_status_edits_and_leaves_the_teams_statuses_alone() {
+    let mut h = Ui1::new();
+    // the team's copy: the same spaces, with "to do" renamed to "queued"
+    let mut team = App::build(None, Some(h.app.data.clone()));
+    let st = team.data.spaces[0]
+        .statuses
+        .iter_mut()
+        .find(|s| s.name == "to do")
+        .unwrap();
+    st.name = "queued".into();
+    let folder = std::env::temp_dir().join(format!("wb-r5-join-{:x}", crate::sync::random_u64()));
+    team.share_here(folder.to_str().unwrap()).unwrap();
+    let team_names: Vec<String> = team.data.spaces[0]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let (sid, _, _) = status_edit_half_done(&mut h);
+    h.app.join_shared(folder.to_str().unwrap()).unwrap();
+    assert!(h.app.edit_statuses.is_none(), "the editor closed");
+    assert!(h.app.status_edit.is_none(), "and its bookkeeping is gone");
+    h.settle();
+    // closing anything status-related later puts no old names on the team's
+    h.app.finish_status_edit();
+    let sp = h.app.data.spaces.iter().find(|s| s.id == sid).unwrap();
+    let names: Vec<String> = sp.statuses.iter().map(|s| s.name.clone()).collect();
+    assert_eq!(names, team_names, "the team's statuses as they were");
+    let _ = std::fs::remove_dir_all(&folder);
+}

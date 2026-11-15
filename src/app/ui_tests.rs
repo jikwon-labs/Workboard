@@ -461,7 +461,7 @@ fn click_workspace_menu_people_and_profile_themes() {
     h.click("Profile menu");
     h.click("Themes");
     assert!(matches!(h.app.modal, Some(Modal::Themes)));
-    h.click("\u{1F319} Dark");
+    h.click("Dark");
     assert!(h.app.data.dark, "dark theme switched on");
 }
 
@@ -527,7 +527,7 @@ fn click_form_template_and_submit() {
             .len(),
         3
     );
-    h.click("\u{1F441} Fill out");
+    h.click("Fill out");
     let n = h.app.data.tasks.len();
     h.click("Submit");
     assert_eq!(h.app.data.tasks.len(), n + 1, "submitting creates a task");
@@ -1713,7 +1713,7 @@ fn settings_is_a_full_page_with_sections() {
     h.click("Settings Spaces");
     assert!(h.has("Team Space"));
     h.click("Settings Themes");
-    h.click("\u{25D0} Auto");
+    h.click("Auto");
     assert!(h.app.data.extra.auto_theme);
     h.click("\u{2190}  Back to Workspace");
     assert_eq!(h.app.section, Section::Home);
@@ -2214,7 +2214,7 @@ fn doc_checkbox_toggles_and_new_page_opens_in_edit() {
     h.settle();
     let id = h.app.doc_open.unwrap();
     assert!(h.has("Start writing"), "an empty page offers how to start");
-    h.click("\u{25A6}  Table");
+    h.click("Table");
     assert!(h
         .app
         .data
@@ -2241,7 +2241,7 @@ fn doc_empty_page_add_subpage() {
     h.app.new_doc(None);
     h.settle();
     let id = h.app.doc_open.unwrap();
-    h.click("\u{1F4C4}  Subpage");
+    h.click("Subpage");
     assert!(h.app.data.docs.iter().any(|d| d.parent == Some(id)));
     assert_ne!(h.app.doc_open, Some(id), "the sub page opens");
 }
@@ -2723,7 +2723,7 @@ fn space_overview_customize_and_lists_card_columns() {
         "editing a cell does not open the List"
     );
     // Customize turns the Docs card off; Add card brings it back
-    h.click("\u{2699}  Customize");
+    h.click("Customize");
     h.click("Card Docs");
     assert!(h.app.data.extra.hidden_cards.contains(&"Docs".to_string()));
     h.key(egui::Key::Escape);
@@ -7126,7 +7126,7 @@ fn header_automate_opens_for_the_current_list_and_manage_people_opens_settings()
     h.app.section = Section::Teams;
     h.app.hub_filter = 3;
     h.settle();
-    h.click("\u{1F464} Manage people");
+    h.click("Manage people");
     assert_eq!(h.app.section, Section::Settings);
     assert_eq!(
         super::settings::SETTINGS[h.app.settings_tab as usize].1,
@@ -8677,7 +8677,7 @@ fn fields_buttons_and_drop_downs_in_a_dialog_are_one_height() {
         time: "09:00".into(),
     });
     h.settle();
-    let day = h.rect("Today");
+    let day = h.rect("Reminder date");
     let time = framed(h.rect("Reminder time"));
     assert!(
         (day.height() - time.height()).abs() < 0.5,

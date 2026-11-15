@@ -616,12 +616,12 @@ impl App {
                     Stroke::new(1.0, t.border),
                     egui::StrokeKind::Inside,
                 );
-                ui.painter().text(
-                    sr.left_center() + vec2(14.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    "\u{1F50D}",
-                    FontId::proportional(12.0),
+                super::icons::line_icon_scaled(
+                    ui.painter(),
+                    "search",
+                    sr.left_center() + vec2(20.0, 0.0),
                     t.text2,
+                    0.8,
                 );
                 let sg = ui.painter().layout_no_wrap(
                     tr("Search").into(),
@@ -658,12 +658,12 @@ impl App {
                     FontId::proportional(13.0),
                     t.text2,
                 );
-                ui.painter().text(
-                    ai_r.right_center() - vec2(10.0, 0.0),
-                    Align2::CENTER_CENTER,
-                    "\u{2728}",
-                    FontId::proportional(11.0),
+                super::icons::line_icon_scaled(
+                    ui.painter(),
+                    "sparkle",
+                    ai_r.right_center() - vec2(12.0, 0.0),
                     Color32::from_rgb(171, 74, 186),
+                    0.75,
                 );
                 if air.clicked() {
                     self.section = Section::Ai;
@@ -769,8 +769,9 @@ impl App {
                 }
                 let now = now_ts();
                 if let Some(task) = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)) {
+                    // room at the start for the stop square drawn over it
                     let txt = format!(
-                        "\u{23F9} {}  {}",
+                        "     {}  {}",
                         fmt_duration(self.data.my_tracked_secs(task, now)),
                         truncate(&task.name, 22)
                     );
@@ -781,7 +782,15 @@ impl App {
                     );
                     let id = task.id;
                     ui.add_space(8.0);
-                    if ui.add(b).on_hover_text(tr("Stop timer")).clicked() {
+                    let br = ui.add(b);
+                    super::icons::line_icon_scaled(
+                        ui.painter(),
+                        "stop",
+                        br.rect.left_center() + vec2(15.0, 0.0),
+                        Color32::WHITE,
+                        0.6,
+                    );
+                    if br.on_hover_text(tr("Stop timer")).clicked() {
                         self.actions.push(Action::ToggleTimer(id));
                     }
                     ctx.request_repaint_after(std::time::Duration::from_secs(1));
@@ -1221,7 +1230,10 @@ impl App {
             } else if resp.hovered() {
                 ui.painter().rect_filled(br, 5.0, t.row_selected);
             }
-            if boxed || hovered || resp.hovered() {
+            // a line icon by its kind; "+" and "⋯" stay characters
+            if (boxed || hovered || resp.hovered())
+                && !line_icon(ui.painter(), glyph, br.center(), t.text2)
+            {
                 ui.painter().text(
                     br.center(),
                     Align2::CENTER_CENTER,
@@ -1366,8 +1378,8 @@ impl App {
                     self.create_menu(ui)
                 });
                 let icons: [(&str, &str); 3] = [
-                    ("\u{1F50D}", "Search your sidebar"),
-                    ("\u{2261}", "Filter your sidebar"),
+                    ("search", "Search your sidebar"),
+                    ("filter", "Filter your sidebar"),
                     ("\u{00AB}", "Close sidebar"),
                 ];
                 for (i, (glyph, tip)) in icons.iter().enumerate() {
@@ -1385,12 +1397,13 @@ impl App {
                     if resp.hovered() || active {
                         ui.painter().rect_filled(br, 6.0, t.row_selected);
                     }
-                    if hovered || active {
+                    if (hovered || active) && !line_icon(ui.painter(), glyph, br.center(), t.text2)
+                    {
                         ui.painter().text(
                             br.center(),
                             Align2::CENTER_CENTER,
                             *glyph,
-                            FontId::proportional(if i == 2 { 16.0 } else { 13.0 }),
+                            FontId::proportional(16.0),
                             t.text2,
                         );
                     }
@@ -1909,7 +1922,7 @@ impl App {
                             let hs = self.side_header(
                                 ui,
                                 "Channels",
-                                &[("\u{1F516}", "Saved messages"), ("+", "Create a Channel")],
+                                &[("bookmark", "Saved messages"), ("+", "Create a Channel")],
                             );
                             name_it(&hs[0], "Saved messages");
                             if hs[0].clicked() {
@@ -2293,17 +2306,18 @@ impl App {
         popup(ui, &pr, ui.id().with(("splus_pop", s.id)), 220.0, |ui| {
             ui.label(RichText::new(tr("Create")).small().color(t.text3));
             for (icon, label) in [
-                ("\u{2630}", "List"),
-                ("\u{1F4C1}", "Folder"),
-                ("\u{1F4C4}", "Doc"),
-                ("\u{1F4CB}", "Form"),
-                ("\u{1F4CA}", "Dashboard"),
-                ("\u{1F3A8}", "Whiteboard"),
-                ("\u{2728}", "From a template"),
+                ("list", "List"),
+                ("folder", "Folder"),
+                ("docs", "Doc"),
+                ("forms", "Form"),
+                ("dashboards", "Dashboard"),
+                ("whiteboards", "Whiteboard"),
+                ("templates", "From a template"),
             ] {
-                if ui
-                    .add(ghost(egui::Button::new(format!("{}  {}", icon, tr(label)))))
-                    .clicked()
+                if menu_row_named(ui, &t, label, tr(label), false, |p, c| {
+                    line_icon(p, icon, c, t.text2);
+                })
+                .clicked()
                 {
                     match label {
                         "List" => self.open_new_list(Some(sid), None),
@@ -2438,11 +2452,19 @@ impl App {
             click_menu(&pr, |ui| {
                 ui.set_min_width(180.0);
                 ui.label(RichText::new(tr("Create")).small().color(t.text3));
-                if ui.button(format!("\u{2630}  {}", tr("List"))).clicked() {
+                if menu_row_named(ui, &t, "List", tr("List"), false, |p, c| {
+                    line_icon(p, "list", c, t.text2);
+                })
+                .clicked()
+                {
                     self.open_new_list(Some(sid), Some(fid));
                     ui.close_menu();
                 }
-                if ui.button(format!("\u{1F4C4}  {}", tr("Doc"))).clicked() {
+                if menu_row_named(ui, &t, "Doc", tr("Doc"), false, |p, c| {
+                    line_icon(p, "docs", c, t.text2);
+                })
+                .clicked()
+                {
                     self.new_doc(Some(sid));
                     ui.close_menu();
                 }
@@ -2927,8 +2949,9 @@ impl App {
                             ui.label(text);
                         }
                         if last && personal {
-                            ui.label(RichText::new("\u{1F512}").size(12.0).color(t.text3))
-                                .on_hover_text(tr("Private: only you can see this List"));
+                            let (r, lr) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                            line_icon(ui.painter(), "lock", r.center(), t.text3);
+                            lr.on_hover_text(tr("Private: only you can see this List"));
                         }
                         if last {
                             let (cr, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
@@ -3765,7 +3788,7 @@ impl App {
             p.with_clip_rect(*r).text(
                 r.left_center(),
                 Align2::LEFT_CENTER,
-                format!("\u{25A4} {}", name),
+                name,
                 FontId::proportional(13.0),
                 t.text2,
             );
@@ -4244,22 +4267,22 @@ impl App {
             x += gw + 10.0;
         }
         if nsub > 0 {
-            ui.painter().text(
+            super::icons::icon_count(
+                ui.painter(),
+                "subtasks",
                 pos2(x, rect.center().y),
-                Align2::LEFT_CENTER,
-                format!("\u{2934} {}", nsub),
-                FontId::proportional(12.0),
+                &nsub.to_string(),
                 t.text3,
             );
             x += 34.0;
         }
         if !task.checklist.is_empty() {
             let done = task.checklist.iter().filter(|c| c.done).count();
-            ui.painter().text(
+            super::icons::icon_count(
+                ui.painter(),
+                "task",
                 pos2(x, rect.center().y),
-                Align2::LEFT_CENTER,
-                format!("\u{2611} {}/{}", done, task.checklist.len()),
-                FontId::proportional(12.0),
+                &format!("{}/{}", done, task.checklist.len()),
                 t.text3,
             );
             x += 42.0;
@@ -4358,12 +4381,12 @@ impl App {
             ),
         }
         if task.recur.is_some() && cols.due.width() > 0.0 {
-            ui.painter_at(cols.due).text(
-                cols.due.right_center() - vec2(10.0, 0.0),
-                Align2::RIGHT_CENTER,
-                "\u{1F501}",
-                FontId::proportional(11.0),
+            super::icons::line_icon_scaled(
+                &ui.painter_at(cols.due),
+                "repeat",
+                cols.due.right_center() - vec2(14.0, 0.0),
                 t.text3,
+                0.7,
             );
         }
         if let Some(true) = popup(ui, &dr, id.with("dup"), 380.0, |ui| {
@@ -4971,11 +4994,11 @@ impl App {
                 }
                 let nsub = self.subtasks(task.id).len();
                 if nsub > 0 {
-                    p.text(
+                    super::icons::icon_count(
+                        &p,
+                        "subtasks",
                         pos2(b.right() + 8.0, r.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("\u{2934} {}", nsub),
-                        FontId::proportional(12.0),
+                        &nsub.to_string(),
                         t.text3,
                     );
                 }

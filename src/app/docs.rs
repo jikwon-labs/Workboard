@@ -347,25 +347,35 @@ impl App {
                             ("I", "Italic"),
                             ("S", "Strikethrough"),
                             ("`", "Inline code"),
-                            ("\u{1F517}", "Link"),
+                            ("link", "Link"),
                             ("\u{2022}", "Bulleted list"),
                             ("1.", "Numbered list"),
-                            ("\u{2611}", "Checklist"),
+                            ("task", "Checklist"),
                             ("\u{201C}", "Quote"),
                             ("</>", "Code block"),
                             ("\u{2014}", "Divider"),
                         ] {
+                            // link and checklist are line icons; the rest characters
+                            let icon = short == "link" || short == "task";
                             let txt = match short {
                                 "B" => RichText::new(short).strong(),
                                 "I" => RichText::new(short).italics(),
                                 "S" => RichText::new(short).strikethrough(),
+                                _ if icon => RichText::new(""),
                                 _ => RichText::new(short),
                             };
-                            if ui
-                                .add(ghost(egui::Button::new(txt).min_size(vec2(26.0, 24.0))))
-                                .on_hover_text(tr(label))
-                                .clicked()
-                            {
+                            let b =
+                                ui.add(ghost(egui::Button::new(txt).min_size(vec2(26.0, 24.0))));
+                            if icon {
+                                super::icons::line_icon(
+                                    ui.painter(),
+                                    short,
+                                    b.rect.center(),
+                                    t.text,
+                                );
+                                name_it(&b, label);
+                            }
+                            if b.on_hover_text(tr(label)).clicked() {
                                 pick = Some(label);
                             }
                         }
@@ -688,10 +698,28 @@ impl App {
                             let mut add_table = false;
                             let mut add_sub = false;
                             ui.horizontal(|ui| {
-                                if ui.button(tr("\u{25A6}  Table")).clicked() {
+                                if super::icons::icon_button(
+                                    ui,
+                                    &t,
+                                    "table",
+                                    tr("Table"),
+                                    "Table",
+                                    true,
+                                )
+                                .clicked()
+                                {
                                     add_table = true;
                                 }
-                                if ui.button(tr("\u{1F4C4}  Subpage")).clicked() {
+                                if super::icons::icon_button(
+                                    ui,
+                                    &t,
+                                    "docs",
+                                    tr("Subpage"),
+                                    "Subpage",
+                                    true,
+                                )
+                                .clicked()
+                                {
                                     add_sub = true;
                                 }
                             });

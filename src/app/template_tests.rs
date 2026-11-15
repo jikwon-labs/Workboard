@@ -105,7 +105,7 @@ fn template_center_opens_from_the_menus_and_searches() {
     h.settle();
     let side = space_id(&h, "Side Projects");
     h.click("Create in Side Projects");
-    h.click("\u{2728}  From a template");
+    h.click("From a template");
     let c = center(&h);
     assert_eq!(c.cat, Category::Lists);
     assert!(!c.new_space);

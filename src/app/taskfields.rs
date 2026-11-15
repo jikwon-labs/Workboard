@@ -214,7 +214,7 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
             ui.label(fmt_duration(e.end - e.start));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let r = ui.add(ghost(egui::Button::new(
-                    RichText::new("\u{2716}").size(10.0).color(t.text3),
+                    RichText::new("\u{00D7}").size(10.0).color(t.text3),
                 )));
                 name_it(&r, &format!("Remove entry {}", i + 1));
                 if r.on_hover_text(tr("Remove this entry")).clicked() {
@@ -338,16 +338,17 @@ impl App {
     ) {
         let me = self.data.me;
         let on = task.watchers.contains(&me);
-        let b = ui.add(ghost(egui::Button::new(
-            RichText::new(tr(if on {
-                "\u{1F441} Watching"
-            } else {
-                "\u{1F441} Watch"
-            }))
-            .size(12.0)
-            .color(if on { t.text } else { t.text2 }),
-        )));
-        name_it(&b, if on { "Stop watching" } else { "Watch task" });
+        let b = super::icons::icon_button_ex(
+            ui,
+            t,
+            "eye",
+            tr(if on { "Watching" } else { "Watch" }),
+            if on { "Stop watching" } else { "Watch task" },
+            false,
+            0.0,
+            if on { t.text } else { t.text2 },
+            t.text2,
+        );
         if b.on_hover_text(tr(if on {
             "Stop getting updates"
         } else {
@@ -369,13 +370,7 @@ impl App {
             ui.painter().rect_filled(r, 6.0, t.hover);
         }
         if task.watchers.is_empty() {
-            ui.painter().text(
-                r.center(),
-                Align2::CENTER_CENTER,
-                "\u{1F441}",
-                FontId::proportional(12.0),
-                t.text3,
-            );
+            super::icons::line_icon_scaled(ui.painter(), "eye", r.center(), t.text3, 0.8);
         } else {
             let shown: Vec<u64> = task.watchers.iter().take(4).copied().collect();
             paint_avatars(
@@ -403,12 +398,12 @@ impl App {
                     |p, c| paint_avatar(p, c, 9.0, m, ring),
                 );
                 if sel {
-                    ui.painter().text(
-                        r.rect.right_center() - vec2(12.0, 0.0),
-                        Align2::RIGHT_CENTER,
-                        "\u{2714}",
-                        FontId::proportional(12.0),
+                    super::icons::line_icon_scaled(
+                        ui.painter(),
+                        "check",
+                        r.rect.right_center() - vec2(16.0, 0.0),
                         t.selected_text,
+                        0.8,
                     );
                 }
                 if r.clicked() {
@@ -586,12 +581,12 @@ impl App {
                     {
                         Some(m) => paint_avatar(ui.painter(), ar.center(), 9.0, m, t.card),
                         None => {
-                            ui.painter().text(
+                            super::icons::line_icon_scaled(
+                                ui.painter(),
+                                "person",
                                 ar.center(),
-                                Align2::CENTER_CENTER,
-                                "\u{1F464}",
-                                FontId::proportional(12.0),
                                 t.text3,
+                                0.8,
                             );
                         }
                     }
@@ -614,7 +609,7 @@ impl App {
                 if !hover {
                     return;
                 }
-                let x = ui.add(small("\u{2716}"));
+                let x = ui.add(small("\u{00D7}"));
                 name_it(&x, &format!("Remove item {}", label));
                 if x.on_hover_text(tr("Remove")).clicked() {
                     remove = Some(i);
@@ -834,14 +829,16 @@ impl App {
             if ids.is_empty() {
                 continue;
             }
-            let (head, col) = match mode {
-                TaskPick::WaitingOn => {
-                    ("\u{26D4}  Waiting on", Color32::from_rgb(0xe1, 0x6b, 0x16))
-                }
-                TaskPick::Blocking => ("\u{26A0}  Blocking", t.danger),
-                _ => ("\u{1F517}  Linked", t.text2),
+            let (head, col, kind) = match mode {
+                TaskPick::WaitingOn => (
+                    "Waiting on",
+                    Color32::from_rgb(0xe1, 0x6b, 0x16),
+                    "hourglass",
+                ),
+                TaskPick::Blocking => ("Blocking", t.danger, "warning"),
+                _ => ("Linked", t.text2, "link"),
             };
-            ui.label(RichText::new(tr(head)).small().color(col));
+            super::icons::icon_label(ui, kind, RichText::new(tr(head)).small().color(col), col);
             for oid in ids.iter() {
                 let Some(o) = self.task(*oid).cloned() else {
                     continue;
@@ -868,7 +865,7 @@ impl App {
                 let x = ui.put(
                     Rect::from_center_size(r.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0)),
                     ghost(
-                        egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover {
+                        egui::Button::new(RichText::new("\u{00D7}").size(10.0).color(if hover {
                             t.text2
                         } else {
                             Color32::TRANSPARENT
@@ -1103,10 +1100,17 @@ impl App {
                 ui.label(RichText::new(task.attachments.len().to_string()).color(t.text3));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let b = ui.add(ghost(egui::Button::new(
-                    RichText::new(tr("\u{1F4CE} Attach")).color(t.text2),
-                )));
-                name_it(&b, "Attach file");
+                let b = super::icons::icon_button_ex(
+                    ui,
+                    t,
+                    "attach",
+                    tr("Attach"),
+                    "Attach file",
+                    false,
+                    0.0,
+                    t.text2,
+                    t.text2,
+                );
                 if b.on_hover_text(tr("Attach pictures or videos (or drop them here)"))
                     .clicked()
                 {
@@ -1144,17 +1148,17 @@ impl App {
                         }
                         None => {
                             ui.painter().rect_filled(pic, 8.0, t.hover);
-                            let glyph = if a.kind == MediaKind::Video {
-                                "\u{25B6}"
+                            let kind = if a.kind == MediaKind::Video {
+                                "play"
                             } else {
-                                "\u{1F5BC}"
+                                "shapes"
                             };
-                            ui.painter().text(
+                            super::icons::line_icon_scaled(
+                                ui.painter(),
+                                kind,
                                 pic.center(),
-                                Align2::CENTER_CENTER,
-                                glyph,
-                                FontId::proportional(20.0),
                                 t.text3,
+                                1.4,
                             );
                         }
                     }
@@ -1172,7 +1176,7 @@ impl App {
                             pic.right_top() + vec2(-12.0, 12.0),
                             vec2(20.0, 20.0),
                         ),
-                        egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover {
+                        egui::Button::new(RichText::new("\u{00D7}").size(10.0).color(if hover {
                             Color32::WHITE
                         } else {
                             Color32::TRANSPARENT
@@ -1238,7 +1242,7 @@ impl App {
                         }
                     }
                     let x = ui.add(ghost(egui::Button::new(
-                        RichText::new("\u{2716}").size(10.0).color(t.text3),
+                        RichText::new("\u{00D7}").size(10.0).color(t.text3),
                     )));
                     name_it(&x, &format!("Dismiss {}", p.name));
                     if x.clicked() {

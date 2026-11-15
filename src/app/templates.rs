@@ -158,7 +158,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "project-tracker",
         en: "Project tracker",
-        glyph: "\u{1F4CB}",
+        glyph: "list",
         color: [0xe1, 0x6b, 0x16],
         about: tr("Plan a project from kickoff to wrap-up, with a review step"),
         tpl: TaskTemplate {
@@ -196,7 +196,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "bug-tracker",
         en: "Bug tracker",
-        glyph: "\u{1F41B}",
+        glyph: "warning",
         color: [0xd3, 0x3d, 0x44],
         about: tr("Report, sort and fix bugs until they are closed"),
         tpl: TaskTemplate {
@@ -225,7 +225,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "content-calendar",
         en: "Content calendar",
-        glyph: "\u{1F4C5}",
+        glyph: "calendar",
         color: [0x44, 0x66, 0xff],
         about: tr("Take posts from idea to published on a schedule"),
         tpl: TaskTemplate {
@@ -260,7 +260,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "onboarding",
         en: "Onboarding checklist",
-        glyph: "\u{1F44B}",
+        glyph: "smile",
         color: [0x3d, 0xb8, 0x8b],
         about: tr("Help a new teammate settle in during the first month"),
         tpl: TaskTemplate {
@@ -283,7 +283,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "bug-report",
         en: "Bug report",
-        glyph: "\u{26A0}",
+        glyph: "flag",
         color: [0xd3, 0x3d, 0x44],
         about: tr("One bug with steps to reproduce and a fix checklist"),
         tpl: TaskTemplate {
@@ -307,7 +307,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "feature-request",
         en: "Feature request",
-        glyph: "\u{1F4A1}",
+        glyph: "sparkle",
         color: [0xf8, 0xae, 0x00],
         about: tr("Describe a problem and the change that would solve it"),
         tpl: TaskTemplate {
@@ -331,7 +331,7 @@ pub fn builtins() -> Vec<Builtin> {
         (
             "project-overview",
             "Project Overview",
-            "\u{1F4CB}",
+            "forms",
             [0xe1, 0x6b, 0x16],
             tr("Summarize goals, scope, and milestones"),
             tr("Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- "),
@@ -339,7 +339,7 @@ pub fn builtins() -> Vec<Builtin> {
         (
             "meeting-notes",
             "Meeting Notes",
-            "\u{1F4DD}",
+            "edit",
             [0xf8, 0xae, 0x00],
             tr("Capture an agenda, notes, and action items"),
             tr("Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] "),
@@ -347,7 +347,7 @@ pub fn builtins() -> Vec<Builtin> {
         (
             "wiki",
             "Wiki",
-            "\u{1F4D3}",
+            "notebook",
             [0x44, 0x66, 0xff],
             tr("Organize information in one place"),
             tr("Overview\n\nHow we work\n\nLinks\n"),
@@ -406,9 +406,9 @@ pub fn merge_statuses(to: &mut Vec<Status>, add: &[Status]) {
 
 fn kind_glyph(kind: &str) -> (&'static str, [u8; 3]) {
     match kind {
-        KIND_LIST => ("\u{2630}", [0x5f, 0x55, 0xee]),
-        KIND_DOC => ("\u{1F4C4}", [0x10, 0x90, 0xe0]),
-        _ => ("\u{2611}", [0x0f, 0x9d, 0x9f]),
+        KIND_LIST => ("list", [0x5f, 0x55, 0xee]),
+        KIND_DOC => ("docs", [0x10, 0x90, 0xe0]),
+        _ => ("task", [0x0f, 0x9d, 0x9f]),
     }
 }
 
@@ -470,15 +470,10 @@ fn template_row(
         hover_bg(ui, &resp, r, 8.0);
     }
     let c = r.left_center() + vec2(20.0, 0.0);
+    // the icon in its colour on a pale tile of it, as in the galleries
     ui.painter()
-        .circle_filled(c, 14.0, rgb(color).gamma_multiply(0.35));
-    ui.painter().text(
-        c,
-        Align2::CENTER_CENTER,
-        glyph,
-        FontId::proportional(13.0),
-        rgb(color),
-    );
+        .circle_filled(c, 14.0, rgb(color).gamma_multiply(0.14));
+    super::icons::line_icon(ui.painter(), glyph, c, rgb(color));
     let text_w = (r.width() - 42.0 - 8.0).max(0.0);
     let (title_font, sub_font) = (FontId::proportional(13.5), FontId::proportional(11.5));
     let shown_title = shell::fit_text(ui.painter(), title, &title_font, text_w);
@@ -941,14 +936,8 @@ impl App {
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
             ui.painter()
-                .circle_filled(r.center(), 17.0, rgb(color).gamma_multiply(0.35));
-            ui.painter().text(
-                r.center(),
-                Align2::CENTER_CENTER,
-                glyph,
-                FontId::proportional(15.0),
-                rgb(color),
-            );
+                .circle_filled(r.center(), 17.0, rgb(color).gamma_multiply(0.14));
+            super::icons::line_icon(ui.painter(), glyph, r.center(), rgb(color));
             ui.vertical(|ui| {
                 ui.label(RichText::new(&tp.name).size(16.0).strong());
                 let about = match &b {
@@ -1408,10 +1397,13 @@ fn template_preview(ui: &mut Ui, t: &Theme, tp: &TaskTemplate) {
                         );
                     }
                     if !x.checklist.is_empty() {
-                        ui.label(
-                            RichText::new(format!("\u{2611} {}", x.checklist.len()))
+                        super::icons::icon_label(
+                            ui,
+                            "task",
+                            RichText::new(x.checklist.len().to_string())
                                 .small()
                                 .color(t.text3),
+                            t.text3,
                         );
                     }
                     for tag in &x.tags {
@@ -1452,7 +1444,8 @@ fn template_preview(ui: &mut Ui, t: &Theme, tp: &TaskTemplate) {
             if !tp.checklist.is_empty() {
                 ui.add_space(4.0);
                 for item in &tp.checklist {
-                    ui.label(format!("\u{2610}  {}", item));
+                    let mut off = false;
+                    ui.add_enabled(false, crate::widgets::Check::new(&mut off, item.as_str()));
                 }
             }
         }

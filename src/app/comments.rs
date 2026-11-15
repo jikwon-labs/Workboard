@@ -388,10 +388,8 @@ impl App {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let more = ui.add(ghost(egui::Button::new(
-                            RichText::new("\u{22EF}").color(t.text2),
-                        )));
-                        name_it(&more, "Comment actions");
+                        let more =
+                            super::icons::icon_button(ui, &t, "dots", "", "Comment actions", false);
                         click_menu(&more, |ui| {
                             if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
                                 acts.push(Act::Reply(a.id));
@@ -444,10 +442,8 @@ impl App {
                                 }
                             }
                         });
-                        let react = ui.add(ghost(egui::Button::new(
-                            RichText::new("\u{263A}").color(t.text2),
-                        )));
-                        name_it(&react, "Add reaction");
+                        let react =
+                            super::icons::icon_button(ui, &t, "smile", "", "Add reaction", false);
                         popup(ui, &react, ui.id().with(("react", a.id)), 180.0, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 for e in REACTIONS {
@@ -474,11 +470,9 @@ impl App {
                             .member(to)
                             .map(|m| m.name.clone())
                             .unwrap_or_else(|| tr("someone").into());
-                        let tick = ui.add(ghost(egui::Button::new(if a.resolved {
-                            "\u{2611}"
-                        } else {
-                            "\u{2610}"
-                        })));
+                        // the same check box as everywhere else
+                        let mut on = a.resolved;
+                        let tick = crate::widgets::check(ui, &mut on, "");
                         name_it(
                             &tick,
                             if a.resolved {
@@ -596,11 +590,8 @@ impl App {
                 };
                 if let Some((done, r)) = check {
                     rest = r;
-                    let b = ui.add(ghost(egui::Button::new(if done {
-                        "\u{2611}"
-                    } else {
-                        "\u{2610}"
-                    })));
+                    let mut on = done;
+                    let b = crate::widgets::check(ui, &mut on, "");
                     name_it(&b, &format!("Tick {}", r.trim()));
                     if b.clicked() {
                         acts.push(Act::Check { id: a.id, line: li });

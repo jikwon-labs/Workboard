@@ -1551,14 +1551,17 @@ impl App {
                 );
                 name_field(&r, "Status text");
                 ui.horizontal_wrapped(|ui| {
-                    for s in [
-                        tr("\u{1F4C5} In a meeting"),
-                        tr("\u{1F68C} Commuting"),
-                        tr("\u{2639} Out sick"),
-                        tr("\u{1F334} Vacationing"),
-                        tr("\u{1F3E0} Working remotely"),
+                    // the emoji stays part of the status people see; the button
+                    // draws a line icon and the words
+                    for (kind, s) in [
+                        ("calendar", tr("\u{1F4C5} In a meeting")),
+                        ("bus", tr("\u{1F68C} Commuting")),
+                        ("frown", tr("\u{2639} Out sick")),
+                        ("plane", tr("\u{1F334} Vacationing")),
+                        ("home", tr("\u{1F3E0} Working remotely")),
                     ] {
-                        if ui.button(s).clicked() {
+                        let words = s.split_once(' ').map_or(s, |x| x.1);
+                        if icon_button(ui, t, kind, words, s, true).clicked() {
                             *text = s.to_string();
                         }
                     }
@@ -1587,26 +1590,55 @@ impl App {
                 ui.label(tr("Appearance"));
                 ui.horizontal(|ui| {
                     let auto = self.data.extra.auto_theme;
-                    if ui
-                        .selectable_label(!auto && !self.data.dark, tr("\u{2600} Light"))
-                        .clicked()
+                    let sel = !auto && !self.data.dark;
+                    if icon_button_ex(
+                        ui,
+                        t,
+                        "sun",
+                        tr("Light"),
+                        "Light",
+                        sel,
+                        0.0,
+                        if sel { t.text } else { t.text2 },
+                        t.text2,
+                    )
+                    .clicked()
                     {
                         self.data.dark = false;
                         self.data.extra.auto_theme = false;
                         self.dirty = true;
                     }
-                    if ui
-                        .selectable_label(!auto && self.data.dark, tr("\u{1F319} Dark"))
-                        .clicked()
+                    let sel = !auto && self.data.dark;
+                    if icon_button_ex(
+                        ui,
+                        t,
+                        "moon",
+                        tr("Dark"),
+                        "Dark",
+                        sel,
+                        0.0,
+                        if sel { t.text } else { t.text2 },
+                        t.text2,
+                    )
+                    .clicked()
                     {
                         self.data.dark = true;
                         self.data.extra.auto_theme = false;
                         self.dirty = true;
                     }
-                    if ui
-                        .selectable_label(auto, tr("\u{25D0} Auto"))
-                        .on_hover_text(tr("Follow your computer's appearance"))
-                        .clicked()
+                    if icon_button_ex(
+                        ui,
+                        t,
+                        "auto",
+                        tr("Auto"),
+                        "Auto",
+                        auto,
+                        0.0,
+                        if auto { t.text } else { t.text2 },
+                        t.text2,
+                    )
+                    .on_hover_text(tr("Follow your computer's appearance"))
+                    .clicked()
                     {
                         self.data.extra.auto_theme = true;
                         self.dirty = true;
@@ -2357,7 +2389,7 @@ impl App {
                         });
                         close = true;
                     }
-                    if ui.button(tr("\u{1F517} Copy link")).clicked() {
+                    if icon_button(ui, t, "link", tr("Copy link"), "Copy link", true).clicked() {
                         // the same kind of link the app opens (search, messages, macOS)
                         ui.ctx().copy_text(super::nav::location_link(self.loc));
                         self.toast = Some((tr("Link copied").into(), now_ts()));
@@ -2458,9 +2490,9 @@ impl App {
                         ui,
                         t,
                         if is_running {
-                            tr("\u{23F9} Stop timer")
+                            tr("Stop timer")
                         } else {
-                            tr("\u{25B6} Start timer")
+                            tr("Start timer")
                         },
                     )
                     .clicked()
@@ -2482,10 +2514,8 @@ impl App {
                 );
                 r.request_focus();
                 ui.horizontal(|ui| {
-                    let d_txt = date
-                        .map(fmt_date)
-                        .unwrap_or_else(|| tr("\u{1F4C5} Date").into());
-                    let r = ui.button(d_txt);
+                    let d_txt = date.map(fmt_date).unwrap_or_else(|| tr("Date").into());
+                    let r = icon_button(ui, t, "calendar", &d_txt, "Reminder date", true);
                     popup(ui, &r, ui.id().with("rem_date"), 380.0, |ui| {
                         date_menu(ui, t, ui.id().with("rem_cal"), date)
                     });

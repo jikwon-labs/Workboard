@@ -503,7 +503,7 @@ impl App {
         });
         // as wide as the name field above it
         egui::ComboBox::from_id_salt("new_list_space")
-            .width(ui.available_width() - 10.0)
+            .width(ui.available_width())
             .selected_text(cur.unwrap_or_else(|| tr("Choose a Space").into()))
             .show_ui(ui, |ui| {
                 for (sid, sname, folders) in &spaces {
@@ -1828,15 +1828,24 @@ impl App {
             .map(|f| f.id);
         ui.label(RichText::new(tr("Create")).small().color(self.t().text3));
         for (icon, label) in [
-            ("\u{2611}", "Task"),
-            ("\u{2630}", "List"),
-            ("\u{1F4C4}", "Doc"),
-            ("\u{1F4CA}", "Dashboard"),
-            ("\u{1F3A8}", "Whiteboard"),
-            ("\u{1F4CB}", "Form"),
+            ("task", "Task"),
+            ("list", "List"),
+            ("docs", "Doc"),
+            ("dashboards", "Dashboard"),
+            ("whiteboards", "Whiteboard"),
+            ("forms", "Form"),
         ] {
-            let b = ui.button(format!("{}  {}", icon, tr(label)));
-            name_it(&b, &format!("Create {}", label));
+            let t = self.t();
+            let b = menu_row_named(
+                ui,
+                &t,
+                &format!("Create {}", label),
+                tr(label),
+                false,
+                |p, c| {
+                    super::icons::line_icon(p, icon, c, t.text2);
+                },
+            );
             if b.clicked() {
                 match label {
                     "Task" => {
@@ -2400,7 +2409,7 @@ impl App {
                         for (fid, name) in shown_fields {
                             let key = super::shell::field_col_key(*fid);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("\u{25A4} {}", name)).color(t.text));
+                                super::icons::icon_label(ui, "fields", RichText::new(name).color(t.text), t.text2);
                                 let on_now = !self.hidden_cols.contains(&key);
                                 if on_now && !field_fits.contains(fid) {
                                     ui.label(RichText::new(tr("no room")).small().color(t.text3)).on_hover_text(tr("The List is too narrow to show this column; widen the window or turn another field off."));
@@ -2618,7 +2627,7 @@ impl App {
                         });
                     name_it(&vr.response, &format!("{} {} values", prefix, n));
                 });
-                let x = ui.add(ghost(egui::Button::new("\u{2716}")));
+                let x = ui.add(ghost(egui::Button::new("\u{00D7}")));
                 name_it(&x, &format!("Remove {} {}", prefix.to_lowercase(), n));
                 if x.clicked() {
                     drop = Some(i);
@@ -2971,7 +2980,7 @@ impl App {
                                 .color(Color32::WHITE),
                             );
                             if ui
-                                .small_button("\u{2716}")
+                                .small_button("\u{00D7}")
                                 .on_hover_text(tr("Clear selection"))
                                 .clicked()
                             {

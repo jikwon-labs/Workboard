@@ -336,7 +336,7 @@ impl App {
                         }
                     }
                     let r = ui
-                        .add(ghost(egui::Button::new("\u{2716}")))
+                        .add(ghost(egui::Button::new("\u{00D7}")))
                         .on_hover_text(tr("Remove"));
                     name_it(&r, &format!("Remove {}", name));
                     if r.clicked() {

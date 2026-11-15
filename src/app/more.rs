@@ -828,7 +828,7 @@ impl App {
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(tr("Type:")).color(t.text2));
                                     egui::ComboBox::from_id_salt("post_type")
-                                        .selected_text(format!("\u{1F4E2} {}", tr(&self.post_type)))
+                                        .selected_text(tr(&self.post_type))
                                         .show_ui(ui, |ui| {
                                             for k in ["Announcement", "Update", "Idea", "Question"]
                                             {
@@ -858,22 +858,24 @@ impl App {
                                         .desired_width(f32::INFINITY),
                                 );
                                 ui.horizontal(|ui| {
+                                    // "+" and "@" are characters; the others line icons
                                     for (g, tip) in [
                                         ("+", "Create task"),
                                         ("@", "Mention someone"),
-                                        ("\u{263A}", "Emoji"),
-                                        ("\u{2611}", "Create task"),
+                                        ("smile", "Emoji"),
+                                        ("task", "Create task"),
                                     ] {
-                                        if ui
-                                            .add(ghost(egui::Button::new(
+                                        let b = if g.len() == 1 {
+                                            ui.add(ghost(egui::Button::new(
                                                 RichText::new(g).color(t.text2),
                                             )))
-                                            .on_hover_text(tr(tip))
-                                            .clicked()
-                                        {
+                                        } else {
+                                            icon_button(ui, &t, g, "", tip, false)
+                                        };
+                                        if b.on_hover_text(tr(tip)).clicked() {
                                             match g {
                                                 "@" => self.post_body.push('@'),
-                                                "\u{263A}" => self.post_body.push_str("\u{1F44D}"),
+                                                "smile" => self.post_body.push_str("\u{1F44D}"),
                                                 _ => self.open_quick_add(None),
                                             }
                                         }
@@ -949,15 +951,13 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.add_space(pad);
                     let fol = Tint(
-                        egui::Button::new(
-                            RichText::new(tr("\u{1F514}  Channels I'm Following")).color(
-                                if self.post_following {
-                                    t.accent_text
-                                } else {
-                                    t.text2
-                                },
-                            ),
-                        )
+                        egui::Button::new(RichText::new(tr("Channels I'm Following")).color(
+                            if self.post_following {
+                                t.accent_text
+                            } else {
+                                t.text2
+                            },
+                        ))
                         .fill(if self.post_following {
                             t.accent_bg
                         } else {
@@ -1035,9 +1035,9 @@ impl App {
                     let tl = self
                         .post_f_type
                         .clone()
-                        .map(|t| format!("\u{25A6}  {}", tr(&t)))
-                        .unwrap_or_else(|| tr("\u{25A6}  Type").into());
-                    let tyr = ui.add(egui::Button::new(tl).corner_radius(13));
+                        .map(|t| tr(&t).to_string())
+                        .unwrap_or_else(|| tr("Type").into());
+                    let tyr = icon_button(ui, &t, "shapes", &tl, "Post type filter", true);
                     popup(ui, &tyr, ui.id().with("pf_ty"), 180.0, |ui| {
                         if ui
                             .selectable_label(self.post_f_type.is_none(), tr("Any type"))
@@ -1116,13 +1116,7 @@ impl App {
                             Stroke::new(1.5, t.border),
                             egui::StrokeKind::Inside,
                         );
-                        ui.painter().text(
-                            r.center(),
-                            Align2::CENTER_CENTER,
-                            "\u{1F4E2}",
-                            FontId::proportional(22.0),
-                            t.text2,
-                        );
+                        line_icon_scaled(ui.painter(), "megaphone", r.center(), t.text2, 1.6);
                         ui.add_space(10.0);
                         ui.label(
                             RichText::new(tr("There are no Posts yet!"))
@@ -1260,7 +1254,7 @@ impl App {
                 ch |= ui.add(egui::TextEdit::singleline(&mut m.title).font(FontId::proportional(26.0)).frame(false).desired_width(f32::INFINITY)).changed();
                 ui.horizontal(|ui| {
                     let mut d = Some(m.date);
-                    let r = ui.button(format!("\u{1F4C5} {}", fmt_date(m.date)));
+                    let r = icon_button(ui, &t, "calendar", &fmt_date(m.date), "Meeting date", true);
                     if let Some(true) = popup(ui, &r, ui.id().with("meet_date"), 380.0, |ui| date_menu(ui, &t, ui.id().with("meet_cal"), &mut d)) {
                         if let Some(d) = d {
                             m.date = d;
@@ -1528,11 +1522,11 @@ impl App {
                     ui.label(tr("Name"));
                     ch |= ui.add(field(&mut g.name).desired_width(260.0)).changed();
                     let mut d = g.due;
-                    let r = ui.button(
-                        g.due
-                            .map(|d| trf!("Due {}", fmt_date(d)))
-                            .unwrap_or_else(|| tr("\u{1F4C5} Due date").into()),
-                    );
+                    let due_txt = g
+                        .due
+                        .map(|d| trf!("Due {}", fmt_date(d)))
+                        .unwrap_or_else(|| tr("Due date").into());
+                    let r = icon_button(ui, &t, "calendar", &due_txt, "Goal due date", true);
                     if let Some(true) =
                         popup(ui, &r, ui.id().with(("goal_due", gid)), 380.0, |ui| {
                             date_menu(ui, &t, ui.id().with(("goal_cal", gid)), &mut d)
@@ -1631,7 +1625,7 @@ impl App {
                         }
                         if ui
                             .add(ghost(egui::Button::new(
-                                RichText::new("\u{2716}").color(t.text3),
+                                RichText::new("\u{00D7}").color(t.text3),
                             )))
                             .clicked()
                         {
@@ -1716,8 +1710,13 @@ impl App {
                 ui.data_mut(|d| d.insert_temp(for_id, fid));
             }
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.form_mode_fill, false, tr("\u{1F4DD} Edit"));
-                ui.selectable_value(&mut self.form_mode_fill, true, tr("\u{1F441} Fill out"));
+                // the mode shown is outlined
+                for (fill, kind, label) in [(false, "edit", "Edit"), (true, "eye", "Fill out")] {
+                    let sel = self.form_mode_fill == fill;
+                    if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).clicked() {
+                        self.form_mode_fill = fill;
+                    }
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.star_toggle(ui, format!("form:{}", fid)));
             });
             ui.separator();
@@ -1762,7 +1761,7 @@ impl App {
                         if down.clicked() {
                             swap = Some((i, i + 1));
                         }
-                        if ui.add(ghost(egui::Button::new(RichText::new("\u{2716}").color(t.text3)))).clicked() {
+                        if ui.add(ghost(egui::Button::new(RichText::new("\u{00D7}").color(t.text3)))).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -1825,7 +1824,7 @@ impl App {
                             }
                             "due" => {
                                 let mut d = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok();
-                                let b = ui.button(d.map(fmt_date).unwrap_or_else(|| tr("\u{1F4C5} Pick a date").into()));
+                                let b = icon_button(ui, &t, "calendar", &d.map(fmt_date).unwrap_or_else(|| tr("Pick a date").into()), "", true);
                                 name_it(&b, &format!("Answer {}", i + 1));
                                 if let Some(true) = popup(ui, &b, ui.id().with(("form_due", fid, i)), 380.0, |ui| date_menu(ui, &t, ui.id().with(("form_due_cal", fid, i)), &mut d)) {
                                     *v = d.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
@@ -2278,7 +2277,7 @@ impl App {
                         p.text(
                             xr.center(),
                             Align2::CENTER_CENTER,
-                            "\u{2716}",
+                            "\u{00D7}",
                             FontId::proportional(9.0),
                             if x.hovered() { t.text } else { t.text3 },
                         );
@@ -2511,9 +2510,13 @@ impl App {
                 ui.horizontal(|ui| {
                     let te = ui.add(field(text).desired_width(220.0));
                     name_it(&te, "Reminder text");
-                    let b = ui.button(
-                        date.map(fmt_date)
-                            .unwrap_or_else(|| tr("\u{1F4C5} Date").into()),
+                    let b = icon_button(
+                        ui,
+                        &t,
+                        "calendar",
+                        &date.map(fmt_date).unwrap_or_else(|| tr("Date").into()),
+                        "Reminder date",
+                        true,
                     );
                     popup(ui, &b, ui.id().with(("rem_edit_date", id)), 380.0, |ui| {
                         date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date)
@@ -2621,7 +2624,7 @@ impl App {
                     self.sweep.reminder_edit = Some((r.id, r.text.clone(), date, time));
                 }
                 let del = ui.add(ghost(egui::Button::new(
-                    RichText::new("\u{2716}").small().color(t.text3),
+                    RichText::new("\u{00D7}").small().color(t.text3),
                 )));
                 name_it(&del, &format!("Delete {}", r.text));
                 if del.clicked() {
@@ -2795,7 +2798,11 @@ impl App {
     pub(super) fn ai_page(&mut self, ui: &mut Ui) {
         let t = self.t();
         egui::Frame::new().inner_margin(egui::Margin::symmetric(40, 40)).show(ui, |ui| {
-            ui.label(RichText::new(tr("\u{2728} AI")).size(24.0));
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), Sense::hover());
+                line_icon_scaled(ui.painter(), "sparkle", r.center(), t.text, 1.4);
+                ui.label(RichText::new(tr("AI")).size(24.0));
+            });
             ui.add_space(8.0);
             ui.label(RichText::new(tr("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.")).color(t.text2));
             ui.label(RichText::new(tr("They will be connected together with the shared server. Everything else works now.")).color(t.text2));
@@ -2828,7 +2835,7 @@ impl App {
                         }
                     }
                 });
-                let cz = ui.button(tr("\u{2699}  Customize"));
+                let cz = icon_button(ui, &t, "settings", tr("Customize"), "Customize", true);
                 popup(ui, &cz, egui::Id::new("ov_customize"), 200.0, |ui| {
                     ui.label(RichText::new(tr("Cards")).small().color(t.text3));
                     for c in OV_CARDS {
@@ -2919,7 +2926,7 @@ impl App {
                             if ui.link(format!("\u{1F516} {}", b.title)).on_hover_text(&b.url).clicked() {
                                 ui.ctx().open_url(egui::OpenUrl::new_tab(&b.url));
                             }
-                            if ui.add(ghost(egui::Button::new(RichText::new("\u{2716}").size(10.0).color(s.t().text3)))).clicked() {
+                            if ui.add(ghost(egui::Button::new(RichText::new("\u{00D7}").size(10.0).color(s.t().text3)))).clicked() {
                                 remove = Some(b.id);
                             }
                         });
@@ -3422,7 +3429,7 @@ impl App {
             let hit = match link {
                 super::nav::Link::Task(id) => self.task(id).map(|t| {
                     (
-                        "\u{2611}",
+                        "task",
                         t.name.clone(),
                         self.data.list_name(t.list_id),
                         Hit::Task(id),
@@ -3431,7 +3438,7 @@ impl App {
                 super::nav::Link::Loc(l @ Location::List(id)) => {
                     self.data.location_exists(l).then(|| {
                         (
-                            "\u{2630}",
+                            "list",
                             self.data.list_name(id),
                             self.data
                                 .space_of_list(id)
@@ -3444,7 +3451,7 @@ impl App {
                 super::nav::Link::Loc(l @ Location::Folder(_)) => {
                     self.data.location_exists(l).then(|| {
                         (
-                            "\u{1F4C1}",
+                            "folder",
                             self.data.location_name(l),
                             tr("Folder").into(),
                             Hit::Go(l),
@@ -3454,7 +3461,7 @@ impl App {
                 super::nav::Link::Loc(l @ Location::Space(_)) => {
                     self.data.location_exists(l).then(|| {
                         (
-                            "\u{25A0}",
+                            "space",
                             self.data.location_name(l),
                             tr("Space").into(),
                             Hit::Go(l),
@@ -3462,7 +3469,7 @@ impl App {
                     })
                 }
                 super::nav::Link::Loc(l) => Some((
-                    "\u{2192}",
+                    "arrow_right",
                     self.data.location_name(l),
                     String::new(),
                     Hit::Go(l),
@@ -3472,13 +3479,13 @@ impl App {
                     .docs
                     .iter()
                     .find(|d| d.id == id)
-                    .map(|d| ("\u{1F4C4}", d.title.clone(), tr("Doc").into(), Hit::Doc(id))),
+                    .map(|d| ("docs", d.title.clone(), tr("Doc").into(), Hit::Doc(id))),
             };
             match hit {
                 // archived, or in someone else's Personal space
                 Some(_) if self.link_shown(link) == Some(false) => rows.push((
                     "Link",
-                    "\u{26A0}",
+                    "warning",
                     tr("This link points to something archived or private").into(),
                     String::new(),
                     Hit::Query(String::new()),
@@ -3486,7 +3493,7 @@ impl App {
                 Some((g, title, place, hit)) => rows.push(("Link", g, title, place, hit)),
                 None => rows.push((
                     "Link",
-                    "\u{26A0}",
+                    "warning",
                     tr("Nothing with this link here (it may have been deleted)").into(),
                     String::new(),
                     Hit::Query(String::new()),
@@ -3497,16 +3504,16 @@ impl App {
         if ql.is_empty() && kind == 0 {
             for (k, id, name, place) in self.recent_items(None).into_iter().take(8) {
                 let (g, hit) = match k.as_str() {
-                    "task" => ("\u{2611}", Hit::Task(id)),
-                    "doc" => ("\u{1F4C4}", Hit::Doc(id)),
-                    _ => ("\u{2630}", Hit::Go(Location::List(id))),
+                    "task" => ("task", Hit::Task(id)),
+                    "doc" => ("docs", Hit::Doc(id)),
+                    _ => ("list", Hit::Go(Location::List(id))),
                 };
                 rows.push(("Recent", g, name, place, hit));
             }
             for r in self.sweep.search_recent.iter().take(5) {
                 rows.push((
                     "Recent searches",
-                    "\u{1F50D}",
+                    "search",
                     r.clone(),
                     String::new(),
                     Hit::Query(r.clone()),
@@ -3522,7 +3529,7 @@ impl App {
             for s in self.data.spaces.iter().filter(|s| space_shown(s)) {
                 locs.push((
                     "Locations",
-                    "\u{25A0}",
+                    "space",
                     s.name.clone(),
                     tr("Space").into(),
                     Hit::Go(Location::Space(s.id)),
@@ -3531,7 +3538,7 @@ impl App {
                 for f in &s.folders {
                     locs.push((
                         "Locations",
-                        "\u{1F4C1}",
+                        "folder",
                         format!("{} / {}", s.name, f.name),
                         tr("Folder").into(),
                         Hit::Go(Location::Folder(f.id)),
@@ -3539,7 +3546,7 @@ impl App {
                     for l in f.lists.iter().filter(|l| !l.archived) {
                         locs.push((
                             "Locations",
-                            "\u{2630}",
+                            "list",
                             format!("{} / {} / {}", s.name, f.name, l.name),
                             tr("List").into(),
                             Hit::Go(Location::List(l.id)),
@@ -3549,7 +3556,7 @@ impl App {
                 for l in s.lists.iter().filter(|l| !l.archived) {
                     locs.push((
                         "Locations",
-                        "\u{2630}",
+                        "list",
                         format!("{} / {}", s.name, l.name),
                         tr("List").into(),
                         Hit::Go(Location::List(l.id)),
@@ -3569,7 +3576,7 @@ impl App {
             rows.extend(tasks.map(|x| {
                 (
                     "Tasks",
-                    "\u{2611}",
+                    "task",
                     x.name.clone(),
                     self.data.list_name(x.list_id),
                     Hit::Task(x.id),
@@ -3589,7 +3596,7 @@ impl App {
             rows.extend(docs.map(|d| {
                 (
                     "Docs",
-                    "\u{1F4C4}",
+                    "docs",
                     d.title.clone(),
                     tr("Doc").into(),
                     Hit::Doc(d.id),
@@ -3629,7 +3636,7 @@ impl App {
                     if m.text.to_lowercase().contains(&ql) {
                         rows.push((
                             "Messages",
-                            "\u{1F4AC}",
+                            "chat",
                             truncate(&super::chat::shown_text(m), 60),
                             place.clone(),
                             Hit::Chat(c.id),
@@ -3648,7 +3655,7 @@ impl App {
             apps.extend(x.whiteboards.iter().filter(|w| has(&w.name)).map(|w| {
                 (
                     "Apps",
-                    "\u{1F3A8}",
+                    "whiteboards",
                     w.name.clone(),
                     tr("Whiteboard").into(),
                     Hit::Whiteboard(w.id),
@@ -3661,7 +3668,7 @@ impl App {
                     .map(|f| {
                         (
                             "Apps",
-                            "\u{1F4CB}",
+                            "forms",
                             f.name.clone(),
                             tr("Form").into(),
                             Hit::Form(f.id),
@@ -3675,7 +3682,7 @@ impl App {
                     .map(|d| {
                         (
                             "Apps",
-                            "\u{1F4CA}",
+                            "dashboards",
                             d.name.clone(),
                             tr("Dashboard").into(),
                             Hit::Dashboard(d.id),
@@ -3685,7 +3692,7 @@ impl App {
             apps.extend(x.goals.iter().filter(|g| has(&g.name)).map(|g| {
                 (
                     "Apps",
-                    "\u{25CE}",
+                    "goals",
                     g.name.clone(),
                     tr("Goal").into(),
                     Hit::Goal(g.id),
@@ -3707,7 +3714,7 @@ impl App {
             rows.extend(people.map(|m| {
                 (
                     "People",
-                    "\u{1F464}",
+                    "person",
                     m.name.clone(),
                     if m.email.is_empty() {
                         super::menus::role_text(&m.role).to_string()
@@ -3846,13 +3853,33 @@ impl App {
                             if sel && (down || up) {
                                 resp.scroll_to_me(None);
                             }
-                            ui.painter().text(
-                                rr.left_center() + vec2(12.0, 0.0),
-                                Align2::CENTER_CENTER,
-                                *glyph,
-                                FontId::proportional(12.5),
-                                t.text3,
-                            );
+                            // a Space shows its colour and first letter as in the
+                            // sidebar; everything else its kind's line icon
+                            let ic = rr.left_center() + vec2(14.0, 0.0);
+                            let space = match hit {
+                                Hit::Go(Location::Space(id)) => {
+                                    self.data.spaces.iter().find(|s| s.id == *id)
+                                }
+                                _ => None,
+                            };
+                            if let Some(sp) = space {
+                                let r = Rect::from_center_size(ic, vec2(16.0, 16.0));
+                                ui.painter().rect_filled(r, 4.0, rgb(sp.color));
+                                ui.painter().text(
+                                    r.center(),
+                                    Align2::CENTER_CENTER,
+                                    sp.name
+                                        .chars()
+                                        .next()
+                                        .unwrap_or('S')
+                                        .to_uppercase()
+                                        .to_string(),
+                                    FontId::proportional(10.0),
+                                    Color32::WHITE,
+                                );
+                            } else {
+                                line_icon(ui.painter(), glyph, ic, t.text2);
+                            }
                             // the title keeps all but 200 for the grey place after
                             // it; both are shortened with an ellipsis
                             let title_r = paint_fit(

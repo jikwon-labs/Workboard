@@ -587,7 +587,7 @@ impl App {
                             ui.label(RichText::new(tr("Thread")).size(15.0).strong());
                             ui.label(RichText::new(self.channel_label(&channel)).color(t.text3));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(ghost(egui::Button::new("\u{2716}"))).clicked() {
+                                if ui.add(ghost(egui::Button::new("\u{00D7}"))).clicked() {
                                     acts.push(ChatAction::CloseThread);
                                 }
                             });
@@ -773,7 +773,7 @@ impl App {
                         4 => tr("Saved messages"),
                         _ => tr("Messages turned into tasks"),
                     };
-                    if ui.add(egui::Button::new(format!("{}  \u{2716}", label)).corner_radius(14)).clicked() {
+                    if ui.add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14)).clicked() {
                         self.channel_panel = 0;
                     }
                 }

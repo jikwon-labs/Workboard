@@ -152,7 +152,7 @@ impl App {
                             ui.painter().text(
                                 xr.center(),
                                 Align2::CENTER_CENTER,
-                                "\u{2716}",
+                                "\u{00D7}",
                                 FontId::proportional(9.0),
                                 t.text3,
                             );
@@ -436,7 +436,9 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("Analytics")).size(20.0).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(tr("\u{1F464} Manage people")).clicked() {
+                        if super::icons::icon_button(ui, &t, "teams", tr("Manage people"), "Manage people", true)
+                            .clicked()
+                        {
                             // the People settings page: server roles, removal with a question
                             self.open_settings("People");
                         }
@@ -586,11 +588,10 @@ impl App {
                     } else if resp.hovered() {
                         ui.painter().rect_filled(r, 6.0, t.hover);
                     }
-                    ui.painter().text(
+                    super::icons::line_icon(
+                        ui.painter(),
+                        "docs",
                         r.left_center() + vec2(12.0, 0.0),
-                        Align2::CENTER_CENTER,
-                        "\u{1F4C4}",
-                        FontId::proportional(13.0),
                         t.text2,
                     );
                     ui.painter().with_clip_rect(r).text(
@@ -729,15 +730,24 @@ impl App {
                                     let id = dashes[di].id;
                                     self.star_toggle(ui, format!("dash:{}", id));
                                     let d = &mut self.data.extra.dashboards[di];
-                                    let label = if d.private {
-                                        format!("\u{1F512} {}", tr("Private"))
+                                    let (kind, label) = if d.private {
+                                        ("lock", "Private")
                                     } else {
-                                        format!("\u{1F465} {}", tr("Shared"))
+                                        ("teams", "Shared")
                                     };
-                                    if ui
-                                        .add(ghost(egui::Button::new(label)))
-                                        .on_hover_text(tr("Only you see a private dashboard"))
-                                        .clicked()
+                                    if super::icons::icon_button_ex(
+                                        ui,
+                                        &t,
+                                        kind,
+                                        tr(label),
+                                        label,
+                                        false,
+                                        0.0,
+                                        t.text,
+                                        t.text2,
+                                    )
+                                    .on_hover_text(tr("Only you see a private dashboard"))
+                                    .clicked()
                                     {
                                         d.private = !d.private;
                                         self.dirty = true;
@@ -949,17 +959,30 @@ impl App {
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         for (glyph, what, code, on) in [
-                                            ("\u{2716}", "Remove card", 0, true),
-                                            ("\u{270E}", "Rename card", 2, true),
+                                            ("\u{00D7}", "Remove card", 0, true),
+                                            ("pen", "Rename card", 2, true),
                                             ("\u{2193}", "Move card down", 1, ci + 1 < n),
                                             ("\u{2191}", "Move card up", -1, ci > 0),
                                         ] {
+                                            // the pencil is a line icon; the rest characters
+                                            let icon = glyph == "pen";
                                             let b = ui.add_enabled(
                                                 on,
                                                 ghost(egui::Button::new(
-                                                    RichText::new(glyph).small().color(t.text3),
+                                                    RichText::new(if icon { "   " } else { glyph })
+                                                        .small()
+                                                        .color(t.text3),
                                                 )),
                                             );
+                                            if icon {
+                                                super::icons::line_icon_scaled(
+                                                    ui.painter(),
+                                                    "pen",
+                                                    b.rect.center(),
+                                                    t.text3,
+                                                    0.7,
+                                                );
+                                            }
                                             name_it(&b, &format!("{} {}", what, title));
                                             if b.clicked() {
                                                 change = Some((ci, code));

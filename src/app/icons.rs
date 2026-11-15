@@ -134,6 +134,26 @@ pub(super) fn icon_label(
     .inner
 }
 
+/// A small line icon and a count after it ("3", "2/5") painted from the
+/// left centre `at`; returns the width used.
+pub(super) fn icon_count(
+    p: &egui::Painter,
+    kind: &str,
+    at: Pos2,
+    text: &str,
+    color: Color32,
+) -> f32 {
+    line_icon_scaled(p, kind, at + vec2(6.0, 0.0), color, 0.75);
+    let r = p.text(
+        at + vec2(15.0, 0.0),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(12.0),
+        color,
+    );
+    r.right() - at.x
+}
+
 /// The gap between an icon and the text after it.
 pub(super) const ICON_GAP: f32 = 6.0;
 
@@ -1185,6 +1205,28 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(5.0, -1.0), vec2(-5.0, -1.0));
             line(vec2(-5.0, -1.0), vec2(-1.5, -4.5));
             line(vec2(-5.0, -1.0), vec2(-1.5, 2.5));
+        }
+        "folder" => {
+            let pts = vec![
+                c + vec2(-7.5, -5.5),
+                c + vec2(-2.5, -5.5),
+                c + vec2(-1.0, -3.5),
+                c + vec2(7.5, -3.5),
+                c + vec2(7.5, 6.0),
+                c + vec2(-7.5, 6.0),
+            ];
+            p.add(egui::Shape::closed_line(pts, s));
+        }
+        "warning" => {
+            let pts = vec![c + vec2(0.0, -7.0), c + vec2(7.5, 6.5), c + vec2(-7.5, 6.5)];
+            p.add(egui::Shape::closed_line(pts, s));
+            line(vec2(0.0, -2.5), vec2(0.0, 2.0));
+            p.circle_filled(c + vec2(0.0, 4.3), 0.9, color);
+        }
+        "arrow_right" => {
+            line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
+            line(vec2(6.5, 0.0), vec2(2.5, -4.0));
+            line(vec2(6.5, 0.0), vec2(2.5, 4.0));
         }
         _ => return false,
     }

@@ -131,7 +131,6 @@ pub const T: &[(&str, &str)] = &[
     ),
     ("Create Task", "작업 만들기"),
     ("Choose list", "목록 선택"),
-    ("\u{1F4C5} Due date", "\u{1F4C5} 마감일"),
     ("Search or add tags...", "태그 검색 또는 추가..."),
     // command search
     ("Search, or jump to a task, list, doc or channel...", "검색하거나 작업, 목록, 문서, 채널로 이동..."),
@@ -157,7 +156,7 @@ pub const T: &[(&str, &str)] = &[
     ("Th", "목"),
     ("Fr", "금"),
     ("Sa", "토"),
-    ("\u{1F501}  Set Recurring", "\u{1F501}  반복 설정"),
+    ("Set Recurring", "반복 설정"),
     ("Never", "안 함"),
     ("Daily", "매일"),
     ("Weekly", "매주"),

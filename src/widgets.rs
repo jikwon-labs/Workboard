@@ -606,7 +606,7 @@ pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
         p.text(
             c,
             Align2::CENTER_CENTER,
-            "\u{2716}",
+            "\u{00D7}",
             FontId::proportional(10.0),
             Color32::GRAY,
         );
@@ -631,13 +631,16 @@ pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>
         let ring = t.card;
         let r = menu_row(ui, t, &label, sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
         if sel {
-            ui.painter().text(
-                r.rect.right_center() - vec2(12.0, 0.0),
-                Align2::RIGHT_CENTER,
-                "\u{2714}",
-                FontId::proportional(12.0),
-                t.selected_text,
-            );
+            // a drawn tick (the glyph came from the emoji font)
+            let c = r.rect.right_center() - vec2(16.0, 0.0);
+            ui.painter().add(egui::Shape::line(
+                vec![
+                    c + vec2(-4.5, 0.3),
+                    c + vec2(-1.5, 3.3),
+                    c + vec2(4.8, -3.2),
+                ],
+                Stroke::new(1.5, t.selected_text),
+            ));
         }
         if r.clicked() {
             if sel {
@@ -1138,7 +1141,7 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) -> bool
     ui.separator();
     let recur = &mut task.recur;
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(tr("\u{1F501}  Set Recurring")).color(t.text2));
+        ui.label(egui::RichText::new(tr("Set Recurring")).color(t.text2));
         // plain buttons: a combo box would close this popup
         for (v, label) in RECUR {
             let sel = recur.as_deref().unwrap_or("") == v;

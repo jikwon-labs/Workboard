@@ -2578,7 +2578,7 @@ impl App {
         // as wide as the link field below it
         egui::ComboBox::from_id_salt("call_in")
             .selected_text(cur)
-            .width(300.0)
+            .width(ui.available_width())
             .show_ui(ui, |ui| {
                 for (id, n) in &chans {
                     ui.selectable_value(ch, *id, n);

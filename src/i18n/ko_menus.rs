@@ -130,9 +130,9 @@ pub const T: &[(&str, &str)] = &[
     ("Clear status", "상태 지우기"),
     // themes
     ("Appearance", "화면 모드"),
-    ("\u{2600} Light", "\u{2600} 라이트"),
-    ("\u{1F319} Dark", "\u{1F319} 다크"),
-    ("\u{25D0} Auto", "\u{25D0} 자동"),
+    ("Light", "라이트"),
+    ("Dark", "다크"),
+    ("Auto", "자동"),
     ("Follow your computer's appearance", "컴퓨터의 화면 모드를 따릅니다"),
     ("Theme color", "테마 색상"),
     ("Black", "검정"),
@@ -249,7 +249,6 @@ pub const T: &[(&str, &str)] = &[
     ("Share \"{}\" with people in your workspace.", "워크스페이스 사람들과 공유합니다: \"{}\""),
     ("Invited", "초대됨"),
     ("Invite by email", "이메일로 초대"),
-    ("\u{1F517} Copy link", "\u{1F517} 링크 복사"),
     ("Link copied", "링크를 복사했습니다"),
     // customize navigation and sidebar
     ("Choose the apps pinned to the left bar.", "왼쪽 막대에 고정할 앱을 고르세요."),
@@ -263,11 +262,8 @@ pub const T: &[(&str, &str)] = &[
     // track time, reminder
     ("Choose a task", "작업 선택"),
     ("Running: {} \u{2022} {}", "진행 중: {} \u{2022} {}"),
-    ("\u{23F9} Stop timer", "\u{23F9} 타이머 중지"),
-    ("\u{25B6} Start timer", "\u{25B6} 타이머 시작"),
     ("Open Timesheets", "타임시트 열기"),
     ("Remind me to...", "리마인드할 내용..."),
-    ("\u{1F4C5} Date", "\u{1F4C5} 날짜"),
     ("Reminder created", "리마인더를 만들었습니다"),
     // trash, switch person, dashboard
     ("Trash is empty.", "휴지통이 비어 있습니다."),

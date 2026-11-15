@@ -71,8 +71,8 @@ pub const T: &[(&str, &str)] = &[
     ("Task type", "작업 유형"),
     ("Milestone", "마일스톤"),
     ("Tags in use", "사용 중인 태그"),
-    ("\u{1F441} Watching", "\u{1F441} 지켜보는 중"),
-    ("\u{1F441} Watch", "\u{1F441} 지켜보기"),
+    ("Watching", "지켜보는 중"),
+    ("Watch", "지켜보기"),
     ("Stop getting updates", "업데이트 받지 않기"),
     ("Get updates on this task", "이 작업의 업데이트 받기"),
     ("{} watching", "{}명이 지켜보는 중"),
@@ -92,9 +92,7 @@ pub const T: &[(&str, &str)] = &[
     ("Waiting on", "대기 중"),
     ("Blocking", "차단 중"),
     ("Link a task", "작업 연결"),
-    ("\u{26D4}  Waiting on", "\u{26D4}  대기 중"),
-    ("\u{26A0}  Blocking", "\u{26A0}  차단 중"),
-    ("\u{1F517}  Linked", "\u{1F517}  연결됨"),
+    ("Linked", "연결됨"),
     (
         "Choose the task \"{}\" goes under.",
         "\"{}\"을(를) 넣을 상위 작업을 고르세요.",
@@ -119,7 +117,7 @@ pub const T: &[(&str, &str)] = &[
     ("{} more not shown. Search to find them.", "{}개는 더 있습니다. 검색해서 찾으세요."),
     // attachments
     ("Attachments", "첨부 파일"),
-    ("\u{1F4CE} Attach", "\u{1F4CE} 첨부"),
+    ("Attach", "첨부"),
     (
         "Attach pictures or videos (or drop them here)",
         "사진이나 동영상 첨부 (여기에 끌어다 놓아도 됩니다)",
@@ -201,7 +199,7 @@ pub const T: &[(&str, &str)] = &[
     ("Red, Green, Blue", "빨강, 초록, 파랑"),
     ("Short text", "짧은 텍스트"),
     ("Choose someone", "사람 선택"),
-    ("\u{1F4C5} Pick a date", "\u{1F4C5} 날짜 선택"),
+    ("Pick a date", "날짜 선택"),
     ("Please answer \"{}\".", "\"{}\"에 답해 주세요."),
     (
         "\"{}\" needs a number.",

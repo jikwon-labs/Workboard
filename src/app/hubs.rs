@@ -618,15 +618,9 @@ impl App {
                                         ui.painter().circle_filled(
                                             c,
                                             18.0,
-                                            rgb(color).gamma_multiply(0.35),
+                                            rgb(color).gamma_multiply(0.14),
                                         );
-                                        ui.painter().text(
-                                            c,
-                                            Align2::CENTER_CENTER,
-                                            glyph,
-                                            FontId::proportional(14.0),
-                                            rgb(color),
-                                        );
+                                        line_icon_scaled(ui.painter(), glyph, c, rgb(color), 1.15);
                                         // shortened with an ellipsis in a narrow card
                                         paint_fit(
                                             ui,
@@ -2078,7 +2072,7 @@ impl App {
                             ui.painter().text(
                                 xr.center(),
                                 Align2::CENTER_CENTER,
-                                "\u{2716}",
+                                "\u{00D7}",
                                 FontId::proportional(10.0),
                                 if x.hovered() { t.danger } else { t.text3 },
                             );
@@ -2403,7 +2397,7 @@ impl App {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
                                 .add(ghost(egui::Button::new(
-                                    RichText::new("\u{2716}").color(t.text3),
+                                    RichText::new("\u{00D7}").color(t.text3),
                                 )))
                                 .clicked()
                             {

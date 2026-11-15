@@ -601,7 +601,19 @@ impl App {
         let path = dir.join(format!("{} ({}).md", safe, d.id % 100000));
         let author = self.data.member(d.owner).map(|m| m.name.clone()).unwrap_or_default();
         let when = chrono::DateTime::from_timestamp(d.updated, 0).map(|x| x.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
-        let text = format!("# {}\n\n_{} \u{2022} last updated {}_\n\n{}\n", d.title, author, when, d.body);
+        let mut text = format!("# {}\n\n_{} \u{2022} last updated {}_\n\n{}\n", d.title, author, when, d.body);
+        // sub pages follow as sections, one heading level down per level
+        fn subs(docs: &[Doc], parent: u64, level: usize, out: &mut String, seen: &mut Vec<u64>) {
+            for c in docs.iter().filter(|c| c.parent == Some(parent)) {
+                if seen.contains(&c.id) {
+                    continue;
+                }
+                seen.push(c.id);
+                out.push_str(&format!("\n{} {}\n\n{}\n", "#".repeat(level.min(6)), c.title, c.body));
+                subs(docs, c.id, level + 1, out, seen);
+            }
+        }
+        subs(&self.data.docs, d.id, 2, &mut text, &mut vec![d.id]);
         std::fs::write(&path, text).ok()?;
         Some(path)
     }

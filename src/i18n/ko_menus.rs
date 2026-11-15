@@ -288,4 +288,8 @@ pub const T: &[(&str, &str)] = &[
     ("https://...", "https://... 주소"),
     // notepad
     ("Write anything. Only you can see this.", "무엇이든 적어 보세요. 나만 볼 수 있습니다."),
+    // automation scope
+    ("Runs in the whole Workspace", "워크스페이스 전체에서 실행됩니다"),
+    ("Runs in {}", "{}에서 실행됩니다"),
+    ("in {}", "{}에서"),
 ];

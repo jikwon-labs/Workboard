@@ -583,7 +583,7 @@ impl App {
                     }
                 }
                 let now = now_ts();
-                if let Some(task) = self.data.tasks.iter().find(|x| x.timer_started.is_some()) {
+                if let Some(task) = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)) {
                     let txt = format!("\u{23F9} {}  {}", fmt_duration(task.tracked_secs(now)), truncate(&task.name, 22));
                     let b = egui::Button::new(RichText::new(txt).color(Color32::WHITE)).fill(t.danger).corner_radius(14);
                     let id = task.id;
@@ -1703,7 +1703,7 @@ impl App {
                         self.section = Section::Ai;
                     }
                     if hb(ui, "\u{2699}  Automate").clicked() {
-                        self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
+                        self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None });
                     }
                     if hb(ui, "\u{260E}").on_hover_text(tr("Start a huddle")).clicked() {
                         self.open_call_dialog();

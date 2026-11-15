@@ -186,6 +186,10 @@ pub struct Activity {
 pub struct TimeEntry {
     pub start: i64,
     pub end: i64,
+    /// Whose time this is; 0 for entries from before entries had an owner
+    /// (see `Task::entry_owner`).
+    #[serde(default)]
+    pub member: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -205,6 +209,10 @@ pub struct Task {
     pub activity: Vec<Activity>,
     pub time_entries: Vec<TimeEntry>,
     pub timer_started: Option<i64>,
+    /// Who started the running timer; None for timers started before this
+    /// was recorded (see `Data::is_my_timer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_by: Option<u64>,
     pub estimate_min: Option<u32>,
     pub created: i64,
     pub updated: i64,
@@ -232,6 +240,16 @@ impl Task {
             s += now - st;
         }
         s
+    }
+
+    /// Who a time entry belongs to: its owner, or for an entry from before
+    /// entries had one, the task's first assignee (0 when there is none).
+    pub fn entry_owner(&self, e: &TimeEntry) -> u64 {
+        if e.member != 0 {
+            e.member
+        } else {
+            self.assignees.first().copied().unwrap_or(0)
+        }
     }
 }
 
@@ -424,6 +442,9 @@ pub struct Form {
     pub list_id: u64,
     pub description: String,
     pub fields: Vec<FormField>,
+    /// Who made it; 0 for forms from before this was recorded.
+    #[serde(default)]
+    pub owner: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -446,6 +467,9 @@ pub struct Whiteboard {
     pub name: String,
     pub strokes: Vec<WbStroke>,
     pub notes: Vec<Sticky>,
+    /// Who made it; 0 for whiteboards from before this was recorded.
+    #[serde(default)]
+    pub owner: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -486,6 +510,8 @@ pub struct Automation {
     /// ...then: assign, priority, comment or move
     pub action: String,
     pub value: String,
+    /// The List or Space (by id; ids are unique across both) it runs in;
+    /// None runs it everywhere.
     pub list: Option<u64>,
 }
 
@@ -512,6 +538,12 @@ pub struct Dashboard {
     pub id: u64,
     pub name: String,
     pub space: Option<u64>,
+    /// Who made it; 0 for dashboards from before this was recorded.
+    #[serde(default)]
+    pub owner: u64,
+    /// Which cards it shows: "simple", "time", "project", or "" for all of them.
+    #[serde(default)]
+    pub kind: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -600,6 +632,10 @@ pub struct Extra {
     /// Space Overview cards turned off with Customize.
     #[serde(default)]
     pub hidden_cards: Vec<String>,
+    /// Tasks people added to their own timesheet with "+ Add task":
+    /// [member, task] pairs.
+    #[serde(default)]
+    pub sheet_rows: Vec<[u64; 2]>,
 }
 
 impl Default for Extra {
@@ -638,6 +674,7 @@ impl Default for Extra {
             sync: Default::default(),
             demo_removed: false,
             hidden_cards: vec![],
+            sheet_rows: vec![],
         }
     }
 }
@@ -985,6 +1022,49 @@ impl Data {
         self.list_item(id).is_some_and(|l| l.archived) || self.space_of_list(id).is_some_and(|s| s.archived)
     }
 
+    /// Not archived, and not in an archived list or space.
+    pub fn task_live(&self, t: &Task) -> bool {
+        !t.archived && !self.list_archived(t.list_id)
+    }
+
+    /// Only one person in the workspace: everything unowned is theirs.
+    pub fn solo(&self) -> bool {
+        self.members.len() <= 1
+    }
+
+    /// The task's timer runs and it is mine. A timer from before timers
+    /// recorded who started it counts as mine only when I'm alone in the
+    /// workspace, so it is never stopped behind a teammate's back.
+    pub fn is_my_timer(&self, t: &Task) -> bool {
+        t.timer_started.is_some()
+            && match t.timer_by {
+                Some(m) => m == self.me,
+                None => self.solo(),
+            }
+    }
+
+    /// A time entry counts as mine (old entries: see `Task::entry_owner`;
+    /// with nobody to give it to, it is mine when I'm alone).
+    pub fn is_my_entry(&self, t: &Task, e: &TimeEntry) -> bool {
+        match t.entry_owner(e) {
+            0 => self.solo(),
+            o => o == self.me,
+        }
+    }
+
+    /// Stops every timer of mine, keeping the time as my entries.
+    pub fn stop_my_timers(&mut self, now: i64) {
+        let me = self.me;
+        let mine: Vec<usize> = (0..self.tasks.len()).filter(|i| self.is_my_timer(&self.tasks[*i])).collect();
+        for i in mine {
+            let t = &mut self.tasks[i];
+            if let Some(st) = t.timer_started.take() {
+                t.time_entries.push(TimeEntry { start: st, end: now, member: me });
+            }
+            t.timer_by = None;
+        }
+    }
+
     /// The letter or symbol drawn on a space's square.
     pub fn space_glyph(s: &Space) -> String {
         if s.icon.is_empty() {
@@ -1227,6 +1307,7 @@ impl Data {
                 activity: vec![Activity { ts: now - 86400 * 3, author: 1, text: "created this task".into(), comment: false, ..Default::default() }],
                 time_entries: vec![],
                 timer_started: None,
+                timer_by: None,
                 estimate_min: None,
                 created: now - 86400 * 3 + i as i64,
                 updated: now,
@@ -1258,6 +1339,7 @@ impl Data {
                 activity: vec![],
                 time_entries: vec![],
                 timer_started: None,
+                timer_by: None,
                 estimate_min: None,
                 created: now,
                 updated: now,
@@ -1323,8 +1405,8 @@ impl Data {
         d.channels.push(Channel { id: c3, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 2], messages: vec![m5], last_read: 0, ..Default::default() });
         let c4 = d.new_id();
         d.channels.push(Channel { id: c4, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 3], messages: vec![], last_read: now2, ..Default::default() });
-        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400 });
-        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800 });
+        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400, member: 0 });
+        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800, member: 0 });
         d.tasks[0].activity.push(Activity { ts: now - 3600 * 5, author: 2, text: "Looks great so far, let's review on Friday.".into(), comment: true, ..Default::default() });
         d
     }

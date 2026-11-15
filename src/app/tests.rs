@@ -1221,3 +1221,106 @@ fn one_message_takes_at_most_ten_pictures() {
     assert!(a.add_media(false, Some(pic), None));
     assert_eq!(a.chat_files.len(), 10);
 }
+
+#[test]
+fn my_timer_leaves_a_teammates_running() {
+    let mut a = app();
+    let ids: Vec<u64> = a.data.tasks.iter().take(2).map(|t| t.id).collect();
+    let started = now_ts() - 600;
+    if let Some(t) = a.data.tasks.iter_mut().find(|t| t.id == ids[0]) {
+        t.timer_started = Some(started);
+        t.timer_by = Some(2);
+    }
+    // starting mine stops only mine
+    a.apply(Action::ToggleTimer(ids[1]));
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started), "Alex's timer keeps running");
+    assert_eq!(a.task(ids[1]).unwrap().timer_by, Some(1));
+    // clicking Alex's timer doesn't stop it
+    a.apply(Action::ToggleTimer(ids[0]));
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started));
+    assert!(a.task(ids[1]).unwrap().timer_started.is_some());
+    // closing the app (on_exit) stops mine and keeps Alex's
+    a.data.stop_my_timers(now_ts());
+    assert!(a.task(ids[1]).unwrap().timer_started.is_none());
+    assert_eq!(a.task(ids[1]).unwrap().time_entries.last().unwrap().member, 1, "the stopped time is mine");
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started));
+    // an old timer without an owner is never stopped behind anyone's back
+    if let Some(t) = a.data.tasks.iter_mut().find(|t| t.id == ids[0]) {
+        t.timer_by = None;
+    }
+    a.data.stop_my_timers(now_ts());
+    assert!(a.task(ids[0]).unwrap().timer_started.is_some());
+}
+
+#[test]
+fn timesheet_edits_only_my_entries() {
+    let mut a = app();
+    let id = a.data.tasks[1].id;
+    let day = today();
+    let nine = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).unwrap().timestamp();
+    let task = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    task.assignees = vec![3];
+    task.time_entries.push(TimeEntry { start: nine, end: nine + 3600, member: 2 });
+    // an old entry with no owner belongs to the first assignee (Sam), not me
+    task.time_entries.push(TimeEntry { start: nine, end: nine + 1800, member: 0 });
+    a.set_day_time(id, day, 2.0);
+    let t = a.task(id).unwrap();
+    let mine: i64 = t.time_entries.iter().filter(|e| a.data.is_my_entry(t, e)).map(|e| e.end - e.start).sum();
+    assert_eq!(mine, 7200);
+    assert!(t.time_entries.iter().any(|e| e.member == 2 && e.end - e.start == 3600), "Alex's hour stays");
+    assert!(t.time_entries.iter().any(|e| e.member == 0 && e.end - e.start == 1800), "the old entry stays");
+    a.set_day_time(id, day, 0.5);
+    let t = a.task(id).unwrap();
+    assert_eq!(t.time_entries.iter().filter(|e| e.member == 1).map(|e| e.end - e.start).sum::<i64>(), 1800);
+    a.set_day_time(id, day, 0.0);
+    let t = a.task(id).unwrap();
+    assert!(!t.time_entries.iter().any(|e| e.member == 1));
+    assert_eq!(t.time_entries.len(), 2);
+    assert_eq!(t.entry_owner(&t.time_entries[1]), 3);
+}
+
+#[test]
+fn scoped_automation_runs_only_in_its_list_and_moves_subtasks() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    let (list, other) = (lists[0], lists[1]);
+    a.data.extra.automations.push(Automation { id: 1, enabled: true, trigger_status: "complete".into(), action: "priority".into(), value: "4".into(), list: Some(other) });
+    a.data.extra.automations.push(Automation { id: 2, enabled: true, trigger_status: "complete".into(), action: "move".into(), value: other.to_string(), list: Some(list) });
+    let id = add_task(&mut a, list, "Scoped");
+    a.apply(Action::Add { list, name: "Scoped child".into(), status: None, priority: 0, assignees: vec![], due: None, parent: Some(id), open: false });
+    let child = a.data.tasks.iter().find(|t| t.name == "Scoped child").unwrap().id;
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let t = a.task(id).unwrap();
+    assert_eq!(t.priority, 0, "the rule for the other list must not run here");
+    assert_eq!(t.list_id, other);
+    assert_eq!(a.task(child).unwrap().list_id, other, "subtasks move along");
+    let statuses = a.data.statuses_for_list(other);
+    assert!(statuses.iter().any(|s| s.name == a.task(child).unwrap().status));
+}
+
+#[test]
+fn removing_a_person_drops_them_from_teams_and_meetings() {
+    let mut a = app();
+    a.data.extra.teams.push(Team { id: 900, name: "T".into(), members: vec![1, 3], color: [0, 0, 0] });
+    a.data.extra.meetings.push(Meeting { id: 901, title: "M".into(), date: today(), time: "10:00".into(), attendees: vec![1, 3], agenda: String::new(), notes: String::new() });
+    a.remove_item("person", 3);
+    assert!(a.data.member(3).is_none());
+    assert_eq!(a.data.extra.teams[0].members, vec![1]);
+    assert_eq!(a.data.extra.meetings[0].attendees, vec![1]);
+    a.remove_item("meeting", 901);
+    assert!(a.data.extra.meetings.is_empty());
+}
+
+#[test]
+fn goal_tasks_ignore_deleted_ones() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Goal task");
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let g = Goal { id: 902, name: "G".into(), color: [0, 0, 0], due: None, owner: 1, targets: vec![GoalTarget { name: "x".into(), kind: TargetKind::Tasks { ids: vec![id, 123456789] } }] };
+    assert_eq!(a.goal_progress(&g), 1.0);
+}

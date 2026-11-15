@@ -385,6 +385,7 @@ impl App {
             t.created = now;
             t.updated = now;
             t.timer_started = None;
+            t.timer_by = None;
             t.time_entries.clear();
             t.activity = vec![Activity { ts: now, author: app.data.me, text: format!("duplicated this task from {}", src.name), comment: false, ..Default::default() }];
             t.order = src.order;
@@ -751,7 +752,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Automations")).clicked() {
-            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
+            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: Some(Location::List(lid)) });
             close_any(ui);
         }
         ui.separator();
@@ -1010,7 +1011,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Automations")).clicked() {
-            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
+            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: Some(Location::Space(sid)) });
             close_any(ui);
         }
         ui.separator();

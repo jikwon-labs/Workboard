@@ -152,7 +152,7 @@ impl App {
                 ui.label(RichText::new(format!("{} - {}", week.text("%b %-d"), end.text("%b %-d, %Y"))).size(15.0));
             });
             ui.add_space(10.0);
-            let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x)).cloned().collect();
+            let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
             let avail = ui.available_rect_before_wrap();
             let left_w = 260.0;
             let mut dropped: Option<(u64, Option<NaiveDate>)> = None;
@@ -274,7 +274,7 @@ impl App {
                 let members = self.data.members.clone();
                 let max_open = members
                     .iter()
-                    .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).count())
+                    .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).count())
                     .max()
                     .unwrap_or(1)
                     .max(1);
@@ -284,10 +284,10 @@ impl App {
                 for row in members.chunks(cols) {
                     ui.horizontal_top(|ui| {
                         for m in row {
-                            let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).cloned().collect();
+                            let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
                             let active = open.iter().filter(|x| self.data.status_of(x).kind == StatusKind::Custom).count();
                             let overdue = open.iter().filter(|x| x.due.map(|d| d < td).unwrap_or(false)).count();
-                            let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x)).count();
+                            let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x) && self.data.task_live(x)).count();
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.set_width(cw - 30.0);
@@ -439,12 +439,14 @@ impl App {
                     let cur = self.dash_open.and_then(|id| dashes.iter().find(|d| d.id == id)).map(|d| d.name.clone()).unwrap_or_else(|| tr("Workspace overview").into());
                     ui.label(RichText::new(&cur).size(20.0));
                     egui::ComboBox::from_id_salt("dash_pick").selected_text(tr("Switch")).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.dash_open, None, tr("Workspace overview"));
+                        // the built-in overview; None would leave the dashboard for the hub
+                        ui.selectable_value(&mut self.dash_open, Some(super::hubs::WORKSPACE_OVERVIEW), tr("Workspace overview"));
                         for d in &dashes {
                             ui.selectable_value(&mut self.dash_open, Some(d.id), &d.name);
                         }
                     });
                     if let Some(di) = self.dash_open.and_then(|id| self.data.extra.dashboards.iter().position(|d| d.id == id)) {
+                        self.star_toggle(ui, format!("dash:{}", self.data.extra.dashboards[di].id));
                         let spaces: Vec<(u64, String)> = self.data.spaces.iter().map(|s| (s.id, s.name.clone())).collect();
                         let cur_space = self.data.extra.dashboards[di].space.and_then(|sid| spaces.iter().find(|s| s.0 == sid)).map(|s| s.1.clone()).unwrap_or_else(|| tr("All Spaces").into());
                         let mut sp = self.data.extra.dashboards[di].space;
@@ -459,9 +461,8 @@ impl App {
                             self.dirty = true;
                         }
                         if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
-                            self.data.extra.dashboards.remove(di);
-                            self.dash_open = None;
-                            self.dirty = true;
+                            let d = &self.data.extra.dashboards[di];
+                            self.modal = Some(Modal::ConfirmRemove { kind: "dashboard", id: d.id, name: d.name.clone() });
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -472,12 +473,23 @@ impl App {
                 });
                 ui.add_space(10.0);
                 let space_lists: Option<Vec<u64>> = self.dash_open.and_then(|id| self.data.extra.dashboards.iter().find(|d| d.id == id)).and_then(|d| d.space).and_then(|sid| self.data.lists_in(Location::Space(sid)));
-                let top: Vec<&Task> = self.data.tasks.iter().filter(|x| x.parent.is_none()).filter(|x| space_lists.as_ref().map(|l| l.contains(&x.list_id)).unwrap_or(true)).collect();
+                // which cards this dashboard's template shows ("" = all)
+                let kind = self.dash_open.and_then(|id| self.data.extra.dashboards.iter().find(|d| d.id == id)).map(|d| d.kind.clone()).unwrap_or_default();
+                let show = |card: &str| match kind.as_str() {
+                    "simple" => matches!(card, "stats" | "status" | "priority" | "overdue"),
+                    "time" => matches!(card, "time" | "time_people"),
+                    "project" => matches!(card, "stats" | "status" | "workload" | "overdue"),
+                    _ => card != "time_people",
+                };
+                // the Space filter, and nothing archived (tasks, or their list or space)
+                let in_view = |x: &Task| space_lists.as_ref().map(|l| l.contains(&x.list_id)).unwrap_or(true) && self.data.task_live(x);
+                let top: Vec<&Task> = self.data.tasks.iter().filter(|x| x.parent.is_none()).filter(|x| in_view(x)).collect();
                 let open = top.iter().filter(|x| !self.data.is_closed(x)).count();
                 let closed = top.len() - open;
                 let overdue: Vec<&&Task> = top.iter().filter(|x| !self.data.is_closed(x) && x.due.map(|d| d < td).unwrap_or(false)).collect();
                 let w = ui.available_width();
                 // stat tiles
+                if show("stats") {
                 ui.horizontal(|ui| {
                     let tw = (w - 36.0) / 4.0;
                     for (label, v, c) in [
@@ -496,8 +508,10 @@ impl App {
                     }
                 });
                 ui.add_space(12.0);
+                }
                 let half = (w - 12.0) / 2.0;
                 ui.horizontal_top(|ui| {
+                    if show("status") {
                     card(ui, &t, half, tr("Tasks by status"), |ui| {
                         let mut sts: Vec<Status> = vec![];
                         for s in &self.data.spaces {
@@ -514,6 +528,8 @@ impl App {
                         }
                     });
                     ui.add_space(12.0);
+                    }
+                    if show("priority") {
                     card(ui, &t, half, tr("Tasks by priority"), |ui| {
                         let counts: Vec<usize> = (0..5u8).map(|p| top.iter().filter(|x| x.priority == p && !self.data.is_closed(x)).count()).collect();
                         let max = counts.iter().copied().max().unwrap_or(1) as f32;
@@ -521,9 +537,11 @@ impl App {
                             bar_row(ui, &t, tr(PRIORITIES[p as usize].label), counts[p as usize] as f32, max, priority_color(p, &t), counts[p as usize].to_string());
                         }
                     });
+                    }
                 });
                 ui.add_space(12.0);
                 ui.horizontal_top(|ui| {
+                    if show("workload") {
                     card(ui, &t, half, tr("Workload by assignee"), |ui| {
                         let counts: Vec<(String, usize, Color32)> = self
                             .data
@@ -537,10 +555,12 @@ impl App {
                         }
                     });
                     ui.add_space(12.0);
+                    }
+                    if show("time") {
                     card(ui, &t, half, tr("Time tracked this week"), |ui| {
                         let ws = week_start(td);
                         let mut per_day = [0i64; 7];
-                        for task in &self.data.tasks {
+                        for task in self.data.tasks.iter().filter(|x| in_view(x)) {
                             for e in &task.time_entries {
                                 let d = ts_date(e.start);
                                 let i = (d - ws).num_days();
@@ -561,8 +581,40 @@ impl App {
                             bar_row(ui, &t, &d.text("%a %-d"), *secs as f32, max, t.primary, if *secs > 0 { fmt_duration(*secs) } else { "-".into() });
                         }
                     });
+                    ui.add_space(12.0);
+                    }
+                    if show("time_people") {
+                    card(ui, &t, half, tr("Time tracked this week by person"), |ui| {
+                        let ws = week_start(td);
+                        let solo = self.data.solo();
+                        let me = self.data.me;
+                        let mut per: HashMap<u64, i64> = HashMap::new();
+                        for task in self.data.tasks.iter().filter(|x| in_view(x)) {
+                            for e in &task.time_entries {
+                                if (0..7).contains(&(ts_date(e.start) - ws).num_days()) {
+                                    let o = match task.entry_owner(e) {
+                                        0 if solo => me,
+                                        o => o,
+                                    };
+                                    *per.entry(o).or_default() += e.end - e.start;
+                                }
+                            }
+                            if let (Some(st), Some(by)) = (task.timer_started, task.timer_by.or(if solo { Some(me) } else { None })) {
+                                if (0..7).contains(&(ts_date(st) - ws).num_days()) {
+                                    *per.entry(by).or_default() += now - st;
+                                }
+                            }
+                        }
+                        let rows: Vec<(String, i64, Color32)> = self.data.members.iter().map(|m| (m.name.clone(), per.get(&m.id).copied().unwrap_or(0), rgb(m.color))).collect();
+                        let max = rows.iter().map(|r| r.1).max().unwrap_or(1).max(1) as f32;
+                        for (name, secs, c) in rows {
+                            bar_row(ui, &t, &name, secs as f32, max, c, if secs > 0 { fmt_duration(secs) } else { "-".into() });
+                        }
+                    });
+                    }
                 });
                 ui.add_space(12.0);
+                if show("overdue") {
                 card(ui, &t, w, tr("Overdue tasks"), |ui| {
                     if overdue.is_empty() {
                         ui.label(RichText::new(tr("Nothing is overdue")).color(t.text3));
@@ -583,6 +635,7 @@ impl App {
                         }
                     }
                 });
+                }
             });
         });
     }
@@ -707,7 +760,7 @@ impl App {
  && task_id != 0 {
                         let start = day_start_ts(ws + Duration::days(day));
                         if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == task_id) {
-                            task.time_entries.push(TimeEntry { start, end: start + mins as i64 * 60 });
+                            task.time_entries.push(TimeEntry { start, end: start + mins as i64 * 60, member: self.data.me });
                             self.dirty = true;
                         }
                     }

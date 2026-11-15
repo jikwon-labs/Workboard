@@ -5,6 +5,9 @@
 
 use super::*;
 
+/// `dash_open` for the built-in Workspace overview (not a saved dashboard).
+pub(super) const WORKSPACE_OVERVIEW: u64 = 0;
+
 fn hub_frame(t: &Theme) -> egui::Frame {
     egui::Frame::new().fill(t.sidebar).corner_radius(egui::CornerRadius { nw: 8, ne: 0, sw: 8, se: 0 }).inner_margin(egui::Margin::symmetric(8, 6))
 }
@@ -315,8 +318,10 @@ impl App {
                             3 => d.private && !d.archived,
                             4 => d.meeting_note && !d.archived,
                             5 => d.archived,
-                            _ => !d.archived && (!d.private || d.owner == me),
+                            _ => !d.archived,
                         })
+                        // someone's Private docs are for them alone
+                        .filter(|d| !d.private || d.owner == me)
                         .filter(|d| d.parent.is_none())
                         .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                         .filter(|d| !mine_only || d.owner == me)
@@ -432,8 +437,8 @@ impl App {
     pub(super) fn dashboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        let items: [(&str, &str, Option<usize>); 4] = [("\u{1F4CA}", "All Dashboards", None), ("@me", "My Dashboards", None), ("\u{1F465}", "Shared with me", None), ("\u{1F512}", "Private", None)];
-        let sel = if self.dash_open.is_some() { 99 } else { self.hub_filter.min(3) };
+        let items: [(&str, &str, Option<usize>); 2] = [("\u{1F4CA}", "All Dashboards", None), ("@me", "My Dashboards", None)];
+        let sel = if self.dash_open.is_some() { 99 } else { self.hub_filter.min(1) };
         let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, false);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -442,9 +447,9 @@ impl App {
         if plus {
             self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() });
         }
-        let _ = me;
+        let mine_only = self.hub_filter.min(1) == 1;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
-            if self.dash_open.is_some() || (self.hub_filter == 0 && !self.data.extra.dashboards.is_empty() && self.dash_open.is_none() && false) {
+            if self.dash_open.is_some() {
                 self.dashboard_content(ui);
                 return;
             }
@@ -452,16 +457,17 @@ impl App {
                 if !self.data.extra.dashboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Dashboards")).size(15.0));
-                        for d in self.data.extra.dashboards.clone() {
-                            if ui.add(egui::Button::new(format!("\u{1F4CA}  {}", d.name)).frame(false)).clicked() {
-                                self.dash_open = Some(d.id);
-                            }
+                        // My: the ones I made (older ones without a maker show in both)
+                        for d in self.data.extra.dashboards.clone().into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0) {
+                            ui.horizontal(|ui| {
+                                self.star_toggle(ui, format!("dash:{}", d.id));
+                                if ui.add(egui::Button::new(format!("\u{1F4CA}  {}", d.name)).frame(false)).clicked() {
+                                    self.dash_open = Some(d.id);
+                                }
+                            });
                         }
                         if ui.add(egui::Button::new(tr("\u{1F4CA}  Workspace overview")).frame(false)).clicked() {
-                            let id = self.data.new_id();
-                            self.data.extra.dashboards.push(Dashboard { id, name: "Workspace overview".into(), space: None });
-                            self.dash_open = Some(id);
-                            self.dirty = true;
+                            self.dash_open = Some(WORKSPACE_OVERVIEW);
                         }
                     });
                 }
@@ -477,14 +483,39 @@ impl App {
                         self.modal = Some(super::menus::unavailable(tr(&name)));
                     } else {
                         let id = self.data.new_id();
+                        // each template shows its own set of cards; scratch shows them all
+                        let kind = match name.as_str() {
+                            "Simple Dashboard" => "simple",
+                            "Time Tracking" => "time",
+                            "Project Management" => "project",
+                            _ => "",
+                        };
                         let n = if name == "Start from scratch" { "New Dashboard".to_string() } else { name };
-                        self.data.extra.dashboards.push(Dashboard { id, name: n, space: None });
+                        self.data.extra.dashboards.push(Dashboard { id, name: n, space: None, owner: me, kind: kind.into() });
                         self.dash_open = Some(id);
                         self.dirty = true;
                     }
                 }
             });
         });
+    }
+
+    /// A star that adds the item ("dash:ID", "wb:ID", "form:ID") to the
+    /// sidebar's Favorites, or takes it off.
+    pub(super) fn star_toggle(&mut self, ui: &mut Ui, key: String) {
+        let t = self.t();
+        let starred = self.data.extra.starred.contains(&key);
+        let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" }).size(16.0).color(if starred { Color32::from_rgb(0xf8, 0xae, 0x00) } else { t.text2 });
+        let r = ui.add(egui::Button::new(star).frame(false)).on_hover_text(if starred { tr("Remove from Favorites") } else { tr("Add to Favorites") });
+        name_it(&r, &format!("Star {}", key));
+        if r.clicked() {
+            if starred {
+                self.data.extra.starred.retain(|s| s != &key);
+            } else {
+                self.data.extra.starred.push(key);
+            }
+            self.dirty = true;
+        }
     }
 
     /// Template gallery with a "Start from scratch" card; returns the chosen title.
@@ -541,10 +572,16 @@ impl App {
                 if !self.data.extra.whiteboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Whiteboards")).size(15.0));
-                        for w in self.data.extra.whiteboards.clone() {
-                            if ui.add(egui::Button::new(format!("\u{1F3A8}  {}", w.name)).frame(false)).clicked() {
-                                self.wb_open = Some(w.id);
-                            }
+                        let me = self.data.me;
+                        let mine_only = self.hub_filter.min(1) == 1;
+                        // My: the ones I made (older ones without a maker show in both)
+                        for w in self.data.extra.whiteboards.clone().into_iter().filter(|w| !mine_only || w.owner == me || w.owner == 0) {
+                            ui.horizontal(|ui| {
+                                self.star_toggle(ui, format!("wb:{}", w.id));
+                                if ui.add(egui::Button::new(format!("\u{1F3A8}  {}", w.name)).frame(false)).clicked() {
+                                    self.wb_open = Some(w.id);
+                                }
+                            });
                         }
                     });
                 }
@@ -601,10 +638,16 @@ impl App {
                 if !self.data.extra.forms.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Forms")).size(15.0));
-                        for f in self.data.extra.forms.clone() {
-                            if ui.add(egui::Button::new(format!("\u{1F4CB}  {}", f.name)).frame(false)).clicked() {
-                                self.form_open = Some(f.id);
-                            }
+                        let me = self.data.me;
+                        let mine_only = self.hub_filter.min(1) == 1;
+                        // My: the ones I made (older ones without a maker show in both)
+                        for f in self.data.extra.forms.clone().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
+                            ui.horizontal(|ui| {
+                                self.star_toggle(ui, format!("form:{}", f.id));
+                                if ui.add(egui::Button::new(format!("\u{1F4CB}  {}", f.name)).frame(false)).clicked() {
+                                    self.form_open = Some(f.id);
+                                }
+                            });
                         }
                     });
                 }
@@ -766,7 +809,6 @@ impl App {
             return;
         };
         let members = self.data.members.clone();
-        let mut delete = false;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
             let tm = &mut self.data.extra.teams[ti];
             if ui.add(egui::TextEdit::singleline(&mut tm.name).font(FontId::proportional(24.0)).frame(false).desired_width(400.0)).changed() {
@@ -787,7 +829,7 @@ impl App {
                 }
             });
             if ui.add(egui::Button::new(RichText::new(tr("Delete team")).color(t.danger)).frame(false)).clicked() {
-                delete = true;
+                self.modal = Some(Modal::ConfirmRemove { kind: "team", id: tm.id, name: tm.name.clone() });
             }
         });
         ui.separator();
@@ -797,7 +839,7 @@ impl App {
                 ui.label(RichText::new(tr("What the team is working on")).size(15.0));
                 for id in ids {
                     let Some(m) = self.data.member(id).cloned() else { continue };
-                    let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&id) && !self.data.is_closed(x)).cloned().collect();
+                    let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&id) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
                         paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
@@ -813,12 +855,6 @@ impl App {
                 }
             });
         });
-        if delete {
-            self.data.extra.teams.remove(ti);
-            self.team_open = None;
-            self.hub_filter = 0;
-            self.dirty = true;
-        }
     }
 
     fn org_chart(&mut self, ui: &mut Ui) {
@@ -884,11 +920,6 @@ impl App {
                         self.hub_filter = i as u8;
                     }
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new(tr("\u{2699}  Settings")).min_size(vec2(0.0, 28.0))).clicked() {
-                        self.modal = Some(Modal::ClickApps);
-                    }
-                });
             });
         });
         let r = ui.available_rect_before_wrap();
@@ -929,7 +960,7 @@ impl App {
                         });
                     }
                     _ => {
-                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) }) || x.timer_started.is_some()) || !self.sheet_rows.is_empty() || self.sheet_force;
+                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows().is_empty() || self.sheet_force;
                         if !has_any {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
@@ -953,12 +984,15 @@ impl App {
                                         if resp.clicked() {
                                             match label {
                                                 "All assigned tasks" => {
-                                                    self.sheet_rows = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x)).map(|x| x.id).collect();
+                                                    let rows = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).map(|x| x.id).collect();
+                                                    self.set_my_sheet_rows(rows);
                                                 }
                                                 "Last week's tasks" => {
                                                     let lw = ws - Duration::days(7);
-                                                    self.sheet_rows = self.data.tasks.iter().filter(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - lw).num_days(); (0..7).contains(&i) })).map(|x| x.id).collect();
-                                                    if self.sheet_rows.is_empty() {
+                                                    let rows: Vec<u64> = self.data.tasks.iter().filter(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - lw).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) })).map(|x| x.id).collect();
+                                                    let none = rows.is_empty();
+                                                    self.set_my_sheet_rows(rows);
+                                                    if none {
                                                         self.toast = Some((tr("No time was tracked last week").into(), now_ts()));
                                                     }
                                                 }
@@ -967,7 +1001,7 @@ impl App {
                                                     self.sheet_force = true;
                                                 }
                                                 _ => {
-                                                    let first = self.data.tasks.iter().find(|x| x.assignees.contains(&me)).map(|x| x.id).unwrap_or(0);
+                                                    let first = self.data.tasks.iter().find(|x| x.assignees.contains(&me) && self.data.task_live(x)).map(|x| x.id).unwrap_or(0);
                                                     self.modal = Some(Modal::TrackTime { task: first });
                                                 }
                                             }
@@ -989,12 +1023,12 @@ impl App {
     fn timesheet_grid(&mut self, ui: &mut Ui, ws: NaiveDate) {
         let t = self.t();
         let now = now_ts();
-        let mut ids: Vec<u64> = self.sheet_rows.clone();
+        let mut ids: Vec<u64> = self.my_sheet_rows();
         for x in &self.data.tasks {
             let any = x.time_entries.iter().any(|e| {
                 let i = (ts_day(e.start) - ws).num_days();
-                (0..7).contains(&i)
-            }) || x.timer_started.is_some();
+                (0..7).contains(&i) && self.data.is_my_entry(x, e)
+            }) || self.data.is_my_timer(x);
             if any && !ids.contains(&x.id) {
                 ids.push(x.id);
             }
@@ -1017,13 +1051,14 @@ impl App {
                 let Some(ti) = self.data.tasks.iter().position(|x| x.id == *id) else { continue };
                 let name = self.data.tasks[ti].name.clone();
                 let mut per = [0i64; 7];
-                for e in &self.data.tasks[ti].time_entries {
+                // my time only: teammates' entries on the same task aren't mine to edit
+                for e in self.data.tasks[ti].time_entries.iter().filter(|e| self.data.is_my_entry(&self.data.tasks[ti], e)) {
                     let i = (ts_day(e.start) - ws).num_days();
                     if (0..7).contains(&i) {
                         per[i as usize] += e.end - e.start;
                     }
                 }
-                if let Some(st) = self.data.tasks[ti].timer_started {
+                if let Some(st) = self.data.tasks[ti].timer_started.filter(|_| self.data.is_my_timer(&self.data.tasks[ti])) {
                     let i = (ts_day(st) - ws).num_days();
                     if (0..7).contains(&i) {
                         per[i as usize] += now - st;
@@ -1062,12 +1097,14 @@ impl App {
             }
             ui.painter().text(pos2(fr.left() + name_w + col * 7.5, fr.center().y), Align2::CENTER_CENTER, fmt_duration(all), FontId::proportional(13.0), t.text);
             ui.horizontal(|ui| {
-                let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|x| !ids.contains(&x.id)).map(|x| (x.id, x.name.clone())).collect();
+                let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|x| !ids.contains(&x.id) && self.data.task_live(x)).map(|x| (x.id, x.name.clone())).collect();
                 ui.menu_button(tr("+ Add task"), |ui| {
                     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         for (id, n) in &tasks {
                             if ui.button(n).clicked() {
-                                self.sheet_rows.push(*id);
+                                let mut rows = self.my_sheet_rows();
+                                rows.push(*id);
+                                self.set_my_sheet_rows(rows);
                                 ui.close_menu();
                             }
                         }
@@ -1077,13 +1114,61 @@ impl App {
         });
     }
 
-    /// Replaces a task's time on one day with a single entry of `hours`.
+    /// The tasks I added to my timesheet with "+ Add task" (kept per person).
+    pub(super) fn my_sheet_rows(&self) -> Vec<u64> {
+        let me = self.data.me;
+        self.data.extra.sheet_rows.iter().filter(|r| r[0] == me && self.task(r[1]).is_some_and(|x| self.data.task_live(x))).map(|r| r[1]).collect()
+    }
+
+    fn set_my_sheet_rows(&mut self, ids: Vec<u64>) {
+        let me = self.data.me;
+        self.data.extra.sheet_rows.retain(|r| r[0] != me);
+        for id in ids {
+            if !self.data.extra.sheet_rows.contains(&[me, id]) {
+                self.data.extra.sheet_rows.push([me, id]);
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Sets my time on one task and day to `hours` (as the grid shows it, my
+    /// running timer included) by adding or taking away the difference from
+    /// my entries that day. Teammates' entries are never touched.
     pub(super) fn set_day_time(&mut self, task_id: u64, day: NaiveDate, hours: f64) {
-        let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == task_id) else { return };
-        task.time_entries.retain(|e| ts_day(e.start) != day);
-        if hours > 0.0 {
-            let start = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or_else(now_ts);
-            task.time_entries.push(TimeEntry { start, end: start + (hours * 3600.0).round() as i64 });
+        let now = now_ts();
+        let me = self.data.me;
+        let Some(ti) = self.data.tasks.iter().position(|x| x.id == task_id) else { return };
+        let task = &self.data.tasks[ti];
+        let running = task.timer_started.filter(|st| self.data.is_my_timer(task) && ts_day(*st) == day).map(|st| now - st).unwrap_or(0);
+        let mine: Vec<usize> = task.time_entries.iter().enumerate().filter(|(_, e)| ts_day(e.start) == day && self.data.is_my_entry(task, e)).map(|(k, _)| k).collect();
+        let have: i64 = mine.iter().map(|k| task.time_entries[*k].end - task.time_entries[*k].start).sum();
+        let want = ((hours * 3600.0).round() as i64 - running).max(0);
+        let task = &mut self.data.tasks[ti];
+        if want > have {
+            let start = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or(now);
+            task.time_entries.push(TimeEntry { start, end: start + (want - have), member: me });
+        } else if want < have {
+            // take it off my latest entries first
+            let mut cut = have - want;
+            let mut gone = vec![];
+            for k in mine.into_iter().rev() {
+                let e = &mut task.time_entries[k];
+                let len = e.end - e.start;
+                if len <= cut {
+                    cut -= len;
+                    gone.push(k);
+                } else {
+                    e.end -= cut;
+                    cut = 0;
+                }
+                if cut == 0 {
+                    break;
+                }
+            }
+            gone.sort_unstable();
+            for k in gone.into_iter().rev() {
+                task.time_entries.remove(k);
+            }
         }
         self.dirty = true;
     }
@@ -1094,7 +1179,7 @@ impl App {
         for x in &self.data.tasks {
             for (k, e) in x.time_entries.iter().enumerate() {
                 let i = (ts_day(e.start) - ws).num_days();
-                if (0..7).contains(&i) {
+                if (0..7).contains(&i) && self.data.is_my_entry(x, e) {
                     rows.push((e.start, e.end, x.name.clone(), x.id, k));
                 }
             }
@@ -1137,22 +1222,41 @@ impl App {
         let t = self.t();
         egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            for m in self.data.members.clone() {
-                let mut total = 0;
-                for x in self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id)) {
-                    for e in &x.time_entries {
-                        let i = (ts_day(e.start) - ws).num_days();
-                        if (0..7).contains(&i) {
-                            total += e.end - e.start;
-                        }
+            // by whose time it is, not by who the task is assigned to
+            let me = self.data.me;
+            let solo = self.data.solo();
+            let mut per: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+            for x in &self.data.tasks {
+                for e in &x.time_entries {
+                    let i = (ts_day(e.start) - ws).num_days();
+                    if (0..7).contains(&i) {
+                        let owner = match x.entry_owner(e) {
+                            0 if solo => me,
+                            o => o,
+                        };
+                        *per.entry(owner).or_default() += e.end - e.start;
                     }
                 }
+            }
+            for m in self.data.members.clone() {
+                let total = per.remove(&m.id).unwrap_or(0);
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
                     paint_avatar(ui.painter(), r.center(), 11.0, &m, t.card);
                     ui.label(&m.name);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(if total > 0 { fmt_duration(total) } else { "-".into() });
+                    });
+                });
+            }
+            // old entries on unassigned tasks, and people no longer here
+            let rest: i64 = per.values().sum();
+            if rest > 0 {
+                ui.horizontal(|ui| {
+                    ui.add_space(30.0);
+                    ui.label(RichText::new(tr("Unknown")).color(t.text2));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(fmt_duration(rest));
                     });
                 });
             }

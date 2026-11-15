@@ -1581,6 +1581,12 @@ impl Data {
             ..Default::default()
         });
         d.extra.demo_removed = true;
+        // a new workspace leaves out what needs an online service Workboard
+        // doesn't have (Customize brings them back); files saved before keep
+        // their own choices, and files without these fields keep the old
+        // defaults (`Extra::default`)
+        d.extra.pinned_tools = vec!["create_task".into()];
+        d.extra.hidden_nav = vec!["Skills".into(), "Artifacts".into()];
         d
     }
 

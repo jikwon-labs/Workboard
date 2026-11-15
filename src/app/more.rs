@@ -437,10 +437,8 @@ impl App {
                         if items.is_empty() && reminders_shown {
                             ui.add_space(16.0);
                             ui.label(
-                                RichText::new(tr(
-                                    "No new comments, mentions or assignments.",
-                                ))
-                                .color(t.text3),
+                                RichText::new(tr("No new comments, mentions or assignments."))
+                                    .color(t.text3),
                             );
                         } else if items.is_empty() {
                             ui.add_space(ui.available_height() * 0.3);

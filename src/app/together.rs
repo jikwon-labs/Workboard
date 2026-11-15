@@ -703,18 +703,24 @@ impl App {
                         .map(|m| m.name.clone())
                         .unwrap_or_default();
                     if let Some(to) = emailed {
-                        self.toast =
-                            Some((trf!("Emailed {}'s invite code to {}.", name, to), now_ts()));
+                        self.toast = Some((
+                            crate::i18n::particles(&trf!(
+                                "Emailed {}'s invite code to {}.",
+                                name,
+                                to
+                            )),
+                            now_ts(),
+                        ));
                     } else if let Some(why) = mail_error {
                         self.toast = Some((trf!("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", name, why), now_ts()));
                     }
                 }
                 NetEvent::Account(email) => {
                     self.toast = Some((
-                        trf!(
+                        crate::i18n::particles(&trf!(
                             "Password saved. Sign in with {} on your other computers and phones.",
                             email
-                        ),
+                        )),
                         now_ts(),
                     ));
                     self.sync_rt.account = Some(email);
@@ -809,7 +815,10 @@ impl App {
                             .member(member)
                             .map(|m| m.name.clone())
                             .unwrap_or_default();
-                        self.toast = Some((trf!("Joined as {}.", name), now_ts()));
+                        self.toast = Some((
+                            crate::i18n::particles(&trf!("Joined as {}.", name)),
+                            now_ts(),
+                        ));
                         if matches!(
                             self.modal,
                             Some(Modal::Together { .. } | Modal::Welcome { .. })
@@ -1810,10 +1819,10 @@ impl App {
             Some(email) => {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(trf!(
+                        RichText::new(crate::i18n::particles(&trf!(
                             "You sign in with {} on your other computers and phones.",
                             email
-                        ))
+                        )))
                         .color(t.text2),
                     );
                     if !form.changing && row_button(ui, tr("Change password")).clicked() {
@@ -2060,8 +2069,12 @@ impl App {
                     .map(|m| m.name.clone())
                     .unwrap_or_default();
                 ui.label(
-                    RichText::new(trf!("Signed in as {} ({})", name, tr(role.label())))
-                        .color(t.text2),
+                    RichText::new(crate::i18n::particles(&trf!(
+                        "Signed in as {} ({})",
+                        name,
+                        tr(role.label())
+                    )))
+                    .color(t.text2),
                 );
             }
             if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {

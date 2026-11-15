@@ -24,8 +24,12 @@ import Foundation
 public enum Sync {
     /// Collections that belong to the whole team (SHARED).
     public static let shared: [String] = [
-        "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams",
+        "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams", "extra.bookmarks",
     ]
+    /// The SyncMeta.v this version writes (META_V): 1 = an item's place
+    /// counts in its fingerprint, 2 = `moved` is kept and fields at their
+    /// default may be left out, 3 = field stamps are kept.
+    public static let metaV: UInt32 = 3
     /// Single settings that belong to the whole team (SHARED_VALUES).
     public static let sharedValues: [String] = ["workspace", "extra.workspace_color", "extra.apps"]
     /// Fields that are each person's own even inside shared items (LOCAL_KEYS).
@@ -40,7 +44,7 @@ public struct SyncMeta: Equatable, Sendable {
     public var tombs: [UInt64: Int64] = [:]
     public var revived: [UInt64: Int64] = [:]
     public var hashes: [UInt64: UInt64] = [:]
-    /// How `hashes` were made: 0 = before an item's place counted, 1 = since.
+    /// How `hashes` were made and what the copy keeps (Sync.metaV).
     public var v: UInt32 = 0
     /// Shared setting -> when it last changed.
     public var values: [String: Int64] = [:]
@@ -51,6 +55,11 @@ public struct SyncMeta: Equatable, Sendable {
     public var fields: [UInt64: [String: Int64]] = [:]
     /// id -> part -> fingerprint when last saved (this device only).
     public var fieldHashes: [UInt64: [String: UInt32]] = [:]
+    /// id -> when it last moved into another item (a list into another
+    /// space). Where an item sits follows this, not `stamps` (from v 2).
+    public var moved: [UInt64: Int64] = [:]
+    /// id -> the item it sat in when last saved (this device only).
+    public var parents: [UInt64: UInt64] = [:]
 
     public init(stamps: [UInt64: Int64] = [:], tombs: [UInt64: Int64] = [:], revived: [UInt64: Int64] = [:], hashes: [UInt64: UInt64] = [:],
                 v: UInt32 = 0, values: [String: Int64] = [:], valueHashes: [String: UInt64] = [:],
@@ -82,6 +91,10 @@ public struct SyncMeta: Equatable, Sendable {
         stamps = map("stamps")
         tombs = map("tombs")
         revived = map("revived")
+        moved = map("moved")
+        for (k, x) in json["parents"]?.object ?? [:] {
+            if let id = UInt64(k), let p = x.uint { parents[id] = p }
+        }
         for (k, v) in json["hashes"]?.object ?? [:] {
             if let id = UInt64(k), let h = v.uint { hashes[id] = h }
         }
@@ -117,6 +130,10 @@ public struct SyncMeta: Equatable, Sendable {
             "values": .object(values.mapValues { JSON.int($0) }),
             "value_hashes": .object(valueHashes.mapValues { JSON.id($0) }),
         ]
+        if !moved.isEmpty { o["moved"] = obj(moved) }
+        if !parents.isEmpty {
+            o["parents"] = .object(Dictionary(uniqueKeysWithValues: parents.map { (String($0.key), JSON.id($0.value)) }))
+        }
         if !fields.isEmpty {
             o["fields"] = .object(Dictionary(uniqueKeysWithValues: fields.map { (String($0.key), JSON.object($0.value.mapValues { JSON.int($0) })) }))
         }
@@ -270,6 +287,58 @@ extension Sync {
         return out
     }
 
+    /// id -> the item it sits in, for every shared item inside another (parents_of).
+    public static func parentsOf(_ data: JSON) -> [UInt64: UInt64] {
+        var out: [UInt64: UInt64] = [:]
+        visit(data) { id, parent, _ in if let p = parent { out[id] = p } }
+        return out
+    }
+
+    /// After the shape items are written in changed (`legacy` is the
+    /// workspace the old way, `current` the new way): fingerprints that still
+    /// match the old way are carried over, so the change in shape alone
+    /// doesn't count as an edit (wb_sync::carry_hashes).
+    public static func carryHashes(_ meta: inout SyncMeta, legacy: JSON, current: JSON) {
+        let cur = fingerprints(current)
+        let parts = partHashes(current)
+        for (id, old) in fingerprints(legacy) where meta.hashes[id] == old {
+            if let h = cur[id] {
+                meta.hashes[id] = h
+                if let p = parts[id] { meta.fieldHashes[id] = p }
+            }
+        }
+    }
+
+    /// A workspace as copies before SyncMeta.v 2 wrote it, with the fields
+    /// that are now left out at their default filled in (the Mac app's
+    /// legacy_shape): time entries' `member`, forms', whiteboards' and
+    /// dashboards' `owner`, dashboards' `kind`.
+    public static func legacyShape(_ v: JSON) -> JSON {
+        var v = v
+        func fill(_ items: JSON?, _ keys: [(String, JSON)]) -> JSON? {
+            guard let a = items?.array else { return items }
+            return .array(a.map { it in
+                guard var o = it.object else { return it }
+                for (k, d) in keys where o[k] == nil { o[k] = d }
+                return .object(o)
+            })
+        }
+        if let tasks = v["tasks"]?.array {
+            v["tasks"] = .array(tasks.map { t in
+                var t = t
+                if t.object != nil, let e = fill(t["time_entries"], [("member", 0)]) { t["time_entries"] = e }
+                return t
+            })
+        }
+        if var e = v["extra"], e.object != nil {
+            if let f = fill(e["forms"], [("owner", 0)]) { e["forms"] = f }
+            if let w = fill(e["whiteboards"], [("owner", 0)]) { e["whiteboards"] = w }
+            if let d = fill(e["dashboards"], [("owner", 0), ("kind", "")]) { e["dashboards"] = d }
+            v["extra"] = e
+        }
+        return v
+    }
+
     /// An item's own fields changed at `next` (wb_sync note_fields).
     static func noteFields(_ meta: inout SyncMeta, _ id: UInt64, before: Int64, _ nowParts: [String: UInt32]?, next: Int64) {
         let nowParts = nowParts ?? [:]
@@ -315,6 +384,15 @@ extension Sync {
             }
             meta.v = 1
         }
+        // places: an item now in another item than when last saved moved there
+        let places = parentsOf(data)
+        for (id, p) in places {
+            if let old = meta.parents[id], old != p {
+                meta.moved[id] = meta.moved[id].map { max(now, $0 + 1) } ?? now
+            }
+        }
+        meta.parents = places
+        meta.v = metaV
         let parts = partHashes(data)
         for (id, h) in cur {
             let next = meta.stamps[id].map { max(now, $0 + 1) } ?? now
@@ -341,6 +419,7 @@ extension Sync {
             meta.tombs[id] = t
             meta.stamps[id] = nil
             meta.fields[id] = nil
+            meta.moved[id] = nil
         }
         meta.hashes = cur
         meta.fieldHashes = parts
@@ -384,22 +463,35 @@ extension Sync {
         var fields: [[UInt64: [String: Int64]]] = []
         var outFields: [UInt64: [String: Int64]] = [:]
 
-        init(stamps: [[UInt64: Int64]], tombs: [UInt64: Int64], revived: [UInt64: Int64], all: [UInt64: [(src: Int, parent: UInt64?, value: JSON)]]) {
+        /// id -> when it moved where it is (0: not known)
+        var homeMoved: [UInt64: Int64] = [:]
+        var outMoved: [UInt64: Int64] = [:]
+
+        init(stamps: [[UInt64: Int64]], moved: [[UInt64: Int64]?], tombs: [UInt64: Int64], revived: [UInt64: Int64], all: [UInt64: [(src: Int, parent: UInt64?, value: JSON)]]) {
             self.stamps = stamps
             self.tombs = tombs
             self.revived = revived
+            omitsDefaults = moved.map { $0 != nil }
+            // the copy that moved it last decides where the item is (copies
+            // that don't keep move times count their item's last change as
+            // one), then the newest copy; on a tie this device's
+            func key(_ src: Int, _ id: UInt64) -> (Int64, Int64) {
+                let s = stamps[src][id] ?? 0
+                let m = moved[src].map { $0[id] ?? 0 } ?? s
+                return (m, s)
+            }
             for (id, list) in all {
-                // the newest copy decides where the item is; on a tie this device's
                 var best = list[0]
-                var bestStamp = stamps[best.src][id] ?? 0
+                var bestKey = key(best.src, id)
                 for c in list.dropFirst() {
-                    let s = stamps[c.src][id] ?? 0
-                    if s > bestStamp {
+                    let k = key(c.src, id)
+                    if k > bestKey {
                         best = c
-                        bestStamp = s
+                        bestKey = k
                     }
                 }
                 home[id] = .some(best.parent)
+                homeMoved[id] = bestKey.0
                 cands[id] = list.map { (src: $0.src, value: $0.value) }
             }
         }
@@ -573,6 +665,7 @@ extension Sync {
                 }
             }
             cx.out[id] = bestStamp
+            if let m = cx.homeMoved[id], m > 0 { cx.outMoved[id] = m }
             guard let wobj = best.value.object else { continue }
             let local = list.first(where: { $0.src == 0 })?.value.object
             var keys = Set(wobj.keys)
@@ -656,8 +749,8 @@ extension Sync {
             for (src, arr) in sources { collect(src, arr, parent: nil, &all, &order) }
             perPath.append((path, sources))
         }
-        let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), tombs: tombs, revived: revived, all: all)
-        cx.omitsDefaults = [lmeta.v >= 2] + metas.map { $0.v >= 2 }
+        let keeps = { (m: SyncMeta) -> [UInt64: Int64]? in m.v >= 2 ? m.moved : nil }
+        let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), moved: [keeps(lmeta)] + metas.map(keeps), tombs: tombs, revived: revived, all: all)
         cx.fields = [lmeta.fields] + metas.map(\.fields)
         var merged: [(String, JSON)] = []
         for (path, sources) in perPath {
@@ -681,11 +774,13 @@ extension Sync {
         lmeta.tombs = tombs
         lmeta.revived = revived
         lmeta.stamps = cx.out
+        lmeta.moved = cx.outMoved
         lmeta.fields = cx.outFields
         lmeta.hashes = fingerprints(local)
         lmeta.fieldHashes = partHashes(local)
+        lmeta.parents = parentsOf(local)
         lmeta.valueHashes = valueHashes(local)
-        lmeta.v = 1
+        lmeta.v = metaV
         local.set("extra.sync", lmeta.json)
         return stripSync(before) != stripSync(local)
     }
@@ -708,6 +803,7 @@ extension Sync {
             v.set("extra.sync.value_hashes", .object([:]))
             var sync = v.at("extra.sync") ?? .object([:])
             sync["field_hashes"] = nil
+            sync["parents"] = nil
             v.set("extra.sync", sync)
         }
         return v

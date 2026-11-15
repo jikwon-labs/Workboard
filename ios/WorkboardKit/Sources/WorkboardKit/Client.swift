@@ -218,14 +218,21 @@ public final class SyncClient {
             let filledActivity = Sync.fillActivityIds(&snap)
             let filled = Sync.fillBoardIds(&snap) || filledActivity
             let old = SyncMeta(of: snap)
+            var meta = old
+            if old.v == 1 {
+                // fingerprints from before fields at their default were left
+                // out of the file: the new shape alone isn't an edit
+                Sync.carryHashes(&meta, legacy: Sync.legacyShape(snap), current: snap)
+            }
             if filled || old.v < 1 || (old.fieldHashes.isEmpty && !old.hashes.isEmpty) {
-                var meta = old
                 meta.hashes = Sync.fingerprints(snap)
                 meta.fieldHashes = Sync.partHashes(snap)
                 meta.valueHashes = Sync.valueHashes(snap)
                 meta.v = max(meta.v, 1)
-                snap.set("extra.sync", meta.json)
             }
+            // where everything sits now, so the next move is noticed
+            if meta.parents.isEmpty { meta.parents = Sync.parentsOf(snap) }
+            if meta != old { snap.set("extra.sync", meta.json) }
             self.data = snap
             self.view = WorkspaceView(snap)
         }
@@ -547,8 +554,9 @@ public final class SyncClient {
             var meta = SyncMeta(of: fresh)
             meta.hashes = Sync.fingerprints(fresh)
             meta.fieldHashes = Sync.partHashes(fresh)
+            meta.parents = Sync.parentsOf(fresh)
             meta.valueHashes = Sync.valueHashes(fresh)
-            meta.v = 1
+            meta.v = Sync.metaV
             fresh.set("extra.sync", meta.json)
             data = fresh
         }

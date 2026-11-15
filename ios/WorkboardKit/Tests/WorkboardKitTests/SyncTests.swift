@@ -257,7 +257,81 @@ final class RustPortTests2: XCTestCase {
         m.stamps = [100: 10, 101: 10]
         Sync.stamp(d, &m, now: 99)
         XCTAssertEqual(m.stamps[101], 10)
-        XCTAssertEqual(m.v, 1)
+        XCTAssertEqual(m.v, Sync.metaV)
+    }
+
+    func testRenamingAListYouNeverSawMoveKeepsTheMove() {
+        var (a, ma, b, mb) = pair([space(100, [], [list(101)]), space(200, [], [])])
+        // A moves the list; later B, not knowing, renames it where B has it
+        change(&a, &ma, [space(100, [], []), space(200, [], [list(101)])], 30)
+        var renamed = list(101)
+        renamed["name"] = "Renamed by B"
+        change(&b, &mb, [space(100, [], [renamed]), space(200, [], [])], 40)
+        let (a0, b0) = (a, b)
+        Sync.merge(&a, [b0])
+        Sync.merge(&b, [a0])
+        for v in [a, b] {
+            XCTAssertEqual(places(v), [[200, 101]], "the move stays")
+            XCTAssertEqual(v["spaces"]?[1]?["lists"]?[0]?["name"], "Renamed by B", "and so does the rename")
+        }
+        XCTAssertEqual(SyncMeta(of: a).moved[101], 30, "the move time travels with the copy")
+        // a copy from an app that doesn't keep move times still moves it by its stamp
+        var (c, _, old, mo) = pair([space(100, [], [list(101)]), space(200, [], [])])
+        change(&old, &mo, [space(100, [], []), space(200, [], [list(101)])], 30)
+        var om = SyncMeta(of: old)
+        om.v = 1
+        om.moved = [:]
+        old.set("extra.sync", om.json)
+        Sync.merge(&c, [old])
+        XCTAssertEqual(places(c), [[200, 101]])
+    }
+
+    func testAPhoneCopyNoLongerUndoesAMacMove() {
+        // the Mac (a) moves a list; the phone, which renamed another list,
+        // merges it and pushes its copy back: the move stays
+        var (mac, mm, phone, pm) = pair([space(100, [], [list(101), list(102)]), space(200, [], [])])
+        change(&mac, &mm, [space(100, [], [list(102)]), space(200, [], [list(101)])], 30)
+        var r = list(102)
+        r["name"] = "renamed"
+        change(&phone, &pm, [space(100, [], [list(101), r]), space(200, [], [])], 40)
+        Sync.merge(&phone, [mac])
+        XCTAssertEqual(SyncMeta(of: phone).v, Sync.metaV)
+        XCTAssertNotNil(SyncMeta(of: phone).moved[101])
+        Sync.merge(&mac, [Sync.outgoing(phone)])
+        XCTAssertEqual(places(mac), [[100, 102], [200, 101]])
+        XCTAssertEqual(mac["spaces"]?[0]?["lists"]?[0]?["name"], "renamed")
+    }
+
+    func testBookmarksAreShared() {
+        var (a, ma, b, _) = pair([])
+        a.set("extra.bookmarks", [["id": 5, "title": "Docs", "url": "https://example.com"]])
+        Sync.stamp(a, &ma, now: 20)
+        a.set("extra.sync", ma.json)
+        Sync.merge(&b, [a])
+        XCTAssertEqual(b.at("extra.bookmarks")?[0]?["title"], "Docs")
+    }
+
+    func testCarryHashesKeepsTheOldShapeFromCountingAsAnEdit() {
+        var d = sp([], SyncMeta())
+        d.set("extra.forms", [["id": 2, "name": "F", "list_id": 3, "description": "", "fields": []]])
+        var m = SyncMeta(hashes: Sync.fingerprints(Sync.legacyShape(d)), v: 1)
+        m.stamps = [2: 10]
+        Sync.carryHashes(&m, legacy: Sync.legacyShape(d), current: d)
+        Sync.stamp(d, &m, now: 99)
+        XCTAssertEqual(m.stamps[2], 10, "nothing counts as edited")
+        XCTAssertEqual(Sync.legacyShape(d).at("extra.forms")?[0]?["owner"], 0)
+    }
+
+    func testMetaKeepsMoveTimesAndLeavesThisDevicesPlacesOut() throws {
+        var m = SyncMeta(stamps: [1: 10], v: Sync.metaV)
+        m.moved = [101: 30]
+        m.parents = [101: 200]
+        m.fields = [1: ["": 5, "name": 10]]
+        XCTAssertEqual(SyncMeta(json: try JSON(parsing: m.json.serialized())), m)
+        let out = Sync.outgoing(["extra": ["sync": m.json]])
+        XCTAssertEqual(out.at("extra.sync.moved.101"), 30)
+        XCTAssertNil(out.at("extra.sync.parents"))
+        XCTAssertEqual(out.at("extra.sync.fields.1.name"), 10)
     }
 
     func ws(_ tasks: JSON, _ meta: SyncMeta) -> JSON {

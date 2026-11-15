@@ -3708,3 +3708,64 @@ fn search_leaves_out_other_peoples_personal_space_and_archived_lists() {
     assert!(h.has("Team Space / Projects / Marketing"));
     assert!(!h.has("Someone Private") && !h.has("Someone Private / Their Secret List") && !h.has("Team Space / Old Archived List"));
 }
+
+#[test]
+fn a_deleted_channel_goes_to_trash_and_comes_back_with_its_messages() {
+    let mut h = Ui1::new();
+    let cid = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    let messages = h.app.data.channels.iter().find(|c| c.id == cid).unwrap().messages.len();
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Delete channel");
+    h.click("Delete");
+    assert!(!h.app.data.channels.iter().any(|c| c.id == cid));
+    assert!(h.app.data.extra.trash.iter().any(|t| t.kind == "Channel" && t.title == "#website-redesign"));
+    h.app.modal = Some(Modal::Trash);
+    h.settle();
+    h.click("Restore");
+    let back = h.app.data.channels.iter().find(|c| c.id == cid).expect("restored");
+    assert_eq!(back.messages.len(), messages);
+}
+
+#[test]
+fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
+    let mut h = Ui1::new();
+    let cid = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    h.app.data.channels.iter_mut().find(|c| c.id == cid).unwrap().creator = 2;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    // Alex Kim (2) is in it and Sam Lee (3) isn't: neither checkbox changes
+    h.click("Sam Lee");
+    h.click("Alex Kim");
+    assert_eq!(h.app.data.channels.iter().find(|c| c.id == cid).unwrap().members, vec![1, 2]);
+    h.click("Delete channel");
+    assert!(!h.has("Delete"), "the delete button is off");
+    assert!(h.app.data.channels.iter().any(|c| c.id == cid));
+}
+
+#[test]
+fn saved_messages_from_every_channel_open_from_the_sidebar() {
+    let mut h = Ui1::new();
+    let cid = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    h.app.data.channels.iter_mut().find(|c| c.id == cid).unwrap().messages[0].saved = true;
+    h.settle();
+    h.click("Saved messages");
+    assert!(matches!(h.app.modal, Some(Modal::SavedMessages)));
+    h.click("Saved message");
+    assert_eq!((h.app.section, h.app.chat_open), (Section::Chat, Some(cid)));
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
+fn add_channel_doesnt_open_someone_elses_private_channel() {
+    let mut h = Ui1::new();
+    let list = h.app.data.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter()))).find(|l| l.name == "Marketing").unwrap().id;
+    let secret = h.app.data.new_id();
+    h.app.data.channels.push(Channel { id: secret, name: "marketing".into(), kind: ChannelKind::Channel, members: vec![2], private: true, ..Default::default() });
+    h.app.apply(Action::Go(Location::List(list)));
+    h.settle();
+    h.click("Add Channel");
+    let open = h.app.chat_open.unwrap();
+    assert_ne!(open, secret);
+    assert!(h.app.data.channels.iter().find(|c| c.id == open).is_some_and(|c| c.name == "marketing" && !c.private));
+}

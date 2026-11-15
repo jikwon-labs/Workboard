@@ -334,8 +334,9 @@ impl App {
             return false;
         }
         let me = self.data.me;
-        let count_new = |d: &Data| d.channels.iter().flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
-        let before = count_new(&self.data);
+        // (only in conversations I may see)
+        let count_new = |a: &Self| a.data.channels.iter().filter(|c| a.can_see(c)).flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
+        let before = count_new(self);
         let mut v = self.data_value();
         let changed = sync::merge(&mut v, others);
         match serde_json::from_value::<Data>(v) {
@@ -351,7 +352,7 @@ impl App {
             }
         }
         if changed {
-            let n = count_new(&self.data).saturating_sub(before);
+            let n = count_new(self).saturating_sub(before);
             if n > 0 {
                 self.toast = Some((if n == 1 { tr("1 new message from your team").into() } else { trf!("{} new messages from your team", n) }, now_ts()));
             }

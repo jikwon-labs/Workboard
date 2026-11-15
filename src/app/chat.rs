@@ -78,6 +78,35 @@ fn take_enter(ui: &Ui, id: egui::Id) -> bool {
     })
 }
 
+/// Whether `text` mentions `name`: "@" and the whole name, not the start
+/// of a longer one ("@Bo" doesn't mention Bob).
+pub(super) fn mentions(text: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let at = format!("@{}", name);
+    text.match_indices(&at).any(|(i, _)| name_ends(&text[i + at.len()..]))
+}
+
+/// What follows a name in a mention: the end, a space or punctuation, not
+/// more letters of a longer name.
+fn name_ends(rest: &str) -> bool {
+    rest.chars().next().map_or(true, |c| !(c.is_alphanumeric() || c == '_'))
+}
+
+/// The people in a direct message, sorted, each once.
+fn dm_people(c: &Channel) -> Vec<u64> {
+    let mut v = c.members.clone();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// Which copy of a direct message shows: one with messages, then the older.
+fn dm_rank(c: &Channel) -> (bool, u64) {
+    (c.messages.is_empty(), c.id)
+}
+
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
@@ -104,8 +133,73 @@ impl App {
         }
     }
 
-    fn unread(&self, c: &Channel) -> usize {
-        c.messages.iter().filter(|m| m.ts > c.last_read && m.author != self.data.me).count()
+    /// Messages from others I haven't seen in a conversation (with its
+    /// duplicate direct messages). Seen ids decide where there are some, so a
+    /// message that arrives late or with its author's clock behind still
+    /// counts; before any were kept, the time last read does.
+    pub(super) fn unread(&self, c: &Channel) -> usize {
+        self.conversation(c).iter().map(|d| self.unread_here(d)).sum()
+    }
+
+    fn unread_here(&self, c: &Channel) -> usize {
+        let seen = self.data.extra.chat_seen.get(&c.id);
+        c.messages
+            .iter()
+            .filter(|m| {
+                m.author != self.data.me
+                    && match seen {
+                        Some(s) => !s.has(m.id) && (m.ts >= s.floor || m.ts > c.last_read),
+                        None => m.ts > c.last_read,
+                    }
+            })
+            .count()
+    }
+
+    /// Something in an open conversation still to be marked read.
+    fn read_mark_due(&self, c: &Channel) -> bool {
+        self.conversation(c).iter().any(|d| self.unread_here(d) > 0 || d.messages.iter().map(|m| m.ts).max().unwrap_or(0) > d.last_read || !self.data.extra.chat_seen.contains_key(&d.id))
+    }
+
+    /// Mark a conversation (and its duplicate direct messages) read: up to
+    /// the newest message even when its clock is ahead of ours, and every
+    /// message in it seen.
+    pub(super) fn mark_read(&mut self, cid: u64) {
+        let Some(c) = self.data.channels.iter().find(|c| c.id == cid) else { return };
+        let ids: Vec<u64> = self.conversation(c).iter().map(|d| d.id).collect();
+        let now = now_ts();
+        for id in ids {
+            if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == id) {
+                let newest = c.messages.iter().map(|m| m.ts).max().unwrap_or(0);
+                c.last_read = now.max(newest);
+                self.data.extra.chat_seen.insert(id, SeenIds::of(c.messages.iter().map(|m| (m.id, m.ts))));
+            }
+        }
+    }
+
+    /// A direct message's copies with the same people (see `dm_duplicate`),
+    /// the one shown first; just `c` for anything else.
+    pub(super) fn conversation<'a>(&'a self, c: &'a Channel) -> Vec<&'a Channel> {
+        if c.kind != ChannelKind::Direct || self.dm_duplicate(c) {
+            return vec![c];
+        }
+        let mine = dm_people(c);
+        std::iter::once(c).chain(self.data.channels.iter().filter(|d| d.id != c.id && d.kind == ChannelKind::Direct && dm_people(d) == mine)).collect()
+    }
+
+    /// The copy of a direct message that shows (itself for anything else).
+    pub(super) fn dm_primary(&self, c: &Channel) -> u64 {
+        if c.kind != ChannelKind::Direct {
+            return c.id;
+        }
+        let mine = dm_people(c);
+        self.data.channels.iter().filter(|d| d.kind == ChannelKind::Direct && dm_people(d) == mine).min_by_key(|d| dm_rank(d)).map_or(c.id, |d| d.id)
+    }
+
+    /// Which copy of a conversation holds a message or reply: `ch`, or one of
+    /// its duplicate direct messages (shown together in `ch`).
+    fn msg_home(&self, ch: u64, msg: u64) -> u64 {
+        let Some(c) = self.data.channels.iter().find(|c| c.id == ch) else { return ch };
+        self.conversation(c).iter().find(|d| d.messages.iter().any(|m| m.id == msg || m.replies.iter().any(|r| r.id == msg))).map_or(ch, |d| d.id)
     }
 
     /// Whether I may see a channel: a public channel is everyone's, a private
@@ -115,6 +209,14 @@ impl App {
             ChannelKind::Channel => !c.private || c.members.contains(&self.data.me),
             ChannelKind::Direct => c.members.contains(&self.data.me),
         }
+    }
+
+    /// Whether I may delete a channel and change who else is in it: whoever
+    /// made it (any member for one made before that was kept), or an owner
+    /// or admin of the team server.
+    pub(super) fn may_manage_channel(&self, c: &Channel) -> bool {
+        let me = self.data.me;
+        self.sync_rt.role.is_some_and(|r| r.manages()) || c.creator == me || (c.creator == 0 && c.members.contains(&me))
     }
 
     /// Whether a channel shows in my lists: one I may see and, for a direct
@@ -127,27 +229,33 @@ impl App {
         if c.kind != ChannelKind::Direct {
             return true;
         }
-        if self.data.extra.closed_dms.iter().any(|(id, at)| *id == c.id && newest_ts(c) <= *at) {
+        if self.dm_duplicate(c) {
             return false;
         }
-        !self.dm_duplicate(c)
+        if let Some((_, at)) = self.data.extra.closed_dms.iter().find(|(id, _)| *id == c.id) {
+            // back once a message comes that wasn't there when I closed it
+            let all: Vec<(u64, i64)> = self.conversation(c).iter().flat_map(|d| d.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter()))).map(|m| (m.id, m.ts)).collect();
+            let fresh = match self.data.extra.closed_dm_seen.get(&c.id) {
+                Some(s) => all.iter().any(|(id, ts)| !s.has(*id) && (*ts >= s.floor || *ts > *at)),
+                None => all.iter().any(|(_, ts)| *ts > *at),
+            };
+            if !fresh {
+                return false;
+            }
+        }
+        true
     }
 
     /// Two people who start a conversation with each other at the same moment
-    /// make two: an empty one gives way to one with messages, else the newer
-    /// to the older.
+    /// make two. One shows, with the messages of both: one with messages
+    /// before an empty one, else the older. Nothing is moved; new messages go
+    /// to the one that shows.
     pub(super) fn dm_duplicate(&self, c: &Channel) -> bool {
-        if c.kind != ChannelKind::Direct || !c.messages.is_empty() {
+        if c.kind != ChannelKind::Direct {
             return false;
         }
-        let people = |c: &Channel| {
-            let mut v = c.members.clone();
-            v.sort_unstable();
-            v.dedup();
-            v
-        };
-        let mine = people(c);
-        self.data.channels.iter().any(|d| d.id != c.id && d.kind == ChannelKind::Direct && people(d) == mine && (!d.messages.is_empty() || d.id < c.id))
+        let mine = dm_people(c);
+        self.data.channels.iter().any(|d| d.id != c.id && d.kind == ChannelKind::Direct && dm_people(d) == mine && dm_rank(d) < dm_rank(c))
     }
 
     /// "Close conversation": the direct message leaves my sidebar until a
@@ -155,8 +263,10 @@ impl App {
     pub(super) fn close_dm(&mut self, cid: u64) {
         let Some(c) = self.data.channels.iter().find(|c| c.id == cid) else { return };
         let at = now_ts().max(newest_ts(c));
+        let seen = SeenIds::of(self.conversation(c).iter().flat_map(|d| d.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter()))).map(|m| (m.id, m.ts)));
         self.data.extra.closed_dms.retain(|(id, _)| *id != cid);
         self.data.extra.closed_dms.push((cid, at));
+        self.data.extra.closed_dm_seen.insert(cid, seen);
         if self.chat_open == Some(cid) {
             self.chat_open = None;
             self.thread_open = None;
@@ -180,7 +290,7 @@ impl App {
                 let after = &rest[1..];
                 let len = names
                     .iter()
-                    .find(|n| after.starts_with(**n) && after[n.len()..].chars().next().map_or(true, |c| !c.is_alphanumeric()))
+                    .find(|n| after.starts_with(**n) && name_ends(&after[n.len()..]))
                     .map(|n| n.len())
                     .or_else(|| Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0));
                 if let Some(len) = len {
@@ -245,16 +355,30 @@ impl App {
             }
             return;
         };
-        let Some(channel) = self.data.channels.iter().find(|c| c.id == cid).cloned() else {
+        let Some(mut channel) = self.data.channels.iter().find(|c| c.id == cid).cloned() else {
             self.chat_open = None;
             return;
         };
+        // a second copy of a direct message opens as the one that shows
+        let primary = self.dm_primary(&channel);
+        if primary != cid {
+            self.chat_open = Some(primary);
+            self.thread_open = None;
+            return;
+        }
+        // with the messages of its duplicates, in time order
+        let others: Vec<Message> = self.conversation(&channel).iter().skip(1).flat_map(|d| d.messages.iter().cloned()).collect();
+        if !others.is_empty() {
+            channel.messages.extend(others);
+            channel.messages.sort_by_key(|m| m.ts);
+        }
         if self.chat_keep_unread.is_some_and(|k| k != cid) {
             self.chat_keep_unread = None;
         }
         // a closed conversation that's opened again is back in the sidebar
         if self.data.extra.closed_dms.iter().any(|(id, _)| *id == cid) {
             self.data.extra.closed_dms.retain(|(id, _)| *id != cid);
+            self.data.extra.closed_dm_seen.remove(&cid);
             self.dirty = true;
         }
 
@@ -369,7 +493,7 @@ impl App {
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(230.0).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in Channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned Messages", 1), ("\u{1F516}", "Saved", 4), ("\u{1F464}", "Assigned", 3), ("\u{2699}", "Settings", 12)];
+                    let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in Channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned Messages", 1), ("\u{1F516}", "Saved", 4), ("\u{2611}", "Turned into tasks", 3), ("\u{2699}", "Settings", 12)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -529,20 +653,14 @@ impl App {
         }
 
         // mark as read (unless the person just marked it unread and is still here)
-        let now = now_ts();
         if self.chat_keep_unread == Some(cid) {
             self.apply_chat(acts);
             return;
         }
-        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == cid) {
-            // read up to the newest message even when its clock is ahead of
-            // ours, so it doesn't count as new again on the next frame
-            let newest = c.messages.iter().map(|m| m.ts).max().unwrap_or(0);
-            if newest > c.last_read {
-                c.last_read = now.max(newest);
-                if self.persist {
-                    self.dirty = true;
-                }
+        if self.data.channels.iter().find(|c| c.id == cid).is_some_and(|c| self.read_mark_due(c)) {
+            self.mark_read(cid);
+            if self.persist {
+                self.dirty = true;
             }
         }
         self.apply_chat(acts);
@@ -1005,9 +1123,80 @@ impl App {
         }
     }
 
+    /// My saved messages from every conversation I can see, newest first;
+    /// a click opens the conversation (and the thread, for a reply). True
+    /// when one was opened.
+    pub(super) fn saved_messages(&mut self, ui: &mut Ui) -> bool {
+        let t = self.t();
+        let mut found: Vec<(u64, String, Option<u64>, Message)> = vec![];
+        for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
+            let label = self.channel_label(c);
+            for m in &c.messages {
+                if m.saved {
+                    found.push((self.dm_primary(c), label.clone(), None, m.clone()));
+                }
+                for r in m.replies.iter().filter(|r| r.saved) {
+                    found.push((self.dm_primary(c), label.clone(), Some(m.id), r.clone()));
+                }
+            }
+        }
+        found.sort_by_key(|x| std::cmp::Reverse(x.3.ts));
+        if found.is_empty() {
+            ui.label(RichText::new(tr("Messages you save for later show up here.")).color(t.text3));
+            return false;
+        }
+        let mut open = None;
+        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+            for (ch, label, parent, m) in &found {
+                let who = self.data.member(m.author).map(|x| x.name.clone()).unwrap_or_else(|| tr("Someone").into());
+                let body = m.post_title.clone().filter(|x| !x.is_empty()).unwrap_or_else(|| m.text.clone());
+                let body = if body.is_empty() && !m.attachments.is_empty() { tr("Picture or video").to_string() } else { truncate(body.lines().next().unwrap_or(""), 80) };
+                let r = egui::Frame::new().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(label).small().color(t.text3));
+                        ui.label(RichText::new(fmt_ago(m.ts)).small().color(t.text3));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(who).strong());
+                        ui.label(body);
+                    });
+                });
+                let resp = ui.interact(r.response.rect, ui.id().with(("saved_msg", m.id)), Sense::click());
+                name_it(&resp, "Saved message");
+                if resp.hovered() {
+                    ui.painter().rect_stroke(r.response.rect, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if resp.clicked() {
+                    open = Some((*ch, *parent));
+                }
+            }
+        });
+        let Some((ch, parent)) = open else { return false };
+        self.section = Section::Chat;
+        self.chat_open = Some(ch);
+        self.thread_open = parent;
+        true
+    }
+
     pub(super) fn apply_chat(&mut self, acts: Vec<ChatAction>) {
         let me = self.data.me;
         for a in acts {
+            // a direct message shows its duplicates' messages too: act on the
+            // copy that holds the message
+            let a = match a {
+                ChatAction::React { ch, msg, emoji } => ChatAction::React { ch: self.msg_home(ch, msg), msg, emoji },
+                ChatAction::Pin { ch, msg } => ChatAction::Pin { ch: self.msg_home(ch, msg), msg },
+                ChatAction::Save { ch, msg } => ChatAction::Save { ch: self.msg_home(ch, msg), msg },
+                ChatAction::Task { ch, msg } if ch != u64::MAX => ChatAction::Task { ch: self.msg_home(ch, msg), msg },
+                ChatAction::SaveEdit { ch, msg, text } => ChatAction::SaveEdit { ch: self.msg_home(ch, msg), msg, text },
+                ChatAction::Delete { ch, msg } => ChatAction::Delete { ch: self.msg_home(ch, msg), msg },
+                ChatAction::Remind { ch, msg, at } => ChatAction::Remind { ch: self.msg_home(ch, msg), msg, at },
+                ChatAction::OpenMedia { ch, msg, index } => ChatAction::OpenMedia { ch: self.msg_home(ch, msg), msg, index },
+                ChatAction::Send { ch, text, parent: Some(pid), files } => ChatAction::Send { ch: self.msg_home(ch, pid), text, parent: Some(pid), files },
+                a => a,
+            };
             match a {
                 ChatAction::JoinHuddle(ch) => self.join_huddle(ch),
                 ChatAction::Open(id) => {
@@ -1045,6 +1234,7 @@ impl App {
                     }
                 }
                 ChatAction::SendPost { ch, title, text, files } => {
+                    self.send_files(&files);
                     let id = self.data.new_id();
                     let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
@@ -1084,7 +1274,9 @@ impl App {
                     self.dirty = true;
                 }
                 ChatAction::Edit { ch, msg } => {
-                    let text = self.data.channels.iter_mut().find(|c| c.id == ch).and_then(|c| find_msg(&mut c.messages, msg)).filter(|m| m.author == me).map(|m| m.text.clone());
+                    // (kept under the conversation shown; saving finds its copy)
+                    let home = self.msg_home(ch, msg);
+                    let text = self.data.channels.iter_mut().find(|c| c.id == home).and_then(|c| find_msg(&mut c.messages, msg)).filter(|m| m.author == me).map(|m| m.text.clone());
                     if let Some(text) = text {
                         self.chat_edit = Some((ch, msg, text));
                     }
@@ -1129,11 +1321,19 @@ impl App {
                     }
                 }
                 ChatAction::MarkUnread { ch, ts } => {
-                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-                        c.last_read = ts - 1;
-                        self.chat_keep_unread = Some(ch);
-                        if self.persist {
-                            self.dirty = true;
+                    let ids: Vec<u64> = self.data.channels.iter().find(|c| c.id == ch).map(|c| self.conversation(c).iter().map(|d| d.id).collect()).unwrap_or_default();
+                    for id in ids {
+                        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == id) {
+                            c.last_read = ts - 1;
+                            // and the messages from then on no longer seen
+                            if let Some(s) = self.data.extra.chat_seen.get_mut(&id) {
+                                let later: HashSet<u64> = c.messages.iter().filter(|m| m.ts >= ts).map(|m| m.id).collect();
+                                s.ids.retain(|x| !later.contains(x));
+                            }
+                            self.chat_keep_unread = Some(ch);
+                            if self.persist {
+                                self.dirty = true;
+                            }
                         }
                     }
                 }
@@ -1169,6 +1369,7 @@ impl App {
                     if self.chat_keep_unread == Some(ch) {
                         self.chat_keep_unread = None;
                     }
+                    self.send_files(&files);
                     let id = self.data.new_id();
                     let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
@@ -1188,7 +1389,7 @@ impl App {
                     let id = self.data.new_id();
                     let name = name.trim().to_lowercase().replace(' ', "-");
                     let members = self.data.members.iter().map(|m| m.id).collect();
-                    self.data.channels.push(Channel { id, name, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
+                    self.data.channels.push(Channel { id, name, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), creator: me, ..Default::default() });
                     self.chat_open = Some(id);
                     self.thread_open = None;
                     self.dirty = true;

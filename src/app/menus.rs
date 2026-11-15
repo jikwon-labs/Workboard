@@ -28,6 +28,8 @@ pub enum Modal {
     Templates { name: String, desc: String, checklist: String, priority: u8 },
     Import { path: String, result: String },
     ChannelSettings(u64),
+    /// My saved messages from every conversation I can see.
+    SavedMessages,
     Share { emails: String },
     CustomizeNav,
     CustomizeSidebar,
@@ -641,6 +643,7 @@ impl App {
             Modal::Templates { .. } => tr("Templates").into(),
             Modal::Import { .. } => tr("Import and export").into(),
             Modal::ChannelSettings(_) => tr("Channel Settings").into(),
+            Modal::SavedMessages => tr("Saved messages").into(),
             Modal::Share { .. } => tr("Share").into(),
             Modal::CustomizeNav => tr("Customize navigation").into(),
             Modal::CustomizeSidebar => tr("Customize your sidebar").into(),
@@ -1344,10 +1347,16 @@ impl App {
                     ui.add_space(6.0);
                     ui.label(tr("Members"));
                     let members = self.data.members.clone();
+                    // anyone may join or leave; only who may delete it changes others
+                    let manager = self.may_manage_channel(&self.data.channels[ci]);
+                    let me = self.data.me;
                     ui.horizontal_wrapped(|ui| {
                         for m in &members {
                             let mut on = self.data.channels[ci].members.contains(&m.id);
-                            if ui.checkbox(&mut on, &m.name).changed() {
+                            let allowed = manager || m.id == me;
+                            let b = ui.add_enabled(allowed, egui::Checkbox::new(&mut on, &m.name));
+                            let b = if allowed { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can change who else is in it.")) };
+                            if b.changed() && allowed {
                                 let c = &mut self.data.channels[ci];
                                 if on {
                                     c.members.push(m.id);
@@ -1362,7 +1371,7 @@ impl App {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button(tr("Mark as read")).clicked() {
-                        self.data.channels[ci].last_read = now_ts();
+                        self.mark_read(cid);
                         self.dirty = true;
                     }
                     if !is_channel {
@@ -1373,13 +1382,15 @@ impl App {
                         }
                         return;
                     }
-                    // deleting removes it for everyone: members only, and asked first
-                    let member = self.data.channels[ci].members.contains(&self.data.me);
+                    // deleting removes it for everyone: only whoever made it (any
+                    // member for channels from before that was kept) or an
+                    // admin, asked first, and it goes to my Trash
+                    let member = self.may_manage_channel(&self.data.channels[ci]);
                     let ask = egui::Id::new(("delete_channel", cid));
                     let asking = ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false));
                     if !asking {
                         let b = ui.add_enabled(member, egui::Button::new(RichText::new(tr("Delete channel")).color(t.danger)));
-                        let b = if member { b } else { b.on_disabled_hover_text(tr("Only members of this channel can delete it.")) };
+                        let b = if member { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can delete it.")) };
                         if b.clicked() {
                             ui.data_mut(|d| d.insert_temp(ask, true));
                         }
@@ -1389,10 +1400,12 @@ impl App {
                 if is_channel && ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false)) {
                     ui.add_space(6.0);
                     let name = self.data.channels[ci].name.clone();
-                    ui.label(RichText::new(crate::trf!("Delete #{} for everyone? Its messages are removed for the whole team.", name)).color(t.text));
+                    ui.label(RichText::new(crate::trf!("Delete #{} for everyone? It goes to your Trash with its messages, and restoring it brings it back for the whole team.", name)).color(t.text));
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() && self.data.channels[ci].members.contains(&self.data.me) {
-                            self.data.channels.remove(ci);
+                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() && self.may_manage_channel(&self.data.channels[ci]) {
+                            let gone = self.data.channels.remove(ci);
+                            let tid = self.data.new_id();
+                            self.data.extra.trash.push(TrashItem { id: tid, kind: "Channel".into(), title: format!("#{}", gone.name), deleted: now_ts(), payload: serde_json::to_string(&gone).unwrap_or_default() });
                             if self.chat_open == Some(cid) {
                                 self.chat_open = None;
                             }
@@ -1506,6 +1519,9 @@ impl App {
                     self.toast = Some((tr("Reminder created").into(), now_ts()));
                     close = true;
                 }
+            }
+            Modal::SavedMessages => {
+                close = self.saved_messages(ui);
             }
             Modal::Trash => {
                 if self.data.extra.trash.is_empty() {
@@ -1781,6 +1797,14 @@ impl App {
                         return;
                     }
                     self.data.tasks.extend(lt.tasks);
+                }
+            }
+            "Channel" => {
+                // back for everyone, with its messages (unless it never left)
+                if let Ok(c) = serde_json::from_str::<Channel>(&item.payload) {
+                    if !self.data.channels.iter().any(|x| x.id == c.id) {
+                        self.data.channels.push(c);
+                    }
                 }
             }
             "Whiteboard" => {

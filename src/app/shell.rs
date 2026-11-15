@@ -1202,8 +1202,12 @@ impl App {
 
                     // Channels
                     if (filter.is_empty() || filter == "unread") && !self.hidden("Channels") {
-                        let hs = self.side_header(ui, "Channels", &[("+", "Create a Channel")]);
+                        let hs = self.side_header(ui, "Channels", &[("\u{1F516}", "Saved messages"), ("+", "Create a Channel")]);
+                        name_it(&hs[0], "Saved messages");
                         if hs[0].clicked() {
+                            self.modal = Some(Modal::SavedMessages);
+                        }
+                        if hs[1].clicked() {
                             self.modal = Some(Modal::NewChannel { name: String::new(), private: false, add_list: false });
                         }
                         // the Unread filter uses the real count; muting only hides the badge
@@ -1258,7 +1262,7 @@ impl App {
                                         let id = self.data.new_id();
                                         let clean = name.trim().to_lowercase().replace(' ', "-");
                                         let members = self.data.members.iter().map(|m| m.id).collect();
-                                        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
+                                        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), creator: self.data.me, ..Default::default() });
                                         self.section = Section::Chat;
                                         self.chat_open = Some(id);
                                         self.dirty = true;
@@ -1379,7 +1383,7 @@ impl App {
         if !self.data.extra.notify.chat {
             return 0;
         }
-        c.messages.iter().filter(|m| m.ts > c.last_read && m.author != self.data.me).count()
+        self.unread(c)
     }
 
     fn space_rows(&mut self, ui: &mut Ui, s: &Space) {
@@ -1831,11 +1835,12 @@ impl App {
                 let ac = if personal { ui.allocate_response(vec2(0.0, 0.0), Sense::hover()) } else { ui.add(egui::Button::new(RichText::new(tr("Add Channel")).size(13.5).color(t.text3)).stroke(Stroke::new(1.0, t.border)).corner_radius(6).min_size(vec2(0.0, 26.0))) };
                 if ac.clicked() {
                     let name = self.data.location_name(self.loc).to_lowercase().replace(' ', "-");
-                    let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Channel && c.name == name).map(|c| c.id);
+                    // (only one I may see: someone else's private channel of that name doesn't count)
+                    let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Channel && c.name == name && self.can_see(c)).map(|c| c.id);
                     let id = existing.unwrap_or_else(|| {
                         let id = self.data.new_id();
                         let members = self.data.members.iter().map(|m| m.id).collect();
-                        self.data.channels.push(Channel { id, name: name.clone(), kind: ChannelKind::Channel, topic: format!("Conversations about {}", self.data.location_name(self.loc)), members, messages: vec![], last_read: now_ts(), ..Default::default() });
+                        self.data.channels.push(Channel { id, name: name.clone(), kind: ChannelKind::Channel, topic: format!("Conversations about {}", self.data.location_name(self.loc)), members, messages: vec![], last_read: now_ts(), creator: self.data.me, ..Default::default() });
                         self.dirty = true;
                         id
                     });

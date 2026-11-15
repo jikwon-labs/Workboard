@@ -868,11 +868,25 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     }
     h.settle();
     assert!(
-        h.tree
-            .iter()
-            .any(|(n, _)| n.starts_with("Status: Reconnecting")),
+        h.has("Status: Reconnecting\u{2026}"),
         "shows that it is reconnecting"
     );
+    // why, in plain words, without the system's error text
+    assert!(
+        h.has("Nothing answers at 127.0.0.1:1. Check that workboard-server is running there. Trying again every few seconds."),
+        "says why"
+    );
+    assert!(!h.tree.iter().any(|(n, _)| n.contains("os error")));
+    let status = h.painted_text("Status: Reconnecting\u{2026}");
+    assert!(
+        !status.is_empty() && status.iter().all(|(_, c)| *c == super::together::WARN),
+        "in the warning colour: {:?}",
+        status
+    );
+    // still failing after a few tries: it says it can't reach the server
+    h.app.sync_rt.fails = super::together::FAILS_BEFORE_CANT_REACH;
+    h.settle();
+    assert!(h.has("Status: Can't reach the server"));
     // owners and admins see everyone's access
     h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
     h.app.sync_rt.role = Some(wb_net::Role::Owner);

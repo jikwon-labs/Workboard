@@ -6374,6 +6374,47 @@ fn server_refusals_are_shown_in_the_interface_language() {
 }
 
 #[test]
+fn a_server_that_cannot_be_reached_is_said_plainly() {
+    use super::together::{net_problem, net_status_text, reach_text, FAILS_BEFORE_CANT_REACH};
+    use crate::i18n::{set_lang, Lang};
+    let refused = "Can't reach 127.0.0.1:9: Connection refused (os error 61)";
+    let lost = wb_net::Status::Reconnecting(refused.into());
+    set_lang(Lang::Ko);
+    let said = [
+        reach_text(refused),
+        reach_text("Can't reach macmini:8787: Operation timed out (os error 60)"),
+        reach_text("Can't find macmini: failed to lookup address information"),
+        reach_text("IO error: Connection reset by peer (os error 54)"),
+        reach_text("The server didn't answer like Workboard: HTTP error: 404 Not Found"),
+        reach_text("The server stopped answering."),
+    ];
+    let first = net_status_text(true, Some(&lost), 1);
+    let later = net_status_text(true, Some(&lost), FAILS_BEFORE_CANT_REACH);
+    let why = net_problem(Some(&lost)).unwrap();
+    set_lang(Lang::En);
+    for s in &said {
+        assert!(
+            s.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))
+                && !s.contains("os error")
+                && !s.contains("refused")
+                && !s.contains("lookup"),
+            "plain Korean: {:?}",
+            s
+        );
+    }
+    assert!(said[0].contains("127.0.0.1:9") && said[0].contains("workboard-server"));
+    assert!(said[1].contains("macmini:8787") && said[2].contains("macmini"));
+    // after a few failed tries it no longer says it is about to reconnect
+    assert_eq!(first, "다시 연결하는 중\u{2026}");
+    assert_eq!(later, "서버에 연결할 수 없음");
+    assert!(why.starts_with(&said[0]), "{}", why);
+    assert_eq!(
+        net_status_text(true, Some(&wb_net::Status::Connected), 9),
+        "Connected"
+    );
+}
+
+#[test]
 fn back_and_forward_to_another_place_clear_the_selection() {
     let mut a = app();
     let lists = list_ids(&a);

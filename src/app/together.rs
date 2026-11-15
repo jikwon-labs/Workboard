@@ -169,6 +169,8 @@ pub struct SyncRt {
     pub(super) backups: Option<Vec<wb_net::Backup>>,
     /// The backup the owner clicked Restore on, waiting for "Yes, restore".
     pub(super) restore_confirm: Option<String>,
+    /// Failed tries to reach the server in a row (none once connected).
+    pub(super) fails: u32,
     /// The person was told the team's copy couldn't be read (said once).
     told_unreadable: bool,
     /// Told this session that someone in the shared folder runs an older app.
@@ -308,16 +310,72 @@ pub(super) fn server_text(s: &str) -> String {
     tr(s).to_string()
 }
 
-/// How the server connection is doing, in words.
-pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>) -> String {
+/// The colour of a connection that isn't working.
+pub(super) const WARN: Color32 = Color32::from_rgb(0xe1, 0x6b, 0x16);
+
+/// Failed tries in a row after which "Reconnecting" becomes "Can't reach
+/// the server" (the app keeps trying either way).
+pub(super) const FAILS_BEFORE_CANT_REACH: u32 = 3;
+
+/// Why the server can't be reached, in plain words: the connection code
+/// says it in English, with the system's own error inside.
+pub(super) fn reach_text(why: &str) -> String {
+    use super::files::fill_back;
+    if let Some(v) = fill_back("Can't reach {}: {}", why) {
+        return if v[1].to_lowercase().contains("refused") {
+            trf!(
+                "Nothing answers at {}. Check that workboard-server is running there.",
+                v[0]
+            )
+        } else {
+            trf!(
+                "Can't reach {}. Check the address and that this computer is on the team's network.",
+                v[0]
+            )
+        };
+    }
+    if let Some(v) = fill_back("Can't find {}: {}", why).or_else(|| fill_back("Can't find {}", why))
+    {
+        return trf!("Can't find {}. Check the server address.", v[0]);
+    }
+    if why.starts_with("The server didn't answer like Workboard") {
+        return tr("Something answered at this address, but not a Workboard server. Check the address and port.").into();
+    }
+    let said = server_text(why);
+    // what the connection library or the system said, untranslated
+    let raw = why.contains("os error")
+        || why.starts_with("IO error")
+        || (crate::i18n::is_ko() && said == why);
+    if raw {
+        tr("The connection to the server broke.").into()
+    } else {
+        said
+    }
+}
+
+/// How the server connection is doing, in a word or two. `fails`: failed
+/// tries in a row.
+pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>, fails: u32) -> String {
     match (net, s) {
         (false, _) => tr("Disconnected").into(),
         (true, None) | (true, Some(NetStatus::Connecting)) => tr("Connecting\u{2026}").into(),
         (true, Some(NetStatus::Connected)) => tr("Connected").into(),
-        (true, Some(NetStatus::Reconnecting(why))) => {
-            trf!("Reconnecting\u{2026} {}", server_text(why))
+        (true, Some(NetStatus::Reconnecting(_))) if fails >= FAILS_BEFORE_CANT_REACH => {
+            tr("Can't reach the server").into()
         }
-        (true, Some(NetStatus::Refused(why))) => trf!("Not signed in. {}", server_text(why)),
+        (true, Some(NetStatus::Reconnecting(_))) => tr("Reconnecting\u{2026}").into(),
+        (true, Some(NetStatus::Refused(_))) => tr("Not signed in").into(),
+    }
+}
+
+/// Why the connection isn't working, when it isn't.
+pub(super) fn net_problem(s: Option<&NetStatus>) -> Option<String> {
+    match s {
+        Some(NetStatus::Reconnecting(why)) => {
+            Some(trf!("{} Trying again every few seconds.", reach_text(why)))
+        }
+        Some(NetStatus::Refused(why)) => Some(server_text(why)),
+        _ => None,
     }
 }
 
@@ -630,6 +688,7 @@ impl App {
                 None => std::sync::Arc::new(|| {}),
             };
             self.sync_rt.net_status = None;
+            self.sync_rt.fails = 0;
             self.sync_rt.net = Some(wb_net::Client::start(&addr, sign_in, wake));
         }
         let events = self
@@ -641,7 +700,14 @@ impl App {
         let mut changed = false;
         for e in events {
             match e {
-                NetEvent::Status(s) => self.sync_rt.net_status = Some(s),
+                NetEvent::Status(s) => {
+                    match &s {
+                        NetStatus::Reconnecting(_) => self.sync_rt.fails += 1,
+                        NetStatus::Connected => self.sync_rt.fails = 0,
+                        _ => {}
+                    }
+                    self.sync_rt.net_status = Some(s)
+                }
                 NetEvent::Welcome {
                     tag,
                     snapshot,
@@ -1511,8 +1577,11 @@ impl App {
         if self.sync_rt.joining.is_some() {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let status =
-                    net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+                let status = net_status_text(
+                    self.sync_rt.net.is_some(),
+                    self.sync_rt.net_status.as_ref(),
+                    self.sync_rt.fails,
+                );
                 ui.label(RichText::new(status).color(t.text2));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.button(tr("Cancel")).clicked() {
@@ -1522,6 +1591,11 @@ impl App {
                     }
                 });
             });
+            if let Some(why) = net_problem(self.sync_rt.net_status.as_ref())
+                .filter(|_| matches!(self.sync_rt.net_status, Some(NetStatus::Reconnecting(_))))
+            {
+                ui.label(RichText::new(why).small().color(WARN));
+            }
             // refused: say why and let them fix what they typed
             if let Some(NetStatus::Refused(why)) = self.sync_rt.net_status.clone() {
                 self.sync_rt.joining = None;
@@ -2054,15 +2128,27 @@ impl App {
             );
             ui.label(RichText::new(&server).color(t.text2));
             let connected = self.sync_rt.net_status == Some(NetStatus::Connected);
-            let status =
-                net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+            let status = net_status_text(
+                self.sync_rt.net.is_some(),
+                self.sync_rt.net_status.as_ref(),
+                self.sync_rt.fails,
+            );
+            let trouble = matches!(
+                self.sync_rt.net_status,
+                Some(NetStatus::Reconnecting(_) | NetStatus::Refused(_))
+            );
             ui.label(
                 RichText::new(trf!("Status: {}", status)).color(if connected {
                     t.text
+                } else if trouble {
+                    WARN
                 } else {
                     t.text2
                 }),
             );
+            if let Some(why) = net_problem(self.sync_rt.net_status.as_ref()) {
+                ui.label(RichText::new(why).small().color(t.text2));
+            }
             if let Some(role) = self.sync_rt.role.filter(|_| connected) {
                 let name = self
                     .data

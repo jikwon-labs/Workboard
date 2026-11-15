@@ -573,15 +573,8 @@ impl App {
                     if primary_button(ui, &tt, tr("New Doc")).clicked() {
                         s.new_doc(s.current_space());
                     }
-                    if ui
-                        .add(egui::Button::new(tr("\u{2B07}  Import")).min_size(vec2(0.0, 28.0)))
-                        .clicked()
-                    {
-                        s.modal = Some(Modal::Import {
-                            path: String::new(),
-                            result: String::new(),
-                        });
-                    }
+                    // no Import here: the only importer reads tasks from a CSV
+                    // into a List, which is not what a Docs page promises
                 });
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])

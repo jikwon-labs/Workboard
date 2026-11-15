@@ -141,11 +141,12 @@ fn people(home: &std::path::Path) {
         return;
     }
     println!("{:<22} {:<28} {:<7} {:>9}  {:<30} {}", "id", "name", "role", "computers", "account", "open invite");
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     for m in members {
         let id = m.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
         let name = m.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let devices = saved.devices.values().filter(|d| d.member == id).count();
-        let invite = saved.invites.iter().find(|(_, i)| i.member == id).map(|(c, _)| c.as_str()).unwrap_or("");
+        let invite = saved.open_invite(id, now_ms).map(|c| c.as_str()).unwrap_or("");
         let account = saved.accounts.get(&id).map(|a| a.email.as_str()).unwrap_or("-");
         println!("{:<22} {:<28} {:<7} {:>9}  {:<30} {}", id, name, saved.role_of(id).label(), devices, account, invite);
     }

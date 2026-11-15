@@ -224,7 +224,7 @@ impl App {
                     self.people = people;
                     self.role = Some(role);
                 }
-                Event::Denied(why) => self.denied.push(why),
+                Event::Denied(why) | Event::CallDenied { why, .. } => self.denied.push(why),
                 Event::CallToken { .. } => {}
                 Event::Backups(b) => self.backups = Some(b),
                 Event::Restored(n) => self.restored.push(n),
@@ -740,7 +740,7 @@ fn files_need_a_valid_token_and_honest_contents() {
 #[test]
 fn files_over_the_limit_are_refused() {
     let home = temp_home("files-big");
-    let server = Server::start_with(&home, 0, workboard_server::Options { max_file: 64 << 10 });
+    let server = Server::start_with(&home, 0, workboard_server::Options { max_file: 64 << 10, ..Default::default() });
     let (mut a, _b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
     let addr = format!("127.0.0.1:{}", server.port);
@@ -1052,6 +1052,284 @@ fn the_join_page_opens_the_app_with_the_invite() {
     assert!(body.contains("<dd>ABCD-EFGH-JKMN</dd>"));
     let (_, body) = http_get(server.port, "/join?code=%3Cscript%3E");
     assert!(!String::from_utf8(body).unwrap().contains("<script>"), "what's typed into the link is escaped");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------- private conversations
+
+fn channel<'a>(d: &'a Value, id: u64) -> Option<&'a Value> {
+    d["channels"].as_array().and_then(|a| a.iter().find(|c| c["id"] == id))
+}
+
+/// A DM between Ann (1) and Cy (3): Bo (2) doesn't get it, and can't join
+/// it, write in it or delete it by sending a doctored copy.
+#[test]
+fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
+    let home = temp_home("private");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 3], "messages": [{"id": 21, "author": 1, "text": "secret", "ts": now()}], "last_read": 0}));
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 30, "name": "plans", "kind": "Channel", "private": true, "topic": "", "members": [1, 3], "messages": [{"id": 31, "author": 1, "text": "private plans", "ts": now()}], "last_read": 0}));
+    });
+    a.change(say("marker 1", 2201));
+    b.wait("marker 1 at B", |d| texts(d).contains(&"marker 1".to_string()));
+    assert!(channel(&b.data, 20).is_none() && channel(&b.data, 30).is_none(), "B never gets them: {}", b.data["channels"]);
+    assert!(!b.data.to_string().contains("secret"), "nothing of the DM reaches B");
+    // a new connection (welcome snapshot) doesn't carry them either
+    let code = a.invite(2, Role::Member);
+    let mut b2 = App::join(server.port, &code);
+    b2.wait("B's second computer gets the copy", |d| texts(d).contains(&"marker 1".to_string()));
+    assert!(channel(&b2.data, 20).is_none() && channel(&b2.data, 30).is_none());
+
+    // B sends a copy that adds B to both, writes in the DM and renames the channel
+    b.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2, 3], "messages": [{"id": 21, "author": 1, "text": "secret", "ts": 1}, {"id": 22, "author": 2, "text": "sneaky", "ts": now()}], "last_read": 0}));
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 30, "name": "taken over", "kind": "Channel", "private": false, "topic": "", "members": [1, 2, 3], "messages": [], "last_read": 0}));
+    });
+    b.change(say("marker 2", 3201));
+    a.wait("marker 2 at A", |d| texts(d).contains(&"marker 2".to_string()));
+    assert_eq!(channel(&a.data, 20).unwrap()["members"], json!([1, 3]), "B didn't get into the DM");
+    assert_eq!(channel(&a.data, 20).unwrap()["messages"].as_array().unwrap().len(), 1, "B's message didn't get in");
+    assert_eq!(channel(&a.data, 30).unwrap()["name"], "plans");
+    assert_eq!(channel(&a.data, 30).unwrap()["private"], true);
+    assert_eq!(channel(&a.data, 30).unwrap()["members"], json!([1, 3]));
+
+    // and deleting them from B's copy deletes nothing for the team
+    b.change(|d| {
+        d["channels"].as_array_mut().unwrap().retain(|c| c["id"] != 20 && c["id"] != 30);
+    });
+    assert!(b.meta().tombs.contains_key(&20) && b.meta().tombs.contains_key(&21), "B's copy did mark them deleted");
+    b.change(say("marker 3", 3202));
+    a.wait("marker 3 at A", |d| texts(d).contains(&"marker 3".to_string()));
+    assert!(channel(&a.data, 20).is_some_and(|c| c["messages"][0]["text"] == "secret"), "the DM is still there");
+    assert!(channel(&a.data, 30).is_some(), "the private channel is still there");
+    // the members keep using it
+    a.change(|d| {
+        let ch = d["channels"].as_array_mut().unwrap().iter_mut().find(|c| c["id"] == 20).unwrap();
+        ch["messages"].as_array_mut().unwrap().push(json!({"id": 23, "author": 1, "text": "still private", "ts": now()}));
+    });
+    a.change(say("marker 4", 2202));
+    b.wait("marker 4 at B", |d| texts(d).contains(&"marker 4".to_string()));
+    assert!(!b.data.to_string().contains("still private"));
+    let canon: Value = {
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let c: Value = std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+            if c.to_string().contains("still private") || Instant::now() > until {
+                break c;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    assert_eq!(channel(&canon, 20).unwrap()["messages"].as_array().unwrap().len(), 2, "the team's copy has both DM messages");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------------ hello size limit
+
+/// Open a WebSocket by hand and send one text frame of `payload`; returns
+/// everything the server sent back before closing (or 5 seconds).
+fn raw_first_message(port: u16, payload: &[u8]) -> Vec<u8> {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(b"GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut head = vec![];
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        s.read_exact(&mut byte).unwrap();
+        head.push(byte[0]);
+    }
+    let head = String::from_utf8_lossy(&head).to_string();
+    assert!(head.starts_with("HTTP/1.1 101"), "{}", head);
+    assert!(head.contains("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="), "the accept key from RFC 6455: {}", head);
+    // a masked text frame (clients always mask)
+    let mut frame = vec![0x81u8, 0x80 | 127];
+    frame.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+    let mask = [1u8, 2, 3, 4];
+    frame.extend_from_slice(&mask);
+    frame.extend(payload.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
+    let _ = s.write_all(&frame);
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    out
+}
+
+#[test]
+fn a_huge_message_before_signing_in_is_refused_but_big_copies_go_after() {
+    let home = temp_home("hello-size");
+    let server = Server::start(&home, 0);
+    // a small first message that isn't hello gets an answer
+    let small = raw_first_message(server.port, br#"{"type":"ping"}"#);
+    assert!(String::from_utf8_lossy(&small).contains("Say hello first"));
+    // a big one is cut off without being read
+    let mut big = br#"{"type":"hello","device":""#.to_vec();
+    big.extend(std::iter::repeat_n(b'x', 200 << 10));
+    big.extend_from_slice(br#""}"#);
+    let out = raw_first_message(server.port, &big);
+    assert!(!String::from_utf8_lossy(&out).contains("error"), "not even a refusal: {:?}", String::from_utf8_lossy(&out));
+    // signed in, a copy far over the hello limit goes through
+    let (mut a, mut b) = two_apps(server.port);
+    let long = "y".repeat(300 << 10);
+    let l2 = long.clone();
+    a.change(move |d| {
+        d["channels"][0]["messages"].as_array_mut().unwrap().push(json!({"id": 2301, "author": 1, "text": l2, "ts": now()}));
+    });
+    b.wait("the long message at B", |d| texts(d).contains(&long));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ---------------------------------------------------------- claims
+
+/// Sign in with a claim and quit as soon as the welcome comes, before the
+/// workspace goes up (the app closed right after pressing Connect).
+fn claim_and_quit(port: u16, device: &str) -> Status {
+    let client = Client::start(&format!("127.0.0.1:{}", port), SignIn { device: device.into(), claim: Some(1), ..Default::default() }, Arc::new(|| {}));
+    let until = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < until {
+        for e in client.events() {
+            match e {
+                Event::Welcome { .. } => return Status::Connected,
+                Event::Status(s @ Status::Refused(_)) => return s,
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("no answer to the claim");
+}
+
+#[test]
+fn a_claim_whose_app_quit_can_be_made_again() {
+    let home = temp_home("reclaim");
+    let server = Server::start_with(&home, 0, workboard_server::Options { claim_wait: Duration::from_secs(2), ..Default::default() });
+    assert_eq!(claim_and_quit(server.port, "first"), Status::Connected);
+    // someone else right away: still refused
+    assert!(matches!(claim_and_quit(server.port, "other"), Status::Refused(w) if w.contains("setting up")));
+    // the same computer may claim again at once
+    assert_eq!(claim_and_quit(server.port, "first"), Status::Connected);
+    // after claim_wait anyone may
+    std::thread::sleep(Duration::from_millis(2200));
+    let mut a = App::start(server.port, {
+        let mut d = workspace();
+        let mut meta = SyncMeta::default();
+        wb_sync::stamp(&d, &mut meta, now());
+        d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+        d
+    }, SignIn { device: "second".into(), claim: Some(1), ..Default::default() });
+    a.until("the new claim is the owner", |a| a.role == Some(Role::Owner));
+    let devices = || workboard_server::load_saved(&home).map(|s| s.devices.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+    let until = Instant::now() + Duration::from_secs(5);
+    while !(home.join(workboard_server::WORKSPACE_FILE).is_file() && devices() == ["second"]) && Instant::now() < until {
+        a.pump();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(devices(), ["second"], "the old claim is gone");
+    assert!(home.join(workboard_server::WORKSPACE_FILE).is_file(), "the new claim's workspace is on the server");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------------ broken copies
+
+#[test]
+fn a_broken_first_copy_is_ignored_and_the_server_keeps_working() {
+    let home = temp_home("broken");
+    let server = Server::start(&home, 0);
+    let mut a = App::start(server.port, Value::Null, SignIn { claim: Some(1), ..Default::default() });
+    a.until("signed in", |a| a.role == Some(Role::Owner));
+    for bad in [json!("not a workspace"), json!([1, 2]), json!({"members": [{"id": 1}], "extra": "x"}), json!({"members": [{"id": 1}], "extra": {"sync": {"stamps": 5}}})] {
+        a.client.push(bad);
+    }
+    // the real copy still goes up and comes back
+    let mut d = workspace();
+    let mut meta = SyncMeta::default();
+    wb_sync::stamp(&d, &mut meta, now());
+    d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    a.client.push(d);
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(server.port, &code);
+    b.wait("B gets the real copy", |d| task_names(d) == ["Plan", "Ship"]);
+    assert_eq!(b.data["members"][0]["role"], "Owner");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn only_the_newest_copies_from_before_a_restore_are_kept() {
+    let home = temp_home("prune");
+    let server = Server::start(&home, 0);
+    let (mut a, _b) = two_apps(server.port);
+    let dir = home.join(workboard_server::BACKUP_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..25 {
+        std::fs::write(dir.join(format!("before-restore-20200101-0000{:02}.json", i)), "{}").unwrap();
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    while !home.join(workboard_server::WORKSPACE_FILE).is_file() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let backup = home.join("manual.json");
+    std::fs::copy(home.join(workboard_server::WORKSPACE_FILE), &backup).unwrap();
+    let res = workboard_server::admin_request(&home, &json!({"restore": backup.to_string_lossy()}), Duration::from_secs(5)).unwrap().expect("answered");
+    assert_eq!(res["ok"], true, "{}", res);
+    let kept = workboard_server::backup_files(&dir, "before-restore");
+    assert_eq!(kept.len(), workboard_server::KEEP_BEFORE_RESTORE);
+    assert!(!kept[0].ends_with("before-restore-20200101-000000.json"), "the oldest went first");
+    assert!(!kept.last().unwrap().to_string_lossy().contains("20200101"), "the new one is kept");
+    a.pump();
+    // a file that isn't a workspace isn't restored
+    std::fs::write(&backup, "[1, 2, 3]").unwrap();
+    let res = workboard_server::admin_request(&home, &json!({"restore": backup.to_string_lossy()}), Duration::from_secs(5)).unwrap().expect("answered");
+    assert_eq!(res["ok"], false, "{}", res);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ---------------------------------------------------- requests and calls
+
+#[test]
+fn a_request_made_while_reconnecting_goes_once_back_in() {
+    let home = temp_home("queued");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let (mut a, _b) = two_apps(port);
+    server.stop();
+    a.wait_status(|s| matches!(s, Status::Reconnecting(_)), "A notices the server is gone");
+    a.client.send(Msg::CreateInvite { member: 3, role: Role::Member });
+    std::thread::sleep(Duration::from_millis(300));
+    let server = Server::start(&home, port);
+    a.wait_status(|s| *s == Status::Connected, "A reconnects");
+    a.until("the code asked for while offline", |a| a.invites.iter().any(|(m, _)| *m == 3));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_refused_call_says_which_conversation() {
+    let home = temp_home("calldenied");
+    let server = Server::start(&home, 0);
+    let (_a, b) = two_apps(server.port);
+    // voice isn't set up on this server: the refusal names the conversation
+    b.client.send(Msg::CallJoin { channel: 10 });
+    let until = Instant::now() + Duration::from_secs(10);
+    let mut got = None;
+    while got.is_none() && Instant::now() < until {
+        for e in b.client.events() {
+            if let Event::CallDenied { channel, why } = e {
+                got = Some((channel, why));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (channel, why) = got.expect("a call refusal");
+    assert_eq!(channel, 10);
+    assert!(why.contains("aren't set up"), "{}", why);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

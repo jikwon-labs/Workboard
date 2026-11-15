@@ -415,8 +415,9 @@ impl App {
                     self.sync_rt.role = Some(role);
                     self.send_auto_invites();
                 }
-                NetEvent::Denied(why) => {
-                    self.huddle_denied();
+                NetEvent::Denied(why) => self.toast = Some((why, now_ts())),
+                NetEvent::CallDenied { channel, why } => {
+                    self.huddle_denied(channel);
                     self.toast = Some((why, now_ts()));
                 }
                 NetEvent::CallToken { channel, url, token } => self.huddle_token(channel, url, token),
@@ -1388,7 +1389,7 @@ impl App {
 
     pub(super) fn call_body(&mut self, ui: &mut Ui, t: &Theme, ch: &mut u64, link: &mut String) -> bool {
         let mut close = false;
-        ui.label(RichText::new(tr("The call opens in your browser (Jitsi Meet: free, no account). Everyone in the conversation gets a Join button.")).color(t.text2));
+        ui.label(RichText::new(tr("The call opens in your browser on Jitsi Meet (free). The person who starts it may be asked to sign in with Google, GitHub or Facebook; everyone else joins without an account. Everyone in the conversation gets a Join button.")).color(t.text2));
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Call in")).color(t.text2));
         let chans: Vec<(u64, String)> = self.data.channels.iter().map(|c| (c.id, if c.kind == ChannelKind::Channel { format!("# {}", c.name) } else { self.channel_label(c) })).collect();

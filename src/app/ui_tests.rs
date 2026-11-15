@@ -8688,3 +8688,80 @@ fn task_picker_with_nothing_typed_does_not_say_no_match() {
     assert!(!h.has("No tasks match"));
     assert!(h.has("No other tasks to pick. Archived tasks are not offered here."));
 }
+
+/// What the app names a whiteboard, form, team or workspace when it makes
+/// one is saved in the language of the person who made it.
+#[test]
+fn things_the_app_names_are_named_in_korean() {
+    let mut h = Ui1::new();
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    h.app.new_whiteboard();
+    h.app.new_form();
+    h.app.new_team();
+    let fresh = Data::fresh();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let d = &h.app.data.extra;
+    assert_eq!(d.whiteboards.last().unwrap().name, "화이트보드 1");
+    let f = d.forms.last().unwrap();
+    assert_eq!(f.name, "새 양식");
+    assert_eq!(f.fields[0].label, "제목");
+    assert!(d.teams.last().unwrap().name.starts_with("팀 "));
+    assert_eq!(fresh.workspace, "내 워크스페이스");
+    assert_eq!(fresh.spaces[0].name, "팀 스페이스");
+    assert_eq!(fresh.spaces[0].lists[0].name, "목록");
+    // and in English, as before
+    h.app.new_whiteboard();
+    assert_eq!(
+        h.app.data.extra.whiteboards.last().unwrap().name,
+        "Whiteboard 2"
+    );
+}
+
+/// A call message is saved in English for every device and shown in the
+/// reader's language; a member who joined is "활성", not the task status.
+#[test]
+fn call_messages_and_member_state_read_in_korean() {
+    let mut h = Ui1::new();
+    let ch = h.app.data.channels[0].id;
+    h.app.start_call(None, ch, "https://meet.example/x");
+    let m = h.app.data.channels[0].messages.last().unwrap().clone();
+    assert_eq!(m.text, "Started a call", "saved as before");
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    assert_eq!(super::chat::shown_text(&m), "통화를 시작했습니다");
+    assert_eq!(crate::i18n::tr_ctx("Active (member)", "Active"), "활성");
+    assert_eq!(
+        crate::i18n::tr("Active"),
+        "진행",
+        "the task status keeps its word"
+    );
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(super::chat::shown_text(&m), "Started a call");
+}
+
+/// The invite dialog's long note wraps inside the dialog instead of
+/// stretching it past its widest.
+#[test]
+fn invite_note_wraps_inside_the_dialog() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.modal = Some(Modal::Invite {
+        emails: String::new(),
+        role: "Member".into(),
+    });
+    h.settle();
+    let close = h.rect("Close");
+    let note = h
+        .tree
+        .iter()
+        .rev()
+        .find(|(n, _)| n.starts_with("This workspace is on a server"))
+        .map(|(_, r)| *r)
+        .expect("the note");
+    assert!(note.width() <= 620.0, "note {} wide", note.width());
+    assert!(note.right() <= close.right() + 1.0, "inside the dialog");
+}

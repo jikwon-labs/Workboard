@@ -3324,7 +3324,7 @@ impl App {
                         rows.push((
                             "Messages",
                             "\u{1F4AC}",
-                            truncate(&m.text, 60),
+                            truncate(&super::chat::shown_text(m), 60),
                             place.clone(),
                             Hit::Chat(c.id),
                         ));

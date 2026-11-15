@@ -9,6 +9,9 @@ pub const T: &[(&str, &str)] = &[
     ("\u{1F464}  Message someone", "\u{1F464}  메시지 보내기"),
     ("\u{1F465}  Work together", "\u{1F465}  함께 작업하기"),
     ("Share this workspace so others can chat with you", "이 워크스페이스를 공유해 다른 사람과 채팅하세요"),
+    // call and huddle messages (kept in English, shown in the reader's language)
+    ("Started a call", "통화를 시작했습니다"),
+    ("Started a huddle", "허들을 시작했습니다"),
     // thread
     ("Thread", "스레드"),
     ("1 reply", "답장 1개"),

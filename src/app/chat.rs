@@ -1333,8 +1333,9 @@ impl App {
                 if editing {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
-                    let job = self.mention_text(&m.text, 14.0);
-                    if let Some(link) = self.text_with_links(ui, job, &m.text) {
+                    let text = shown_text(m);
+                    let job = self.mention_text(&text, 14.0);
+                    if let Some(link) = self.text_with_links(ui, job, &text) {
                         self.link_pending = Some(link);
                     }
                     if compact && m.edited.is_some() {
@@ -2299,5 +2300,15 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// Calls and huddles post a message whose text is kept in English, so every
+/// device and the iPhone app read the same thing; it is put in the reader's
+/// language where it is shown. Anything else is what the person wrote.
+pub(super) fn shown_text(m: &Message) -> String {
+    match m.text.as_str() {
+        t @ ("Started a call" | "Started a huddle") if m.call.is_some() => tr(t).to_string(),
+        t => t.to_string(),
     }
 }

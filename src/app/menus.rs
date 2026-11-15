@@ -1298,9 +1298,10 @@ impl App {
                     .shared
                     .as_ref()
                     .is_some_and(|c| c.server.is_some());
-                ui.horizontal(|ui| {
+                // wrapped: in a plain row the long note pushed the dialog past its width
+                ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(if on_server { tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
-                    if ui.link(if shared { tr("Sharing") } else { tr("Work together") }).clicked() {
+                    if ui.link(RichText::new(if shared { tr("Sharing") } else { tr("Work together") }).small()).clicked() {
                         self.modal = Some(self.together_modal());
                     }
                 });

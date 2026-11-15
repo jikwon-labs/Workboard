@@ -4227,8 +4227,15 @@ impl App {
                             }
                         }
                         if mode == 1 && tab == 0 {
+                            // off with nothing unread (known from the last frame's list)
+                            let any: bool = ui
+                                .data(|d| d.get_temp(egui::Id::new("replies_unread")))
+                                .unwrap_or(true);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.button(tr("Mark all as read")).clicked() {
+                                if ui
+                                    .add_enabled(any, egui::Button::new(tr("Mark all as read")))
+                                    .clicked()
+                                {
                                     self.data.extra.replies_seen = now_ts();
                                     self.dirty = true;
                                 }
@@ -4332,6 +4339,10 @@ impl App {
                     }
                 }
                 items.sort_by_key(|x| std::cmp::Reverse(x.0));
+                if mode == 1 && tab == 0 {
+                    let any = !items.is_empty();
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("replies_unread"), any));
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {

@@ -544,3 +544,31 @@ fn a_new_workspace_shows_its_colour_chosen() {
     assert_eq!(chosen(&h), 1);
     assert_ne!(start, STATUS_PALETTE[3]);
 }
+
+#[test]
+fn mark_all_as_read_is_off_with_nothing_unread() {
+    let mut h = with(solo(), 1440.0, 900.0);
+    h.app.actions.push(Action::Go(Location::Replies));
+    h.app.apply_actions();
+    h.settle();
+    let before = h.app.data.extra.replies_seen;
+    h.click("Mark all as read");
+    assert_eq!(h.app.data.extra.replies_seen, before, "nothing to mark");
+    // a reply from someone else turns it on
+    let mut h = Ui1::new();
+    let other = h.app.data.members[1].id;
+    let ts = now_ts();
+    h.app.data.extra.replies_seen = ts - 100;
+    h.app.data.tasks[0].activity.push(Activity {
+        ts: ts - 10,
+        author: other,
+        text: "Looks good".into(),
+        comment: true,
+        ..Default::default()
+    });
+    h.app.actions.push(Action::Go(Location::Replies));
+    h.app.apply_actions();
+    h.settle();
+    h.click("Mark all as read");
+    assert!(h.app.data.extra.replies_seen >= ts);
+}

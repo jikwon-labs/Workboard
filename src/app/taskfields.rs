@@ -314,7 +314,7 @@ impl App {
                 ui.label(RichText::new(tr("Tags in use")).small().color(t.text3));
                 for g in &sugg {
                     let c = tag_color(g);
-                    if menu_row(ui, t, &trf!("Tag {}", g), false, |p, at| {
+                    if menu_row_named(ui, t, &format!("Tag {}", g), g, false, |p, at| {
                         p.circle_filled(at, 5.0, c);
                     })
                     .clicked()
@@ -394,9 +394,14 @@ impl App {
             for m in data.members.iter().filter(|m| !m.invited) {
                 let sel = task.watchers.contains(&m.id);
                 let ring = t.card;
-                let r = menu_row(ui, t, &trf!("Watcher {}", m.name), sel, |p, c| {
-                    paint_avatar(p, c, 9.0, m, ring)
-                });
+                let r = menu_row_named(
+                    ui,
+                    t,
+                    &format!("Watcher {}", m.name),
+                    &m.name,
+                    sel,
+                    |p, c| paint_avatar(p, c, 9.0, m, ring),
+                );
                 if sel {
                     ui.painter().text(
                         r.rect.right_center() - vec2(12.0, 0.0),
@@ -941,9 +946,14 @@ impl App {
                         break;
                     }
                     let st = self.data.status_of(o);
-                    if menu_row(ui, t, &trf!("Pick {}", o.name), false, |p, c| {
-                        paint_status_circle(p, c, 6.0, &st)
-                    })
+                    if menu_row_named(
+                        ui,
+                        t,
+                        &format!("Pick {}", o.name),
+                        &o.name,
+                        false,
+                        |p, c| paint_status_circle(p, c, 6.0, &st),
+                    )
                     .clicked()
                     {
                         picked = Some(oid);

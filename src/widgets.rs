@@ -417,9 +417,22 @@ pub fn menu_row(
     selected: bool,
     lead: impl FnOnce(&egui::Painter, Pos2),
 ) -> Response {
+    menu_row_named(ui, t, label, label, selected, lead)
+}
+
+/// A `menu_row` showing `label` whose accessibility name is `name` (a row
+/// that shows a task's name but is called "Pick <name>").
+pub fn menu_row_named(
+    ui: &mut Ui,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
     let w = ui.available_width().max(160.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-    name_it(&resp, label);
+    name_it(&resp, name);
     if resp.hovered() || selected {
         ui.painter()
             .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });

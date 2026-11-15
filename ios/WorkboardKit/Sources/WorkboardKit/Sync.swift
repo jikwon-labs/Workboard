@@ -1,40 +1,58 @@
-// Change stamps and merging, ported from the Mac app's src/sync.rs so that a
-// copy pushed from the phone merges on the server exactly like a Mac's copy.
+// Change stamps and merging, ported from crates/wb-sync/src/lib.rs (the
+// same code the Mac app and workboard-server use) so that a copy pushed from
+// the phone merges exactly like a Mac's copy.
 //
 // Every item with an `id` remembers when its own fields last changed
-// (`stamps`). The newest version of an item wins; the items inside it
-// (messages in a channel, lists in a space) are merged one by one. Deleted
-// items leave a tombstone (`tombs`); restoring one records a revival.
+// (`stamps`, in milliseconds). The newest version of an item wins; the items
+// inside it (messages in a channel, lists in a space) are merged one by one,
+// and an item that moved (a list to another space) sits only where its newest
+// copy puts it. Deleted items leave a tombstone (`tombs`); restoring one
+// records a revival. A few single settings (SHARED_VALUES) are shared too,
+// newest change wins. Task comments and activity lines get ids worked out
+// from their contents when they have none (`activityId`), bit for bit like
+// the Rust code, since those ids are shared.
 //
-// Fingerprints (`hashes`) are this device's own and need not match the Rust
-// bytes; they only need to be stable here, which the sorted-key serializer in
-// JSON.swift gives.
+// Fingerprints (`hashes`, `value_hashes`) are this device's own and need not
+// match the Rust bytes; they only need to be stable here, which the
+// sorted-key serializer in JSON.swift gives.
 
 import Foundation
 
 public enum Sync {
-    /// Collections that belong to the whole team (src/sync.rs SHARED).
+    /// Collections that belong to the whole team (SHARED).
     public static let shared: [String] = [
         "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams",
     ]
+    /// Single settings that belong to the whole team (SHARED_VALUES).
+    public static let sharedValues: [String] = ["workspace", "extra.workspace_color", "extra.apps"]
     /// Fields that are each person's own even inside shared items (LOCAL_KEYS).
     public static let localKeys: Set<String> = ["last_read", "saved", "expanded"]
     /// Lists that only ever grow (APPEND_KEYS).
     public static let appendKeys: Set<String> = ["activity"]
 }
 
-/// Change bookkeeping kept at `extra.sync` (src/sync.rs SyncMeta).
+/// Change bookkeeping kept at `extra.sync` (wb_sync::SyncMeta).
 public struct SyncMeta: Equatable, Sendable {
     public var stamps: [UInt64: Int64] = [:]
     public var tombs: [UInt64: Int64] = [:]
     public var revived: [UInt64: Int64] = [:]
     public var hashes: [UInt64: UInt64] = [:]
+    /// How `hashes` were made: 0 = before an item's place counted, 1 = since.
+    public var v: UInt32 = 0
+    /// Shared setting -> when it last changed.
+    public var values: [String: Int64] = [:]
+    /// Shared setting -> fingerprint when last saved (this device only).
+    public var valueHashes: [String: UInt64] = [:]
 
-    public init(stamps: [UInt64: Int64] = [:], tombs: [UInt64: Int64] = [:], revived: [UInt64: Int64] = [:], hashes: [UInt64: UInt64] = [:]) {
+    public init(stamps: [UInt64: Int64] = [:], tombs: [UInt64: Int64] = [:], revived: [UInt64: Int64] = [:], hashes: [UInt64: UInt64] = [:],
+                v: UInt32 = 0, values: [String: Int64] = [:], valueHashes: [String: UInt64] = [:]) {
         self.stamps = stamps
         self.tombs = tombs
         self.revived = revived
         self.hashes = hashes
+        self.v = v
+        self.values = values
+        self.valueHashes = valueHashes
     }
 
     /// Reads `extra.sync` of a workspace; missing or broken parts read as empty.
@@ -56,6 +74,13 @@ public struct SyncMeta: Equatable, Sendable {
         for (k, v) in json["hashes"]?.object ?? [:] {
             if let id = UInt64(k), let h = v.uint { hashes[id] = h }
         }
+        v = UInt32(clamping: json["v"]?.uint ?? 0)
+        for (k, x) in json["values"]?.object ?? [:] {
+            if let t = x.int { values[k] = t }
+        }
+        for (k, x) in json["value_hashes"]?.object ?? [:] {
+            if let h = x.uint { valueHashes[k] = h }
+        }
     }
 
     public var json: JSON {
@@ -65,6 +90,9 @@ public struct SyncMeta: Equatable, Sendable {
             "tombs": obj(tombs),
             "revived": obj(revived),
             "hashes": .object(Dictionary(uniqueKeysWithValues: hashes.map { (String($0.key), JSON.id($0.value)) })),
+            "v": .int(Int64(v)),
+            "values": .object(values.mapValues { JSON.int($0) }),
+            "value_hashes": .object(valueHashes.mapValues { JSON.id($0) }),
         ])
     }
 }
@@ -99,69 +127,118 @@ extension Sync {
         return fnv(JSON.object(own).serialized().utf8)
     }
 
-    private static func walk(_ v: JSON, _ out: inout [UInt64: UInt64]) {
+    /// `parent` is the item this array sits in (nil at the top). With
+    /// `placed`, an inner item's fingerprint includes its parent, so moving a
+    /// list to another space counts as a change to the list.
+    private static func walk(_ v: JSON, parent: UInt64?, placed: Bool, _ out: inout [UInt64: UInt64]) {
         for item in v.array ?? [] {
             guard let id = idOf(item), let obj = item.object else { continue }
-            out[id] = ownHash(obj)
+            var h = ownHash(obj)
+            if placed, let p = parent { h = fnv("\(h)/\(p)".utf8) }
+            out[id] = h
             for (_, child) in obj where isIdArray(child) {
-                walk(child, &out)
+                walk(child, parent: id, placed: placed, &out)
             }
         }
     }
 
-    /// Fingerprints of every shared item in a workspace.
-    public static func fingerprints(_ data: JSON) -> [UInt64: UInt64] {
+    static func fingerprints(_ data: JSON, placed: Bool) -> [UInt64: UInt64] {
         var out: [UInt64: UInt64] = [:]
         for path in shared {
-            if let v = data.at(path) { walk(v, &out) }
+            if let v = data.at(path) { walk(v, parent: nil, placed: placed, &out) }
         }
         return out
     }
 
+    /// Fingerprints of every shared item in a workspace.
+    public static func fingerprints(_ data: JSON) -> [UInt64: UInt64] {
+        fingerprints(data, placed: true)
+    }
+
+    static func valueHashes(_ data: JSON) -> [String: UInt64] {
+        var out: [String: UInt64] = [:]
+        for p in sharedValues { out[p] = fnv((data.at(p) ?? .null).serialized().utf8) }
+        return out
+    }
+
     /// Record what changed since the last save: new stamps for edited items,
-    /// tombstones for removed ones, revivals for restored ones.
-    ///
-    /// With `pastSeen`, an edited item's stamp is also made later than the
-    /// stamp it had, so an edit made after seeing a version always beats that
-    /// version even when this device's clock runs behind (the Rust code uses
-    /// `now` alone; see docs/ios-design.md).
-    public static func stamp(_ data: JSON, _ meta: inout SyncMeta, now: Int64, pastSeen: Bool = false) {
+    /// tombstones for removed ones, revivals for restored ones (wb_sync::stamp).
+    /// `now` is in milliseconds. A new stamp is always later than the item's
+    /// last one, so an edit made after seeing a version beats that version
+    /// even when this device's clock runs behind.
+    public static func stamp(_ data: JSON, _ meta: inout SyncMeta, now: Int64) {
         let cur = fingerprints(data)
+        if meta.v < 1 {
+            // fingerprints saved before an item's place counted: carry over the
+            // unchanged ones so updating the app doesn't mark everything as edited
+            for (id, old) in fingerprints(data, placed: false) where meta.hashes[id] == old {
+                if let h = cur[id] { meta.hashes[id] = h }
+            }
+            meta.v = 1
+        }
         for (id, h) in cur {
+            let next = meta.stamps[id].map { max(now, $0 + 1) } ?? now
             if let old = meta.hashes[id] {
-                if old != h {
-                    var t = now
-                    if pastSeen, let prev = meta.stamps[id] { t = max(now, prev + 1) }
-                    meta.stamps[id] = t
-                }
+                if old != h { meta.stamps[id] = next }
             } else {
-                meta.stamps[id] = now
-                if let t = meta.tombs[id] {
-                    if meta.revived[id].map({ $0 < t }) ?? true {
-                        meta.revived[id] = max(now, t + 1)
-                    }
+                meta.stamps[id] = next
+                if let t = meta.tombs[id], meta.revived[id].map({ $0 < t }) ?? true {
+                    meta.revived[id] = max(now, t + 1)
                 }
             }
         }
         for id in meta.hashes.keys where cur[id] == nil {
-            meta.tombs[id] = now
+            // a delete always wins over the item's last known change or
+            // restore, even when this device's clock is behind
+            var t = now
+            if let s = meta.stamps[id] { t = max(t, s + 1) }
+            if let r = meta.revived[id] { t = max(t, r + 1) }
+            meta.tombs[id] = t
             meta.stamps[id] = nil
         }
         meta.hashes = cur
+        // shared settings: a changed one gets a new stamp; one seen for the
+        // first time keeps none, so it wins only once someone changes it
+        for (path, h) in valueHashes(data) {
+            if let old = meta.valueHashes[path], old != h {
+                meta.values[path] = meta.values[path].map { max(now, $0 + 1) } ?? now
+            }
+            meta.valueHashes[path] = h
+        }
     }
 
-    // MARK: merge (src/sync.rs merge / merge_arr)
+    // MARK: merge (wb_sync::merge / merge_arr)
+
+    private typealias Cand = (src: Int, value: JSON)
 
     private final class Ctx {
-        var stamps: [[UInt64: Int64]]
-        var tombs: [UInt64: Int64]
-        var revived: [UInt64: Int64]
+        let stamps: [[UInt64: Int64]]
+        let tombs: [UInt64: Int64]
+        let revived: [UInt64: Int64]
         var out: [UInt64: Int64] = [:]
+        /// id -> every copy of the item, in every source and every place.
+        var cands: [UInt64: [Cand]] = [:]
+        /// id -> the item it sits in, in the newest copy (nil at the top).
+        var home: [UInt64: UInt64?] = [:]
 
-        init(stamps: [[UInt64: Int64]], tombs: [UInt64: Int64], revived: [UInt64: Int64]) {
+        init(stamps: [[UInt64: Int64]], tombs: [UInt64: Int64], revived: [UInt64: Int64], all: [UInt64: [(src: Int, parent: UInt64?, value: JSON)]]) {
             self.stamps = stamps
             self.tombs = tombs
             self.revived = revived
+            for (id, list) in all {
+                // the newest copy decides where the item is; on a tie this device's
+                var best = list[0]
+                var bestStamp = stamps[best.src][id] ?? 0
+                for c in list.dropFirst() {
+                    let s = stamps[c.src][id] ?? 0
+                    if s > bestStamp {
+                        best = c
+                        bestStamp = s
+                    }
+                }
+                home[id] = .some(best.parent)
+                cands[id] = list.map { (src: $0.src, value: $0.value) }
+            }
         }
 
         func alive(_ id: UInt64) -> Bool {
@@ -170,44 +247,56 @@ extension Sync {
         }
     }
 
-    private static func mergeArr(_ cx: Ctx, _ sources: [(Int, [JSON])]) -> [JSON] {
+    /// Every item with an id in one source, with the item it sits in.
+    private static func collect(_ src: Int, _ arr: [JSON], parent: UInt64?, _ out: inout [UInt64: [(src: Int, parent: UInt64?, value: JSON)]], _ order: inout [UInt64]) {
+        for item in arr {
+            guard let id = idOf(item), let obj = item.object else { continue }
+            if out[id] == nil { order.append(id) }
+            out[id, default: []].append((src: src, parent: parent, value: item))
+            for (_, child) in obj where isIdArray(child) {
+                collect(src, child.array ?? [], parent: id, &out, &order)
+            }
+        }
+    }
+
+    private static func mergeArr(_ cx: Ctx, _ sources: [(Int, [JSON])], parent: UInt64?) -> [JSON] {
         var order: [UInt64] = []
-        var cands: [UInt64: [(Int, JSON)]] = [:]
-        for (src, arr) in sources {
+        var seen = Set<UInt64>()
+        for (_, arr) in sources {
             for v in arr {
                 guard let id = idOf(v) else { continue }
-                if cands[id] == nil { order.append(id) }
-                cands[id, default: []].append((src, v))
+                if seen.insert(id).inserted { order.append(id) }
             }
         }
         var out: [JSON] = []
         for id in order {
             if !cx.alive(id) { continue }
-            let list = cands[id]!
+            if parent != nil, let h = cx.home[id], h != parent { continue }
+            guard let list = cx.cands[id], !list.isEmpty else { continue }
             // newest own fields win; on a tie this device's version stays
             var best = list[0]
-            var bestStamp = cx.stamps[best.0][id] ?? 0
+            var bestStamp = cx.stamps[best.src][id] ?? 0
             for c in list.dropFirst() {
-                let s = cx.stamps[c.0][id] ?? 0
+                let s = cx.stamps[c.src][id] ?? 0
                 if s > bestStamp {
                     best = c
                     bestStamp = s
                 }
             }
             cx.out[id] = bestStamp
-            guard let wobj = best.1.object else { continue }
-            let local = list.first(where: { $0.0 == 0 })?.1.object
+            guard let wobj = best.value.object else { continue }
+            let local = list.first(where: { $0.src == 0 })?.value.object
             var keys = Set(wobj.keys)
             for c in list {
-                for k in c.1.object?.keys ?? [String: JSON]().keys { keys.insert(k) }
+                for k in c.value.object?.keys ?? [String: JSON]().keys { keys.insert(k) }
             }
             var obj: [String: JSON] = [:]
             for k in keys {
-                let vals: [(Int, JSON)] = list.compactMap { c in c.1[k].map { (c.0, $0) } }
+                let vals: [(Int, JSON)] = list.compactMap { c in c.value[k].map { (c.src, $0) } }
                 let value: JSON
                 if vals.contains(where: { isIdArray($0.1) }) {
                     let subs: [(Int, [JSON])] = vals.compactMap { s, v in v.array.map { (s, $0) } }
-                    value = .array(mergeArr(cx, subs))
+                    value = .array(mergeArr(cx, subs, parent: id))
                 } else if appendKeys.contains(k) {
                     var all: [JSON] = []
                     for (_, v) in vals {
@@ -243,6 +332,14 @@ extension Sync {
     /// than the bookkeeping changed.
     @discardableResult
     public static func merge(_ local: inout JSON, _ others: [JSON]) -> Bool {
+        // copies from before activity had ids: give their entries the same ids
+        // here as everywhere else, or their comments would not be matched up
+        fillActivityIds(&local)
+        let others = others.map { o -> JSON in
+            var o = o
+            fillActivityIds(&o)
+            return o
+        }
         let before = local
         var lmeta = SyncMeta(of: local)
         let metas = others.map { SyncMeta(of: $0) }
@@ -252,20 +349,43 @@ extension Sync {
             for (k, v) in m.tombs { tombs[k] = max(tombs[k] ?? v, v) }
             for (k, v) in m.revived { revived[k] = max(revived[k] ?? v, v) }
         }
-        let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), tombs: tombs, revived: revived)
-        var merged: [(String, JSON)] = []
+        var all: [UInt64: [(src: Int, parent: UInt64?, value: JSON)]] = [:]
+        var order: [UInt64] = []
+        var perPath: [(String, [(Int, [JSON])])] = []
         for path in shared {
             var sources: [(Int, [JSON])] = [(0, before.at(path)?.array ?? [])]
             for (i, o) in others.enumerated() {
                 if let a = o.at(path)?.array { sources.append((i + 1, a)) }
             }
-            merged.append((path, .array(mergeArr(cx, sources))))
+            for (src, arr) in sources { collect(src, arr, parent: nil, &all, &order) }
+            perPath.append((path, sources))
+        }
+        let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), tombs: tombs, revived: revived, all: all)
+        var merged: [(String, JSON)] = []
+        for (path, sources) in perPath {
+            merged.append((path, .array(mergeArr(cx, sources, parent: nil))))
         }
         for (path, v) in merged { local.set(path, v) }
+        // shared settings: the newest change wins; on a tie this device's stays
+        for path in sharedValues {
+            var best: JSON?
+            var bestStamp = lmeta.values[path] ?? 0
+            for (o, m) in zip(others, metas) {
+                let s = m.values[path] ?? 0
+                if s > bestStamp, let v = o.at(path) {
+                    best = v
+                    bestStamp = s
+                }
+            }
+            if let v = best { local.set(path, v) }
+            if bestStamp > 0 { lmeta.values[path] = bestStamp }
+        }
         lmeta.tombs = tombs
         lmeta.revived = revived
         lmeta.stamps = cx.out
         lmeta.hashes = fingerprints(local)
+        lmeta.valueHashes = valueHashes(local)
+        lmeta.v = 1
         local.set("extra.sync", lmeta.json)
         return stripSync(before) != stripSync(local)
     }
@@ -280,12 +400,93 @@ extension Sync {
     }
 
     /// The copy sent to the server: this device's fingerprints left out, as
-    /// write_mine does for the shared folder.
+    /// wb_sync::shareable does.
     public static func outgoing(_ data: JSON) -> JSON {
         var v = data
         if v.at("extra.sync")?.object != nil {
             v.set("extra.sync.hashes", .object([:]))
+            v.set("extra.sync.value_hashes", .object([:]))
         }
         return v
+    }
+
+    /// Takes items the server hides from this person (`hidden` in welcome and
+    /// update: others' DMs and private channels, others' personal spaces and
+    /// private docs) out of this copy WITHOUT tombstones, so nothing is
+    /// deleted for the others, and forgets their stamps and fingerprints
+    /// (wb_sync::hide). Returns the ids of everything that left, inner items too.
+    @discardableResult
+    public static func hide(_ data: inout JSON, ids: [UInt64]) -> Set<UInt64> {
+        guard !ids.isEmpty else { return [] }
+        let wanted = Set(ids)
+        var gone: [JSON] = []
+        for path in shared {
+            guard let a = data.at(path)?.array else { continue }
+            let out = a.filter { idOf($0).map(wanted.contains) ?? false }
+            guard !out.isEmpty else { continue }
+            gone += out
+            data.set(path, .array(a.filter { !(idOf($0).map(wanted.contains) ?? false) }))
+        }
+        guard !gone.isEmpty else { return [] }
+        var inner: [UInt64: UInt64] = [:]
+        walk(.array(gone), parent: nil, placed: false, &inner)
+        if data.at("extra.sync")?.object != nil {
+            for key in ["stamps", "hashes", "moved", "parents"] {
+                guard var m = data.at("extra.sync." + key)?.object else { continue }
+                for id in inner.keys { m[String(id)] = nil }
+                data.set("extra.sync." + key, .object(m))
+            }
+        }
+        return Set(inner.keys)
+    }
+
+    // MARK: activity ids (wb_sync::activity_id / fill_activity_ids)
+
+    /// The id a task comment or activity line gets when it was written
+    /// without one. Worked out from what the entry says, so every device
+    /// gives the same entry the same id; bit 62 set.
+    public static func activityId(task: UInt64, ts: Int64, author: UInt64, comment: Bool, text: String, nth: Int) -> UInt64 {
+        let h = fnv("\(task)|\(ts)|\(author)|\(comment)|\(nth)|\(text)".utf8)
+        return (h & ((1 << 62) - 1)) | (1 << 62)
+    }
+
+    /// Gives every task activity entry without an id one, and drops repeats
+    /// of the same id. True when anything changed.
+    @discardableResult
+    public static func fillActivityIds(_ data: inout JSON) -> Bool {
+        guard var tasks = data["tasks"]?.array else { return false }
+        var changed = false
+        for ti in tasks.indices {
+            let tid = idOf(tasks[ti]) ?? 0
+            guard let acts = tasks[ti]["activity"]?.array else { continue }
+            if acts.allSatisfy({ (idOf($0) ?? 0) != 0 }) {
+                var seen = Set<UInt64?>()
+                if acts.allSatisfy({ seen.insert(idOf($0)).inserted }) { continue }
+            }
+            struct Key: Hashable { let ts: Int64; let author: UInt64; let comment: Bool; let text: String }
+            var counts: [Key: Int] = [:]
+            var seen = Set<UInt64>()
+            var out: [JSON] = []
+            for var a in acts {
+                guard a.object != nil else { continue }
+                let ts = a["ts"]?.int ?? 0
+                let author = a["author"]?.uint ?? 0
+                let comment = a["comment"]?.bool ?? false
+                let text = a["text"]?.string ?? ""
+                let key = Key(ts: ts, author: author, comment: comment, text: text)
+                let nth = counts[key, default: 0]
+                counts[key] = nth + 1
+                var id = a["id"]?.uint ?? 0
+                if id == 0 {
+                    id = activityId(task: tid, ts: ts, author: author, comment: comment, text: text, nth: nth)
+                    a["id"] = .id(id)
+                    changed = true
+                }
+                if seen.insert(id).inserted { out.append(a) } else { changed = true }
+            }
+            tasks[ti]["activity"] = .array(out)
+        }
+        if changed { data["tasks"] = .array(tasks) }
+        return changed
     }
 }

@@ -163,7 +163,9 @@ struct ListTasksView: View {
 
 struct TaskDetailView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
     let taskId: UInt64
+    @State private var confirmDelete = false
     @State private var name = ""
     @State private var desc = ""
     @State private var loaded = false
@@ -299,7 +301,28 @@ struct TaskDetailView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { focus = nil }.accessibilityIdentifier("taskDone")
                     }
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button(role: .destructive) { confirmDelete = true } label: { Label("Delete task", systemImage: "trash") }
+                                .accessibilityIdentifier("deleteTaskButton")
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .disabled(!client.canEdit)
+                        .accessibilityLabel("More")
+                        .accessibilityIdentifier("taskMoreMenu")
+                    }
                 }
+            }
+            .confirmationDialog("Delete this task?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    loaded = false // nothing left to save
+                    if client.edit({ d, _ in Edits.deleteTask(&d, task: t.id) }) { dismiss() }
+                }
+                .accessibilityIdentifier("confirmDeleteTask")
+            } message: {
+                Text(client.view.subtasks(of: t.id).isEmpty ? "It's removed for everyone." : "It's removed for everyone, with its subtasks.")
             }
             .onAppear {
                 if !loaded { name = t.name; desc = t.description; loaded = true }

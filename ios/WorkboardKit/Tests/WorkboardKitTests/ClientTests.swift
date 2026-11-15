@@ -11,7 +11,7 @@ final class ProtocolTests: XCTestCase {
             .hello(Hello(device: "d5", email: "a@b.c", newPassword: "12345678", resetCode: "QQQQ-WWWW-EEEE")),
             .push(data: ["tasks": []]), .setPassword(email: "a@b.c", password: "12345678", oldPassword: nil),
             .setPassword(email: "a@b.c", password: "12345678", oldPassword: "old-pass"),
-            .pushToken(token: "ab12", platform: "ios", env: "development"), .ping, .pong,
+            .pushToken(token: "ab12", platform: "ios", env: "development"), .callJoin(channel: 301), .ping, .pong,
         ]
         for m in msgs { XCTAssertEqual(ClientMessage(text: m.text), m) }
     }
@@ -36,6 +36,7 @@ final class ProtocolTests: XCTestCase {
             .welcome(Welcome(tag: 4, snapshot: nil, rev: 0, member: 2, role: "member", token: "tok", email: "a@b.c")),
             .update(data: ["b": 2], rev: 10), .account(email: "a@b.c"), .ping, .pong,
             .error(code: "auth", message: "no"), .error(code: nil, message: "Say hello first."),
+            .callToken(channel: 301, url: "ws://x:7880", token: "jwt"), .error(code: "denied", message: "no", channel: 301),
         ]
         for m in msgs { XCTAssertEqual(ServerMessage(text: m.text), m) }
         // as the real server writes them (serde, Option as null, absent token)
@@ -195,12 +196,12 @@ final class ClientTests: XCTestCase {
         XCTAssertTrue(a.canEdit, "edits work offline")
         XCTAssertTrue(a.edit { d, me in Edits.sendMessage(&d, channel: 301, text: "written offline", me: me, id: a.newId(), ts: nowTs()) })
         XCTAssertTrue(a.edit { d, me in Edits.setStatus(&d, task: 205, to: "in progress", me: me, ts: nowTs()) })
-        XCTAssertEqual(a.waitingCount, 2, "a new message (counted on the channel) and a task change")
+        XCTAssertEqual(a.waitingCount, 3, "a new message, a task change and its activity line (which has an id now)")
 
         // a fresh launch while the server is down shows the saved copy with the offline edits
         let relaunch = SyncClient(storage: s, tokens: MemoryTokenStore())
         XCTAssertEqual(relaunch.view.channels.first { $0.id == 301 }?.messages.last?.text, "written offline")
-        XCTAssertEqual(relaunch.waitingCount, 2, "waiting marks are saved")
+        XCTAssertEqual(relaunch.waitingCount, 3, "waiting marks are saved")
 
         // the server comes back on the same port; the client finds it alone and sends the edits
         let again = FakeServer(snapshot: server.current)
@@ -463,43 +464,7 @@ final class ClientTests: XCTestCase {
 }
 
 final class HTTPTests: XCTestCase {
-    func testCallTokenEndpointAndFallbacks() async throws {
-        let withCalls = FakeServer(snapshot: SampleWorkspace.make(), livekit: .dev)
-        let p1 = try await withCalls.start(port: 0)
-        defer { withCalls.stop() }
-        let grant = try await CallAPI.requestToken(server: "ws://127.0.0.1:\(p1)", deviceToken: nil, channel: 301)
-        XCTAssertEqual(grant.url, "ws://127.0.0.1:7880")
-        XCTAssertEqual(grant.room, "workboard-301")
-        let parts = grant.token.split(separator: ".")
-        XCTAssertEqual(parts.count, 3)
-        // the signature checks out with the dev secret
-        var b64 = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        while b64.count % 4 != 0 { b64 += "=" }
-        let claims = try JSON(parsing: Data(base64Encoded: b64)!)
-        XCTAssertEqual(claims.at("video.room"), "workboard-301")
-        XCTAssertEqual(claims["iss"], "devkey")
-
-        let noCalls = FakeServer(snapshot: SampleWorkspace.make())
-        let p2 = try await noCalls.start(port: 0)
-        defer { noCalls.stop() }
-        do {
-            _ = try await CallAPI.requestToken(server: "ws://127.0.0.1:\(p2)", deviceToken: nil, channel: 301)
-            XCTFail("expected notAvailable")
-        } catch let e as CallError { XCTAssertEqual(e, .notAvailable) }
-
-        let locked = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true, livekit: .dev)
-        let p3 = try await locked.start(port: 0)
-        defer { locked.stop() }
-        do {
-            _ = try await CallAPI.requestToken(server: "ws://127.0.0.1:\(p3)", deviceToken: "nope", channel: 301)
-            XCTFail("expected unauthorized")
-        } catch let e as CallError { XCTAssertEqual(e, .unauthorized) }
-    }
-
-    func testHealthAndEndpointAddress() async throws {
-        XCTAssertEqual(CallAPI.endpoint(forServer: "ws://mac-mini.x.ts.net:8787")?.absoluteString, "http://mac-mini.x.ts.net:8787/call-token")
-        XCTAssertEqual(CallAPI.endpoint(forServer: "wss://host/ws")?.absoluteString, "https://host/call-token")
-        XCTAssertEqual(CallAPI.endpoint(forServer: "macmini")?.absoluteString, "http://macmini:8787/call-token")
+    func testHealthAndLinkCall() async throws {
         XCTAssertTrue(CallAPI.linkCall().hasPrefix("https://meet.jit.si/Workboard-"))
         let server = FakeServer(snapshot: SampleWorkspace.make())
         let port = try await server.start(port: 0)
@@ -507,5 +472,189 @@ final class HTTPTests: XCTestCase {
         let (data, resp) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/health")!)
         XCTAssertEqual((resp as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertEqual(try JSON(parsing: data)["ok"], true)
+    }
+}
+
+/// Huddles over the WebSocket (call_join -> call_token), as on the real server.
+@MainActor
+final class CallTests: XCTestCase {
+    func storage() -> Storage {
+        Storage(folder: FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)"))
+    }
+
+    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
+        let end = Date().addingTimeInterval(timeout)
+        while !cond() {
+            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    func testCallJoinGivesATokenForTheRoom() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true, livekit: .dev)
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let code = server.invite(member: 2)
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        c.setServer("ws://127.0.0.1:\(port)")
+        await until("sign-in screen") { c.needsSignIn }
+        c.signIn(.invite(code: code, email: "alex@example.test", newPassword: "alex-password-1"))
+        await until("signed in") { c.canEdit && c.state.isConnected }
+
+        let grant = try await c.requestCall(channel: 301)
+        XCTAssertEqual(grant.url, "ws://127.0.0.1:7880")
+        XCTAssertEqual(grant.room, "wb-301")
+        var b64 = String(grant.token.split(separator: ".")[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        let claims = try JSON(parsing: Data(base64Encoded: b64)!)
+        XCTAssertEqual(claims.at("video.room"), "wb-301")
+        let identity = try XCTUnwrap(claims["sub"]?.string)
+        XCTAssertEqual(identity, "2-\(c.settings.device)", "<member>-<device>, as the real server names people")
+        XCTAssertEqual(CallAPI.member(inIdentity: identity), 2)
+        XCTAssertEqual(CallAPI.member(inIdentity: "member-7"), 7)
+
+        // a conversation the server doesn't have: turned down, connection stays
+        do {
+            _ = try await c.requestCall(channel: 999)
+            XCTFail("expected denied")
+        } catch let e as CallError {
+            XCTAssertEqual(e, .denied("That conversation isn't on the server yet. Try again in a moment."))
+        }
+        XCTAssertTrue(c.state.isConnected)
+        XCTAssertNil(c.notice, "a call refusal is the huddle's business, not a notice")
+    }
+
+    func testServerWithoutLiveKitMeansLinkCall() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        c.setMe(1)
+        c.setServer("ws://127.0.0.1:\(port)")
+        await until("connected") { c.state.isConnected }
+        do {
+            _ = try await c.requestCall(channel: 301)
+            XCTFail("expected notAvailable")
+        } catch let e as CallError { XCTAssertEqual(e, .notAvailable) }
+
+        c.disconnect()
+        do {
+            _ = try await c.requestCall(channel: 301)
+            XCTFail("expected offline")
+        } catch let e as CallError { XCTAssertEqual(e, .offline) }
+        XCTAssertEqual(CallAPI.huddleChannel("workboard-huddle:301"), 301)
+        XCTAssertNil(CallAPI.huddleChannel("https://meet.jit.si/x"))
+    }
+}
+
+/// Round 2: stamps in milliseconds, moving to another server, files, empty servers.
+@MainActor
+final class Round2ClientTests: XCTestCase {
+    func storage() -> Storage {
+        Storage(folder: FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)"))
+    }
+
+    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
+        let end = Date().addingTimeInterval(timeout)
+        while !cond() {
+            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    func testEditsAreStampedInMilliseconds() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        c.setMe(1)
+        c.setServer("ws://127.0.0.1:\(port)")
+        await until("connected") { c.canEdit }
+        let before = nowMs()
+        c.edit { d, _ in Edits.rename(&d, task: 201, to: "Stamped", ts: nowTs()) }
+        let stamp = try XCTUnwrap(SyncMeta(of: c.data!).stamps[201])
+        XCTAssertGreaterThanOrEqual(stamp, before, "milliseconds, like the Mac app and the server")
+        XCTAssertLessThan(stamp, before + 60_000)
+        // a desktop edit made a second earlier (in ms) loses to the phone's
+        var desk = c.data!
+        var dm = SyncMeta(of: desk)
+        desk.updateItem(at: "tasks", id: 201) { $0["name"] = "Desk" }
+        dm.stamps[201] = before - 1000
+        desk.set("extra.sync", dm.json)
+        var mine = c.data!
+        Sync.merge(&mine, [desk])
+        XCTAssertEqual(mine["tasks"]!.array!.first { $0["id"] == 201 }!["name"], "Stamped")
+    }
+
+    func testMovingToAnotherServerStartsFromAFreshCopy() async throws {
+        let a = FakeServer(snapshot: SampleWorkspace.make())
+        var other = SampleWorkspace.make()
+        other["workspace"] = "Other Team"
+        other["tasks"] = [] // nothing in common
+        let b = FakeServer(snapshot: other)
+        let pa = try await a.start(port: 0), pb = try await b.start(port: 0)
+        defer { a.stop(); b.stop() }
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        c.setMe(1)
+        c.setServer("ws://127.0.0.1:\(pa)")
+        await until("first server") { c.canEdit }
+        // the same server typed another way keeps the copy
+        XCTAssertFalse(c.isDifferentServer("127.0.0.1:\(pa)"))
+        XCTAssertTrue(c.isDifferentServer("ws://127.0.0.1:\(pb)"))
+        c.setServer("ws://127.0.0.1:\(pb)")
+        XCTAssertNil(c.data, "the first workspace is dropped")
+        XCTAssertNil(c.me, "people are numbered per workspace")
+        XCTAssertEqual(c.waitingCount, 0)
+        c.setMe(1)
+        await until("second server's workspace") { c.view.name == "Other Team" && c.state.isConnected }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(b.current?["tasks"]?.array?.count, 0, "nothing from the first server went to the second")
+    }
+
+    func testPicturesGoUpAndComeBackWithTheDeviceToken() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let code = server.invite(member: 3)
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        let url = "ws://127.0.0.1:\(port)"
+        c.setServer(url)
+        await until("sign-in screen") { c.needsSignIn }
+        c.signIn(.invite(code: code, email: nil, newPassword: "sam-password-1"))
+        await until("signed in") { c.canEdit }
+        let auth = try XCTUnwrap(c.fileAuth)
+        XCTAssertTrue(auth.hasPrefix("Bearer \(c.settings.device):"))
+
+        let picture = Data((0..<5000).map { UInt8($0 % 251) })
+        let sha = try await FileAPI.upload(server: url, auth: auth, data: picture, contentType: "image/jpeg")
+        XCTAssertEqual(sha, FileAPI.sha256(picture))
+        XCTAssertEqual(server.storedFile(sha), picture)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("wbfiles-\(UUID().uuidString)")
+        let local = try await FileAPI.download(server: url, auth: auth, sha: sha, ext: "jpg", folder: folder)
+        XCTAssertEqual(try Data(contentsOf: local), picture)
+        XCTAssertEqual(local.pathExtension, "jpg")
+
+        // without the token the server says no
+        do {
+            _ = try await FileAPI.download(server: url, auth: nil, sha: sha, folder: folder.appendingPathComponent("x"))
+            XCTFail("expected notSignedIn")
+        } catch let e as FileError { XCTAssertEqual(e, .notSignedIn) }
+        do {
+            _ = try await FileAPI.download(server: url, auth: auth, sha: String(repeating: "0", count: 64), folder: folder)
+            XCTFail("expected missing")
+        } catch let e as FileError { XCTAssertEqual(e, .missing) }
+    }
+
+    func testEmptyServerIsToldApart() async throws {
+        let empty = FakeServer(snapshot: nil, requireSignIn: true)
+        let full = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let pe = try await empty.start(port: 0), pf = try await full.start(port: 0)
+        defer { empty.stop(); full.stop() }
+        let e = await AuthAPI.hasWorkspace(server: "ws://127.0.0.1:\(pe)")
+        let f = await AuthAPI.hasWorkspace(server: "ws://127.0.0.1:\(pf)")
+        XCTAssertEqual(e, false)
+        XCTAssertEqual(f, true)
+        let none = await AuthAPI.hasWorkspace(server: "ws://127.0.0.1:1")
+        XCTAssertNil(none)
     }
 }

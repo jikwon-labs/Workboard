@@ -179,6 +179,20 @@ public enum AuthAPI {
         }
         return j["mail"]?.bool ?? false
     }
+
+    /// Whether the server has a workspace yet (GET /health "workspace"); nil
+    /// when it can't be asked or doesn't say. An empty server is set up by
+    /// the first Mac app that connects (it brings its workspace with a
+    /// `claim`); the iPhone has no workspace of its own to bring.
+    public static func hasWorkspace(server: String, session: URLSession = .shared) async -> Bool? {
+        guard let url = ServerAddress.http(server, path: "/health") else { return nil }
+        guard let (data, resp) = try? await session.data(for: URLRequest(url: url, timeoutInterval: 10)),
+              (resp as? HTTPURLResponse)?.statusCode == 200, let j = try? JSON(parsing: data) else { return nil }
+        return j["workspace"]?.bool
+    }
+
+    /// What to say on the sign-in screen when the server is still empty.
+    public static let emptyServerNote = "This server has no workspace yet. Set it up from Workboard on the Mac first (it brings its workspace and makes you the owner), then make an invite code there or set a password, and sign in here."
 }
 
 /// Turning what a person typed into the addresses the app uses, the way the

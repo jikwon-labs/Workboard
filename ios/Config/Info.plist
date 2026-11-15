@@ -3,23 +3,17 @@
 <plist version="1.0">
 <dict>
 	<!-- Merged with the generated Info.plist (GENERATE_INFOPLIST_FILE).
-	     Plain ws:// is allowed only to Tailscale MagicDNS names (*.ts.net),
-	     where the tailnet already encrypts traffic, and to the local network
-	     (simulator testing against 127.0.0.1). Everything else keeps ATS. -->
+	     Plain http:// and ws:// are allowed to any address, like the Mac app:
+	     the team server is plain HTTP on the tailnet, reached by a Tailscale
+	     IP (100.x.y.z), a short MagicDNS name ("macmini") or a *.ts.net name,
+	     and ATS exceptions can't name IP addresses or short names. Tailscale
+	     already encrypts that traffic. Only NSAllowsArbitraryLoads is set:
+	     iOS ignores it when NSAllowsLocalNetworking or exception domains are
+	     present too. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>ts.net</key>
-			<dict>
-				<key>NSIncludesSubdomains</key>
-				<true/>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-		</dict>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Workboard uses the microphone for huddles with your team.</string>

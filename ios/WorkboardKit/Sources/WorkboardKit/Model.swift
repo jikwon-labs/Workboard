@@ -183,6 +183,28 @@ public struct ReactionView: Hashable, Sendable {
     public let users: [UInt64]
 }
 
+/// A picture or video in a message (Attachment in src/model.rs). The file
+/// lives on the team server, named by the sha256 of its contents.
+public struct AttachmentView: Hashable, Sendable {
+    public let file: String
+    public let name: String
+    public let isVideo: Bool
+    public let bytes: UInt64
+    public let w: Int
+    public let h: Int
+    public let secs: Double
+
+    init(_ j: JSON) {
+        file = j["file"]?.string ?? ""
+        name = j["name"]?.string ?? ""
+        isVideo = j["kind"]?.string == "Video"
+        bytes = j["bytes"]?.uint ?? 0
+        w = Int(j["w"]?.int ?? 0)
+        h = Int(j["h"]?.int ?? 0)
+        secs = j["secs"]?.double ?? 0
+    }
+}
+
 public struct MessageView: Identifiable, Hashable, Sendable {
     public let id: UInt64
     public let author: UInt64
@@ -193,8 +215,13 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     public let pinned: Bool
     public let call: String?
     public let reactions: [ReactionView]
+    public let attachments: [AttachmentView]
+    /// When its author last changed the text.
+    public let edited: Int64?
 
     init(_ j: JSON) {
+        attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
+        edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }
         id = j["id"]?.uint ?? 0
         author = j["author"]?.uint ?? 0
@@ -217,8 +244,11 @@ public struct ChannelView: Identifiable, Hashable, Sendable {
     public let members: [UInt64]
     public let messages: [MessageView]
     public let lastRead: Int64
+    /// Made with "Make Private": only its members see it.
+    public let isPrivate: Bool
 
     init(_ j: JSON) {
+        isPrivate = j["private"]?.bool ?? false
         id = j["id"]?.uint ?? 0
         name = j["name"]?.string ?? ""
         kind = ChannelKind(rawValue: j["kind"]?.string ?? "") ?? .channel
@@ -293,7 +323,7 @@ public struct WorkspaceView: Sendable {
 
     /// Channels this person is in, plus every public channel.
     public func visibleChannels(me: UInt64) -> [ChannelView] {
-        channels.filter { $0.kind == .channel || $0.members.contains(me) }
+        channels.filter { ($0.kind == .channel && !$0.isPrivate) || $0.members.contains(me) }
     }
 
     /// A DM's title: the other people in it.

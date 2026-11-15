@@ -117,10 +117,9 @@ private struct ParticipantTile: View {
         .animation(.easeOut(duration: 0.15), value: participant.isSpeaking)
     }
 
-    /// The server names people "member-<id>" (see the fake server and docs/ios-design.md).
+    /// The server names people "<member>-<device>" (call_token in server/src/lib.rs).
     var memberId: UInt64? {
-        guard let s = participant.identity?.stringValue, s.hasPrefix("member-") else { return nil }
-        return UInt64(s.dropFirst(7))
+        participant.identity.flatMap { CallAPI.member(inIdentity: $0.stringValue) }
     }
 }
 

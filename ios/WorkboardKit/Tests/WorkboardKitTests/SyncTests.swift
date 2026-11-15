@@ -1,5 +1,6 @@
 import XCTest
 @testable import WorkboardKit
+import WorkboardFakeServer
 
 /// The four tests in src/sync.rs, ported one to one.
 final class RustPortTests: XCTestCase {
@@ -108,7 +109,7 @@ final class StampTests: XCTestCase {
         Sync.stamp(d, &m, now: 10)
         m.stamps[1] = 500 // another device with a clock ahead stamped it
         d.set("tasks", [["id": 1, "name": "b"]])
-        Sync.stamp(d, &m, now: 100, pastSeen: true)
+        Sync.stamp(d, &m, now: 100)
         XCTAssertEqual(m.stamps[1], 501)
     }
 
@@ -159,5 +160,207 @@ final class IdTests: XCTestCase {
     func testTagIsModulo1024() {
         var m = IdMaker(tag: 1030)
         XCTAssertEqual(m.next(nowMillis: 1) % 1024, 6)
+    }
+}
+
+/// The newer tests in crates/wb-sync/src/lib.rs, ported one to one, so the
+/// phone merges exactly like the Mac app and the server.
+final class RustPortTests2: XCTestCase {
+    func sp(_ spaces: JSON, _ meta: SyncMeta) -> JSON {
+        ["workspace": "W", "spaces": spaces, "tasks": [], "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": [], "docs": [], "extra": ["sync": meta.json]]
+    }
+
+    func list(_ id: Int64) -> JSON { ["id": .int(id), "name": .string("L\(id)")] }
+    func space(_ id: Int64, _ folders: JSON, _ lists: JSON) -> JSON { ["id": .int(id), "name": .string("S\(id)"), "folders": folders, "lists": lists] }
+    func folder(_ id: Int64, _ lists: JSON) -> JSON { ["id": .int(id), "name": .string("F\(id)"), "lists": lists] }
+
+    /// Two devices that start from the same synced copy.
+    func pair(_ spaces: JSON) -> (JSON, SyncMeta, JSON, SyncMeta) {
+        var ma = SyncMeta()
+        var a = sp(spaces, ma)
+        Sync.stamp(a, &ma, now: 10)
+        a.set("extra.sync", ma.json)
+        return (a, ma, a, ma)
+    }
+
+    func change(_ v: inout JSON, _ m: inout SyncMeta, _ spaces: JSON, _ now: Int64) {
+        v["spaces"] = spaces
+        Sync.stamp(v, &m, now: now)
+        v.set("extra.sync", m.json)
+    }
+
+    /// Where every list is: (parent id, list id), in order.
+    func places(_ v: JSON) -> [[UInt64]] {
+        var out: [[UInt64]] = []
+        for s in v["spaces"]?.array ?? [] {
+            for l in s["lists"]?.array ?? [] { out.append([s["id"]!.uint!, l["id"]!.uint!]) }
+            for f in s["folders"]?.array ?? [] {
+                for l in f["lists"]?.array ?? [] { out.append([f["id"]!.uint!, l["id"]!.uint!]) }
+            }
+        }
+        return out
+    }
+
+    func testAMovedListAppearsOnceForEveryone() {
+        // space to space
+        var (a, ma, b, _) = pair([space(100, [], [list(101), list(102)]), space(200, [], [])])
+        change(&a, &ma, [space(100, [], [list(102)]), space(200, [], [list(101)])], 30)
+        Sync.merge(&a, [b])
+        XCTAssertEqual(places(a), [[100, 102], [200, 101]])
+        Sync.merge(&b, [a])
+        XCTAssertEqual(places(b), [[100, 102], [200, 101]])
+
+        // folder to another space, and back from a space into a folder
+        var (c, mc, d, _) = pair([space(100, [folder(300, [list(101)])], []), space(200, [], [])])
+        change(&c, &mc, [space(100, [folder(300, [])], []), space(200, [], [list(101)])], 30)
+        var stale = d
+        Sync.merge(&d, [c])
+        XCTAssertEqual(places(d), [[200, 101]])
+        Sync.merge(&c, [stale])
+        XCTAssertEqual(places(c), [[200, 101]])
+        var md = SyncMeta(of: d)
+        change(&d, &md, [space(100, [folder(300, [list(101)])], []), space(200, [], [])], 40)
+        stale = c
+        Sync.merge(&c, [d])
+        XCTAssertEqual(places(c), [[300, 101]])
+        Sync.merge(&d, [stale])
+        XCTAssertEqual(places(d), [[300, 101]])
+    }
+
+    func testAListAddedWhileAnotherMovedIsKept() {
+        var (a, ma, b, mb) = pair([space(100, [], [list(101), list(102)]), space(200, [], [])])
+        // A moves 101 away; B, not knowing, adds 103 to the old space
+        change(&a, &ma, [space(100, [], [list(102)]), space(200, [], [list(101)])], 30)
+        change(&b, &mb, [space(100, [], [list(101), list(102), list(103)]), space(200, [], [])], 25)
+        var (a0, b0) = (a, b)
+        Sync.merge(&a, [b0])
+        Sync.merge(&b, [a0])
+        XCTAssertEqual(places(a), [[100, 102], [100, 103], [200, 101]])
+        XCTAssertEqual(places(b), places(a))
+
+        // a folder moves while someone adds a list inside it
+        (a, ma, b, mb) = pair([space(100, [folder(300, [list(101)])], []), space(200, [], [])])
+        change(&a, &ma, [space(100, [], []), space(200, [folder(300, [list(101)])], [])], 30)
+        change(&b, &mb, [space(100, [folder(300, [list(101), list(104)])], []), space(200, [], [])], 25)
+        (a0, b0) = (a, b)
+        Sync.merge(&a, [b0])
+        Sync.merge(&b, [a0])
+        XCTAssertEqual(places(a), [[300, 101], [300, 104]])
+        XCTAssertEqual(a["spaces"]?[1]?["folders"]?[0]?["id"], 300)
+        XCTAssertEqual(a["spaces"]?[0]?["folders"]?.array?.count, 0)
+        XCTAssertEqual(places(b), places(a))
+    }
+
+    func testUpdatingTheAppDoesNotMarkInnerItemsAsEdited() {
+        let d = sp([space(100, [], [list(101)])], SyncMeta())
+        var m = SyncMeta(hashes: Sync.fingerprints(d, placed: false))
+        m.stamps = [100: 10, 101: 10]
+        Sync.stamp(d, &m, now: 99)
+        XCTAssertEqual(m.stamps[101], 10)
+        XCTAssertEqual(m.v, 1)
+    }
+
+    func ws(_ tasks: JSON, _ meta: SyncMeta) -> JSON {
+        ["workspace": "W", "spaces": [], "tasks": tasks, "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": [], "docs": [], "extra": ["sync": meta.json]]
+    }
+
+    func testADeleteWinsEvenWithAClockBehind() {
+        var m = SyncMeta()
+        let a = ws([["id": 1, "name": "t"]], m)
+        Sync.stamp(a, &m, now: 1000)
+        // restored on a device whose clock is ahead
+        m.revived[1] = 2000
+        let gone = ws([], m)
+        Sync.stamp(gone, &m, now: 20)
+        XCTAssertGreaterThan(m.tombs[1]!, 2000)
+        var other = a
+        var mine = gone
+        mine.set("extra.sync", m.json)
+        Sync.merge(&other, [mine])
+        XCTAssertEqual(other["tasks"]?.array?.count, 0)
+    }
+
+    func testWorkspaceSettingsAreSharedNewestWins() {
+        var (a, ma, b, mb) = pair([])
+        a.set("extra.apps", ["priorities": true])
+        b.set("extra.apps", ["priorities": true])
+        Sync.stamp(a, &ma, now: 11)
+        Sync.stamp(b, &mb, now: 11)
+        // A renames the workspace, B turns off priorities later
+        a["workspace"] = "Team"
+        Sync.stamp(a, &ma, now: 20)
+        a.set("extra.sync", ma.json)
+        b.set("extra.apps", ["priorities": false])
+        Sync.stamp(b, &mb, now: 30)
+        b.set("extra.sync", mb.json)
+        let (a0, b0) = (a, b)
+        XCTAssertTrue(Sync.merge(&a, [b0]))
+        Sync.merge(&b, [a0])
+        for v in [a, b] {
+            XCTAssertEqual(v["workspace"], "Team")
+            XCTAssertEqual(v.at("extra.apps.priorities"), false)
+        }
+        // a setting nobody changed yet stays as each device has it
+        var (c, _, d, _) = pair([])
+        d.set("extra.workspace_color", [1, 2, 3])
+        Sync.merge(&c, [d])
+        XCTAssertNil(c.at("extra.workspace_color"))
+    }
+
+    func testActivityIdsMatchTheRustOnes() {
+        // values printed by wb_sync::activity_id
+        XCTAssertEqual(Sync.activityId(task: 201, ts: 1_700_000_000, author: 3, comment: true, text: "Looks good 👍", nth: 0), 8258850863592127377)
+        XCTAssertEqual(Sync.activityId(task: 5, ts: -1, author: 0, comment: false, text: "created this task", nth: 2), 7191864566954938370)
+        // same text twice in a task: different ids; existing ids are kept
+        var d: JSON = ["tasks": [["id": 9, "activity": [
+            ["ts": 1, "author": 1, "text": "x", "comment": false],
+            ["ts": 1, "author": 1, "text": "x", "comment": false],
+            ["ts": 2, "author": 1, "text": "y", "comment": true, "id": 77],
+        ]]]]
+        XCTAssertTrue(Sync.fillActivityIds(&d))
+        let ids = (d["tasks"]?[0]?["activity"]?.array ?? []).compactMap { $0["id"]?.uint }
+        XCTAssertEqual(ids, [Sync.activityId(task: 9, ts: 1, author: 1, comment: false, text: "x", nth: 0), Sync.activityId(task: 9, ts: 1, author: 1, comment: false, text: "x", nth: 1), 77])
+        XCTAssertFalse(Sync.fillActivityIds(&d), "nothing left to fill")
+    }
+
+    func testMetaKeepsVersionAndSharedSettings() throws {
+        let m = SyncMeta(stamps: [1: 10], v: 1, values: ["workspace": 5], valueHashes: ["workspace": UInt64.max - 1])
+        XCTAssertEqual(SyncMeta(json: try JSON(parsing: m.json.serialized())), m)
+        // the copy for the server leaves this device's fingerprints out
+        var d: JSON = ["extra": ["sync": m.json]]
+        d = Sync.outgoing(d)
+        XCTAssertEqual(d.at("extra.sync.value_hashes"), .object([:]))
+        XCTAssertEqual(d.at("extra.sync.v"), 1)
+    }
+}
+
+/// `hidden` from newer servers (wb_sync::hide): out of the copy, no tombstone.
+final class HideTests: XCTestCase {
+    func testHiddenItemsLeaveWithoutTombstones() throws {
+        var d = SampleWorkspace.make()
+        var meta = SyncMeta()
+        Sync.stamp(d, &meta, now: 10)
+        d.set("extra.sync", meta.json)
+        let gone = Sync.hide(&d, ids: [303, 999])
+        XCTAssertEqual(gone, [303, 331], "the DM and the message in it")
+        XCTAssertNil(WorkspaceView(d).channels.first { $0.id == 303 })
+        var m = SyncMeta(of: d)
+        XCTAssertNil(m.stamps[331])
+        XCTAssertNil(m.hashes[303])
+        Sync.stamp(d, &m, now: 20)
+        XCTAssertNil(m.tombs[303], "hiding is not deleting")
+        XCTAssertNil(m.tombs[331])
+        // and the server's merge keeps it for the others
+        var server = SampleWorkspace.make()
+        var sm = SyncMeta()
+        Sync.stamp(server, &sm, now: 10)
+        server.set("extra.sync", sm.json)
+        d.set("extra.sync", m.json)
+        Sync.merge(&server, [d])
+        XCTAssertNotNil(WorkspaceView(server).channels.first { $0.id == 303 })
+        // the field is read from welcome and update; older servers leave it out
+        XCTAssertEqual(ServerMessage(text: #"{"type":"update","data":{},"rev":2,"hidden":[303]}"#), .update(data: [:], rev: 2, hidden: [303]))
+        guard case let .welcome(w) = ServerMessage(text: #"{"type":"welcome","tag":1,"snapshot":null,"rev":0,"member":1,"role":"member","hidden":[5,6]}"#) else { return XCTFail() }
+        XCTAssertEqual(w.hidden, [5, 6])
     }
 }

@@ -34,6 +34,9 @@ struct SignInView: View {
     @State private var attemptMode: Mode?
     @State private var editServer = false
     @State private var address = ""
+    @State private var confirmSwitch = false
+    /// GET /health says the server has no workspace yet.
+    @State private var emptyServer = false
 
     var body: some View {
         NavigationStack {
@@ -59,6 +62,13 @@ struct SignInView: View {
                 takeInvite()
             }
             .onChange(of: nav.invite) { takeInvite() }
+            .task(id: "\(client.settings.server)|\(client.signInMessage ?? "")") { await checkEmpty() }
+            .alert("Switch servers?", isPresented: $confirmSwitch) {
+                Button("Switch", role: .destructive) { useAddress(confirmed: true) }
+                Button("Cancel", role: .cancel) { address = client.settings.server }
+            } message: {
+                Text("\(client.waitingCount) \(client.waitingCount == 1 ? "change hasn't" : "changes haven't") reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
+            }
         }
     }
 
@@ -72,6 +82,7 @@ struct SignInView: View {
 
     /// Why the server asked (its own words), above the forms.
     var note: String? {
+        if emptyServer { return AuthAPI.emptyServerNote }
         switch client.signInReason {
         case .signedOut: return client.signInMessage ?? "This iPhone isn't signed in on the server any more."
         case .needed, nil: return mode == .password ? "Sign in with your email and password, or use the invite code you were given." : nil
@@ -82,6 +93,7 @@ struct SignInView: View {
     /// The error under the form that was sent (local check or the server's answer).
     var shownError: String? {
         if let localError { return localError }
+        if emptyServer { return nil } // the note above says what to do instead
         if client.signInReason == .failed, attemptMode == mode, !client.signingIn { return client.signInMessage }
         return nil
     }
@@ -224,7 +236,7 @@ struct SignInView: View {
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .onSubmit { client.setServer(address); editServer = false }
+                    .onSubmit { useAddress(confirmed: false) }
             } else {
                 LabeledContent(client.settings.server) {
                     Button("Change") { address = client.settings.server; editServer = true }
@@ -253,6 +265,24 @@ struct SignInView: View {
     }
 
     // MARK: actions
+
+    /// A different server starts from its own workspace (see SettingsView.apply).
+    func useAddress(confirmed: Bool) {
+        if !confirmed, client.isDifferentServer(address), client.waitingCount > 0 {
+            confirmSwitch = true
+            return
+        }
+        client.setServer(address)
+        editServer = false
+    }
+
+    /// The server turned us away: is it because it's still empty?
+    func checkEmpty() async {
+        let server = client.settings.server
+        guard !server.isEmpty else { emptyServer = false; return }
+        let has = await AuthAPI.hasWorkspace(server: server)
+        if server == client.settings.server { emptyServer = has == false }
+    }
 
     func switchTo(_ m: Mode) {
         localError = nil

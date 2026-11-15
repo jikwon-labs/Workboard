@@ -6,17 +6,22 @@
 //                                email?, password?, new_password?, reset_code?}
 //   server -> app  welcome      {tag, snapshot|null, rev, member, role, token?, email?}
 //   app -> server  push         {data}
-//   server -> all  update       {data, rev}
+//   server -> all  update       {data, rev, hidden?}   (hidden also in welcome: ids
+//                                this person may not see; dropped without tombstones)
 //   app -> server  set_password {email, password, old_password?}
 //   server -> app  account      {email}
 //   app -> server  push_token   {token, platform: "ios", env}   (ignored by servers that don't know it)
+//   app -> server  call_join    {channel}
+//   server -> app  call_token   {channel, url, token}   (a LiveKit address and join token)
 //   both           ping / pong, every 30 seconds
-//   server -> app  error        {message, code?}
+//   server -> app  error        {message, code?, channel?}   (channel: a call_join turned down)
 //
 // Optional hello fields are left out when absent: the server treats a field
 // that is there as meant. It uses the first that applies: reset_code (with
 // email and new_password), invite (with new_password: make the account),
-// email + password, token, claim (iOS never claims).
+// email + password, token, claim. iOS never claims: claiming an empty
+// server means bringing a workspace, which only the Mac app has; the sign-in
+// screen asks /health and says to set the server up from the Mac instead.
 //
 // Error codes: "auth" = signing in was refused and the server closes the
 // connection; "denied" = one request was refused, the connection stays; no
@@ -55,6 +60,7 @@ public enum ClientMessage: Equatable, Sendable {
     case push(data: JSON)
     case setPassword(email: String, password: String, oldPassword: String?)
     case pushToken(token: String, platform: String, env: String)
+    case callJoin(channel: UInt64)
     case ping
     case pong
 
@@ -80,6 +86,8 @@ public enum ClientMessage: Equatable, Sendable {
             return .object(o)
         case let .pushToken(token, platform, env):
             return ["type": "push_token", "token": .string(token), "platform": .string(platform), "env": .string(env)]
+        case let .callJoin(channel):
+            return ["type": "call_join", "channel": .id(channel)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         }
@@ -103,6 +111,9 @@ public enum ClientMessage: Equatable, Sendable {
             self = .setPassword(email: e, password: p, oldPassword: j["old_password"]?.string)
         case "push_token":
             self = .pushToken(token: j["token"]?.string ?? "", platform: j["platform"]?.string ?? "", env: j["env"]?.string ?? "")
+        case "call_join":
+            guard let ch = j["channel"]?.uint else { return nil }
+            self = .callJoin(channel: ch)
         case "ping": self = .ping
         case "pong": self = .pong
         default: return nil
@@ -131,8 +142,11 @@ public struct Welcome: Equatable, Sendable {
     public var token: String?
     /// The account email of this member, when they have a password.
     public var email: String?
+    /// Items the server hides from this person (newer servers; see Sync.hide).
+    public var hidden: [UInt64]
 
-    public init(tag: UInt64, snapshot: JSON?, rev: Int64, member: UInt64? = nil, role: String? = nil, token: String? = nil, email: String? = nil) {
+    public init(tag: UInt64, snapshot: JSON?, rev: Int64, member: UInt64? = nil, role: String? = nil, token: String? = nil, email: String? = nil, hidden: [UInt64] = []) {
+        self.hidden = hidden
         self.tag = tag
         self.snapshot = snapshot
         self.rev = rev
@@ -145,11 +159,13 @@ public struct Welcome: Equatable, Sendable {
 
 public enum ServerMessage: Equatable, Sendable {
     case welcome(Welcome)
-    case update(data: JSON, rev: Int64)
+    case update(data: JSON, rev: Int64, hidden: [UInt64] = [])
     case account(email: String)
+    case callToken(channel: UInt64, url: String, token: String)
     case ping
     case pong
-    case error(code: String?, message: String)
+    /// `channel` is set when a call_join for it was turned down.
+    case error(code: String?, message: String, channel: UInt64? = nil)
     case unknown(String)
 
     public var json: JSON {
@@ -160,16 +176,22 @@ public enum ServerMessage: Equatable, Sendable {
             if let r = w.role { o["role"] = .string(r) }
             if let t = w.token { o["token"] = .string(t) }
             if let e = w.email { o["email"] = .string(e) }
+            if !w.hidden.isEmpty { o["hidden"] = .array(w.hidden.map(JSON.id)) }
             return .object(o)
-        case let .update(data, rev):
-            return ["type": "update", "data": data, "rev": .int(rev)]
+        case let .update(data, rev, hidden):
+            var o: [String: JSON] = ["type": "update", "data": data, "rev": .int(rev)]
+            if !hidden.isEmpty { o["hidden"] = .array(hidden.map(JSON.id)) }
+            return .object(o)
         case let .account(email):
             return ["type": "account", "email": .string(email)]
+        case let .callToken(channel, url, token):
+            return ["type": "call_token", "channel": .id(channel), "url": .string(url), "token": .string(token)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
-        case let .error(code, m):
+        case let .error(code, m, channel):
             var o: [String: JSON] = ["type": "error", "message": .string(m)]
             if let code { o["code"] = .string(code) }
+            if let channel { o["channel"] = .id(channel) }
             return .object(o)
         case let .unknown(t): return ["type": .string(t)]
         }
@@ -186,18 +208,21 @@ public enum ServerMessage: Equatable, Sendable {
         case "welcome":
             let snap = j["snapshot"]
             self = .welcome(Welcome(tag: j["tag"]?.uint ?? 0, snapshot: snap?.object != nil ? snap : nil, rev: j["rev"]?.int ?? 0,
-                                    member: j["member"]?.uint, role: j["role"]?.string, token: j["token"]?.string, email: j["email"]?.string))
+                                    member: j["member"]?.uint, role: j["role"]?.string, token: j["token"]?.string, email: j["email"]?.string,
+                                    hidden: (j["hidden"]?.array ?? []).compactMap(\.uint)))
         case "update":
             if let s = j["data"], s.object != nil {
-                self = .update(data: s, rev: j["rev"]?.int ?? 0)
+                self = .update(data: s, rev: j["rev"]?.int ?? 0, hidden: (j["hidden"]?.array ?? []).compactMap(\.uint))
             } else {
                 self = .unknown("update without data")
             }
         case "account":
             self = .account(email: j["email"]?.string ?? "")
+        case "call_token":
+            self = .callToken(channel: j["channel"]?.uint ?? 0, url: j["url"]?.string ?? "", token: j["token"]?.string ?? "")
         case "ping": self = .ping
         case "pong": self = .pong
-        case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "")
+        case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint)
         default: self = .unknown(type)
         }
     }

@@ -59,7 +59,9 @@ struct DocsView: View {
 struct DocDetailView: View {
     @Environment(SyncClient.self) private var client
     @Environment(Nav.self) private var nav
+    @Environment(\.dismiss) private var dismiss
     let docId: UInt64
+    @State private var confirmDelete = false
     @State private var editing = false
     @State private var title = ""
     @State private var draft = ""
@@ -130,7 +132,26 @@ struct DocDetailView: View {
                         .disabled(!client.canEdit)
                         .accessibilityIdentifier("docEdit")
                     }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button(role: .destructive) { confirmDelete = true } label: { Label("Delete doc", systemImage: "trash") }
+                                .accessibilityIdentifier("deleteDocButton")
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .disabled(!client.canEdit)
+                        .accessibilityLabel("More")
+                        .accessibilityIdentifier("docMoreMenu")
+                    }
                 }
+            }
+            .confirmationDialog("Delete this doc?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if client.edit({ data, _ in Edits.deleteDoc(&data, doc: d.id) }) { dismiss() }
+                }
+                .accessibilityIdentifier("confirmDeleteDoc")
+            } message: {
+                Text("It's removed for everyone, with its sub pages.")
             }
         } else {
             EmptyNote(title: "This doc is gone", systemImage: "doc.text")

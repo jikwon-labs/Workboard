@@ -22,7 +22,11 @@ pub struct Status {
 
 impl Status {
     pub fn new(name: &str, color: [u8; 3], kind: StatusKind) -> Self {
-        Self { name: name.to_string(), color, kind }
+        Self {
+            name: name.to_string(),
+            color,
+            kind,
+        }
     }
 }
 
@@ -64,11 +68,26 @@ pub struct PriorityDef {
 }
 
 pub const PRIORITIES: [PriorityDef; 5] = [
-    PriorityDef { label: "No Priority", color: [0x87, 0x90, 0x9e] },
-    PriorityDef { label: "Urgent", color: [0xf5, 0x00, 0x00] },
-    PriorityDef { label: "High", color: [0xff, 0xcc, 0x00] },
-    PriorityDef { label: "Normal", color: [0x6f, 0xdd, 0xff] },
-    PriorityDef { label: "Low", color: [0xd8, 0xd8, 0xd8] },
+    PriorityDef {
+        label: "No Priority",
+        color: [0x87, 0x90, 0x9e],
+    },
+    PriorityDef {
+        label: "Urgent",
+        color: [0xf5, 0x00, 0x00],
+    },
+    PriorityDef {
+        label: "High",
+        color: [0xff, 0xcc, 0x00],
+    },
+    PriorityDef {
+        label: "Normal",
+        color: [0x6f, 0xdd, 0xff],
+    },
+    PriorityDef {
+        label: "Low",
+        color: [0xd8, 0xd8, 0xd8],
+    },
 ];
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -167,12 +186,33 @@ pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64>
         let fits = |name: &str| {
             !name.is_empty()
                 && rest.starts_with(name)
-                && !(name.chars().last().is_some_and(|c| c.is_ascii_alphanumeric())
-                    && rest[name.len()..].chars().next().is_some_and(|c| c.is_ascii_alphanumeric()))
+                && !(name
+                    .chars()
+                    .last()
+                    .is_some_and(|c| c.is_ascii_alphanumeric())
+                    && rest[name.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphanumeric()))
         };
-        let Some(best) = members.iter().filter(|m| fits(&m.name)).map(|m| m.name.len()).max() else { continue };
-        let named: Vec<u64> = members.iter().filter(|m| m.name.len() == best && fits(&m.name)).map(|m| m.id).collect();
-        let chosen: Vec<u64> = named.iter().copied().filter(|id| picked.contains(id)).collect();
+        let Some(best) = members
+            .iter()
+            .filter(|m| fits(&m.name))
+            .map(|m| m.name.len())
+            .max()
+        else {
+            continue;
+        };
+        let named: Vec<u64> = members
+            .iter()
+            .filter(|m| m.name.len() == best && fits(&m.name))
+            .map(|m| m.id)
+            .collect();
+        let chosen: Vec<u64> = named
+            .iter()
+            .copied()
+            .filter(|id| picked.contains(id))
+            .collect();
         for id in if chosen.is_empty() { named } else { chosen } {
             if !out.contains(&id) {
                 out.push(id);
@@ -341,7 +381,9 @@ pub fn fix_task_activity_ids(t: &mut Task) {
     let mut seen = std::collections::HashSet::new();
     let tid = t.id;
     t.activity.retain_mut(|a| {
-        let n = counts.entry((a.ts, a.author, a.comment, a.text.clone())).or_insert(0);
+        let n = counts
+            .entry((a.ts, a.author, a.comment, a.text.clone()))
+            .or_insert(0);
         if a.id == 0 {
             a.id = wb_sync::activity_id(tid, a.ts, a.author, a.comment, &a.text, *n);
         }
@@ -363,7 +405,11 @@ impl Task {
     /// Every running timer: who started it (None for an old timer that
     /// didn't record it) and when.
     pub fn running_timers(&self) -> Vec<(Option<u64>, i64)> {
-        self.timer_started.map(|st| (self.timer_by, st)).into_iter().chain(self.timers.iter().map(|r| (Some(r.member), r.start))).collect()
+        self.timer_started
+            .map(|st| (self.timer_by, st))
+            .into_iter()
+            .chain(self.timers.iter().map(|r| (Some(r.member), r.start)))
+            .collect()
     }
 
     /// Who a time entry belongs to: its owner, or for an entry from before
@@ -517,9 +563,17 @@ impl SeenIds {
     pub fn of(msgs: impl Iterator<Item = (u64, i64)>) -> SeenIds {
         let mut v: Vec<(u64, i64)> = msgs.collect();
         v.sort_by_key(|x| std::cmp::Reverse(x.1));
-        let floor = if v.len() > Self::MAX { v[Self::MAX - 1].1 } else { i64::MIN };
+        let floor = if v.len() > Self::MAX {
+            v[Self::MAX - 1].1
+        } else {
+            i64::MIN
+        };
         // (every message at the floor's time is kept, so none of them looks new)
-        let mut ids: Vec<u64> = v.into_iter().filter(|x| x.1 >= floor).map(|x| x.0).collect();
+        let mut ids: Vec<u64> = v
+            .into_iter()
+            .filter(|x| x.1 >= floor)
+            .map(|x| x.0)
+            .collect();
         ids.sort_unstable();
         ids.dedup();
         SeenIds { ids, floor }
@@ -591,9 +645,18 @@ pub struct Reminder {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TargetKind {
-    Number { start: f64, target: f64, current: f64, unit: String },
-    TrueFalse { done: bool },
-    Tasks { ids: Vec<u64> },
+    Number {
+        start: f64,
+        target: f64,
+        current: f64,
+        unit: String,
+    },
+    TrueFalse {
+        done: bool,
+    },
+    Tasks {
+        ids: Vec<u64>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -706,8 +769,15 @@ impl ListTrash {
         if let Ok(t) = serde_json::from_str::<ListTrash>(payload) {
             return Some(t);
         }
-        let (space, list, tasks) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(payload).ok()?;
-        Some(ListTrash { space, folder: None, list, tasks, statuses: vec![] })
+        let (space, list, tasks) =
+            serde_json::from_str::<(u64, ListItem, Vec<Task>)>(payload).ok()?;
+        Some(ListTrash {
+            space,
+            folder: None,
+            list,
+            tasks,
+            statuses: vec![],
+        })
     }
 }
 
@@ -814,7 +884,14 @@ pub struct ClickApps {
 
 impl Default for ClickApps {
     fn default() -> Self {
-        Self { priorities: true, tags: true, time_tracking: true, time_estimates: true, custom_fields: true, multiple_assignees: true }
+        Self {
+            priorities: true,
+            tags: true,
+            time_tracking: true,
+            time_estimates: true,
+            custom_fields: true,
+            multiple_assignees: true,
+        }
     }
 }
 
@@ -921,7 +998,11 @@ impl NotifySettings {
 
     /// "all", "mentions" or "nothing" for a channel.
     pub fn channel_mode(&self, id: u64) -> &str {
-        self.channel_modes.iter().find(|(c, _)| *c == id).map(|(_, m)| m.as_str()).unwrap_or(&self.channel_default)
+        self.channel_modes
+            .iter()
+            .find(|(c, _)| *c == id)
+            .map(|(_, m)| m.as_str())
+            .unwrap_or(&self.channel_default)
     }
 
     pub fn set_channel_mode(&mut self, id: u64, mode: &str) {
@@ -1116,12 +1197,18 @@ impl Data {
 
     pub fn workspaces() -> Vec<WsEntry> {
         let p = Self::dir().join("workspaces.json");
-        std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        std::fs::read_to_string(p)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
     }
 
     /// The workspace file open when the app last ran.
     pub fn last_workspace() -> Option<String> {
-        let f = std::fs::read_to_string(Self::dir().join("last-workspace")).ok()?.trim().to_string();
+        let f = std::fs::read_to_string(Self::dir().join("last-workspace"))
+            .ok()?
+            .trim()
+            .to_string();
         // only a plain file name in the data folder
         (!f.is_empty() && !f.contains('/') && !f.contains("..")).then_some(f)
     }
@@ -1163,7 +1250,11 @@ impl Data {
     fn keep_unreadable(file: &str, text: &str) {
         let stem = file.strip_suffix(".json").unwrap_or(file);
         let p = Self::dir().join(format!("{}-unreadable-{}.json", stem, now_ts()));
-        eprintln!("workboard: couldn't read {}; a copy is kept at {}", file, p.display());
+        eprintln!(
+            "workboard: couldn't read {}; a copy is kept at {}",
+            file,
+            p.display()
+        );
         if std::fs::write(&p, text).is_ok() {
             *UNREADABLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(p);
         }
@@ -1202,9 +1293,32 @@ impl Data {
         };
         let sid = d.new_id();
         let lid = d.new_id();
-        d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true, private_owner: None, ..Default::default() });
+        d.spaces.push(Space {
+            id: sid,
+            name: "Team Space".into(),
+            color: [0x5f, 0x55, 0xee],
+            statuses: default_statuses(),
+            folders: vec![],
+            lists: vec![ListItem {
+                id: lid,
+                name: "List".into(),
+                ..Default::default()
+            }],
+            expanded: true,
+            private_owner: None,
+            ..Default::default()
+        });
         let cid = d.new_id();
-        d.channels.push(Channel { id: cid, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members: vec![owner.id], messages: vec![], last_read: now_ts(), ..Default::default() });
+        d.channels.push(Channel {
+            id: cid,
+            name: "general".into(),
+            kind: ChannelKind::Channel,
+            topic: String::new(),
+            members: vec![owner.id],
+            messages: vec![],
+            last_read: now_ts(),
+            ..Default::default()
+        });
         d.extra.demo_removed = true;
         d
     }
@@ -1244,7 +1358,10 @@ impl Data {
                     }
                 }
                 if !d.extra.demo_removed {
-                    let _ = std::fs::write(Self::dir().join(format!("data-before-cleanup-{}.json", now_ts())), &s);
+                    let _ = std::fs::write(
+                        Self::dir().join(format!("data-before-cleanup-{}.json", now_ts())),
+                        &s,
+                    );
                     d.remove_demo();
                     d.save();
                 }
@@ -1252,7 +1369,19 @@ impl Data {
                 if !d.channels.iter().any(|c| c.kind == ChannelKind::Channel) {
                     let id = d.new_id();
                     let members = d.members.iter().map(|m| m.id).collect();
-                    d.channels.insert(0, Channel { id, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
+                    d.channels.insert(
+                        0,
+                        Channel {
+                            id,
+                            name: "general".into(),
+                            kind: ChannelKind::Channel,
+                            topic: String::new(),
+                            members,
+                            messages: vec![],
+                            last_read: now_ts(),
+                            ..Default::default()
+                        },
+                    );
                 }
                 return d;
             }
@@ -1277,7 +1406,14 @@ impl Data {
     pub fn fresh() -> Self {
         let user = std::env::var("USER").unwrap_or_default();
         let name = Self::display_user(&user);
-        let owner = Member { id: 1, name, color: [0x5f, 0x55, 0xee], email: String::new(), role: "Owner".into(), ..Default::default() };
+        let owner = Member {
+            id: 1,
+            name,
+            color: [0x5f, 0x55, 0xee],
+            email: String::new(),
+            role: "Owner".into(),
+            ..Default::default()
+        };
         let mut d = Self::blank("My Workspace", owner);
         d.extra.welcome = true;
         d
@@ -1289,7 +1425,9 @@ impl Data {
         use serde_json::Value;
         use std::collections::HashSet;
         fn label(v: &Value) -> Option<String> {
-            ["name", "title", "text"].iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(|x| x.to_string()))
+            ["name", "title", "text"]
+                .iter()
+                .find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(|x| x.to_string()))
         }
         fn collect(v: &Value, key: &str, out: &mut HashSet<(String, String)>) {
             match v {
@@ -1312,14 +1450,22 @@ impl Data {
             }
         }
         // true when the item (or something inside it) must stay
-        fn filter(v: &mut Value, key: &str, demo: &HashSet<(String, String)>, keep: &HashSet<u64>) -> bool {
+        fn filter(
+            v: &mut Value,
+            key: &str,
+            demo: &HashSet<(String, String)>,
+            keep: &HashSet<u64>,
+        ) -> bool {
             let mut stays = false;
             match v {
                 Value::Array(a) => {
                     a.retain_mut(|x| {
                         let inner = filter(x, key, demo, keep);
-                        let Some(id) = x.get("id").and_then(|i| i.as_u64()) else { return true };
-                        let is_demo = id < 1000 && label(x).map_or(false, |l| demo.contains(&(key.to_string(), l)));
+                        let Some(id) = x.get("id").and_then(|i| i.as_u64()) else {
+                            return true;
+                        };
+                        let is_demo = id < 1000
+                            && label(x).map_or(false, |l| demo.contains(&(key.to_string(), l)));
                         let keep_it = !is_demo || inner || keep.contains(&id);
                         stays |= keep_it;
                         keep_it
@@ -1328,7 +1474,9 @@ impl Data {
                 Value::Object(o) => {
                     for (k, x) in o.iter_mut() {
                         if x.is_array() {
-                            let had = x.as_array().map_or(false, |a| a.iter().any(|i| i.get("id").is_some()));
+                            let had = x
+                                .as_array()
+                                .map_or(false, |a| a.iter().any(|i| i.get("id").is_some()));
                             let any = filter(x, k, demo, keep);
                             stays |= had && any;
                         }
@@ -1348,7 +1496,8 @@ impl Data {
         // lists still holding the person's own tasks, and the person themself, stay
         let mut keep: HashSet<u64> = HashSet::new();
         keep.insert(self.me);
-        let demo_task = |t: &Task| t.id < 1000 && demo.contains(&("tasks".to_string(), t.name.clone()));
+        let demo_task =
+            |t: &Task| t.id < 1000 && demo.contains(&("tasks".to_string(), t.name.clone()));
         for t in &self.tasks {
             if !demo_task(t) {
                 keep.insert(t.list_id);
@@ -1400,9 +1549,22 @@ impl Data {
                     m.email.clear();
                 }
             }
-            let lists: HashSet<u64> = d.spaces.iter().flat_map(|s| s.lists.iter().map(|l| l.id).chain(s.folders.iter().flat_map(|f| f.lists.iter().map(|l| l.id)))).collect();
+            let lists: HashSet<u64> = d
+                .spaces
+                .iter()
+                .flat_map(|s| {
+                    s.lists
+                        .iter()
+                        .map(|l| l.id)
+                        .chain(s.folders.iter().flat_map(|f| f.lists.iter().map(|l| l.id)))
+                })
+                .collect();
             let spaces: HashSet<u64> = d.spaces.iter().map(|s| s.id).collect();
-            let folders: HashSet<u64> = d.spaces.iter().flat_map(|s| s.folders.iter().map(|f| f.id)).collect();
+            let folders: HashSet<u64> = d
+                .spaces
+                .iter()
+                .flat_map(|s| s.folders.iter().map(|f| f.id))
+                .collect();
             d.favorites.retain(|f| match f {
                 Location::List(id) => lists.contains(id),
                 Location::Space(id) => spaces.contains(id),
@@ -1412,7 +1574,21 @@ impl Data {
             if d.spaces.is_empty() {
                 let sid = d.new_id();
                 let lid = d.new_id();
-                d.spaces.push(Space { id: sid, name: "Team Space".into(), color: [0x5f, 0x55, 0xee], statuses: default_statuses(), folders: vec![], lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true, private_owner: None, ..Default::default() });
+                d.spaces.push(Space {
+                    id: sid,
+                    name: "Team Space".into(),
+                    color: [0x5f, 0x55, 0xee],
+                    statuses: default_statuses(),
+                    folders: vec![],
+                    lists: vec![ListItem {
+                        id: lid,
+                        name: "List".into(),
+                        ..Default::default()
+                    }],
+                    expanded: true,
+                    private_owner: None,
+                    ..Default::default()
+                });
             }
             d.extra.demo_removed = true;
             *self = d;
@@ -1444,14 +1620,21 @@ impl Data {
     pub fn space_of_list(&self, list_id: u64) -> Option<&Space> {
         self.spaces.iter().find(|s| {
             s.lists.iter().any(|l| l.id == list_id)
-                || s.folders.iter().any(|f| f.lists.iter().any(|l| l.id == list_id))
+                || s.folders
+                    .iter()
+                    .any(|f| f.lists.iter().any(|l| l.id == list_id))
         })
     }
 
     /// True when the list, or the folder or space it sits in, is archived.
     pub fn list_archived(&self, id: u64) -> bool {
         self.list_item(id).is_some_and(|l| l.archived)
-            || self.space_of_list(id).is_some_and(|s| s.archived || s.folders.iter().any(|f| f.archived && f.lists.iter().any(|l| l.id == id)))
+            || self.space_of_list(id).is_some_and(|s| {
+                s.archived
+                    || s.folders
+                        .iter()
+                        .any(|f| f.archived && f.lists.iter().any(|l| l.id == id))
+            })
     }
 
     /// Not archived, and not in an archived list or space.
@@ -1477,7 +1660,12 @@ impl Data {
             Some(m) => m == self.me,
             None => self.solo(),
         });
-        legacy.or_else(|| t.timers.iter().find(|r| r.member == self.me).map(|r| r.start))
+        legacy.or_else(|| {
+            t.timers
+                .iter()
+                .find(|r| r.member == self.me)
+                .map(|r| r.start)
+        })
     }
 
     /// A timer from an older app that didn't record who started it, in a
@@ -1490,19 +1678,26 @@ impl Data {
     /// Starts my timer on a task (other people's timers keep running).
     pub fn start_my_timer(&mut self, task_id: u64, now: i64) {
         let me = self.me;
-        let Some(t) = self.tasks.iter_mut().find(|t| t.id == task_id) else { return };
+        let Some(t) = self.tasks.iter_mut().find(|t| t.id == task_id) else {
+            return;
+        };
         if t.timer_started.is_none() {
             t.timer_started = Some(now);
             t.timer_by = Some(me);
         } else if !t.timers.iter().any(|r| r.member == me) {
-            t.timers.push(RunningTimer { member: me, start: now });
+            t.timers.push(RunningTimer {
+                member: me,
+                start: now,
+            });
         }
     }
 
     /// Stops my timer on one task, keeping the time as my entry.
     pub fn stop_my_timer(&mut self, task_id: u64, now: i64) {
         let me = self.me;
-        let Some(i) = self.tasks.iter().position(|t| t.id == task_id) else { return };
+        let Some(i) = self.tasks.iter().position(|t| t.id == task_id) else {
+            return;
+        };
         let legacy_mine = self.tasks[i].timer_started.is_some()
             && match self.tasks[i].timer_by {
                 Some(m) => m == me,
@@ -1511,7 +1706,11 @@ impl Data {
         let t = &mut self.tasks[i];
         if legacy_mine {
             if let Some(st) = t.timer_started.take() {
-                t.time_entries.push(TimeEntry { start: st, end: now, member: me });
+                t.time_entries.push(TimeEntry {
+                    start: st,
+                    end: now,
+                    member: me,
+                });
             }
             t.timer_by = None;
             // the next person's timer moves into the field older apps read
@@ -1522,17 +1721,27 @@ impl Data {
             }
         } else if let Some(k) = t.timers.iter().position(|r| r.member == me) {
             let r = t.timers.remove(k);
-            t.time_entries.push(TimeEntry { start: r.start, end: now, member: me });
+            t.time_entries.push(TimeEntry {
+                start: r.start,
+                end: now,
+                member: me,
+            });
         }
     }
 
     /// Stops a timer an older app started without an owner, keeping the
     /// time without an owner too.
     pub fn stop_ownerless_timer(&mut self, task_id: u64, now: i64) {
-        let Some(t) = self.tasks.iter_mut().find(|t| t.id == task_id) else { return };
+        let Some(t) = self.tasks.iter_mut().find(|t| t.id == task_id) else {
+            return;
+        };
         if t.timer_by.is_none() {
             if let Some(st) = t.timer_started.take() {
-                t.time_entries.push(TimeEntry { start: st, end: now, member: 0 });
+                t.time_entries.push(TimeEntry {
+                    start: st,
+                    end: now,
+                    member: 0,
+                });
             }
             if !t.timers.is_empty() {
                 let r = t.timers.remove(0);
@@ -1553,7 +1762,12 @@ impl Data {
 
     /// Stops every timer of mine, keeping the time as my entries.
     pub fn stop_my_timers(&mut self, now: i64) {
-        let mine: Vec<u64> = self.tasks.iter().filter(|t| self.is_my_timer(t)).map(|t| t.id).collect();
+        let mine: Vec<u64> = self
+            .tasks
+            .iter()
+            .filter(|t| self.is_my_timer(t))
+            .map(|t| t.id)
+            .collect();
         for id in mine {
             self.stop_my_timer(id, now);
         }
@@ -1562,7 +1776,12 @@ impl Data {
     /// The letter or symbol drawn on a space's square.
     pub fn space_glyph(s: &Space) -> String {
         if s.icon.is_empty() {
-            s.name.chars().next().unwrap_or('S').to_uppercase().to_string()
+            s.name
+                .chars()
+                .next()
+                .unwrap_or('S')
+                .to_uppercase()
+                .to_string()
         } else {
             s.icon.clone()
         }
@@ -1570,11 +1789,25 @@ impl Data {
 
     /// The list with this id, wherever it sits (space or folder).
     pub fn list_item(&self, id: u64) -> Option<&ListItem> {
-        self.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter()))).find(|l| l.id == id)
+        self.spaces
+            .iter()
+            .flat_map(|s| {
+                s.lists
+                    .iter()
+                    .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
+            })
+            .find(|l| l.id == id)
     }
 
     pub fn list_item_mut(&mut self, id: u64) -> Option<&mut ListItem> {
-        self.spaces.iter_mut().flat_map(|s| s.lists.iter_mut().chain(s.folders.iter_mut().flat_map(|f| f.lists.iter_mut()))).find(|l| l.id == id)
+        self.spaces
+            .iter_mut()
+            .flat_map(|s| {
+                s.lists
+                    .iter_mut()
+                    .chain(s.folders.iter_mut().flat_map(|f| f.lists.iter_mut()))
+            })
+            .find(|l| l.id == id)
     }
 
     pub fn list_name(&self, list_id: u64) -> String {
@@ -1629,7 +1862,10 @@ impl Data {
     }
 
     pub fn is_closed(&self, t: &Task) -> bool {
-        matches!(self.status_of(t).kind, StatusKind::Closed | StatusKind::Done)
+        matches!(
+            self.status_of(t).kind,
+            StatusKind::Closed | StatusKind::Done
+        )
     }
 
     /// Lists covered by a location (empty for cross-workspace locations).
@@ -1687,7 +1923,10 @@ impl Data {
     pub fn location_exists(&self, loc: Location) -> bool {
         match loc {
             Location::Space(id) => self.spaces.iter().any(|s| s.id == id),
-            Location::Folder(id) => self.spaces.iter().any(|s| s.folders.iter().any(|f| f.id == id)),
+            Location::Folder(id) => self
+                .spaces
+                .iter()
+                .any(|s| s.folders.iter().any(|f| f.id == id)),
             Location::List(id) => self.space_of_list(id).is_some(),
             _ => true,
         }
@@ -1718,10 +1957,38 @@ impl Data {
             spaces: vec![],
             tasks: vec![],
             members: vec![
-                Member { id: 1, name: "Me".into(), color: [0x5f, 0x55, 0xee], email: "me@example.com".into(), role: "Owner".into(), ..Default::default() },
-                Member { id: 2, name: "Alex Kim".into(), color: [0x10, 0x90, 0xe0], email: "alex@example.com".into(), role: "Admin".into(), ..Default::default() },
-                Member { id: 3, name: "Sam Lee".into(), color: [0xe1, 0x6b, 0x16], email: "sam@example.com".into(), role: "Member".into(), ..Default::default() },
-                Member { id: 4, name: "Jordan Park".into(), color: [0x00, 0x88, 0x44], email: "jordan@example.com".into(), role: "Member".into(), ..Default::default() },
+                Member {
+                    id: 1,
+                    name: "Me".into(),
+                    color: [0x5f, 0x55, 0xee],
+                    email: "me@example.com".into(),
+                    role: "Owner".into(),
+                    ..Default::default()
+                },
+                Member {
+                    id: 2,
+                    name: "Alex Kim".into(),
+                    color: [0x10, 0x90, 0xe0],
+                    email: "alex@example.com".into(),
+                    role: "Admin".into(),
+                    ..Default::default()
+                },
+                Member {
+                    id: 3,
+                    name: "Sam Lee".into(),
+                    color: [0xe1, 0x6b, 0x16],
+                    email: "sam@example.com".into(),
+                    role: "Member".into(),
+                    ..Default::default()
+                },
+                Member {
+                    id: 4,
+                    name: "Jordan Park".into(),
+                    color: [0x00, 0x88, 0x44],
+                    email: "jordan@example.com".into(),
+                    role: "Member".into(),
+                    ..Default::default()
+                },
             ],
             me: 1,
             next_id: 100,
@@ -1747,13 +2014,25 @@ impl Data {
                 id: folder,
                 name: "Projects".into(),
                 lists: vec![
-                    ListItem { id: l_web, name: "Website Redesign".into(), ..Default::default() },
-                    ListItem { id: l_mkt, name: "Marketing".into(), ..Default::default() },
+                    ListItem {
+                        id: l_web,
+                        name: "Website Redesign".into(),
+                        ..Default::default()
+                    },
+                    ListItem {
+                        id: l_mkt,
+                        name: "Marketing".into(),
+                        ..Default::default()
+                    },
                 ],
                 expanded: true,
                 archived: false,
             }],
-            lists: vec![ListItem { id: l_personal, name: "Personal".into(), ..Default::default() }],
+            lists: vec![ListItem {
+                id: l_personal,
+                name: "Personal".into(),
+                ..Default::default()
+            }],
             expanded: true,
             private_owner: None,
             ..Default::default()
@@ -1764,7 +2043,11 @@ impl Data {
             color: [0xe1, 0x6b, 0x16],
             statuses: default_statuses(),
             folders: vec![],
-            lists: vec![ListItem { id: l_ideas, name: "Ideas".into(), ..Default::default() }],
+            lists: vec![ListItem {
+                id: l_ideas,
+                name: "Ideas".into(),
+                ..Default::default()
+            }],
             expanded: false,
             private_owner: None,
             ..Default::default()
@@ -1774,19 +2057,136 @@ impl Data {
         let t = today();
         let wd = t.weekday().num_days_from_monday() as i64;
         let day = |n: i64| Some(t + Duration::days(n));
-        let samples: Vec<(u64, &str, &str, u8, Vec<u64>, Option<NaiveDate>, Option<NaiveDate>, Vec<&str>)> = vec![
-            (l_web, "Design new homepage layout", "in progress", 2, vec![1, 2], day(-wd), day(2), vec!["design"]),
-            (l_web, "Write copy for landing page", "to do", 3, vec![3], day(1), day(4), vec!["content"]),
-            (l_web, "Set up analytics dashboard", "to do", 4, vec![], None, day(9), vec![]),
-            (l_web, "Fix navigation on mobile", "in progress", 1, vec![1], day(-3), day(-1), vec!["bug"]),
-            (l_web, "Collect feedback from beta users", "to do", 0, vec![4], None, None, vec![]),
-            (l_web, "Choose color palette", "complete", 3, vec![2], day(-8), day(-5), vec!["design"]),
-            (l_mkt, "Plan Q1 campaign", "in progress", 2, vec![1, 3], day(-2), day(6), vec![]),
-            (l_mkt, "Newsletter draft", "to do", 3, vec![3], None, day(3), vec!["content"]),
-            (l_mkt, "Social media calendar", "complete", 4, vec![4], day(-10), day(-6), vec![]),
-            (l_personal, "Renew passport", "to do", 2, vec![1], None, day(0), vec![]),
-            (l_personal, "Book dentist appointment", "to do", 3, vec![1], None, day(12), vec![]),
-            (l_ideas, "Build a reading tracker", "to do", 0, vec![1], None, None, vec![]),
+        let samples: Vec<(
+            u64,
+            &str,
+            &str,
+            u8,
+            Vec<u64>,
+            Option<NaiveDate>,
+            Option<NaiveDate>,
+            Vec<&str>,
+        )> = vec![
+            (
+                l_web,
+                "Design new homepage layout",
+                "in progress",
+                2,
+                vec![1, 2],
+                day(-wd),
+                day(2),
+                vec!["design"],
+            ),
+            (
+                l_web,
+                "Write copy for landing page",
+                "to do",
+                3,
+                vec![3],
+                day(1),
+                day(4),
+                vec!["content"],
+            ),
+            (
+                l_web,
+                "Set up analytics dashboard",
+                "to do",
+                4,
+                vec![],
+                None,
+                day(9),
+                vec![],
+            ),
+            (
+                l_web,
+                "Fix navigation on mobile",
+                "in progress",
+                1,
+                vec![1],
+                day(-3),
+                day(-1),
+                vec!["bug"],
+            ),
+            (
+                l_web,
+                "Collect feedback from beta users",
+                "to do",
+                0,
+                vec![4],
+                None,
+                None,
+                vec![],
+            ),
+            (
+                l_web,
+                "Choose color palette",
+                "complete",
+                3,
+                vec![2],
+                day(-8),
+                day(-5),
+                vec!["design"],
+            ),
+            (
+                l_mkt,
+                "Plan Q1 campaign",
+                "in progress",
+                2,
+                vec![1, 3],
+                day(-2),
+                day(6),
+                vec![],
+            ),
+            (
+                l_mkt,
+                "Newsletter draft",
+                "to do",
+                3,
+                vec![3],
+                None,
+                day(3),
+                vec!["content"],
+            ),
+            (
+                l_mkt,
+                "Social media calendar",
+                "complete",
+                4,
+                vec![4],
+                day(-10),
+                day(-6),
+                vec![],
+            ),
+            (
+                l_personal,
+                "Renew passport",
+                "to do",
+                2,
+                vec![1],
+                None,
+                day(0),
+                vec![],
+            ),
+            (
+                l_personal,
+                "Book dentist appointment",
+                "to do",
+                3,
+                vec![1],
+                None,
+                day(12),
+                vec![],
+            ),
+            (
+                l_ideas,
+                "Build a reading tracker",
+                "to do",
+                0,
+                vec![1],
+                None,
+                None,
+                vec![],
+            ),
         ];
         let now = now_ts();
         for (i, (list, name, st, pr, asg, start, due, tags)) in samples.into_iter().enumerate() {
@@ -1804,7 +2204,13 @@ impl Data {
                 due,
                 tags: tags.into_iter().map(String::from).collect(),
                 checklist: vec![],
-                activity: vec![Activity { ts: now - 86400 * 3, author: 1, text: "created this task".into(), comment: false, ..Default::default() }],
+                activity: vec![Activity {
+                    ts: now - 86400 * 3,
+                    author: 1,
+                    text: "created this task".into(),
+                    comment: false,
+                    ..Default::default()
+                }],
                 time_entries: vec![],
                 timer_started: None,
                 timer_by: None,
@@ -1827,7 +2233,10 @@ impl Data {
         }
         // Subtasks and a checklist on the first task.
         let first = d.tasks[0].id;
-        for (n, name) in ["Wireframe hero section", "Pick hero image"].iter().enumerate() {
+        for (n, name) in ["Wireframe hero section", "Pick hero image"]
+            .iter()
+            .enumerate()
+        {
             let id = d.new_id();
             d.tasks.push(Task {
                 id,
@@ -1835,7 +2244,11 @@ impl Data {
                 parent: Some(first),
                 name: (*name).into(),
                 description: String::new(),
-                status: if n == 0 { "complete".into() } else { "to do".into() },
+                status: if n == 0 {
+                    "complete".into()
+                } else {
+                    "to do".into()
+                },
                 priority: 0,
                 assignees: vec![2],
                 start: None,
@@ -1863,11 +2276,25 @@ impl Data {
                 attachments: vec![],
             });
         }
-        d.tasks[0].description = "Refresh the homepage with a cleaner hero, clear call to action and a lighter grid.".into();
+        d.tasks[0].description =
+            "Refresh the homepage with a cleaner hero, clear call to action and a lighter grid."
+                .into();
         d.tasks[0].checklist = vec![
-            CheckItem { text: "Review competitors".into(), done: true, assignee: None },
-            CheckItem { text: "Sketch three options".into(), done: false, assignee: None },
-            CheckItem { text: "Share with the team".into(), done: false, assignee: None },
+            CheckItem {
+                text: "Review competitors".into(),
+                done: true,
+                assignee: None,
+            },
+            CheckItem {
+                text: "Sketch three options".into(),
+                done: false,
+                assignee: None,
+            },
+            CheckItem {
+                text: "Share with the team".into(),
+                done: false,
+                assignee: None,
+            },
         ];
         let now2 = now_ts();
         let doc_id = d.new_id();
@@ -1904,24 +2331,107 @@ impl Data {
             edited: None,
         };
         let c1 = d.new_id();
-        let mut m1 = msg(&mut d, 2, "Morning everyone! The new homepage mockups are in the Website Redesign list.", 3 * 3600);
-        m1.reactions.push(Reaction { emoji: "\u{1F44D}".into(), users: vec![3, 4] });
-        let r1 = msg(&mut d, 1, "Looks great, I'll review them after lunch.", 2 * 3600);
+        let mut m1 = msg(
+            &mut d,
+            2,
+            "Morning everyone! The new homepage mockups are in the Website Redesign list.",
+            3 * 3600,
+        );
+        m1.reactions.push(Reaction {
+            emoji: "\u{1F44D}".into(),
+            users: vec![3, 4],
+        });
+        let r1 = msg(
+            &mut d,
+            1,
+            "Looks great, I'll review them after lunch.",
+            2 * 3600,
+        );
         m1.replies.push(r1);
-        let m2 = msg(&mut d, 3, "Reminder: newsletter draft is due Thursday.", 3600);
-        let m3 = msg(&mut d, 4, "@Me can you check the beta feedback list when you have a minute?", 1200);
-        d.channels.push(Channel { id: c1, name: "general".into(), kind: ChannelKind::Channel, topic: "Company-wide announcements and chat".into(), members: vec![1, 2, 3, 4], messages: vec![m1, m2, m3], last_read: now2 - 1800, ..Default::default() });
+        let m2 = msg(
+            &mut d,
+            3,
+            "Reminder: newsletter draft is due Thursday.",
+            3600,
+        );
+        let m3 = msg(
+            &mut d,
+            4,
+            "@Me can you check the beta feedback list when you have a minute?",
+            1200,
+        );
+        d.channels.push(Channel {
+            id: c1,
+            name: "general".into(),
+            kind: ChannelKind::Channel,
+            topic: "Company-wide announcements and chat".into(),
+            members: vec![1, 2, 3, 4],
+            messages: vec![m1, m2, m3],
+            last_read: now2 - 1800,
+            ..Default::default()
+        });
         let c2 = d.new_id();
-        let m4 = msg(&mut d, 2, "Should the hero image be a photo or an illustration?", 5400);
-        d.channels.push(Channel { id: c2, name: "website-redesign".into(), kind: ChannelKind::Channel, topic: "Everything about the new site".into(), members: vec![1, 2], messages: vec![m4], last_read: now2, ..Default::default() });
+        let m4 = msg(
+            &mut d,
+            2,
+            "Should the hero image be a photo or an illustration?",
+            5400,
+        );
+        d.channels.push(Channel {
+            id: c2,
+            name: "website-redesign".into(),
+            kind: ChannelKind::Channel,
+            topic: "Everything about the new site".into(),
+            members: vec![1, 2],
+            messages: vec![m4],
+            last_read: now2,
+            ..Default::default()
+        });
         let c3 = d.new_id();
-        let m5 = msg(&mut d, 2, "Hey, do you have a minute to talk about the launch date?", 600);
-        d.channels.push(Channel { id: c3, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 2], messages: vec![m5], last_read: 0, ..Default::default() });
+        let m5 = msg(
+            &mut d,
+            2,
+            "Hey, do you have a minute to talk about the launch date?",
+            600,
+        );
+        d.channels.push(Channel {
+            id: c3,
+            name: String::new(),
+            kind: ChannelKind::Direct,
+            topic: String::new(),
+            members: vec![1, 2],
+            messages: vec![m5],
+            last_read: 0,
+            ..Default::default()
+        });
         let c4 = d.new_id();
-        d.channels.push(Channel { id: c4, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 3], messages: vec![], last_read: now2, ..Default::default() });
-        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400, member: 0 });
-        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800, member: 0 });
-        d.tasks[0].activity.push(Activity { ts: now - 3600 * 5, author: 2, text: "Looks great so far, let's review on Friday.".into(), comment: true, ..Default::default() });
+        d.channels.push(Channel {
+            id: c4,
+            name: String::new(),
+            kind: ChannelKind::Direct,
+            topic: String::new(),
+            members: vec![1, 3],
+            messages: vec![],
+            last_read: now2,
+            ..Default::default()
+        });
+        d.tasks[0].time_entries.push(TimeEntry {
+            start: now2 - 86400 - 5400,
+            end: now2 - 86400,
+            member: 0,
+        });
+        d.tasks[3].time_entries.push(TimeEntry {
+            start: now2 - 7200,
+            end: now2 - 4800,
+            member: 0,
+        });
+        d.tasks[0].activity.push(Activity {
+            ts: now - 3600 * 5,
+            author: 2,
+            text: "Looks great so far, let's review on Friday.".into(),
+            comment: true,
+            ..Default::default()
+        });
         d
     }
 }

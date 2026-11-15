@@ -47,7 +47,13 @@ pub fn paint_dashed(p: &egui::Painter, c: Pos2, r: f32, color: Color32) {
     for i in 0..n {
         let a0 = std::f32::consts::TAU * (i as f32 / n as f32);
         let a1 = a0 + std::f32::consts::TAU / n as f32 * 0.55;
-        p.line_segment([c + vec2(a0.cos(), a0.sin()) * r, c + vec2(a1.cos(), a1.sin()) * r], Stroke::new(1.5, color));
+        p.line_segment(
+            [
+                c + vec2(a0.cos(), a0.sin()) * r,
+                c + vec2(a1.cos(), a1.sin()) * r,
+            ],
+            Stroke::new(1.5, color),
+        );
     }
 }
 
@@ -83,7 +89,14 @@ pub fn paint_avatar(p: &egui::Painter, center: Pos2, r: f32, m: &Member, ring: C
 }
 
 /// Overlapping avatars; returns the width used.
-pub fn paint_avatars(p: &egui::Painter, left: Pos2, r: f32, ids: &[u64], data: &Data, ring: Color32) -> f32 {
+pub fn paint_avatars(
+    p: &egui::Painter,
+    left: Pos2,
+    r: f32,
+    ids: &[u64],
+    data: &Data,
+    ring: Color32,
+) -> f32 {
     let mut x = left.x + r;
     let mut n = 0;
     for id in ids.iter().take(3) {
@@ -94,7 +107,13 @@ pub fn paint_avatars(p: &egui::Painter, left: Pos2, r: f32, ids: &[u64], data: &
         }
     }
     if ids.len() > 3 {
-        p.text(pos2(x + 2.0, left.y), Align2::LEFT_CENTER, format!("+{}", ids.len() - 3), FontId::proportional(11.0), Color32::GRAY);
+        p.text(
+            pos2(x + 2.0, left.y),
+            Align2::LEFT_CENTER,
+            format!("+{}", ids.len() - 3),
+            FontId::proportional(11.0),
+            Color32::GRAY,
+        );
         x += 18.0;
     }
     if n == 0 {
@@ -107,8 +126,18 @@ pub fn paint_avatars(p: &egui::Painter, left: Pos2, r: f32, ids: &[u64], data: &
 pub fn paint_empty_avatar(p: &egui::Painter, center: Pos2, r: f32, color: Color32) {
     p.circle_stroke(center, r, Stroke::new(1.0, color));
     // person glyph
-    p.circle_stroke(center + vec2(0.0, -r * 0.25), r * 0.28, Stroke::new(1.0, color));
-    p.line_segment([center + vec2(-r * 0.45, r * 0.5), center + vec2(r * 0.45, r * 0.5)], Stroke::new(1.0, color));
+    p.circle_stroke(
+        center + vec2(0.0, -r * 0.25),
+        r * 0.28,
+        Stroke::new(1.0, color),
+    );
+    p.line_segment(
+        [
+            center + vec2(-r * 0.45, r * 0.5),
+            center + vec2(r * 0.45, r * 0.5),
+        ],
+        Stroke::new(1.0, color),
+    );
 }
 
 /// Status pill: open statuses are a light grey pill with dark text and a dashed
@@ -117,15 +146,32 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
     let open = st.kind == StatusKind::Open;
     let dark = ui.visuals().dark_mode;
     let (fill, fg) = if open {
-        (if dark { Color32::from_white_alpha(22) } else { Color32::from_black_alpha(15) }, if dark { Color32::from_rgb(230, 230, 230) } else { Color32::from_rgb(32, 32, 32) })
+        (
+            if dark {
+                Color32::from_white_alpha(22)
+            } else {
+                Color32::from_black_alpha(15)
+            },
+            if dark {
+                Color32::from_rgb(230, 230, 230)
+            } else {
+                Color32::from_rgb(32, 32, 32)
+            },
+        )
     } else {
         (rgb(st.color), Color32::WHITE)
     };
     let text = crate::i18n::status_text(&st.name).to_uppercase();
-    let galley = ui.painter().layout_no_wrap(text, FontId::proportional(12.0), fg);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text, FontId::proportional(12.0), fg);
     let size = vec2(galley.size().x + 30.0, 22.0);
     let (rect, resp) = ui.allocate_exact_size(size, sense);
-    let fill = if resp.hovered() { fill.gamma_multiply(0.9) } else { fill };
+    let fill = if resp.hovered() {
+        fill.gamma_multiply(0.9)
+    } else {
+        fill
+    };
     ui.painter().rect_filled(rect, 5.0, fill);
     let c = rect.left_center() + vec2(11.0, 0.0);
     match st.kind {
@@ -136,11 +182,21 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
         }
         _ => {
             ui.painter().circle_filled(c, 5.0, fg);
-            ui.painter().line_segment([c + vec2(-2.3, 0.0), c + vec2(-0.6, 1.8)], Stroke::new(1.3, fill));
-            ui.painter().line_segment([c + vec2(-0.6, 1.8), c + vec2(2.5, -1.8)], Stroke::new(1.3, fill));
+            ui.painter().line_segment(
+                [c + vec2(-2.3, 0.0), c + vec2(-0.6, 1.8)],
+                Stroke::new(1.3, fill),
+            );
+            ui.painter().line_segment(
+                [c + vec2(-0.6, 1.8), c + vec2(2.5, -1.8)],
+                Stroke::new(1.3, fill),
+            );
         }
     }
-    ui.painter().galley(pos2(rect.left() + 20.0, rect.center().y - galley.size().y / 2.0), galley, fg);
+    ui.painter().galley(
+        pos2(rect.left() + 20.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        fg,
+    );
     resp
 }
 
@@ -197,7 +253,11 @@ pub fn fmt_ago(ts: i64) -> String {
         crate::trf!("{} mins ago", (d / 60).max(1))
     } else if d < 86400 {
         let h = d / 3600;
-        if h == 1 { tr("1 hour ago").into() } else { crate::trf!("{} hours ago", h) }
+        if h == 1 {
+            tr("1 hour ago").into()
+        } else {
+            crate::trf!("{} hours ago", h)
+        }
     } else {
         let dt = chrono::DateTime::from_timestamp(ts, 0)
             .map(|x| x.with_timezone(&chrono::Local).text("%b %-d at %-I:%M %p"))
@@ -207,7 +267,13 @@ pub fn fmt_ago(ts: i64) -> String {
 }
 
 /// Opens a popup below `resp` when it is clicked; shows `add` while open.
-pub fn popup<R>(ui: &Ui, resp: &Response, id: egui::Id, width: f32, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+pub fn popup<R>(
+    ui: &Ui,
+    resp: &Response,
+    id: egui::Id,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
     if resp.clicked() {
         ui.memory_mut(|m| m.toggle_popup(id));
     }
@@ -219,25 +285,35 @@ pub fn popup<R>(ui: &Ui, resp: &Response, id: egui::Id, width: f32, add: impl Fn
     let room = (screen.bottom() - resp.rect.bottom() - 32.0).max(screen.height() * 0.6);
     let tall_id = id.with("__tall");
     let tall: f32 = ui.data(|d| d.get_temp(tall_id)).unwrap_or(0.0);
-    egui::popup_below_widget(ui, id, resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-        ui.set_min_width(width);
-        if tall > room {
-            egui::ScrollArea::vertical().id_salt(id.with("scroll")).max_height(room).auto_shrink([true, true]).show(ui, |ui| {
-                ui.set_min_width(width);
+    egui::popup_below_widget(
+        ui,
+        id,
+        resp,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(width);
+            if tall > room {
+                egui::ScrollArea::vertical()
+                    .id_salt(id.with("scroll"))
+                    .max_height(room)
+                    .auto_shrink([true, true])
+                    .show(ui, |ui| {
+                        ui.set_min_width(width);
+                        let r = add(ui);
+                        let h = ui.min_rect().height();
+                        ui.data_mut(|d| d.insert_temp(tall_id, h));
+                        r
+                    })
+                    .inner
+            } else {
+                let top = ui.min_rect().top();
                 let r = add(ui);
-                let h = ui.min_rect().height();
+                let h = ui.min_rect().bottom() - top;
                 ui.data_mut(|d| d.insert_temp(tall_id, h));
                 r
-            })
-            .inner
-        } else {
-            let top = ui.min_rect().top();
-            let r = add(ui);
-            let h = ui.min_rect().bottom() - top;
-            ui.data_mut(|d| d.insert_temp(tall_id, h));
-            r
-        }
-    })
+            }
+        },
+    )
 }
 
 /// Opens a real egui menu below `resp` when it is clicked, the same kind a
@@ -255,7 +331,10 @@ pub fn click_menu(resp: &Response, add: impl FnOnce(&mut Ui)) {
     let open = st.as_ref().is_some_and(|r| r.id == resp.id);
     let pressed_outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.primary_down())
         && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
-            !resp.rect.contains(p) && !st.as_ref().is_some_and(|r| r.menu_state.read().area_contains(p))
+            !resp.rect.contains(p)
+                && !st
+                    .as_ref()
+                    .is_some_and(|r| r.menu_state.read().area_contains(p))
         });
     if open && (resp.clicked() || pressed_outside) {
         **st = None;
@@ -288,7 +367,9 @@ const MENU_SHOWN: &str = "__wb_click_menu_shown";
 pub fn any_menu_was_open(ctx: &egui::Context) -> bool {
     let nr = ctx.cumulative_pass_nr();
     let last: Option<u64> = ctx.data(|d| d.get_temp(egui::Id::new(MENU_SHOWN)));
-    ctx.memory(|m| m.any_popup_open()) || ctx.is_context_menu_open() || last.is_some_and(|l| l + 1 >= nr)
+    ctx.memory(|m| m.any_popup_open())
+        || ctx.is_context_menu_open()
+        || last.is_some_and(|l| l + 1 >= nr)
 }
 
 pub fn close_popup(ui: &Ui) {
@@ -296,15 +377,28 @@ pub fn close_popup(ui: &Ui) {
 }
 
 /// A plain full-width menu row with an optional painted lead.
-pub fn menu_row(ui: &mut Ui, t: &Theme, label: &str, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2)) -> Response {
+pub fn menu_row(
+    ui: &mut Ui,
+    t: &Theme,
+    label: &str,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
     let w = ui.available_width().max(160.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     name_it(&resp, label);
     if resp.hovered() || selected {
-        ui.painter().rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
+        ui.painter()
+            .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
     }
     lead(ui.painter(), rect.left_center() + vec2(14.0, 0.0));
-    ui.painter().text(rect.left_center() + vec2(30.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text);
+    ui.painter().text(
+        rect.left_center() + vec2(30.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        t.text,
+    );
     resp
 }
 
@@ -313,7 +407,13 @@ pub fn status_menu(ui: &mut Ui, t: &Theme, statuses: &[Status], current: &mut St
     ui.label(egui::RichText::new(tr("Statuses")).small().color(t.text3));
     for st in statuses {
         let sel = &st.name == current;
-        let r = menu_row(ui, t, &crate::i18n::status_text(&st.name).to_uppercase(), sel, |p, c| paint_status_circle(p, c, 6.0, st));
+        let r = menu_row(
+            ui,
+            t,
+            &crate::i18n::status_text(&st.name).to_uppercase(),
+            sel,
+            |p, c| paint_status_circle(p, c, 6.0, st),
+        );
         if r.clicked() {
             if !sel {
                 *current = st.name.clone();
@@ -340,10 +440,20 @@ pub fn priority_menu(ui: &mut Ui, t: &Theme, current: &mut u8) -> bool {
 /// clicked" separately from "the value changed".
 pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
     let mut picked = None;
-    ui.label(egui::RichText::new(tr("Task Priority")).small().color(t.text3));
+    ui.label(
+        egui::RichText::new(tr("Task Priority"))
+            .small()
+            .color(t.text3),
+    );
     for pr in [1u8, 2, 3, 4] {
         let col = priority_color(pr, t);
-        let r = menu_row(ui, t, tr(PRIORITIES[pr as usize].label), current == pr, |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0));
+        let r = menu_row(
+            ui,
+            t,
+            tr(PRIORITIES[pr as usize].label),
+            current == pr,
+            |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0),
+        );
         if r.clicked() {
             picked = Some(pr);
             close_popup(ui);
@@ -351,7 +461,13 @@ pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
     }
     ui.separator();
     let r = menu_row(ui, t, tr("Clear"), false, |p, c| {
-        p.text(c, Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), Color32::GRAY);
+        p.text(
+            c,
+            Align2::CENTER_CENTER,
+            "\u{2716}",
+            FontId::proportional(10.0),
+            Color32::GRAY,
+        );
     });
     if r.clicked() {
         picked = Some(0);
@@ -365,11 +481,21 @@ pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>
     ui.label(egui::RichText::new(tr("People")).small().color(t.text3));
     for m in &data.members {
         let sel = current.contains(&m.id);
-        let label = if m.id == data.me { crate::trf!("{} (you)", m.name) } else { m.name.clone() };
+        let label = if m.id == data.me {
+            crate::trf!("{} (you)", m.name)
+        } else {
+            m.name.clone()
+        };
         let ring = t.card;
         let r = menu_row(ui, t, &label, sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
         if sel {
-            ui.painter().text(r.rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, "\u{2714}", FontId::proportional(12.0), t.selected_text);
+            ui.painter().text(
+                r.rect.right_center() - vec2(12.0, 0.0),
+                Align2::RIGHT_CENTER,
+                "\u{2714}",
+                FontId::proportional(12.0),
+                t.selected_text,
+            );
         }
         if r.clicked() {
             if sel {
@@ -391,7 +517,13 @@ pub fn date_menu(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Naiv
     date_menu_inner(ui, t, id, current, true)
 }
 
-fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<NaiveDate>, close: bool) -> bool {
+fn date_menu_inner(
+    ui: &mut Ui,
+    t: &Theme,
+    id: egui::Id,
+    current: &mut Option<NaiveDate>,
+    close: bool,
+) -> bool {
     let close_popup = |ui: &Ui| {
         if close {
             close_popup(ui)
@@ -418,7 +550,11 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
                 ("8 weeks", td + Duration::days(56)),
             ];
             for (label, d) in opts {
-                let r = ui.add(egui::Button::new(tr(label)).frame(false).min_size(vec2(126.0, 24.0)));
+                let r = ui.add(
+                    egui::Button::new(tr(label))
+                        .frame(false)
+                        .min_size(vec2(126.0, 24.0)),
+                );
                 if r.clicked() {
                     *current = Some(d);
                     changed = true;
@@ -427,7 +563,13 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
             }
             if current.is_some() {
                 ui.separator();
-                if ui.add(egui::Button::new(egui::RichText::new(tr("Clear")).color(t.danger)).frame(false)).clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new(tr("Clear")).color(t.danger))
+                            .frame(false),
+                    )
+                    .clicked()
+                {
                     *current = None;
                     changed = true;
                     close_popup(ui);
@@ -454,18 +596,32 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
             let cell = 28.0;
             let (rect, _) = ui.allocate_exact_size(vec2(cell * 7.0, cell * 7.0), Sense::hover());
             let p = ui.painter();
-            for (i, d) in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].iter().enumerate() {
-                p.text(rect.min + vec2(cell * (i as f32 + 0.5), cell * 0.5), Align2::CENTER_CENTER, tr(d), FontId::proportional(11.0), t.text3);
+            for (i, d) in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+                .iter()
+                .enumerate()
+            {
+                p.text(
+                    rect.min + vec2(cell * (i as f32 + 0.5), cell * 0.5),
+                    Align2::CENTER_CENTER,
+                    tr(d),
+                    FontId::proportional(11.0),
+                    t.text3,
+                );
             }
             let start = month - Duration::days(month.weekday().num_days_from_sunday() as i64);
             for i in 0..42 {
                 let d = start + Duration::days(i);
-                let r = Rect::from_min_size(rect.min + vec2(cell * (i % 7) as f32, cell * (1 + i / 7) as f32), vec2(cell, cell)).shrink(1.5);
+                let r = Rect::from_min_size(
+                    rect.min + vec2(cell * (i % 7) as f32, cell * (1 + i / 7) as f32),
+                    vec2(cell, cell),
+                )
+                .shrink(1.5);
                 let resp = ui.interact(r, id.with(i), Sense::click());
                 let sel = Some(d) == *current;
                 let is_today = d == today();
                 if sel {
-                    ui.painter().circle_filled(r.center(), cell * 0.42, t.primary);
+                    ui.painter()
+                        .circle_filled(r.center(), cell * 0.42, t.primary);
                 } else if resp.hovered() {
                     ui.painter().circle_filled(r.center(), cell * 0.42, t.hover);
                 }
@@ -478,7 +634,13 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
                 } else {
                     t.text
                 };
-                ui.painter().text(r.center(), Align2::CENTER_CENTER, d.day().to_string(), FontId::proportional(12.0), col);
+                ui.painter().text(
+                    r.center(),
+                    Align2::CENTER_CENTER,
+                    d.day().to_string(),
+                    FontId::proportional(12.0),
+                    col,
+                );
                 if resp.clicked() {
                     *current = Some(d);
                     changed = true;
@@ -487,7 +649,11 @@ fn date_menu_inner(ui: &mut Ui, t: &Theme, id: egui::Id, current: &mut Option<Na
             }
         });
     });
-    ui.painter().vline(sep_x, cols.response.rect.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
+    ui.painter().vline(
+        sep_x,
+        cols.response.rect.y_range(),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
     ui.data_mut(|d| d.insert_temp(id, month));
     changed
 }
@@ -513,7 +679,11 @@ pub fn primary_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
 pub fn row_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
     ui.scope(|ui| {
         ui.spacing_mut().button_padding = vec2(10.0, 3.0);
-        ui.add(egui::Button::new(text).corner_radius(6).min_size(vec2(0.0, 26.0)))
+        ui.add(
+            egui::Button::new(text)
+                .corner_radius(6)
+                .min_size(vec2(0.0, 26.0)),
+        )
     })
     .inner
 }
@@ -522,8 +692,10 @@ pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let font = FontId::proportional(11.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 18.0), Sense::click());
-    ui.painter().rect_filled(rect, 4.0, color.gamma_multiply(0.16));
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    ui.painter()
+        .rect_filled(rect, 4.0, color.gamma_multiply(0.16));
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, color);
     resp
 }
 
@@ -538,9 +710,17 @@ pub fn tag_color(tag: &str) -> Color32 {
 pub fn paint_triangle(p: &egui::Painter, center: Pos2, open: bool, color: Color32) {
     let s = 4.0;
     let pts = if open {
-        vec![center + vec2(-s, -s * 0.5), center + vec2(s, -s * 0.5), center + vec2(0.0, s * 0.6)]
+        vec![
+            center + vec2(-s, -s * 0.5),
+            center + vec2(s, -s * 0.5),
+            center + vec2(0.0, s * 0.6),
+        ]
     } else {
-        vec![center + vec2(-s * 0.5, -s), center + vec2(s * 0.6, 0.0), center + vec2(-s * 0.5, s)]
+        vec![
+            center + vec2(-s * 0.5, -s),
+            center + vec2(s * 0.6, 0.0),
+            center + vec2(-s * 0.5, s),
+        ]
     };
     p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
 }
@@ -548,7 +728,9 @@ pub fn paint_triangle(p: &egui::Painter, center: Pos2, open: bool, color: Color3
 /// Place a widget over an exact rectangle without moving the layout cursor
 /// (unlike `Ui::put`, which pulls the following rows up to the rectangle).
 pub fn put_over(ui: &mut egui::Ui, rect: egui::Rect, w: impl egui::Widget) -> Response {
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+    ));
     child.add(w)
 }
 
@@ -568,10 +750,20 @@ pub fn focus_once(ui: &Ui, r: &Response) -> bool {
 }
 
 /// Repeat choices for recurring tasks (stored value, label).
-pub const RECUR: [(&str, &str); 5] = [("", "Never"), ("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"), ("yearly", "Yearly")];
+pub const RECUR: [(&str, &str); 5] = [
+    ("", "Never"),
+    ("daily", "Daily"),
+    ("weekly", "Weekly"),
+    ("monthly", "Monthly"),
+    ("yearly", "Yearly"),
+];
 
 pub fn recur_label(r: &Option<String>) -> &'static str {
-    RECUR.iter().find(|x| Some(x.0) == r.as_deref()).map(|x| x.1).unwrap_or("Never")
+    RECUR
+        .iter()
+        .find(|x| Some(x.0) == r.as_deref())
+        .map(|x| x.1)
+        .unwrap_or("Never")
 }
 
 /// The next date of a repeating task.
@@ -579,15 +771,26 @@ pub fn next_recur(d: NaiveDate, r: &str) -> NaiveDate {
     match r {
         "daily" => d + Duration::days(1),
         "weekly" => d + Duration::days(7),
-        "monthly" => d.checked_add_months(chrono::Months::new(1)).unwrap_or(d + Duration::days(30)),
-        "yearly" => d.checked_add_months(chrono::Months::new(12)).unwrap_or(d + Duration::days(365)),
+        "monthly" => d
+            .checked_add_months(chrono::Months::new(1))
+            .unwrap_or(d + Duration::days(30)),
+        "yearly" => d
+            .checked_add_months(chrono::Months::new(12))
+            .unwrap_or(d + Duration::days(365)),
         _ => d,
     }
 }
 
 /// Start date / Due date picker with a repeat choice, as in the original's
 /// date popup. Returns true when anything changed.
-pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<NaiveDate>, due: &mut Option<NaiveDate>, recur: &mut Option<String>) -> bool {
+pub fn dates_menu(
+    ui: &mut Ui,
+    t: &Theme,
+    id: egui::Id,
+    start: &mut Option<NaiveDate>,
+    due: &mut Option<NaiveDate>,
+    recur: &mut Option<String>,
+) -> bool {
     let mut which: u8 = ui.data(|d| d.get_temp(id.with("which"))).unwrap_or(1);
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -597,10 +800,18 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<Naive
                 None => tr(label).to_string(),
             };
             let sel = which == k;
-            let b = egui::Button::new(egui::RichText::new(txt).color(if sel { t.text } else { t.text2 }))
-                .fill(if sel { t.selected_bg } else { Color32::TRANSPARENT })
-                .stroke(Stroke::new(1.0, t.border))
-                .min_size(vec2(170.0, 28.0));
+            let b = egui::Button::new(egui::RichText::new(txt).color(if sel {
+                t.text
+            } else {
+                t.text2
+            }))
+            .fill(if sel {
+                t.selected_bg
+            } else {
+                Color32::TRANSPARENT
+            })
+            .stroke(Stroke::new(1.0, t.border))
+            .min_size(vec2(170.0, 28.0));
             if ui.add(b).clicked() {
                 which = k;
             }
@@ -630,7 +841,11 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<Naive
         for (v, label) in RECUR {
             let sel = recur.as_deref().unwrap_or("") == v;
             if ui.selectable_label(sel, tr(label)).clicked() && !sel {
-                *recur = if v.is_empty() { None } else { Some(v.to_string()) };
+                *recur = if v.is_empty() {
+                    None
+                } else {
+                    Some(v.to_string())
+                };
                 changed = true;
             }
         }
@@ -640,7 +855,11 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, start: &mut Option<Naive
 
 /// The frame every dialog window uses (Create List, Create a Space, Create Task...).
 pub fn dialog_frame(t: &Theme) -> egui::Frame {
-    egui::Frame::new().fill(t.card).corner_radius(12).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(20))
+    egui::Frame::new()
+        .fill(t.card)
+        .corner_radius(12)
+        .stroke(Stroke::new(1.0, t.border))
+        .inner_margin(egui::Margin::same(20))
 }
 
 /// Dialog heading: title on the left, round close button on the right.
@@ -652,10 +871,20 @@ pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
             name_it(&resp, "Close");
-            ui.painter().circle_filled(r.center(), 14.0, if resp.hovered() { t.border } else { t.hover });
+            ui.painter().circle_filled(
+                r.center(),
+                14.0,
+                if resp.hovered() { t.border } else { t.hover },
+            );
             let c = r.center();
-            ui.painter().line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], Stroke::new(1.5, t.text2));
-            ui.painter().line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], Stroke::new(1.5, t.text2));
+            ui.painter().line_segment(
+                [c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)],
+                Stroke::new(1.5, t.text2),
+            );
+            ui.painter().line_segment(
+                [c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)],
+                Stroke::new(1.5, t.text2),
+            );
             if resp.on_hover_text(tr("Close")).clicked() {
                 close = true;
             }
@@ -673,15 +902,22 @@ pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
     }
     let bg = if *on { t.primary } else { t.border };
     ui.painter().rect_filled(r, 10.0, bg);
-    let x = if *on { r.right() - 10.0 } else { r.left() + 10.0 };
-    ui.painter().circle_filled(pos2(x, r.center().y), 7.0, Color32::WHITE);
+    let x = if *on {
+        r.right() - 10.0
+    } else {
+        r.left() + 10.0
+    };
+    ui.painter()
+        .circle_filled(pos2(x, r.center().y), 7.0, Color32::WHITE);
     resp
 }
 
 /// Names a text field by its hint so screen readers (and the click tests) can find it.
 pub fn name_field(resp: &Response, label: &str) {
     let l = label.to_string();
-    resp.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, l.clone()));
+    resp.widget_info(move || {
+        egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, l.clone())
+    });
 }
 
 /// A full-width faint "+ Add ..." row (Add subtask, Create checklist).
@@ -692,6 +928,12 @@ pub fn add_line(ui: &mut Ui, t: &Theme, label: &str) -> Response {
     if resp.hovered() {
         ui.painter().rect_filled(r, 6.0, t.hover);
     }
-    ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text2);
+    ui.painter().text(
+        r.left_center() + vec2(10.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        t.text2,
+    );
     resp
 }

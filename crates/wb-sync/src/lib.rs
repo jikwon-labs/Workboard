@@ -22,7 +22,21 @@ use std::path::{Path, PathBuf};
 
 /// Collections that belong to the whole team (everything else stays personal).
 pub const SHARED: &[&str] = &[
-    "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams", "extra.bookmarks",
+    "spaces",
+    "tasks",
+    "members",
+    "docs",
+    "channels",
+    "extra.goals",
+    "extra.forms",
+    "extra.whiteboards",
+    "extra.meetings",
+    "extra.fields",
+    "extra.automations",
+    "extra.templates",
+    "extra.dashboards",
+    "extra.teams",
+    "extra.bookmarks",
 ];
 
 /// Single settings that belong to the whole team (not lists of items): the
@@ -40,7 +54,22 @@ const LOCAL_KEYS: &[&str] = &["last_read", "saved", "expanded"];
 /// field is kept from the other copies, so an app that doesn't know a field
 /// can't erase it. A new field like these goes here with a `META_V` bump.
 const DEFAULT_WHEN_MISSING: &[&str] = &[
-    "archived", "assignee", "reactions", "resolved", "timer_by", "timers", "milestone", "watchers", "waiting_on", "linked", "tags", "private", "required", "options", "cards", "mentions",
+    "archived",
+    "assignee",
+    "reactions",
+    "resolved",
+    "timer_by",
+    "timers",
+    "milestone",
+    "watchers",
+    "waiting_on",
+    "linked",
+    "tags",
+    "private",
+    "required",
+    "options",
+    "cards",
+    "mentions",
 ];
 
 /// Lists that only ever grow; every side's entries are kept.
@@ -111,7 +140,12 @@ pub fn fnv(bytes: &[u8]) -> u64 {
 pub fn random_u64() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
     h.finish()
 }
 
@@ -159,7 +193,9 @@ fn own_hash(obj: &Map<String, Value>) -> u64 {
         }
         own.insert(k.clone(), v.clone());
     }
-    fnv(serde_json::to_string(&Value::Object(own)).unwrap_or_default().as_bytes())
+    fnv(serde_json::to_string(&Value::Object(own))
+        .unwrap_or_default()
+        .as_bytes())
 }
 
 /// `parent` is the item this array sits in (None at the top). With `placed`,
@@ -244,7 +280,19 @@ pub fn carry_hashes(meta: &mut SyncMeta, legacy: &Value, current: &Value) {
 }
 
 fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
-    SHARED_VALUES.iter().map(|p| (p.to_string(), fnv(serde_json::to_string(get_path(data, p).unwrap_or(&Value::Null)).unwrap_or_default().as_bytes()))).collect()
+    SHARED_VALUES
+        .iter()
+        .map(|p| {
+            (
+                p.to_string(),
+                fnv(
+                    serde_json::to_string(get_path(data, p).unwrap_or(&Value::Null))
+                        .unwrap_or_default()
+                        .as_bytes(),
+                ),
+            )
+        })
+        .collect()
 }
 
 /// Record what changed since the last save: new stamps for edited items,
@@ -354,7 +402,13 @@ fn collect<'a>(src: usize, arr: &'a [Value], parent: Option<u64>, out: &mut Cand
 }
 
 impl<'a> Ctx<'a> {
-    fn new(stamps: Vec<&'a BTreeMap<u64, i64>>, moved: Vec<Option<&'a BTreeMap<u64, i64>>>, tombs: BTreeMap<u64, i64>, revived: BTreeMap<u64, i64>, all: Cands<'a>) -> Self {
+    fn new(
+        stamps: Vec<&'a BTreeMap<u64, i64>>,
+        moved: Vec<Option<&'a BTreeMap<u64, i64>>>,
+        tombs: BTreeMap<u64, i64>,
+        revived: BTreeMap<u64, i64>,
+        all: Cands<'a>,
+    ) -> Self {
         let omits_defaults: Vec<bool> = moved.iter().map(|m| m.is_some()).collect();
         let mut cands = HashMap::new();
         let mut home = HashMap::new();
@@ -384,7 +438,17 @@ impl<'a> Ctx<'a> {
             home_moved.insert(id, best_key.0);
             cands.insert(id, list.into_iter().map(|(s, _, v)| (s, v)).collect());
         }
-        Ctx { stamps, tombs, revived, out: BTreeMap::new(), cands, home, home_moved, out_moved: BTreeMap::new(), omits_defaults }
+        Ctx {
+            stamps,
+            tombs,
+            revived,
+            out: BTreeMap::new(),
+            cands,
+            home,
+            home_moved,
+            out_moved: BTreeMap::new(),
+            omits_defaults,
+        }
     }
 
     fn alive(&self, id: u64) -> bool {
@@ -398,7 +462,11 @@ impl<'a> Ctx<'a> {
 /// Merge one array of items. `parent` is the item it sits in (None at the
 /// top). An item that moved sits only where its newest copy puts it, and its
 /// copies from every place are merged, so nothing added inside it is lost.
-fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: Option<u64>) -> Vec<Value> {
+fn merge_arr<'a>(
+    cx: &mut Ctx<'a>,
+    sources: &[(usize, &'a Vec<Value>)],
+    parent: Option<u64>,
+) -> Vec<Value> {
     let mut order: Vec<u64> = vec![];
     let mut seen = std::collections::HashSet::new();
     for (_, arr) in sources {
@@ -417,7 +485,9 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
         if parent.is_some() && cx.home.get(&id).is_some_and(|h| *h != parent) {
             continue;
         }
-        let Some(list) = cx.cands.get(&id).cloned() else { continue };
+        let Some(list) = cx.cands.get(&id).cloned() else {
+            continue;
+        };
         let list = &list;
         // newest own fields win; on a tie this computer's version stays
         let mut best = list[0];
@@ -433,7 +503,9 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
         if let Some(m) = cx.home_moved.get(&id).filter(|m| **m > 0) {
             cx.out_moved.insert(id, *m);
         }
-        let Some(wobj) = best.1.as_object() else { continue };
+        let Some(wobj) = best.1.as_object() else {
+            continue;
+        };
         let local = list.iter().find(|c| c.0 == 0).and_then(|c| c.1.as_object());
         let mut keys: Vec<String> = wobj.keys().cloned().collect();
         for c in list {
@@ -447,9 +519,15 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
         }
         let mut obj = Map::new();
         for k in keys {
-            let vals: Vec<(usize, &'a Value)> = list.iter().filter_map(|c| c.1.get(&k).map(|v| (c.0, v))).collect();
+            let vals: Vec<(usize, &'a Value)> = list
+                .iter()
+                .filter_map(|c| c.1.get(&k).map(|v| (c.0, v)))
+                .collect();
             let value = if vals.iter().any(|(_, v)| is_id_array(v)) {
-                let subs: Vec<(usize, &'a Vec<Value>)> = vals.iter().filter_map(|(s, v)| v.as_array().map(|a| (*s, a))).collect();
+                let subs: Vec<(usize, &'a Vec<Value>)> = vals
+                    .iter()
+                    .filter_map(|(s, v)| v.as_array().map(|a| (*s, a)))
+                    .collect();
                 Value::Array(merge_arr(cx, &subs, Some(id)))
             } else if APPEND_KEYS.contains(&k.as_str()) {
                 let mut all: Vec<Value> = vec![];
@@ -462,11 +540,15 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
                 }
                 all.sort_by_key(|x| x.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
                 Value::Array(all)
-            } else if LOCAL_KEYS.contains(&k.as_str()) && local.map_or(false, |o| o.contains_key(&k)) {
+            } else if LOCAL_KEYS.contains(&k.as_str())
+                && local.map_or(false, |o| o.contains_key(&k))
+            {
                 local.unwrap()[&k].clone()
             } else if let Some(v) = wobj.get(&k) {
                 v.clone()
-            } else if DEFAULT_WHEN_MISSING.contains(&k.as_str()) && cx.omits_defaults.get(best.0).copied().unwrap_or(false) {
+            } else if DEFAULT_WHEN_MISSING.contains(&k.as_str())
+                && cx.omits_defaults.get(best.0).copied().unwrap_or(false)
+            {
                 // the newest copy has it at its default (see `omits_defaults`)
                 continue;
             } else {
@@ -477,14 +559,21 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
         out.push(Value::Object(obj));
     }
     // messages and replies read in time order
-    if !out.is_empty() && out.iter().all(|x| x.get("ts").map_or(false, |t| t.is_i64())) {
+    if !out.is_empty()
+        && out
+            .iter()
+            .all(|x| x.get("ts").map_or(false, |t| t.is_i64()))
+    {
         out.sort_by_key(|x| x["ts"].as_i64().unwrap_or(0));
     }
     out
 }
 
 fn meta_of(v: &Value) -> SyncMeta {
-    v.get("extra").and_then(|e| e.get("sync")).and_then(|s| serde_json::from_value(s.clone()).ok()).unwrap_or_default()
+    v.get("extra")
+        .and_then(|e| e.get("sync"))
+        .and_then(|s| serde_json::from_value(s.clone()).ok())
+        .unwrap_or_default()
 }
 
 /// Merge other people's copies into this one. Returns true when anything changed.
@@ -524,12 +613,18 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         let mut stamps: Vec<&BTreeMap<u64, i64>> = vec![&lmeta.stamps];
         stamps.extend(metas.iter().map(|m| &m.stamps));
         let keeps = |m: &SyncMeta| m.v >= 2;
-        let mut moved: Vec<Option<&BTreeMap<u64, i64>>> = vec![keeps(&lmeta).then_some(&lmeta.moved)];
+        let mut moved: Vec<Option<&BTreeMap<u64, i64>>> =
+            vec![keeps(&lmeta).then_some(&lmeta.moved)];
         moved.extend(metas.iter().map(|m| keeps(m).then_some(&m.moved)));
         let mut all: Vec<Vec<(usize, &Vec<Value>)>> = vec![];
         let mut cands = HashMap::new();
         for path in SHARED {
-            let mut sources: Vec<(usize, &Vec<Value>)> = vec![(0, get_path(&before, path).and_then(|v| v.as_array()).unwrap_or(&empty))];
+            let mut sources: Vec<(usize, &Vec<Value>)> = vec![(
+                0,
+                get_path(&before, path)
+                    .and_then(|v| v.as_array())
+                    .unwrap_or(&empty),
+            )];
             for (i, o) in others.iter().enumerate() {
                 if let Some(a) = get_path(o, path).and_then(|v| v.as_array()) {
                     sources.push((i + 1, a));
@@ -543,7 +638,10 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         let mut cx = Ctx::new(stamps, moved, tombs.clone(), revived.clone(), cands);
         let mut res = vec![];
         for (path, sources) in SHARED.iter().zip(&all) {
-            res.push((path.to_string(), Value::Array(merge_arr(&mut cx, sources, None))));
+            res.push((
+                path.to_string(),
+                Value::Array(merge_arr(&mut cx, sources, None)),
+            ));
         }
         merged = res;
         out_stamps = cx.out;
@@ -580,7 +678,11 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     lmeta.parents = parents_of(local);
     lmeta.value_hashes = value_hashes(local);
     lmeta.v = META_V;
-    set_path(local, "extra.sync", serde_json::to_value(&lmeta).unwrap_or_default());
+    set_path(
+        local,
+        "extra.sync",
+        serde_json::to_value(&lmeta).unwrap_or_default(),
+    );
     // compare without the bookkeeping, which always moves a little
     let strip = |v: &Value| {
         let mut v = v.clone();
@@ -636,8 +738,13 @@ pub fn shareable(data: &Value) -> Value {
 /// A DM or a private channel with a member list that doesn't include
 /// `member`: they don't get it and can't change it.
 pub fn closed_to(ch: &Value, member: u64) -> bool {
-    let restricted = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct") || ch.get("private").and_then(|p| p.as_bool()) == Some(true);
-    let members: Vec<u64> = ch.get("members").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.as_u64()).collect()).unwrap_or_default();
+    let restricted = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct")
+        || ch.get("private").and_then(|p| p.as_bool()) == Some(true);
+    let members: Vec<u64> = ch
+        .get("members")
+        .and_then(|m| m.as_array())
+        .map(|a| a.iter().filter_map(|m| m.as_u64()).collect())
+        .unwrap_or_default();
     restricted && !members.is_empty() && !members.contains(&member)
 }
 
@@ -646,8 +753,17 @@ pub fn closed_to(ch: &Value, member: u64) -> bool {
 /// Personal spaces with the tasks and docs in them, and other people's
 /// private docs with their sub pages.
 pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
-    let arr = |path: &str| get_path(data, path).and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]);
-    let mut out: Vec<u64> = arr("channels").iter().filter(|c| closed_to(c, member)).filter_map(id_of).collect();
+    let arr = |path: &str| {
+        get_path(data, path)
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+    };
+    let mut out: Vec<u64> = arr("channels")
+        .iter()
+        .filter(|c| closed_to(c, member))
+        .filter_map(id_of)
+        .collect();
     let mut spaces = vec![];
     let mut lists = std::collections::HashSet::new();
     for s in arr("spaces") {
@@ -662,20 +778,43 @@ pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
         lists.extend(inner.into_keys());
     }
     out.extend(&spaces);
-    out.extend(arr("tasks").iter().filter(|t| t.get("list_id").and_then(|l| l.as_u64()).is_some_and(|l| lists.contains(&l))).filter_map(id_of));
+    out.extend(
+        arr("tasks")
+            .iter()
+            .filter(|t| {
+                t.get("list_id")
+                    .and_then(|l| l.as_u64())
+                    .is_some_and(|l| lists.contains(&l))
+            })
+            .filter_map(id_of),
+    );
     let docs = arr("docs");
     let mut hid: std::collections::HashSet<u64> = docs
         .iter()
         .filter(|d| {
             let owner = d.get("owner").and_then(|o| o.as_u64()).unwrap_or(0);
-            let private = d.get("private").and_then(|p| p.as_bool()) == Some(true) && owner != 0 && owner != member;
-            private || d.get("space").and_then(|s| s.as_u64()).is_some_and(|s| spaces.contains(&s))
+            let private = d.get("private").and_then(|p| p.as_bool()) == Some(true)
+                && owner != 0
+                && owner != member;
+            private
+                || d.get("space")
+                    .and_then(|s| s.as_u64())
+                    .is_some_and(|s| spaces.contains(&s))
         })
         .filter_map(id_of)
         .collect();
     // sub pages of a hidden page
     loop {
-        let more: Vec<u64> = docs.iter().filter(|d| d.get("parent").and_then(|p| p.as_u64()).is_some_and(|p| hid.contains(&p))).filter_map(id_of).filter(|i| !hid.contains(i)).collect();
+        let more: Vec<u64> = docs
+            .iter()
+            .filter(|d| {
+                d.get("parent")
+                    .and_then(|p| p.as_u64())
+                    .is_some_and(|p| hid.contains(&p))
+            })
+            .filter_map(id_of)
+            .filter(|i| !hid.contains(i))
+            .collect();
         if more.is_empty() {
             break;
         }
@@ -696,8 +835,12 @@ pub fn hide(data: &mut Value, ids: &[u64]) -> Vec<Value> {
     }
     let mut gone = vec![];
     for path in SHARED {
-        let Some(a) = get_path_mut(data, path).and_then(|v| v.as_array_mut()) else { continue };
-        let (out, keep): (Vec<Value>, Vec<Value>) = std::mem::take(a).into_iter().partition(|x| id_of(x).is_some_and(|i| ids.contains(&i)));
+        let Some(a) = get_path_mut(data, path).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        let (out, keep): (Vec<Value>, Vec<Value>) = std::mem::take(a)
+            .into_iter()
+            .partition(|x| id_of(x).is_some_and(|i| ids.contains(&i)));
         *a = keep;
         gone.extend(out);
     }
@@ -742,7 +885,10 @@ pub fn suggested_folders() -> Vec<(String, String)> {
     let mut out = vec![];
     let icloud = h.join("Library/Mobile Documents/com~apple~CloudDocs");
     if icloud.is_dir() {
-        out.push(("iCloud Drive".to_string(), icloud.join("Workboard").to_string_lossy().to_string()));
+        out.push((
+            "iCloud Drive".to_string(),
+            icloud.join("Workboard").to_string_lossy().to_string(),
+        ));
     }
     if let Ok(rd) = std::fs::read_dir(h.join("Library/CloudStorage")) {
         for e in rd.flatten() {
@@ -750,17 +896,29 @@ pub fn suggested_folders() -> Vec<(String, String)> {
             if name.starts_with("GoogleDrive") {
                 let my = e.path().join("My Drive");
                 let base = if my.is_dir() { my } else { e.path() };
-                out.push(("Google Drive".to_string(), base.join("Workboard").to_string_lossy().to_string()));
+                out.push((
+                    "Google Drive".to_string(),
+                    base.join("Workboard").to_string_lossy().to_string(),
+                ));
             } else if name.starts_with("Dropbox") {
-                out.push(("Dropbox".to_string(), e.path().join("Workboard").to_string_lossy().to_string()));
+                out.push((
+                    "Dropbox".to_string(),
+                    e.path().join("Workboard").to_string_lossy().to_string(),
+                ));
             } else if name.starts_with("OneDrive") {
-                out.push(("OneDrive".to_string(), e.path().join("Workboard").to_string_lossy().to_string()));
+                out.push((
+                    "OneDrive".to_string(),
+                    e.path().join("Workboard").to_string_lossy().to_string(),
+                ));
             }
         }
     }
     let dropbox = h.join("Dropbox");
     if dropbox.is_dir() && !out.iter().any(|(n, _)| n == "Dropbox") {
-        out.push(("Dropbox".to_string(), dropbox.join("Workboard").to_string_lossy().to_string()));
+        out.push((
+            "Dropbox".to_string(),
+            dropbox.join("Workboard").to_string_lossy().to_string(),
+        ));
     }
     out
 }
@@ -780,10 +938,14 @@ pub fn activity_id(task: u64, ts: i64, author: u64, comment: bool, text: &str, n
 /// and drops repeats of the same id. True when anything changed.
 pub fn fill_activity_ids(data: &mut Value) -> bool {
     let mut changed = false;
-    let Some(tasks) = data.get_mut("tasks").and_then(|t| t.as_array_mut()) else { return false };
+    let Some(tasks) = data.get_mut("tasks").and_then(|t| t.as_array_mut()) else {
+        return false;
+    };
     for task in tasks {
         let tid = id_of(task).unwrap_or(0);
-        let Some(acts) = task.get_mut("activity").and_then(|a| a.as_array_mut()) else { continue };
+        let Some(acts) = task.get_mut("activity").and_then(|a| a.as_array_mut()) else {
+            continue;
+        };
         if acts.iter().all(|a| id_of(a).is_some_and(|i| i != 0)) {
             let mut seen = std::collections::HashSet::new();
             if acts.iter().all(|a| seen.insert(id_of(a))) {
@@ -794,12 +956,23 @@ pub fn fill_activity_ids(data: &mut Value) -> bool {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::with_capacity(acts.len());
         for mut a in std::mem::take(acts) {
-            let Some(obj) = a.as_object_mut() else { continue };
+            let Some(obj) = a.as_object_mut() else {
+                continue;
+            };
             let ts = obj.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
             let author = obj.get("author").and_then(|v| v.as_u64()).unwrap_or(0);
-            let comment = obj.get("comment").and_then(|v| v.as_bool()).unwrap_or(false);
-            let text = obj.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let n = counts.entry((ts, author, comment, text.clone())).or_insert(0);
+            let comment = obj
+                .get("comment")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let text = obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let n = counts
+                .entry((ts, author, comment, text.clone()))
+                .or_insert(0);
             let nth = *n;
             *n += 1;
             let id = match obj.get("id").and_then(|v| v.as_u64()) {
@@ -827,7 +1000,11 @@ pub fn fill_activity_ids(data: &mut Value) -> bool {
 /// for everything else: what joining a team workspace opens.
 pub fn with_team_things(personal: &Value, team: &Value) -> Value {
     let mut v = personal.clone();
-    for path in SHARED.iter().chain(SHARED_VALUES).chain(&["extra.sync", "next_id"]) {
+    for path in SHARED
+        .iter()
+        .chain(SHARED_VALUES)
+        .chain(&["extra.sync", "next_id"])
+    {
         if let Some(x) = get_path(team, path) {
             set_path(&mut v, path, x.clone());
         }
@@ -854,16 +1031,38 @@ mod tests {
         stamp(&a, &mut ma, 100);
         let mut b = ws(json!([]), base, &mb);
         stamp(&b, &mut mb, 100);
-        a = ws(json!([]), ch(json!([{"id": 11, "author": 1, "text": "hi", "ts": 100}, {"id": 21, "author": 1, "text": "from A", "ts": 200}]), 500), &ma);
+        a = ws(
+            json!([]),
+            ch(
+                json!([{"id": 11, "author": 1, "text": "hi", "ts": 100}, {"id": 21, "author": 1, "text": "from A", "ts": 200}]),
+                500,
+            ),
+            &ma,
+        );
         stamp(&a.clone(), &mut ma, 200);
         a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
-        b = ws(json!([]), ch(json!([{"id": 11, "author": 1, "text": "hi", "ts": 100}, {"id": 31, "author": 2, "text": "from B", "ts": 150}]), 9), &mb);
+        b = ws(
+            json!([]),
+            ch(
+                json!([{"id": 11, "author": 1, "text": "hi", "ts": 100}, {"id": 31, "author": 2, "text": "from B", "ts": 150}]),
+                9,
+            ),
+            &mb,
+        );
         stamp(&b.clone(), &mut mb, 150);
         b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
         assert!(merge(&mut a, &[b]));
-        let msgs: Vec<&str> = a["channels"][0]["messages"].as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap()).collect();
+        let msgs: Vec<&str> = a["channels"][0]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["text"].as_str().unwrap())
+            .collect();
         assert_eq!(msgs, vec!["hi", "from B", "from A"]);
-        assert_eq!(a["channels"][0]["last_read"], 500, "read position stays personal");
+        assert_eq!(
+            a["channels"][0]["last_read"], 500,
+            "read position stays personal"
+        );
     }
 
     #[test]
@@ -884,25 +1083,41 @@ mod tests {
         stamp(&b.clone(), &mut mb, 20);
         b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
         merge(&mut a, &[b.clone()]);
-        let names: Vec<&str> = a["tasks"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = a["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, vec!["one by A"]);
         // and B sees the same after reading A
         merge(&mut b, &[a.clone()]);
-        let names: Vec<&str> = b["tasks"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = b["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, vec!["one by A"]);
     }
 
     #[test]
     fn comments_from_both_sides_are_kept() {
         let mut ma = SyncMeta::default();
-        let mut a = ws(json!([{"id": 1, "name": "t", "activity": []}]), json!([]), &ma);
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "activity": []}]),
+            json!([]),
+            &ma,
+        );
         stamp(&a.clone(), &mut ma, 10);
         let mut mb = ma.clone();
         let mut b = a.clone();
-        a["tasks"][0]["activity"] = json!([{"ts": 20, "author": 1, "text": "A says", "comment": true}]);
+        a["tasks"][0]["activity"] =
+            json!([{"ts": 20, "author": 1, "text": "A says", "comment": true}]);
         stamp(&a.clone(), &mut ma, 20);
         a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
-        b["tasks"][0]["activity"] = json!([{"ts": 25, "author": 2, "text": "B says", "comment": true}]);
+        b["tasks"][0]["activity"] =
+            json!([{"ts": 25, "author": 2, "text": "B says", "comment": true}]);
         stamp(&b.clone(), &mut mb, 25);
         b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
         merge(&mut a, &[b]);
@@ -936,7 +1151,14 @@ mod tests {
         assert!(m.tombs.contains_key(&1));
         stamp(&a, &mut m, 30);
         assert!(m.revived[&1] > m.tombs[&1]);
-        let mut other = ws(json!([]), json!([]), &SyncMeta { tombs: [(1, 20)].into(), ..Default::default() });
+        let mut other = ws(
+            json!([]),
+            json!([]),
+            &SyncMeta {
+                tombs: [(1, 20)].into(),
+                ..Default::default()
+            },
+        );
         let mut mine = a.clone();
         mine["extra"]["sync"] = serde_json::to_value(&m).unwrap();
         merge(&mut other, &[mine]);
@@ -993,23 +1215,53 @@ mod tests {
     #[test]
     fn a_moved_list_appears_once_for_everyone() {
         // space to space
-        let (mut a, mut ma, mut b, _) = pair(json!([space(100, json!([]), json!([list(101), list(102)])), space(200, json!([]), json!([]))]));
-        change(&mut a, &mut ma, json!([space(100, json!([]), json!([list(102)])), space(200, json!([]), json!([list(101)]))]), 30);
+        let (mut a, mut ma, mut b, _) = pair(json!([
+            space(100, json!([]), json!([list(101), list(102)])),
+            space(200, json!([]), json!([]))
+        ]));
+        change(
+            &mut a,
+            &mut ma,
+            json!([
+                space(100, json!([]), json!([list(102)])),
+                space(200, json!([]), json!([list(101)]))
+            ]),
+            30,
+        );
         merge(&mut a, &[b.clone()]);
         assert_eq!(places(&a), vec![(100, 102), (200, 101)]);
         merge(&mut b, &[a.clone()]);
         assert_eq!(places(&b), vec![(100, 102), (200, 101)]);
 
         // folder to another space, and back from a space into a folder
-        let (mut a, mut ma, mut b, _) = pair(json!([space(100, json!([folder(300, json!([list(101)]))]), json!([])), space(200, json!([]), json!([]))]));
-        change(&mut a, &mut ma, json!([space(100, json!([folder(300, json!([]))]), json!([])), space(200, json!([]), json!([list(101)]))]), 30);
+        let (mut a, mut ma, mut b, _) = pair(json!([
+            space(100, json!([folder(300, json!([list(101)]))]), json!([])),
+            space(200, json!([]), json!([]))
+        ]));
+        change(
+            &mut a,
+            &mut ma,
+            json!([
+                space(100, json!([folder(300, json!([]))]), json!([])),
+                space(200, json!([]), json!([list(101)]))
+            ]),
+            30,
+        );
         let stale = b.clone();
         merge(&mut b, &[a.clone()]);
         assert_eq!(places(&b), vec![(200, 101)]);
         merge(&mut a, &[stale]);
         assert_eq!(places(&a), vec![(200, 101)]);
         let mut mb = meta_of(&b);
-        change(&mut b, &mut mb, json!([space(100, json!([folder(300, json!([list(101)]))]), json!([])), space(200, json!([]), json!([]))]), 40);
+        change(
+            &mut b,
+            &mut mb,
+            json!([
+                space(100, json!([folder(300, json!([list(101)]))]), json!([])),
+                space(200, json!([]), json!([]))
+            ]),
+            40,
+        );
         let stale = a.clone();
         merge(&mut a, &[b.clone()]);
         assert_eq!(places(&a), vec![(300, 101)]);
@@ -1019,10 +1271,29 @@ mod tests {
 
     #[test]
     fn a_list_added_while_another_moved_is_kept() {
-        let (mut a, mut ma, mut b, mut mb) = pair(json!([space(100, json!([]), json!([list(101), list(102)])), space(200, json!([]), json!([]))]));
+        let (mut a, mut ma, mut b, mut mb) = pair(json!([
+            space(100, json!([]), json!([list(101), list(102)])),
+            space(200, json!([]), json!([]))
+        ]));
         // A moves 101 away; B, not knowing, adds 103 to the old space
-        change(&mut a, &mut ma, json!([space(100, json!([]), json!([list(102)])), space(200, json!([]), json!([list(101)]))]), 30);
-        change(&mut b, &mut mb, json!([space(100, json!([]), json!([list(101), list(102), list(103)])), space(200, json!([]), json!([]))]), 25);
+        change(
+            &mut a,
+            &mut ma,
+            json!([
+                space(100, json!([]), json!([list(102)])),
+                space(200, json!([]), json!([list(101)]))
+            ]),
+            30,
+        );
+        change(
+            &mut b,
+            &mut mb,
+            json!([
+                space(100, json!([]), json!([list(101), list(102), list(103)])),
+                space(200, json!([]), json!([]))
+            ]),
+            25,
+        );
         let (a0, b0) = (a.clone(), b.clone());
         merge(&mut a, &[b0]);
         merge(&mut b, &[a0]);
@@ -1030,9 +1301,32 @@ mod tests {
         assert_eq!(places(&b), places(&a));
 
         // a folder moves while someone adds a list inside it
-        let (mut a, mut ma, mut b, mut mb) = pair(json!([space(100, json!([folder(300, json!([list(101)]))]), json!([])), space(200, json!([]), json!([]))]));
-        change(&mut a, &mut ma, json!([space(100, json!([]), json!([])), space(200, json!([folder(300, json!([list(101)]))]), json!([]))]), 30);
-        change(&mut b, &mut mb, json!([space(100, json!([folder(300, json!([list(101), list(104)]))]), json!([])), space(200, json!([]), json!([]))]), 25);
+        let (mut a, mut ma, mut b, mut mb) = pair(json!([
+            space(100, json!([folder(300, json!([list(101)]))]), json!([])),
+            space(200, json!([]), json!([]))
+        ]));
+        change(
+            &mut a,
+            &mut ma,
+            json!([
+                space(100, json!([]), json!([])),
+                space(200, json!([folder(300, json!([list(101)]))]), json!([]))
+            ]),
+            30,
+        );
+        change(
+            &mut b,
+            &mut mb,
+            json!([
+                space(
+                    100,
+                    json!([folder(300, json!([list(101), list(104)]))]),
+                    json!([])
+                ),
+                space(200, json!([]), json!([]))
+            ]),
+            25,
+        );
         let (a0, b0) = (a.clone(), b.clone());
         merge(&mut a, &[b0]);
         merge(&mut b, &[a0]);
@@ -1044,8 +1338,15 @@ mod tests {
 
     #[test]
     fn updating_the_app_does_not_mark_inner_items_as_edited() {
-        let d = sp(json!([space(100, json!([]), json!([list(101)]))]), &SyncMeta::default());
-        let mut m = SyncMeta { hashes: fingerprints_with(&d, false), stamps: [(100, 10), (101, 10)].into(), ..Default::default() };
+        let d = sp(
+            json!([space(100, json!([]), json!([list(101)]))]),
+            &SyncMeta::default(),
+        );
+        let mut m = SyncMeta {
+            hashes: fingerprints_with(&d, false),
+            stamps: [(100, 10), (101, 10)].into(),
+            ..Default::default()
+        };
         stamp(&d, &mut m, 99);
         assert_eq!(m.stamps[&101], 10);
         assert_eq!(m.v, META_V);
@@ -1112,24 +1413,60 @@ mod tests {
 
     #[test]
     fn renaming_a_list_you_never_saw_move_keeps_the_move() {
-        let (mut a, mut ma, mut b, mut mb) = pair(json!([space(100, json!([]), json!([list(101)])), space(200, json!([]), json!([]))]));
+        let (mut a, mut ma, mut b, mut mb) = pair(json!([
+            space(100, json!([]), json!([list(101)])),
+            space(200, json!([]), json!([]))
+        ]));
         // A moves the list; later B, not knowing, renames it where B has it
-        change(&mut a, &mut ma, json!([space(100, json!([]), json!([])), space(200, json!([]), json!([list(101)]))]), 30);
+        change(
+            &mut a,
+            &mut ma,
+            json!([
+                space(100, json!([]), json!([])),
+                space(200, json!([]), json!([list(101)]))
+            ]),
+            30,
+        );
         let mut renamed = list(101);
         renamed["name"] = json!("Renamed by B");
-        change(&mut b, &mut mb, json!([space(100, json!([]), json!([renamed])), space(200, json!([]), json!([]))]), 40);
+        change(
+            &mut b,
+            &mut mb,
+            json!([
+                space(100, json!([]), json!([renamed])),
+                space(200, json!([]), json!([]))
+            ]),
+            40,
+        );
         let (a0, b0) = (a.clone(), b.clone());
         merge(&mut a, &[b0]);
         merge(&mut b, &[a0]);
         for v in [&a, &b] {
             assert_eq!(places(v), vec![(200, 101)], "the move stays");
-            assert_eq!(v["spaces"][1]["lists"][0]["name"], "Renamed by B", "and so does the rename");
+            assert_eq!(
+                v["spaces"][1]["lists"][0]["name"], "Renamed by B",
+                "and so does the rename"
+            );
         }
         // a copy from an app that doesn't keep move times still moves it by its stamp
-        let (mut a, _, mut old, mut mo) = pair(json!([space(100, json!([]), json!([list(101)])), space(200, json!([]), json!([]))]));
-        change(&mut old, &mut mo, json!([space(100, json!([]), json!([])), space(200, json!([]), json!([list(101)]))]), 30);
+        let (mut a, _, mut old, mut mo) = pair(json!([
+            space(100, json!([]), json!([list(101)])),
+            space(200, json!([]), json!([]))
+        ]));
+        change(
+            &mut old,
+            &mut mo,
+            json!([
+                space(100, json!([]), json!([])),
+                space(200, json!([]), json!([list(101)]))
+            ]),
+            30,
+        );
         old["extra"]["sync"]["v"] = json!(1);
-        old["extra"]["sync"].as_object_mut().unwrap().remove("moved");
+        old["extra"]["sync"]
+            .as_object_mut()
+            .unwrap()
+            .remove("moved");
         merge(&mut a, &[old]);
         assert_eq!(places(&a), vec![(200, 101)]);
     }
@@ -1157,16 +1494,28 @@ mod tests {
         assert_eq!(gone.len(), 7);
         let mut m = meta_of(&d);
         for id in [20, 21, 30, 50, 51, 52, 80, 81, 85] {
-            assert!(!m.stamps.contains_key(&id) && !m.hashes.contains_key(&id), "no bookkeeping left for {}", id);
+            assert!(
+                !m.stamps.contains_key(&id) && !m.hashes.contains_key(&id),
+                "no bookkeeping left for {}",
+                id
+            );
         }
         stamp(&d.clone(), &mut m, 20);
-        assert!(m.tombs.is_empty(), "nothing counts as deleted: {:?}", m.tombs);
+        assert!(
+            m.tombs.is_empty(),
+            "nothing counts as deleted: {:?}",
+            m.tombs
+        );
         assert!(d.to_string().contains("\"open\"") && !d.to_string().contains("secret"));
         // when they come back from the team's copy, they are simply there again
         let mut team = json!({"workspace": "W", "spaces": [], "tasks": [], "members": [], "docs": [], "channels": [{"id": 30, "name": "plans", "kind": "Channel", "private": true, "members": [1, 2, 3], "messages": []}], "extra": {"sync": {"stamps": {"30": 5}, "v": 2}}});
         d["extra"]["sync"] = serde_json::to_value(&m).unwrap();
         merge(&mut d, &[team.take()]);
-        assert!(d["channels"].as_array().unwrap().iter().any(|c| c["id"] == 30));
+        assert!(d["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == 30));
     }
 
     #[test]
@@ -1185,7 +1534,8 @@ mod tests {
     fn a_field_set_back_to_its_default_stays_there() {
         // a task with a running timer (fields left out at their default)
         let (mut a, mut ma, mut b, mut mb) = pair(json!([]));
-        a["tasks"] = json!([{"id": 7, "name": "T", "timer_by": 2, "timers": [{"member": 3, "start": 5}]}]);
+        a["tasks"] =
+            json!([{"id": 7, "name": "T", "timer_by": 2, "timers": [{"member": 3, "start": 5}]}]);
         stamp(&a.clone(), &mut ma, 20);
         a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
         merge(&mut b, &[a.clone()]);
@@ -1197,7 +1547,11 @@ mod tests {
         stamp(&b.clone(), &mut mb, 30);
         b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
         merge(&mut a, &[b.clone()]);
-        assert!(a["tasks"][0].get("timer_by").is_none(), "a stopped timer doesn't come back: {}", a["tasks"][0]);
+        assert!(
+            a["tasks"][0].get("timer_by").is_none(),
+            "a stopped timer doesn't come back: {}",
+            a["tasks"][0]
+        );
         assert!(a["tasks"][0].get("timers").is_none());
         // a copy from an app that doesn't leave defaults out (v below 2) still
         // keeps fields it doesn't know about
@@ -1211,7 +1565,11 @@ mod tests {
         c["tasks"] = json!([{"id": 7, "name": "T", "watchers": [4]}]);
         merge(&mut c, &[old]);
         assert_eq!(c["tasks"][0]["name"], "T renamed");
-        assert_eq!(c["tasks"][0]["watchers"], json!([4]), "an older app's copy doesn't drop what it can't know");
+        assert_eq!(
+            c["tasks"][0]["watchers"],
+            json!([4]),
+            "an older app's copy doesn't drop what it can't know"
+        );
         // and a field outside DEFAULT_WHEN_MISSING is kept even from a new copy
         let mut newer = b.clone();
         let mut mn = mb.clone();

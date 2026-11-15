@@ -27,8 +27,8 @@ use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::VideoResolution;
 use livekit::webrtc::video_stream::native::NativeVideoStream;
 use std::collections::HashMap;
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -112,7 +112,11 @@ impl Call {
         std::thread::Builder::new()
             .name("workboard-voice".into())
             .spawn(move || {
-                let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+                let rt = match tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                {
                     Ok(rt) => rt,
                     Err(e) => {
                         let _ = etx.send(Event::Left(Some(e.to_string())));
@@ -125,7 +129,12 @@ impl Call {
                 wake();
             })
             .expect("start voice thread");
-        Call { tx, rx, pictures, seen: Default::default() }
+        Call {
+            tx,
+            rx,
+            pictures,
+            seen: Default::default(),
+        }
     }
 
     pub fn set_camera(&self, on: bool) {
@@ -144,7 +153,11 @@ impl Call {
                 out.push((id.clone(), Some(p.clone())));
             }
         }
-        let gone: Vec<String> = seen.keys().filter(|k| !pics.contains_key(*k)).cloned().collect();
+        let gone: Vec<String> = seen
+            .keys()
+            .filter(|k| !pics.contains_key(*k))
+            .cloned()
+            .collect();
         for id in gone {
             seen.remove(&id);
             out.push((id, None));
@@ -188,7 +201,12 @@ async fn play_tone(source: NativeAudioSource, hz: f32) {
                 (phase.sin() * 8000.0) as i16
             })
             .collect();
-        let frame = AudioFrame { data: data.into(), sample_rate: RATE, num_channels: 1, samples_per_channel: FRAME };
+        let frame = AudioFrame {
+            data: data.into(),
+            sample_rate: RATE,
+            num_channels: 1,
+            samples_per_channel: FRAME,
+        };
         if source.capture_frame(&frame).await.is_err() {
             return;
         }
@@ -196,11 +214,21 @@ async fn play_tone(source: NativeAudioSource, hz: f32) {
 }
 
 /// Measure how loud a remote track arrives (root mean square, 0..1).
-async fn measure(track: RemoteAudioTrack, identity: String, levels: Arc<Mutex<HashMap<String, f32>>>) {
+async fn measure(
+    track: RemoteAudioTrack,
+    identity: String,
+    levels: Arc<Mutex<HashMap<String, f32>>>,
+) {
     let mut stream = NativeAudioStream::new(track.rtc_track(), RATE as i32, 1);
     while let Some(frame) = stream.next().await {
         let n = frame.data.len().max(1) as f32;
-        let rms = (frame.data.iter().map(|s| (*s as f32 / 32768.0).powi(2)).sum::<f32>() / n).sqrt();
+        let rms = (frame
+            .data
+            .iter()
+            .map(|s| (*s as f32 / 32768.0).powi(2))
+            .sum::<f32>()
+            / n)
+            .sqrt();
         let mut l = levels.lock().unwrap();
         let e = l.entry(identity.clone()).or_insert(0.0);
         *e = *e * 0.8 + rms * 0.2;
@@ -231,7 +259,12 @@ fn unwatch(watchers: &mut Watchers, pictures: &Pictures, id: &str) {
 
 /// Turn received frames into pictures (at most video::FPS a second), until
 /// the stream ends or `alive` is cleared.
-async fn watch(track: RemoteVideoTrack, identity: String, pictures: Pictures, alive: Arc<AtomicBool>) {
+async fn watch(
+    track: RemoteVideoTrack,
+    identity: String,
+    pictures: Pictures,
+    alive: Arc<AtomicBool>,
+) {
     let mut stream = NativeVideoStream::new(track.rtc_track());
     let gap = Duration::from_millis(1000 / video::FPS);
     let mut last = std::time::Instant::now() - gap;
@@ -254,14 +287,23 @@ async fn watch(track: RemoteVideoTrack, identity: String, pictures: Pictures, al
     }
 }
 
-fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String], camera_on: bool) -> Vec<Person> {
+fn people(
+    room: &Room,
+    levels: &HashMap<String, f32>,
+    speaking: &[String],
+    camera_on: bool,
+) -> Vec<Person> {
     let me = room.local_participant();
     let mut out = vec![Person {
         identity: me.identity().to_string(),
         name: me.name(),
         me: true,
         speaking: speaking.contains(&me.identity().to_string()),
-        muted: me.track_publications().values().filter(|p| p.source() == TrackSource::Microphone).all(|p| p.is_muted()),
+        muted: me
+            .track_publications()
+            .values()
+            .filter(|p| p.source() == TrackSource::Microphone)
+            .all(|p| p.is_muted()),
         heard: 0.0,
         camera: camera_on,
     }];
@@ -270,9 +312,14 @@ fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String], camer
     for p in others {
         let id = p.identity().to_string();
         let pubs = p.track_publications();
-        let mics: Vec<_> = pubs.values().filter(|t| t.source() == TrackSource::Microphone).collect();
+        let mics: Vec<_> = pubs
+            .values()
+            .filter(|t| t.source() == TrackSource::Microphone)
+            .collect();
         out.push(Person {
-            camera: pubs.values().any(|t| t.source() == TrackSource::Camera && !t.is_muted()),
+            camera: pubs
+                .values()
+                .any(|t| t.source() == TrackSource::Camera && !t.is_muted()),
             speaking: speaking.contains(&id),
             muted: mics.is_empty() || mics.iter().all(|t| t.is_muted()),
             heard: levels.get(&id).copied().unwrap_or(0.0),
@@ -284,7 +331,15 @@ fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String], camer
     out
 }
 
-async fn run(join: Join, audio: Audio, video: Video, crx: Receiver<Cmd>, etx: &Sender<Event>, wake: &Wake, pictures: Pictures) -> Option<String> {
+async fn run(
+    join: Join,
+    audio: Audio,
+    video: Video,
+    crx: Receiver<Cmd>,
+    etx: &Sender<Event>,
+    wake: &Wake,
+    pictures: Pictures,
+) -> Option<String> {
     let emit = |e: Event| {
         let ok = etx.send(e).is_ok();
         wake();
@@ -298,10 +353,11 @@ async fn run(join: Join, audio: Audio, video: Video, crx: Receiver<Cmd>, etx: &S
         },
         Audio::Tone(_) => None,
     };
-    let (room, mut events) = match Room::connect(&join.url, &join.token, RoomOptions::default()).await {
-        Ok(x) => x,
-        Err(e) => return Some(format!("Couldn't join the call: {}", e)),
-    };
+    let (room, mut events) =
+        match Room::connect(&join.url, &join.token, RoomOptions::default()).await {
+            Ok(x) => x,
+            Err(e) => return Some(format!("Couldn't join the call: {}", e)),
+        };
     let source = match (&platform, audio) {
         (Some(p), _) => p.rtc_source(),
         (None, Audio::Tone(hz)) => {
@@ -312,7 +368,17 @@ async fn run(join: Join, audio: Audio, video: Video, crx: Receiver<Cmd>, etx: &S
         (None, Audio::Platform) => unreachable!(),
     };
     let track = LocalAudioTrack::create_audio_track("microphone", source);
-    let publication = match room.local_participant().publish_track(LocalTrack::Audio(track), TrackPublishOptions { source: TrackSource::Microphone, ..Default::default() }).await {
+    let publication = match room
+        .local_participant()
+        .publish_track(
+            LocalTrack::Audio(track),
+            TrackPublishOptions {
+                source: TrackSource::Microphone,
+                ..Default::default()
+            },
+        )
+        .await
+    {
         Ok(p) => p,
         Err(e) => {
             let _ = room.close().await;

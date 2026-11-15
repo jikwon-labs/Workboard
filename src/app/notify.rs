@@ -278,7 +278,10 @@ impl App {
             }
             let (key, target) = match it.src {
                 // two lines in the same second by the same person share an Inbox key
-                InboxSrc::Task(id) => (format!("task:{}:{}", it.key, it.text), format!("task:{}", id)),
+                InboxSrc::Task(id) => (
+                    format!("task:{}:{}", it.key, it.text),
+                    format!("task:{}", id),
+                ),
                 InboxSrc::Chat { ch, thread, .. } => {
                     if self.data.channels.iter().any(|c| {
                         c.id == ch
@@ -436,9 +439,16 @@ impl App {
         let found = self.notify_candidates(&mine);
         // every key, whatever the settings: turning a kind on later must not
         // bring back old things as news
-        let all: Vec<String> = self.notify_candidates(&NotifySettings::everything()).into_iter().map(|(_, n)| n.key).collect();
+        let all: Vec<String> = self
+            .notify_candidates(&NotifySettings::everything())
+            .into_iter()
+            .map(|(_, n)| n.key)
+            .collect();
         if !self.notify_rt.seeded {
-            self.notify_rt.seen = all.into_iter().chain(found.into_iter().map(|(_, n)| n.key)).collect();
+            self.notify_rt.seen = all
+                .into_iter()
+                .chain(found.into_iter().map(|(_, n)| n.key))
+                .collect();
             self.notify_rt.seeded = true;
             self.notify_rt.pending = false;
             return;
@@ -449,7 +459,11 @@ impl App {
             if !self.notify_rt.seen.insert(note.key.clone()) {
                 continue;
             }
-            let limit = if note.kind == Kind::Huddle { HUDDLE_FRESH_SECS } else { FRESH_SECS };
+            let limit = if note.kind == Kind::Huddle {
+                HUDDLE_FRESH_SECS
+            } else {
+                FRESH_SECS
+            };
             if ts != i64::MAX && now - ts > limit {
                 continue;
             }
@@ -572,7 +586,14 @@ impl App {
                 self.section = Section::Goals;
                 self.goal_open = Some(id);
             }
-            ("reminder", Some(id)) => match self.data.extra.reminders.iter().find(|r| r.id == id).cloned() {
+            ("reminder", Some(id)) => match self
+                .data
+                .extra
+                .reminders
+                .iter()
+                .find(|r| r.id == id)
+                .cloned()
+            {
                 Some(r) if r.task.is_some() || r.message.is_some() => self.open_reminder(&r),
                 _ => self.actions.push(Action::Go(Location::Inbox)),
             },

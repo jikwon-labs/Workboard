@@ -4,8 +4,8 @@ mod links;
 mod model;
 mod notifier;
 use wb_sync as sync;
-mod theme;
 mod media;
+mod theme;
 mod updater;
 mod widgets;
 
@@ -43,7 +43,10 @@ fn main() -> eframe::Result<()> {
     }
 
     #[allow(unused_mut)]
-    let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    let mut options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
     #[cfg(target_os = "macos")]
     if shot {
         options.event_loop_builder = Some(Box::new(|b| {

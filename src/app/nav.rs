@@ -30,7 +30,9 @@ pub(crate) enum Link {
 /// today, everything). Spaces around the link and a trailing slash or
 /// punctuation are ignored.
 pub(crate) fn parse_link(s: &str) -> Option<Link> {
-    let s = s.trim().trim_end_matches(|c: char| matches!(c, '/' | '.' | ',' | ')' | '>' | '"' | '\''));
+    let s = s
+        .trim()
+        .trim_end_matches(|c: char| matches!(c, '/' | '.' | ',' | ')' | '>' | '"' | '\''));
     let rest = s.strip_prefix("workboard://")?;
     let mut parts = rest.split('/');
     let kind = parts.next()?.to_ascii_lowercase();
@@ -86,8 +88,14 @@ pub(crate) fn find_links(text: &str) -> Vec<(usize, usize, String)> {
                     let lead = word[..at].chars().count();
                     let link: String = word[at..].to_string();
                     if parse_link(&link).is_some() {
-                        let clean = link.trim_end_matches(|c: char| matches!(c, '/' | '.' | ',' | ')' | '>' | '"' | '\''));
-                        out.push((start + lead, start + lead + clean.chars().count(), clean.to_string()));
+                        let clean = link.trim_end_matches(|c: char| {
+                            matches!(c, '/' | '.' | ',' | ')' | '>' | '"' | '\'')
+                        });
+                        out.push((
+                            start + lead,
+                            start + lead + clean.chars().count(),
+                            clean.to_string(),
+                        ));
                     }
                 }
             }
@@ -105,7 +113,11 @@ pub(crate) fn find_links(text: &str) -> Vec<(usize, usize, String)> {
 pub(super) enum InboxSrc {
     Task(u64),
     /// A chat message; `thread` is the message whose thread holds it.
-    Chat { ch: u64, msg: u64, thread: Option<u64> },
+    Chat {
+        ch: u64,
+        msg: u64,
+        thread: Option<u64>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +148,11 @@ impl App {
     pub(super) fn inbox_items(&self) -> Vec<InboxItem> {
         let me = self.data.me;
         let n = &self.data.extra.notify;
-        let my_name = self.data.member(me).map(|m| m.name.clone()).unwrap_or_default();
+        let my_name = self
+            .data
+            .member(me)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
         let cleared = &self.data.extra.inbox_cleared;
         let later = &self.data.extra.inbox_later;
         let tab_of = |key: &str, primary: bool| {
@@ -151,11 +167,23 @@ impl App {
             }
         };
         let members = &self.data.members;
-        let mentions = |text: &str, ids: &[u64]| if ids.is_empty() { crate::model::mentioned_ids(text, members, &[]).contains(&me) } else { ids.contains(&me) };
+        let mentions = |text: &str, ids: &[u64]| {
+            if ids.is_empty() {
+                crate::model::mentioned_ids(text, members, &[]).contains(&me)
+            } else {
+                ids.contains(&me)
+            }
+        };
         let mut out = vec![];
         for task in &self.data.tasks {
             // a task I made (or made as a copy of another) is mine like one I'm assigned to
-            let mine = task.assignees.contains(&me) || task.activity.iter().any(|a| a.author == me && !a.comment && (a.text == "created this task" || a.text.starts_with("duplicated this task from ")));
+            let mine = task.assignees.contains(&me)
+                || task.activity.iter().any(|a| {
+                    a.author == me
+                        && !a.comment
+                        && (a.text == "created this task"
+                            || a.text.starts_with("duplicated this task from "))
+                });
             for a in &task.activity {
                 if a.author == me {
                     continue;
@@ -166,10 +194,24 @@ impl App {
                         Some(who) => who == me && a.text.starts_with("assigned to "),
                         None => !my_name.is_empty() && a.text == format!("assigned to {}", my_name),
                     };
-                let primary = (a.comment && n.comments && mine) || (mention && n.mentions) || (assigned && n.assigned);
+                let primary = (a.comment && n.comments && mine)
+                    || (mention && n.mentions)
+                    || (assigned && n.assigned);
                 let key = format!("{}:{}:{}", task.id, a.ts, a.author);
                 let tab = tab_of(&key, primary);
-                out.push(InboxItem { key, ts: a.ts, author: a.author, title: task.name.clone(), text: a.text.clone(), src: InboxSrc::Task(task.id), comment: a.comment, mention, assigned, reply: false, tab });
+                out.push(InboxItem {
+                    key,
+                    ts: a.ts,
+                    author: a.author,
+                    title: task.name.clone(),
+                    text: a.text.clone(),
+                    src: InboxSrc::Task(task.id),
+                    comment: a.comment,
+                    mention,
+                    assigned,
+                    reply: false,
+                    tab,
+                });
             }
         }
         for c in &self.data.channels {
@@ -177,12 +219,35 @@ impl App {
             if (c.kind == ChannelKind::Direct || c.private) && !c.members.contains(&me) {
                 continue;
             }
-            let title = if c.kind == ChannelKind::Channel { format!("#{}", c.name) } else { self.data.member(c.members.iter().copied().find(|m| *m != me).unwrap_or(me)).map(|m| m.name.clone()).unwrap_or_default() };
+            let title = if c.kind == ChannelKind::Channel {
+                format!("#{}", c.name)
+            } else {
+                self.data
+                    .member(c.members.iter().copied().find(|m| *m != me).unwrap_or(me))
+                    .map(|m| m.name.clone())
+                    .unwrap_or_default()
+            };
             for m in &c.messages {
                 if m.author != me && mentions(&m.text, &m.mentions) {
                     let key = format!("chat:{}:{}", c.id, m.id);
                     let tab = tab_of(&key, n.mentions);
-                    out.push(InboxItem { key, ts: m.ts, author: m.author, title: title.clone(), text: m.text.clone(), src: InboxSrc::Chat { ch: c.id, msg: m.id, thread: None }, comment: true, mention: true, assigned: false, reply: false, tab });
+                    out.push(InboxItem {
+                        key,
+                        ts: m.ts,
+                        author: m.author,
+                        title: title.clone(),
+                        text: m.text.clone(),
+                        src: InboxSrc::Chat {
+                            ch: c.id,
+                            msg: m.id,
+                            thread: None,
+                        },
+                        comment: true,
+                        mention: true,
+                        assigned: false,
+                        reply: false,
+                        tab,
+                    });
                 }
                 for (i, r) in m.replies.iter().enumerate() {
                     if r.author == me {
@@ -196,7 +261,23 @@ impl App {
                     }
                     let key = format!("chat:{}:{}", c.id, r.id);
                     let tab = tab_of(&key, (mention && n.mentions) || reply);
-                    out.push(InboxItem { key, ts: r.ts, author: r.author, title: title.clone(), text: r.text.clone(), src: InboxSrc::Chat { ch: c.id, msg: r.id, thread: Some(m.id) }, comment: true, mention, assigned: false, reply, tab });
+                    out.push(InboxItem {
+                        key,
+                        ts: r.ts,
+                        author: r.author,
+                        title: title.clone(),
+                        text: r.text.clone(),
+                        src: InboxSrc::Chat {
+                            ch: c.id,
+                            msg: r.id,
+                            thread: Some(m.id),
+                        },
+                        comment: true,
+                        mention,
+                        assigned: false,
+                        reply,
+                        tab,
+                    });
                 }
             }
         }
@@ -207,14 +288,31 @@ impl App {
     /// plus reminders that are due, when reminders are turned on.
     pub(super) fn inbox_badge(&self) -> usize {
         let rows = self.inbox_items().iter().filter(|i| i.tab == 0).count();
-        rows + if self.data.extra.notify.reminders { self.due_reminders() } else { 0 }
+        rows + if self.data.extra.notify.reminders {
+            self.due_reminders()
+        } else {
+            0
+        }
     }
 
     /// The text of an Inbox row under its title.
-    pub(super) fn inbox_line(&self, author: u64, text: &str, comment: bool, src: InboxSrc, mention: bool) -> String {
-        let who = self.data.member(author).map(|m| m.name.clone()).unwrap_or_default();
+    pub(super) fn inbox_line(
+        &self,
+        author: u64,
+        text: &str,
+        comment: bool,
+        src: InboxSrc,
+        mention: bool,
+    ) -> String {
+        let who = self
+            .data
+            .member(author)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
         match src {
-            InboxSrc::Chat { thread: Some(_), .. } if !mention => trf!("{} replied: {}", who, text),
+            InboxSrc::Chat {
+                thread: Some(_), ..
+            } if !mention => trf!("{} replied: {}", who, text),
             InboxSrc::Chat { .. } => trf!("{} mentioned you: {}", who, text),
             InboxSrc::Task(_) if comment => trf!("{} commented: {}", who, text),
             InboxSrc::Task(_) => crate::i18n::history_line(&who, text),
@@ -257,7 +355,11 @@ impl App {
             Section::Dashboards => self.dash_open,
             _ => None,
         };
-        NavSpot { section: self.section, loc: self.loc, item }
+        NavSpot {
+            section: self.section,
+            loc: self.loc,
+            item,
+        }
     }
 
     /// The page of a history entry still exists (its place, and its channel,
@@ -274,7 +376,9 @@ impl App {
             Section::Whiteboards => x.whiteboards.iter().any(|w| w.id == id),
             Section::Forms => x.forms.iter().any(|f| f.id == id),
             // the Workspace overview is built in, not one of the dashboards
-            Section::Dashboards => id == super::hubs::WORKSPACE_OVERVIEW || x.dashboards.iter().any(|d| d.id == id),
+            Section::Dashboards => {
+                id == super::hubs::WORKSPACE_OVERVIEW || x.dashboards.iter().any(|d| d.id == id)
+            }
             _ => true,
         }
     }
@@ -315,9 +419,21 @@ impl App {
         let space_ok = |s: &Space| !s.archived && s.private_owner.is_none_or(|o| o == me);
         self.data.location_exists(loc)
             && match loc {
-                Location::Space(id) => self.data.spaces.iter().find(|s| s.id == id).is_some_and(space_ok),
-                Location::Folder(id) => self.data.spaces.iter().any(|s| space_ok(s) && s.folders.iter().any(|f| f.id == id && !f.archived)),
-                Location::List(id) => !self.data.list_archived(id) && self.data.space_of_list(id).is_some_and(space_ok),
+                Location::Space(id) => self
+                    .data
+                    .spaces
+                    .iter()
+                    .find(|s| s.id == id)
+                    .is_some_and(space_ok),
+                Location::Folder(id) => self
+                    .data
+                    .spaces
+                    .iter()
+                    .any(|s| space_ok(s) && s.folders.iter().any(|f| f.id == id && !f.archived)),
+                Location::List(id) => {
+                    !self.data.list_archived(id)
+                        && self.data.space_of_list(id).is_some_and(space_ok)
+                }
                 _ => true,
             }
     }
@@ -325,7 +441,12 @@ impl App {
     /// A doc shown in lists, search and the sidebar: not archived, not
     /// someone else's Private doc and not in a space I can't go to.
     pub(super) fn doc_shown(&self, d: &Doc) -> bool {
-        !d.archived && (!d.private || d.owner == self.data.me) && d.space.is_none_or(|s| !self.data.location_exists(Location::Space(s)) || self.location_shown(Location::Space(s)))
+        !d.archived
+            && (!d.private || d.owner == self.data.me)
+            && d.space.is_none_or(|s| {
+                !self.data.location_exists(Location::Space(s))
+                    || self.location_shown(Location::Space(s))
+            })
     }
 
     /// What a workboard:// link opens: `None` when this workspace doesn't
@@ -349,15 +470,30 @@ impl App {
         match (link, shown) {
             (Some(Link::Task(id)), Some(true)) => self.actions.push(Action::Open(id)),
             (Some(Link::Loc(l)), Some(true)) => self.actions.push(Action::Go(l)),
-            (_, Some(false)) => self.toast = Some((tr("This link points to something archived or private").into(), now_ts())),
-            _ => self.toast = Some((tr("This link can't be opened in this Workspace").into(), now_ts())),
+            (_, Some(false)) => {
+                self.toast = Some((
+                    tr("This link points to something archived or private").into(),
+                    now_ts(),
+                ))
+            }
+            _ => {
+                self.toast = Some((
+                    tr("This link can't be opened in this Workspace").into(),
+                    now_ts(),
+                ))
+            }
         }
         shown == Some(true)
     }
 
     /// A message text with its workboard:// links clickable; returns the
     /// link clicked.
-    pub(super) fn text_with_links(&self, ui: &mut Ui, job: egui::text::LayoutJob, text: &str) -> Option<String> {
+    pub(super) fn text_with_links(
+        &self,
+        ui: &mut Ui,
+        job: egui::text::LayoutJob,
+        text: &str,
+    ) -> Option<String> {
         let links = find_links(text);
         if links.is_empty() {
             ui.add(egui::Label::new(job).wrap());
@@ -377,16 +513,24 @@ impl App {
             }
             job.sections.push(s);
         }
-        let (pos, galley, resp) = egui::Label::new(job).wrap().sense(Sense::click()).layout_in_ui(ui);
+        let (pos, galley, resp) = egui::Label::new(job)
+            .wrap()
+            .sense(Sense::click())
+            .layout_in_ui(ui);
         ui.painter().galley(pos, galley.clone(), t.text);
         let at = |p: egui::Pos2| galley.cursor_from_pos(p - pos).ccursor.index;
-        let over = resp.hover_pos().map(at).and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e).cloned());
+        let over = resp
+            .hover_pos()
+            .map(at)
+            .and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e).cloned());
         if over.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         if resp.clicked() {
             let c = resp.interact_pointer_pos().map(at);
-            return c.and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e)).map(|l| l.2.clone());
+            return c
+                .and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e))
+                .map(|l| l.2.clone());
         }
         None
     }
@@ -407,7 +551,13 @@ impl App {
         let me = self.data.me;
         let now = now_ts();
         let mut fired: Vec<Reminder> = vec![];
-        for r in self.data.extra.reminders.iter_mut().filter(|r| r.owner == me && !r.done && !r.alerted && r.due_ts <= now) {
+        for r in self
+            .data
+            .extra
+            .reminders
+            .iter_mut()
+            .filter(|r| r.owner == me && !r.done && !r.alerted && r.due_ts <= now)
+        {
             r.alerted = true;
             fired.push(r.clone());
         }
@@ -416,28 +566,66 @@ impl App {
             if self.data.extra.notify.reminders {
                 let key = format!("reminder:{}:{}", fired[0].id, now);
                 let note = if fired.len() == 1 {
-                    super::notify::Note { key, kind: super::notify::Kind::Reminder, title: tr("Reminder").into(), body: fired[0].text.clone(), target: format!("reminder:{}", fired[0].id) }
+                    super::notify::Note {
+                        key,
+                        kind: super::notify::Kind::Reminder,
+                        title: tr("Reminder").into(),
+                        body: fired[0].text.clone(),
+                        target: format!("reminder:{}", fired[0].id),
+                    }
                 } else {
-                    let body = fired.iter().map(|r| r.text.clone()).collect::<Vec<_>>().join("\n");
-                    super::notify::Note { key, kind: super::notify::Kind::Reminder, title: trf!("{} reminders are due", fired.len()), body, target: "inbox".into() }
+                    let body = fired
+                        .iter()
+                        .map(|r| r.text.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    super::notify::Note {
+                        key,
+                        kind: super::notify::Kind::Reminder,
+                        title: trf!("{} reminders are due", fired.len()),
+                        body,
+                        target: "inbox".into(),
+                    }
                 };
                 self.deliver(note);
             }
         }
         if let Some(ctx) = ctx {
-            let next = self.data.extra.reminders.iter().filter(|r| r.owner == me && !r.done && !r.alerted && r.due_ts > now).map(|r| r.due_ts).min();
+            let next = self
+                .data
+                .extra
+                .reminders
+                .iter()
+                .filter(|r| r.owner == me && !r.done && !r.alerted && r.due_ts > now)
+                .map(|r| r.due_ts)
+                .min();
             if let Some(next) = next {
-                ctx.request_repaint_after(std::time::Duration::from_secs((next - now).max(1) as u64));
+                ctx.request_repaint_after(std::time::Duration::from_secs(
+                    (next - now).max(1) as u64
+                ));
             }
         }
     }
 
     /// Opens what a reminder is about (a task, or the message in its channel).
     pub(super) fn open_reminder(&mut self, r: &Reminder) {
-        if let Some(id) = r.task.filter(|id| self.data.tasks.iter().any(|t| t.id == *id)) {
+        if let Some(id) = r
+            .task
+            .filter(|id| self.data.tasks.iter().any(|t| t.id == *id))
+        {
             self.actions.push(Action::Open(id));
         } else if let Some((ch, msg)) = r.message {
-            let thread = self.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.iter().find(|m| m.replies.iter().any(|x| x.id == msg))).map(|m| m.id);
+            let thread = self
+                .data
+                .channels
+                .iter()
+                .find(|c| c.id == ch)
+                .and_then(|c| {
+                    c.messages
+                        .iter()
+                        .find(|m| m.replies.iter().any(|x| x.id == msg))
+                })
+                .map(|m| m.id);
             self.open_chat_at(ch, thread);
         }
     }

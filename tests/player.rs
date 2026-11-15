@@ -36,7 +36,10 @@ fn main() {}
 fn main() {
     use std::path::Path;
     use std::time::{Duration, Instant};
-    let Some(ffmpeg) = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].into_iter().find(|p| Path::new(p).exists()) else {
+    let Some(ffmpeg) = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        .into_iter()
+        .find(|p| Path::new(p).exists())
+    else {
         eprintln!("player: skipped, ffmpeg isn't installed (brew install ffmpeg)");
         return;
     };
@@ -45,7 +48,25 @@ fn main() {
     let clip = dir.join("clip.mp4");
     // 3 seconds of a test pattern with a tone
     let ok = std::process::Command::new(ffmpeg)
-        .args(["-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=3:size=320x240:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac", "-shortest"])
+        .args([
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=3:size=320x240:rate=30",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=3",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-shortest",
+        ])
         .arg(&clip)
         .output()
         .unwrap()
@@ -65,12 +86,34 @@ fn main() {
             frames.push(f);
         }
     }
-    assert!(frames.len() >= 5, "frames keep coming while it plays (got {})", frames.len());
-    assert!(frames.iter().all(|f| (f.w, f.h) == (160, 120) && f.px.len() == 160 * 120 * 4), "scaled to the asked size");
-    assert!(frames[0].px.chunks(4).any(|c| c[0] > 100 || c[1] > 100 || c[2] > 100), "not black");
-    assert!(frames.first().map(|f| &f.px) != frames.last().map(|f| &f.px), "the picture moves");
+    assert!(
+        frames.len() >= 5,
+        "frames keep coming while it plays (got {})",
+        frames.len()
+    );
+    assert!(
+        frames
+            .iter()
+            .all(|f| (f.w, f.h) == (160, 120) && f.px.len() == 160 * 120 * 4),
+        "scaled to the asked size"
+    );
+    assert!(
+        frames[0]
+            .px
+            .chunks(4)
+            .any(|c| c[0] > 100 || c[1] > 100 || c[2] > 100),
+        "not black"
+    );
+    assert!(
+        frames.first().map(|f| &f.px) != frames.last().map(|f| &f.px),
+        "the picture moves"
+    );
     assert!(p.playing());
-    assert!((p.duration() - 3.0).abs() < 0.1, "duration {}", p.duration());
+    assert!(
+        (p.duration() - 3.0).abs() < 0.1,
+        "duration {}",
+        p.duration()
+    );
 
     p.seek(2.0);
     spin(0.5);

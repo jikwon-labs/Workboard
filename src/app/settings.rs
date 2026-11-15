@@ -32,17 +32,39 @@ impl App {
 
     fn settings_modal_for(&self, label: &str) -> Option<Modal> {
         Some(match label {
-            "General" => Modal::WorkspaceSettings { name: self.data.workspace.clone() },
+            "General" => Modal::WorkspaceSettings {
+                name: self.data.workspace.clone(),
+            },
             "Trash" => Modal::Trash,
             "Apps" => Modal::ClickApps,
-            "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
-            "Tag Manager" => Modal::TagManager { from: String::new(), to: String::new() },
-            "Templates" => Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 },
-            "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None },
+            "Custom Fields" => Modal::CustomFields {
+                name: String::new(),
+                kind: "text".into(),
+                opts: String::new(),
+            },
+            "Tag Manager" => Modal::TagManager {
+                from: String::new(),
+                to: String::new(),
+            },
+            "Templates" => Modal::Templates {
+                name: String::new(),
+                desc: String::new(),
+                checklist: String::new(),
+                priority: 0,
+            },
+            "Automations" => Modal::Automations {
+                status: "complete".into(),
+                action: "comment".into(),
+                value: String::new(),
+                scope: None,
+            },
             "Work together" => self.together_modal(),
             "My Settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();
-                Modal::Profile { name: m.name, email: m.email }
+                Modal::Profile {
+                    name: m.name,
+                    email: m.email,
+                }
             }
             "Notifications" => Modal::Notifications,
             "Themes" => Modal::Themes,
@@ -58,9 +80,20 @@ impl App {
         let nav = Rect::from_min_max(full.min, pos2(full.left() + nav_w, full.bottom()));
         let body = Rect::from_min_max(pos2(full.left() + nav_w, full.top()), full.max);
         ui.painter().rect_filled(nav, 0.0, t.sidebar);
-        ui.painter().vline(nav.right(), nav.y_range(), Stroke::new(1.0, t.border));
-        let mut nui = ui.new_child(egui::UiBuilder::new().max_rect(nav.shrink(10.0)).layout(Layout::top_down(Align::Min)));
-        if nui.add(egui::Button::new(RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2)).frame(false)).clicked() {
+        ui.painter()
+            .vline(nav.right(), nav.y_range(), Stroke::new(1.0, t.border));
+        let mut nui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(nav.shrink(10.0))
+                .layout(Layout::top_down(Align::Min)),
+        );
+        if nui
+            .add(
+                egui::Button::new(RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2))
+                    .frame(false),
+            )
+            .clicked()
+        {
             self.section = Section::Home;
         }
         nui.add_space(6.0);
@@ -82,14 +115,24 @@ impl App {
             } else if resp.hovered() {
                 nui.painter().rect_filled(r, 6.0, t.hover);
             }
-            nui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(13.5), if sel { t.selected_text } else { t.text });
+            nui.painter().text(
+                r.left_center() + vec2(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                tr(label),
+                FontId::proportional(13.5),
+                if sel { t.selected_text } else { t.text },
+            );
             if resp.clicked() && !sel {
                 self.settings_tab = i as u8;
                 self.settings_state = None;
             }
         }
         let label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
-        let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(body.shrink2(vec2(32.0, 20.0))).layout(Layout::top_down(Align::Min)));
+        let mut bui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(body.shrink2(vec2(32.0, 20.0)))
+                .layout(Layout::top_down(Align::Min)),
+        );
         bui.label(RichText::new(tr(label)).size(22.0).strong());
         bui.add_space(12.0);
         match label {
@@ -107,18 +150,24 @@ impl App {
             }
             _ => {}
         }
-        egui::ScrollArea::vertical().id_salt("settings_body").auto_shrink([false, false]).show(&mut bui, |ui| {
-            ui.set_max_width(640.0);
-            let mut state = self.settings_state.take().or_else(|| self.settings_modal_for(label));
-            if let Some(m) = state.as_mut() {
-                let done = self.modal_body(ui, &t, m);
-                if done {
-                    // saved: start the section fresh
-                    state = None;
+        egui::ScrollArea::vertical()
+            .id_salt("settings_body")
+            .auto_shrink([false, false])
+            .show(&mut bui, |ui| {
+                ui.set_max_width(640.0);
+                let mut state = self
+                    .settings_state
+                    .take()
+                    .or_else(|| self.settings_modal_for(label));
+                if let Some(m) = state.as_mut() {
+                    let done = self.modal_body(ui, &t, m);
+                    if done {
+                        // saved: start the section fresh
+                        state = None;
+                    }
                 }
-            }
-            self.settings_state = state;
-        });
+                self.settings_state = state;
+            });
     }
 
     /// The interface language: the system's, English or Korean.
@@ -127,7 +176,11 @@ impl App {
         ui.label(RichText::new(tr("The language of menus, buttons and messages on this computer. Names and text people write stay as they are.")).color(self.t().text2));
         ui.add_space(10.0);
         // each language is named in itself, so it can be found whatever is on
-        for (c, label) in [(Choice::System, tr("Same as the system")), (Choice::En, "English"), (Choice::Ko, "\u{d55c}\u{ad6d}\u{c5b4}")] {
+        for (c, label) in [
+            (Choice::System, tr("Same as the system")),
+            (Choice::En, "English"),
+            (Choice::Ko, "\u{d55c}\u{ad6d}\u{c5b4}"),
+        ] {
             let r = ui.radio(self.lang_choice == c, label);
             name_it(&r, &format!("Language {}", crate::i18n::choice_key(c)));
             if r.clicked() && self.lang_choice != c {
@@ -148,8 +201,16 @@ impl App {
             .open_spaces()
             .iter()
             .map(|s| {
-                let lists = self.data.lists_in(Location::Space(s.id)).unwrap_or_default();
-                let tasks = self.data.tasks.iter().filter(|t| lists.contains(&t.list_id)).count();
+                let lists = self
+                    .data
+                    .lists_in(Location::Space(s.id))
+                    .unwrap_or_default();
+                let tasks = self
+                    .data
+                    .tasks
+                    .iter()
+                    .filter(|t| lists.contains(&t.list_id))
+                    .count();
                 (s.id, s.name.clone(), s.color, lists.len(), tasks)
             })
             .collect();
@@ -157,90 +218,129 @@ impl App {
             ui.label(RichText::new(trf!("{} Spaces", spaces.len())).color(t.text2));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if primary_button(ui, &t, tr("+ New Space")).clicked() {
-                    self.modal = Some(Modal::NewSpace { name: String::new(), color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13] });
+                    self.modal = Some(Modal::NewSpace {
+                        name: String::new(),
+                        color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
+                    });
                 }
             });
         });
         ui.add_space(8.0);
-        egui::Grid::new("spaces_table").num_columns(5).striped(true).spacing(vec2(24.0, 10.0)).show(ui, |ui| {
-            for h in ["Name", "Lists", "Tasks", "", ""] {
-                ui.label(RichText::new(tr(h)).small().color(t.text3));
-            }
-            ui.end_row();
-            for (id, name, color, nl, nt) in spaces {
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-                    ui.painter().rect_filled(r, 4.0, rgb(color));
-                    if ui.link(&name).clicked() {
-                        self.actions.push(Action::Go(Location::Space(id)));
-                    }
-                });
-                ui.label(nl.to_string());
-                ui.label(nt.to_string());
-                let r = ui.button("\u{22EF}");
-                click_menu(&r, |ui| self.space_menu(ui, id));
-                let hidden = self.data.spaces.iter().find(|s| s.id == id).is_some_and(|s| s.hidden);
-                if hidden {
-                    let b = ui.button(tr("Show in sidebar"));
-                    name_it(&b, &format!("Show {}", name));
-                    if b.clicked() {
-                        if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == id) {
-                            s.hidden = false;
-                        }
-                        self.dirty = true;
-                    }
-                } else {
-                    ui.label("");
+        egui::Grid::new("spaces_table")
+            .num_columns(5)
+            .striped(true)
+            .spacing(vec2(24.0, 10.0))
+            .show(ui, |ui| {
+                for h in ["Name", "Lists", "Tasks", "", ""] {
+                    ui.label(RichText::new(tr(h)).small().color(t.text3));
                 }
                 ui.end_row();
-            }
-        });
+                for (id, name, color, nl, nt) in spaces {
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                        ui.painter().rect_filled(r, 4.0, rgb(color));
+                        if ui.link(&name).clicked() {
+                            self.actions.push(Action::Go(Location::Space(id)));
+                        }
+                    });
+                    ui.label(nl.to_string());
+                    ui.label(nt.to_string());
+                    let r = ui.button("\u{22EF}");
+                    click_menu(&r, |ui| self.space_menu(ui, id));
+                    let hidden = self
+                        .data
+                        .spaces
+                        .iter()
+                        .find(|s| s.id == id)
+                        .is_some_and(|s| s.hidden);
+                    if hidden {
+                        let b = ui.button(tr("Show in sidebar"));
+                        name_it(&b, &format!("Show {}", name));
+                        if b.clicked() {
+                            if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == id) {
+                                s.hidden = false;
+                            }
+                            self.dirty = true;
+                        }
+                    } else {
+                        ui.label("");
+                    }
+                    ui.end_row();
+                }
+            });
         // archived spaces and lists, with Restore
-        let arch_spaces: Vec<(u64, String)> = self.data.spaces.iter().filter(|s| s.archived && s.private_owner.is_none()).map(|s| (s.id, s.name.clone())).collect();
+        let arch_spaces: Vec<(u64, String)> = self
+            .data
+            .spaces
+            .iter()
+            .filter(|s| s.archived && s.private_owner.is_none())
+            .map(|s| (s.id, s.name.clone()))
+            .collect();
         let arch_lists: Vec<(u64, String)> = self
             .data
             .spaces
             .iter()
             .filter(|s| !s.archived)
-            .flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).filter(|l| l.archived).map(move |l| (l.id, format!("{} / {}", s.name, l.name))))
+            .flat_map(|s| {
+                s.lists
+                    .iter()
+                    .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
+                    .filter(|l| l.archived)
+                    .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
+            })
             .collect();
-        let arch_folders: Vec<(u64, String)> = self.data.spaces.iter().filter(|s| !s.archived).flat_map(|s| s.folders.iter().filter(|f| f.archived).map(move |f| (f.id, format!("{} / {}", s.name, f.name)))).collect();
+        let arch_folders: Vec<(u64, String)> = self
+            .data
+            .spaces
+            .iter()
+            .filter(|s| !s.archived)
+            .flat_map(|s| {
+                s.folders
+                    .iter()
+                    .filter(|f| f.archived)
+                    .map(move |f| (f.id, format!("{} / {}", s.name, f.name)))
+            })
+            .collect();
         ui.add_space(18.0);
         ui.label(RichText::new(tr("Archived")).strong());
         if arch_spaces.is_empty() && arch_lists.is_empty() && arch_folders.is_empty() {
             ui.label(RichText::new(tr("Nothing is archived. Archived Spaces and Lists show here so you can restore them.")).color(t.text3));
         }
-        egui::Grid::new("archived_table").num_columns(3).striped(true).spacing(vec2(24.0, 8.0)).show(ui, |ui| {
-            for (id, name) in arch_spaces {
-                ui.label(RichText::new(tr("Space")).small().color(t.text3));
-                ui.label(&name);
-                let b = ui.button(tr("Restore"));
-                name_it(&b, &format!("Restore {}", name));
-                if b.clicked() {
-                    self.set_space_archived(id, false);
+        egui::Grid::new("archived_table")
+            .num_columns(3)
+            .striped(true)
+            .spacing(vec2(24.0, 8.0))
+            .show(ui, |ui| {
+                for (id, name) in arch_spaces {
+                    ui.label(RichText::new(tr("Space")).small().color(t.text3));
+                    ui.label(&name);
+                    let b = ui.button(tr("Restore"));
+                    name_it(&b, &format!("Restore {}", name));
+                    if b.clicked() {
+                        self.set_space_archived(id, false);
+                    }
+                    ui.end_row();
                 }
-                ui.end_row();
-            }
-            for (id, name) in arch_folders {
-                ui.label(RichText::new(tr("Folder")).small().color(t.text3));
-                ui.label(&name);
-                let b = ui.button(tr("Restore"));
-                name_it(&b, &format!("Restore {}", name));
-                if b.clicked() {
-                    self.set_folder_archived(id, false);
+                for (id, name) in arch_folders {
+                    ui.label(RichText::new(tr("Folder")).small().color(t.text3));
+                    ui.label(&name);
+                    let b = ui.button(tr("Restore"));
+                    name_it(&b, &format!("Restore {}", name));
+                    if b.clicked() {
+                        self.set_folder_archived(id, false);
+                    }
+                    ui.end_row();
                 }
-                ui.end_row();
-            }
-            for (id, name) in arch_lists {
-                ui.label(RichText::new(tr("List")).small().color(t.text3));
-                ui.label(&name);
-                let b = ui.button(tr("Restore"));
-                name_it(&b, &format!("Restore {}", name));
-                if b.clicked() {
-                    self.set_list_archived(id, false);
+                for (id, name) in arch_lists {
+                    ui.label(RichText::new(tr("List")).small().color(t.text3));
+                    ui.label(&name);
+                    let b = ui.button(tr("Restore"));
+                    name_it(&b, &format!("Restore {}", name));
+                    if b.clicked() {
+                        self.set_list_archived(id, false);
+                    }
+                    ui.end_row();
                 }
-                ui.end_row();
-            }
-        });
+            });
     }
 }

@@ -128,10 +128,18 @@ pub fn theme(dark: bool) -> Theme {
 }
 
 pub fn apply(ctx: &egui::Context, t: &Theme) {
-    let mut v = if t.dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if t.dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     v.panel_fill = t.bg;
     v.window_fill = t.card;
-    v.extreme_bg_color = if t.dark { Color32::from_rgb(28, 28, 28) } else { Color32::WHITE };
+    v.extreme_bg_color = if t.dark {
+        Color32::from_rgb(28, 28, 28)
+    } else {
+        Color32::WHITE
+    };
     v.faint_bg_color = t.sidebar;
     // text colour through the widget styles (not override_text_color, which
     // would also paint input placeholders as dark as typed text)
@@ -139,7 +147,11 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     v.widgets.noninteractive.fg_stroke.color = t.text;
     v.widgets.active.fg_stroke.color = t.text;
     v.widgets.open.fg_stroke.color = t.text;
-    v.selection.bg_fill = if t.dark { t.primary } else { Color32::from_rgb(200, 215, 250) };
+    v.selection.bg_fill = if t.dark {
+        t.primary
+    } else {
+        Color32::from_rgb(200, 215, 250)
+    };
     v.selection.stroke = egui::Stroke::new(1.0, t.text);
     v.hyperlink_color = t.selected_text;
     v.window_stroke = egui::Stroke::new(1.0, t.border);
@@ -170,9 +182,13 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     ctx.style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         s.spacing.button_padding = egui::vec2(8.0, 4.0);
-        s.text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
-        s.text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
-        s.text_styles.insert(egui::TextStyle::Small, egui::FontId::proportional(11.5));
-        s.text_styles.insert(egui::TextStyle::Heading, egui::FontId::proportional(20.0));
+        s.text_styles
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
+        s.text_styles
+            .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+        s.text_styles
+            .insert(egui::TextStyle::Small, egui::FontId::proportional(11.5));
+        s.text_styles
+            .insert(egui::TextStyle::Heading, egui::FontId::proportional(20.0));
     });
 }

@@ -35,7 +35,8 @@ pub(super) const MAX_PER_MESSAGE: usize = 10;
 const RETRY_SECS: [u64; 4] = [5, 15, 60, 300];
 /// Why an attachment waits when the workspace is on a server this computer
 /// isn't signed in to (it goes up by itself once it is).
-pub(super) const NOT_SIGNED_IN: &str = "This computer isn't signed in to the team server yet. The file goes up once it is.";
+pub(super) const NOT_SIGNED_IN: &str =
+    "This computer isn't signed in to the team server yet. The file goes up once it is.";
 
 /// An attachment waiting in the message box.
 #[derive(Clone, Debug)]
@@ -50,7 +51,11 @@ pub(super) struct Pending {
 impl Pending {
     /// Ready to go out: checked, and on the server when there is one.
     pub fn ready(&self, files: &Files) -> bool {
-        self.error.is_none() && self.att.as_ref().is_some_and(|a| files.state(&a.file) == Some(Transfer::Done))
+        self.error.is_none()
+            && self
+                .att
+                .as_ref()
+                .is_some_and(|a| files.state(&a.file) == Some(Transfer::Done))
     }
 }
 
@@ -79,18 +84,51 @@ pub(super) enum Remote {
 }
 
 enum Job {
-    Prepare { local: u64, path: Option<PathBuf>, png: Option<Vec<u8>>, name: String, folder: Option<PathBuf> },
-    Upload { sha: String, ctype: String, addr: String, auth: wb_net::Auth },
-    Download { sha: String, addr: String, auth: wb_net::Auth },
-    FromFolder { sha: String, folder: PathBuf },
+    Prepare {
+        local: u64,
+        path: Option<PathBuf>,
+        png: Option<Vec<u8>>,
+        name: String,
+        folder: Option<PathBuf>,
+    },
+    Upload {
+        sha: String,
+        ctype: String,
+        addr: String,
+        auth: wb_net::Auth,
+    },
+    Download {
+        sha: String,
+        addr: String,
+        auth: wb_net::Auth,
+    },
+    FromFolder {
+        sha: String,
+        folder: PathBuf,
+    },
     /// copy a cached file into the shared folder
-    ToFolder { sha: String, folder: PathBuf },
-    Decode { key: String, sha: String, ext: String, kind: MediaKind, max: u32 },
+    ToFolder {
+        sha: String,
+        folder: PathBuf,
+    },
+    Decode {
+        key: String,
+        sha: String,
+        ext: String,
+        kind: MediaKind,
+        max: u32,
+    },
 }
 
 enum Done {
-    Prepared { local: u64, result: Result<Attachment, String> },
-    Decoded { key: String, img: Option<Rgba> },
+    Prepared {
+        local: u64,
+        result: Result<Attachment, String>,
+    },
+    Decoded {
+        key: String,
+        img: Option<Rgba>,
+    },
 }
 
 /// Fetching a file that isn't here: how many tries so far, and when the
@@ -154,33 +192,87 @@ impl Files {
         for rx in [net_rx, small_rx] {
             let rx = Arc::new(Mutex::new(rx));
             for _ in 0..2 {
-                let (dir, states, wake, rx, cancelled, on_server) = (dir.clone(), states.clone(), wake.clone(), rx.clone(), cancelled.clone(), on_server.clone());
-                let _ = std::thread::Builder::new().name("workboard-files".into()).spawn(move || loop {
-                    let job = rx.lock().unwrap().recv();
-                    match job {
-                        Ok(job) => move_file(&dir, job, &states, &cancelled, &on_server, &wake),
-                        Err(_) => return,
-                    }
-                });
+                let (dir, states, wake, rx, cancelled, on_server) = (
+                    dir.clone(),
+                    states.clone(),
+                    wake.clone(),
+                    rx.clone(),
+                    cancelled.clone(),
+                    on_server.clone(),
+                );
+                let _ = std::thread::Builder::new()
+                    .name("workboard-files".into())
+                    .spawn(move || loop {
+                        let job = rx.lock().unwrap().recv();
+                        match job {
+                            Ok(job) => move_file(&dir, job, &states, &cancelled, &on_server, &wake),
+                            Err(_) => return,
+                        }
+                    });
             }
         }
         {
             let (dir, done_tx) = (dir.clone(), done_tx);
-            let _ = std::thread::Builder::new().name("workboard-media".into()).spawn(move || {
-                for job in work_rx {
-                    let out = match job {
-                        Job::Prepare { local, path, png, name, folder } => Done::Prepared { local, result: prepare(&dir, path.as_deref(), png, &name, folder.as_deref()) },
-                        Job::Decode { key, sha, ext, kind, max } => Done::Decoded { key, img: media::thumbnail(&with_ext(&dir, &sha, &ext), kind, max) },
-                        _ => continue,
-                    };
-                    if done_tx.send(out).is_err() {
-                        return;
+            let _ = std::thread::Builder::new()
+                .name("workboard-media".into())
+                .spawn(move || {
+                    for job in work_rx {
+                        let out = match job {
+                            Job::Prepare {
+                                local,
+                                path,
+                                png,
+                                name,
+                                folder,
+                            } => Done::Prepared {
+                                local,
+                                result: prepare(
+                                    &dir,
+                                    path.as_deref(),
+                                    png,
+                                    &name,
+                                    folder.as_deref(),
+                                ),
+                            },
+                            Job::Decode {
+                                key,
+                                sha,
+                                ext,
+                                kind,
+                                max,
+                            } => Done::Decoded {
+                                key,
+                                img: media::thumbnail(&with_ext(&dir, &sha, &ext), kind, max),
+                            },
+                            _ => continue,
+                        };
+                        if done_tx.send(out).is_err() {
+                            return;
+                        }
+                        wake();
                     }
-                    wake();
-                }
-            });
+                });
         }
-        Files { dir, small, net, work, done, states, wants: Default::default(), asked: Default::default(), fetches: Default::default(), background: Default::default(), on_server, cancelled, token: Default::default(), textures: Default::default(), ok: Default::default(), prepared: vec![], next_local: 1, ctx }
+        Files {
+            dir,
+            small,
+            net,
+            work,
+            done,
+            states,
+            wants: Default::default(),
+            asked: Default::default(),
+            fetches: Default::default(),
+            background: Default::default(),
+            on_server,
+            cancelled,
+            token: Default::default(),
+            textures: Default::default(),
+            ok: Default::default(),
+            prepared: vec![],
+            next_local: 1,
+            ctx,
+        }
     }
 
     /// The file in the cache, when it's there.
@@ -197,13 +289,28 @@ impl Files {
     pub fn add(&mut self, path: Option<PathBuf>, png: Option<Vec<u8>>, remote: &Remote) -> Pending {
         let local = self.next_local;
         self.next_local += 1;
-        let name = path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Pasted image.png".into());
+        let name = path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Pasted image.png".into());
         let folder = match remote {
             Remote::Folder(f) => Some(f.join("files")),
             _ => None,
         };
-        let _ = self.work.send(Job::Prepare { local, path, png, name: name.clone(), folder });
-        Pending { local, name, att: None, error: None }
+        let _ = self.work.send(Job::Prepare {
+            local,
+            path,
+            png,
+            name: name.clone(),
+            folder,
+        });
+        Pending {
+            local,
+            name,
+            att: None,
+            error: None,
+        }
     }
 
     /// The lane a picture's or a video's transfer goes on.
@@ -237,11 +344,17 @@ impl Files {
         let (addr, auth) = match remote {
             Remote::Server { addr, auth } => (addr, auth),
             Remote::SignedOut => {
-                self.states.lock().unwrap().insert(att.file.clone(), Transfer::Failed(NOT_SIGNED_IN.into()));
+                self.states
+                    .lock()
+                    .unwrap()
+                    .insert(att.file.clone(), Transfer::Failed(NOT_SIGNED_IN.into()));
                 return;
             }
             Remote::None | Remote::Folder(_) => {
-                self.states.lock().unwrap().insert(att.file.clone(), Transfer::Done);
+                self.states
+                    .lock()
+                    .unwrap()
+                    .insert(att.file.clone(), Transfer::Done);
                 return;
             }
         };
@@ -254,7 +367,12 @@ impl Files {
             drop(s);
             self.cancelled.lock().unwrap().remove(&att.file);
             let ctype = media::content_type(Path::new(&att.name)).to_string();
-            let _ = self.lane(att.kind).send(Job::Upload { sha: att.file.clone(), ctype, addr: addr.clone(), auth: auth.clone() });
+            let _ = self.lane(att.kind).send(Job::Upload {
+                sha: att.file.clone(),
+                ctype,
+                addr: addr.clone(),
+                auth: auth.clone(),
+            });
         }
     }
 
@@ -270,14 +388,25 @@ impl Files {
                 if self.local(&att.file).is_none() {
                     return;
                 }
-                self.background.entry(att.file.clone()).or_insert_with(|| (att.clone(), Fetch { tries: 1, next: None }));
+                self.background.entry(att.file.clone()).or_insert_with(|| {
+                    (
+                        att.clone(),
+                        Fetch {
+                            tries: 1,
+                            next: None,
+                        },
+                    )
+                });
                 self.upload(att, remote);
             }
         }
     }
 
     fn is_on_server(&self, addr: &str, sha: &str) -> bool {
-        self.on_server.lock().unwrap().contains(&format!("{}\n{}", addr, sha))
+        self.on_server
+            .lock()
+            .unwrap()
+            .contains(&format!("{}\n{}", addr, sha))
     }
 
     /// Stop sending a file (its tile was removed before it got there),
@@ -297,13 +426,18 @@ impl Files {
     /// files sent before the workspace was shared).
     pub fn to_folder(&self, att: &Attachment, folder: &Path) {
         if self.local(&att.file).is_some() && !folder.join(&att.file).is_file() {
-            let _ = self.lane(att.kind).send(Job::ToFolder { sha: att.file.clone(), folder: folder.to_path_buf() });
+            let _ = self.lane(att.kind).send(Job::ToFolder {
+                sha: att.file.clone(),
+                folder: folder.to_path_buf(),
+            });
         }
     }
 
     /// While drawing: this attachment is on screen and should be shown at `max`.
     pub fn want(&self, a: &Attachment, max: u32) {
-        self.wants.borrow_mut().push((a.file.clone(), ext_of(&a.name), a.kind, max));
+        self.wants
+            .borrow_mut()
+            .push((a.file.clone(), ext_of(&a.name), a.kind, max));
     }
 
     /// The cached file under a name with the attachment's extension, for
@@ -348,7 +482,13 @@ impl Files {
                         log_broken(&key);
                     }
                     // tests have no context: only remember how it went
-                    let tex = img.zip(ctx).map(|(img, c)| c.load_texture(format!("media-{}", key), img.to_color_image(), egui::TextureOptions::LINEAR));
+                    let tex = img.zip(ctx).map(|(img, c)| {
+                        c.load_texture(
+                            format!("media-{}", key),
+                            img.to_color_image(),
+                            egui::TextureOptions::LINEAR,
+                        )
+                    });
                     self.textures.insert(key, tex);
                 }
             }
@@ -362,16 +502,26 @@ impl Files {
             if self.local(&sha).is_some() {
                 self.fetches.remove(&sha);
                 self.asked.insert(k.clone());
-                let _ = self.work.send(Job::Decode { key: k, sha, ext, kind, max });
+                let _ = self.work.send(Job::Decode {
+                    key: k,
+                    sha,
+                    ext,
+                    kind,
+                    max,
+                });
                 continue;
             }
             // not here yet: fetch it, and when that fails try again a while later
-            if matches!(remote, Remote::None | Remote::SignedOut) || matches!(self.state(&sha), Some(Transfer::Down(_) | Transfer::Up(_))) {
+            if matches!(remote, Remote::None | Remote::SignedOut)
+                || matches!(self.state(&sha), Some(Transfer::Down(_) | Transfer::Up(_)))
+            {
                 continue;
             }
             let now = Instant::now();
             if let Some(f) = self.fetches.get_mut(&sha) {
-                let at = *f.next.get_or_insert_with(|| now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)]));
+                let at = *f.next.get_or_insert_with(|| {
+                    now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)])
+                });
                 if now < at {
                     if let Some(c) = ctx {
                         c.request_repaint_after(at - now);
@@ -381,11 +531,24 @@ impl Files {
                 f.tries += 1;
                 f.next = None;
             } else {
-                self.fetches.insert(sha.clone(), Fetch { tries: 1, next: None });
+                self.fetches.insert(
+                    sha.clone(),
+                    Fetch {
+                        tries: 1,
+                        next: None,
+                    },
+                );
             }
             let job = match remote {
-                Remote::Server { addr, auth } => Job::Download { sha: sha.clone(), addr: addr.clone(), auth: auth.clone() },
-                Remote::Folder(f) => Job::FromFolder { sha: sha.clone(), folder: f.join("files") },
+                Remote::Server { addr, auth } => Job::Download {
+                    sha: sha.clone(),
+                    addr: addr.clone(),
+                    auth: auth.clone(),
+                },
+                Remote::Folder(f) => Job::FromFolder {
+                    sha: sha.clone(),
+                    folder: f.join("files"),
+                },
                 Remote::None | Remote::SignedOut => continue,
             };
             self.states.lock().unwrap().insert(sha, Transfer::Down(0.0));
@@ -396,7 +559,9 @@ impl Files {
     /// Files that must get to the server: start the ones not sent there yet
     /// (or waiting for a sign-in), and try failed ones again when due.
     fn tick_background(&mut self, ctx: Option<&egui::Context>, remote: &Remote) {
-        let Remote::Server { addr, .. } = remote else { return };
+        let Remote::Server { addr, .. } = remote else {
+            return;
+        };
         let now = Instant::now();
         let shas: Vec<String> = self.background.keys().cloned().collect();
         for sha in shas {
@@ -408,9 +573,13 @@ impl Files {
             if matches!(state, Some(Transfer::Up(_))) {
                 continue;
             }
-            let Some((att, f)) = self.background.get_mut(&sha) else { continue };
+            let Some((att, f)) = self.background.get_mut(&sha) else {
+                continue;
+            };
             if matches!(&state, Some(Transfer::Failed(e)) if e != NOT_SIGNED_IN) {
-                let at = *f.next.get_or_insert_with(|| now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)]));
+                let at = *f.next.get_or_insert_with(|| {
+                    now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)])
+                });
                 if now < at {
                     if let Some(c) = ctx {
                         c.request_repaint_after(at - now);
@@ -452,7 +621,9 @@ impl Files {
     /// Tries so far at fetching a file, and whether the next one waits (tests).
     #[cfg(test)]
     pub fn fetch_tries(&self, sha: &str) -> Option<(usize, bool)> {
-        self.fetches.get(sha).map(|f| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
+        self.fetches
+            .get(sha)
+            .map(|f| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
     }
 
     /// Make a waiting retry due now (tests).
@@ -470,13 +641,19 @@ impl Files {
     /// one waits (tests).
     #[cfg(test)]
     pub fn upload_tries(&self, sha: &str) -> Option<(usize, bool)> {
-        self.background.get(sha).map(|(_, f)| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
+        self.background
+            .get(sha)
+            .map(|(_, f)| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
     }
 }
 
 /// "mov" for "Clip.MOV"; empty without one.
 fn ext_of(name: &str) -> String {
-    Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric())).unwrap_or_default()
+    Path::new(name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or_default()
 }
 
 /// <dir>/<sha>.<ext>: a hard link to the cached file (a copy if linking fails).
@@ -501,7 +678,10 @@ fn log_broken(key: &str) {
 }
 
 fn wb_server_name_ok(sha: &str) -> bool {
-    sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    sha.len() == 64
+        && sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Copy `from` into the cache under its hash (temporary name first).
@@ -517,7 +697,13 @@ fn store(dir: &Path, from: &Path, sha: &str) -> Result<(), String> {
 }
 
 /// Check a file and get it into the cache (and the shared folder).
-fn prepare(dir: &Path, path: Option<&Path>, png: Option<Vec<u8>>, name: &str, folder: Option<&Path>) -> Result<Attachment, String> {
+fn prepare(
+    dir: &Path,
+    path: Option<&Path>,
+    png: Option<Vec<u8>>,
+    name: &str,
+    folder: Option<&Path>,
+) -> Result<Attachment, String> {
     let (src, tmp) = match (path, png) {
         (Some(p), _) => (p.to_path_buf(), None),
         (None, Some(bytes)) => {
@@ -529,18 +715,31 @@ fn prepare(dir: &Path, path: Option<&Path>, png: Option<Vec<u8>>, name: &str, fo
         (None, None) => return Err("Nothing to send.".into()),
     };
     let out = (|| {
-        let kind = media::kind_of(&src).ok_or_else(|| format!("{} isn't a picture or a video.", name))?;
-        let bytes = std::fs::metadata(&src).map_err(|_| format!("{} can't be read.", name))?.len();
+        let kind =
+            media::kind_of(&src).ok_or_else(|| format!("{} isn't a picture or a video.", name))?;
+        let bytes = std::fs::metadata(&src)
+            .map_err(|_| format!("{} can't be read.", name))?
+            .len();
         if bytes > MAX_FILE {
             return Err(format!("{} is larger than 500 MB.", name));
         }
         let (w, h, secs) = media::probe(&src, kind)?;
-        let (sha, bytes) = wb_net::sha256_file(&src).map_err(|_| format!("{} can't be read.", name))?;
+        let (sha, bytes) =
+            wb_net::sha256_file(&src).map_err(|_| format!("{} can't be read.", name))?;
         store(dir, &src, &sha)?;
         if let Some(f) = folder {
-            store(f, &src, &sha).map_err(|e| format!("Couldn't put {} in the shared folder: {}", name, e))?;
+            store(f, &src, &sha)
+                .map_err(|e| format!("Couldn't put {} in the shared folder: {}", name, e))?;
         }
-        Ok(Attachment { file: sha, name: name.to_string(), kind, bytes, w, h, secs })
+        Ok(Attachment {
+            file: sha,
+            name: name.to_string(),
+            kind,
+            bytes,
+            w,
+            h,
+            secs,
+        })
     })();
     if let Some(t) = tmp {
         let _ = std::fs::remove_file(t);
@@ -549,7 +748,14 @@ fn prepare(dir: &Path, path: Option<&Path>, png: Option<Vec<u8>>, name: &str, fo
 }
 
 /// A files thread: one upload, download or folder copy.
-fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, cancelled: &Mutex<HashSet<String>>, on_server: &Mutex<HashSet<String>>, wake: &impl Fn()) {
+fn move_file(
+    dir: &Path,
+    job: Job,
+    states: &Mutex<HashMap<String, Transfer>>,
+    cancelled: &Mutex<HashSet<String>>,
+    on_server: &Mutex<HashSet<String>>,
+    wake: &impl Fn(),
+) {
     let set = |sha: &str, t: Transfer| {
         states.lock().unwrap().insert(sha.to_string(), t);
         wake();
@@ -563,17 +769,33 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, ca
             if up && stopped(&sha) {
                 return false;
             }
-            let pct = if total == 0 { 100 } else { (done * 100 / total) as i32 };
+            let pct = if total == 0 {
+                100
+            } else {
+                (done * 100 / total) as i32
+            };
             if pct != last {
                 last = pct;
                 let f = pct as f32 / 100.0;
-                set(&sha, if up { Transfer::Up(f) } else { Transfer::Down(f) });
+                set(
+                    &sha,
+                    if up {
+                        Transfer::Up(f)
+                    } else {
+                        Transfer::Down(f)
+                    },
+                );
             }
             true
         }
     };
     match job {
-        Job::Upload { sha, ctype, addr, auth } => {
+        Job::Upload {
+            sha,
+            ctype,
+            addr,
+            auth,
+        } => {
             let path = dir.join(&sha);
             let result = if stopped(&sha) {
                 Err(wb_net::FileError::Cancelled)
@@ -583,7 +805,10 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, ca
             };
             match result {
                 Ok(()) => {
-                    on_server.lock().unwrap().insert(format!("{}\n{}", addr, sha));
+                    on_server
+                        .lock()
+                        .unwrap()
+                        .insert(format!("{}\n{}", addr, sha));
                     set(&sha, Transfer::Done)
                 }
                 Err(wb_net::FileError::Cancelled) => {
@@ -598,7 +823,10 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, ca
             let mut progress = report(&sha, false);
             match wb_net::download(&addr, &auth, &sha, &dir.join(&sha), &mut progress) {
                 Ok(()) => {
-                    on_server.lock().unwrap().insert(format!("{}\n{}", addr, sha));
+                    on_server
+                        .lock()
+                        .unwrap()
+                        .insert(format!("{}\n{}", addr, sha));
                     set(&sha, Transfer::Done)
                 }
                 Err(e) => set(&sha, Transfer::Failed(e.explain())),
@@ -606,7 +834,10 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, ca
         }
         Job::FromFolder { sha, folder } => match store(dir, &folder.join(&sha), &sha) {
             Ok(()) => set(&sha, Transfer::Done),
-            Err(_) => set(&sha, Transfer::Failed("The file isn't in the shared folder yet.".into())),
+            Err(_) => set(
+                &sha,
+                Transfer::Failed("The file isn't in the shared folder yet.".into()),
+            ),
         },
         Job::ToFolder { sha, folder } => {
             let _ = store(&folder, &dir.join(&sha), &sha);
@@ -630,7 +861,14 @@ pub(super) struct Viewer {
 
 impl Viewer {
     pub fn new(ch: u64, msg: u64, index: usize) -> Viewer {
-        Viewer { ch, msg, index, player: None, frame: None, unplayable: None }
+        Viewer {
+            ch,
+            msg,
+            index,
+            player: None,
+            frame: None,
+            unplayable: None,
+        }
     }
 }
 
@@ -641,8 +879,18 @@ impl App {
     /// Where this workspace's files go besides the cache.
     pub(super) fn media_remote(&self) -> Remote {
         match &self.data.extra.shared {
-            Some(crate::sync::SharedCfg { server: Some(addr), device, .. }) => match self.files.token(addr, device) {
-                Some(token) => Remote::Server { addr: addr.clone(), auth: wb_net::Auth { device: device.clone(), token } },
+            Some(crate::sync::SharedCfg {
+                server: Some(addr),
+                device,
+                ..
+            }) => match self.files.token(addr, device) {
+                Some(token) => Remote::Server {
+                    addr: addr.clone(),
+                    auth: wb_net::Auth {
+                        device: device.clone(),
+                        token,
+                    },
+                },
                 None => Remote::SignedOut,
             },
             Some(cfg) if !cfg.folder.is_empty() => Remote::Folder(PathBuf::from(&cfg.folder)),
@@ -655,7 +903,10 @@ impl App {
         let remote = self.media_remote();
         self.files.tick(ctx, &remote);
         for (local, result) in self.files.take_prepared() {
-            let boxes = [&mut self.chat_files, &mut self.thread_files].into_iter().chain(self.drafts.chat_files.saved.values_mut()).chain(self.drafts.thread_files.saved.values_mut());
+            let boxes = [&mut self.chat_files, &mut self.thread_files]
+                .into_iter()
+                .chain(self.drafts.chat_files.saved.values_mut())
+                .chain(self.drafts.thread_files.saved.values_mut());
             for list in boxes {
                 if let Some(p) = list.iter_mut().find(|p| p.local == local) {
                     match &result {
@@ -687,7 +938,9 @@ impl App {
         }
         if let Some(p) = self.pasted.take() {
             if self.section == Section::Chat && self.chat_open.is_some() {
-                let thread = ctx.is_some_and(|c| c.memory(|m| m.focused()) == Some(egui::Id::new(THREAD_BOX))) && self.thread_open.is_some();
+                let thread = ctx
+                    .is_some_and(|c| c.memory(|m| m.focused()) == Some(egui::Id::new(THREAD_BOX)))
+                    && self.thread_open.is_some();
                 if p.files.is_empty() {
                     if let Some(png) = p.png {
                         self.add_media(thread, None, Some(png));
@@ -704,8 +957,13 @@ impl App {
     /// The attachments in every message box (this one and the ones kept
     /// with other channels).
     fn boxed_attachments(&self) -> Vec<Attachment> {
-        let boxes = [&self.chat_files, &self.thread_files].into_iter().chain(self.drafts.chat_files.saved.values()).chain(self.drafts.thread_files.saved.values());
-        boxes.flat_map(|l| l.iter().filter_map(|p| p.att.clone())).collect()
+        let boxes = [&self.chat_files, &self.thread_files]
+            .into_iter()
+            .chain(self.drafts.chat_files.saved.values())
+            .chain(self.drafts.thread_files.saved.values());
+        boxes
+            .flat_map(|l| l.iter().filter_map(|p| p.att.clone()))
+            .collect()
     }
 
     /// Sharing just started: the pictures and videos earlier messages refer
@@ -719,7 +977,11 @@ impl App {
             .data
             .channels
             .iter()
-            .flat_map(|c| c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter())))
+            .flat_map(|c| {
+                c.messages
+                    .iter()
+                    .flat_map(|m| std::iter::once(m).chain(m.replies.iter()))
+            })
             .flat_map(|m| m.attachments.iter())
             .cloned()
             .collect();
@@ -745,7 +1007,14 @@ impl App {
     /// Error text from the files and media threads, in the interface
     /// language (some carry a file name or a reason inside).
     pub(super) fn error_text(e: &str) -> String {
-        const WITH_VALUES: [&str; 6] = ["Couldn't reach the server: {}", "{} isn't a picture or a video.", "{} can't be read.", "{} is larger than 500 MB.", "Couldn't put {} in the shared folder: {}", "The server said {} {}"];
+        const WITH_VALUES: [&str; 6] = [
+            "Couldn't reach the server: {}",
+            "{} isn't a picture or a video.",
+            "{} can't be read.",
+            "{} is larger than 500 MB.",
+            "Couldn't put {} in the shared folder: {}",
+            "The server said {} {}",
+        ];
         for pattern in WITH_VALUES {
             if let Some(values) = fill_back(pattern, e) {
                 return crate::i18n::fill(tr(pattern), &values);
@@ -757,10 +1026,25 @@ impl App {
     /// Put a file (or a pasted picture) in the channel or thread message box.
     /// At most MAX_PER_MESSAGE per box: past that it says so and leaves the
     /// file out (false).
-    pub(super) fn add_media(&mut self, thread: bool, path: Option<PathBuf>, png: Option<Vec<u8>>) -> bool {
-        let count = if thread { self.thread_files.len() } else { self.chat_files.len() };
+    pub(super) fn add_media(
+        &mut self,
+        thread: bool,
+        path: Option<PathBuf>,
+        png: Option<Vec<u8>>,
+    ) -> bool {
+        let count = if thread {
+            self.thread_files.len()
+        } else {
+            self.chat_files.len()
+        };
         if count >= MAX_PER_MESSAGE {
-            self.toast = Some((trf!("You can send up to {} pictures or videos in one message.", MAX_PER_MESSAGE), now_ts()));
+            self.toast = Some((
+                trf!(
+                    "You can send up to {} pictures or videos in one message.",
+                    MAX_PER_MESSAGE
+                ),
+                now_ts(),
+            ));
             return false;
         }
         let remote = self.media_remote();
@@ -783,12 +1067,22 @@ impl App {
     /// Files dropped on the chat: into the thread box when dropped over the
     /// thread panel, else the channel's.
     pub(super) fn take_dropped(&mut self, ctx: &egui::Context, thread_rect: Option<Rect>) {
-        let (dropped, at) = ctx.input(|i| (i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect::<Vec<_>>(), i.pointer.latest_pos()));
+        let (dropped, at) = ctx.input(|i| {
+            (
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .filter_map(|f| f.path.clone())
+                    .collect::<Vec<_>>(),
+                i.pointer.latest_pos(),
+            )
+        });
         // over an open task they belong to the task (see task_window)
         if dropped.is_empty() || self.open_task.is_some() {
             return;
         }
-        let thread = self.thread_open.is_some() && thread_rect.zip(at).is_some_and(|(r, p)| r.contains(p));
+        let thread =
+            self.thread_open.is_some() && thread_rect.zip(at).is_some_and(|(r, p)| r.contains(p));
         for f in dropped {
             self.add_media(thread, Some(f), None);
         }
@@ -803,7 +1097,11 @@ impl App {
             self.paste_text_seen = false;
             return;
         }
-        if raw.events.iter().any(|e| matches!(e, egui::Event::Paste(_))) {
+        if raw
+            .events
+            .iter()
+            .any(|e| matches!(e, egui::Event::Paste(_)))
+        {
             self.paste_text_seen = true;
             // files copied in Finder come with their names as text: send the files instead
             let p = media::pasteboard();
@@ -827,7 +1125,11 @@ impl App {
     /// Attachments waiting in a message box, as small tiles with a remove
     /// button and how far the upload is.
     pub(super) fn pending_strip(&mut self, ui: &mut Ui, thread: bool) {
-        let list = if thread { &self.thread_files } else { &self.chat_files };
+        let list = if thread {
+            &self.thread_files
+        } else {
+            &self.chat_files
+        };
         if list.is_empty() {
             return;
         }
@@ -843,7 +1145,13 @@ impl App {
                     Some(Transfer::Failed(e)) => Some(e.clone()),
                     _ => None,
                 });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("Attachment {}", p.name)));
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Image,
+                        true,
+                        format!("Attachment {}", p.name),
+                    )
+                });
                 let painter = ui.painter_at(rect.expand(6.0));
                 match p.att.as_ref().and_then(|a| {
                     self.files.want(a, THUMB);
@@ -851,25 +1159,62 @@ impl App {
                 }) {
                     Some(tex) => {
                         let uv = cover_uv(tex.size_vec2(), size);
-                        painter.add(egui::epaint::RectShape::filled(rect, 8.0, Color32::WHITE).with_texture(tex.id(), uv));
+                        painter.add(
+                            egui::epaint::RectShape::filled(rect, 8.0, Color32::WHITE)
+                                .with_texture(tex.id(), uv),
+                        );
                     }
                     None => {
                         painter.rect_filled(rect, 8.0, t.hover);
-                        painter.text(rect.center(), Align2::CENTER_CENTER, if p.att.is_none() && failed.is_none() { "..." } else { "" }, FontId::proportional(14.0), t.text3);
+                        painter.text(
+                            rect.center(),
+                            Align2::CENTER_CENTER,
+                            if p.att.is_none() && failed.is_none() {
+                                "..."
+                            } else {
+                                ""
+                            },
+                            FontId::proportional(14.0),
+                            t.text3,
+                        );
                     }
                 }
                 if p.att.as_ref().is_some_and(|a| a.kind == MediaKind::Video) {
                     play_badge(&painter, rect.center(), 12.0);
                 }
                 if let Some(Transfer::Up(f)) = state {
-                    let bar = Rect::from_min_size(pos2(rect.left() + 6.0, rect.bottom() - 10.0), vec2(rect.width() - 12.0, 4.0));
+                    let bar = Rect::from_min_size(
+                        pos2(rect.left() + 6.0, rect.bottom() - 10.0),
+                        vec2(rect.width() - 12.0, 4.0),
+                    );
                     painter.rect_filled(bar, 2.0, Color32::from_black_alpha(120));
-                    painter.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * f, bar.height())), 2.0, Color32::WHITE);
+                    painter.rect_filled(
+                        Rect::from_min_size(bar.min, vec2(bar.width() * f, bar.height())),
+                        2.0,
+                        Color32::WHITE,
+                    );
                 }
                 if let Some(why) = &failed {
-                    painter.rect_stroke(rect, 8.0, Stroke::new(2.0, t.danger), egui::StrokeKind::Inside);
-                    painter.text(rect.center(), Align2::CENTER_CENTER, "!", FontId::proportional(18.0), t.danger);
-                    let r = resp.clone().on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN { format!("{}\n{}", App::error_text(why), tr("Click to try again")) } else { App::error_text(why) });
+                    painter.rect_stroke(
+                        rect,
+                        8.0,
+                        Stroke::new(2.0, t.danger),
+                        egui::StrokeKind::Inside,
+                    );
+                    painter.text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        "!",
+                        FontId::proportional(18.0),
+                        t.danger,
+                    );
+                    let r =
+                        resp.clone()
+                            .on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN {
+                                format!("{}\n{}", App::error_text(why), tr("Click to try again"))
+                            } else {
+                                App::error_text(why)
+                            });
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
@@ -877,12 +1222,33 @@ impl App {
                     resp.clone().on_hover_text(&p.name);
                 }
                 // remove
-                let x = Rect::from_center_size(rect.right_top() + vec2(-8.0, 8.0), vec2(18.0, 18.0));
+                let x =
+                    Rect::from_center_size(rect.right_top() + vec2(-8.0, 8.0), vec2(18.0, 18.0));
                 let xr = ui.interact(x, ui.id().with(("unattach", p.local)), Sense::click());
-                xr.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Remove {}", p.name)));
-                painter.circle_filled(x.center(), 9.0, if xr.hovered() { Color32::from_black_alpha(220) } else { Color32::from_black_alpha(160) });
-                for (a, b) in [(vec2(-3.5, -3.5), vec2(3.5, 3.5)), (vec2(-3.5, 3.5), vec2(3.5, -3.5))] {
-                    painter.line_segment([x.center() + a, x.center() + b], Stroke::new(1.6, Color32::WHITE));
+                xr.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Remove {}", p.name),
+                    )
+                });
+                painter.circle_filled(
+                    x.center(),
+                    9.0,
+                    if xr.hovered() {
+                        Color32::from_black_alpha(220)
+                    } else {
+                        Color32::from_black_alpha(160)
+                    },
+                );
+                for (a, b) in [
+                    (vec2(-3.5, -3.5), vec2(3.5, 3.5)),
+                    (vec2(-3.5, 3.5), vec2(3.5, -3.5)),
+                ] {
+                    painter.line_segment(
+                        [x.center() + a, x.center() + b],
+                        Stroke::new(1.6, Color32::WHITE),
+                    );
                 }
                 if xr.clicked() {
                     remove = Some(p.local);
@@ -895,13 +1261,29 @@ impl App {
             self.files.upload(&a, &remote);
         }
         if let Some(l) = remove {
-            let list = if thread { &mut self.thread_files } else { &mut self.chat_files };
-            let gone = list.iter().find(|p| p.local == l).and_then(|p| p.att.clone());
+            let list = if thread {
+                &mut self.thread_files
+            } else {
+                &mut self.chat_files
+            };
+            let gone = list
+                .iter()
+                .find(|p| p.local == l)
+                .and_then(|p| p.att.clone());
             list.retain(|p| p.local != l);
             // stop its upload, unless another message box or a sent message
             // has the same file
             if let Some(a) = gone {
-                let sent = self.data.channels.iter().flat_map(|c| c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter()))).any(|m| m.attachments.iter().any(|x| x.file == a.file));
+                let sent = self
+                    .data
+                    .channels
+                    .iter()
+                    .flat_map(|c| {
+                        c.messages
+                            .iter()
+                            .flat_map(|m| std::iter::once(m).chain(m.replies.iter()))
+                    })
+                    .any(|m| m.attachments.iter().any(|x| x.file == a.file));
                 if !sent && !self.boxed_attachments().iter().any(|x| x.file == a.file) {
                     self.files.cancel_upload(&a.file);
                 }
@@ -911,9 +1293,20 @@ impl App {
 
     /// Whether a message box may send, and the attachments it would send.
     pub(super) fn pending_ready(&self, thread: bool) -> (bool, Vec<Attachment>) {
-        let list = if thread { &self.thread_files } else { &self.chat_files };
+        let list = if thread {
+            &self.thread_files
+        } else {
+            &self.chat_files
+        };
         let ok = list.iter().all(|p| p.ready(&self.files));
-        (ok, if ok { list.iter().filter_map(|p| p.att.clone()).collect() } else { vec![] })
+        (
+            ok,
+            if ok {
+                list.iter().filter_map(|p| p.att.clone()).collect()
+            } else {
+                vec![]
+            },
+        )
     }
 
     /// A message's pictures and videos. Returns the one clicked.
@@ -928,7 +1321,11 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             for (i, a) in m.attachments.iter().enumerate() {
-                let aspect = if a.w > 0 && a.h > 0 { a.w as f32 / a.h as f32 } else { 4.0 / 3.0 };
+                let aspect = if a.w > 0 && a.h > 0 {
+                    a.w as f32 / a.h as f32
+                } else {
+                    4.0 / 3.0
+                };
                 let size = if one {
                     let w = (320.0 * aspect).min(360.0).min(avail).max(80.0);
                     vec2(w, (w / aspect).min(320.0))
@@ -937,8 +1334,18 @@ impl App {
                     vec2((h * aspect).clamp(100.0, 260.0), h)
                 };
                 let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-                let label = format!("{} {}", if a.kind == MediaKind::Video { "Video" } else { "Picture" }, a.name);
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, label.clone()));
+                let label = format!(
+                    "{} {}",
+                    if a.kind == MediaKind::Video {
+                        "Video"
+                    } else {
+                        "Picture"
+                    },
+                    a.name
+                );
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Image, true, label.clone())
+                });
                 if !ui.is_rect_visible(rect) {
                     continue;
                 }
@@ -947,25 +1354,50 @@ impl App {
                 match self.files.texture(&a.file, THUMB) {
                     Some(tex) => {
                         let uv = cover_uv(tex.size_vec2(), size);
-                        painter.add(egui::epaint::RectShape::filled(rect, 8.0, Color32::WHITE).with_texture(tex.id(), uv));
+                        painter.add(
+                            egui::epaint::RectShape::filled(rect, 8.0, Color32::WHITE)
+                                .with_texture(tex.id(), uv),
+                        );
                     }
                     None => {
                         painter.rect_filled(rect, 8.0, t.hover);
                         let status = match self.files.state(&a.file) {
                             Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                            Some(Transfer::Failed(e)) => format!("{}\n{}", App::error_text(&e), tr("Click to try again")),
-                            _ if self.files.broken(&a.file, THUMB) => tr("Can't show this file").into(),
+                            Some(Transfer::Failed(e)) => {
+                                format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
+                            }
+                            _ if self.files.broken(&a.file, THUMB) => {
+                                tr("Can't show this file").into()
+                            }
                             _ => a.name.clone(),
                         };
-                        painter.text(rect.center() + vec2(0.0, if a.kind == MediaKind::Video { 26.0 } else { 0.0 }), Align2::CENTER_CENTER, status, FontId::proportional(12.0), t.text3);
+                        painter.text(
+                            rect.center()
+                                + vec2(
+                                    0.0,
+                                    if a.kind == MediaKind::Video {
+                                        26.0
+                                    } else {
+                                        0.0
+                                    },
+                                ),
+                            Align2::CENTER_CENTER,
+                            status,
+                            FontId::proportional(12.0),
+                            t.text3,
+                        );
                     }
                 }
                 if a.kind == MediaKind::Video {
                     play_badge(&painter, rect.center(), 20.0);
                     if a.secs > 0.0 {
                         let txt = media::clock(a.secs);
-                        let g = painter.layout_no_wrap(txt, FontId::proportional(11.5), Color32::WHITE);
-                        let r = Rect::from_min_size(rect.right_bottom() - g.size() - vec2(14.0, 10.0), g.size() + vec2(8.0, 4.0));
+                        let g =
+                            painter.layout_no_wrap(txt, FontId::proportional(11.5), Color32::WHITE);
+                        let r = Rect::from_min_size(
+                            rect.right_bottom() - g.size() - vec2(14.0, 10.0),
+                            g.size() + vec2(8.0, 4.0),
+                        );
                         painter.rect_filled(r, 4.0, Color32::from_black_alpha(160));
                         painter.galley(r.min + vec2(4.0, 2.0), g, Color32::WHITE);
                     }
@@ -984,13 +1416,21 @@ impl App {
     /// The message a viewer shows.
     fn viewer_message(&self, v: &Viewer) -> Option<Message> {
         let c = self.data.channels.iter().find(|c| c.id == v.ch)?;
-        c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter())).find(|m| m.id == v.msg).cloned()
+        c.messages
+            .iter()
+            .flat_map(|m| std::iter::once(m).chain(m.replies.iter()))
+            .find(|m| m.id == v.msg)
+            .cloned()
     }
 
     /// A picture or video opened large, over everything.
     pub(super) fn media_viewer(&mut self, ctx: &egui::Context) {
-        let Some(mut v) = self.viewer.take() else { return };
-        let Some(m) = self.viewer_message(&v) else { return };
+        let Some(mut v) = self.viewer.take() else {
+            return;
+        };
+        let Some(m) = self.viewer_message(&v) else {
+            return;
+        };
         if m.attachments.is_empty() {
             return;
         }
@@ -1017,7 +1457,9 @@ impl App {
         }
         // the video player follows the file shown
         if a.kind == MediaKind::Video {
-            if v.player.as_ref().map(|(s, _)| s != &a.file).unwrap_or(true) && v.unplayable.as_deref() != Some(a.file.as_str()) {
+            if v.player.as_ref().map(|(s, _)| s != &a.file).unwrap_or(true)
+                && v.unplayable.as_deref() != Some(a.file.as_str())
+            {
                 v.player = None;
                 v.frame = None;
                 if let Some(path) = self.files.playable(&a).filter(|_| local.is_some()) {
@@ -1033,7 +1475,10 @@ impl App {
                 }
             }
             // it opened but AVFoundation gave up on it: say so instead of a dead Play button
-            if v.player.as_ref().is_some_and(|(s, p)| s == &a.file && p.failed()) {
+            if v.player
+                .as_ref()
+                .is_some_and(|(s, p)| s == &a.file && p.failed())
+            {
                 v.player = None;
                 v.frame = None;
                 v.unplayable = Some(a.file.clone());
@@ -1042,7 +1487,13 @@ impl App {
                 if let Some(f) = p.frame() {
                     match v.frame.as_mut() {
                         Some(tex) => tex.set(f.to_color_image(), egui::TextureOptions::LINEAR),
-                        None => v.frame = Some(ctx.load_texture("media-player", f.to_color_image(), egui::TextureOptions::LINEAR)),
+                        None => {
+                            v.frame = Some(ctx.load_texture(
+                                "media-player",
+                                f.to_color_image(),
+                                egui::TextureOptions::LINEAR,
+                            ))
+                        }
                     }
                 }
                 if p.playing() {
@@ -1056,128 +1507,320 @@ impl App {
             v.frame = None;
         }
 
-        egui::Area::new(egui::Id::new("media_viewer")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
-            let (bg, bg_resp) = ui.allocate_exact_size(screen.size(), Sense::click());
-            ui.painter().rect_filled(bg, 0.0, Color32::from_black_alpha(225));
-            let bar_h = 56.0;
-            let area = Rect::from_min_max(bg.min + vec2(60.0, 50.0), bg.max - vec2(60.0, bar_h + 20.0));
-            // the picture or frame, fitted
-            let tex = match a.kind {
-                MediaKind::Image => self.files.texture(&a.file, FULL).or_else(|| self.files.texture(&a.file, THUMB)).cloned(),
-                MediaKind::Video => v.frame.clone().or_else(|| self.files.texture(&a.file, THUMB).cloned()),
-            };
-            let (w, h) = fit(a.w.max(1) as f32, a.h.max(1) as f32, area.width(), area.height());
-            let pic = Rect::from_center_size(area.center(), vec2(w, h));
-            let pic_resp = ui.interact(pic, ui.id().with("media_pic"), Sense::click());
-            pic_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("Large {}", a.name)));
-            match &tex {
-                Some(tex) => {
-                    ui.painter().image(tex.id(), pic, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-                }
-                None => {
-                    let failed = matches!(self.files.state(&a.file), Some(Transfer::Failed(_)));
-                    if failed && pic_resp.clicked() {
-                        self.files.retry(&a.file);
-                    }
-                    let status = match self.files.state(&a.file) {
-                        Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => format!("{}\n{}", App::error_text(&e), tr("Click to try again")),
-                        _ => tr("Loading...").into(),
-                    };
-                    ui.painter().text(pic.center(), Align2::CENTER_CENTER, status, FontId::proportional(15.0), Color32::from_gray(200));
-                }
-            }
-            if bg_resp.clicked() && !pic.contains(bg_resp.interact_pointer_pos().unwrap_or(pic.center())) {
-                close = true;
-            }
-            // top: name and the buttons
-            let top = Rect::from_min_size(bg.min + vec2(20.0, 12.0), vec2(bg.width() - 40.0, 30.0));
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(top).layout(Layout::left_to_right(Align::Center)), |ui| {
-                let count = if m.attachments.len() > 1 { trf!("  {} of {}", v.index + 1, m.attachments.len()) } else { String::new() };
-                ui.label(RichText::new(format!("{}{}", a.name, count)).color(Color32::WHITE).size(14.0));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let b = |ui: &mut Ui, s: &str| ui.add(egui::Button::new(RichText::new(s).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(6).min_size(vec2(0.0, 28.0)));
-                    if b(ui, tr("Close")).on_hover_text("Esc").clicked() {
-                        close = true;
-                    }
-                    if let Some(path) = &local {
-                        if b(ui, tr("Save to Downloads")).clicked() {
-                            match save_copy(path, &a.name) {
-                                Ok(dest) => self.toast = Some((trf!("Saved {}", dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()), now_ts())),
-                                Err(e) => self.toast = Some((trf!("Couldn't save: {}", e), now_ts())),
-                            }
-                        }
-                        if b(ui, tr("Show in Finder")).clicked() {
-                            let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
-                        }
-                    }
+        egui::Area::new(egui::Id::new("media_viewer"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                let (bg, bg_resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+                ui.painter()
+                    .rect_filled(bg, 0.0, Color32::from_black_alpha(225));
+                let bar_h = 56.0;
+                let area = Rect::from_min_max(
+                    bg.min + vec2(60.0, 50.0),
+                    bg.max - vec2(60.0, bar_h + 20.0),
+                );
+                // the picture or frame, fitted
+                let tex = match a.kind {
+                    MediaKind::Image => self
+                        .files
+                        .texture(&a.file, FULL)
+                        .or_else(|| self.files.texture(&a.file, THUMB))
+                        .cloned(),
+                    MediaKind::Video => v
+                        .frame
+                        .clone()
+                        .or_else(|| self.files.texture(&a.file, THUMB).cloned()),
+                };
+                let (w, h) = fit(
+                    a.w.max(1) as f32,
+                    a.h.max(1) as f32,
+                    area.width(),
+                    area.height(),
+                );
+                let pic = Rect::from_center_size(area.center(), vec2(w, h));
+                let pic_resp = ui.interact(pic, ui.id().with("media_pic"), Sense::click());
+                pic_resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Image,
+                        true,
+                        format!("Large {}", a.name),
+                    )
                 });
-            });
-            // previous / next
-            if m.attachments.len() > 1 {
-                for (dir, x, glyph) in [(-1, bg.left() + 30.0, "\u{2039}"), (1, bg.right() - 30.0, "\u{203A}")] {
-                    let r = Rect::from_center_size(pos2(x, area.center().y), vec2(40.0, 60.0));
-                    let resp = ui.interact(r, ui.id().with(("media_step", dir)), Sense::click());
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, if dir < 0 { "Previous" } else { "Next" }));
-                    ui.painter().text(r.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(40.0), if resp.hovered() { Color32::WHITE } else { Color32::from_gray(170) });
-                    if resp.clicked() {
-                        step = dir;
+                match &tex {
+                    Some(tex) => {
+                        ui.painter().image(
+                            tex.id(),
+                            pic,
+                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
                     }
-                }
-            }
-            // video controls
-            if a.kind == MediaKind::Video {
-                let bar = Rect::from_min_size(pos2(area.center().x - 300.0, bg.bottom() - bar_h - 12.0), vec2(600.0, bar_h));
-                ui.painter().rect_filled(bar, 10.0, Color32::from_white_alpha(22));
-                if let Some((_, p)) = v.player.as_mut() {
-                    let (pos, dur) = (p.position(), p.duration().max(a.secs).max(0.001));
-                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(12.0, 0.0))).layout(Layout::left_to_right(Align::Center)), |ui| {
-                        let playing = p.playing();
-                        let pb = ui.add(egui::Button::new(RichText::new(if playing { "\u{23F8}" } else { "\u{25B6}" }).color(Color32::WHITE).size(16.0)).frame(false).min_size(vec2(32.0, 32.0)));
-                        pb.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, if playing { "Pause" } else { "Play" }));
-                        if pb.clicked() || ui.input(|i| i.key_pressed(egui::Key::Space)) {
-                            if playing {
-                                p.pause();
-                            } else {
-                                p.play();
+                    None => {
+                        let failed = matches!(self.files.state(&a.file), Some(Transfer::Failed(_)));
+                        if failed && pic_resp.clicked() {
+                            self.files.retry(&a.file);
+                        }
+                        let status = match self.files.state(&a.file) {
+                            Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
+                            Some(Transfer::Failed(e)) => {
+                                format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
                             }
-                        }
-                        ui.label(RichText::new(media::clock(pos)).color(Color32::WHITE).monospace().size(12.0));
-                        // the bar: click or drag to move
-                        let track_w = ui.available_width() - 110.0;
-                        let (tr, tresp) = ui.allocate_exact_size(vec2(track_w.max(40.0), 24.0), Sense::click_and_drag());
-                        tresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Video position"));
-                        let line = Rect::from_center_size(tr.center(), vec2(tr.width(), 4.0));
-                        ui.painter().rect_filled(line, 2.0, Color32::from_white_alpha(60));
-                        let f = (pos / dur).clamp(0.0, 1.0);
-                        ui.painter().rect_filled(Rect::from_min_size(line.min, vec2(line.width() * f, 4.0)), 2.0, Color32::WHITE);
-                        ui.painter().circle_filled(pos2(line.left() + line.width() * f, line.center().y), if tresp.hovered() || tresp.dragged() { 7.0 } else { 5.0 }, Color32::WHITE);
-                        if let Some(at) = tresp.interact_pointer_pos().filter(|_| tresp.clicked() || tresp.dragged()) {
-                            p.seek(((at.x - line.left()) / line.width()).clamp(0.0, 1.0) * dur);
-                        }
-                        ui.label(RichText::new(media::clock(dur)).color(Color32::from_gray(200)).monospace().size(12.0));
-                        let muted = p.muted();
-                        let mb = ui.add(egui::Button::new(RichText::new(if muted { "\u{1F507}" } else { "\u{1F50A}" }).color(Color32::WHITE).size(15.0)).frame(false).min_size(vec2(32.0, 32.0)));
-                        mb.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, if muted { "Turn sound on" } else { "Mute" }));
-                        if mb.clicked() {
-                            p.set_muted(!muted);
-                        }
-                    });
-                } else {
-                    let status = match self.files.state(&a.file) {
-                        Some(Transfer::Down(f)) => trf!("Loading the video {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => App::error_text(&e),
-                        _ if local.is_some() || v.unplayable.as_deref() == Some(a.file.as_str()) => tr("This video can't be played on this Mac.").into(),
-                        _ => tr("Loading the video...").into(),
-                    };
-                    ui.painter().text(bar.center(), Align2::CENTER_CENTER, status, FontId::proportional(13.0), Color32::from_gray(220));
-                    if local.is_none() {
-                        // the download is what the player waits for
-                        self.files.want(&a, FULL);
+                            _ => tr("Loading...").into(),
+                        };
+                        ui.painter().text(
+                            pic.center(),
+                            Align2::CENTER_CENTER,
+                            status,
+                            FontId::proportional(15.0),
+                            Color32::from_gray(200),
+                        );
                     }
                 }
-            }
-        });
+                if bg_resp.clicked()
+                    && !pic.contains(bg_resp.interact_pointer_pos().unwrap_or(pic.center()))
+                {
+                    close = true;
+                }
+                // top: name and the buttons
+                let top =
+                    Rect::from_min_size(bg.min + vec2(20.0, 12.0), vec2(bg.width() - 40.0, 30.0));
+                ui.allocate_new_ui(
+                    egui::UiBuilder::new()
+                        .max_rect(top)
+                        .layout(Layout::left_to_right(Align::Center)),
+                    |ui| {
+                        let count = if m.attachments.len() > 1 {
+                            trf!("  {} of {}", v.index + 1, m.attachments.len())
+                        } else {
+                            String::new()
+                        };
+                        ui.label(
+                            RichText::new(format!("{}{}", a.name, count))
+                                .color(Color32::WHITE)
+                                .size(14.0),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let b = |ui: &mut Ui, s: &str| {
+                                ui.add(
+                                    egui::Button::new(RichText::new(s).color(Color32::WHITE))
+                                        .fill(Color32::from_white_alpha(28))
+                                        .corner_radius(6)
+                                        .min_size(vec2(0.0, 28.0)),
+                                )
+                            };
+                            if b(ui, tr("Close")).on_hover_text("Esc").clicked() {
+                                close = true;
+                            }
+                            if let Some(path) = &local {
+                                if b(ui, tr("Save to Downloads")).clicked() {
+                                    match save_copy(path, &a.name) {
+                                        Ok(dest) => {
+                                            self.toast = Some((
+                                                trf!(
+                                                    "Saved {}",
+                                                    dest.file_name()
+                                                        .map(|n| n.to_string_lossy().to_string())
+                                                        .unwrap_or_default()
+                                                ),
+                                                now_ts(),
+                                            ))
+                                        }
+                                        Err(e) => {
+                                            self.toast =
+                                                Some((trf!("Couldn't save: {}", e), now_ts()))
+                                        }
+                                    }
+                                }
+                                if b(ui, tr("Show in Finder")).clicked() {
+                                    let _ = std::process::Command::new("open")
+                                        .arg("-R")
+                                        .arg(path)
+                                        .spawn();
+                                }
+                            }
+                        });
+                    },
+                );
+                // previous / next
+                if m.attachments.len() > 1 {
+                    for (dir, x, glyph) in [
+                        (-1, bg.left() + 30.0, "\u{2039}"),
+                        (1, bg.right() - 30.0, "\u{203A}"),
+                    ] {
+                        let r = Rect::from_center_size(pos2(x, area.center().y), vec2(40.0, 60.0));
+                        let resp =
+                            ui.interact(r, ui.id().with(("media_step", dir)), Sense::click());
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                if dir < 0 { "Previous" } else { "Next" },
+                            )
+                        });
+                        ui.painter().text(
+                            r.center(),
+                            Align2::CENTER_CENTER,
+                            glyph,
+                            FontId::proportional(40.0),
+                            if resp.hovered() {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_gray(170)
+                            },
+                        );
+                        if resp.clicked() {
+                            step = dir;
+                        }
+                    }
+                }
+                // video controls
+                if a.kind == MediaKind::Video {
+                    let bar = Rect::from_min_size(
+                        pos2(area.center().x - 300.0, bg.bottom() - bar_h - 12.0),
+                        vec2(600.0, bar_h),
+                    );
+                    ui.painter()
+                        .rect_filled(bar, 10.0, Color32::from_white_alpha(22));
+                    if let Some((_, p)) = v.player.as_mut() {
+                        let (pos, dur) = (p.position(), p.duration().max(a.secs).max(0.001));
+                        ui.allocate_new_ui(
+                            egui::UiBuilder::new()
+                                .max_rect(bar.shrink2(vec2(12.0, 0.0)))
+                                .layout(Layout::left_to_right(Align::Center)),
+                            |ui| {
+                                let playing = p.playing();
+                                let pb = ui.add(
+                                    egui::Button::new(
+                                        RichText::new(if playing {
+                                            "\u{23F8}"
+                                        } else {
+                                            "\u{25B6}"
+                                        })
+                                        .color(Color32::WHITE)
+                                        .size(16.0),
+                                    )
+                                    .frame(false)
+                                    .min_size(vec2(32.0, 32.0)),
+                                );
+                                pb.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        if playing { "Pause" } else { "Play" },
+                                    )
+                                });
+                                if pb.clicked() || ui.input(|i| i.key_pressed(egui::Key::Space)) {
+                                    if playing {
+                                        p.pause();
+                                    } else {
+                                        p.play();
+                                    }
+                                }
+                                ui.label(
+                                    RichText::new(media::clock(pos))
+                                        .color(Color32::WHITE)
+                                        .monospace()
+                                        .size(12.0),
+                                );
+                                // the bar: click or drag to move
+                                let track_w = ui.available_width() - 110.0;
+                                let (tr, tresp) = ui.allocate_exact_size(
+                                    vec2(track_w.max(40.0), 24.0),
+                                    Sense::click_and_drag(),
+                                );
+                                tresp.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Slider,
+                                        true,
+                                        "Video position",
+                                    )
+                                });
+                                let line =
+                                    Rect::from_center_size(tr.center(), vec2(tr.width(), 4.0));
+                                ui.painter()
+                                    .rect_filled(line, 2.0, Color32::from_white_alpha(60));
+                                let f = (pos / dur).clamp(0.0, 1.0);
+                                ui.painter().rect_filled(
+                                    Rect::from_min_size(line.min, vec2(line.width() * f, 4.0)),
+                                    2.0,
+                                    Color32::WHITE,
+                                );
+                                ui.painter().circle_filled(
+                                    pos2(line.left() + line.width() * f, line.center().y),
+                                    if tresp.hovered() || tresp.dragged() {
+                                        7.0
+                                    } else {
+                                        5.0
+                                    },
+                                    Color32::WHITE,
+                                );
+                                if let Some(at) = tresp
+                                    .interact_pointer_pos()
+                                    .filter(|_| tresp.clicked() || tresp.dragged())
+                                {
+                                    p.seek(
+                                        ((at.x - line.left()) / line.width()).clamp(0.0, 1.0) * dur,
+                                    );
+                                }
+                                ui.label(
+                                    RichText::new(media::clock(dur))
+                                        .color(Color32::from_gray(200))
+                                        .monospace()
+                                        .size(12.0),
+                                );
+                                let muted = p.muted();
+                                let mb = ui.add(
+                                    egui::Button::new(
+                                        RichText::new(if muted {
+                                            "\u{1F507}"
+                                        } else {
+                                            "\u{1F50A}"
+                                        })
+                                        .color(Color32::WHITE)
+                                        .size(15.0),
+                                    )
+                                    .frame(false)
+                                    .min_size(vec2(32.0, 32.0)),
+                                );
+                                mb.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        if muted { "Turn sound on" } else { "Mute" },
+                                    )
+                                });
+                                if mb.clicked() {
+                                    p.set_muted(!muted);
+                                }
+                            },
+                        );
+                    } else {
+                        let status = match self.files.state(&a.file) {
+                            Some(Transfer::Down(f)) => {
+                                trf!("Loading the video {}%", (f * 100.0) as u32)
+                            }
+                            Some(Transfer::Failed(e)) => App::error_text(&e),
+                            _ if local.is_some()
+                                || v.unplayable.as_deref() == Some(a.file.as_str()) =>
+                            {
+                                tr("This video can't be played on this Mac.").into()
+                            }
+                            _ => tr("Loading the video...").into(),
+                        };
+                        ui.painter().text(
+                            bar.center(),
+                            Align2::CENTER_CENTER,
+                            status,
+                            FontId::proportional(13.0),
+                            Color32::from_gray(220),
+                        );
+                        if local.is_none() {
+                            // the download is what the player waits for
+                            self.files.want(&a, FULL);
+                        }
+                    }
+                }
+            });
         if step != 0 {
             let n = m.attachments.len() as i32;
             v.index = ((v.index as i32 + step).rem_euclid(n)) as usize;
@@ -1233,15 +1876,29 @@ fn fit(w: f32, h: f32, mw: f32, mh: f32) -> (f32, f32) {
 fn play_badge(p: &egui::Painter, c: egui::Pos2, r: f32) {
     p.circle_filled(c, r, Color32::from_black_alpha(150));
     let k = r * 0.45;
-    p.add(egui::Shape::convex_polygon(vec![c + vec2(-k * 0.7, -k), c + vec2(k, 0.0), c + vec2(-k * 0.7, k)], Color32::WHITE, Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(
+        vec![
+            c + vec2(-k * 0.7, -k),
+            c + vec2(k, 0.0),
+            c + vec2(-k * 0.7, k),
+        ],
+        Color32::WHITE,
+        Stroke::NONE,
+    ));
 }
 
 /// Copy a file to ~/Downloads under its name, without overwriting.
 fn save_copy(from: &Path, name: &str) -> Result<PathBuf, String> {
     let dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Downloads");
     let p = Path::new(name);
-    let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "file".into());
-    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    let ext = p
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     let mut dest = dir.join(format!("{}{}", stem, ext));
     let mut n = 2;
     while dest.exists() {

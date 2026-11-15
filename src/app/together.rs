@@ -25,11 +25,19 @@ const WRITE_SECS: f64 = 1.5;
 pub enum How {
     /// An invite code; with a password, the person's account is set up too
     /// (the email is the one on their member record unless one is typed).
-    Invite { code: String, email: String, password: String },
+    Invite {
+        code: String,
+        email: String,
+        password: String,
+    },
     /// An account's email and password.
     Account { email: String, password: String },
     /// The code from a password-reset mail, with the new password.
-    Reset { email: String, code: String, password: String },
+    Reset {
+        email: String,
+        code: String,
+        password: String,
+    },
     /// An empty server: this workspace goes up and I become the owner,
     /// with an account when an email and password are given.
     Claim { email: String, password: String },
@@ -40,9 +48,16 @@ impl How {
     pub(super) fn sign_in(&self, device: &str, me: u64) -> SignIn {
         let text = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
         let pass = |s: &str| Some(s.to_string()).filter(|s| !s.is_empty());
-        let mut si = SignIn { device: device.to_string(), ..Default::default() };
+        let mut si = SignIn {
+            device: device.to_string(),
+            ..Default::default()
+        };
         match self {
-            How::Invite { code, email, password } => {
+            How::Invite {
+                code,
+                email,
+                password,
+            } => {
                 si.invite = text(code);
                 si.email = text(email);
                 si.new_password = pass(password);
@@ -51,7 +66,11 @@ impl How {
                 si.email = text(email);
                 si.password = pass(password);
             }
-            How::Reset { email, code, password } => {
+            How::Reset {
+                email,
+                code,
+                password,
+            } => {
                 si.email = text(email);
                 si.reset_code = text(code);
                 si.new_password = pass(password);
@@ -105,7 +124,10 @@ pub struct Form {
 /// Why a new password won't do, if it won't.
 pub(super) fn new_password_problem(password: &str, repeat: &str) -> Option<String> {
     if password.chars().count() < wb_net::MIN_PASSWORD {
-        return Some(trf!("Choose a password of at least {} characters.", wb_net::MIN_PASSWORD));
+        return Some(trf!(
+            "Choose a password of at least {} characters.",
+            wb_net::MIN_PASSWORD
+        ));
     }
     (password != repeat).then(|| tr("The two passwords aren't the same.").to_string())
 }
@@ -162,7 +184,8 @@ fn token_account(addr: &str, device: &str) -> String {
 
 #[cfg(test)]
 fn test_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
-    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::OnceLock::new();
     T.get_or_init(Default::default)
 }
 
@@ -172,7 +195,10 @@ fn token_file() -> Option<PathBuf> {
 }
 
 fn read_token_file(p: &Path) -> std::collections::BTreeMap<String, String> {
-    std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    std::fs::read_to_string(p)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
 fn write_token_file(p: &Path, m: &std::collections::BTreeMap<String, String>) {
@@ -204,7 +230,9 @@ pub(super) fn load_token(addr: &str, device: &str) -> Option<String> {
             return read_token_file(&p).get(&key).cloned();
         }
         #[cfg(target_os = "macos")]
-        return security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &key).ok().and_then(|b| String::from_utf8(b).ok());
+        return security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &key)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok());
         #[allow(unreachable_code)]
         None
     }
@@ -226,7 +254,11 @@ pub(super) fn save_token(addr: &str, device: &str, token: &str) {
             return;
         }
         #[cfg(target_os = "macos")]
-        let _ = security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, &key, token.as_bytes());
+        let _ = security_framework::passwords::set_generic_password(
+            KEYCHAIN_SERVICE,
+            &key,
+            token.as_bytes(),
+        );
     }
 }
 
@@ -287,13 +319,21 @@ pub(super) fn legacy_shape(v: &serde_json::Value) -> serde_json::Value {
             }
         }
     };
-    for t in v.get_mut("tasks").and_then(|a| a.as_array_mut()).into_iter().flatten() {
+    for t in v
+        .get_mut("tasks")
+        .and_then(|a| a.as_array_mut())
+        .into_iter()
+        .flatten()
+    {
         fill(t.get_mut("time_entries"), &[("member", 0.into())]);
     }
     if let Some(e) = v.get_mut("extra") {
         fill(e.get_mut("forms"), &[("owner", 0.into())]);
         fill(e.get_mut("whiteboards"), &[("owner", 0.into())]);
-        fill(e.get_mut("dashboards"), &[("owner", 0.into()), ("kind", "".into())]);
+        fill(
+            e.get_mut("dashboards"),
+            &[("owner", 0.into()), ("kind", "".into())],
+        );
     }
     v
 }
@@ -330,7 +370,9 @@ impl App {
     }
 
     pub(super) fn write_shared(&mut self) {
-        let Some(cfg) = self.data.extra.shared.clone() else { return };
+        let Some(cfg) = self.data.extra.shared.clone() else {
+            return;
+        };
         self.data.fix_activity_ids();
         let v = self.data_value();
         if cfg.server.is_some() {
@@ -342,7 +384,10 @@ impl App {
             return;
         }
         if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v).is_err() {
-            self.toast = Some((tr("Couldn't write to the shared folder. Is it still there?").into(), now_ts()));
+            self.toast = Some((
+                tr("Couldn't write to the shared folder. Is it still there?").into(),
+                now_ts(),
+            ));
         }
         self.sync_rt.pending = false;
     }
@@ -360,13 +405,18 @@ impl App {
 
     /// Read teammates' copies and merge them in. Returns true when something new arrived.
     pub(super) fn sync_pull(&mut self) -> bool {
-        let Some(cfg) = self.data.extra.shared.clone() else { return false };
+        let Some(cfg) = self.data.extra.shared.clone() else {
+            return false;
+        };
         if cfg.server.is_some() {
             return self.net_tick(None);
         }
         let files = sync::other_files(Path::new(&cfg.folder), &cfg.device);
         self.sync_rt.seen = files.clone();
-        let others: Vec<serde_json::Value> = files.iter().filter_map(|(p, _)| sync::read_json(p)).collect();
+        let others: Vec<serde_json::Value> = files
+            .iter()
+            .filter_map(|(p, _)| sync::read_json(p))
+            .collect();
         self.merge_in(&others, &[])
     }
 
@@ -379,14 +429,28 @@ impl App {
         }
         // changes not recorded yet (made just before quitting, say) are
         // recorded first, or the merge would take them as already known
-        if self.data.extra.shared.is_some() && !self.data.extra.sync.hashes.is_empty() && self.stamp_now() {
+        if self.data.extra.shared.is_some()
+            && !self.data.extra.sync.hashes.is_empty()
+            && self.stamp_now()
+        {
             self.sync_rt.pending = true;
         }
         let me = self.data.me;
-        let seen: Vec<u64> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (!c.private || c.members.contains(&me))).map(|c| c.id).collect();
+        let seen: Vec<u64> = self
+            .data
+            .channels
+            .iter()
+            .filter(|c| c.kind == ChannelKind::Channel && (!c.private || c.members.contains(&me)))
+            .map(|c| c.id)
+            .collect();
         let mut v = self.data_value();
         let mut changed = sync::merge(&mut v, others);
-        let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+        let on_server = self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some());
         let gone = if on_server {
             let mut ids = hidden.to_vec();
             ids.extend(sync::hidden_from(&v, me));
@@ -412,7 +476,11 @@ impl App {
                 return false;
             }
         }
-        for ch in gone.iter().filter(|c| c.get("id").and_then(|i| i.as_u64()).is_some_and(|i| seen.contains(&i))) {
+        for ch in gone.iter().filter(|c| {
+            c.get("id")
+                .and_then(|i| i.as_u64())
+                .is_some_and(|i| seen.contains(&i))
+        }) {
             self.left_channel(ch);
         }
         if changed {
@@ -429,11 +497,25 @@ impl App {
     /// my Notepad, since it may not have reached the team before I left.
     fn left_channel(&mut self, ch: &serde_json::Value) {
         let me = self.data.me;
-        let name = ch.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
+        let name = ch
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or_default()
+            .to_string();
         let since = now_ts() - 10 * 60;
         let mut mine: Vec<String> = vec![];
-        for m in ch.get("messages").and_then(|m| m.as_array()).into_iter().flatten() {
-            for x in std::iter::once(m).chain(m.get("replies").and_then(|r| r.as_array()).into_iter().flatten()) {
+        for m in ch
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .into_iter()
+            .flatten()
+        {
+            for x in std::iter::once(m).chain(
+                m.get("replies")
+                    .and_then(|r| r.as_array())
+                    .into_iter()
+                    .flatten(),
+            ) {
                 let author = x.get("author").and_then(|a| a.as_u64());
                 let ts = x.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
                 let text = x.get("text").and_then(|t| t.as_str()).unwrap_or_default();
@@ -443,14 +525,24 @@ impl App {
             }
         }
         if mine.is_empty() {
-            self.toast = Some((trf!("You're no longer in #{}, so it was taken off your list.", name), now_ts()));
+            self.toast = Some((
+                trf!(
+                    "You're no longer in #{}, so it was taken off your list.",
+                    name
+                ),
+                now_ts(),
+            ));
             return;
         }
         let notepad = &mut self.data.extra.notepad;
         if !notepad.is_empty() && !notepad.ends_with('\n') {
             notepad.push('\n');
         }
-        notepad.push_str(&format!("{}\n{}\n", trf!("Written in #{} before you were taken out of it:", name), mine.join("\n")));
+        notepad.push_str(&format!(
+            "{}\n{}\n",
+            trf!("Written in #{} before you were taken out of it:", name),
+            mine.join("\n")
+        ));
         self.toast = Some((trf!("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", name), now_ts()));
     }
 
@@ -460,10 +552,20 @@ impl App {
         if self.sync_rt.net.is_none() {
             let (addr, sign_in) = if let Some(j) = &self.sync_rt.joining {
                 (j.addr.clone(), j.how.sign_in(&j.device, self.data.me))
-            } else if let Some(SharedCfg { server: Some(addr), device, tag, .. }) = &self.data.extra.shared {
+            } else if let Some(SharedCfg {
+                server: Some(addr),
+                device,
+                tag,
+                ..
+            }) = &self.data.extra.shared
+            {
                 let mut si = match &self.sync_rt.resign {
                     Some(how) => how.sign_in(device, self.data.me),
-                    None => SignIn { device: device.clone(), token: load_token(addr, device), ..Default::default() },
+                    None => SignIn {
+                        device: device.clone(),
+                        token: load_token(addr, device),
+                        ..Default::default()
+                    },
                 };
                 si.tag = Some(*tag);
                 (addr.clone(), si)
@@ -480,16 +582,33 @@ impl App {
             self.sync_rt.net_status = None;
             self.sync_rt.net = Some(wb_net::Client::start(&addr, sign_in, wake));
         }
-        let events = self.sync_rt.net.as_ref().map(|n| n.events()).unwrap_or_default();
+        let events = self
+            .sync_rt
+            .net
+            .as_ref()
+            .map(|n| n.events())
+            .unwrap_or_default();
         let mut changed = false;
         for e in events {
             match e {
                 NetEvent::Status(s) => self.sync_rt.net_status = Some(s),
-                NetEvent::Welcome { tag, snapshot, member, role, token, email, hidden, .. } => {
+                NetEvent::Welcome {
+                    tag,
+                    snapshot,
+                    member,
+                    role,
+                    token,
+                    email,
+                    hidden,
+                    ..
+                } => {
                     if let Some(t) = token {
-                        let (addr, device) = match (&self.sync_rt.joining, &self.data.extra.shared) {
+                        let (addr, device) = match (&self.sync_rt.joining, &self.data.extra.shared)
+                        {
                             (Some(j), _) => (j.addr.clone(), j.device.clone()),
-                            (None, Some(c)) => (c.server.clone().unwrap_or_default(), c.device.clone()),
+                            (None, Some(c)) => {
+                                (c.server.clone().unwrap_or_default(), c.device.clone())
+                            }
                             _ => continue,
                         };
                         save_token(&addr, &device, &t);
@@ -501,26 +620,53 @@ impl App {
                     self.sync_rt.form = Form::default();
                     self.sync_rt.role = Some(role);
                     // the server that let us in also publishes app updates
-                    let server = self.sync_rt.joining.as_ref().map(|j| j.addr.clone()).or_else(|| self.data.extra.shared.as_ref().and_then(|c| c.server.clone()));
+                    let server = self
+                        .sync_rt
+                        .joining
+                        .as_ref()
+                        .map(|j| j.addr.clone())
+                        .or_else(|| {
+                            self.data
+                                .extra
+                                .shared
+                                .as_ref()
+                                .and_then(|c| c.server.clone())
+                        });
                     if let Some(addr) = server {
                         crate::updater::set_server(&addr);
                     }
                     changed |= self.net_welcome(tag, snapshot, member, &hidden);
                 }
                 NetEvent::Update { data, hidden, .. } => changed |= self.merge_in(&[data], &hidden),
-                NetEvent::Invite { member, code, emailed, mail_error } => {
+                NetEvent::Invite {
+                    member,
+                    code,
+                    emailed,
+                    mail_error,
+                } => {
                     if let Some(p) = self.sync_rt.people.iter_mut().find(|p| p.member == member) {
                         p.invite = Some(code);
                     }
-                    let name = self.data.member(member).map(|m| m.name.clone()).unwrap_or_default();
+                    let name = self
+                        .data
+                        .member(member)
+                        .map(|m| m.name.clone())
+                        .unwrap_or_default();
                     if let Some(to) = emailed {
-                        self.toast = Some((trf!("Emailed {}'s invite code to {}.", name, to), now_ts()));
+                        self.toast =
+                            Some((trf!("Emailed {}'s invite code to {}.", name, to), now_ts()));
                     } else if let Some(why) = mail_error {
                         self.toast = Some((trf!("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", name, why), now_ts()));
                     }
                 }
                 NetEvent::Account(email) => {
-                    self.toast = Some((trf!("Password saved. Sign in with {} on your other computers and phones.", email), now_ts()));
+                    self.toast = Some((
+                        trf!(
+                            "Password saved. Sign in with {} on your other computers and phones.",
+                            email
+                        ),
+                        now_ts(),
+                    ));
                     self.sync_rt.account = Some(email);
                     self.sync_rt.acct = Form::default();
                 }
@@ -537,11 +683,21 @@ impl App {
                     self.huddle_denied(channel);
                     self.toast = Some((why, now_ts()));
                 }
-                NetEvent::CallToken { channel, url, token } => self.huddle_token(channel, url, token),
+                NetEvent::CallToken {
+                    channel,
+                    url,
+                    token,
+                } => self.huddle_token(channel, url, token),
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();
-                    self.toast = Some((trf!("Restored the team's workspace to {}. Everyone gets it now.", label), now_ts()));
+                    self.toast = Some((
+                        trf!(
+                            "Restored the team's workspace to {}. Everyone gets it now.",
+                            label
+                        ),
+                        now_ts(),
+                    ));
                     self.sync_rt.restore_confirm = None;
                     // the copy from before the restore is a new backup
                     self.access_request(NetMsg::BackupList);
@@ -552,9 +708,20 @@ impl App {
     }
 
     /// The server answered: finish joining, or catch up after a reconnect.
-    fn net_welcome(&mut self, tag: u16, snapshot: Option<serde_json::Value>, member: u64, hidden: &[u64]) -> bool {
+    fn net_welcome(
+        &mut self,
+        tag: u16,
+        snapshot: Option<serde_json::Value>,
+        member: u64,
+        hidden: &[u64],
+    ) -> bool {
         if let Some(j) = self.sync_rt.joining.take() {
-            let cfg = SharedCfg { folder: String::new(), device: j.device, tag, server: Some(j.addr) };
+            let cfg = SharedCfg {
+                folder: String::new(),
+                device: j.device,
+                tag,
+                server: Some(j.addr),
+            };
             match snapshot {
                 None => {
                     // an empty server: this workspace becomes the team's
@@ -564,8 +731,14 @@ impl App {
                     self.write_shared();
                     self.save_local();
                     self.share_cached_files();
-                    self.toast = Some((tr("Connected. This workspace is now on the server for your team.").into(), now_ts()));
-                    if matches!(self.modal, Some(Modal::Together { .. } | Modal::Welcome { .. })) {
+                    self.toast = Some((
+                        tr("Connected. This workspace is now on the server for your team.").into(),
+                        now_ts(),
+                    ));
+                    if matches!(
+                        self.modal,
+                        Some(Modal::Together { .. } | Modal::Welcome { .. })
+                    ) {
                         self.modal = None;
                     }
                 }
@@ -577,9 +750,16 @@ impl App {
                         self.sync_note_change();
                         self.write_shared();
                         self.save_local();
-                        let name = self.data.member(member).map(|m| m.name.clone()).unwrap_or_default();
+                        let name = self
+                            .data
+                            .member(member)
+                            .map(|m| m.name.clone())
+                            .unwrap_or_default();
                         self.toast = Some((trf!("Joined as {}.", name), now_ts()));
-                        if matches!(self.modal, Some(Modal::Together { .. } | Modal::Welcome { .. })) {
+                        if matches!(
+                            self.modal,
+                            Some(Modal::Together { .. } | Modal::Welcome { .. })
+                        ) {
                             self.modal = None;
                         }
                     }
@@ -614,7 +794,18 @@ impl App {
     /// Start connecting to a server: with an invite code, or with none to
     /// set up an empty server.
     pub(super) fn connect_server(&mut self, addr: &str, invite: &str) -> Result<(), String> {
-        let how = if invite.trim().is_empty() { How::Claim { email: String::new(), password: String::new() } } else { How::Invite { code: invite.to_string(), email: String::new(), password: String::new() } };
+        let how = if invite.trim().is_empty() {
+            How::Claim {
+                email: String::new(),
+                password: String::new(),
+            }
+        } else {
+            How::Invite {
+                code: invite.to_string(),
+                email: String::new(),
+                password: String::new(),
+            }
+        };
         self.connect_with(addr, how)
     }
 
@@ -625,14 +816,23 @@ impl App {
         if let How::Claim { email, .. } = &how {
             // the owner's email goes up with the workspace
             let me = self.data.me;
-            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me && m.email.trim().is_empty() && !email.trim().is_empty()) {
+            if let Some(m) = self
+                .data
+                .members
+                .iter_mut()
+                .find(|m| m.id == me && m.email.trim().is_empty() && !email.trim().is_empty())
+            {
                 m.email = email.trim().to_string();
                 self.dirty = true;
             }
         }
         self.sync_rt.net = None;
         self.sync_rt.net_status = None;
-        self.sync_rt.joining = Some(Joining { addr: addr.trim().to_string(), device: format!("{:08x}", sync::random_u64() as u32), how });
+        self.sync_rt.joining = Some(Joining {
+            addr: addr.trim().to_string(),
+            device: format!("{:08x}", sync::random_u64() as u32),
+            how,
+        });
         Ok(())
     }
 
@@ -641,7 +841,11 @@ impl App {
         if code.trim().is_empty() {
             return;
         }
-        self.sign_in_with(How::Invite { code: code.to_string(), email: String::new(), password: String::new() });
+        self.sign_in_with(How::Invite {
+            code: code.to_string(),
+            email: String::new(),
+            password: String::new(),
+        });
     }
 
     /// Sign this computer in again: email and password, a code, a reset.
@@ -657,7 +861,11 @@ impl App {
             return;
         }
         let known: Vec<u64> = self.sync_rt.people.iter().map(|p| p.member).collect();
-        let (ready, wait): (Vec<_>, Vec<_>) = self.sync_rt.auto_invite.drain(..).partition(|(m, _)| known.contains(m));
+        let (ready, wait): (Vec<_>, Vec<_>) = self
+            .sync_rt
+            .auto_invite
+            .drain(..)
+            .partition(|(m, _)| known.contains(m));
         self.sync_rt.auto_invite = wait;
         for (member, role) in ready {
             self.access_request(NetMsg::CreateInvite { member, role });
@@ -673,14 +881,26 @@ impl App {
         form.code = j.code.clone();
         form.email = j.email.clone().unwrap_or_default();
         form.note.clear();
-        match self.data.extra.shared.as_ref().and_then(|c| c.server.clone()) {
+        match self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .and_then(|c| c.server.clone())
+        {
             Some(server) => {
                 if !matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
                     self.toast = Some((trf!("This workspace is already on {}. To join another team, choose Stop sharing here first.", server), now_ts()));
                 }
                 self.modal = Some(self.together_modal());
             }
-            None => self.modal = Some(Modal::Welcome { step: 2, name: String::new(), addr: j.server.unwrap_or_default() }),
+            None => {
+                self.modal = Some(Modal::Welcome {
+                    step: 2,
+                    name: String::new(),
+                    addr: j.server.unwrap_or_default(),
+                })
+            }
         }
     }
 
@@ -693,7 +913,12 @@ impl App {
                 }
                 n.send(msg)
             }
-            _ => self.toast = Some((tr("Not connected to the server right now.").into(), now_ts())),
+            _ => {
+                self.toast = Some((
+                    tr("Not connected to the server right now.").into(),
+                    now_ts(),
+                ))
+            }
         }
     }
 
@@ -703,7 +928,9 @@ impl App {
             self.net_tick(Some(ctx));
             return;
         }
-        let Some(cfg) = self.data.extra.shared.clone() else { return };
+        let Some(cfg) = self.data.extra.shared.clone() else {
+            return;
+        };
         let now = ctx.input(|i| i.time);
         if cfg.server.is_some() {
             self.net_tick(Some(ctx));
@@ -737,13 +964,24 @@ impl App {
         let used: Vec<u16> = sync::other_files(Path::new(folder), "")
             .iter()
             .filter_map(|(p, _)| sync::read_json(p))
-            .filter_map(|v| v.get("extra")?.get("shared")?.get("tag")?.as_u64().map(|t| t as u16))
+            .filter_map(|v| {
+                v.get("extra")?
+                    .get("shared")?
+                    .get("tag")?
+                    .as_u64()
+                    .map(|t| t as u16)
+            })
             .collect();
         let mut tag = (sync::random_u64() % 1024) as u16;
         while used.contains(&tag) {
             tag = (tag + 1) % 1024;
         }
-        SharedCfg { folder: folder.to_string(), device: format!("{:08x}", sync::random_u64() as u32), tag, server: None }
+        SharedCfg {
+            folder: folder.to_string(),
+            device: format!("{:08x}", sync::random_u64() as u32),
+            tag,
+            server: None,
+        }
     }
 
     /// Share the open workspace in an (empty) folder.
@@ -768,8 +1006,12 @@ impl App {
     pub(super) fn join_shared(&mut self, folder: &str) -> Result<(), String> {
         let folder = folder.trim();
         let files = sync::other_files(Path::new(folder), "");
-        let newest = files.iter().max_by_key(|(_, m)| *m).ok_or(tr("No shared workspace in that folder yet."))?;
-        let base = sync::read_json(&newest.0).ok_or(tr("The shared workspace couldn't be read."))?;
+        let newest = files
+            .iter()
+            .max_by_key(|(_, m)| *m)
+            .ok_or(tr("No shared workspace in that folder yet."))?;
+        let base =
+            sync::read_json(&newest.0).ok_or(tr("The shared workspace couldn't be read."))?;
         self.join_from(base, Self::new_cfg(folder))?;
         self.sync_rt = SyncRt::default();
         self.sync_pull();
@@ -779,10 +1021,12 @@ impl App {
 
     /// Open the team's copy as a new workspace on this computer.
     fn join_from(&mut self, base: serde_json::Value, cfg: SharedCfg) -> Result<(), String> {
-        serde_json::from_value::<Data>(base.clone()).map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
+        serde_json::from_value::<Data>(base.clone())
+            .map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
         // the team's things with this person's own settings (theme, notifications,
         // pinned tools...) instead of the owner's
-        let mut d: Data = serde_json::from_value(sync::with_team_things(&self.data_value(), &base)).map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
+        let mut d: Data = serde_json::from_value(sync::with_team_things(&self.data_value(), &base))
+            .map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
         // personal things that point into the old workspace start empty
         d.favorites.clear();
         d.extra.recent.clear();
@@ -800,10 +1044,16 @@ impl App {
             self.data.save_file(&self.ws_file);
             let mut list = Data::workspaces();
             if list.is_empty() {
-                list.push(WsEntry { name: self.data.workspace.clone(), file: self.ws_file.clone() });
+                list.push(WsEntry {
+                    name: self.data.workspace.clone(),
+                    file: self.ws_file.clone(),
+                });
             }
             let file = format!("workspace-{}.json", now_ts());
-            list.push(WsEntry { name: d.workspace.clone(), file: file.clone() });
+            list.push(WsEntry {
+                name: d.workspace.clone(),
+                file: file.clone(),
+            });
             Data::save_workspaces(&list);
             Data::set_last_workspace(&file);
             self.ws_places.clear();
@@ -815,7 +1065,11 @@ impl App {
 
     fn after_join(&mut self) {
         self.data.extra.sync.hashes = sync::fingerprints(&self.data_value());
-        self.loc = self.data.first_list().map(Location::List).unwrap_or(Location::Home);
+        self.loc = self
+            .data
+            .first_list()
+            .map(Location::List)
+            .unwrap_or(Location::Home);
         self.section = Section::Home;
         self.open_task = None;
         self.chat_open = None;
@@ -829,7 +1083,12 @@ impl App {
     pub(super) fn stop_sharing(&mut self) {
         self.leave_huddle();
         self.ws_places.clear();
-        if let Some(SharedCfg { server: Some(addr), device, .. }) = &self.data.extra.shared {
+        if let Some(SharedCfg {
+            server: Some(addr),
+            device,
+            ..
+        }) = &self.data.extra.shared
+        {
             forget_token(addr, device);
         }
         self.data.extra.shared = None;
@@ -845,7 +1104,14 @@ impl App {
             None => {
                 let id = self.data.new_id();
                 let color = STATUS_PALETTE[1 + (id % 13) as usize];
-                self.data.members.push(Member { id, name: name.trim().to_string(), color, email: email.trim().to_string(), role: "Member".into(), ..Default::default() });
+                self.data.members.push(Member {
+                    id,
+                    name: name.trim().to_string(),
+                    color,
+                    email: email.trim().to_string(),
+                    role: "Member".into(),
+                    ..Default::default()
+                });
                 id
             }
         };
@@ -862,13 +1128,38 @@ impl App {
     }
 
     /// Post a call in a channel or DM and open it in the browser.
-    pub(super) fn start_call(&mut self, ctx: Option<&egui::Context>, ch: u64, custom: &str) -> String {
+    pub(super) fn start_call(
+        &mut self,
+        ctx: Option<&egui::Context>,
+        ch: u64,
+        custom: &str,
+    ) -> String {
         let custom = custom.trim();
-        let link = if custom.starts_with("https://") || custom.starts_with("http://") { custom.to_string() } else { call_link() };
+        let link = if custom.starts_with("https://") || custom.starts_with("http://") {
+            custom.to_string()
+        } else {
+            call_link()
+        };
         let id = self.data.new_id();
         let me = self.data.me;
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-            c.messages.push(Message { edited: None, mentions: vec![], attachments: vec![], id, author: me, text: "Started a call".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(link.clone()) });
+            c.messages.push(Message {
+                edited: None,
+                mentions: vec![],
+                attachments: vec![],
+                id,
+                author: me,
+                text: "Started a call".into(),
+                ts: now_ts(),
+                reactions: vec![],
+                replies: vec![],
+                saved: false,
+                task: None,
+                post_title: None,
+                post_type: String::new(),
+                pinned: false,
+                call: Some(link.clone()),
+            });
             c.last_read = now_ts();
         }
         self.section = Section::Chat;
@@ -883,10 +1174,14 @@ impl App {
     /// Where archived documents are written as Markdown.
     pub(super) fn archive_dir(&self) -> PathBuf {
         match &self.data.extra.shared {
-            Some(cfg) if cfg.server.is_none() && !cfg.folder.is_empty() => Path::new(&cfg.folder).join("Docs archive"),
+            Some(cfg) if cfg.server.is_none() && !cfg.folder.is_empty() => {
+                Path::new(&cfg.folder).join("Docs archive")
+            }
             _ => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-                Path::new(&home).join("Documents").join("Workboard Docs archive")
+                Path::new(&home)
+                    .join("Documents")
+                    .join("Workboard Docs archive")
             }
         }
     }
@@ -896,12 +1191,39 @@ impl App {
         let d = self.data.docs.iter().find(|d| d.id == id)?;
         let dir = self.archive_dir();
         std::fs::create_dir_all(&dir).ok()?;
-        let safe: String = d.title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' }).collect();
-        let safe = if safe.trim().is_empty() { "Untitled".to_string() } else { safe.trim().to_string() };
+        let safe: String = d
+            .title
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let safe = if safe.trim().is_empty() {
+            "Untitled".to_string()
+        } else {
+            safe.trim().to_string()
+        };
         let path = dir.join(format!("{} ({}).md", safe, d.id % 100000));
-        let author = self.data.member(d.owner).map(|m| m.name.clone()).unwrap_or_default();
-        let when = chrono::DateTime::from_timestamp(d.updated, 0).map(|x| x.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
-        let mut text = format!("# {}\n\n_{} \u{2022} last updated {}_\n\n{}\n", d.title, author, when, d.body);
+        let author = self
+            .data
+            .member(d.owner)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
+        let when = chrono::DateTime::from_timestamp(d.updated, 0)
+            .map(|x| {
+                x.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let mut text = format!(
+            "# {}\n\n_{} \u{2022} last updated {}_\n\n{}\n",
+            d.title, author, when, d.body
+        );
         // sub pages follow as sections, one heading level down per level
         fn subs(docs: &[Doc], parent: u64, level: usize, out: &mut String, seen: &mut Vec<u64>) {
             for c in docs.iter().filter(|c| c.parent == Some(parent)) {
@@ -909,7 +1231,12 @@ impl App {
                     continue;
                 }
                 seen.push(c.id);
-                out.push_str(&format!("\n{} {}\n\n{}\n", "#".repeat(level.min(6)), c.title, c.body));
+                out.push_str(&format!(
+                    "\n{} {}\n\n{}\n",
+                    "#".repeat(level.min(6)),
+                    c.title,
+                    c.body
+                ));
                 subs(docs, c.id, level + 1, out, seen);
             }
         }
@@ -920,14 +1247,27 @@ impl App {
 
     /// Archive (or bring back) a document; archiving also saves a Markdown copy.
     pub(super) fn toggle_archive(&mut self, id: u64) {
-        let Some(d) = self.data.docs.iter_mut().find(|d| d.id == id) else { return };
+        let Some(d) = self.data.docs.iter_mut().find(|d| d.id == id) else {
+            return;
+        };
         d.archived = !d.archived;
         let archived = d.archived;
         self.dirty = true;
         if archived {
             self.toast = Some(match self.export_doc(id) {
-                Some(p) => (trf!("Archived. A copy was saved in {}", p.parent().map(|p| p.display().to_string()).unwrap_or_default()), now_ts()),
-                None => (tr("Archived. (The Markdown copy couldn't be saved.)").into(), now_ts()),
+                Some(p) => (
+                    trf!(
+                        "Archived. A copy was saved in {}",
+                        p.parent()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_default()
+                    ),
+                    now_ts(),
+                ),
+                None => (
+                    tr("Archived. (The Markdown copy couldn't be saved.)").into(),
+                    now_ts(),
+                ),
             });
         } else {
             self.toast = Some((tr("Moved back to Docs").into(), now_ts()));
@@ -952,26 +1292,40 @@ impl App {
         }
         let mut req: Option<NetMsg> = None;
         let mut confirm = self.sync_rt.restore_confirm.clone();
-        egui::ScrollArea::vertical().id_salt("backups").max_height(160.0).show(ui, |ui| {
-            for b in list.iter().take(80) {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(b.label()).color(t.text));
-                    ui.label(RichText::new(format!("{} KB", b.bytes.div_ceil(1024))).small().color(t.text3));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if confirm.as_deref() == Some(b.name.as_str()) {
-                            if row_button(ui, tr("Cancel")).clicked() {
-                                confirm = None;
+        egui::ScrollArea::vertical()
+            .id_salt("backups")
+            .max_height(160.0)
+            .show(ui, |ui| {
+                for b in list.iter().take(80) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(b.label()).color(t.text));
+                        ui.label(
+                            RichText::new(format!("{} KB", b.bytes.div_ceil(1024)))
+                                .small()
+                                .color(t.text3),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if confirm.as_deref() == Some(b.name.as_str()) {
+                                if row_button(ui, tr("Cancel")).clicked() {
+                                    confirm = None;
+                                }
+                                if row_button(ui, RichText::new(tr("Yes, restore")).color(t.danger))
+                                    .clicked()
+                                {
+                                    req = Some(NetMsg::Restore {
+                                        name: b.name.clone(),
+                                    });
+                                }
+                            } else if row_button(ui, tr("Restore"))
+                                .on_hover_text(trf!("Go back to {}", b.label()))
+                                .clicked()
+                            {
+                                confirm = Some(b.name.clone());
                             }
-                            if row_button(ui, RichText::new(tr("Yes, restore")).color(t.danger)).clicked() {
-                                req = Some(NetMsg::Restore { name: b.name.clone() });
-                            }
-                        } else if row_button(ui, tr("Restore")).on_hover_text(trf!("Go back to {}", b.label())).clicked() {
-                            confirm = Some(b.name.clone());
-                        }
+                        });
                     });
-                });
-            }
-        });
+                }
+            });
         self.sync_rt.restore_confirm = confirm;
         if let Some(m) = req {
             self.access_request(m);
@@ -986,45 +1340,89 @@ impl App {
         let my_role = self.sync_rt.role.unwrap_or_default();
         let people = self.sync_rt.people.clone();
         let mut req: Option<NetMsg> = None;
-        egui::ScrollArea::vertical().id_salt("people").max_height(220.0).show(ui, |ui| {
-            for p in &people {
-                let Some(m) = self.data.member(p.member) else { continue };
-                let name = m.name.clone();
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&name).color(t.text));
-                    ui.label(RichText::new(tr(p.role.label())).small().color(t.text2));
-                    ui.label(RichText::new(match p.devices { 0 => tr("not signed in").to_string(), 1 => tr("1 computer").to_string(), n => trf!("{} computers", n) }).small().color(t.text3));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if p.role != Role::Owner && p.member != me {
-                            if row_button(ui, RichText::new(tr("Remove access")).color(t.danger)).on_hover_text(trf!("Sign out {}'s computers", name)).clicked() {
-                                req = Some(NetMsg::Revoke { member: p.member });
-                            }
-                            if my_role.manages() {
-                                let (label, role) = if p.role == Role::Admin { ("Make member", Role::Member) } else { ("Make admin", Role::Admin) };
-                                if row_button(ui, tr(label)).clicked() {
-                                    req = Some(NetMsg::SetRole { member: p.member, role });
+        egui::ScrollArea::vertical()
+            .id_salt("people")
+            .max_height(220.0)
+            .show(ui, |ui| {
+                for p in &people {
+                    let Some(m) = self.data.member(p.member) else {
+                        continue;
+                    };
+                    let name = m.name.clone();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&name).color(t.text));
+                        ui.label(RichText::new(tr(p.role.label())).small().color(t.text2));
+                        ui.label(
+                            RichText::new(match p.devices {
+                                0 => tr("not signed in").to_string(),
+                                1 => tr("1 computer").to_string(),
+                                n => trf!("{} computers", n),
+                            })
+                            .small()
+                            .color(t.text3),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if p.role != Role::Owner && p.member != me {
+                                if row_button(
+                                    ui,
+                                    RichText::new(tr("Remove access")).color(t.danger),
+                                )
+                                .on_hover_text(trf!("Sign out {}'s computers", name))
+                                .clicked()
+                                {
+                                    req = Some(NetMsg::Revoke { member: p.member });
+                                }
+                                if my_role.manages() {
+                                    let (label, role) = if p.role == Role::Admin {
+                                        ("Make member", Role::Member)
+                                    } else {
+                                        ("Make admin", Role::Admin)
+                                    };
+                                    if row_button(ui, tr(label)).clicked() {
+                                        req = Some(NetMsg::SetRole {
+                                            member: p.member,
+                                            role,
+                                        });
+                                    }
                                 }
                             }
-                        }
-                        // a code for the owner signs in as the owner: only the owner makes one
-                        let may_invite = p.member != me && (p.role != Role::Owner || my_role == Role::Owner);
-                        if may_invite && row_button(ui, if p.invite.is_some() { tr("New code") } else { tr("Invite code") }).clicked() {
-                            req = Some(NetMsg::CreateInvite { member: p.member, role: Role::Member });
-                        }
+                            // a code for the owner signs in as the owner: only the owner makes one
+                            let may_invite =
+                                p.member != me && (p.role != Role::Owner || my_role == Role::Owner);
+                            if may_invite
+                                && row_button(
+                                    ui,
+                                    if p.invite.is_some() {
+                                        tr("New code")
+                                    } else {
+                                        tr("Invite code")
+                                    },
+                                )
+                                .clicked()
+                            {
+                                req = Some(NetMsg::CreateInvite {
+                                    member: p.member,
+                                    role: Role::Member,
+                                });
+                            }
+                        });
                     });
-                });
-                if let Some(code) = &p.invite {
-                    ui.horizontal(|ui| {
-                        ui.add_space(12.0);
-                        ui.label(RichText::new(trf!("Code for {}: {}", name, code)).monospace().color(t.text));
-                        if row_button(ui, tr("Copy")).clicked() {
-                            ui.ctx().copy_text(code.clone());
-                            self.toast = Some((tr("Invite code copied").into(), now_ts()));
-                        }
-                    });
+                    if let Some(code) = &p.invite {
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ui.label(
+                                RichText::new(trf!("Code for {}: {}", name, code))
+                                    .monospace()
+                                    .color(t.text),
+                            );
+                            if row_button(ui, tr("Copy")).clicked() {
+                                ui.ctx().copy_text(code.clone());
+                                self.toast = Some((tr("Invite code copied").into(), now_ts()));
+                            }
+                        });
+                    }
                 }
-            }
-        });
+            });
         if let Some(m) = req {
             self.access_request(m);
         }
@@ -1034,12 +1432,19 @@ impl App {
     /// progress and Cancel while it tries).
     fn server_form(&mut self, ui: &mut Ui, t: &Theme, addr: &mut String, modes: &[Mode]) {
         ui.label(RichText::new(tr("Server")).color(t.text2));
-        let r = ui.add(egui::TextEdit::singleline(addr).hint_text(tr("macmini or 100.101.102.103")).desired_width(f32::INFINITY));
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address"));
+        let r = ui.add(
+            egui::TextEdit::singleline(addr)
+                .hint_text(tr("macmini or 100.101.102.103"))
+                .desired_width(f32::INFINITY),
+        );
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address")
+        });
         if self.sync_rt.joining.is_some() {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let status = net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+                let status =
+                    net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
                 ui.label(RichText::new(status).color(t.text2));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.button(tr("Cancel")).clicked() {
@@ -1069,9 +1474,18 @@ impl App {
     /// The sign-in fields for one of `modes` (with tabs when there are
     /// several, and "Forgot password?" under the password). The way to sign
     /// in when `button` is clicked and everything needed is there.
-    fn login_form(&mut self, ui: &mut Ui, t: &Theme, addr: &mut String, modes: &[Mode], button: &str) -> Option<How> {
+    fn login_form(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        addr: &mut String,
+        modes: &[Mode],
+        button: &str,
+    ) -> Option<How> {
         let mut form = std::mem::take(&mut self.sync_rt.form);
-        if !modes.contains(&form.mode) && !(form.mode == Mode::Forgot && modes.contains(&Mode::Account)) {
+        if !modes.contains(&form.mode)
+            && !(form.mode == Mode::Forgot && modes.contains(&Mode::Account))
+        {
             form.mode = modes[0];
         }
         if modes.len() > 1 {
@@ -1086,7 +1500,11 @@ impl App {
                     let on = form.mode == *m || (form.mode == Mode::Forgot && *m == Mode::Account);
                     if ui.selectable_label(on, tr(label)).clicked() && form.mode != *m {
                         // the email carries over; passwords and codes don't
-                        form = Form { mode: *m, email: std::mem::take(&mut form.email), ..Default::default() };
+                        form = Form {
+                            mode: *m,
+                            email: std::mem::take(&mut form.email),
+                            ..Default::default()
+                        };
                     }
                 }
             });
@@ -1094,9 +1512,16 @@ impl App {
         }
         let field = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
             ui.label(RichText::new(tr(label)).color(t.text2));
-            let r = ui.add(egui::TextEdit::singleline(text).hint_text(tr(hint)).password(secret).desired_width(f32::INFINITY));
+            let r = ui.add(
+                egui::TextEdit::singleline(text)
+                    .hint_text(tr(hint))
+                    .password(secret)
+                    .desired_width(f32::INFINITY),
+            );
             let name = format!("{} entry", label);
-            r.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name));
+            r.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name)
+            });
         };
         let mut go = false;
         let mut how = None;
@@ -1111,7 +1536,13 @@ impl App {
                 }
             }
             Mode::Invite => {
-                field(ui, &mut form.code, "Invite code", "XXXX-XXXX-XXXX, or paste the invite link", false);
+                field(
+                    ui,
+                    &mut form.code,
+                    "Invite code",
+                    "XXXX-XXXX-XXXX, or paste the invite link",
+                    false,
+                );
                 // a pasted link (or a whole invite mail) fills in everything it has
                 if form.code.contains("workboard://") {
                     let j = wb_net::parse_join(&form.code);
@@ -1123,8 +1554,20 @@ impl App {
                         *addr = s;
                     }
                 }
-                field(ui, &mut form.email, "Email", "the email you were invited with", false);
-                field(ui, &mut form.password, "Choose a password", &trf!("at least {} characters", wb_net::MIN_PASSWORD), true);
+                field(
+                    ui,
+                    &mut form.email,
+                    "Email",
+                    "the email you were invited with",
+                    false,
+                );
+                field(
+                    ui,
+                    &mut form.password,
+                    "Choose a password",
+                    &trf!("at least {} characters", wb_net::MIN_PASSWORD),
+                    true,
+                );
                 field(ui, &mut form.repeat, "Repeat password", "", true);
                 ui.label(RichText::new(tr("You sign in with this email and password on your other computers and phones.")).small().color(t.text3));
             }
@@ -1147,11 +1590,20 @@ impl App {
                         }
                         Err(_) => {
                             ui.label(RichText::new(tr("Asking the server\u{2026}")).color(t.text2));
-                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(200));
                         }
                     }
                 }
-                if self.sync_rt.forgot.is_none() && ui.button(tr(if form.sent { "Email me another code" } else { "Email me a code" })).clicked() {
+                if self.sync_rt.forgot.is_none()
+                    && ui
+                        .button(tr(if form.sent {
+                            "Email me another code"
+                        } else {
+                            "Email me a code"
+                        }))
+                        .clicked()
+                {
                     if wb_net::server_url(addr).is_err() {
                         form.note = tr("Type the server's address first.").into();
                     } else if !form.email.contains('@') {
@@ -1168,8 +1620,20 @@ impl App {
                     }
                 }
                 if form.sent {
-                    field(ui, &mut form.code, "Reset code", "XXXX-XXXX-XXXX from the mail", false);
-                    field(ui, &mut form.password, "New password", &trf!("at least {} characters", wb_net::MIN_PASSWORD), true);
+                    field(
+                        ui,
+                        &mut form.code,
+                        "Reset code",
+                        "XXXX-XXXX-XXXX from the mail",
+                        false,
+                    );
+                    field(
+                        ui,
+                        &mut form.password,
+                        "New password",
+                        &trf!("at least {} characters", wb_net::MIN_PASSWORD),
+                        true,
+                    );
                     field(ui, &mut form.repeat, "Repeat password", "", true);
                 }
                 if ui.link(tr("Back to sign in")).clicked() {
@@ -1180,7 +1644,13 @@ impl App {
             Mode::NewServer => {
                 ui.label(RichText::new(tr("This workspace goes up to the empty server and you become its owner. Choose how you sign in on your other computers and phones.")).small().color(t.text3));
                 field(ui, &mut form.email, "Email", "you@company.com", false);
-                field(ui, &mut form.password, "Choose a password", &trf!("at least {} characters", wb_net::MIN_PASSWORD), true);
+                field(
+                    ui,
+                    &mut form.password,
+                    "Choose a password",
+                    &trf!("at least {} characters", wb_net::MIN_PASSWORD),
+                    true,
+                );
                 field(ui, &mut form.repeat, "Repeat password", "", true);
             }
         }
@@ -1192,7 +1662,16 @@ impl App {
         if shown {
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    go = primary_button(ui, t, tr(if form.mode == Mode::Forgot { "Set password and sign in" } else { button })).clicked();
+                    go = primary_button(
+                        ui,
+                        t,
+                        tr(if form.mode == Mode::Forgot {
+                            "Set password and sign in"
+                        } else {
+                            button
+                        }),
+                    )
+                    .clicked();
                 });
             });
         }
@@ -1200,12 +1679,22 @@ impl App {
             let email_ok = form.email.trim().contains('@');
             let problem = match form.mode {
                 Mode::Account if !email_ok => Some(tr("Type your email.").to_string()),
-                Mode::Account if form.password.is_empty() => Some(tr("Type your password.").to_string()),
-                Mode::Invite if form.code.trim().is_empty() => Some(tr("Type your invite code.").to_string()),
-                Mode::Invite if !form.email.trim().is_empty() && !email_ok => Some(tr("That email doesn't look right.").to_string()),
-                Mode::Forgot if form.code.trim().is_empty() => Some(tr("Type the code from the mail.").to_string()),
+                Mode::Account if form.password.is_empty() => {
+                    Some(tr("Type your password.").to_string())
+                }
+                Mode::Invite if form.code.trim().is_empty() => {
+                    Some(tr("Type your invite code.").to_string())
+                }
+                Mode::Invite if !form.email.trim().is_empty() && !email_ok => {
+                    Some(tr("That email doesn't look right.").to_string())
+                }
+                Mode::Forgot if form.code.trim().is_empty() => {
+                    Some(tr("Type the code from the mail.").to_string())
+                }
                 Mode::NewServer if !email_ok => Some(tr("Type your email.").to_string()),
-                Mode::Invite | Mode::Forgot | Mode::NewServer => new_password_problem(&form.password, &form.repeat),
+                Mode::Invite | Mode::Forgot | Mode::NewServer => {
+                    new_password_problem(&form.password, &form.repeat)
+                }
                 _ => None,
             };
             match problem {
@@ -1213,10 +1702,24 @@ impl App {
                 None => {
                     form.note.clear();
                     how = Some(match form.mode {
-                        Mode::Account => How::Account { email: form.email.clone(), password: form.password.clone() },
-                        Mode::Invite => How::Invite { code: form.code.clone(), email: form.email.clone(), password: form.password.clone() },
-                        Mode::Forgot => How::Reset { email: form.email.clone(), code: form.code.clone(), password: form.password.clone() },
-                        Mode::NewServer => How::Claim { email: form.email.clone(), password: form.password.clone() },
+                        Mode::Account => How::Account {
+                            email: form.email.clone(),
+                            password: form.password.clone(),
+                        },
+                        Mode::Invite => How::Invite {
+                            code: form.code.clone(),
+                            email: form.email.clone(),
+                            password: form.password.clone(),
+                        },
+                        Mode::Forgot => How::Reset {
+                            email: form.email.clone(),
+                            code: form.code.clone(),
+                            password: form.password.clone(),
+                        },
+                        Mode::NewServer => How::Claim {
+                            email: form.email.clone(),
+                            password: form.password.clone(),
+                        },
                     });
                 }
             }
@@ -1232,17 +1735,32 @@ impl App {
         let mut form = std::mem::take(&mut self.sync_rt.acct);
         let field = |ui: &mut Ui, text: &mut String, label: &str, secret: bool| {
             ui.horizontal(|ui| {
-                ui.add_sized([130.0, 20.0], egui::Label::new(RichText::new(tr(label)).color(t.text2)));
-                let r = ui.add(egui::TextEdit::singleline(text).password(secret).desired_width(260.0));
+                ui.add_sized(
+                    [130.0, 20.0],
+                    egui::Label::new(RichText::new(tr(label)).color(t.text2)),
+                );
+                let r = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .password(secret)
+                        .desired_width(260.0),
+                );
                 let name = format!("{} entry", label);
-                r.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name));
+                r.widget_info(move || {
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name)
+                });
             });
         };
         let mut send = None;
         match self.sync_rt.account.clone() {
             Some(email) => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(trf!("You sign in with {} on your other computers and phones.", email)).color(t.text2));
+                    ui.label(
+                        RichText::new(trf!(
+                            "You sign in with {} on your other computers and phones.",
+                            email
+                        ))
+                        .color(t.text2),
+                    );
                     if !form.changing && row_button(ui, tr("Change password")).clicked() {
                         form.changing = true;
                         form.note.clear();
@@ -1256,7 +1774,13 @@ impl App {
                         if primary_button(ui, t, tr("Save password")).clicked() {
                             match new_password_problem(&form.password, &form.repeat) {
                                 Some(p) => form.note = p,
-                                None => send = Some(NetMsg::SetPassword { email: email.clone(), password: form.password.clone(), old_password: Some(form.old.clone()) }),
+                                None => {
+                                    send = Some(NetMsg::SetPassword {
+                                        email: email.clone(),
+                                        password: form.password.clone(),
+                                        old_password: Some(form.old.clone()),
+                                    })
+                                }
                             }
                         }
                         if ui.button(tr("Cancel")).clicked() {
@@ -1268,7 +1792,11 @@ impl App {
             None => {
                 ui.label(RichText::new(tr("Set a password to sign in on your other computers and phones without a new invite code.")).color(t.text2));
                 if form.email.is_empty() {
-                    form.email = self.data.member(self.data.me).map(|m| m.email.clone()).unwrap_or_default();
+                    form.email = self
+                        .data
+                        .member(self.data.me)
+                        .map(|m| m.email.clone())
+                        .unwrap_or_default();
                 }
                 field(ui, &mut form.email, "Email", false);
                 field(ui, &mut form.password, "Password", true);
@@ -1279,7 +1807,13 @@ impl App {
                     } else {
                         match new_password_problem(&form.password, &form.repeat) {
                             Some(p) => form.note = p,
-                            None => send = Some(NetMsg::SetPassword { email: form.email.trim().to_string(), password: form.password.clone(), old_password: None }),
+                            None => {
+                                send = Some(NetMsg::SetPassword {
+                                    email: form.email.trim().to_string(),
+                                    password: form.password.clone(),
+                                    old_password: None,
+                                })
+                            }
                         }
                     }
                 }
@@ -1296,25 +1830,68 @@ impl App {
 
     /// The first start: work alone on this Mac, join a team, or set up a
     /// team server. `step`: 0 the choice, 1 your name, 2 join, 3 new server.
-    pub(super) fn welcome_body(&mut self, ui: &mut Ui, t: &Theme, step: &mut u8, name: &mut String, addr: &mut String) -> bool {
+    pub(super) fn welcome_body(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        step: &mut u8,
+        name: &mut String,
+        addr: &mut String,
+    ) -> bool {
         let mut close = false;
         match *step {
             0 => {
-                ui.label(RichText::new(tr("Tasks, chat and docs for you and your team. How do you want to start?")).color(t.text2));
+                ui.label(
+                    RichText::new(tr(
+                        "Tasks, chat and docs for you and your team. How do you want to start?",
+                    ))
+                    .color(t.text2),
+                );
                 ui.add_space(10.0);
                 let choices = [
-                    (1u8, "Use it on this Mac", "Start your own workspace. You can share it with your team later."),
-                    (2, "Join my team", "Sign in with your email, or use the invite code someone sent you."),
-                    (3, "Set up a server for my team", "Put this workspace on your team's Workboard server and become its owner."),
+                    (
+                        1u8,
+                        "Use it on this Mac",
+                        "Start your own workspace. You can share it with your team later.",
+                    ),
+                    (
+                        2,
+                        "Join my team",
+                        "Sign in with your email, or use the invite code someone sent you.",
+                    ),
+                    (
+                        3,
+                        "Set up a server for my team",
+                        "Put this workspace on your team's Workboard server and become its owner.",
+                    ),
                 ];
                 for (to, title, desc) in choices {
-                    let r = ui.add(egui::Button::new(RichText::new(format!("{}\n{}", tr(title), tr(desc))).color(t.text)).min_size(vec2(ui.available_width(), 52.0)).corner_radius(8));
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+                    let r = ui.add(
+                        egui::Button::new(
+                            RichText::new(format!("{}\n{}", tr(title), tr(desc))).color(t.text),
+                        )
+                        .min_size(vec2(ui.available_width(), 52.0))
+                        .corner_radius(8),
+                    );
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title)
+                    });
                     if r.clicked() {
                         *step = to;
-                        self.sync_rt.form = Form { mode: if to == 3 { Mode::NewServer } else { Mode::Account }, ..Default::default() };
+                        self.sync_rt.form = Form {
+                            mode: if to == 3 {
+                                Mode::NewServer
+                            } else {
+                                Mode::Account
+                            },
+                            ..Default::default()
+                        };
                         if to == 1 && name.is_empty() {
-                            *name = self.data.member(self.data.me).map(|m| m.name.clone()).unwrap_or_default();
+                            *name = self
+                                .data
+                                .member(self.data.me)
+                                .map(|m| m.name.clone())
+                                .unwrap_or_default();
                         }
                     }
                     ui.add_space(6.0);
@@ -1322,8 +1899,14 @@ impl App {
             }
             1 => {
                 ui.label(RichText::new(tr("What should your team call you?")).color(t.text2));
-                let r = ui.add(egui::TextEdit::singleline(name).hint_text(tr("Your name")).desired_width(f32::INFINITY));
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Your name entry"));
+                let r = ui.add(
+                    egui::TextEdit::singleline(name)
+                        .hint_text(tr("Your name"))
+                        .desired_width(f32::INFINITY),
+                );
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Your name entry")
+                });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button(tr("Back")).clicked() {
@@ -1332,7 +1915,13 @@ impl App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary_button(ui, t, tr("Start")).clicked() {
                             let me = self.data.me;
-                            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me).filter(|_| !name.trim().is_empty()) {
+                            if let Some(m) = self
+                                .data
+                                .members
+                                .iter_mut()
+                                .find(|m| m.id == me)
+                                .filter(|_| !name.trim().is_empty())
+                            {
                                 m.name = name.trim().to_string();
                             }
                             self.dirty = true;
@@ -1342,7 +1931,11 @@ impl App {
                 });
             }
             _ => {
-                let modes: &[Mode] = if *step == 3 { &[Mode::NewServer] } else { &[Mode::Account, Mode::Invite] };
+                let modes: &[Mode] = if *step == 3 {
+                    &[Mode::NewServer]
+                } else {
+                    &[Mode::Account, Mode::Invite]
+                };
                 ui.label(RichText::new(tr(if *step == 3 {
                     "Type the address of the Mac running workboard-server (for example a Mac mini your team reaches through Tailscale)."
                 } else {
@@ -1364,30 +1957,65 @@ impl App {
     pub(super) fn together_modal(&self) -> Modal {
         let cfg = self.data.extra.shared.as_ref();
         Modal::Together {
-            path: cfg.filter(|c| c.server.is_none()).map(|c| c.folder.clone()).unwrap_or_default(),
+            path: cfg
+                .filter(|c| c.server.is_none())
+                .map(|c| c.folder.clone())
+                .unwrap_or_default(),
             addr: cfg.and_then(|c| c.server.clone()).unwrap_or_default(),
             code: String::new(),
             result: String::new(),
         }
     }
 
-    pub(super) fn together_body(&mut self, ui: &mut Ui, t: &Theme, path: &mut String, addr: &mut String, code: &mut String, result: &mut String) -> bool {
+    pub(super) fn together_body(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        path: &mut String,
+        addr: &mut String,
+        code: &mut String,
+        result: &mut String,
+    ) -> bool {
         let mut close = false;
-        if let Some(SharedCfg { server: Some(server), .. }) = self.data.extra.shared.clone() {
-            ui.label(RichText::new(tr("This workspace is on a server")).size(15.0).strong());
+        if let Some(SharedCfg {
+            server: Some(server),
+            ..
+        }) = self.data.extra.shared.clone()
+        {
+            ui.label(
+                RichText::new(tr("This workspace is on a server"))
+                    .size(15.0)
+                    .strong(),
+            );
             ui.label(RichText::new(&server).color(t.text2));
             let connected = self.sync_rt.net_status == Some(NetStatus::Connected);
-            let status = net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
-            ui.label(RichText::new(trf!("Status: {}", status)).color(if connected { t.text } else { t.text2 }));
+            let status =
+                net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+            ui.label(
+                RichText::new(trf!("Status: {}", status)).color(if connected {
+                    t.text
+                } else {
+                    t.text2
+                }),
+            );
             if let Some(role) = self.sync_rt.role.filter(|_| connected) {
-                let name = self.data.member(self.data.me).map(|m| m.name.clone()).unwrap_or_default();
-                ui.label(RichText::new(trf!("Signed in as {} ({})", name, tr(role.label()))).color(t.text2));
+                let name = self
+                    .data
+                    .member(self.data.me)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_default();
+                ui.label(
+                    RichText::new(trf!("Signed in as {} ({})", name, tr(role.label())))
+                        .color(t.text2),
+                );
             }
             if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
                 ui.add_space(6.0);
                 ui.label(RichText::new(tr("Sign this computer in again with your email and password, or with a new invite code from the owner or an admin.")).color(t.text2));
                 let mut at = server.clone();
-                if let Some(how) = self.login_form(ui, t, &mut at, &[Mode::Account, Mode::Invite], "Sign in") {
+                if let Some(how) =
+                    self.login_form(ui, t, &mut at, &[Mode::Account, Mode::Invite], "Sign in")
+                {
                     self.sign_in_with(how);
                 }
             }
@@ -1412,14 +2040,22 @@ impl App {
                     self.sync_rt.net_status = None;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button(RichText::new(tr("Stop sharing")).color(t.danger)).on_hover_text(tr("Keep working on this computer only; your copy stays")).clicked() {
+                    if ui
+                        .button(RichText::new(tr("Stop sharing")).color(t.danger))
+                        .on_hover_text(tr("Keep working on this computer only; your copy stays"))
+                        .clicked()
+                    {
                         self.stop_sharing();
                         close = true;
                     }
                 });
             });
         } else if let Some(cfg) = self.data.extra.shared.clone() {
-            ui.label(RichText::new(tr("This workspace is shared")).size(15.0).strong());
+            ui.label(
+                RichText::new(tr("This workspace is shared"))
+                    .size(15.0)
+                    .strong(),
+            );
             ui.label(RichText::new(&cfg.folder).color(t.text2));
             let n = sync::other_files(Path::new(&cfg.folder), &cfg.device).len();
             ui.label(RichText::new(match n {
@@ -1433,25 +2069,40 @@ impl App {
             ui.horizontal(|ui| {
                 if ui.button(tr("Check for changes now")).clicked() {
                     let changed = self.sync_pull();
-                    *result = if changed { tr("Got the latest changes.").into() } else { tr("Everything is up to date.").into() };
+                    *result = if changed {
+                        tr("Got the latest changes.").into()
+                    } else {
+                        tr("Everything is up to date.").into()
+                    };
                 }
                 if ui.button(tr("Show folder")).clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!("file://{}", cfg.folder)));
+                    ui.ctx()
+                        .open_url(egui::OpenUrl::new_tab(format!("file://{}", cfg.folder)));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button(RichText::new(tr("Stop sharing")).color(t.danger)).on_hover_text(tr("Keep working on this computer only; your copy stays")).clicked() {
+                    if ui
+                        .button(RichText::new(tr("Stop sharing")).color(t.danger))
+                        .on_hover_text(tr("Keep working on this computer only; your copy stays"))
+                        .clicked()
+                    {
                         self.stop_sharing();
                         close = true;
                     }
                 });
             });
         } else {
-            ui.label(tr("Work on this workspace with other people, without a server."));
+            ui.label(tr(
+                "Work on this workspace with other people, without a server.",
+            ));
             ui.label(RichText::new(tr("Pick a folder that a sync app shares with your teammates (iCloud Drive, Dropbox, Google Drive, OneDrive or Syncthing). Everyone opens Workboard on their own computer and points it at the same folder.")).color(t.text2));
             ui.add_space(8.0);
             let sugg = sync::suggested_folders();
             if !sugg.is_empty() {
-                ui.label(RichText::new(tr("Found on this computer")).small().color(t.text3));
+                ui.label(
+                    RichText::new(tr("Found on this computer"))
+                        .small()
+                        .color(t.text3),
+                );
                 ui.horizontal_wrapped(|ui| {
                     for (name, p) in &sugg {
                         if ui.button(name).on_hover_text(p).clicked() {
@@ -1461,7 +2112,11 @@ impl App {
                 });
             }
             ui.label(RichText::new(tr("Folder")).color(t.text2));
-            ui.add(egui::TextEdit::singleline(path).hint_text(tr("Paste a folder path, or pick one above")).desired_width(f32::INFINITY));
+            ui.add(
+                egui::TextEdit::singleline(path)
+                    .hint_text(tr("Paste a folder path, or pick one above"))
+                    .desired_width(f32::INFINITY),
+            );
             let n = folder_people(path);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1505,24 +2160,49 @@ impl App {
         close
     }
 
-    pub(super) fn who_am_i_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String, email: &mut String) -> bool {
+    pub(super) fn who_am_i_body(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        name: &mut String,
+        email: &mut String,
+    ) -> bool {
         let mut close = false;
-        ui.label(RichText::new(tr("Pick yourself so your messages and tasks show your name.")).color(t.text2));
+        ui.label(
+            RichText::new(tr(
+                "Pick yourself so your messages and tasks show your name.",
+            ))
+            .color(t.text2),
+        );
         ui.add_space(6.0);
         let members: Vec<Member> = self.data.members.clone();
-        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-            for m in &members {
-                let label = if m.invited { trf!("{}   {}  (invited)", m.name, m.email) } else { format!("{}   {}", m.name, m.email) };
-                if ui.add(egui::Button::new(label).frame(false)).clicked() {
-                    self.become_member(Some(m.id), "", "");
-                    close = true;
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .show(ui, |ui| {
+                for m in &members {
+                    let label = if m.invited {
+                        trf!("{}   {}  (invited)", m.name, m.email)
+                    } else {
+                        format!("{}   {}", m.name, m.email)
+                    };
+                    if ui.add(egui::Button::new(label).frame(false)).clicked() {
+                        self.become_member(Some(m.id), "", "");
+                        close = true;
+                    }
                 }
-            }
-        });
+            });
         ui.separator();
         ui.label(RichText::new(tr("I'm new here")).color(t.text2));
-        ui.add(egui::TextEdit::singleline(name).hint_text(tr("Your name")).desired_width(f32::INFINITY));
-        ui.add(egui::TextEdit::singleline(email).hint_text(tr("Email")).desired_width(f32::INFINITY));
+        ui.add(
+            egui::TextEdit::singleline(name)
+                .hint_text(tr("Your name"))
+                .desired_width(f32::INFINITY),
+        );
+        ui.add(
+            egui::TextEdit::singleline(email)
+                .hint_text(tr("Email"))
+                .desired_width(f32::INFINITY),
+        );
         ui.add_space(6.0);
         if primary_button(ui, t, tr("Join as new member")).clicked() && !name.trim().is_empty() {
             self.become_member(None, name, email);
@@ -1531,25 +2211,63 @@ impl App {
         close
     }
 
-    pub(super) fn call_body(&mut self, ui: &mut Ui, t: &Theme, ch: &mut u64, link: &mut String) -> bool {
+    pub(super) fn call_body(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        ch: &mut u64,
+        link: &mut String,
+    ) -> bool {
         let mut close = false;
         ui.label(RichText::new(tr("The call opens in your browser on Jitsi Meet (free). The person who starts it may be asked to sign in with Google, GitHub or Facebook; everyone else joins without an account. Everyone in the conversation gets a Join button.")).color(t.text2));
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Call in")).color(t.text2));
-        let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| self.listed(c)).map(|c| (c.id, if c.kind == ChannelKind::Channel { format!("# {}", c.name) } else { self.channel_label(c) })).collect();
-        let cur = chans.iter().find(|c| c.0 == *ch).map(|c| c.1.clone()).unwrap_or_else(|| tr("Choose").into());
-        egui::ComboBox::from_id_salt("call_in").selected_text(cur).width(300.0).show_ui(ui, |ui| {
-            for (id, n) in &chans {
-                ui.selectable_value(ch, *id, n);
-            }
-        });
+        let chans: Vec<(u64, String)> = self
+            .data
+            .channels
+            .iter()
+            .filter(|c| self.listed(c))
+            .map(|c| {
+                (
+                    c.id,
+                    if c.kind == ChannelKind::Channel {
+                        format!("# {}", c.name)
+                    } else {
+                        self.channel_label(c)
+                    },
+                )
+            })
+            .collect();
+        let cur = chans
+            .iter()
+            .find(|c| c.0 == *ch)
+            .map(|c| c.1.clone())
+            .unwrap_or_else(|| tr("Choose").into());
+        egui::ComboBox::from_id_salt("call_in")
+            .selected_text(cur)
+            .width(300.0)
+            .show_ui(ui, |ui| {
+                for (id, n) in &chans {
+                    ui.selectable_value(ch, *id, n);
+                }
+            });
         ui.add_space(6.0);
-        ui.label(RichText::new(tr("Or use your own meeting link (Zoom, Google Meet...)")).small().color(t.text3));
-        ui.add(egui::TextEdit::singleline(link).hint_text("https://...").desired_width(f32::INFINITY));
+        ui.label(
+            RichText::new(tr("Or use your own meeting link (Zoom, Google Meet...)"))
+                .small()
+                .color(t.text3),
+        );
+        ui.add(
+            egui::TextEdit::singleline(link)
+                .hint_text("https://...")
+                .desired_width(f32::INFINITY),
+        );
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, t, tr("Start call")).clicked() && chans.iter().any(|c| c.0 == *ch) {
+                if primary_button(ui, t, tr("Start call")).clicked()
+                    && chans.iter().any(|c| c.0 == *ch)
+                {
                     let ctx = ui.ctx().clone();
                     self.start_call(Some(&ctx), *ch, link);
                     close = true;
@@ -1564,14 +2282,27 @@ impl App {
 
     /// The call to open from a Huddle / call button: the open conversation, else #general.
     pub(super) fn open_call_dialog(&mut self) {
-        let ch = if self.section == Section::Chat { self.chat_open } else { None }
-            .or_else(|| self.data.channels.iter().find(|c| c.kind == ChannelKind::Channel).map(|c| c.id))
-            .unwrap_or(0);
+        let ch = if self.section == Section::Chat {
+            self.chat_open
+        } else {
+            None
+        }
+        .or_else(|| {
+            self.data
+                .channels
+                .iter()
+                .find(|c| c.kind == ChannelKind::Channel)
+                .map(|c| c.id)
+        })
+        .unwrap_or(0);
         // on the team's server: a voice huddle right here
         if self.huddles_on_server() && ch != 0 {
             self.start_huddle(ch);
             return;
         }
-        self.modal = Some(Modal::Call { ch, link: String::new() });
+        self.modal = Some(Modal::Call {
+            ch,
+            link: String::new(),
+        });
     }
 }

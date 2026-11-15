@@ -41,7 +41,10 @@ fn prefs_path() -> std::path::PathBuf {
 /// View settings saved on this computer (they are personal, so they stay
 /// out of the shared workspace file).
 pub(super) fn load_prefs() -> HashMap<String, ViewPrefs> {
-    std::fs::read_to_string(prefs_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    std::fs::read_to_string(prefs_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
 impl App {
@@ -54,7 +57,16 @@ impl App {
     pub(super) fn current_prefs(&self) -> ViewPrefs {
         let mut hidden: Vec<String> = self.hidden_cols.iter().cloned().collect();
         hidden.sort();
-        ViewPrefs { group_by: self.group_by, sort_by: self.sort_by, sort_desc: self.sort_desc, show_closed: self.show_closed, subtasks_open: self.subtasks_open, hidden_cols: hidden, filter_rows: self.filter.rows.clone(), archived: self.filter.archived }
+        ViewPrefs {
+            group_by: self.group_by,
+            sort_by: self.sort_by,
+            sort_desc: self.sort_desc,
+            show_closed: self.show_closed,
+            subtasks_open: self.subtasks_open,
+            hidden_cols: hidden,
+            filter_rows: self.filter.rows.clone(),
+            archived: self.filter.archived,
+        }
     }
 
     fn apply_prefs(&mut self, p: &ViewPrefs) {
@@ -86,7 +98,11 @@ impl App {
             return;
         }
         let cur = self.current_prefs();
-        if self.view_prefs_at.as_ref().is_some_and(|(_, seen)| *seen != cur) {
+        if self
+            .view_prefs_at
+            .as_ref()
+            .is_some_and(|(_, seen)| *seen != cur)
+        {
             self.view_prefs.insert(key.clone(), cur.clone());
             self.view_prefs_at = Some((key, cur));
             if self.persist {
@@ -104,19 +120,42 @@ impl App {
     /// parent, by handing the moved block the `order` values it already
     /// used (tasks elsewhere keep their place relative to them).
     pub(super) fn reorder_task(&mut self, dragged: u64, target: u64, after: bool) {
-        let (Some(d), Some(tg)) = (self.task(dragged), self.task(target)) else { return };
+        let (Some(d), Some(tg)) = (self.task(dragged), self.task(target)) else {
+            return;
+        };
         // only same-parent moves: a subtask stays under its parent
         if dragged == target || d.parent != tg.parent {
             return;
         }
         let parent = tg.parent;
         // top-level rows: the tasks of the lists shown here
-        let lists = if parent.is_none() { self.data.lists_in(self.loc) } else { None };
-        let mut seq: Vec<(u64, i64)> = self.data.tasks.iter().filter(|t| t.parent == parent && lists.as_ref().map_or(true, |l| l.contains(&t.list_id) || t.id == dragged)).map(|t| (t.id, t.order)).collect();
+        let lists = if parent.is_none() {
+            self.data.lists_in(self.loc)
+        } else {
+            None
+        };
+        let mut seq: Vec<(u64, i64)> = self
+            .data
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.parent == parent
+                    && lists
+                        .as_ref()
+                        .map_or(true, |l| l.contains(&t.list_id) || t.id == dragged)
+            })
+            .map(|t| (t.id, t.order))
+            .collect();
         seq.sort_by_key(|x| x.1);
         let mut slots: Vec<i64> = seq.iter().map(|x| x.1).collect();
-        let mut ids: Vec<u64> = seq.iter().map(|x| x.0).filter(|id| *id != dragged).collect();
-        let Some(ti) = ids.iter().position(|id| *id == target) else { return };
+        let mut ids: Vec<u64> = seq
+            .iter()
+            .map(|x| x.0)
+            .filter(|id| *id != dragged)
+            .collect();
+        let Some(ti) = ids.iter().position(|id| *id == target) else {
+            return;
+        };
         ids.insert(if after { ti + 1 } else { ti }, dragged);
         // keep the values strictly increasing so the new order is unambiguous
         for i in 1..slots.len() {
@@ -140,9 +179,13 @@ impl App {
     /// change order (and take the group's value when dropped into another
     /// group); subtasks move only within their parent.
     pub(super) fn drop_row(&mut self, dragged: u64, spot: usize, after: bool) {
-        let Some(s) = self.row_spots.get(spot) else { return };
+        let Some(s) = self.row_spots.get(spot) else {
+            return;
+        };
         let (target, target_parent, gi) = (s.id, s.parent, s.group);
-        let Some(parent) = self.task(dragged).map(|t| t.parent) else { return };
+        let Some(parent) = self.task(dragged).map(|t| t.parent) else {
+            return;
+        };
         if parent != target_parent {
             return;
         }
@@ -151,7 +194,8 @@ impl App {
             self.reorder_task(dragged, target, after);
         }
         let group = self.row_groups.get(gi).cloned();
-        let other_group = parent.is_none() && group.as_ref().is_some_and(|g| !g.tasks.contains(&dragged));
+        let other_group =
+            parent.is_none() && group.as_ref().is_some_and(|g| !g.tasks.contains(&dragged));
         if let (true, Some(g)) = (other_group, group) {
             // cloned after the reorder so the new order goes along
             if let Some(mut e) = self.task(dragged).cloned() {
@@ -159,7 +203,10 @@ impl App {
                 self.actions.push(Action::Replace(e));
             }
         } else if !manual {
-            self.toast = Some((tr("Sort by Manual to drag tasks into your own order").into(), now_ts()));
+            self.toast = Some((
+                tr("Sort by Manual to drag tasks into your own order").into(),
+                now_ts(),
+            ));
         }
     }
 
@@ -171,20 +218,38 @@ impl App {
         let pos = ui.ctx().pointer_latest_pos();
         let released = ui.input(|i| !i.pointer.primary_down());
         let hit = pos.and_then(|p| {
-            let i = self.row_spots.iter().position(|s| p.y >= s.rect.top() && p.y < s.rect.bottom())?;
+            let i = self
+                .row_spots
+                .iter()
+                .position(|s| p.y >= s.rect.top() && p.y < s.rect.bottom())?;
             Some((i, p.y > self.row_spots[i].rect.center().y))
         });
         if let (Some((i, after)), Some(p)) = (hit, pos) {
             let r = self.row_spots[i].rect;
             let y = if after { r.bottom() } else { r.top() };
-            let x0 = r.left() + 28.0 + if self.row_spots[i].parent.is_some() { 26.0 } else { 0.0 };
-            ui.painter().hline(x0..=r.right(), y, Stroke::new(2.0_f32, t.primary));
+            let x0 = r.left()
+                + 28.0
+                + if self.row_spots[i].parent.is_some() {
+                    26.0
+                } else {
+                    0.0
+                };
+            ui.painter()
+                .hline(x0..=r.right(), y, Stroke::new(2.0_f32, t.primary));
             let name = self.task(d).map(|x| x.name.clone()).unwrap_or_default();
-            let lp = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("row_drag_ghost")));
+            let lp = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Tooltip,
+                egui::Id::new("row_drag_ghost"),
+            ));
             let g = lp.layout_no_wrap(truncate(&name, 40), FontId::proportional(13.5), t.text);
             let br = Rect::from_min_size(p + vec2(12.0, -14.0), g.size() + vec2(20.0, 12.0));
             lp.rect_filled(br, 6.0, t.card);
-            lp.rect_stroke(br, 6.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
+            lp.rect_stroke(
+                br,
+                6.0,
+                Stroke::new(1.0_f32, t.border),
+                egui::StrokeKind::Inside,
+            );
             lp.galley(br.min + vec2(10.0, 6.0), g, t.text);
         }
         if released {
@@ -228,7 +293,16 @@ impl App {
     /// asking), Up / Down move a highlight and Enter opens it.
     pub(super) fn list_keys(&mut self, ctx: &egui::Context) {
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
-        if typing || self.modal.is_some() || self.quick_add.is_some() || self.palette.is_some() || self.rename.is_some() || self.open_task.is_some() || self.row_rename.is_some() || self.confirm_bulk_delete || self.menu_was_open {
+        if typing
+            || self.modal.is_some()
+            || self.quick_add.is_some()
+            || self.palette.is_some()
+            || self.rename.is_some()
+            || self.open_task.is_some()
+            || self.row_rename.is_some()
+            || self.confirm_bulk_delete
+            || self.menu_was_open
+        {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
@@ -239,16 +313,27 @@ impl App {
         if !plain {
             return;
         }
-        if !self.selected.is_empty() && ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+        if !self.selected.is_empty()
+            && ctx
+                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+        {
             self.confirm_bulk_delete = true;
             return;
         }
         let down = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown));
         let up = ctx.input(|i| i.key_pressed(egui::Key::ArrowUp));
         if (down || up) && !self.row_order.is_empty() {
-            let at = self.row_focus.and_then(|f| self.row_order.iter().position(|x| *x == f));
+            let at = self
+                .row_focus
+                .and_then(|f| self.row_order.iter().position(|x| *x == f));
             let next = match at {
-                None => if down { 0 } else { self.row_order.len() - 1 },
+                None => {
+                    if down {
+                        0
+                    } else {
+                        self.row_order.len() - 1
+                    }
+                }
                 Some(i) if down => (i + 1).min(self.row_order.len() - 1),
                 Some(i) => i.saturating_sub(1),
             };
@@ -303,26 +388,49 @@ impl App {
 
     /// "Deleted - Undo" at the bottom after tasks were deleted.
     pub(super) fn undo_bar(&mut self, ctx: &egui::Context) {
-        let Some((trash, ts)) = self.undo_trash.clone() else { return };
+        let Some((trash, ts)) = self.undo_trash.clone() else {
+            return;
+        };
         if now_ts() - ts > 8 || trash.is_empty() {
             self.undo_trash = None;
             return;
         }
         let n = trash.len();
         let mut undo = false;
-        egui::Area::new(egui::Id::new("undo_bar")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -24.0]).show(ctx, |ui| {
-            egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).corner_radius(8).inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(if n == 1 { tr("Task deleted").to_string() } else { trf!("{} tasks deleted", n) }).color(Color32::WHITE));
-                    ui.add_space(8.0);
-                    let b = ui.add(egui::Button::new(RichText::new(tr("Undo")).color(Color32::from_rgb(140, 170, 255)).strong()).frame(false));
-                    name_it(&b, "Undo delete");
-                    if b.clicked() {
-                        undo = true;
-                    }
-                });
+        egui::Area::new(egui::Id::new("undo_bar"))
+            .order(egui::Order::Foreground)
+            .anchor(Align2::CENTER_BOTTOM, [0.0, -24.0])
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(32, 32, 32))
+                    .corner_radius(8)
+                    .inner_margin(egui::Margin::symmetric(16, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(if n == 1 {
+                                    tr("Task deleted").to_string()
+                                } else {
+                                    trf!("{} tasks deleted", n)
+                                })
+                                .color(Color32::WHITE),
+                            );
+                            ui.add_space(8.0);
+                            let b = ui.add(
+                                egui::Button::new(
+                                    RichText::new(tr("Undo"))
+                                        .color(Color32::from_rgb(140, 170, 255))
+                                        .strong(),
+                                )
+                                .frame(false),
+                            );
+                            name_it(&b, "Undo delete");
+                            if b.clicked() {
+                                undo = true;
+                            }
+                        });
+                    });
             });
-        });
         if undo {
             for tid in trash.iter().rev() {
                 if let Some(i) = self.data.extra.trash.iter().position(|x| x.id == *tid) {
@@ -340,7 +448,14 @@ impl App {
     pub(super) fn group_menu(&mut self, ui: &mut Ui, g: &Group) {
         ui.set_min_width(200.0);
         let collapsed = self.collapsed.contains(&g.key);
-        if ui.button(tr(if collapsed { "Expand group" } else { "Collapse group" })).clicked() {
+        if ui
+            .button(tr(if collapsed {
+                "Expand group"
+            } else {
+                "Collapse group"
+            }))
+            .clicked()
+        {
             if collapsed {
                 self.collapsed.remove(&g.key);
             } else {
@@ -350,7 +465,11 @@ impl App {
         }
         if ui.button(tr("Collapse all groups")).clicked() {
             let tasks = self.filtered();
-            let keys: Vec<String> = self.groups(&tasks, false).into_iter().map(|g| g.key).collect();
+            let keys: Vec<String> = self
+                .groups(&tasks, false)
+                .into_iter()
+                .map(|g| g.key)
+                .collect();
             self.collapsed.extend(keys);
             parity::close_any(ui);
         }
@@ -374,11 +493,22 @@ impl App {
 
     /// Small buttons drawn after a row's name while it is hovered: add a
     /// subtask, rename, add a tag.
-    pub(super) fn row_quick_actions(&mut self, ui: &mut Ui, row: Rect, x: f32, limit: f32, task: &Task) {
+    pub(super) fn row_quick_actions(
+        &mut self,
+        ui: &mut Ui,
+        row: Rect,
+        x: f32,
+        limit: f32,
+        task: &Task,
+    ) {
         let t = self.t();
         let id = Self::quick_id(ui, task.id);
         let mut x = x;
-        let items: [(&str, &str); 3] = [("+", "Add subtask"), ("\u{270E}", "Rename"), ("#", "Add tag")];
+        let items: [(&str, &str); 3] = [
+            ("+", "Add subtask"),
+            ("\u{270E}", "Rename"),
+            ("#", "Add tag"),
+        ];
         for (glyph, what) in items {
             let r = Rect::from_min_size(pos2(x, row.center().y - 10.0), vec2(20.0, 20.0));
             if r.right() > limit {
@@ -386,11 +516,22 @@ impl App {
             }
             let resp = ui.interact(r, id.with(what), Sense::click());
             name_it(&resp, &format!("{} {}", what, task.name));
-            ui.painter().rect_stroke(r, 4.0, Stroke::new(1.0_f32, if resp.hovered() { t.text3 } else { t.border }), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                r,
+                4.0,
+                Stroke::new(1.0_f32, if resp.hovered() { t.text3 } else { t.border }),
+                egui::StrokeKind::Inside,
+            );
             if resp.hovered() {
                 ui.painter().rect_filled(r.shrink(1.0), 4.0, t.hover);
             }
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(12.0), t.text2);
+            ui.painter().text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                glyph,
+                FontId::proportional(12.0),
+                t.text2,
+            );
             let resp = resp.on_hover_text(tr(what));
             match what {
                 "Add subtask" => {
@@ -406,7 +547,9 @@ impl App {
                 }
                 _ => {
                     let mut tags = task.tags.clone();
-                    if let Some(true) = popup(ui, &resp, id.with("tagp"), 200.0, |ui| tag_menu(ui, &t, &self.all_tags(), &mut tags)) {
+                    if let Some(true) = popup(ui, &resp, id.with("tagp"), 200.0, |ui| {
+                        tag_menu(ui, &t, &self.all_tags(), &mut tags)
+                    }) {
                         let mut e = task.clone();
                         e.tags = tags;
                         self.actions.push(Action::Replace(e));
@@ -427,7 +570,12 @@ impl App {
     }
 
     pub(super) fn all_tags(&self) -> Vec<String> {
-        let mut tags: Vec<String> = self.data.tasks.iter().flat_map(|t| t.tags.iter().cloned()).collect();
+        let mut tags: Vec<String> = self
+            .data
+            .tasks
+            .iter()
+            .flat_map(|t| t.tags.iter().cloned())
+            .collect();
         tags.sort_by_key(|g| g.to_lowercase());
         tags.dedup();
         tags
@@ -435,9 +583,19 @@ impl App {
 
     /// The name field shown in place of a row's name while renaming it.
     pub(super) fn row_rename_field(&mut self, ui: &mut Ui, r: Rect, task: &Task) {
-        let Some((_, text)) = self.row_rename.as_mut() else { return };
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(Layout::left_to_right(Align::Center)));
-        let resp = child.add(egui::TextEdit::singleline(text).desired_width(r.width()).font(FontId::proportional(14.0)));
+        let Some((_, text)) = self.row_rename.as_mut() else {
+            return;
+        };
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(r)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        let resp = child.add(
+            egui::TextEdit::singleline(text)
+                .desired_width(r.width())
+                .font(FontId::proportional(14.0)),
+        );
         name_field(&resp, "Rename task");
         focus_once(&child, &resp);
         let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
@@ -458,13 +616,19 @@ impl App {
     /// The inline "new subtask" field under a parent's subtasks.
     pub(super) fn sub_add_row(&mut self, ui: &mut Ui, parent: &Task) {
         let t = self.t();
-        let Some((_, text)) = self.sub_adding.as_mut() else { return };
+        let Some((_, text)) = self.sub_adding.as_mut() else {
+            return;
+        };
         let mut submit = false;
         let mut cancel = false;
         let w = ui.available_width();
         ui.horizontal(|ui| {
             ui.add_space(14.0 + 26.0 + 40.0);
-            let r = ui.add(egui::TextEdit::singleline(text).hint_text(tr("Subtask name")).desired_width((w - 300.0).max(200.0)));
+            let r = ui.add(
+                egui::TextEdit::singleline(text)
+                    .hint_text(tr("Subtask name"))
+                    .desired_width((w - 300.0).max(200.0)),
+            );
             name_field(&r, "Subtask name");
             focus_once(ui, &r);
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -485,7 +649,16 @@ impl App {
         });
         let name = text.trim().to_string();
         if submit && !name.is_empty() {
-            self.actions.push(Action::Add { list: parent.list_id, name, status: None, priority: 0, assignees: vec![], due: None, parent: Some(parent.id), open: false });
+            self.actions.push(Action::Add {
+                list: parent.list_id,
+                name,
+                status: None,
+                priority: 0,
+                assignees: vec![],
+                due: None,
+                parent: Some(parent.id),
+                open: false,
+            });
             self.sub_adding = Some((parent.id, String::new()));
         } else if cancel || submit {
             self.sub_adding = None;
@@ -499,7 +672,11 @@ pub(super) fn tag_menu(ui: &mut Ui, t: &Theme, all: &[String], tags: &mut Vec<St
     let mut changed = false;
     let id = ui.id().with("new_tag");
     let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(tr("Search or add tags...")).desired_width(f32::INFINITY));
+    let r = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .hint_text(tr("Search or add tags..."))
+            .desired_width(f32::INFINITY),
+    );
     name_field(&r, "Tag name");
     focus_once(ui, &r);
     let q = text.trim().to_lowercase();
@@ -511,7 +688,10 @@ pub(super) fn tag_menu(ui: &mut Ui, t: &Theme, all: &[String], tags: &mut Vec<St
         }
         text.clear();
     }
-    for tag in all.iter().filter(|g| q.is_empty() || g.to_lowercase().contains(&q)) {
+    for tag in all
+        .iter()
+        .filter(|g| q.is_empty() || g.to_lowercase().contains(&q))
+    {
         let on = tags.contains(tag);
         let col = tag_color(tag);
         if menu_row(ui, t, tag, on, |p, c| {

@@ -33,7 +33,9 @@ impl Rgba {
 
 /// File name endings taken as pictures, and as videos (the file picker
 /// offers exactly these).
-pub const IMAGE_EXTS: [&str; 10] = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp"];
+pub const IMAGE_EXTS: [&str; 10] = [
+    "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp",
+];
 pub const VIDEO_EXTS: [&str; 4] = ["mov", "mp4", "m4v", "3gp"];
 
 /// What a file is, from its name. None for anything that isn't a picture or
@@ -51,7 +53,12 @@ pub fn kind_of(path: &Path) -> Option<MediaKind> {
 
 /// The content type sent with an upload.
 pub fn content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("png") => "image/png",
         Some("gif") => "image/gif",
@@ -190,13 +197,26 @@ mod mac {
 
     impl CMTime {
         fn secs(s: f32) -> CMTime {
-            CMTime { value: (s.max(0.0) as f64 * 600.0) as i64, timescale: 600, flags: CMTIME_VALID, epoch: 0 }
+            CMTime {
+                value: (s.max(0.0) as f64 * 600.0) as i64,
+                timescale: 600,
+                flags: CMTIME_VALID,
+                epoch: 0,
+            }
         }
         fn zero() -> CMTime {
-            CMTime { value: 0, timescale: 1, flags: CMTIME_VALID, epoch: 0 }
+            CMTime {
+                value: 0,
+                timescale: 1,
+                flags: CMTIME_VALID,
+                epoch: 0,
+            }
         }
         fn to_secs(self) -> Option<f32> {
-            if self.flags & CMTIME_VALID == 0 || self.flags & CMTIME_INDEFINITE != 0 || self.timescale == 0 {
+            if self.flags & CMTIME_VALID == 0
+                || self.flags & CMTIME_INDEFINITE != 0
+                || self.timescale == 0
+            {
                 return None;
             }
             Some((self.value as f64 / self.timescale as f64) as f32)
@@ -212,7 +232,15 @@ mod mac {
         fn CGImageGetWidth(img: CFRef) -> usize;
         fn CGImageGetHeight(img: CFRef) -> usize;
         fn CGColorSpaceCreateDeviceRGB() -> CFRef;
-        fn CGBitmapContextCreate(data: *mut c_void, w: usize, h: usize, bits: usize, row: usize, space: CFRef, info: u32) -> CFRef;
+        fn CGBitmapContextCreate(
+            data: *mut c_void,
+            w: usize,
+            h: usize,
+            bits: usize,
+            row: usize,
+            space: CFRef,
+            info: u32,
+        ) -> CFRef;
         fn CGContextDrawImage(ctx: CFRef, rect: CGRect, img: CFRef);
     }
     #[link(name = "ImageIO", kind = "framework")]
@@ -313,9 +341,23 @@ mod mac {
         if ctx.is_null() {
             return None;
         }
-        CGContextDrawImage(ctx, CGRect { origin: CGPoint::default(), size: CGSize { w: w as f64, h: h as f64 } }, img);
+        CGContextDrawImage(
+            ctx,
+            CGRect {
+                origin: CGPoint::default(),
+                size: CGSize {
+                    w: w as f64,
+                    h: h as f64,
+                },
+            },
+            img,
+        );
         CFRelease(ctx);
-        Some(Rgba { w: w as u32, h: h as u32, px })
+        Some(Rgba {
+            w: w as u32,
+            h: h as u32,
+            px,
+        })
     }
 
     unsafe fn image_source(path: &Path) -> Option<CFRef> {
@@ -351,13 +393,21 @@ mod mac {
                             msg_send![n, longLongValue]
                         }
                     };
-                    let (w, h, orient) = (get(kCGImagePropertyPixelWidth), get(kCGImagePropertyPixelHeight), get(kCGImagePropertyOrientation));
+                    let (w, h, orient) = (
+                        get(kCGImagePropertyPixelWidth),
+                        get(kCGImagePropertyPixelHeight),
+                        get(kCGImagePropertyOrientation),
+                    );
                     CFRelease(props);
                     if w <= 0 || h <= 0 {
                         return Err("That picture can't be opened.".into());
                     }
                     // EXIF orientations 5-8 are turned a quarter
-                    Ok(if (5..=8).contains(&orient) { (h as u32, w as u32, 0.0) } else { (w as u32, h as u32, 0.0) })
+                    Ok(if (5..=8).contains(&orient) {
+                        (h as u32, w as u32, 0.0)
+                    } else {
+                        (w as u32, h as u32, 0.0)
+                    })
                 }
                 MediaKind::Video => {
                     let asset: *mut Object = msg_send![class!(AVURLAsset), URLAssetWithURL: file_url(path) options: null_mut::<Object>()];
@@ -374,7 +424,11 @@ mod mac {
                     let t: CGAffineTransform = msg_send![track, preferredTransform];
                     let turned = t.b.abs() > 0.5 && t.c.abs() > 0.5;
                     let (w, h) = (size.w.abs().round() as u32, size.h.abs().round() as u32);
-                    Ok(if turned { (h, w, dur.to_secs().unwrap_or(0.0)) } else { (w, h, dur.to_secs().unwrap_or(0.0)) })
+                    Ok(if turned {
+                        (h, w, dur.to_secs().unwrap_or(0.0))
+                    } else {
+                        (w, h, dur.to_secs().unwrap_or(0.0))
+                    })
                 }
             }
         })
@@ -408,7 +462,8 @@ mod mac {
                     }
                     let gen: *mut Object = msg_send![class!(AVAssetImageGenerator), assetImageGeneratorWithAsset: asset];
                     let _: () = msg_send![gen, setAppliesPreferredTrackTransform: YES];
-                    let _: () = msg_send![gen, setMaximumSize: CGSize { w: max as f64, h: max as f64 }];
+                    let _: () =
+                        msg_send![gen, setMaximumSize: CGSize { w: max as f64, h: max as f64 }];
                     let dur: CMTime = msg_send![asset, duration];
                     // a little way in: the very first frame is often black
                     let at = (dur.to_secs().unwrap_or(0.0) / 10.0).min(1.0);
@@ -438,7 +493,9 @@ mod mac {
             let types: Vec<*mut Object> = IMAGE_EXTS
                 .iter()
                 .chain(VIDEO_EXTS.iter())
-                .map(|e| -> *mut Object { msg_send![class!(UTType), typeWithFilenameExtension: ns(e)] })
+                .map(|e| -> *mut Object {
+                    msg_send![class!(UTType), typeWithFilenameExtension: ns(e)]
+                })
                 .filter(|t| !t.is_null())
                 .collect();
             if !types.is_empty() {
@@ -483,10 +540,12 @@ mod mac {
             if data.is_null() {
                 let tiff: *mut Object = msg_send![pb, dataForType: NSPasteboardTypeTIFF];
                 if !tiff.is_null() {
-                    let rep: *mut Object = msg_send![class!(NSBitmapImageRep), imageRepWithData: tiff];
+                    let rep: *mut Object =
+                        msg_send![class!(NSBitmapImageRep), imageRepWithData: tiff];
                     if !rep.is_null() {
                         // NSBitmapImageFileTypePNG
-                        data = msg_send![rep, representationUsingType: 4usize properties: dict(&[])];
+                        data =
+                            msg_send![rep, representationUsingType: 4usize properties: dict(&[])];
                     }
                 }
             }
@@ -528,13 +587,22 @@ mod mac {
                     return None;
                 }
                 let _: *mut Object = msg_send![item, retain];
-                let attrs = dict(&[(kCVPixelBufferPixelFormatTypeKey, number(BGRA as i64)), (kCVPixelBufferWidthKey, number(w.max(2) as i64)), (kCVPixelBufferHeightKey, number(h.max(2) as i64))]);
+                let attrs = dict(&[
+                    (kCVPixelBufferPixelFormatTypeKey, number(BGRA as i64)),
+                    (kCVPixelBufferWidthKey, number(w.max(2) as i64)),
+                    (kCVPixelBufferHeightKey, number(h.max(2) as i64)),
+                ]);
                 let output: *mut Object = msg_send![class!(AVPlayerItemVideoOutput), alloc];
                 let output: *mut Object = msg_send![output, initWithPixelBufferAttributes: attrs];
                 let _: () = msg_send![item, addOutput: output];
                 let player: *mut Object = msg_send![class!(AVPlayer), alloc];
                 let player: *mut Object = msg_send![player, initWithPlayerItem: item];
-                Some(Player { player, item, output, muted: false })
+                Some(Player {
+                    player,
+                    item,
+                    output,
+                    muted: false,
+                })
             })
         }
 
@@ -551,7 +619,11 @@ mod mac {
                     return None;
                 }
                 CVPixelBufferLockBaseAddress(pb, 1);
-                let (w, h, row) = (CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb), CVPixelBufferGetBytesPerRow(pb));
+                let (w, h, row) = (
+                    CVPixelBufferGetWidth(pb),
+                    CVPixelBufferGetHeight(pb),
+                    CVPixelBufferGetBytesPerRow(pb),
+                );
                 let base = CVPixelBufferGetBaseAddress(pb);
                 let mut px = vec![0u8; w * h * 4];
                 if !base.is_null() {
@@ -568,7 +640,11 @@ mod mac {
                 }
                 CVPixelBufferUnlockBaseAddress(pb, 1);
                 CVBufferRelease(pb);
-                Some(Rgba { w: w as u32, h: h as u32, px })
+                Some(Rgba {
+                    w: w as u32,
+                    h: h as u32,
+                    px,
+                })
             })
         }
 
@@ -632,7 +708,8 @@ mod mac {
         fn drop(&mut self) {
             unsafe {
                 let _: () = msg_send![self.player, pause];
-                let _: () = msg_send![self.player, replaceCurrentItemWithPlayerItem: null_mut::<Object>()];
+                let _: () =
+                    msg_send![self.player, replaceCurrentItemWithPlayerItem: null_mut::<Object>()];
                 let _: () = msg_send![self.player, release];
                 let _: () = msg_send![self.output, release];
                 let _: () = msg_send![self.item, release];
@@ -655,7 +732,11 @@ mod tests {
     fn picture(dir: &Path) -> PathBuf {
         let mut img = image::RgbaImage::new(400, 300);
         for (x, _, p) in img.enumerate_pixels_mut() {
-            *p = if x < 200 { image::Rgba([220, 20, 20, 255]) } else { image::Rgba([20, 20, 220, 255]) };
+            *p = if x < 200 {
+                image::Rgba([220, 20, 20, 255])
+            } else {
+                image::Rgba([20, 20, 220, 255])
+            };
         }
         let p = dir.join("pic.png");
         img.save(&p).unwrap();
@@ -672,12 +753,29 @@ mod tests {
         assert_eq!((t.w, t.h), (100, 75));
         assert_eq!(t.px.len(), 100 * 75 * 4);
         // left is red, right is blue, the top row first
-        let at = |x: u32, y: u32| &t.px[((y * t.w + x) * 4) as usize..((y * t.w + x) * 4 + 4) as usize];
-        assert!(at(10, 10)[0] > 180 && at(10, 10)[2] < 60, "{:?}", at(10, 10));
-        assert!(at(90, 60)[2] > 180 && at(90, 60)[0] < 60, "{:?}", at(90, 60));
+        let at =
+            |x: u32, y: u32| &t.px[((y * t.w + x) * 4) as usize..((y * t.w + x) * 4 + 4) as usize];
+        assert!(
+            at(10, 10)[0] > 180 && at(10, 10)[2] < 60,
+            "{:?}",
+            at(10, 10)
+        );
+        assert!(
+            at(90, 60)[2] > 180 && at(90, 60)[0] < 60,
+            "{:?}",
+            at(90, 60)
+        );
         // a JPEG made by the system tools reads the same way
         let jpg = dir.join("pic.jpg");
-        let ok = std::process::Command::new("sips").args(["-s", "format", "jpeg"]).arg(&png).arg("--out").arg(&jpg).output().unwrap().status.success();
+        let ok = std::process::Command::new("sips")
+            .args(["-s", "format", "jpeg"])
+            .arg(&png)
+            .arg("--out")
+            .arg(&jpg)
+            .output()
+            .unwrap()
+            .status
+            .success();
         assert!(ok);
         assert_eq!(probe(&jpg, MediaKind::Image).unwrap(), (400, 300, 0.0));
         // not a picture at all
@@ -697,7 +795,18 @@ mod tests {
         let mp4 = dir.join("clip.mp4");
         // 2 seconds of a test pattern at 320x240, H.264
         let ok = std::process::Command::new(ffmpeg)
-            .args(["-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=30", "-pix_fmt", "yuv420p", "-c:v", "libx264"])
+            .args([
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=320x240:rate=30",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx264",
+            ])
             .arg(&mp4)
             .output()
             .unwrap()
@@ -710,7 +819,11 @@ mod tests {
         assert!((secs - 2.0).abs() < 0.1, "{}", secs);
         let t = thumbnail(&mp4, MediaKind::Video, 160).unwrap();
         assert_eq!((t.w, t.h), (160, 120));
-        assert!(t.px.chunks(4).any(|p| p[0] > 100 || p[1] > 100 || p[2] > 100), "the still isn't black");
+        assert!(
+            t.px.chunks(4)
+                .any(|p| p[0] > 100 || p[1] > 100 || p[2] > 100),
+            "the still isn't black"
+        );
         // playback is checked in tests/player.rs: AVPlayer needs the main thread
         // something AVFoundation can't read
         let bad = dir.join("bad.mp4");
@@ -720,12 +833,19 @@ mod tests {
     }
 
     fn which(name: &str) -> Result<PathBuf, ()> {
-        ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].iter().map(|d| Path::new(d).join(name)).find(|p| p.exists()).ok_or(())
+        ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+            .iter()
+            .map(|d| Path::new(d).join(name))
+            .find(|p| p.exists())
+            .ok_or(())
     }
 
     #[test]
     fn kinds_types_and_clock() {
-        assert_eq!(kind_of(Path::new("a/IMG_0001.HEIC")), Some(MediaKind::Image));
+        assert_eq!(
+            kind_of(Path::new("a/IMG_0001.HEIC")),
+            Some(MediaKind::Image)
+        );
         assert_eq!(kind_of(Path::new("screen.mov")), Some(MediaKind::Video));
         assert_eq!(kind_of(Path::new("notes.pdf")), None);
         assert_eq!(kind_of(Path::new("noext")), None);

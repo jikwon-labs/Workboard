@@ -54,19 +54,33 @@ fn yuv_to_rgb(y: u8, u: u8, v: u8) -> [u8; 3] {
     let c = y as i32 - 16;
     let d = u as i32 - 128;
     let e = v as i32 - 128;
-    [clamp((298 * c + 409 * e + 128) >> 8), clamp((298 * c - 100 * d - 208 * e + 128) >> 8), clamp((298 * c + 516 * d + 128) >> 8)]
+    [
+        clamp((298 * c + 409 * e + 128) >> 8),
+        clamp((298 * c - 100 * d - 208 * e + 128) >> 8),
+        clamp((298 * c + 516 * d + 128) >> 8),
+    ]
 }
 
 /// The size to send a `w` x `h` picture at (even numbers, at most SEND_WIDTH wide).
 pub fn send_size(w: u32, h: u32) -> (u32, u32) {
     let (w, h) = (w.max(2), h.max(2));
-    let (ow, oh) = if w > SEND_WIDTH { (SEND_WIDTH, (h as u64 * SEND_WIDTH as u64 / w as u64) as u32) } else { (w, h) };
+    let (ow, oh) = if w > SEND_WIDTH {
+        (SEND_WIDTH, (h as u64 * SEND_WIDTH as u64 / w as u64) as u32)
+    } else {
+        (w, h)
+    };
     (ow & !1, oh.max(2) & !1)
 }
 
 /// Build an I420 frame of size `ow` x `oh` by sampling `pixel(x, y)` on the
 /// source grid `w` x `h` (nearest neighbour).
-fn build_i420(w: u32, h: u32, ow: u32, oh: u32, pixel: impl Fn(u32, u32) -> (u8, u8, u8)) -> I420Buffer {
+fn build_i420(
+    w: u32,
+    h: u32,
+    ow: u32,
+    oh: u32,
+    pixel: impl Fn(u32, u32) -> (u8, u8, u8),
+) -> I420Buffer {
     let mut buf = I420Buffer::new(ow, oh);
     let (sy, su, sv) = buf.strides();
     let (dy, du, dv) = buf.data_mut();
@@ -122,11 +136,19 @@ pub fn i420_to_picture(buf: &I420Buffer) -> Picture {
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
-            let c = yuv_to_rgb(dy[(y * sy + x) as usize], du[((y / 2) * su + x / 2) as usize], dv[((y / 2) * sv + x / 2) as usize]);
+            let c = yuv_to_rgb(
+                dy[(y * sy + x) as usize],
+                du[((y / 2) * su + x / 2) as usize],
+                dv[((y / 2) * sv + x / 2) as usize],
+            );
             rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
         }
     }
-    Picture { width: w, height: h, rgba }
+    Picture {
+        width: w,
+        height: h,
+        rgba,
+    }
 }
 
 /// Where the pictures this computer sends come from.
@@ -152,7 +174,12 @@ impl Drop for Feed {
 /// Start sending pictures. `preview` gets each one sent (to show yourself),
 /// and None when sending ends; `trouble` gets a message when the camera
 /// can't be used.
-pub fn start_feed(video: Video, source: NativeVideoSource, preview: impl Fn(Option<Picture>) + Send + 'static, trouble: impl Fn(String) + Send + 'static) -> Feed {
+pub fn start_feed(
+    video: Video,
+    source: NativeVideoSource,
+    preview: impl Fn(Option<Picture>) + Send + 'static,
+    trouble: impl Fn(String) + Send + 'static,
+) -> Feed {
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     std::thread::Builder::new()
@@ -188,7 +215,12 @@ fn send(source: &NativeVideoSource, buf: I420Buffer, started: Instant, preview: 
     source.capture_frame(&frame);
 }
 
-fn run_pattern(rgb: [u8; 3], source: &NativeVideoSource, stop: &AtomicBool, preview: &impl Fn(Picture)) {
+fn run_pattern(
+    rgb: [u8; 3],
+    source: &NativeVideoSource,
+    stop: &AtomicBool,
+    preview: &impl Fn(Picture),
+) {
     let (w, h) = (320u32, 180u32);
     let started = Instant::now();
     let mut n = 0u32;
@@ -199,7 +231,11 @@ fn run_pattern(rgb: [u8; 3], source: &NativeVideoSource, stop: &AtomicBool, prev
         for y in 0..h {
             for x in 0..w {
                 let i = ((y * w + x) * 3) as usize;
-                let c = if x >= bar && x < bar + 8 { [255, 255, 255] } else { rgb };
+                let c = if x >= bar && x < bar + 8 {
+                    [255, 255, 255]
+                } else {
+                    rgb
+                };
                 px[i..i + 3].copy_from_slice(&c);
             }
         }
@@ -222,30 +258,45 @@ fn camera_allowed() -> Result<(), String> {
     }
 }
 
-fn run_camera(source: &NativeVideoSource, stop: &AtomicBool, preview: &impl Fn(Picture)) -> Result<(), String> {
+fn run_camera(
+    source: &NativeVideoSource,
+    stop: &AtomicBool,
+    preview: &impl Fn(Picture),
+) -> Result<(), String> {
     use nokhwa::pixel_format::RgbFormat;
     use nokhwa::utils::{ApiBackend, FrameFormat, RequestedFormat, RequestedFormatType};
     camera_allowed()?;
-    let cams = nokhwa::query(ApiBackend::Auto).map_err(|e| format!("Couldn't look for cameras: {}", e))?;
+    let cams =
+        nokhwa::query(ApiBackend::Auto).map_err(|e| format!("Couldn't look for cameras: {}", e))?;
     let first = cams.first().ok_or("No camera found on this computer.")?;
     // frame_raw, not frame: frame() reconfigures the camera on every call.
     // (The camera lock nokhwa leaked is fixed in third_party/nokhwa-bindings-macos.)
     // the smallest picture at a usual frame rate: everything is scaled down anyway
     let want = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
-    let mut cam = nokhwa::Camera::new(first.index().clone(), want).map_err(|e| format!("Couldn't open the camera: {}", e))?;
+    let mut cam = nokhwa::Camera::new(first.index().clone(), want)
+        .map_err(|e| format!("Couldn't open the camera: {}", e))?;
     if let Ok(formats) = cam.compatible_camera_formats() {
-        if let Some(small) = formats.iter().filter(|f| f.frame_rate() >= 15 && f.resolution().width() >= 320).min_by_key(|f| (f.resolution().width(), u32::MAX - f.frame_rate())) {
-            let _ = cam.set_camera_requset(RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(*small)));
+        if let Some(small) = formats
+            .iter()
+            .filter(|f| f.frame_rate() >= 15 && f.resolution().width() >= 320)
+            .min_by_key(|f| (f.resolution().width(), u32::MAX - f.frame_rate()))
+        {
+            let _ = cam.set_camera_requset(RequestedFormat::new::<RgbFormat>(
+                RequestedFormatType::Exact(*small),
+            ));
         }
     }
-    cam.open_stream().map_err(|e| format!("Couldn't start the camera: {}", e))?;
+    cam.open_stream()
+        .map_err(|e| format!("Couldn't start the camera: {}", e))?;
     let fmt = cam.camera_format();
     let (w, h) = (fmt.resolution().width(), fmt.resolution().height());
     let started = Instant::now();
     let gap = Duration::from_millis(1000 / FPS);
     let mut last = Instant::now() - gap;
     while !stop.load(Ordering::Relaxed) {
-        let raw = cam.frame_raw().map_err(|e| format!("The camera stopped: {}", e))?;
+        let raw = cam
+            .frame_raw()
+            .map_err(|e| format!("The camera stopped: {}", e))?;
         if last.elapsed() < gap {
             continue;
         }
@@ -256,7 +307,9 @@ fn run_camera(source: &NativeVideoSource, stop: &AtomicBool, preview: &impl Fn(P
             FrameFormat::RAWRGB if raw.len() >= (w * h * 3) as usize => rgb_to_i420(&raw, w, h),
             other => {
                 let frame = nokhwa::Buffer::new(fmt.resolution(), &raw, other);
-                let img = frame.decode_image::<RgbFormat>().map_err(|e| format!("Couldn't read the camera picture: {}", e))?;
+                let img = frame
+                    .decode_image::<RgbFormat>()
+                    .map_err(|e| format!("Couldn't read the camera picture: {}", e))?;
                 rgb_to_i420(img.as_raw(), img.width(), img.height())
             }
         };
@@ -272,12 +325,22 @@ mod tests {
 
     #[test]
     fn colors_survive_the_round_trip() {
-        for rgb in [[200u8, 30, 40], [20, 180, 60], [30, 60, 210], [128, 128, 128]] {
+        for rgb in [
+            [200u8, 30, 40],
+            [20, 180, 60],
+            [30, 60, 210],
+            [128, 128, 128],
+        ] {
             let px: Vec<u8> = std::iter::repeat(rgb).take(16 * 8).flatten().collect();
             let p = i420_to_picture(&rgb_to_i420(&px, 16, 8));
             let a = p.average();
             for i in 0..3 {
-                assert!((a[i] as i32 - rgb[i] as i32).abs() <= 4, "{:?} came back as {:?}", rgb, a);
+                assert!(
+                    (a[i] as i32 - rgb[i] as i32).abs() <= 4,
+                    "{:?} came back as {:?}",
+                    rgb,
+                    a
+                );
             }
         }
     }
@@ -288,7 +351,10 @@ mod tests {
         assert_eq!(send_size(320, 181), (320, 180));
         // YUYV: two pixels share U and V
         let (y, u, v) = rgb_to_yuv(250, 20, 20);
-        let yuyv: Vec<u8> = std::iter::repeat([y, u, y, v]).take(1280 * 720 / 2).flatten().collect();
+        let yuyv: Vec<u8> = std::iter::repeat([y, u, y, v])
+            .take(1280 * 720 / 2)
+            .flatten()
+            .collect();
         let p = i420_to_picture(&yuyv_to_i420(&yuyv, 1280, 720));
         assert_eq!((p.width, p.height), (640, 360));
         assert!(p.average()[0] > 200 && p.average()[1] < 60);

@@ -5,7 +5,20 @@
 use super::*;
 
 /// Reactions offered on a comment.
-const REACTIONS: [&str; 12] = ["\u{1F44D}", "\u{1F389}", "\u{2705}", "\u{1F440}", "\u{1F525}", "\u{1F64F}", "\u{1F604}", "\u{2764}", "\u{1F680}", "\u{1F914}", "\u{1F4AF}", "\u{1F44F}"];
+const REACTIONS: [&str; 12] = [
+    "\u{1F44D}",
+    "\u{1F389}",
+    "\u{2705}",
+    "\u{1F440}",
+    "\u{1F525}",
+    "\u{1F64F}",
+    "\u{1F604}",
+    "\u{2764}",
+    "\u{1F680}",
+    "\u{1F914}",
+    "\u{1F4AF}",
+    "\u{1F44F}",
+];
 
 const UNCHECKED: &str = "\u{2610} ";
 const CHECKED: &str = "\u{2611} ";
@@ -30,7 +43,11 @@ pub(super) enum LinkTo {
 /// the target and how many bytes the link takes.
 pub(super) fn parse_link(s: &str) -> Option<(LinkTo, usize)> {
     let rest = s.strip_prefix("workboard://")?;
-    for (kind, mk) in [("task/", LinkTo::Task as fn(u64) -> LinkTo), ("list/", LinkTo::List), ("space/", LinkTo::Space)] {
+    for (kind, mk) in [
+        ("task/", LinkTo::Task as fn(u64) -> LinkTo),
+        ("list/", LinkTo::List),
+        ("space/", LinkTo::Space),
+    ] {
         if let Some(r) = rest.strip_prefix(kind) {
             let digits = r.bytes().take_while(|b| b.is_ascii_digit()).count();
             let n: u64 = r[..digits].parse().ok()?;
@@ -52,7 +69,11 @@ pub(super) fn segments<'a>(line: &'a str, names: &[String]) -> Vec<Seg<'a>> {
         if let Some((to, n)) = parse_link(rest) {
             hit = Some((Seg::Link(&line[i..i + n], to), n));
         } else if rest.starts_with('@') && (i == 0 || line[..i].ends_with(char::is_whitespace)) {
-            let best = names.iter().filter(|n| !n.is_empty() && rest[1..].starts_with(n.as_str())).map(|n| n.len()).max();
+            let best = names
+                .iter()
+                .filter(|n| !n.is_empty() && rest[1..].starts_with(n.as_str()))
+                .map(|n| n.len())
+                .max();
             if let Some(n) = best {
                 hit = Some((Seg::Mention(&line[i..i + 1 + n]), 1 + n));
             }
@@ -107,7 +128,10 @@ pub(super) fn toggle_reaction(rs: &mut Vec<Reaction>, emoji: &str, me: u64) {
             r.users.push(me);
         }
     } else {
-        rs.push(Reaction { emoji: emoji.to_string(), users: vec![me] });
+        rs.push(Reaction {
+            emoji: emoji.to_string(),
+            users: vec![me],
+        });
     }
 }
 
@@ -173,7 +197,14 @@ impl App {
     /// The task window's comments and activity lines, oldest first.
     /// `q` keeps only comments containing it; `only_comments` hides the
     /// activity lines.
-    pub(super) fn comment_feed(&mut self, ui: &mut Ui, task: &mut Task, q: Option<&str>, only_comments: bool, win_id: egui::Id) {
+    pub(super) fn comment_feed(
+        &mut self,
+        ui: &mut Ui,
+        task: &mut Task,
+        q: Option<&str>,
+        only_comments: bool,
+        win_id: egui::Id,
+    ) {
         let t = self.t();
         let me = self.data.me;
         let edit_id = win_id.with("comment_edit");
@@ -182,7 +213,12 @@ impl App {
         let mut replying: Option<(u64, String)> = ui.data(|d| d.get_temp(reply_id)).unwrap_or(None);
         let mut names: Vec<String> = self.data.members.iter().map(|m| m.name.clone()).collect();
         names.sort_by_key(|n| std::cmp::Reverse(n.len()));
-        let ids: HashSet<u64> = task.activity.iter().filter(|a| a.comment).map(|a| a.id).collect();
+        let ids: HashSet<u64> = task
+            .activity
+            .iter()
+            .filter(|a| a.comment)
+            .map(|a| a.id)
+            .collect();
         let is_reply = |a: &Activity| a.parent.is_some_and(|p| p != a.id && ids.contains(&p));
         let mut acts: Vec<Act> = vec![];
         let mut shown = 0;
@@ -197,16 +233,31 @@ impl App {
                     continue;
                 }
                 shown += 1;
-                let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| tr("Someone").into());
+                let who = self
+                    .data
+                    .member(a.author)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| tr("Someone").into());
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(format!("\u{2022} {}", crate::i18n::history_line(&who, &a.text))).small().color(t.text2));
+                    ui.label(
+                        RichText::new(format!(
+                            "\u{2022} {}",
+                            crate::i18n::history_line(&who, &a.text)
+                        ))
+                        .small()
+                        .color(t.text2),
+                    );
                     ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
                 });
                 continue;
             }
             shown += 1;
             self.comment_card(ui, &t, a, &names, &mut editing, &mut acts);
-            let replies: Vec<&Activity> = task.activity.iter().filter(|r| r.comment && r.parent == Some(a.id) && r.id != a.id).collect();
+            let replies: Vec<&Activity> = task
+                .activity
+                .iter()
+                .filter(|r| r.comment && r.parent == Some(a.id) && r.id != a.id)
+                .collect();
             let reply_open = replying.as_ref().is_some_and(|(p, _)| *p == a.id);
             if !replies.is_empty() || reply_open {
                 ui.horizontal(|ui| {
@@ -216,15 +267,27 @@ impl App {
                             self.comment_card(ui, &t, r, &names, &mut editing, &mut acts);
                         }
                         if let Some((_, text)) = replying.as_mut().filter(|(p, _)| *p == a.id) {
-                            let send_key = ui.memory(|m| m.has_focus(reply_id)) && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
-                            let r = ui.add(egui::TextEdit::multiline(text).id(reply_id).hint_text(tr("Reply...")).desired_rows(2).desired_width(f32::INFINITY));
+                            let send_key = ui.memory(|m| m.has_focus(reply_id))
+                                && ui.input_mut(|i| {
+                                    i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
+                                });
+                            let r = ui.add(
+                                egui::TextEdit::multiline(text)
+                                    .id(reply_id)
+                                    .hint_text(tr("Reply..."))
+                                    .desired_rows(2)
+                                    .desired_width(f32::INFINITY),
+                            );
                             name_field(&r, "Reply box");
                             focus_once(ui, &r);
                             ui.horizontal(|ui| {
                                 let send = primary_button(ui, &t, tr("Reply"));
                                 name_it(&send, "Send reply");
                                 if (send.clicked() || send_key) && !text.trim().is_empty() {
-                                    acts.push(Act::SendReply { parent: a.id, text: text.trim().to_string() });
+                                    acts.push(Act::SendReply {
+                                        parent: a.id,
+                                        text: text.trim().to_string(),
+                                    });
                                 }
                                 if ui.button(tr("Cancel")).clicked() {
                                     acts.push(Act::Reply(0));
@@ -257,16 +320,33 @@ impl App {
                 Act::SendReply { parent, text } => {
                     let id = self.data.new_id();
                     let mentions = self.data.mentions_in(&text);
-                    task.activity.push(Activity { ts: now_ts(), author: me, text, comment: true, id, parent: Some(parent), mentions, ..Default::default() });
+                    task.activity.push(Activity {
+                        ts: now_ts(),
+                        author: me,
+                        text,
+                        comment: true,
+                        id,
+                        parent: Some(parent),
+                        mentions,
+                        ..Default::default()
+                    });
                     replying = None;
                 }
                 Act::Edit(id) => {
-                    editing = task.activity.iter().find(|a| a.id == id).map(|a| (id, a.text.clone()));
+                    editing = task
+                        .activity
+                        .iter()
+                        .find(|a| a.id == id)
+                        .map(|a| (id, a.text.clone()));
                 }
                 Act::SaveEdit { id, text } => {
                     if let Some(i) = find(task, id) {
                         if task.activity[i].text != text {
-                            task.activity[i].mentions = crate::model::mentioned_ids(&text, &self.data.members, &task.activity[i].mentions);
+                            task.activity[i].mentions = crate::model::mentioned_ids(
+                                &text,
+                                &self.data.members,
+                                &task.activity[i].mentions,
+                            );
                             task.activity[i].text = text;
                             task.activity[i].edited = Some(now_ts());
                         }
@@ -301,138 +381,247 @@ impl App {
     }
 
     /// One comment (or reply) card.
-    fn comment_card(&self, ui: &mut Ui, t: &Theme, a: &Activity, names: &[String], editing: &mut Option<(u64, String)>, acts: &mut Vec<Act>) {
+    fn comment_card(
+        &self,
+        ui: &mut Ui,
+        t: &Theme,
+        a: &Activity,
+        names: &[String],
+        editing: &mut Option<(u64, String)>,
+        acts: &mut Vec<Act>,
+    ) {
         let me = self.data.me;
         let mine = a.author == me;
-        let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_else(|| tr("Someone").into());
+        let who = self
+            .data
+            .member(a.author)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| tr("Someone").into());
         let fill = if a.post { t.accent_bg } else { t.card };
-        egui::Frame::new().fill(fill).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                if let Some(m) = self.data.member(a.author) {
-                    let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                    paint_avatar(ui.painter(), r.center(), 10.0, m, fill);
-                }
-                ui.label(RichText::new(&who).strong());
-                if a.post {
-                    chip(ui, tr("Post"), if t.dark { t.accent_text } else { t.primary });
-                }
-                ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
-                if a.edited.is_some() {
-                    ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let more = ui.add(egui::Button::new(RichText::new("\u{22EF}").color(t.text2)).frame(false));
-                    name_it(&more, "Comment actions");
-                    click_menu(&more, |ui| {
-                        if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
-                            acts.push(Act::Reply(a.id));
-                            ui.close_menu();
-                        }
-                        if mine && ui.button(tr("Edit")).clicked() {
-                            acts.push(Act::Edit(a.id));
-                            ui.close_menu();
-                        }
-                        ui.menu_button(tr("Assign comment"), |ui| {
-                            for m in self.data.members.iter().filter(|m| !m.invited) {
-                                if ui.selectable_label(a.assignee == Some(m.id), &m.name).clicked() {
-                                    acts.push(Act::Assign { id: a.id, to: Some(m.id) });
+        egui::Frame::new()
+            .fill(fill)
+            .stroke(Stroke::new(1.0_f32, t.border))
+            .corner_radius(8)
+            .inner_margin(egui::Margin::same(10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    if let Some(m) = self.data.member(a.author) {
+                        let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                        paint_avatar(ui.painter(), r.center(), 10.0, m, fill);
+                    }
+                    ui.label(RichText::new(&who).strong());
+                    if a.post {
+                        chip(
+                            ui,
+                            tr("Post"),
+                            if t.dark { t.accent_text } else { t.primary },
+                        );
+                    }
+                    ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
+                    if a.edited.is_some() {
+                        ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let more = ui.add(
+                            egui::Button::new(RichText::new("\u{22EF}").color(t.text2))
+                                .frame(false),
+                        );
+                        name_it(&more, "Comment actions");
+                        click_menu(&more, |ui| {
+                            if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
+                                acts.push(Act::Reply(a.id));
+                                ui.close_menu();
+                            }
+                            if mine && ui.button(tr("Edit")).clicked() {
+                                acts.push(Act::Edit(a.id));
+                                ui.close_menu();
+                            }
+                            ui.menu_button(tr("Assign comment"), |ui| {
+                                for m in self.data.members.iter().filter(|m| !m.invited) {
+                                    if ui
+                                        .selectable_label(a.assignee == Some(m.id), &m.name)
+                                        .clicked()
+                                    {
+                                        acts.push(Act::Assign {
+                                            id: a.id,
+                                            to: Some(m.id),
+                                        });
+                                        ui.close_menu();
+                                    }
+                                }
+                                if a.assignee.is_some() && ui.button(tr("Unassign")).clicked() {
+                                    acts.push(Act::Assign { id: a.id, to: None });
+                                    ui.close_menu();
+                                }
+                            });
+                            if ui
+                                .button(tr(if a.resolved { "Reopen" } else { "Resolve" }))
+                                .clicked()
+                            {
+                                acts.push(Act::Resolve {
+                                    id: a.id,
+                                    done: !a.resolved,
+                                });
+                                ui.close_menu();
+                            }
+                            if ui.button(tr("Copy text")).clicked() {
+                                ui.ctx().copy_text(a.text.clone());
+                                ui.close_menu();
+                            }
+                            if mine {
+                                ui.separator();
+                                if ui
+                                    .button(RichText::new(tr("Delete comment")).color(t.danger))
+                                    .clicked()
+                                {
+                                    acts.push(Act::Delete(a.id));
                                     ui.close_menu();
                                 }
                             }
-                            if a.assignee.is_some() && ui.button(tr("Unassign")).clicked() {
-                                acts.push(Act::Assign { id: a.id, to: None });
-                                ui.close_menu();
-                            }
                         });
-                        if ui.button(tr(if a.resolved { "Reopen" } else { "Resolve" })).clicked() {
-                            acts.push(Act::Resolve { id: a.id, done: !a.resolved });
-                            ui.close_menu();
-                        }
-                        if ui.button(tr("Copy text")).clicked() {
-                            ui.ctx().copy_text(a.text.clone());
-                            ui.close_menu();
-                        }
-                        if mine {
-                            ui.separator();
-                            if ui.button(RichText::new(tr("Delete comment")).color(t.danger)).clicked() {
-                                acts.push(Act::Delete(a.id));
-                                ui.close_menu();
-                            }
-                        }
-                    });
-                    let react = ui.add(egui::Button::new(RichText::new("\u{263A}").color(t.text2)).frame(false));
-                    name_it(&react, "Add reaction");
-                    popup(ui, &react, ui.id().with(("react", a.id)), 180.0, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for e in REACTIONS {
-                                if ui.add(egui::Button::new(RichText::new(e).size(18.0)).frame(false)).clicked() {
-                                    acts.push(Act::React { id: a.id, emoji: e.to_string() });
-                                    close_popup(ui);
+                        let react = ui.add(
+                            egui::Button::new(RichText::new("\u{263A}").color(t.text2))
+                                .frame(false),
+                        );
+                        name_it(&react, "Add reaction");
+                        popup(ui, &react, ui.id().with(("react", a.id)), 180.0, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for e in REACTIONS {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(RichText::new(e).size(18.0))
+                                                .frame(false),
+                                        )
+                                        .clicked()
+                                    {
+                                        acts.push(Act::React {
+                                            id: a.id,
+                                            emoji: e.to_string(),
+                                        });
+                                        close_popup(ui);
+                                    }
                                 }
-                            }
+                            });
                         });
                     });
                 });
-            });
-            // assigned: who, and the tick that resolves it
-            if let Some(to) = a.assignee {
-                ui.horizontal(|ui| {
-                    let name = self.data.member(to).map(|m| m.name.clone()).unwrap_or_else(|| tr("someone").into());
-                    let tick = ui.add(egui::Button::new(if a.resolved { "\u{2611}" } else { "\u{2610}" }).frame(false));
-                    name_it(&tick, if a.resolved { "Reopen comment" } else { "Resolve comment" });
-                    if tick.clicked() {
-                        acts.push(Act::Resolve { id: a.id, done: !a.resolved });
-                    }
-                    let label = if a.resolved { trf!("Resolved \u{00B7} assigned to {}", name) } else { trf!("Assigned to {}", name) };
-                    ui.label(RichText::new(label).small().color(if a.resolved { t.text3 } else { t.text2 }));
-                });
-            } else if a.resolved {
-                ui.label(RichText::new(tr("Resolved")).small().color(t.text3));
-            }
-            match editing.as_mut().filter(|(id, _)| *id == a.id) {
-                Some((_, text)) => {
-                    let edit_box = ui.id().with("comment_edit_box");
-                    let save_key = ui.memory(|m| m.has_focus(edit_box)) && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
-                    let r = ui.add(egui::TextEdit::multiline(text).id(edit_box).desired_rows(2).desired_width(f32::INFINITY));
-                    name_field(&r, "Edit comment box");
-                    focus_once(ui, &r);
+                // assigned: who, and the tick that resolves it
+                if let Some(to) = a.assignee {
                     ui.horizontal(|ui| {
-                        let save = primary_button(ui, t, tr("Save"));
-                        name_it(&save, "Save comment");
-                        if (save.clicked() || save_key) && !text.trim().is_empty() {
-                            acts.push(Act::SaveEdit { id: a.id, text: text.trim().to_string() });
+                        let name = self
+                            .data
+                            .member(to)
+                            .map(|m| m.name.clone())
+                            .unwrap_or_else(|| tr("someone").into());
+                        let tick = ui.add(
+                            egui::Button::new(if a.resolved { "\u{2611}" } else { "\u{2610}" })
+                                .frame(false),
+                        );
+                        name_it(
+                            &tick,
+                            if a.resolved {
+                                "Reopen comment"
+                            } else {
+                                "Resolve comment"
+                            },
+                        );
+                        if tick.clicked() {
+                            acts.push(Act::Resolve {
+                                id: a.id,
+                                done: !a.resolved,
+                            });
                         }
-                        if ui.button(tr("Cancel")).clicked() {
-                            acts.push(Act::CancelEdit);
-                        }
+                        let label = if a.resolved {
+                            trf!("Resolved \u{00B7} assigned to {}", name)
+                        } else {
+                            trf!("Assigned to {}", name)
+                        };
+                        ui.label(RichText::new(label).small().color(if a.resolved {
+                            t.text3
+                        } else {
+                            t.text2
+                        }));
                     });
+                } else if a.resolved {
+                    ui.label(RichText::new(tr("Resolved")).small().color(t.text3));
                 }
-                None => self.comment_body(ui, t, a, names, acts),
-            }
-            if !a.reactions.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    for rc in &a.reactions {
-                        let on = rc.users.contains(&me);
-                        let b = egui::Button::new(RichText::new(format!("{} {}", rc.emoji, rc.users.len())).size(12.0))
+                match editing.as_mut().filter(|(id, _)| *id == a.id) {
+                    Some((_, text)) => {
+                        let edit_box = ui.id().with("comment_edit_box");
+                        let save_key = ui.memory(|m| m.has_focus(edit_box))
+                            && ui.input_mut(|i| {
+                                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
+                            });
+                        let r = ui.add(
+                            egui::TextEdit::multiline(text)
+                                .id(edit_box)
+                                .desired_rows(2)
+                                .desired_width(f32::INFINITY),
+                        );
+                        name_field(&r, "Edit comment box");
+                        focus_once(ui, &r);
+                        ui.horizontal(|ui| {
+                            let save = primary_button(ui, t, tr("Save"));
+                            name_it(&save, "Save comment");
+                            if (save.clicked() || save_key) && !text.trim().is_empty() {
+                                acts.push(Act::SaveEdit {
+                                    id: a.id,
+                                    text: text.trim().to_string(),
+                                });
+                            }
+                            if ui.button(tr("Cancel")).clicked() {
+                                acts.push(Act::CancelEdit);
+                            }
+                        });
+                    }
+                    None => self.comment_body(ui, t, a, names, acts),
+                }
+                if !a.reactions.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        for rc in &a.reactions {
+                            let on = rc.users.contains(&me);
+                            let b = egui::Button::new(
+                                RichText::new(format!("{} {}", rc.emoji, rc.users.len()))
+                                    .size(12.0),
+                            )
                             .fill(if on { t.selected_bg } else { t.hover })
                             .stroke(Stroke::new(1.0_f32, if on { t.primary } else { t.border }))
                             .corner_radius(10);
-                        let who: Vec<String> = rc.users.iter().filter_map(|u| self.data.member(*u)).map(|m| m.name.clone()).collect();
-                        if ui.add(b).on_hover_text(who.join(", ")).clicked() {
-                            acts.push(Act::React { id: a.id, emoji: rc.emoji.clone() });
+                            let who: Vec<String> = rc
+                                .users
+                                .iter()
+                                .filter_map(|u| self.data.member(*u))
+                                .map(|m| m.name.clone())
+                                .collect();
+                            if ui.add(b).on_hover_text(who.join(", ")).clicked() {
+                                acts.push(Act::React {
+                                    id: a.id,
+                                    emoji: rc.emoji.clone(),
+                                });
+                            }
                         }
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
         ui.add_space(6.0);
     }
 
     /// A comment's text: checklist items tick, @mentions stand out, and
     /// workboard:// links open what they point to.
-    fn comment_body(&self, ui: &mut Ui, t: &Theme, a: &Activity, names: &[String], acts: &mut Vec<Act>) {
-        let (link, link_hover) = if t.dark { (t.accent_text, t.text) } else { (t.primary, t.accent_text) };
+    fn comment_body(
+        &self,
+        ui: &mut Ui,
+        t: &Theme,
+        a: &Activity,
+        names: &[String],
+        acts: &mut Vec<Act>,
+    ) {
+        let (link, link_hover) = if t.dark {
+            (t.accent_text, t.text)
+        } else {
+            (t.primary, t.accent_text)
+        };
         for (li, line) in a.text.split('\n').enumerate() {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -444,7 +633,9 @@ impl App {
                 };
                 if let Some((done, r)) = check {
                     rest = r;
-                    let b = ui.add(egui::Button::new(if done { "\u{2611}" } else { "\u{2610}" }).frame(false));
+                    let b = ui.add(
+                        egui::Button::new(if done { "\u{2611}" } else { "\u{2610}" }).frame(false),
+                    );
                     name_it(&b, &format!("Tick {}", r.trim()));
                     if b.clicked() {
                         acts.push(Act::Check { id: a.id, line: li });
@@ -464,14 +655,26 @@ impl App {
                             ui.add(egui::Label::new(rt).wrap());
                         }
                         Seg::Mention(s) => {
-                            ui.label(RichText::new(s).color(if t.dark { t.accent_text } else { t.primary }).background_color(t.selected_bg).strong());
+                            ui.label(
+                                RichText::new(s)
+                                    .color(if t.dark { t.accent_text } else { t.primary })
+                                    .background_color(t.selected_bg)
+                                    .strong(),
+                            );
                         }
                         Seg::Link(s, to) => {
-                            let r = ui.add(egui::Label::new(RichText::new(s).color(link).underline()).sense(Sense::click()));
+                            let r = ui.add(
+                                egui::Label::new(RichText::new(s).color(link).underline())
+                                    .sense(Sense::click()),
+                            );
                             let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
                             name_it(&r, s);
                             if r.hovered() {
-                                ui.painter().hline(r.rect.x_range(), r.rect.bottom(), Stroke::new(1.0_f32, link_hover));
+                                ui.painter().hline(
+                                    r.rect.x_range(),
+                                    r.rect.bottom(),
+                                    Stroke::new(1.0_f32, link_hover),
+                                );
                             }
                             if r.clicked() {
                                 acts.push(Act::Link(to));

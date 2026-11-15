@@ -9,190 +9,414 @@ use super::*;
 pub(super) const WORKSPACE_OVERVIEW: u64 = 0;
 
 fn hub_frame(t: &Theme) -> egui::Frame {
-    egui::Frame::new().fill(t.sidebar).corner_radius(egui::CornerRadius { nw: 8, ne: 0, sw: 8, se: 0 }).inner_margin(egui::Margin::symmetric(8, 6))
+    egui::Frame::new()
+        .fill(t.sidebar)
+        .corner_radius(egui::CornerRadius {
+            nw: 8,
+            ne: 0,
+            sw: 8,
+            se: 0,
+        })
+        .inner_margin(egui::Margin::symmetric(8, 6))
 }
 
 fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
-    egui::Frame::new().fill(t.bg).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.vertical_centered(|ui| {
-            ui.label(RichText::new(glyph).size(16.0).color(Color32::from_rgb(0xf8, 0xae, 0x00)));
-            ui.label(RichText::new(text).size(13.0).color(t.text2));
+    egui::Frame::new()
+        .fill(t.bg)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(10, 14))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new(glyph)
+                        .size(16.0)
+                        .color(Color32::from_rgb(0xf8, 0xae, 0x00)),
+                );
+                ui.label(RichText::new(text).size(13.0).color(t.text2));
+            });
         });
-    });
 }
 
 /// A template card as in the galleries: round coloured icon, title, description.
-fn gallery_card(ui: &mut Ui, t: &Theme, w: f32, color: [u8; 3], glyph: &str, title: &str, sub: &str, ai: bool) -> egui::Response {
+fn gallery_card(
+    ui: &mut Ui,
+    t: &Theme,
+    w: f32,
+    color: [u8; 3],
+    glyph: &str,
+    title: &str,
+    sub: &str,
+    ai: bool,
+) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(vec2(w, 142.0), Sense::click());
     name_it(&resp, title);
-    ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
-    ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    ui.painter()
+        .rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
+    ui.painter().rect_stroke(
+        r,
+        10.0,
+        Stroke::new(1.0, t.border),
+        egui::StrokeKind::Inside,
+    );
     let c = r.left_top() + vec2(38.0, 36.0);
     if glyph == "+" {
         ui.painter().circle_filled(c, 18.0, t.hover);
-        ui.painter().text(c, Align2::CENTER_CENTER, "+", FontId::proportional(22.0), t.text2);
+        ui.painter().text(
+            c,
+            Align2::CENTER_CENTER,
+            "+",
+            FontId::proportional(22.0),
+            t.text2,
+        );
     } else {
-        ui.painter().circle_filled(c, 18.0, rgb(color).gamma_multiply(0.35));
-        ui.painter().text(c, Align2::CENTER_CENTER, glyph, FontId::proportional(15.0), rgb(color));
+        ui.painter()
+            .circle_filled(c, 18.0, rgb(color).gamma_multiply(0.35));
+        ui.painter().text(
+            c,
+            Align2::CENTER_CENTER,
+            glyph,
+            FontId::proportional(15.0),
+            rgb(color),
+        );
     }
-    let tc = if ai { Color32::from_rgb(0x9b, 0x2d, 0xd6) } else { t.text };
-    ui.painter().text(r.left_top() + vec2(20.0, 82.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(15.0), tc);
-    let g = ui.painter().layout(tr(sub).to_string(), FontId::proportional(13.0), t.text2, w - 40.0);
-    ui.painter().galley(r.left_top() + vec2(20.0, 96.0), g, t.text2);
+    let tc = if ai {
+        Color32::from_rgb(0x9b, 0x2d, 0xd6)
+    } else {
+        t.text
+    };
+    ui.painter().text(
+        r.left_top() + vec2(20.0, 82.0),
+        Align2::LEFT_CENTER,
+        tr(title),
+        FontId::proportional(15.0),
+        tc,
+    );
+    let g = ui.painter().layout(
+        tr(sub).to_string(),
+        FontId::proportional(13.0),
+        t.text2,
+        w - 40.0,
+    );
+    ui.painter()
+        .galley(r.left_top() + vec2(20.0, 96.0), g, t.text2);
     resp
 }
 
 impl App {
     /// The sidebar used by every app hub. Returns (clicked item, plus clicked).
-    fn hub_sidebar(&mut self, ui: &mut Ui, id: &str, title: &str, items: &[(&str, &str, Option<usize>)], selected: u8, create_button: bool) -> (Option<u8>, bool) {
+    fn hub_sidebar(
+        &mut self,
+        ui: &mut Ui,
+        id: &str,
+        title: &str,
+        items: &[(&str, &str, Option<usize>)],
+        selected: u8,
+        create_button: bool,
+    ) -> (Option<u8>, bool) {
         let t = self.t();
         let mut clicked = None;
         let mut plus = false;
-        egui::SidePanel::left(egui::Id::new(("hub", id))).exact_width(255.0).resizable(false).frame(hub_frame(&t)).show_inside(ui, |ui| {
-            let w = ui.available_width();
-            let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
-            ui.painter().text(hr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(17.0), t.text);
-            if create_button {
-                let br = Rect::from_min_size(pos2(hr.right() - 80.0, hr.center().y - 14.0), vec2(80.0, 28.0));
-                let b = ui.interact(br, ui.id().with("hub_create"), Sense::click());
-                name_it(&b, &format!("Create in {}", title));
-                ui.painter().rect_filled(br, 7.0, if b.hovered() { t.primary_hover } else { t.primary });
-                ui.painter().text(br.center(), Align2::CENTER_CENTER, tr("+  Create"), FontId::proportional(14.0), Color32::WHITE);
-                plus |= b.clicked();
-            } else {
-                let br = Rect::from_center_size(pos2(hr.right() - 14.0, hr.center().y), vec2(28.0, 28.0));
-                let b = ui.interact(br, ui.id().with("hub_plus"), Sense::click());
-                name_it(&b, &format!("New in {}", title));
-                ui.painter().rect_filled(br, 7.0, if b.hovered() { t.hover } else { t.bg });
-                ui.painter().rect_stroke(br, 7.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                ui.painter().text(br.center(), Align2::CENTER_CENTER, "+", FontId::proportional(18.0), t.text);
-                plus |= b.clicked();
-            }
-            let cr = Rect::from_center_size(pos2(hr.right() - (if create_button { 100.0 } else { 44.0 }), hr.center().y), vec2(24.0, 24.0));
-            let c = ui.interact(cr, ui.id().with("hub_collapse"), Sense::click());
-            if c.hovered() {
-                ui.painter().rect_filled(cr, 5.0, t.row_selected);
-            }
-            ui.painter().text(cr.center(), Align2::CENTER_CENTER, "\u{00AB}", FontId::proportional(16.0), t.text2);
-            if c.on_hover_text(tr("Back to Home")).clicked() {
-                self.section = Section::Home;
-            }
-            ui.add_space(4.0);
-            for (i, (icon, label, count)) in items.iter().enumerate() {
-                let sel = selected == i as u8;
+        egui::SidePanel::left(egui::Id::new(("hub", id)))
+            .exact_width(255.0)
+            .resizable(false)
+            .frame(hub_frame(&t))
+            .show_inside(ui, |ui| {
                 let w = ui.available_width();
-                let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                name_it(&resp, label);
-                if sel {
-                    ui.painter().rect_filled(r, 7.0, t.row_selected);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(r, 7.0, t.hover);
-                }
-                if *icon == "@me" {
-                    if let Some(m) = self.data.member(self.data.me) {
-                        paint_avatar(ui.painter(), r.left_center() + vec2(16.0, 0.0), 9.0, m, t.sidebar);
-                    }
+                let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
+                ui.painter().text(
+                    hr.left_center() + vec2(6.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    tr(title),
+                    FontId::proportional(17.0),
+                    t.text,
+                );
+                if create_button {
+                    let br = Rect::from_min_size(
+                        pos2(hr.right() - 80.0, hr.center().y - 14.0),
+                        vec2(80.0, 28.0),
+                    );
+                    let b = ui.interact(br, ui.id().with("hub_create"), Sense::click());
+                    name_it(&b, &format!("Create in {}", title));
+                    ui.painter().rect_filled(
+                        br,
+                        7.0,
+                        if b.hovered() {
+                            t.primary_hover
+                        } else {
+                            t.primary
+                        },
+                    );
+                    ui.painter().text(
+                        br.center(),
+                        Align2::CENTER_CENTER,
+                        tr("+  Create"),
+                        FontId::proportional(14.0),
+                        Color32::WHITE,
+                    );
+                    plus |= b.clicked();
                 } else {
-                    ui.painter().text(r.left_center() + vec2(16.0, 0.0), Align2::CENTER_CENTER, *icon, FontId::proportional(13.0), t.text2);
+                    let br = Rect::from_center_size(
+                        pos2(hr.right() - 14.0, hr.center().y),
+                        vec2(28.0, 28.0),
+                    );
+                    let b = ui.interact(br, ui.id().with("hub_plus"), Sense::click());
+                    name_it(&b, &format!("New in {}", title));
+                    ui.painter()
+                        .rect_filled(br, 7.0, if b.hovered() { t.hover } else { t.bg });
+                    ui.painter().rect_stroke(
+                        br,
+                        7.0,
+                        Stroke::new(1.0, t.border),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.painter().text(
+                        br.center(),
+                        Align2::CENTER_CENTER,
+                        "+",
+                        FontId::proportional(18.0),
+                        t.text,
+                    );
+                    plus |= b.clicked();
                 }
-                ui.painter().text(r.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), if sel { t.text } else { t.text2 });
-                if let Some(n) = count {
-                    if *n > 0 {
-                        ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, n.to_string(), FontId::proportional(12.0), t.text3);
-                    }
+                let cr = Rect::from_center_size(
+                    pos2(
+                        hr.right() - (if create_button { 100.0 } else { 44.0 }),
+                        hr.center().y,
+                    ),
+                    vec2(24.0, 24.0),
+                );
+                let c = ui.interact(cr, ui.id().with("hub_collapse"), Sense::click());
+                if c.hovered() {
+                    ui.painter().rect_filled(cr, 5.0, t.row_selected);
                 }
-                if resp.clicked() {
-                    clicked = Some(i as u8);
+                ui.painter().text(
+                    cr.center(),
+                    Align2::CENTER_CENTER,
+                    "\u{00AB}",
+                    FontId::proportional(16.0),
+                    t.text2,
+                );
+                if c.on_hover_text(tr("Back to Home")).clicked() {
+                    self.section = Section::Home;
                 }
-            }
-            ui.add_space(6.0);
-            let r = ui.available_rect_before_wrap();
-            ui.painter().hline(r.left() + 6.0..=r.right() - 6.0, r.top(), Stroke::new(1.0, t.border));
-            ui.add_space(10.0);
-            ui.label(RichText::new(tr("  Favorites")).size(13.0).color(t.text2));
-            let prefix = match id {
-                "docs" => "doc:",
-                "wb" => "wb:",
-                "forms" => "form:",
-                "dash" => "dash:",
-                _ => "",
-            };
-            let stars: Vec<String> = self.data.extra.starred.iter().filter(|s| !prefix.is_empty() && s.starts_with(prefix)).cloned().collect();
-            if stars.is_empty() {
-                let text = match id {
-                    "docs" => tr("Star a Doc to see it here"),
-                    "wb" => tr("Star a Whiteboard to see it here"),
-                    "forms" => tr("Star a Form to see it here"),
-                    _ => tr("Star a Dashboard to see it here"),
-                };
-                if id != "teams" {
-                    empty_card(ui, &t, "\u{2605}", text);
-                }
-            } else {
-                for st in stars {
-                    let oid: u64 = st[prefix.len()..].parse().unwrap_or(0);
-                    let name = match id {
-                        "docs" => self.data.docs.iter().find(|d| d.id == oid).map(|d| d.title.clone()),
-                        "wb" => self.data.extra.whiteboards.iter().find(|d| d.id == oid).map(|d| d.name.clone()),
-                        "forms" => self.data.extra.forms.iter().find(|d| d.id == oid).map(|d| d.name.clone()),
-                        _ => self.data.extra.dashboards.iter().find(|d| d.id == oid).map(|d| d.name.clone()),
-                    };
-                    if let Some(n) = name {
-                        if ui.add(egui::Button::new(format!("\u{2605}  {}", n)).frame(false)).clicked() {
-                            match id {
-                                "docs" => self.doc_open = Some(oid),
-                                "wb" => self.wb_open = Some(oid),
-                                "forms" => self.form_open = Some(oid),
-                                _ => self.dash_open = Some(oid),
-                            }
-                        }
-                    }
-                }
-            }
-            if id == "docs" {
-                ui.add_space(14.0);
-                ui.label(RichText::new(tr("  Popular Wikis")).size(13.0).color(t.text2));
-                empty_card(ui, &t, "\u{2714}", tr("Most viewed and active Wikis appear here"));
-            }
-            if id == "teams" {
                 ui.add_space(4.0);
-                let teams = self.data.extra.teams.clone();
-                if teams.is_empty() {
-                    empty_card(ui, &t, "\u{1F465}", tr("Once you join or create a Team you will see it here"));
-                }
-                for tm in teams {
-                    let sel = self.team_open == Some(tm.id);
+                for (i, (icon, label, count)) in items.iter().enumerate() {
+                    let sel = selected == i as u8;
                     let w = ui.available_width();
                     let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                    name_it(&resp, label);
                     if sel {
                         ui.painter().rect_filled(r, 7.0, t.row_selected);
                     } else if resp.hovered() {
                         ui.painter().rect_filled(r, 7.0, t.hover);
                     }
-                    ui.painter().rect_filled(Rect::from_center_size(r.left_center() + vec2(16.0, 0.0), vec2(16.0, 16.0)), 4.0, rgb(tm.color));
-                    ui.painter().text(r.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, &tm.name, FontId::proportional(14.0), t.text);
+                    if *icon == "@me" {
+                        if let Some(m) = self.data.member(self.data.me) {
+                            paint_avatar(
+                                ui.painter(),
+                                r.left_center() + vec2(16.0, 0.0),
+                                9.0,
+                                m,
+                                t.sidebar,
+                            );
+                        }
+                    } else {
+                        ui.painter().text(
+                            r.left_center() + vec2(16.0, 0.0),
+                            Align2::CENTER_CENTER,
+                            *icon,
+                            FontId::proportional(13.0),
+                            t.text2,
+                        );
+                    }
+                    ui.painter().text(
+                        r.left_center() + vec2(34.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        tr(label),
+                        FontId::proportional(14.0),
+                        if sel { t.text } else { t.text2 },
+                    );
+                    if let Some(n) = count {
+                        if *n > 0 {
+                            ui.painter().text(
+                                r.right_center() - vec2(12.0, 0.0),
+                                Align2::RIGHT_CENTER,
+                                n.to_string(),
+                                FontId::proportional(12.0),
+                                t.text3,
+                            );
+                        }
+                    }
                     if resp.clicked() {
-                        self.team_open = Some(tm.id);
-                        self.hub_filter = 9;
+                        clicked = Some(i as u8);
                     }
                 }
-            }
-        });
+                ui.add_space(6.0);
+                let r = ui.available_rect_before_wrap();
+                ui.painter().hline(
+                    r.left() + 6.0..=r.right() - 6.0,
+                    r.top(),
+                    Stroke::new(1.0, t.border),
+                );
+                ui.add_space(10.0);
+                ui.label(RichText::new(tr("  Favorites")).size(13.0).color(t.text2));
+                let prefix = match id {
+                    "docs" => "doc:",
+                    "wb" => "wb:",
+                    "forms" => "form:",
+                    "dash" => "dash:",
+                    _ => "",
+                };
+                let stars: Vec<String> = self
+                    .data
+                    .extra
+                    .starred
+                    .iter()
+                    .filter(|s| !prefix.is_empty() && s.starts_with(prefix))
+                    .cloned()
+                    .collect();
+                if stars.is_empty() {
+                    let text = match id {
+                        "docs" => tr("Star a Doc to see it here"),
+                        "wb" => tr("Star a Whiteboard to see it here"),
+                        "forms" => tr("Star a Form to see it here"),
+                        _ => tr("Star a Dashboard to see it here"),
+                    };
+                    if id != "teams" {
+                        empty_card(ui, &t, "\u{2605}", text);
+                    }
+                } else {
+                    for st in stars {
+                        let oid: u64 = st[prefix.len()..].parse().unwrap_or(0);
+                        let name = match id {
+                            "docs" => self
+                                .data
+                                .docs
+                                .iter()
+                                .find(|d| d.id == oid)
+                                .map(|d| d.title.clone()),
+                            "wb" => self
+                                .data
+                                .extra
+                                .whiteboards
+                                .iter()
+                                .find(|d| d.id == oid)
+                                .map(|d| d.name.clone()),
+                            "forms" => self
+                                .data
+                                .extra
+                                .forms
+                                .iter()
+                                .find(|d| d.id == oid)
+                                .map(|d| d.name.clone()),
+                            _ => self
+                                .data
+                                .extra
+                                .dashboards
+                                .iter()
+                                .find(|d| d.id == oid)
+                                .map(|d| d.name.clone()),
+                        };
+                        if let Some(n) = name {
+                            if ui
+                                .add(egui::Button::new(format!("\u{2605}  {}", n)).frame(false))
+                                .clicked()
+                            {
+                                match id {
+                                    "docs" => self.doc_open = Some(oid),
+                                    "wb" => self.wb_open = Some(oid),
+                                    "forms" => self.form_open = Some(oid),
+                                    _ => self.dash_open = Some(oid),
+                                }
+                            }
+                        }
+                    }
+                }
+                if id == "docs" {
+                    ui.add_space(14.0);
+                    ui.label(
+                        RichText::new(tr("  Popular Wikis"))
+                            .size(13.0)
+                            .color(t.text2),
+                    );
+                    empty_card(
+                        ui,
+                        &t,
+                        "\u{2714}",
+                        tr("Most viewed and active Wikis appear here"),
+                    );
+                }
+                if id == "teams" {
+                    ui.add_space(4.0);
+                    let teams = self.data.extra.teams.clone();
+                    if teams.is_empty() {
+                        empty_card(
+                            ui,
+                            &t,
+                            "\u{1F465}",
+                            tr("Once you join or create a Team you will see it here"),
+                        );
+                    }
+                    for tm in teams {
+                        let sel = self.team_open == Some(tm.id);
+                        let w = ui.available_width();
+                        let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                        if sel {
+                            ui.painter().rect_filled(r, 7.0, t.row_selected);
+                        } else if resp.hovered() {
+                            ui.painter().rect_filled(r, 7.0, t.hover);
+                        }
+                        ui.painter().rect_filled(
+                            Rect::from_center_size(
+                                r.left_center() + vec2(16.0, 0.0),
+                                vec2(16.0, 16.0),
+                            ),
+                            4.0,
+                            rgb(tm.color),
+                        );
+                        ui.painter().text(
+                            r.left_center() + vec2(34.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            &tm.name,
+                            FontId::proportional(14.0),
+                            t.text,
+                        );
+                        if resp.clicked() {
+                            self.team_open = Some(tm.id);
+                            self.hub_filter = 9;
+                        }
+                    }
+                }
+            });
         (clicked, plus)
     }
 
-    pub(super) fn page_bar(&mut self, ui: &mut Ui, title: &str, right: impl FnOnce(&mut Self, &mut Ui)) {
+    pub(super) fn page_bar(
+        &mut self,
+        ui: &mut Ui,
+        title: &str,
+        right: impl FnOnce(&mut Self, &mut Ui),
+    ) {
         let t = self.t();
-        egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.set_height(28.0);
-                ui.label(RichText::new(tr(title)).size(15.5).color(t.text));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| right(self, ui));
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 16,
+                right: 12,
+                top: 8,
+                bottom: 8,
+            })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_height(28.0);
+                    ui.label(RichText::new(tr(title)).size(15.5).color(t.text));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| right(self, ui));
+                });
             });
-        });
         let r = ui.available_rect_before_wrap();
-        ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+        ui.painter()
+            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
     }
 
     // ---------------------------------------------------------------- docs
@@ -200,20 +424,17 @@ impl App {
     /// The "My Docs" badge: top-level docs only, as the list shows them
     /// (sub pages are counted with their doc).
     pub(super) fn my_docs_count(&self) -> usize {
-        self.data.docs.iter().filter(|d| d.owner == self.data.me && !d.archived && d.parent.is_none()).count()
+        self.data
+            .docs
+            .iter()
+            .filter(|d| d.owner == self.data.me && !d.archived && d.parent.is_none())
+            .count()
     }
 
     pub(super) fn docs_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        let counts = [
-            None,
-            Some(self.my_docs_count()),
-            None,
-            None,
-            None,
-            None,
-        ];
+        let counts = [None, Some(self.my_docs_count()), None, None, None, None];
         let items: [(&str, &str, Option<usize>); 6] = [
             ("\u{1F4C4}", "All Docs", counts[0]),
             ("@me", "My Docs", counts[1]),
@@ -222,7 +443,11 @@ impl App {
             ("\u{1F4DD}", "Meeting Notes", None),
             ("\u{1F5D1}", "Archived", None),
         ];
-        let sel = if self.doc_open.is_some() { 99 } else { self.hub_filter.min(5) };
+        let sel = if self.doc_open.is_some() {
+            99
+        } else {
+            self.hub_filter.min(5)
+        };
         let (clicked, plus) = self.hub_sidebar(ui, "docs", "Docs", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -231,187 +456,384 @@ impl App {
         if plus {
             self.new_doc(self.current_space());
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
-            if self.doc_open.is_some() {
-                self.doc_editor(ui);
-                return;
-            }
-            let title = items[self.hub_filter.min(5) as usize].1;
-            self.page_bar(ui, title, |s, ui| {
-                let tt = s.t();
-                if primary_button(ui, &tt, tr("New Doc")).clicked() {
-                    s.new_doc(s.current_space());
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(t.bg))
+            .show_inside(ui, |ui| {
+                if self.doc_open.is_some() {
+                    self.doc_editor(ui);
+                    return;
                 }
-                if ui.add(egui::Button::new(tr("\u{2B07}  Import")).min_size(vec2(0.0, 28.0))).clicked() {
-                    s.modal = Some(Modal::Import { path: String::new(), result: String::new() });
-                }
-            });
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
-                    ui.label(RichText::new(tr("Templates")).color(t.text2));
-                    ui.add_space(4.0);
-                    let w = ui.available_width();
-                    let cw = ((w - 24.0) / 3.0).min(430.0);
-                    ui.horizontal(|ui| {
-                        for (color, glyph, name, sub, body) in [
-                            ([0xe1, 0x6b, 0x16], "\u{1F4CB}", "Project Overview", "Summarize goals, scope, and milestones", "Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- "),
-                            ([0xf8, 0xae, 0x00], "\u{1F4DD}", "Meeting Notes", "Capture an agenda, notes, and action items", "Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] "),
-                            ([0x44, 0x66, 0xff], "\u{1F4D3}", "Wiki", "Organize information in one place", "Overview\n\nHow we work\n\nLinks\n"),
-                        ] {
-                            let (r, resp) = ui.allocate_exact_size(vec2(cw, 70.0), Sense::click());
-                            name_it(&resp, &format!("Template {}", name));
-                            ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
-                            ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                            let c = r.left_center() + vec2(32.0, 0.0);
-                            ui.painter().circle_filled(c, 18.0, rgb(color).gamma_multiply(0.35));
-                            ui.painter().text(c, Align2::CENTER_CENTER, glyph, FontId::proportional(14.0), rgb(color));
-                            ui.painter().text(r.left_center() + vec2(62.0, -10.0), Align2::LEFT_CENTER, tr(name), FontId::proportional(15.0), t.text);
-                            ui.painter().with_clip_rect(r.shrink(4.0)).text(r.left_center() + vec2(62.0, 12.0), Align2::LEFT_CENTER, tr(sub), FontId::proportional(12.5), t.text2);
-                            if resp.clicked() {
-                                self.new_doc(self.current_space());
-                                if let Some(d) = self.doc_open.and_then(|id| self.data.docs.iter_mut().find(|d| d.id == id)) {
-                                    d.title = name.to_string();
-                                    d.body = body.to_string();
-                                    d.meeting_note = name == "Meeting Notes";
-                                }
-                            }
-                        }
-                    });
-                    ui.add_space(16.0);
-                    ui.horizontal(|ui| {
-                        let r = ui.add(egui::Button::new(if self.docs_mine { tr("\u{2261}  Filters \u{2022} 1") } else { tr("\u{2261}  Filters") }).corner_radius(13));
-                        popup(ui, &r, ui.id().with("docs_filters"), 200.0, |ui| {
-                            ui.checkbox(&mut self.docs_mine, tr("Only Docs I created"));
-                        });
-                        let sr = ui.add(egui::Button::new(trf!("\u{21C5}  Sort: {}", tr(["Date updated", "Name", "Date created"][self.docs_sort as usize % 3]))).corner_radius(13));
-                        popup(ui, &sr, ui.id().with("docs_sort"), 180.0, |ui| {
-                            for (i, l) in ["Date updated", "Name", "Date created"].iter().enumerate() {
-                                if ui.selectable_label(self.docs_sort == i as u8, tr(l)).clicked() {
-                                    self.docs_sort = i as u8;
-                                    close_popup(ui);
-                                }
-                            }
-                        });
-                        let tag_label = match &self.docs_tag {
-                            Some(g) => trf!("Tags: {}", g),
-                            None => tr("Tags").to_string(),
-                        };
-                        let tagr = ui.add(egui::Button::new(tag_label).corner_radius(13));
-                        name_it(&tagr, "Docs tag filter");
-                        let all_tags = self.doc_tags();
-                        popup(ui, &tagr, ui.id().with("docs_tags"), 180.0, |ui| {
-                            if all_tags.is_empty() {
-                                ui.label(RichText::new(tr("No tags yet. Add tags under a Doc's title.")).color(t.text3));
-                            }
-                            if ui.selectable_label(self.docs_tag.is_none(), tr("Any tag")).clicked() {
-                                self.docs_tag = None;
-                                close_popup(ui);
-                            }
-                            for g in all_tags {
-                                if ui.selectable_label(self.docs_tag.as_ref() == Some(&g), RichText::new(&g).color(tag_color(&g))).clicked() {
-                                    self.docs_tag = Some(g);
-                                    close_popup(ui);
-                                }
-                            }
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let r = ui.add(egui::TextEdit::singleline(&mut self.docs_search).hint_text(tr("\u{1F50D} Search")).desired_width(160.0));
-                            name_field(&r, "Search Docs");
-                        });
-                    });
-                    ui.add_space(8.0);
-                    let w = ui.available_width();
-                    let cols = [0.0, 0.42, 0.62, 0.76, 0.88];
-                    let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-                    for (x, h) in cols.iter().zip(["Name", "Location", "Tags", "Date updated", "Sharing"]) {
-                        ui.painter().text(pos2(hr.left() + w * x + 30.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
+                let title = items[self.hub_filter.min(5) as usize].1;
+                self.page_bar(ui, title, |s, ui| {
+                    let tt = s.t();
+                    if primary_button(ui, &tt, tr("New Doc")).clicked() {
+                        s.new_doc(s.current_space());
                     }
-                    ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-                    let q = self.docs_search.to_lowercase();
-                    let tag = self.docs_tag.clone();
-                    let filter = self.hub_filter;
-                    let mine_only = self.docs_mine;
-                    let sort = self.docs_sort;
-                    let mut docs: Vec<Doc> = self
-                        .data
-                        .docs
-                        .iter()
-                        .filter(|d| match filter {
-                            1 => d.owner == me && !d.archived,
-                            2 => d.owner != me && !d.private && !d.archived,
-                            3 => d.private && !d.archived,
-                            4 => d.meeting_note && !d.archived,
-                            5 => d.archived,
-                            _ => !d.archived,
-                        })
-                        // someone's Private docs are for them alone
-                        .filter(|d| !d.private || d.owner == me)
-                        .filter(|d| d.parent.is_none())
-                        .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
-                        .filter(|d| !mine_only || d.owner == me)
-                        .filter(|d| tag.as_ref().is_none_or(|g| d.tags.contains(g)))
-                        .cloned()
-                        .collect();
-                    match sort {
-                        1 => docs.sort_by_key(|d| d.title.to_lowercase()),
-                        2 => docs.sort_by_key(|d| std::cmp::Reverse(d.created)),
-                        _ => docs.sort_by_key(|d| std::cmp::Reverse(d.updated)),
-                    }
-                    if docs.is_empty() {
-                        ui.add_space(20.0);
-                        ui.vertical_centered(|ui| ui.label(RichText::new(tr("No Docs here yet")).color(t.text3)));
-                    }
-                    for d in docs {
-                        let (r, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
-                        if resp.hovered() {
-                            ui.painter().rect_filled(r, 0.0, t.hover);
-                        }
-                        ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
-                        let ic = Rect::from_center_size(r.left_center() + vec2(44.0, 0.0), vec2(12.0, 15.0));
-                        ui.painter().rect_filled(ic, 2.0, Color32::from_rgb(16, 144, 224));
-                        ui.painter().text(r.left_center() + vec2(60.0, 0.0), Align2::LEFT_CENTER, &d.title, FontId::proportional(14.5), t.text);
-                        let loc = d.space.and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid)).map(|s| (s.name.clone(), s.color));
-                        if let Some((n, c)) = loc {
-                            let lr = Rect::from_center_size(pos2(r.left() + w * cols[1] + 38.0, r.center().y), vec2(16.0, 16.0));
-                            ui.painter().rect_filled(lr, 4.0, rgb(c));
-                            ui.painter().text(pos2(r.left() + w * cols[1] + 52.0, r.center().y), Align2::LEFT_CENTER, n, FontId::proportional(14.0), t.text2);
-                        } else {
-                            ui.painter().text(pos2(r.left() + w * cols[1] + 30.0, r.center().y), Align2::LEFT_CENTER, tr("Workspace"), FontId::proportional(14.0), t.text2);
-                        }
-                        if d.tags.is_empty() {
-                            ui.painter().text(pos2(r.left() + w * cols[2] + 30.0, r.center().y), Align2::LEFT_CENTER, "\u{2013}", FontId::proportional(14.0), t.text3);
-                        } else {
-                            // tag chips, clipped to the column
-                            let col = Rect::from_min_max(pos2(r.left() + w * cols[2] + 30.0, r.top()), pos2(r.left() + w * cols[3] + 24.0, r.bottom()));
-                            let p = ui.painter().with_clip_rect(col);
-                            let mut x = col.left();
-                            for g in &d.tags {
-                                let c = tag_color(g);
-                                let gal = p.layout_no_wrap(g.clone(), FontId::proportional(11.0), c);
-                                let cr = Rect::from_min_size(pos2(x, r.center().y - 9.0), vec2(gal.size().x + 12.0, 18.0));
-                                p.rect_filled(cr, 4.0, c.gamma_multiply(0.16));
-                                p.galley(cr.center() - gal.size() / 2.0, gal, c);
-                                x = cr.right() + 4.0;
-                            }
-                        }
-                        ui.painter().text(pos2(r.left() + w * cols[3] + 30.0, r.center().y), Align2::LEFT_CENTER, fmt_ago(d.updated), FontId::proportional(14.0), t.text2);
-                        if let Some(m) = self.data.member(d.owner).or_else(|| self.data.member(me)) {
-                            paint_avatar(ui.painter(), pos2(r.left() + w * cols[4] + 42.0, r.center().y), 11.0, m, t.bg);
-                        }
-                        name_it(&resp, &format!("Doc {}", d.title));
-                        if resp.clicked() {
-                            self.doc_open = Some(d.id);
-                        }
-                        resp.context_menu(|ui| self.doc_menu(ui, d.id, true));
+                    if ui
+                        .add(egui::Button::new(tr("\u{2B07}  Import")).min_size(vec2(0.0, 28.0)))
+                        .clicked()
+                    {
+                        s.modal = Some(Modal::Import {
+                            path: String::new(),
+                            result: String::new(),
+                        });
                     }
                 });
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        egui::Frame::new()
+                            .inner_margin(egui::Margin::symmetric(16, 12))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(tr("Templates")).color(t.text2));
+                                ui.add_space(4.0);
+                                let w = ui.available_width();
+                                let cw = ((w - 24.0) / 3.0).min(430.0);
+                                ui.horizontal(|ui| {
+                                    for (color, glyph, name, sub, body) in [
+                                        (
+                                            [0xe1, 0x6b, 0x16],
+                                            "\u{1F4CB}",
+                                            "Project Overview",
+                                            "Summarize goals, scope, and milestones",
+                                            "Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- ",
+                                        ),
+                                        (
+                                            [0xf8, 0xae, 0x00],
+                                            "\u{1F4DD}",
+                                            "Meeting Notes",
+                                            "Capture an agenda, notes, and action items",
+                                            "Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] ",
+                                        ),
+                                        (
+                                            [0x44, 0x66, 0xff],
+                                            "\u{1F4D3}",
+                                            "Wiki",
+                                            "Organize information in one place",
+                                            "Overview\n\nHow we work\n\nLinks\n",
+                                        ),
+                                    ] {
+                                        let (r, resp) =
+                                            ui.allocate_exact_size(vec2(cw, 70.0), Sense::click());
+                                        name_it(&resp, &format!("Template {}", name));
+                                        ui.painter().rect_filled(
+                                            r,
+                                            10.0,
+                                            if resp.hovered() { t.sidebar } else { t.card },
+                                        );
+                                        ui.painter().rect_stroke(
+                                            r,
+                                            10.0,
+                                            Stroke::new(1.0, t.border),
+                                            egui::StrokeKind::Inside,
+                                        );
+                                        let c = r.left_center() + vec2(32.0, 0.0);
+                                        ui.painter().circle_filled(
+                                            c,
+                                            18.0,
+                                            rgb(color).gamma_multiply(0.35),
+                                        );
+                                        ui.painter().text(
+                                            c,
+                                            Align2::CENTER_CENTER,
+                                            glyph,
+                                            FontId::proportional(14.0),
+                                            rgb(color),
+                                        );
+                                        ui.painter().text(
+                                            r.left_center() + vec2(62.0, -10.0),
+                                            Align2::LEFT_CENTER,
+                                            tr(name),
+                                            FontId::proportional(15.0),
+                                            t.text,
+                                        );
+                                        ui.painter().with_clip_rect(r.shrink(4.0)).text(
+                                            r.left_center() + vec2(62.0, 12.0),
+                                            Align2::LEFT_CENTER,
+                                            tr(sub),
+                                            FontId::proportional(12.5),
+                                            t.text2,
+                                        );
+                                        if resp.clicked() {
+                                            self.new_doc(self.current_space());
+                                            if let Some(d) = self.doc_open.and_then(|id| {
+                                                self.data.docs.iter_mut().find(|d| d.id == id)
+                                            }) {
+                                                d.title = name.to_string();
+                                                d.body = body.to_string();
+                                                d.meeting_note = name == "Meeting Notes";
+                                            }
+                                        }
+                                    }
+                                });
+                                ui.add_space(16.0);
+                                ui.horizontal(|ui| {
+                                    let r = ui.add(
+                                        egui::Button::new(if self.docs_mine {
+                                            tr("\u{2261}  Filters \u{2022} 1")
+                                        } else {
+                                            tr("\u{2261}  Filters")
+                                        })
+                                        .corner_radius(13),
+                                    );
+                                    popup(ui, &r, ui.id().with("docs_filters"), 200.0, |ui| {
+                                        ui.checkbox(&mut self.docs_mine, tr("Only Docs I created"));
+                                    });
+                                    let sr = ui.add(
+                                        egui::Button::new(trf!(
+                                            "\u{21C5}  Sort: {}",
+                                            tr(["Date updated", "Name", "Date created"]
+                                                [self.docs_sort as usize % 3])
+                                        ))
+                                        .corner_radius(13),
+                                    );
+                                    popup(ui, &sr, ui.id().with("docs_sort"), 180.0, |ui| {
+                                        for (i, l) in ["Date updated", "Name", "Date created"]
+                                            .iter()
+                                            .enumerate()
+                                        {
+                                            if ui
+                                                .selectable_label(self.docs_sort == i as u8, tr(l))
+                                                .clicked()
+                                            {
+                                                self.docs_sort = i as u8;
+                                                close_popup(ui);
+                                            }
+                                        }
+                                    });
+                                    let tag_label = match &self.docs_tag {
+                                        Some(g) => trf!("Tags: {}", g),
+                                        None => tr("Tags").to_string(),
+                                    };
+                                    let tagr =
+                                        ui.add(egui::Button::new(tag_label).corner_radius(13));
+                                    name_it(&tagr, "Docs tag filter");
+                                    let all_tags = self.doc_tags();
+                                    popup(ui, &tagr, ui.id().with("docs_tags"), 180.0, |ui| {
+                                        if all_tags.is_empty() {
+                                            ui.label(
+                                                RichText::new(tr(
+                                                    "No tags yet. Add tags under a Doc's title.",
+                                                ))
+                                                .color(t.text3),
+                                            );
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                self.docs_tag.is_none(),
+                                                tr("Any tag"),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.docs_tag = None;
+                                            close_popup(ui);
+                                        }
+                                        for g in all_tags {
+                                            if ui
+                                                .selectable_label(
+                                                    self.docs_tag.as_ref() == Some(&g),
+                                                    RichText::new(&g).color(tag_color(&g)),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.docs_tag = Some(g);
+                                                close_popup(ui);
+                                            }
+                                        }
+                                    });
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        let r = ui.add(
+                                            egui::TextEdit::singleline(&mut self.docs_search)
+                                                .hint_text(tr("\u{1F50D} Search"))
+                                                .desired_width(160.0),
+                                        );
+                                        name_field(&r, "Search Docs");
+                                    });
+                                });
+                                ui.add_space(8.0);
+                                let w = ui.available_width();
+                                let cols = [0.0, 0.42, 0.62, 0.76, 0.88];
+                                let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+                                for (x, h) in cols.iter().zip([
+                                    "Name",
+                                    "Location",
+                                    "Tags",
+                                    "Date updated",
+                                    "Sharing",
+                                ]) {
+                                    ui.painter().text(
+                                        pos2(hr.left() + w * x + 30.0, hr.center().y),
+                                        Align2::LEFT_CENTER,
+                                        tr(h),
+                                        FontId::proportional(13.0),
+                                        t.text2,
+                                    );
+                                }
+                                ui.painter().hline(
+                                    hr.x_range(),
+                                    hr.bottom(),
+                                    Stroke::new(1.0, t.border),
+                                );
+                                let q = self.docs_search.to_lowercase();
+                                let tag = self.docs_tag.clone();
+                                let filter = self.hub_filter;
+                                let mine_only = self.docs_mine;
+                                let sort = self.docs_sort;
+                                let mut docs: Vec<Doc> = self
+                                    .data
+                                    .docs
+                                    .iter()
+                                    .filter(|d| match filter {
+                                        1 => d.owner == me && !d.archived,
+                                        2 => d.owner != me && !d.private && !d.archived,
+                                        3 => d.private && !d.archived,
+                                        4 => d.meeting_note && !d.archived,
+                                        5 => d.archived,
+                                        _ => !d.archived,
+                                    })
+                                    // someone's Private docs are for them alone
+                                    .filter(|d| !d.private || d.owner == me)
+                                    .filter(|d| d.parent.is_none())
+                                    .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
+                                    .filter(|d| !mine_only || d.owner == me)
+                                    .filter(|d| tag.as_ref().is_none_or(|g| d.tags.contains(g)))
+                                    .cloned()
+                                    .collect();
+                                match sort {
+                                    1 => docs.sort_by_key(|d| d.title.to_lowercase()),
+                                    2 => docs.sort_by_key(|d| std::cmp::Reverse(d.created)),
+                                    _ => docs.sort_by_key(|d| std::cmp::Reverse(d.updated)),
+                                }
+                                if docs.is_empty() {
+                                    ui.add_space(20.0);
+                                    ui.vertical_centered(|ui| {
+                                        ui.label(
+                                            RichText::new(tr("No Docs here yet")).color(t.text3),
+                                        )
+                                    });
+                                }
+                                for d in docs {
+                                    let (r, resp) =
+                                        ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
+                                    if resp.hovered() {
+                                        ui.painter().rect_filled(r, 0.0, t.hover);
+                                    }
+                                    ui.painter().hline(
+                                        r.x_range(),
+                                        r.bottom(),
+                                        Stroke::new(0.5, t.border),
+                                    );
+                                    let ic = Rect::from_center_size(
+                                        r.left_center() + vec2(44.0, 0.0),
+                                        vec2(12.0, 15.0),
+                                    );
+                                    ui.painter().rect_filled(
+                                        ic,
+                                        2.0,
+                                        Color32::from_rgb(16, 144, 224),
+                                    );
+                                    ui.painter().text(
+                                        r.left_center() + vec2(60.0, 0.0),
+                                        Align2::LEFT_CENTER,
+                                        &d.title,
+                                        FontId::proportional(14.5),
+                                        t.text,
+                                    );
+                                    let loc = d
+                                        .space
+                                        .and_then(|sid| {
+                                            self.data.spaces.iter().find(|s| s.id == sid)
+                                        })
+                                        .map(|s| (s.name.clone(), s.color));
+                                    if let Some((n, c)) = loc {
+                                        let lr = Rect::from_center_size(
+                                            pos2(r.left() + w * cols[1] + 38.0, r.center().y),
+                                            vec2(16.0, 16.0),
+                                        );
+                                        ui.painter().rect_filled(lr, 4.0, rgb(c));
+                                        ui.painter().text(
+                                            pos2(r.left() + w * cols[1] + 52.0, r.center().y),
+                                            Align2::LEFT_CENTER,
+                                            n,
+                                            FontId::proportional(14.0),
+                                            t.text2,
+                                        );
+                                    } else {
+                                        ui.painter().text(
+                                            pos2(r.left() + w * cols[1] + 30.0, r.center().y),
+                                            Align2::LEFT_CENTER,
+                                            tr("Workspace"),
+                                            FontId::proportional(14.0),
+                                            t.text2,
+                                        );
+                                    }
+                                    if d.tags.is_empty() {
+                                        ui.painter().text(
+                                            pos2(r.left() + w * cols[2] + 30.0, r.center().y),
+                                            Align2::LEFT_CENTER,
+                                            "\u{2013}",
+                                            FontId::proportional(14.0),
+                                            t.text3,
+                                        );
+                                    } else {
+                                        // tag chips, clipped to the column
+                                        let col = Rect::from_min_max(
+                                            pos2(r.left() + w * cols[2] + 30.0, r.top()),
+                                            pos2(r.left() + w * cols[3] + 24.0, r.bottom()),
+                                        );
+                                        let p = ui.painter().with_clip_rect(col);
+                                        let mut x = col.left();
+                                        for g in &d.tags {
+                                            let c = tag_color(g);
+                                            let gal = p.layout_no_wrap(
+                                                g.clone(),
+                                                FontId::proportional(11.0),
+                                                c,
+                                            );
+                                            let cr = Rect::from_min_size(
+                                                pos2(x, r.center().y - 9.0),
+                                                vec2(gal.size().x + 12.0, 18.0),
+                                            );
+                                            p.rect_filled(cr, 4.0, c.gamma_multiply(0.16));
+                                            p.galley(cr.center() - gal.size() / 2.0, gal, c);
+                                            x = cr.right() + 4.0;
+                                        }
+                                    }
+                                    ui.painter().text(
+                                        pos2(r.left() + w * cols[3] + 30.0, r.center().y),
+                                        Align2::LEFT_CENTER,
+                                        fmt_ago(d.updated),
+                                        FontId::proportional(14.0),
+                                        t.text2,
+                                    );
+                                    if let Some(m) =
+                                        self.data.member(d.owner).or_else(|| self.data.member(me))
+                                    {
+                                        paint_avatar(
+                                            ui.painter(),
+                                            pos2(r.left() + w * cols[4] + 42.0, r.center().y),
+                                            11.0,
+                                            m,
+                                            t.bg,
+                                        );
+                                    }
+                                    name_it(&resp, &format!("Doc {}", d.title));
+                                    if resp.clicked() {
+                                        self.doc_open = Some(d.id);
+                                    }
+                                    resp.context_menu(|ui| self.doc_menu(ui, d.id, true));
+                                }
+                            });
+                    });
             });
-        });
     }
 
     fn doc_editor(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let Some(idx) = self.doc_open.and_then(|id| self.data.docs.iter().position(|d| d.id == id)) else {
+        let Some(idx) = self
+            .doc_open
+            .and_then(|id| self.data.docs.iter().position(|d| d.id == id))
+        else {
             self.doc_open = None;
             return;
         };
@@ -419,87 +841,180 @@ impl App {
         let key = format!("doc:{}", id);
         let starred = self.data.extra.starred.contains(&key);
         let mut delete = false;
-        egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new(tr("\u{2190}  All Docs")).color(t.text2)).frame(false)).clicked() {
-                    self.doc_open = None;
-                }
-                let loc = self.data.docs[idx].space.and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid)).map(|s| s.name.clone()).unwrap_or_else(|| tr("Workspace").into());
-                // the location moves the doc to another Space
-                let lr = ui.add(egui::Button::new(RichText::new(format!("/  {}  \u{25BE}", loc)).color(t.text3)).frame(false)).on_hover_text(tr("Move to another Space"));
-                name_it(&lr, "Doc location");
-                let cur_space = self.data.docs[idx].space;
-                let mut spaces: Vec<(Option<u64>, String)> = vec![(None, tr("Workspace (no Space)").into())];
-                spaces.extend(self.open_spaces().iter().map(|s| (Some(s.id), s.name.clone())));
-                popup(ui, &lr, ui.id().with(("doc_move", id)), 200.0, |ui| {
-                    ui.label(RichText::new(tr("Move to")).small().color(t.text3));
-                    for (sid, name) in spaces {
-                        if ui.selectable_label(cur_space == sid, name).clicked() {
-                            self.move_doc_to_space(id, sid);
-                            close_popup(ui);
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 16,
+                right: 12,
+                top: 8,
+                bottom: 8,
+            })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(tr("\u{2190}  All Docs")).color(t.text2),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
+                        self.doc_open = None;
+                    }
+                    let loc = self.data.docs[idx]
+                        .space
+                        .and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid))
+                        .map(|s| s.name.clone())
+                        .unwrap_or_else(|| tr("Workspace").into());
+                    // the location moves the doc to another Space
+                    let lr = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!("/  {}  \u{25BE}", loc)).color(t.text3),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text(tr("Move to another Space"));
+                    name_it(&lr, "Doc location");
+                    let cur_space = self.data.docs[idx].space;
+                    let mut spaces: Vec<(Option<u64>, String)> =
+                        vec![(None, tr("Workspace (no Space)").into())];
+                    spaces.extend(
+                        self.open_spaces()
+                            .iter()
+                            .map(|s| (Some(s.id), s.name.clone())),
+                    );
+                    popup(ui, &lr, ui.id().with(("doc_move", id)), 200.0, |ui| {
+                        ui.label(RichText::new(tr("Move to")).small().color(t.text3));
+                        for (sid, name) in spaces {
+                            if ui.selectable_label(cur_space == sid, name).clicked() {
+                                self.move_doc_to_space(id, sid);
+                                close_popup(ui);
+                            }
                         }
+                    });
+                    if self.data.docs[idx].meeting_note {
+                        ui.label(
+                            RichText::new(format!("\u{1F4DD} {}", tr("Meeting Note")))
+                                .small()
+                                .color(t.text3),
+                        );
                     }
-                });
-                if self.data.docs[idx].meeting_note {
-                    ui.label(RichText::new(format!("\u{1F4DD} {}", tr("Meeting Note"))).small().color(t.text3));
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let mr = ui.add(egui::Button::new("\u{22EF}").frame(false).min_size(vec2(24.0, 24.0))).on_hover_text(tr("More"));
-                    name_it(&mr, "Doc options");
-                    click_menu(&mr, |ui| self.doc_menu(ui, id, false));
-                    if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
-                        delete = true;
-                    }
-                    let arch = if self.data.docs[idx].archived { "Unarchive" } else { "Archive" };
-                    if ui.add(egui::Button::new(tr(arch)).frame(false)).on_hover_text(tr("Move to Archived and save a Markdown copy")).clicked() {
-                        self.toggle_archive(id);
-                    }
-                    if ui.add(egui::Button::new(tr("Export")).frame(false)).on_hover_text(tr("Save as a Markdown file")).clicked() {
-                        self.toast = Some(match self.export_doc(id) {
-                            Some(p) => (trf!("Saved {}", p.display()), now_ts()),
-                            None => (tr("Couldn't save the file").into(), now_ts()),
-                        });
-                    }
-                    if ui.add(egui::Button::new(tr("Duplicate")).frame(false)).on_hover_text(tr("Copy this doc and its pages")).clicked() {
-                        if let Some(n) = self.duplicate_doc(id) {
-                            self.doc_open = Some(n);
-                            self.toast = Some((tr("Doc duplicated").into(), now_ts()));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let mr = ui
+                            .add(
+                                egui::Button::new("\u{22EF}")
+                                    .frame(false)
+                                    .min_size(vec2(24.0, 24.0)),
+                            )
+                            .on_hover_text(tr("More"));
+                        name_it(&mr, "Doc options");
+                        click_menu(&mr, |ui| self.doc_menu(ui, id, false));
+                        if ui
+                            .add(
+                                egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
+                                    .frame(false),
+                            )
+                            .clicked()
+                        {
+                            delete = true;
                         }
-                    }
-                    if ui.add(egui::Button::new(tr("Copy link")).frame(false)).clicked() {
-                        ui.ctx().copy_text(format!("workboard://doc/{}", id));
-                        self.toast = Some((tr("Link copied").into(), now_ts()));
-                    }
-                    let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else { return };
-                    let d = &mut self.data.docs[idx];
-                    if ui.add(egui::Button::new(if d.private { tr("\u{1F512} Private") } else { tr("\u{1F465} Shared") }).frame(false)).on_hover_text(tr("Who can see this Doc")).clicked() {
-                        d.private = !d.private;
-                        self.dirty = true;
-                    }
-                    let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" }).size(16.0).color(if starred { Color32::from_rgb(0xf8, 0xae, 0x00) } else { t.text2 });
-                    if ui.add(egui::Button::new(star).frame(false)).clicked() {
-                        if starred {
-                            self.data.extra.starred.retain(|s| s != &key);
+                        let arch = if self.data.docs[idx].archived {
+                            "Unarchive"
                         } else {
-                            self.data.extra.starred.push(key.clone());
+                            "Archive"
+                        };
+                        if ui
+                            .add(egui::Button::new(tr(arch)).frame(false))
+                            .on_hover_text(tr("Move to Archived and save a Markdown copy"))
+                            .clicked()
+                        {
+                            self.toggle_archive(id);
                         }
-                        self.dirty = true;
-                    }
-                    if let Some(d) = self.data.docs.iter().find(|d| d.id == id) {
-                        ui.label(RichText::new(trf!("Last updated {}", fmt_ago(d.updated))).small().color(t.text3));
-                    }
+                        if ui
+                            .add(egui::Button::new(tr("Export")).frame(false))
+                            .on_hover_text(tr("Save as a Markdown file"))
+                            .clicked()
+                        {
+                            self.toast = Some(match self.export_doc(id) {
+                                Some(p) => (trf!("Saved {}", p.display()), now_ts()),
+                                None => (tr("Couldn't save the file").into(), now_ts()),
+                            });
+                        }
+                        if ui
+                            .add(egui::Button::new(tr("Duplicate")).frame(false))
+                            .on_hover_text(tr("Copy this doc and its pages"))
+                            .clicked()
+                        {
+                            if let Some(n) = self.duplicate_doc(id) {
+                                self.doc_open = Some(n);
+                                self.toast = Some((tr("Doc duplicated").into(), now_ts()));
+                            }
+                        }
+                        if ui
+                            .add(egui::Button::new(tr("Copy link")).frame(false))
+                            .clicked()
+                        {
+                            ui.ctx().copy_text(format!("workboard://doc/{}", id));
+                            self.toast = Some((tr("Link copied").into(), now_ts()));
+                        }
+                        let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else {
+                            return;
+                        };
+                        let d = &mut self.data.docs[idx];
+                        if ui
+                            .add(
+                                egui::Button::new(if d.private {
+                                    tr("\u{1F512} Private")
+                                } else {
+                                    tr("\u{1F465} Shared")
+                                })
+                                .frame(false),
+                            )
+                            .on_hover_text(tr("Who can see this Doc"))
+                            .clicked()
+                        {
+                            d.private = !d.private;
+                            self.dirty = true;
+                        }
+                        let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" })
+                            .size(16.0)
+                            .color(if starred {
+                                Color32::from_rgb(0xf8, 0xae, 0x00)
+                            } else {
+                                t.text2
+                            });
+                        if ui.add(egui::Button::new(star).frame(false)).clicked() {
+                            if starred {
+                                self.data.extra.starred.retain(|s| s != &key);
+                            } else {
+                                self.data.extra.starred.push(key.clone());
+                            }
+                            self.dirty = true;
+                        }
+                        if let Some(d) = self.data.docs.iter().find(|d| d.id == id) {
+                            ui.label(
+                                RichText::new(trf!("Last updated {}", fmt_ago(d.updated)))
+                                    .small()
+                                    .color(t.text3),
+                            );
+                        }
+                    });
                 });
             });
-        });
         let r = ui.available_rect_before_wrap();
-        ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+        ui.painter()
+            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
         if delete {
             // the page and its sub pages go to Trash together
             self.trash_doc(id);
             return;
         }
         // the header may have opened a copy or deleted this doc
-        let Some(idx) = self.doc_open.and_then(|o| self.data.docs.iter().position(|d| d.id == o)) else {
+        let Some(idx) = self
+            .doc_open
+            .and_then(|o| self.data.docs.iter().position(|d| d.id == o))
+        else {
             return;
         };
         self.doc_body(ui, idx);
@@ -510,15 +1025,24 @@ impl App {
     pub(super) fn dashboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        let items: [(&str, &str, Option<usize>); 2] = [("\u{1F4CA}", "All Dashboards", None), ("@me", "My Dashboards", None)];
-        let sel = if self.dash_open.is_some() { 99 } else { self.hub_filter.min(1) };
+        let items: [(&str, &str, Option<usize>); 2] = [
+            ("\u{1F4CA}", "All Dashboards", None),
+            ("@me", "My Dashboards", None),
+        ];
+        let sel = if self.dash_open.is_some() {
+            99
+        } else {
+            self.hub_filter.min(1)
+        };
         let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, false);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.dash_open = None;
         }
         if plus {
-            self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() });
+            self.modal = Some(Modal::NewDashboard {
+                name: "New Dashboard".into(),
+            });
         }
         let mine_only = self.hub_filter.min(1) == 1;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
@@ -580,8 +1104,20 @@ impl App {
     pub(super) fn star_toggle(&mut self, ui: &mut Ui, key: String) {
         let t = self.t();
         let starred = self.data.extra.starred.contains(&key);
-        let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" }).size(16.0).color(if starred { Color32::from_rgb(0xf8, 0xae, 0x00) } else { t.text2 });
-        let r = ui.add(egui::Button::new(star).frame(false)).on_hover_text(if starred { tr("Remove from Favorites") } else { tr("Add to Favorites") });
+        let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" })
+            .size(16.0)
+            .color(if starred {
+                Color32::from_rgb(0xf8, 0xae, 0x00)
+            } else {
+                t.text2
+            });
+        let r = ui
+            .add(egui::Button::new(star).frame(false))
+            .on_hover_text(if starred {
+                tr("Remove from Favorites")
+            } else {
+                tr("Add to Favorites")
+            });
         name_it(&r, &format!("Star {}", key));
         if r.clicked() {
             if starred {
@@ -594,7 +1130,13 @@ impl App {
     }
 
     /// Template gallery with a "Start from scratch" card; returns the chosen title.
-    fn gallery(&mut self, ui: &mut Ui, title: &str, sub: &str, cards: &[([u8; 3], &str, &str, &str, bool)]) -> Option<String> {
+    fn gallery(
+        &mut self,
+        ui: &mut Ui,
+        title: &str,
+        sub: &str,
+        cards: &[([u8; 3], &str, &str, &str, bool)],
+    ) -> Option<String> {
         let t = self.t();
         let mut out = None;
         ui.add_space(60.0);
@@ -628,8 +1170,15 @@ impl App {
 
     pub(super) fn whiteboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let items: [(&str, &str, Option<usize>); 2] = [("\u{1F3A8}", "All Whiteboards", None), ("@me", "My Whiteboards", None)];
-        let sel = if self.wb_open.is_some() { 99 } else { self.hub_filter.min(1) };
+        let items: [(&str, &str, Option<usize>); 2] = [
+            ("\u{1F3A8}", "All Whiteboards", None),
+            ("@me", "My Whiteboards", None),
+        ];
+        let sel = if self.wb_open.is_some() {
+            99
+        } else {
+            self.hub_filter.min(1)
+        };
         let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, false);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -694,8 +1243,13 @@ impl App {
 
     pub(super) fn forms_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let items: [(&str, &str, Option<usize>); 2] = [("\u{1F4CB}", "All Forms", None), ("@me", "My Forms", None)];
-        let sel = if self.form_open.is_some() { 99 } else { self.hub_filter.min(1) };
+        let items: [(&str, &str, Option<usize>); 2] =
+            [("\u{1F4CB}", "All Forms", None), ("@me", "My Forms", None)];
+        let sel = if self.form_open.is_some() {
+            99
+        } else {
+            self.hub_filter.min(1)
+        };
         let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, false);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -763,7 +1317,16 @@ impl App {
             return;
         }
         let r = ui.max_rect();
-        ui.painter().rect_filled(r, egui::CornerRadius { nw: 8, ne: 8, sw: 8, se: 8 }, Color32::from_rgb(243, 244, 247));
+        ui.painter().rect_filled(
+            r,
+            egui::CornerRadius {
+                nw: 8,
+                ne: 8,
+                sw: 8,
+                se: 8,
+            },
+            Color32::from_rgb(243, 244, 247),
+        );
         ui.add_space(110.0);
         ui.vertical_centered(|ui| {
             ui.label(RichText::new(tr("Make your goals a reality.")).size(26.0).color(t.text2));
@@ -805,9 +1368,25 @@ impl App {
     pub(super) fn teams_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let people = self.data.members.len();
-        let mine = self.data.extra.teams.iter().filter(|x| x.members.contains(&self.data.me)).count();
-        let items: [(&str, &str, Option<usize>); 5] = [("\u{1F465}", "All Teams", None), ("\u{1F4C7}", "All People", Some(people)), ("\u{2630}", "Org Chart", None), ("\u{1F4CA}", "Analytics", None), ("@me", "My Teams", Some(mine))];
-        let sel = if self.hub_filter == 9 { 99 } else { self.hub_filter.min(4) };
+        let mine = self
+            .data
+            .extra
+            .teams
+            .iter()
+            .filter(|x| x.members.contains(&self.data.me))
+            .count();
+        let items: [(&str, &str, Option<usize>); 5] = [
+            ("\u{1F465}", "All Teams", None),
+            ("\u{1F4C7}", "All People", Some(people)),
+            ("\u{2630}", "Org Chart", None),
+            ("\u{1F4CA}", "Analytics", None),
+            ("@me", "My Teams", Some(mine)),
+        ];
+        let sel = if self.hub_filter == 9 {
+            99
+        } else {
+            self.hub_filter.min(4)
+        };
         let (clicked, plus) = self.hub_sidebar(ui, "teams", "Teams", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -816,20 +1395,27 @@ impl App {
         if plus {
             self.new_team();
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| match self.hub_filter {
-            1 => self.people_page(ui),
-            2 => self.org_chart(ui),
-            3 => self.teams_workload(ui),
-            4 => self.all_teams(ui, true),
-            9 => self.team_detail(ui),
-            _ => self.all_teams(ui, false),
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(t.bg))
+            .show_inside(ui, |ui| match self.hub_filter {
+                1 => self.people_page(ui),
+                2 => self.org_chart(ui),
+                3 => self.teams_workload(ui),
+                4 => self.all_teams(ui, true),
+                9 => self.team_detail(ui),
+                _ => self.all_teams(ui, false),
+            });
     }
 
     pub(super) fn new_team(&mut self) {
         let id = self.data.new_id();
         let n = self.data.extra.teams.len();
-        self.data.extra.teams.push(Team { id, name: format!("Team {}", n + 1), members: vec![self.data.me], color: STATUS_PALETTE[1 + (n * 3) % 13] });
+        self.data.extra.teams.push(Team {
+            id,
+            name: format!("Team {}", n + 1),
+            members: vec![self.data.me],
+            color: STATUS_PALETTE[1 + (n * 3) % 13],
+        });
         self.team_open = Some(id);
         self.hub_filter = 9;
         self.dirty = true;
@@ -884,110 +1470,195 @@ impl App {
 
     fn team_detail(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let Some(ti) = self.team_open.and_then(|id| self.data.extra.teams.iter().position(|x| x.id == id)) else {
+        let Some(ti) = self
+            .team_open
+            .and_then(|id| self.data.extra.teams.iter().position(|x| x.id == id))
+        else {
             self.hub_filter = 0;
             return;
         };
         let members = self.data.members.clone();
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-            let tm = &mut self.data.extra.teams[ti];
-            if ui.add(egui::TextEdit::singleline(&mut tm.name).font(FontId::proportional(24.0)).frame(false).desired_width(400.0)).changed() {
-                self.dirty = true;
-            }
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("Color")).color(t.text2));
-                for (i, c) in STATUS_PALETTE.iter().skip(1).enumerate() {
-                    let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
-                    name_it(&resp, &format!("Team color {}", i + 1));
-                    ui.painter().rect_filled(r.shrink(2.0), 4.0, rgb(*c));
-                    if tm.color == *c {
-                        ui.painter().rect_stroke(r, 5.0, Stroke::new(1.5, t.text), egui::StrokeKind::Inside);
-                    }
-                    if resp.clicked() {
-                        tm.color = *c;
-                        self.dirty = true;
-                    }
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(24, 16))
+            .show(ui, |ui| {
+                let tm = &mut self.data.extra.teams[ti];
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut tm.name)
+                            .font(FontId::proportional(24.0))
+                            .frame(false)
+                            .desired_width(400.0),
+                    )
+                    .changed()
+                {
+                    self.dirty = true;
                 }
-            });
-            ui.label(RichText::new(tr("Members")).color(t.text2));
-            ui.horizontal_wrapped(|ui| {
-                for m in &members {
-                    let mut on = tm.members.contains(&m.id);
-                    if ui.checkbox(&mut on, &m.name).changed() {
-                        if on {
-                            tm.members.push(m.id);
-                        } else {
-                            tm.members.retain(|x| *x != m.id);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(tr("Color")).color(t.text2));
+                    for (i, c) in STATUS_PALETTE.iter().skip(1).enumerate() {
+                        let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                        name_it(&resp, &format!("Team color {}", i + 1));
+                        ui.painter().rect_filled(r.shrink(2.0), 4.0, rgb(*c));
+                        if tm.color == *c {
+                            ui.painter().rect_stroke(
+                                r,
+                                5.0,
+                                Stroke::new(1.5, t.text),
+                                egui::StrokeKind::Inside,
+                            );
                         }
-                        self.dirty = true;
+                        if resp.clicked() {
+                            tm.color = *c;
+                            self.dirty = true;
+                        }
                     }
+                });
+                ui.label(RichText::new(tr("Members")).color(t.text2));
+                ui.horizontal_wrapped(|ui| {
+                    for m in &members {
+                        let mut on = tm.members.contains(&m.id);
+                        if ui.checkbox(&mut on, &m.name).changed() {
+                            if on {
+                                tm.members.push(m.id);
+                            } else {
+                                tm.members.retain(|x| *x != m.id);
+                            }
+                            self.dirty = true;
+                        }
+                    }
+                });
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new(tr("Delete team")).color(t.danger))
+                            .frame(false),
+                    )
+                    .clicked()
+                {
+                    self.modal = Some(Modal::ConfirmRemove {
+                        kind: "team",
+                        id: tm.id,
+                        name: tm.name.clone(),
+                    });
                 }
             });
-            if ui.add(egui::Button::new(RichText::new(tr("Delete team")).color(t.danger)).frame(false)).clicked() {
-                self.modal = Some(Modal::ConfirmRemove { kind: "team", id: tm.id, name: tm.name.clone() });
-            }
-        });
         ui.separator();
         let ids = self.data.extra.teams[ti].members.clone();
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 8)).show(ui, |ui| {
-                ui.label(RichText::new(tr("What the team is working on")).size(15.0));
-                for id in ids {
-                    let Some(m) = self.data.member(id).cloned() else { continue };
-                    let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&id) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
-                        paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
-                        ui.label(RichText::new(&m.name).strong());
-                        ui.label(RichText::new(trf!("{} open tasks", open.len())).color(t.text2));
-                    });
-                    for task in open.iter().take(6) {
-                        if ui.link(format!("      {}", task.name)).clicked() {
-                            self.actions.push(Action::Open(task.id));
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(24, 8))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(tr("What the team is working on")).size(15.0));
+                        for id in ids {
+                            let Some(m) = self.data.member(id).cloned() else {
+                                continue;
+                            };
+                            let open: Vec<Task> = self
+                                .data
+                                .tasks
+                                .iter()
+                                .filter(|x| {
+                                    x.assignees.contains(&id)
+                                        && !self.data.is_closed(x)
+                                        && self.data.task_live(x)
+                                })
+                                .cloned()
+                                .collect();
+                            ui.horizontal(|ui| {
+                                let (r, _) =
+                                    ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+                                paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
+                                ui.label(RichText::new(&m.name).strong());
+                                ui.label(
+                                    RichText::new(trf!("{} open tasks", open.len())).color(t.text2),
+                                );
+                            });
+                            for task in open.iter().take(6) {
+                                if ui.link(format!("      {}", task.name)).clicked() {
+                                    self.actions.push(Action::Open(task.id));
+                                }
+                            }
+                            ui.add_space(6.0);
                         }
-                    }
-                    ui.add_space(6.0);
-                }
+                    });
             });
-        });
     }
 
     fn org_chart(&mut self, ui: &mut Ui) {
         let t = self.t();
         self.page_bar(ui, "Org Chart", |_, _| {});
-        egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 24)).show(ui, |ui| {
-                for role in ["Owner", "Admin", "Member", "Guest"] {
-                    let people: Vec<Member> = self.data.members.iter().filter(|m| (if m.role.is_empty() { "Member" } else { m.role.as_str() }) == role).cloned().collect();
-                    if people.is_empty() {
-                        continue;
-                    }
-                    let heading = match role {
-                        "Owner" => tr("Owners"),
-                        "Admin" => tr("Admins"),
-                        "Guest" => tr("Guests"),
-                        _ => tr("Members"),
-                    };
-                    ui.label(RichText::new(heading).color(t.text2));
-                    ui.horizontal_wrapped(|ui| {
-                        for m in people {
-                            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
-                                ui.set_width(170.0);
-                                ui.horizontal(|ui| {
-                                    let (r, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-                                    paint_avatar(ui.painter(), r.center(), 13.0, &m, t.card);
-                                    ui.vertical(|ui| {
-                                        ui.label(RichText::new(&m.name).strong());
-                                        ui.label(RichText::new(if m.invited { tr("Invited") } else { tr(role) }).small().color(t.text3));
-                                    });
-                                });
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(24, 24))
+                    .show(ui, |ui| {
+                        for role in ["Owner", "Admin", "Member", "Guest"] {
+                            let people: Vec<Member> = self
+                                .data
+                                .members
+                                .iter()
+                                .filter(|m| {
+                                    (if m.role.is_empty() {
+                                        "Member"
+                                    } else {
+                                        m.role.as_str()
+                                    }) == role
+                                })
+                                .cloned()
+                                .collect();
+                            if people.is_empty() {
+                                continue;
+                            }
+                            let heading = match role {
+                                "Owner" => tr("Owners"),
+                                "Admin" => tr("Admins"),
+                                "Guest" => tr("Guests"),
+                                _ => tr("Members"),
+                            };
+                            ui.label(RichText::new(heading).color(t.text2));
+                            ui.horizontal_wrapped(|ui| {
+                                for m in people {
+                                    egui::Frame::new()
+                                        .fill(t.card)
+                                        .stroke(Stroke::new(1.0, t.border))
+                                        .corner_radius(10)
+                                        .inner_margin(egui::Margin::same(12))
+                                        .show(ui, |ui| {
+                                            ui.set_width(170.0);
+                                            ui.horizontal(|ui| {
+                                                let (r, _) = ui.allocate_exact_size(
+                                                    vec2(30.0, 30.0),
+                                                    Sense::hover(),
+                                                );
+                                                paint_avatar(
+                                                    ui.painter(),
+                                                    r.center(),
+                                                    13.0,
+                                                    &m,
+                                                    t.card,
+                                                );
+                                                ui.vertical(|ui| {
+                                                    ui.label(RichText::new(&m.name).strong());
+                                                    ui.label(
+                                                        RichText::new(if m.invited {
+                                                            tr("Invited")
+                                                        } else {
+                                                            tr(role)
+                                                        })
+                                                        .small()
+                                                        .color(t.text3),
+                                                    );
+                                                });
+                                            });
+                                        });
+                                }
                             });
+                            ui.add_space(12.0);
                         }
                     });
-                    ui.add_space(12.0);
-                }
             });
-        });
     }
 
     // ---------------------------------------------------------------- timesheets
@@ -997,31 +1668,61 @@ impl App {
         let ws = self.sheet_week;
         let me = self.data.me;
         // tabs bar
-        egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 6, bottom: 0 }).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.set_height(40.0);
-                ui.label(RichText::new(tr("\u{23F1}  Timesheets")).size(15.5));
-                ui.separator();
-                // no Approvals tab: submitting a week for approval isn't built
-                for (i, label) in ["My timesheet", "All timesheets"].iter().enumerate() {
-                    let sel = self.hub_filter.min(1) == i as u8;
-                    let g = ui.painter().layout_no_wrap(tr(label).to_string(), FontId::proportional(15.0), if sel { t.text } else { t.text3 });
-                    let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 16.0, 40.0), Sense::click());
-                    name_it(&resp, label);
-                    ui.painter().galley(r.center() - g.size() / 2.0, g, if sel { t.text } else { t.text3 });
-                    if sel {
-                        ui.painter().rect_filled(Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), r.max), 1.0, t.text);
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 20,
+                right: 12,
+                top: 6,
+                bottom: 0,
+            })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_height(40.0);
+                    ui.label(RichText::new(tr("\u{23F1}  Timesheets")).size(15.5));
+                    ui.separator();
+                    // no Approvals tab: submitting a week for approval isn't built
+                    for (i, label) in ["My timesheet", "All timesheets"].iter().enumerate() {
+                        let sel = self.hub_filter.min(1) == i as u8;
+                        let g = ui.painter().layout_no_wrap(
+                            tr(label).to_string(),
+                            FontId::proportional(15.0),
+                            if sel { t.text } else { t.text3 },
+                        );
+                        let (r, resp) =
+                            ui.allocate_exact_size(vec2(g.size().x + 16.0, 40.0), Sense::click());
+                        name_it(&resp, label);
+                        ui.painter().galley(
+                            r.center() - g.size() / 2.0,
+                            g,
+                            if sel { t.text } else { t.text3 },
+                        );
+                        if sel {
+                            ui.painter().rect_filled(
+                                Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), r.max),
+                                1.0,
+                                t.text,
+                            );
+                        }
+                        if resp.clicked() {
+                            self.hub_filter = i as u8;
+                        }
                     }
-                    if resp.clicked() {
-                        self.hub_filter = i as u8;
-                    }
-                }
+                });
             });
-        });
         let r = ui.available_rect_before_wrap();
-        ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+        ui.painter()
+            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
         let bg = Color32::from_rgb(249, 249, 249);
-        ui.painter().rect_filled(Rect::from_min_max(r.min + vec2(0.0, 1.0), r.max), egui::CornerRadius { nw: 0, ne: 0, sw: 8, se: 8 }, bg);
+        ui.painter().rect_filled(
+            Rect::from_min_max(r.min + vec2(0.0, 1.0), r.max),
+            egui::CornerRadius {
+                nw: 0,
+                ne: 0,
+                sw: 8,
+                se: 8,
+            },
+            bg,
+        );
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -1123,110 +1824,210 @@ impl App {
                 ids.push(x.id);
             }
         }
-        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
-            let w = ui.available_width();
-            let col = 92.0;
-            let name_w = (w - col * 8.0).max(200.0);
-            let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-            ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr("Task"), FontId::proportional(13.0), t.text2);
-            for i in 0..7 {
-                let d = ws + Duration::days(i);
-                let x = hr.left() + name_w + col * i as f32 + col / 2.0;
-                ui.painter().text(pos2(x, hr.center().y), Align2::CENTER_CENTER, d.text("%a %-d"), FontId::proportional(12.5), if d == today() { t.danger } else { t.text2 });
-            }
-            ui.painter().text(pos2(hr.left() + name_w + col * 7.5, hr.center().y), Align2::CENTER_CENTER, tr("Total"), FontId::proportional(12.5), t.text2);
-            ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-            let mut totals = [0i64; 7];
-            let mut drop_row = None;
-            for id in &ids {
-                let Some(ti) = self.data.tasks.iter().position(|x| x.id == *id) else { continue };
-                let name = self.data.tasks[ti].name.clone();
-                let mut per = [0i64; 7];
-                // my time only: teammates' entries on the same task aren't mine to edit
-                for e in self.data.tasks[ti].time_entries.iter().filter(|e| self.data.is_my_entry(&self.data.tasks[ti], e)) {
-                    let i = (ts_day(e.start) - ws).num_days();
-                    if (0..7).contains(&i) {
-                        per[i as usize] += e.end - e.start;
-                    }
+        egui::Frame::new()
+            .fill(t.card)
+            .stroke(Stroke::new(1.0, t.border))
+            .corner_radius(10)
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                let w = ui.available_width();
+                let col = 92.0;
+                let name_w = (w - col * 8.0).max(200.0);
+                let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+                ui.painter().text(
+                    hr.left_center() + vec2(8.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    tr("Task"),
+                    FontId::proportional(13.0),
+                    t.text2,
+                );
+                for i in 0..7 {
+                    let d = ws + Duration::days(i);
+                    let x = hr.left() + name_w + col * i as f32 + col / 2.0;
+                    ui.painter().text(
+                        pos2(x, hr.center().y),
+                        Align2::CENTER_CENTER,
+                        d.text("%a %-d"),
+                        FontId::proportional(12.5),
+                        if d == today() { t.danger } else { t.text2 },
+                    );
                 }
-                if let Some(st) = self.data.my_timer_start(&self.data.tasks[ti]) {
-                    let i = (ts_day(st) - ws).num_days();
-                    if (0..7).contains(&i) {
-                        per[i as usize] += now - st;
-                    }
-                }
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    let (nr, nresp) = ui.allocate_exact_size(vec2(name_w, 34.0), Sense::click());
-                    ui.painter().with_clip_rect(Rect::from_min_max(nr.min, nr.max - vec2(26.0, 0.0))).text(nr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text);
-                    // take the row off (and my time on it this week)
-                    let xr = Rect::from_center_size(nr.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0));
-                    let x = ui.interact(xr, ui.id().with(("sheet_x", *id)), Sense::click());
-                    name_it(&x, &format!("Remove row {}", name));
-                    if nresp.hovered() || x.hovered() {
-                        ui.painter().text(xr.center(), Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), if x.hovered() { t.danger } else { t.text3 });
-                    }
-                    if x.clicked() {
-                        drop_row = Some(*id);
-                    } else if nresp.clicked() {
-                        self.actions.push(Action::Open(*id));
-                    }
-                    let mut sum = 0;
-                    for i in 0..7 {
-                        totals[i] += per[i];
-                        sum += per[i];
-                        let before = per[i] as f64 / 3600.0;
-                        let mut hours = before;
-                        // never clamp what is already there: a day over 24h
-                        // (entries from elsewhere) would be cut just by drawing
-                        let r = ui.add_sized([col - 8.0, 26.0], egui::DragValue::new(&mut hours).range(0.0..=24.0).clamp_existing_to_range(false).speed(0.05).max_decimals(2).suffix(tr("h")));
-                        ui.add_space(8.0);
-                        if r.changed() && hours != before {
-                            let tid = self.data.tasks[ti].id;
-                            self.set_day_time(tid, ws + Duration::days(i as i64), hours);
+                ui.painter().text(
+                    pos2(hr.left() + name_w + col * 7.5, hr.center().y),
+                    Align2::CENTER_CENTER,
+                    tr("Total"),
+                    FontId::proportional(12.5),
+                    t.text2,
+                );
+                ui.painter()
+                    .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+                let mut totals = [0i64; 7];
+                let mut drop_row = None;
+                for id in &ids {
+                    let Some(ti) = self.data.tasks.iter().position(|x| x.id == *id) else {
+                        continue;
+                    };
+                    let name = self.data.tasks[ti].name.clone();
+                    let mut per = [0i64; 7];
+                    // my time only: teammates' entries on the same task aren't mine to edit
+                    for e in self.data.tasks[ti]
+                        .time_entries
+                        .iter()
+                        .filter(|e| self.data.is_my_entry(&self.data.tasks[ti], e))
+                    {
+                        let i = (ts_day(e.start) - ws).num_days();
+                        if (0..7).contains(&i) {
+                            per[i as usize] += e.end - e.start;
                         }
                     }
-                    let (tr, _) = ui.allocate_exact_size(vec2(col, 34.0), Sense::hover());
-                    ui.painter().text(tr.center(), Align2::CENTER_CENTER, fmt_duration(sum), FontId::proportional(13.0), t.text);
-                });
-            }
-            if let Some(id) = drop_row {
-                self.drop_sheet_row(ws, id);
-                if let Some(ti) = self.data.tasks.iter().position(|x| x.id == id) {
-                    let task = &self.data.tasks[ti];
-                    let keep: Vec<bool> = task.time_entries.iter().map(|e| !((0..7).contains(&(ts_day(e.start) - ws).num_days()) && self.data.is_my_entry(task, e))).collect();
-                    if keep.iter().any(|k| !k) {
-                        let task = &mut self.data.tasks[ti];
-                        let mut it = keep.iter();
-                        task.time_entries.retain(|_| *it.next().unwrap_or(&true));
-                        self.dirty = true;
-                        self.toast = Some((trf!("Removed this week's time on {}", task.name), now_ts()));
+                    if let Some(st) = self.data.my_timer_start(&self.data.tasks[ti]) {
+                        let i = (ts_day(st) - ws).num_days();
+                        if (0..7).contains(&i) {
+                            per[i as usize] += now - st;
+                        }
                     }
-                }
-            }
-            let (fr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
-            ui.painter().hline(fr.x_range(), fr.top(), Stroke::new(1.0, t.border));
-            ui.painter().text(fr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr("Total"), FontId::proportional(13.5), t.text);
-            let mut all = 0;
-            for (i, v) in totals.iter().enumerate() {
-                all += v;
-                ui.painter().text(pos2(fr.left() + name_w + col * i as f32 + col / 2.0 - 4.0, fr.center().y), Align2::CENTER_CENTER, if *v > 0 { fmt_duration(*v) } else { "-".into() }, FontId::proportional(12.5), t.text2);
-            }
-            ui.painter().text(pos2(fr.left() + name_w + col * 7.5, fr.center().y), Align2::CENTER_CENTER, fmt_duration(all), FontId::proportional(13.0), t.text);
-            ui.horizontal(|ui| {
-                let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|x| !ids.contains(&x.id) && self.data.task_live(x)).map(|x| (x.id, x.name.clone())).collect();
-                ui.menu_button(tr("+ Add task"), |ui| {
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                        for (id, n) in &tasks {
-                            if ui.button(n).clicked() {
-                                self.add_sheet_rows(ws, vec![*id]);
-                                ui.close_menu();
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let (nr, nresp) =
+                            ui.allocate_exact_size(vec2(name_w, 34.0), Sense::click());
+                        ui.painter()
+                            .with_clip_rect(Rect::from_min_max(nr.min, nr.max - vec2(26.0, 0.0)))
+                            .text(
+                                nr.left_center() + vec2(8.0, 0.0),
+                                Align2::LEFT_CENTER,
+                                &name,
+                                FontId::proportional(14.0),
+                                t.text,
+                            );
+                        // take the row off (and my time on it this week)
+                        let xr = Rect::from_center_size(
+                            nr.right_center() - vec2(14.0, 0.0),
+                            vec2(20.0, 20.0),
+                        );
+                        let x = ui.interact(xr, ui.id().with(("sheet_x", *id)), Sense::click());
+                        name_it(&x, &format!("Remove row {}", name));
+                        if nresp.hovered() || x.hovered() {
+                            ui.painter().text(
+                                xr.center(),
+                                Align2::CENTER_CENTER,
+                                "\u{2716}",
+                                FontId::proportional(10.0),
+                                if x.hovered() { t.danger } else { t.text3 },
+                            );
+                        }
+                        if x.clicked() {
+                            drop_row = Some(*id);
+                        } else if nresp.clicked() {
+                            self.actions.push(Action::Open(*id));
+                        }
+                        let mut sum = 0;
+                        for i in 0..7 {
+                            totals[i] += per[i];
+                            sum += per[i];
+                            let before = per[i] as f64 / 3600.0;
+                            let mut hours = before;
+                            // never clamp what is already there: a day over 24h
+                            // (entries from elsewhere) would be cut just by drawing
+                            let r = ui.add_sized(
+                                [col - 8.0, 26.0],
+                                egui::DragValue::new(&mut hours)
+                                    .range(0.0..=24.0)
+                                    .clamp_existing_to_range(false)
+                                    .speed(0.05)
+                                    .max_decimals(2)
+                                    .suffix(tr("h")),
+                            );
+                            ui.add_space(8.0);
+                            if r.changed() && hours != before {
+                                let tid = self.data.tasks[ti].id;
+                                self.set_day_time(tid, ws + Duration::days(i as i64), hours);
                             }
                         }
+                        let (tr, _) = ui.allocate_exact_size(vec2(col, 34.0), Sense::hover());
+                        ui.painter().text(
+                            tr.center(),
+                            Align2::CENTER_CENTER,
+                            fmt_duration(sum),
+                            FontId::proportional(13.0),
+                            t.text,
+                        );
+                    });
+                }
+                if let Some(id) = drop_row {
+                    self.drop_sheet_row(ws, id);
+                    if let Some(ti) = self.data.tasks.iter().position(|x| x.id == id) {
+                        let task = &self.data.tasks[ti];
+                        let keep: Vec<bool> = task
+                            .time_entries
+                            .iter()
+                            .map(|e| {
+                                !((0..7).contains(&(ts_day(e.start) - ws).num_days())
+                                    && self.data.is_my_entry(task, e))
+                            })
+                            .collect();
+                        if keep.iter().any(|k| !k) {
+                            let task = &mut self.data.tasks[ti];
+                            let mut it = keep.iter();
+                            task.time_entries.retain(|_| *it.next().unwrap_or(&true));
+                            self.dirty = true;
+                            self.toast =
+                                Some((trf!("Removed this week's time on {}", task.name), now_ts()));
+                        }
+                    }
+                }
+                let (fr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
+                ui.painter()
+                    .hline(fr.x_range(), fr.top(), Stroke::new(1.0, t.border));
+                ui.painter().text(
+                    fr.left_center() + vec2(8.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    tr("Total"),
+                    FontId::proportional(13.5),
+                    t.text,
+                );
+                let mut all = 0;
+                for (i, v) in totals.iter().enumerate() {
+                    all += v;
+                    ui.painter().text(
+                        pos2(
+                            fr.left() + name_w + col * i as f32 + col / 2.0 - 4.0,
+                            fr.center().y,
+                        ),
+                        Align2::CENTER_CENTER,
+                        if *v > 0 { fmt_duration(*v) } else { "-".into() },
+                        FontId::proportional(12.5),
+                        t.text2,
+                    );
+                }
+                ui.painter().text(
+                    pos2(fr.left() + name_w + col * 7.5, fr.center().y),
+                    Align2::CENTER_CENTER,
+                    fmt_duration(all),
+                    FontId::proportional(13.0),
+                    t.text,
+                );
+                ui.horizontal(|ui| {
+                    let tasks: Vec<(u64, String)> = self
+                        .data
+                        .tasks
+                        .iter()
+                        .filter(|x| !ids.contains(&x.id) && self.data.task_live(x))
+                        .map(|x| (x.id, x.name.clone()))
+                        .collect();
+                    ui.menu_button(tr("+ Add task"), |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                for (id, n) in &tasks {
+                                    if ui.button(n).clicked() {
+                                        self.add_sheet_rows(ws, vec![*id]);
+                                        ui.close_menu();
+                                    }
+                                }
+                            });
                     });
                 });
             });
-        });
     }
 
     /// The tasks I added to the timesheet of the week starting `ws` with
@@ -1235,7 +2036,14 @@ impl App {
     pub(super) fn my_sheet_rows(&self, ws: NaiveDate) -> Vec<u64> {
         let me = self.data.me;
         let wk = sheet_week_key(ws);
-        let mut ids: Vec<u64> = self.data.extra.sheet_rows.iter().filter(|r| r[0] == me).map(|r| r[1]).collect();
+        let mut ids: Vec<u64> = self
+            .data
+            .extra
+            .sheet_rows
+            .iter()
+            .filter(|r| r[0] == me)
+            .map(|r| r[1])
+            .collect();
         for r in &self.data.extra.sheet_week_rows {
             if r[0] == me && r[2] == wk && !ids.contains(&r[1]) {
                 ids.push(r[1]);
@@ -1263,7 +2071,10 @@ impl App {
         let me = self.data.me;
         let wk = sheet_week_key(ws);
         self.data.extra.sheet_rows.retain(|r| *r != [me, id]);
-        self.data.extra.sheet_week_rows.retain(|r| *r != [me, id, wk]);
+        self.data
+            .extra
+            .sheet_week_rows
+            .retain(|r| *r != [me, id, wk]);
         self.dirty = true;
     }
 
@@ -1273,21 +2084,50 @@ impl App {
     pub(super) fn set_day_time(&mut self, task_id: u64, day: NaiveDate, hours: f64) {
         let now = now_ts();
         let me = self.data.me;
-        let Some(ti) = self.data.tasks.iter().position(|x| x.id == task_id) else { return };
+        let Some(ti) = self.data.tasks.iter().position(|x| x.id == task_id) else {
+            return;
+        };
         let task = &self.data.tasks[ti];
-        let running = self.data.my_timer_start(task).filter(|st| ts_day(*st) == day).map(|st| now - st).unwrap_or(0);
-        let mine: Vec<usize> = task.time_entries.iter().enumerate().filter(|(_, e)| ts_day(e.start) == day && self.data.is_my_entry(task, e)).map(|(k, _)| k).collect();
-        let have: i64 = mine.iter().map(|k| task.time_entries[*k].end - task.time_entries[*k].start).sum();
+        let running = self
+            .data
+            .my_timer_start(task)
+            .filter(|st| ts_day(*st) == day)
+            .map(|st| now - st)
+            .unwrap_or(0);
+        let mine: Vec<usize> = task
+            .time_entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| ts_day(e.start) == day && self.data.is_my_entry(task, e))
+            .map(|(k, _)| k)
+            .collect();
+        let have: i64 = mine
+            .iter()
+            .map(|k| task.time_entries[*k].end - task.time_entries[*k].start)
+            .sum();
         let want = ((hours * 3600.0).round() as i64 - running).max(0);
         let task = &mut self.data.tasks[ti];
         if want > have {
-            let start = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or(now);
+            let start = day
+                .and_hms_opt(9, 0, 0)
+                .and_then(|x| x.and_local_timezone(chrono::Local).single())
+                .map(|x| x.timestamp())
+                .unwrap_or(now);
             // one entry typed in the grid per day: grow it instead of adding
             // a new one on every step of a drag
-            if let Some(e) = task.time_entries.iter_mut().rev().find(|e| e.start == start && e.member == me) {
+            if let Some(e) = task
+                .time_entries
+                .iter_mut()
+                .rev()
+                .find(|e| e.start == start && e.member == me)
+            {
                 e.end += want - have;
             } else {
-                task.time_entries.push(TimeEntry { start, end: start + (want - have), member: me });
+                task.time_entries.push(TimeEntry {
+                    start,
+                    end: start + (want - have),
+                    member: me,
+                });
             }
         } else if want < have {
             // take it off my latest entries first
@@ -1327,120 +2167,176 @@ impl App {
             }
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let mut remove = None;
-            let mut save = None;
-            for (s, e, name, id, k) in &rows {
-                ui.horizontal(|ui| {
-                    let local = chrono::DateTime::from_timestamp(*s, 0).map(|d| d.with_timezone(&chrono::Local));
-                    let when = local.map(|d| d.text("%a %b %-d, %-I:%M %p")).unwrap_or_default();
-                    if let Some((_, _, start, hours)) = self.sweep.entry_edit.as_mut().filter(|x| x.0 == *id && x.1 == *k) {
-                        ui.label(RichText::new(local.map(|d| d.text("%a %b %-d")).unwrap_or_default()).color(t.text2));
-                        let st = ui.add(egui::TextEdit::singleline(start).hint_text("09:00").desired_width(54.0));
-                        name_it(&st, "Entry start");
-                        let hr = ui.add(egui::DragValue::new(hours).range(0.0..=24.0).speed(0.05).max_decimals(2).suffix("h"));
-                        name_it(&hr, "Entry hours");
-                        ui.label(name.as_str());
-                        if ui.button(tr("Save")).clicked() {
-                            let day = local.map(|d| d.date_naive()).unwrap_or_else(today);
-                            save = Some((*id, *k, super::more::reminder_ts(day, start), *hours));
+        egui::Frame::new()
+            .fill(t.card)
+            .stroke(Stroke::new(1.0, t.border))
+            .corner_radius(10)
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let mut remove = None;
+                let mut save = None;
+                for (s, e, name, id, k) in &rows {
+                    ui.horizontal(|ui| {
+                        let local = chrono::DateTime::from_timestamp(*s, 0)
+                            .map(|d| d.with_timezone(&chrono::Local));
+                        let when = local
+                            .map(|d| d.text("%a %b %-d, %-I:%M %p"))
+                            .unwrap_or_default();
+                        if let Some((_, _, start, hours)) = self
+                            .sweep
+                            .entry_edit
+                            .as_mut()
+                            .filter(|x| x.0 == *id && x.1 == *k)
+                        {
+                            ui.label(
+                                RichText::new(
+                                    local.map(|d| d.text("%a %b %-d")).unwrap_or_default(),
+                                )
+                                .color(t.text2),
+                            );
+                            let st = ui.add(
+                                egui::TextEdit::singleline(start)
+                                    .hint_text("09:00")
+                                    .desired_width(54.0),
+                            );
+                            name_it(&st, "Entry start");
+                            let hr = ui.add(
+                                egui::DragValue::new(hours)
+                                    .range(0.0..=24.0)
+                                    .speed(0.05)
+                                    .max_decimals(2)
+                                    .suffix("h"),
+                            );
+                            name_it(&hr, "Entry hours");
+                            ui.label(name.as_str());
+                            if ui.button(tr("Save")).clicked() {
+                                let day = local.map(|d| d.date_naive()).unwrap_or_else(today);
+                                save =
+                                    Some((*id, *k, super::more::reminder_ts(day, start), *hours));
+                            }
+                            if ui.button(tr("Cancel")).clicked() {
+                                self.sweep.entry_edit = None;
+                            }
+                            return;
                         }
-                        if ui.button(tr("Cancel")).clicked() {
-                            self.sweep.entry_edit = None;
+                        ui.label(RichText::new(when).color(t.text2));
+                        if ui.link(name).clicked() {
+                            self.actions.push(Action::Open(*id));
                         }
-                        return;
-                    }
-                    ui.label(RichText::new(when).color(t.text2));
-                    if ui.link(name).clicked() {
-                        self.actions.push(Action::Open(*id));
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
-                            remove = Some((*id, *k));
-                        }
-                        let ed = ui.add(egui::Button::new(RichText::new(tr("Edit")).small()).frame(false));
-                        name_it(&ed, &format!("Edit entry {}", name));
-                        if ed.clicked() {
-                            let start = local.map(|d| d.format("%H:%M").to_string()).unwrap_or_else(|| "09:00".into());
-                            self.sweep.entry_edit = Some((*id, *k, start, (e - s) as f64 / 3600.0));
-                        }
-                        ui.label(fmt_duration(e - s));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new("\u{2716}").color(t.text3))
+                                        .frame(false),
+                                )
+                                .clicked()
+                            {
+                                remove = Some((*id, *k));
+                            }
+                            let ed = ui.add(
+                                egui::Button::new(RichText::new(tr("Edit")).small()).frame(false),
+                            );
+                            name_it(&ed, &format!("Edit entry {}", name));
+                            if ed.clicked() {
+                                let start = local
+                                    .map(|d| d.format("%H:%M").to_string())
+                                    .unwrap_or_else(|| "09:00".into());
+                                self.sweep.entry_edit =
+                                    Some((*id, *k, start, (e - s) as f64 / 3600.0));
+                            }
+                            ui.label(fmt_duration(e - s));
+                        });
                     });
-                });
-            }
-            if rows.is_empty() {
-                ui.label(RichText::new(tr("No time entries this week")).color(t.text3));
-
-            }
-            if let Some((id, k, start, hours)) = save {
-                if let Some(e) = self.data.tasks.iter_mut().find(|x| x.id == id).and_then(|x| x.time_entries.get_mut(k)) {
-                    e.start = start;
-                    e.end = start + (hours * 3600.0).round() as i64;
-                    self.dirty = true;
                 }
-                self.sweep.entry_edit = None;
-            }
-            if let Some((id, k)) = remove {
-                if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == id) {
-                    if k < task.time_entries.len() {
-                        task.time_entries.remove(k);
-                        self.sweep.entry_edit = None;
+                if rows.is_empty() {
+                    ui.label(RichText::new(tr("No time entries this week")).color(t.text3));
+                }
+                if let Some((id, k, start, hours)) = save {
+                    if let Some(e) = self
+                        .data
+                        .tasks
+                        .iter_mut()
+                        .find(|x| x.id == id)
+                        .and_then(|x| x.time_entries.get_mut(k))
+                    {
+                        e.start = start;
+                        e.end = start + (hours * 3600.0).round() as i64;
                         self.dirty = true;
                     }
+                    self.sweep.entry_edit = None;
                 }
-            }
-        });
+                if let Some((id, k)) = remove {
+                    if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == id) {
+                        if k < task.time_entries.len() {
+                            task.time_entries.remove(k);
+                            self.sweep.entry_edit = None;
+                            self.dirty = true;
+                        }
+                    }
+                }
+            });
     }
 
     fn all_timesheets(&mut self, ui: &mut Ui, ws: NaiveDate) {
         let t = self.t();
-        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            // by whose time it is, not by who the task is assigned to
-            let me = self.data.me;
-            let solo = self.data.solo();
-            let mut per: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
-            for x in &self.data.tasks {
-                for e in &x.time_entries {
-                    let i = (ts_day(e.start) - ws).num_days();
-                    if (0..7).contains(&i) {
-                        let owner = match x.entry_owner(e) {
-                            0 if solo => me,
-                            o => o,
-                        };
-                        *per.entry(owner).or_default() += e.end - e.start;
+        egui::Frame::new()
+            .fill(t.card)
+            .stroke(Stroke::new(1.0, t.border))
+            .corner_radius(10)
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                // by whose time it is, not by who the task is assigned to
+                let me = self.data.me;
+                let solo = self.data.solo();
+                let mut per: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+                for x in &self.data.tasks {
+                    for e in &x.time_entries {
+                        let i = (ts_day(e.start) - ws).num_days();
+                        if (0..7).contains(&i) {
+                            let owner = match x.entry_owner(e) {
+                                0 if solo => me,
+                                o => o,
+                            };
+                            *per.entry(owner).or_default() += e.end - e.start;
+                        }
                     }
                 }
-            }
-            for m in self.data.members.clone() {
-                let total = per.remove(&m.id).unwrap_or(0);
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-                    paint_avatar(ui.painter(), r.center(), 11.0, &m, t.card);
-                    ui.label(&m.name);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(if total > 0 { fmt_duration(total) } else { "-".into() });
+                for m in self.data.members.clone() {
+                    let total = per.remove(&m.id).unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
+                        paint_avatar(ui.painter(), r.center(), 11.0, &m, t.card);
+                        ui.label(&m.name);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(if total > 0 {
+                                fmt_duration(total)
+                            } else {
+                                "-".into()
+                            });
+                        });
                     });
-                });
-            }
-            // old entries on unassigned tasks, and people no longer here
-            let rest: i64 = per.values().sum();
-            if rest > 0 {
-                ui.horizontal(|ui| {
-                    ui.add_space(30.0);
-                    ui.label(RichText::new(tr("Unknown")).color(t.text2));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(fmt_duration(rest));
+                }
+                // old entries on unassigned tasks, and people no longer here
+                let rest: i64 = per.values().sum();
+                if rest > 0 {
+                    ui.horizontal(|ui| {
+                        ui.add_space(30.0);
+                        ui.label(RichText::new(tr("Unknown")).color(t.text2));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(fmt_duration(rest));
+                        });
                     });
-                });
-            }
-        });
+                }
+            });
     }
 }
 
 pub(super) fn ts_day(ts: i64) -> NaiveDate {
-    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today)
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|d| d.with_timezone(&chrono::Local).date_naive())
+        .unwrap_or_else(today)
 }
 
 /// How a week is stored with a timesheet row: its first day, counted in days.

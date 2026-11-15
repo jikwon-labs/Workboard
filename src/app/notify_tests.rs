@@ -329,7 +329,10 @@ fn tasks_due_today_are_announced_once_a_day_at_the_chosen_time() {
     let mut a = app();
     let day = today();
     // only the tasks made here are mine
-    a.data.tasks.iter_mut().for_each(|t| t.assignees.retain(|m| *m != 1));
+    a.data
+        .tasks
+        .iter_mut()
+        .for_each(|t| t.assignees.retain(|m| *m != 1));
     let id = my_task(&mut a, "File taxes");
     a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().due = Some(day);
     let late = my_task(&mut a, "Send invoice");
@@ -344,7 +347,10 @@ fn tasks_due_today_are_announced_once_a_day_at_the_chosen_time() {
     assert_eq!(a.notify_rt.sent.len(), 1, "once a day");
     // another time of day
     let mut b = app();
-    b.data.tasks.iter_mut().for_each(|t| t.assignees.retain(|m| *m != 1));
+    b.data
+        .tasks
+        .iter_mut()
+        .for_each(|t| t.assignees.retain(|m| *m != 1));
     b.data.extra.notify.due_time = "07:30".into();
     let id = my_task(&mut b, "Early");
     b.data.tasks.iter_mut().find(|t| t.id == id).unwrap().due = Some(day);
@@ -640,13 +646,25 @@ fn a_mention_picked_from_the_list_is_announced_by_member_not_name() {
     // picked from the mention list: kept by id, whatever the text says
     let id = a.data.new_id();
     let m: Message = serde_json::from_value(serde_json::json!({"id": id, "author": 2, "text": "@Boss please review", "ts": now_ts(), "mentions": [1]})).unwrap();
-    a.data.channels.iter_mut().find(|c| c.id == g).unwrap().messages.push(m);
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == g)
+        .unwrap()
+        .messages
+        .push(m);
     a.notify_scan();
     assert_eq!(kinds(&a), vec![Kind::Mention]);
     // someone else picked: not me, even with my name in the text
     let id = a.data.new_id();
     let m: Message = serde_json::from_value(serde_json::json!({"id": id, "author": 2, "text": "@Me (the other one)", "ts": now_ts(), "mentions": [3]})).unwrap();
-    a.data.channels.iter_mut().find(|c| c.id == g).unwrap().messages.push(m);
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == g)
+        .unwrap()
+        .messages
+        .push(m);
     a.notify_scan();
     assert_eq!(a.notify_rt.sent.len(), 1);
 }

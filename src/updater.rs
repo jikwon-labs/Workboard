@@ -74,7 +74,9 @@ mod mac {
     }
 
     pub fn set_server(addr: &str) {
-        let Ok(url) = wb_net::updates_url(addr) else { return };
+        let Ok(url) = wb_net::updates_url(addr) else {
+            return;
+        };
         if !on_main_thread() {
             return;
         }
@@ -125,7 +127,9 @@ mod mac {
             return null_mut();
         }
         let frameworks: *mut Object = msg_send![main, privateFrameworksPath];
-        let Some(frameworks) = from_ns(frameworks) else { return null_mut() };
+        let Some(frameworks) = from_ns(frameworks) else {
+            return null_mut();
+        };
         let path = format!("{}/Sparkle.framework", frameworks);
         if !std::path::Path::new(&path).is_dir() {
             return null_mut();
@@ -139,7 +143,9 @@ mod mac {
             eprintln!("workboard: couldn't load {}", path);
             return null_mut();
         }
-        let Some(cls) = Class::get("SPUStandardUpdaterController") else { return null_mut() };
+        let Some(cls) = Class::get("SPUStandardUpdaterController") else {
+            return null_mut();
+        };
         let delegate = delegate();
         let c: *mut Object = msg_send![cls, alloc];
         // kept for the life of the app (the controller holds its delegate weakly; ours is never freed either)
@@ -157,8 +163,12 @@ mod mac {
         let cls = match Class::get("WorkboardUpdaterDelegate") {
             Some(c) => c,
             None => {
-                let mut decl = ClassDecl::new("WorkboardUpdaterDelegate", class!(NSObject)).expect("declare updater delegate");
-                decl.add_method(sel!(feedURLStringForUpdater:), feed_url as extern "C" fn(&Object, Sel, *mut Object) -> *mut Object);
+                let mut decl = ClassDecl::new("WorkboardUpdaterDelegate", class!(NSObject))
+                    .expect("declare updater delegate");
+                decl.add_method(
+                    sel!(feedURLStringForUpdater:),
+                    feed_url as extern "C" fn(&Object, Sel, *mut Object) -> *mut Object,
+                );
                 decl.register()
             }
         };

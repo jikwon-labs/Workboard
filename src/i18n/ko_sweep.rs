@@ -8,7 +8,10 @@ pub const T: &[(&str, &str)] = &[
     // list and table views
     ("NO TAGS", "태그 없음"),
     ("Columns", "열"),
-    ("Custom Fields you add show here too.", "추가한 사용자 지정 필드도 여기에 표시됩니다."),
+    (
+        "Custom Fields you add show here too.",
+        "추가한 사용자 지정 필드도 여기에 표시됩니다.",
+    ),
     ("Time tracked", "추적한 시간"),
     ("Time estimate", "예상 시간"),
     ("Date updated", "수정한 날짜"),
@@ -17,11 +20,17 @@ pub const T: &[(&str, &str)] = &[
     ("Collapse all groups", "모든 그룹 접기"),
     ("Expand all groups", "모든 그룹 펼치기"),
     ("Select all in group", "그룹 전체 선택"),
-    ("Sort by Manual to drag tasks into your own order", "정렬을 수동으로 바꾸면 작업을 끌어서 순서를 정할 수 있습니다"),
+    (
+        "Sort by Manual to drag tasks into your own order",
+        "정렬을 수동으로 바꾸면 작업을 끌어서 순서를 정할 수 있습니다",
+    ),
     ("Subtask name", "하위 작업 이름"),
     ("Delete 1 task?", "작업 1개를 삭제할까요?"),
     ("Delete {} tasks?", "작업 {}개를 삭제할까요?"),
-    ("Their subtasks go too. You can undo right after, or restore them from Trash.", "하위 작업도 함께 삭제됩니다. 바로 실행 취소하거나 휴지통에서 복원할 수 있습니다."),
+    (
+        "Their subtasks go too. You can undo right after, or restore them from Trash.",
+        "하위 작업도 함께 삭제됩니다. 바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
+    ),
     ("Task deleted", "작업을 삭제했습니다"),
     ("{} tasks deleted", "작업 {}개를 삭제했습니다"),
     // filters
@@ -39,11 +48,17 @@ pub const T: &[(&str, &str)] = &[
     ("Turn into a subtask", "하위 작업으로 바꾸기"),
     ("Comments only", "댓글만"),
     ("No one by that name", "그 이름의 사람이 없습니다"),
-    ("Time entries, add time by hand", "시간 항목, 직접 시간 추가"),
+    (
+        "Time entries, add time by hand",
+        "시간 항목, 직접 시간 추가",
+    ),
     ("Time entries", "시간 항목"),
     ("No time tracked yet", "아직 추적한 시간이 없습니다"),
     ("Remove this entry", "이 항목 제거"),
-    ("Type a time like 2h 30m, 45m or 1.5h", "2h 30m, 45m, 1.5h처럼 시간을 입력하세요"),
+    (
+        "Type a time like 2h 30m, 45m or 1.5h",
+        "2h 30m, 45m, 1.5h처럼 시간을 입력하세요",
+    ),
     ("e.g. 1h 30m", "예: 1h 30m"),
     ("Task type", "작업 유형"),
     ("Milestone", "마일스톤"),
@@ -64,24 +79,45 @@ pub const T: &[(&str, &str)] = &[
     ("Relationships", "관계"),
     ("+  Add relationship", "+  관계 추가"),
     ("Make subtask of", "하위 작업으로 만들기"),
-    ("Add existing task as subtask", "기존 작업을 하위 작업으로 추가"),
+    (
+        "Add existing task as subtask",
+        "기존 작업을 하위 작업으로 추가",
+    ),
     ("Waiting on", "대기 중"),
     ("Blocking", "차단 중"),
     ("Link a task", "작업 연결"),
     ("\u{26D4}  Waiting on", "\u{26D4}  대기 중"),
     ("\u{26A0}  Blocking", "\u{26A0}  차단 중"),
     ("\u{1F517}  Linked", "\u{1F517}  연결됨"),
-    ("Choose the task \"{}\" goes under.", "\"{}\"을(를) 넣을 상위 작업을 고르세요."),
-    ("Choose a task to put under \"{}\".", "\"{}\" 아래에 넣을 작업을 고르세요."),
-    ("Choose a task \"{}\" waits on.", "\"{}\"이(가) 기다리는 작업을 고르세요."),
-    ("Choose a task \"{}\" blocks.", "\"{}\"이(가) 차단하는 작업을 고르세요."),
-    ("Choose a task to link to \"{}\".", "\"{}\"에 연결할 작업을 고르세요."),
+    (
+        "Choose the task \"{}\" goes under.",
+        "\"{}\"을(를) 넣을 상위 작업을 고르세요.",
+    ),
+    (
+        "Choose a task to put under \"{}\".",
+        "\"{}\" 아래에 넣을 작업을 고르세요.",
+    ),
+    (
+        "Choose a task \"{}\" waits on.",
+        "\"{}\"이(가) 기다리는 작업을 고르세요.",
+    ),
+    (
+        "Choose a task \"{}\" blocks.",
+        "\"{}\"이(가) 차단하는 작업을 고르세요.",
+    ),
+    (
+        "Choose a task to link to \"{}\".",
+        "\"{}\"에 연결할 작업을 고르세요.",
+    ),
     ("No tasks match", "일치하는 작업이 없습니다"),
     ("Pick {}", "{} 선택"),
     // attachments
     ("Attachments", "첨부 파일"),
     ("\u{1F4CE} Attach", "\u{1F4CE} 첨부"),
-    ("Attach pictures or videos (or drop them here)", "사진이나 동영상 첨부 (여기에 끌어다 놓아도 됩니다)"),
+    (
+        "Attach pictures or videos (or drop them here)",
+        "사진이나 동영상 첨부 (여기에 끌어다 놓아도 됩니다)",
+    ),
     ("{} is still downloading", "{}을(를) 아직 내려받는 중입니다"),
     ("Adding {}...", "{} 추가하는 중..."),
     // comments
@@ -91,7 +127,10 @@ pub const T: &[(&str, &str)] = &[
     ("Reply", "답장"),
     ("Assign comment", "댓글 할당"),
     ("Assigned to {}", "{}에게 할당됨"),
-    ("Resolved \u{00B7} assigned to {}", "해결됨 \u{00B7} {}에게 할당됨"),
+    (
+        "Resolved \u{00B7} assigned to {}",
+        "해결됨 \u{00B7} {}에게 할당됨",
+    ),
     ("Unassign", "할당 해제"),
     ("someone", "누군가"),
     ("Delete comment", "댓글 삭제"),
@@ -114,7 +153,10 @@ pub const T: &[(&str, &str)] = &[
     ("New tag", "새 태그"),
     ("Any tag", "모든 태그"),
     ("Tags: {}", "태그: {}"),
-    ("No tags yet. Add tags under a Doc's title.", "아직 태그가 없습니다. 문서 제목 아래에서 태그를 추가하세요."),
+    (
+        "No tags yet. Add tags under a Doc's title.",
+        "아직 태그가 없습니다. 문서 제목 아래에서 태그를 추가하세요.",
+    ),
     ("Strikethrough", "취소선"),
     ("Inline code", "인라인 코드"),
     ("Link", "링크"),
@@ -127,10 +169,16 @@ pub const T: &[(&str, &str)] = &[
     ("Task created in {}", "{}에 작업을 만들었습니다"),
     // trash
     ("Empty trash", "휴지통 비우기"),
-    ("Delete all {} items for good?", "항목 {}개를 모두 영구 삭제할까요?"),
+    (
+        "Delete all {} items for good?",
+        "항목 {}개를 모두 영구 삭제할까요?",
+    ),
     ("Team", "팀"),
     // replies and inbox
-    ("Comments assigned to someone, or that @mention them, until resolved", "누군가에게 할당되었거나 @멘션한 댓글 (해결될 때까지)"),
+    (
+        "Comments assigned to someone, or that @mention them, until resolved",
+        "누군가에게 할당되었거나 @멘션한 댓글 (해결될 때까지)",
+    ),
     ("{} commented: {}", "{}님의 댓글: {}"),
     ("{} replied: {}", "{}님의 답장: {}"),
     ("Mark read", "읽음으로 표시"),
@@ -149,8 +197,14 @@ pub const T: &[(&str, &str)] = &[
     ("Choose someone", "사람 선택"),
     ("\u{1F4C5} Pick a date", "\u{1F4C5} 날짜 선택"),
     ("Please answer \"{}\".", "\"{}\"에 답해 주세요."),
-    ("\"{}\" needs a number.", "\"{}\"에는 숫자를 입력해야 합니다."),
-    ("\"{}\" needs an email address.", "\"{}\"에는 이메일 주소를 입력해야 합니다."),
+    (
+        "\"{}\" needs a number.",
+        "\"{}\"에는 숫자를 입력해야 합니다.",
+    ),
+    (
+        "\"{}\" needs an email address.",
+        "\"{}\"에는 이메일 주소를 입력해야 합니다.",
+    ),
     // goals
     ("Nobody", "없음"),
     // whiteboards
@@ -160,25 +214,55 @@ pub const T: &[(&str, &str)] = &[
     // dashboards
     ("Task totals", "작업 합계"),
     ("Shared", "공유됨"),
-    ("No cards. Add one with + Add card.", "카드가 없습니다. + 카드 추가로 추가하세요."),
+    (
+        "No cards. Add one with + Add card.",
+        "카드가 없습니다. + 카드 추가로 추가하세요.",
+    ),
     // teams and timesheets
     ("My Teams", "내 팀"),
     ("You're not in any team yet", "아직 속한 팀이 없습니다"),
-    ("Removed this week's time on {}", "{}의 이번 주 시간을 제거했습니다"),
+    (
+        "Removed this week's time on {}",
+        "{}의 이번 주 시간을 제거했습니다",
+    ),
     // sidebar menus
     ("List color", "목록 색상"),
     ("Folder duplicated", "폴더를 복제했습니다"),
     ("No other Space", "다른 스페이스가 없습니다"),
     ("Unassign all", "모두 할당 해제"),
     // search
-    ("Search, or paste a link to a task, list or space...", "검색하거나 작업, 목록, 스페이스 링크를 붙여 넣으세요..."),
+    (
+        "Search, or paste a link to a task, list or space...",
+        "검색하거나 작업, 목록, 스페이스 링크를 붙여 넣으세요...",
+    ),
     ("No results", "결과 없음"),
     ("Recent searches", "최근 검색"),
-    ("Nothing with this link here (it may have been deleted)", "이 링크에 해당하는 항목이 없습니다 (삭제되었을 수 있습니다)"),
-    ("Delete the dashboard \"{}\"? It goes to Trash.", "대시보드 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
-    ("Delete the whiteboard \"{}\"? It goes to Trash.", "화이트보드 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
-    ("Delete the form \"{}\"? It goes to Trash.", "양식 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
-    ("Delete the goal \"{}\"? It goes to Trash.", "목표 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
-    ("Delete the team \"{}\"? It goes to Trash.", "팀 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
-    ("Only you see a private dashboard", "비공개 대시보드는 나만 볼 수 있습니다"),
+    (
+        "Nothing with this link here (it may have been deleted)",
+        "이 링크에 해당하는 항목이 없습니다 (삭제되었을 수 있습니다)",
+    ),
+    (
+        "Delete the dashboard \"{}\"? It goes to Trash.",
+        "대시보드 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다.",
+    ),
+    (
+        "Delete the whiteboard \"{}\"? It goes to Trash.",
+        "화이트보드 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다.",
+    ),
+    (
+        "Delete the form \"{}\"? It goes to Trash.",
+        "양식 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다.",
+    ),
+    (
+        "Delete the goal \"{}\"? It goes to Trash.",
+        "목표 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다.",
+    ),
+    (
+        "Delete the team \"{}\"? It goes to Trash.",
+        "팀 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다.",
+    ),
+    (
+        "Only you see a private dashboard",
+        "비공개 대시보드는 나만 볼 수 있습니다",
+    ),
 ];

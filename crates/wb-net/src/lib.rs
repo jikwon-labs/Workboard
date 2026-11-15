@@ -96,7 +96,11 @@ pub struct JoinLink {
 
 /// The link that opens Workboard ready to join.
 pub fn join_link(server: &str, code: &str, email: Option<&str>) -> String {
-    let mut s = format!("workboard://join?server={}&code={}", pct_encode(server), pct_encode(code));
+    let mut s = format!(
+        "workboard://join?server={}&code={}",
+        pct_encode(server),
+        pct_encode(code)
+    );
     if let Some(e) = email.filter(|e| !e.is_empty()) {
         s.push_str("&email=");
         s.push_str(&pct_encode(e));
@@ -109,9 +113,15 @@ pub fn join_link(server: &str, code: &str, email: Option<&str>) -> String {
 pub fn parse_join(text: &str) -> JoinLink {
     let t = text.trim();
     let Some(start) = t.find("workboard://join") else {
-        return JoinLink { code: t.to_string(), ..Default::default() };
+        return JoinLink {
+            code: t.to_string(),
+            ..Default::default()
+        };
     };
-    let link: String = t[start..].chars().take_while(|c| !c.is_whitespace() && !"<>\"'".contains(*c)).collect();
+    let link: String = t[start..]
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !"<>\"'".contains(*c))
+        .collect();
     let mut out = JoinLink::default();
     if let Some((_, query)) = link.split_once('?') {
         for pair in query.split('&') {
@@ -130,7 +140,13 @@ pub fn parse_join(text: &str) -> JoinLink {
 
 fn pct_encode(s: &str) -> String {
     s.bytes()
-        .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{:02X}", b) })
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{:02X}", b)
+            }
+        })
         .collect()
 }
 
@@ -140,14 +156,16 @@ fn pct_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         match b[i] {
-            b'%' if i + 2 < b.len() => match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or(""), 16) {
-                Ok(v) => {
-                    out.push(v);
-                    i += 3;
-                    continue;
+            b'%' if i + 2 < b.len() => {
+                match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or(""), 16) {
+                    Ok(v) => {
+                        out.push(v);
+                        i += 3;
+                        continue;
+                    }
+                    Err(_) => out.push(b'%'),
                 }
-                Err(_) => out.push(b'%'),
-            },
+            }
             b'+' => out.push(b' '),
             c => out.push(c),
         }
@@ -178,7 +196,11 @@ impl Backup {
             return self.name.clone();
         };
         let d: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
-        let date = if d.len() >= 8 { format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]) } else { rest.to_string() };
+        let date = if d.len() >= 8 {
+            format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8])
+        } else {
+            rest.to_string()
+        };
         let time = match d.len() {
             10 => format!(" {}:00", &d[8..10]),
             14 => format!(" {}:{}:{}", &d[8..10], &d[10..12], &d[12..14]),
@@ -352,18 +374,36 @@ impl Msg {
     }
 
     pub fn error(message: &str, code: Option<&str>) -> Msg {
-        Msg::Error { message: message.to_string(), code: code.map(|c| c.to_string()), channel: None }
+        Msg::Error {
+            message: message.to_string(),
+            code: code.map(|c| c.to_string()),
+            channel: None,
+        }
     }
 
     /// A call_join for `channel` turned down.
     pub fn call_denied(message: &str, channel: u64) -> Msg {
-        Msg::Error { message: message.to_string(), code: Some(CODE_DENIED.to_string()), channel: Some(channel) }
+        Msg::Error {
+            message: message.to_string(),
+            code: Some(CODE_DENIED.to_string()),
+            channel: Some(channel),
+        }
     }
 
     /// A request that waits for the connection while reconnecting (pushes
     /// don't: the newest copy goes after every welcome anyway).
     fn waits_for_connection(&self) -> bool {
-        matches!(self, Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. } | Msg::CallJoin { .. })
+        matches!(
+            self,
+            Msg::CreateInvite { .. }
+                | Msg::SetPassword { .. }
+                | Msg::SetRole { .. }
+                | Msg::Revoke { .. }
+                | Msg::AccessList
+                | Msg::BackupList
+                | Msg::Restore { .. }
+                | Msg::CallJoin { .. }
+        )
     }
 
     /// A request that does the same thing when the server gets it twice.
@@ -371,7 +411,11 @@ impl Msg {
     /// a password change) aren't sent again by themselves after a send
     /// failed, since the first one may have reached the server anyway.
     fn safe_to_resend(&self) -> bool {
-        self.waits_for_connection() && !matches!(self, Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::Restore { .. })
+        self.waits_for_connection()
+            && !matches!(
+                self,
+                Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::Restore { .. }
+            )
     }
 }
 
@@ -383,9 +427,15 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
         return Err("Type the server's address first.".into());
     }
     if a.starts_with("wss://") || a.starts_with("https://") {
-        return Err("Secure (wss) addresses aren't supported. Use the server's Tailscale name or address.".into());
+        return Err(
+            "Secure (wss) addresses aren't supported. Use the server's Tailscale name or address."
+                .into(),
+        );
     }
-    let rest = a.strip_prefix("ws://").or_else(|| a.strip_prefix("http://")).unwrap_or(a);
+    let rest = a
+        .strip_prefix("ws://")
+        .or_else(|| a.strip_prefix("http://"))
+        .unwrap_or(a);
     let (hostport, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, PATH),
@@ -393,11 +443,18 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
     let (host, port) = if let Some(h) = hostport.strip_prefix('[') {
         // [ipv6]:port
         let end = h.find(']').ok_or("That address doesn't look right.")?;
-        let port = h[end + 1..].strip_prefix(':').map(|p| p.parse::<u16>()).transpose().map_err(|_| "That port isn't a number.")?;
+        let port = h[end + 1..]
+            .strip_prefix(':')
+            .map(|p| p.parse::<u16>())
+            .transpose()
+            .map_err(|_| "That port isn't a number.")?;
         (h[..end].to_string(), port)
     } else {
         match hostport.rsplit_once(':') {
-            Some((h, p)) if !h.contains(':') => (h.to_string(), Some(p.parse::<u16>().map_err(|_| "That port isn't a number.")?)),
+            Some((h, p)) if !h.contains(':') => (
+                h.to_string(),
+                Some(p.parse::<u16>().map_err(|_| "That port isn't a number.")?),
+            ),
             _ => (hostport.to_string(), None),
         }
     };
@@ -405,7 +462,11 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
         return Err("That address doesn't look right.".into());
     }
     let port = port.unwrap_or(DEFAULT_PORT);
-    let shown = if host.contains(':') { format!("[{}]", host) } else { host.clone() };
+    let shown = if host.contains(':') {
+        format!("[{}]", host)
+    } else {
+        host.clone()
+    };
     Ok((host, port, format!("ws://{}:{}{}", shown, port, path)))
 }
 
@@ -413,7 +474,11 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
 /// /updates route): http on the same host and port as the sync connection.
 pub fn updates_url(addr: &str) -> Result<String, String> {
     let (host, port, _) = server_url(addr)?;
-    let shown = if host.contains(':') { format!("[{}]", host) } else { host };
+    let shown = if host.contains(':') {
+        format!("[{}]", host)
+    } else {
+        host
+    };
     Ok(format!("http://{}:{}/updates/appcast.xml", shown, port))
 }
 
@@ -431,18 +496,46 @@ pub enum Status {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Status(Status),
-    Welcome { tag: u16, snapshot: Option<Value>, rev: u64, member: u64, role: Role, token: Option<String>, email: Option<String>, hidden: Vec<u64> },
-    Update { data: Value, rev: u64, hidden: Vec<u64> },
-    Invite { member: u64, code: String, emailed: Option<String>, mail_error: Option<String> },
+    Welcome {
+        tag: u16,
+        snapshot: Option<Value>,
+        rev: u64,
+        member: u64,
+        role: Role,
+        token: Option<String>,
+        email: Option<String>,
+        hidden: Vec<u64>,
+    },
+    Update {
+        data: Value,
+        rev: u64,
+        hidden: Vec<u64>,
+    },
+    Invite {
+        member: u64,
+        code: String,
+        emailed: Option<String>,
+        mail_error: Option<String>,
+    },
     /// The account is set up or its password changed.
     Account(String),
-    Access { people: Vec<Person>, role: Role },
+    Access {
+        people: Vec<Person>,
+        role: Role,
+    },
     /// A request was turned down; the connection stays.
     Denied(String),
     /// The huddle of this conversation was turned down (not in it, voice
     /// not set up...); the connection stays.
-    CallDenied { channel: u64, why: String },
-    CallToken { channel: u64, url: String, token: String },
+    CallDenied {
+        channel: u64,
+        why: String,
+    },
+    CallToken {
+        channel: u64,
+        url: String,
+        token: String,
+    },
     Backups(Vec<Backup>),
     Restored(String),
 }
@@ -527,16 +620,27 @@ impl Line {
 
 fn connect(addr: &str) -> Result<WebSocket<TcpStream>, String> {
     let (host, port, url) = server_url(addr)?;
-    let addrs: Vec<_> = (host.as_str(), port).to_socket_addrs().map_err(|e| format!("Can't find {}: {}", host, e))?.collect();
+    let addrs: Vec<_> = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|e| format!("Can't find {}: {}", host, e))?
+        .collect();
     let mut last = format!("Can't find {}", host);
     for sa in addrs {
         match TcpStream::connect_timeout(&sa, Duration::from_secs(5)) {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
-                stream.set_read_timeout(Some(Duration::from_secs(10))).map_err(|e| e.to_string())?;
-                let cfg = WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE)).max_frame_size(Some(MAX_MESSAGE));
-                let (ws, _) = tungstenite::client::client_with_config(url.as_str(), stream, Some(cfg)).map_err(|e| format!("The server didn't answer like Workboard: {}", e))?;
-                ws.get_ref().set_read_timeout(Some(Duration::from_millis(100))).map_err(|e| e.to_string())?;
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .map_err(|e| e.to_string())?;
+                let cfg = WebSocketConfig::default()
+                    .max_message_size(Some(MAX_MESSAGE))
+                    .max_frame_size(Some(MAX_MESSAGE));
+                let (ws, _) =
+                    tungstenite::client::client_with_config(url.as_str(), stream, Some(cfg))
+                        .map_err(|e| format!("The server didn't answer like Workboard: {}", e))?;
+                ws.get_ref()
+                    .set_read_timeout(Some(Duration::from_millis(100)))
+                    .map_err(|e| e.to_string())?;
                 return Ok(ws);
             }
             Err(e) => last = format!("Can't reach {}:{}: {}", host, port, e),
@@ -569,12 +673,18 @@ fn send_failed(m: Msg, queued: &mut Vec<Msg>) -> Option<Event> {
         queued.insert(0, m);
         None
     } else {
-        m.waits_for_connection().then(|| Event::Denied(UNSURE_SEND.into()))
+        m.waits_for_connection()
+            .then(|| Event::Denied(UNSURE_SEND.into()))
     }
 }
 
 /// Wait before trying again; false when the app asked to stop.
-fn wait(crx: &Receiver<Cmd>, pending: &mut Option<Value>, queued: &mut Vec<Msg>, secs: u64) -> bool {
+fn wait(
+    crx: &Receiver<Cmd>,
+    pending: &mut Option<Value>,
+    queued: &mut Vec<Msg>,
+    secs: u64,
+) -> bool {
     let until = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < until {
         match crx.recv_timeout(Duration::from_millis(100)) {
@@ -602,7 +712,15 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
     loop {
         let end = match connect(&addr) {
             Ok(mut ws) => {
-                let end = session(&mut ws, &line, &crx, &mut sign_in, &mut pending, &mut queued, &mut tries);
+                let end = session(
+                    &mut ws,
+                    &line,
+                    &crx,
+                    &mut sign_in,
+                    &mut pending,
+                    &mut queued,
+                    &mut tries,
+                );
                 let _ = ws.close(None);
                 let _ = ws.flush();
                 end
@@ -635,8 +753,19 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
     }
 }
 
-fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign_in: &mut SignIn, pending: &mut Option<Value>, queued: &mut Vec<Msg>, tries: &mut u64) -> End {
-    let send = |ws: &mut WebSocket<TcpStream>, m: &Msg| ws.send(Message::text(m.to_json())).map_err(|e| e.to_string());
+fn session(
+    ws: &mut WebSocket<TcpStream>,
+    line: &Line,
+    crx: &Receiver<Cmd>,
+    sign_in: &mut SignIn,
+    pending: &mut Option<Value>,
+    queued: &mut Vec<Msg>,
+    tries: &mut u64,
+) -> End {
+    let send = |ws: &mut WebSocket<TcpStream>, m: &Msg| {
+        ws.send(Message::text(m.to_json()))
+            .map_err(|e| e.to_string())
+    };
     let hello = Msg::Hello {
         device: sign_in.device.clone(),
         tag: sign_in.tag,
@@ -691,12 +820,27 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
         if last_heard.elapsed() >= Duration::from_secs(SILENT_SECS) {
             return End::Lost("The server stopped answering.".into());
         }
-        let emit = |e: Event| -> Result<(), End> { if line.emit(e) { Ok(()) } else { Err(End::Stop) } };
+        let emit = |e: Event| -> Result<(), End> {
+            if line.emit(e) {
+                Ok(())
+            } else {
+                Err(End::Stop)
+            }
+        };
         let res: Result<(), End> = match ws.read() {
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
                 match Msg::parse(t.as_str()) {
-                    Some(Msg::Welcome { tag, snapshot, rev, member, role, token, email, hidden }) => {
+                    Some(Msg::Welcome {
+                        tag,
+                        snapshot,
+                        rev,
+                        member,
+                        role,
+                        token,
+                        email,
+                        hidden,
+                    }) => {
                         // sign in the same way next time: with the token, not the password
                         sign_in.tag = Some(tag);
                         if let Some(t) = &token {
@@ -710,20 +854,58 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
                         sign_in.reset_code = None;
                         welcomed = true;
                         *tries = 0;
-                        emit(Event::Status(Status::Connected)).and_then(|_| emit(Event::Welcome { tag, snapshot, rev, member, role, token, email, hidden }))
+                        emit(Event::Status(Status::Connected)).and_then(|_| {
+                            emit(Event::Welcome {
+                                tag,
+                                snapshot,
+                                rev,
+                                member,
+                                role,
+                                token,
+                                email,
+                                hidden,
+                            })
+                        })
                     }
-                    Some(Msg::Update { data, rev, hidden }) => emit(Event::Update { data, rev, hidden }),
-                    Some(Msg::Invite { member, code, emailed, mail_error }) => emit(Event::Invite { member, code, emailed, mail_error }),
+                    Some(Msg::Update { data, rev, hidden }) => {
+                        emit(Event::Update { data, rev, hidden })
+                    }
+                    Some(Msg::Invite {
+                        member,
+                        code,
+                        emailed,
+                        mail_error,
+                    }) => emit(Event::Invite {
+                        member,
+                        code,
+                        emailed,
+                        mail_error,
+                    }),
                     Some(Msg::Account { email }) => emit(Event::Account(email)),
                     Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),
-                    Some(Msg::CallToken { channel, url, token }) => emit(Event::CallToken { channel, url, token }),
+                    Some(Msg::CallToken {
+                        channel,
+                        url,
+                        token,
+                    }) => emit(Event::CallToken {
+                        channel,
+                        url,
+                        token,
+                    }),
                     Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
                     Some(Msg::Restored { name }) => emit(Event::Restored(name)),
                     Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
-                    Some(Msg::Error { message, code, channel }) => match code.as_deref() {
+                    Some(Msg::Error {
+                        message,
+                        code,
+                        channel,
+                    }) => match code.as_deref() {
                         Some(CODE_AUTH) => Err(End::Refused(message)),
                         Some(CODE_DENIED) => match channel {
-                            Some(channel) => emit(Event::CallDenied { channel, why: message }),
+                            Some(channel) => emit(Event::CallDenied {
+                                channel,
+                                why: message,
+                            }),
                             None => emit(Event::Denied(message)),
                         },
                         _ => Err(End::Lost(message)),
@@ -736,7 +918,11 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
                 last_heard = Instant::now();
                 Ok(())
             }
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => Ok(()),
+            Err(tungstenite::Error::Io(e))
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+            {
+                Ok(())
+            }
             Err(e) => Err(End::Lost(e.to_string())),
         };
         if let Err(end) = res {
@@ -752,12 +938,27 @@ mod tests {
     #[test]
     fn addresses_people_type_become_urls() {
         assert_eq!(server_url("macmini").unwrap().2, "ws://macmini:8787/ws");
-        assert_eq!(updates_url("macmini").unwrap(), "http://macmini:8787/updates/appcast.xml");
-        assert_eq!(updates_url("ws://mac-mini.tail1.ts.net:9000/ws").unwrap(), "http://mac-mini.tail1.ts.net:9000/updates/appcast.xml");
-        assert_eq!(updates_url("[::1]:8787").unwrap(), "http://[::1]:8787/updates/appcast.xml");
+        assert_eq!(
+            updates_url("macmini").unwrap(),
+            "http://macmini:8787/updates/appcast.xml"
+        );
+        assert_eq!(
+            updates_url("ws://mac-mini.tail1.ts.net:9000/ws").unwrap(),
+            "http://mac-mini.tail1.ts.net:9000/updates/appcast.xml"
+        );
+        assert_eq!(
+            updates_url("[::1]:8787").unwrap(),
+            "http://[::1]:8787/updates/appcast.xml"
+        );
         assert!(updates_url("").is_err());
-        assert_eq!(server_url(" 100.1.2.3:9000 ").unwrap(), ("100.1.2.3".into(), 9000, "ws://100.1.2.3:9000/ws".into()));
-        assert_eq!(server_url("ws://mac-mini.tail1.ts.net/").unwrap().2, "ws://mac-mini.tail1.ts.net:8787/ws");
+        assert_eq!(
+            server_url(" 100.1.2.3:9000 ").unwrap(),
+            ("100.1.2.3".into(), 9000, "ws://100.1.2.3:9000/ws".into())
+        );
+        assert_eq!(
+            server_url("ws://mac-mini.tail1.ts.net/").unwrap().2,
+            "ws://mac-mini.tail1.ts.net:8787/ws"
+        );
         assert_eq!(server_url("http://h:1/ws").unwrap().2, "ws://h:1/ws");
         assert_eq!(server_url("[::1]:8787").unwrap().2, "ws://[::1]:8787/ws");
         assert!(server_url("").is_err());
@@ -767,37 +968,102 @@ mod tests {
 
     #[test]
     fn messages_round_trip_as_tagged_json() {
-        let hello = |tag| Msg::Hello { device: "d1".into(), tag, token: None, invite: None, claim: None, email: None, password: None, new_password: None, reset_code: None };
-        assert_eq!(hello(Some(3)).to_json(), r#"{"type":"hello","device":"d1","tag":3}"#);
-        assert_eq!(Msg::parse(r#"{"type":"hello","device":"d1"}"#), Some(hello(None)));
+        let hello = |tag| Msg::Hello {
+            device: "d1".into(),
+            tag,
+            token: None,
+            invite: None,
+            claim: None,
+            email: None,
+            password: None,
+            new_password: None,
+            reset_code: None,
+        };
+        assert_eq!(
+            hello(Some(3)).to_json(),
+            r#"{"type":"hello","device":"d1","tag":3}"#
+        );
+        assert_eq!(
+            Msg::parse(r#"{"type":"hello","device":"d1"}"#),
+            Some(hello(None))
+        );
         // an older server's welcome (no email) still reads
-        assert!(matches!(Msg::parse(r#"{"type":"welcome","tag":1,"snapshot":null,"rev":0,"member":2,"role":"member"}"#), Some(Msg::Welcome { email: None, .. })));
+        assert!(matches!(
+            Msg::parse(
+                r#"{"type":"welcome","tag":1,"snapshot":null,"rev":0,"member":2,"role":"member"}"#
+            ),
+            Some(Msg::Welcome { email: None, .. })
+        ));
         assert_eq!(Msg::parse(r#"{"type":"ping"}"#), Some(Msg::Ping));
-        assert_eq!(Msg::parse(r#"{"type":"set_role","member":5,"role":"admin"}"#), Some(Msg::SetRole { member: 5, role: Role::Admin }));
+        assert_eq!(
+            Msg::parse(r#"{"type":"set_role","member":5,"role":"admin"}"#),
+            Some(Msg::SetRole {
+                member: 5,
+                role: Role::Admin
+            })
+        );
         // what the iPhone app sends (ios/WorkboardKit Protocol.swift)
-        let t = Msg::PushToken { token: "ab12".into(), platform: "ios".into(), env: "development".into() };
-        assert_eq!(Msg::parse(r#"{"type":"push_token","token":"ab12","platform":"ios","env":"development"}"#), Some(t.clone()));
+        let t = Msg::PushToken {
+            token: "ab12".into(),
+            platform: "ios".into(),
+            env: "development".into(),
+        };
+        assert_eq!(
+            Msg::parse(
+                r#"{"type":"push_token","token":"ab12","platform":"ios","env":"development"}"#
+            ),
+            Some(t.clone())
+        );
         assert_eq!(Msg::parse(&t.to_json()), Some(t));
     }
 
     #[test]
     fn invite_links_round_trip_and_read_from_pasted_mail() {
-        let link = join_link("mac-mini.tail1.ts.net:8787", "ABCD-EFGH-JKMN", Some("kim.minji+wb@company.com"));
+        let link = join_link(
+            "mac-mini.tail1.ts.net:8787",
+            "ABCD-EFGH-JKMN",
+            Some("kim.minji+wb@company.com"),
+        );
         assert_eq!(link, "workboard://join?server=mac-mini.tail1.ts.net%3A8787&code=ABCD-EFGH-JKMN&email=kim.minji%2Bwb%40company.com");
-        let want = JoinLink { server: Some("mac-mini.tail1.ts.net:8787".into()), code: "ABCD-EFGH-JKMN".into(), email: Some("kim.minji+wb@company.com".into()) };
+        let want = JoinLink {
+            server: Some("mac-mini.tail1.ts.net:8787".into()),
+            code: "ABCD-EFGH-JKMN".into(),
+            email: Some("kim.minji+wb@company.com".into()),
+        };
         assert_eq!(parse_join(&link), want);
         let mail = format!("Hi,\n\nOpen this: <{}>\nThanks", link);
         assert_eq!(parse_join(&mail), want);
-        assert_eq!(parse_join("  abcd-efgh-jkmn "), JoinLink { code: "abcd-efgh-jkmn".into(), ..Default::default() });
-        assert_eq!(parse_join("workboard://join?code=X%2"), JoinLink { code: "X%2".into(), ..Default::default() });
+        assert_eq!(
+            parse_join("  abcd-efgh-jkmn "),
+            JoinLink {
+                code: "abcd-efgh-jkmn".into(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_join("workboard://join?code=X%2"),
+            JoinLink {
+                code: "X%2".into(),
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
     fn backup_names_read_as_dates() {
-        let b = |n: &str| Backup { name: n.into(), bytes: 0 }.label();
+        let b = |n: &str| {
+            Backup {
+                name: n.into(),
+                bytes: 0,
+            }
+            .label()
+        };
         assert_eq!(b("hourly-20261115-03.json"), "2026-11-15 03:00 (hourly)");
         assert_eq!(b("daily-20261115.json"), "2026-11-15 (daily)");
-        assert_eq!(b("before-restore-20261115-031500.json"), "2026-11-15 03:15:00 (before a restore)");
+        assert_eq!(
+            b("before-restore-20261115-031500.json"),
+            "2026-11-15 03:15:00 (before a restore)"
+        );
         assert_eq!(b("other.json"), "other.json");
     }
 
@@ -809,9 +1075,18 @@ mod tests {
 
     #[test]
     fn a_call_refusal_names_its_conversation_and_old_errors_still_read() {
-        assert_eq!(Msg::call_denied("no", 5).to_json(), r#"{"type":"error","message":"no","code":"denied","channel":5}"#);
-        assert_eq!(Msg::parse(r#"{"type":"error","message":"no","code":"denied"}"#), Some(Msg::error("no", Some(CODE_DENIED))));
-        assert_eq!(Msg::error("x", None).to_json(), r#"{"type":"error","message":"x"}"#);
+        assert_eq!(
+            Msg::call_denied("no", 5).to_json(),
+            r#"{"type":"error","message":"no","code":"denied","channel":5}"#
+        );
+        assert_eq!(
+            Msg::parse(r#"{"type":"error","message":"no","code":"denied"}"#),
+            Some(Msg::error("no", Some(CODE_DENIED)))
+        );
+        assert_eq!(
+            Msg::error("x", None).to_json(),
+            r#"{"type":"error","message":"x"}"#
+        );
     }
 
     #[test]
@@ -832,13 +1107,37 @@ mod tests {
     #[test]
     fn a_failed_send_is_repeated_only_when_twice_does_no_harm() {
         let mut q = vec![Msg::AccessList];
-        for m in [Msg::Revoke { member: 3 }, Msg::SetRole { member: 3, role: Role::Admin }, Msg::CallJoin { channel: 1 }, Msg::BackupList] {
+        for m in [
+            Msg::Revoke { member: 3 },
+            Msg::SetRole {
+                member: 3,
+                role: Role::Admin,
+            },
+            Msg::CallJoin { channel: 1 },
+            Msg::BackupList,
+        ] {
             assert_eq!(send_failed(m.clone(), &mut q), None);
             assert_eq!(q[0], m, "goes again first thing after reconnecting");
         }
         let before = q.len();
-        for m in [Msg::Restore { name: "daily-20261115.json".into() }, Msg::CreateInvite { member: 3, role: Role::Member }, Msg::SetPassword { email: "a@b.c".into(), password: "x".into(), old_password: None }] {
-            assert_eq!(send_failed(m, &mut q), Some(Event::Denied(UNSURE_SEND.into())));
+        for m in [
+            Msg::Restore {
+                name: "daily-20261115.json".into(),
+            },
+            Msg::CreateInvite {
+                member: 3,
+                role: Role::Member,
+            },
+            Msg::SetPassword {
+                email: "a@b.c".into(),
+                password: "x".into(),
+                old_password: None,
+            },
+        ] {
+            assert_eq!(
+                send_failed(m, &mut q),
+                Some(Event::Denied(UNSURE_SEND.into()))
+            );
         }
         assert_eq!(q.len(), before, "not sent again by itself");
         assert_eq!(send_failed(Msg::Ping, &mut q), None);

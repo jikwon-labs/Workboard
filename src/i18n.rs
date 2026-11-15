@@ -204,9 +204,17 @@ fn particles(s: &str) -> String {
         let before = &rest[..at];
         out.push_str(before);
         let last = before.chars().last().or_else(|| out.chars().last());
-        let token = if is_ro { "(\u{c73c})\u{b85c}" } else { "\u{c744}(\u{b97c})" };
+        let token = if is_ro {
+            "(\u{c73c})\u{b85c}"
+        } else {
+            "\u{c744}(\u{b97c})"
+        };
         match last.and_then(|c| coda(c, is_ro)) {
-            Some(true) => out.push_str(if is_ro { "\u{c73c}\u{b85c}" } else { "\u{c744}" }),
+            Some(true) => out.push_str(if is_ro {
+                "\u{c73c}\u{b85c}"
+            } else {
+                "\u{c744}"
+            }),
             Some(false) => out.push_str(if is_ro { "\u{b85c}" } else { "\u{b97c}" }),
             None => out.push_str(token),
         }
@@ -223,7 +231,11 @@ fn match_pattern<'a>(pattern: &str, text: &'a str) -> Option<Vec<&'a str>> {
     let mut vals = vec![];
     for (i, sep) in parts.iter().enumerate().skip(1) {
         if i == parts.len() - 1 {
-            let v = if sep.is_empty() { rest } else { rest.strip_suffix(sep)? };
+            let v = if sep.is_empty() {
+                rest
+            } else {
+                rest.strip_suffix(sep)?
+            };
             vals.push(v);
             rest = "";
         } else {
@@ -245,7 +257,12 @@ fn history_value(v: &str) -> String {
     if low == "none" {
         return tr("None").to_string();
     }
-    let cap: String = low.chars().take(1).flat_map(|c| c.to_uppercase()).chain(low.chars().skip(1)).collect();
+    let cap: String = low
+        .chars()
+        .take(1)
+        .flat_map(|c| c.to_uppercase())
+        .chain(low.chars().skip(1))
+        .collect();
     if matches!(cap.as_str(), "Daily" | "Weekly" | "Monthly" | "Yearly") {
         return tr(&cap).to_string();
     }
@@ -376,9 +393,12 @@ fn names(s: String) -> String {
     ];
     let mut s = s;
     for (long, short, ko) in DAYS {
-        s = s.replace(long, &format!("{}\u{c694}\u{c77c}", ko)).replace(short, ko);
+        s = s
+            .replace(long, &format!("{}\u{c694}\u{c77c}", ko))
+            .replace(short, ko);
     }
-    s.replace("AM", "\u{c624}\u{c804}").replace("PM", "\u{c624}\u{d6c4}")
+    s.replace("AM", "\u{c624}\u{c804}")
+        .replace("PM", "\u{c624}\u{d6c4}")
 }
 
 /// The language the choice comes to on this computer.
@@ -427,7 +447,9 @@ fn system_language() -> String {
                     let first: *mut Object = msg_send![langs, objectAtIndex: 0usize];
                     let utf8: *const std::os::raw::c_char = msg_send![first, UTF8String];
                     if !utf8.is_null() {
-                        return std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned();
+                        return std::ffi::CStr::from_ptr(utf8)
+                            .to_string_lossy()
+                            .into_owned();
                     }
                 }
             }
@@ -466,17 +488,47 @@ mod tests {
         assert_eq!(d.text("%b %-d"), "11월 16일");
         assert_eq!(d.text("%A, %B %-d"), "11월 16일 월요일");
         assert_eq!(d.text("%a %-d"), "16일 (월)");
-        assert_eq!(history_line("Alex", "changed status from TO DO to COMPLETE"), "Alex님이 상태를 할 일에서 완료로 변경했습니다");
-        assert_eq!(history_line("Alex", "changed due date to Nov 16"), "Alex님이 마감일을 11월 16일로 변경했습니다");
-        assert_eq!(history_line("Alex", "set priority to Urgent"), "Alex님이 우선순위를 긴급으로 설정했습니다");
-        assert_eq!(history_line("Alex", "changed status from TO DO to REVIEW"), "Alex님이 상태를 할 일에서 REVIEW(으)로 변경했습니다");
-        assert_eq!(history_line("Alex", "removed assignee 민준"), "Alex님이 담당자 민준을 제거했습니다");
-        assert_eq!(history_line("Alex", "removed assignee 지우"), "Alex님이 담당자 지우를 제거했습니다");
-        assert_eq!(history_line("Alex", "commented something odd"), "Alex commented something odd");
-        assert_eq!(history_line("Alex", "added tag 디자인"), "Alex님이 태그 디자인을 추가했습니다");
-        assert_eq!(history_line("Alex", "made this a top-level task"), "Alex님이 이 작업을 최상위 작업으로 만들었습니다");
+        assert_eq!(
+            history_line("Alex", "changed status from TO DO to COMPLETE"),
+            "Alex님이 상태를 할 일에서 완료로 변경했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "changed due date to Nov 16"),
+            "Alex님이 마감일을 11월 16일로 변경했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "set priority to Urgent"),
+            "Alex님이 우선순위를 긴급으로 설정했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "changed status from TO DO to REVIEW"),
+            "Alex님이 상태를 할 일에서 REVIEW(으)로 변경했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "removed assignee 민준"),
+            "Alex님이 담당자 민준을 제거했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "removed assignee 지우"),
+            "Alex님이 담당자 지우를 제거했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "commented something odd"),
+            "Alex commented something odd"
+        );
+        assert_eq!(
+            history_line("Alex", "added tag 디자인"),
+            "Alex님이 태그 디자인을 추가했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "made this a top-level task"),
+            "Alex님이 이 작업을 최상위 작업으로 만들었습니다"
+        );
         set_lang(Lang::En);
-        assert_eq!(history_line("Alex", "created this task"), "Alex created this task");
+        assert_eq!(
+            history_line("Alex", "created this task"),
+            "Alex created this task"
+        );
         set_lang(Lang::Ko);
         set_lang(Lang::En);
     }
@@ -484,10 +536,25 @@ mod tests {
     /// Each Korean entry keeps the English one's placeholders, so no value is lost.
     #[test]
     fn translations_keep_the_placeholders() {
-        let count = |s: &str| fill(s, &(0..9).map(|i| format!("\u{1}{}\u{1}", i)).collect::<Vec<_>>()).matches('\u{1}').count();
+        let count = |s: &str| {
+            fill(
+                s,
+                &(0..9)
+                    .map(|i| format!("\u{1}{}\u{1}", i))
+                    .collect::<Vec<_>>(),
+            )
+            .matches('\u{1}')
+            .count()
+        };
         for part in ALL {
             for (en, ko) in part.iter() {
-                assert_eq!(count(en), count(ko), "placeholders differ: {:?} -> {:?}", en, ko);
+                assert_eq!(
+                    count(en),
+                    count(ko),
+                    "placeholders differ: {:?} -> {:?}",
+                    en,
+                    ko
+                );
                 assert!(!ko.is_empty(), "empty translation for {:?}", en);
             }
         }
@@ -526,7 +593,12 @@ mod tests {
         }
         missing.sort();
         missing.dedup();
-        assert!(missing.is_empty(), "{} texts without Korean:\n{}", missing.len(), missing.join("\n"));
+        assert!(
+            missing.is_empty(),
+            "{} texts without Korean:\n{}",
+            missing.len(),
+            missing.join("\n")
+        );
     }
 
     /// The string literals that follow each marker, with Rust escapes undone.
@@ -562,7 +634,9 @@ mod tests {
                                         hex.push(h);
                                     }
                                 }
-                                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                                if let Some(ch) =
+                                    u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
+                                {
                                     s.push(ch);
                                 }
                             }

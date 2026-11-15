@@ -37,7 +37,10 @@ pub const T: &[(&str, &str)] = &[
     ("Artifacts", "아티팩트"),
     ("My Tasks", "내 작업"),
     ("Overview", "개요"),
-    ("\u{25A6}  Customize your sidebar", "\u{25A6}  사이드바 사용자 지정"),
+    (
+        "\u{25A6}  Customize your sidebar",
+        "\u{25A6}  사이드바 사용자 지정",
+    ),
     ("Assigned to me", "나에게 할당됨"),
     ("Today & Overdue", "오늘 및 기한 지남"),
     ("Personal List", "개인 목록"),
@@ -62,7 +65,10 @@ pub const T: &[(&str, &str)] = &[
     ("Remove from Favorites", "즐겨찾기에서 제거"),
     ("Add to Favorites", "즐겨찾기에 추가"),
     // page header
-    ("Private: only you can see this List", "비공개: 나만 이 목록을 볼 수 있습니다"),
+    (
+        "Private: only you can see this List",
+        "비공개: 나만 이 목록을 볼 수 있습니다",
+    ),
     ("Favorite", "즐겨찾기"),
     ("Ask", "질문"),
     ("Automate", "자동화"),
@@ -103,7 +109,10 @@ pub const T: &[(&str, &str)] = &[
     ("Latest comment", "최근 댓글"),
     ("Add a column (Custom Field)", "열 추가 (사용자 지정 필드)"),
     ("All tasks here are done", "이곳의 작업을 모두 완료했습니다"),
-    ("All {} tasks here are done", "이곳의 작업 {}개를 모두 완료했습니다"),
+    (
+        "All {} tasks here are done",
+        "이곳의 작업 {}개를 모두 완료했습니다",
+    ),
     ("Show 1 closed task", "닫힌 작업 1개 보기"),
     ("Show {} closed tasks", "닫힌 작업 {}개 보기"),
     ("No tasks here yet", "아직 작업이 없습니다"),

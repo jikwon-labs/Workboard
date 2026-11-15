@@ -82,8 +82,14 @@ pub fn listen() {
         let cls = match Class::get("WorkboardLinkHandler") {
             Some(c) => c,
             None => {
-                let Some(mut decl) = ClassDecl::new("WorkboardLinkHandler", class!(NSObject)) else { return };
-                decl.add_method(sel!(handleURLEvent:withReplyEvent:), handle as extern "C" fn(&Object, Sel, *mut Object, *mut Object));
+                let Some(mut decl) = ClassDecl::new("WorkboardLinkHandler", class!(NSObject))
+                else {
+                    return;
+                };
+                decl.add_method(
+                    sel!(handleURLEvent:withReplyEvent:),
+                    handle as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
+                );
                 decl.register()
             }
         };

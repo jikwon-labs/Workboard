@@ -23,6 +23,7 @@ mod parity;
 mod comments;
 mod settings;
 mod shell;
+mod taskfields;
 mod together;
 #[cfg(test)]
 mod tests;
@@ -31,6 +32,7 @@ mod ui_tests;
 pub use menus::Modal;
 pub use pages::Section;
 use parity::TaskFilter;
+pub use taskfields::TaskPick;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ViewKind {
@@ -414,6 +416,8 @@ pub struct App {
     undo_trash: Option<(Vec<u64>, i64)>,
     /// Asking before deleting the selected tasks.
     confirm_bulk_delete: bool,
+    /// Pictures and videos on their way onto a task: (task, file).
+    task_files: Vec<(u64, files::Pending)>,
 }
 
 impl App {
@@ -625,6 +629,7 @@ impl App {
             sub_adding: None,
             undo_trash: None,
             confirm_bulk_delete: false,
+            task_files: vec![],
         }
     }
 
@@ -1093,12 +1098,17 @@ impl App {
                     archived: false,
                     done_at: None,
                     closed_at: None,
+                    milestone: false,
+                    watchers: vec![],
+                    waiting_on: vec![],
+                    linked: vec![],
+                    attachments: vec![],
                 });
                 if let Some(tp) = self.pending_template.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         t.description = tp.description.clone();
                         t.tags = tp.tags.clone();
-                        t.checklist = tp.checklist.iter().map(|c| CheckItem { text: c.clone(), done: false }).collect();
+                        t.checklist = tp.checklist.iter().map(|c| CheckItem { text: c.clone(), done: false, assignee: None }).collect();
                     }
                 }
                 if let Some(desc) = self.pending_description.take() {
@@ -2216,9 +2226,19 @@ impl App {
                                 ui.ctx().copy_text(tid.to_string());
                                 self.toast = Some(("Task ID copied".into(), now_ts()));
                             }
+                            self.watchers_header(ui, &t, win_id, &mut task);
                             popup(ui, &r, win_id.with("more"), 200.0, |ui| {
                                 if ui.button("Move to...").clicked() {
                                     self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
+                                    close_popup(ui);
+                                }
+                                if ui.button("Make subtask of...").clicked() {
+                                    self.modal = Some(Modal::PickTask { task: tid, mode: TaskPick::Parent, query: String::new() });
+                                    close_popup(ui);
+                                }
+                                if task.parent.is_some() && ui.button("Make top-level task").clicked() {
+                                    task.parent = None;
+                                    self.make_top_level(tid);
                                     close_popup(ui);
                                 }
                                 if ui.button("Duplicate").clicked() {
@@ -2278,12 +2298,7 @@ impl App {
                 let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left.shrink2(vec2(28.0, 14.0))).layout(Layout::top_down(Align::Min)));
                 egui::ScrollArea::vertical().id_salt("detail_left").auto_shrink([false, false]).show(&mut left_ui, |ui| {
                     // task type label above the title, as in the original
-                    let g = ui.painter().layout_no_wrap("Task".into(), FontId::proportional(13.5), t.text);
-                    let (tr, _) = ui.allocate_exact_size(vec2(g.size().x + 44.0, 26.0), Sense::hover());
-                    ui.painter().rect_stroke(tr, 7.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                    ui.painter().circle_filled(tr.left_center() + vec2(13.0, 0.0), 5.0, t.text2);
-                    ui.painter().galley(pos2(tr.left() + 24.0, tr.center().y - g.size().y / 2.0), g, t.text);
-                    paint_triangle(ui.painter(), tr.right_center() - vec2(10.0, 0.0), true, t.text2);
+                    taskfields::task_type_pill(ui, &t, win_id, &mut task.milestone);
                     ui.add_space(6.0);
                     ui.add(egui::TextEdit::singleline(&mut task.name).font(FontId::proportional(30.0)).frame(false).desired_width(f32::INFINITY));
                     ui.add_space(10.0);
@@ -2380,14 +2395,7 @@ impl App {
                         if apps.time_estimates {
                         ui.label(RichText::new("\u{231B}  Time estimate").color(t.text2));
                         ui.horizontal(|ui| {
-                            let mut est = task.estimate_min.unwrap_or(0);
-                            if est == 0 {
-                                ui.label(RichText::new("Empty").color(t.text3));
-                            }
-                            let r = ui.add(egui::DragValue::new(&mut est).range(0..=100000).speed(5).suffix(" min"));
-                            if r.changed() {
-                                task.estimate_min = if est == 0 { None } else { Some(est) };
-                            }
+                            taskfields::estimate_field(ui, win_id, &mut task.estimate_min);
                         });
                         } else if !one_col {
                             ui.label("");
@@ -2411,7 +2419,10 @@ impl App {
                                 self.actions.push(Action::ToggleTimer(tid));
                             }
                             let secs = task.tracked_secs(now);
-                            ui.label(if secs > 0 { fmt_duration(secs) } else { "Start".into() });
+                            let te = ui.add(egui::Button::new(if secs > 0 { fmt_duration(secs) } else { "Start".into() }).frame(false));
+                            name_it(&te, "Time entries");
+                            let te = te.on_hover_text("Time entries, add time by hand");
+                            popup(ui, &te, win_id.with("entries"), 260.0, |ui| taskfields::time_entries_menu(ui, &t, win_id.with("entries_m"), &mut task));
                             if running {
                                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
                             }
@@ -2433,14 +2444,7 @@ impl App {
                             if let Some(i) = remove {
                                 task.tags.remove(i);
                             }
-                            let r = ui.add(egui::TextEdit::singleline(&mut self.tag_text).hint_text("Add tag").desired_width(100.0));
-                            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                let tag = self.tag_text.trim().to_lowercase();
-                                if !tag.is_empty() && !task.tags.contains(&tag) {
-                                    task.tags.push(tag);
-                                }
-                                self.tag_text.clear();
-                            }
+                            self.tag_field(ui, &t, win_id, &mut task);
                         });
                         ui.end_row();
                         // custom fields, two per row
@@ -2493,7 +2497,7 @@ impl App {
                     let r = ui.available_rect_before_wrap();
                     ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
                     ui.add_space(10.0);
-                    ui.add(egui::TextEdit::multiline(&mut task.description).hint_text("Add description").frame(false).font(FontId::proportional(15.0)).desired_rows(4).desired_width(f32::INFINITY));
+                    self.description_field(ui, &t, &mut task);
                     ui.add_space(16.0);
                     // subtasks
                     let subs: Vec<Task> = self.subtasks(tid).into_iter().cloned().collect();
@@ -2520,12 +2524,57 @@ impl App {
                             sub_changed = true;
                         }
                         let closed = matches!(st.kind, StatusKind::Closed | StatusKind::Done);
-                        ui.painter().text(r.left_center() + vec2(32.0, 0.0), Align2::LEFT_CENTER, &s.name, FontId::proportional(13.0), if closed { t.text3 } else { t.text });
-                        paint_avatars(ui.painter(), r.right_center() - vec2(110.0, 0.0), 10.0, &s.assignees, &self.data, t.card);
-                        if let Some(d) = s.due {
-                            ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, fmt_date(d), FontId::proportional(12.0), date_color(d, closed, &t));
+                        ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 200.0, r.bottom()))).text(r.left_center() + vec2(32.0, 0.0), Align2::LEFT_CENTER, &s.name, FontId::proportional(13.0), if closed { t.text3 } else { t.text });
+                        // assignees and due date open their menus; on hover
+                        // the row also offers "make top-level" and delete
+                        let hover = ui.rect_contains_pointer(r);
+                        let ar = Rect::from_min_max(pos2(r.right() - 146.0, r.top() + 4.0), pos2(r.right() - 84.0, r.bottom() - 4.0));
+                        let a = ui.interact(ar, win_id.with(("subas", s.id)), Sense::click());
+                        name_it(&a, &format!("Subtask assignees {}", s.name));
+                        if a.hovered() {
+                            ui.painter().rect_filled(ar, 5.0, t.hover);
                         }
-                        if sub_changed {
+                        if paint_avatars(ui.painter(), ar.left_center() + vec2(4.0, 0.0), 10.0, &s.assignees, &self.data, t.card) == 0.0 && hover {
+                            ui.painter().text(ar.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, "\u{1F464}", FontId::proportional(12.0), t.text3);
+                        }
+                        let data = &self.data;
+                        if let Some(true) = popup(ui, &a, win_id.with(("subasp", s.id)), 220.0, |ui| assignee_menu(ui, &t, data, &mut se.assignees)) {
+                            sub_changed = true;
+                        }
+                        let dr = Rect::from_min_max(pos2(r.right() - 80.0, r.top() + 4.0), pos2(r.right() - 4.0, r.bottom() - 4.0));
+                        let d = ui.interact(dr, win_id.with(("subdue", s.id)), Sense::click());
+                        name_it(&d, &format!("Subtask due {}", s.name));
+                        if d.hovered() {
+                            ui.painter().rect_filled(dr, 5.0, t.hover);
+                        }
+                        match s.due {
+                            Some(dd) => {
+                                ui.painter().text(dr.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, fmt_date(dd), FontId::proportional(12.0), date_color(dd, closed, &t));
+                            }
+                            None if hover => {
+                                ui.painter().text(dr.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, "\u{1F4C5}", FontId::proportional(12.0), t.text3);
+                            }
+                            None => {}
+                        }
+                        if let Some(true) = popup(ui, &d, win_id.with(("subduep", s.id)), 380.0, |ui| date_menu(ui, &t, win_id.with(("subduec", s.id)), &mut se.due)) {
+                            sub_changed = true;
+                        }
+                        let mut top = false;
+                        let mut del = false;
+                        if hover {
+                            let b = ui.put(Rect::from_center_size(pos2(r.right() - 162.0, r.center().y), vec2(22.0, 22.0)), egui::Button::new(RichText::new("\u{2B11}").size(12.0).color(t.text2)).frame(false));
+                            name_it(&b, &format!("Make top-level {}", s.name));
+                            top = b.on_hover_text("Make it a task of its own").clicked();
+                            let b = ui.put(Rect::from_center_size(pos2(r.right() - 186.0, r.center().y), vec2(22.0, 22.0)), egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text2)).frame(false));
+                            name_it(&b, &format!("Delete subtask {}", s.name));
+                            del = b.on_hover_text("Delete").clicked();
+                        }
+                        if del {
+                            self.actions.push(Action::DeleteTask(s.id));
+                        } else if top {
+                            se.parent = None;
+                            self.actions.push(Action::Replace(se));
+                        } else if sub_changed {
                             self.actions.push(Action::Replace(se));
                         } else if resp.clicked() {
                             self.actions.push(Action::Open(s.id));
@@ -2552,6 +2601,11 @@ impl App {
                         sub_on = true;
                     }
                     ui.data_mut(|d| d.insert_temp(sub_on_id, sub_on));
+                    if add_line(ui, &t, "+  Add existing task").clicked() {
+                        self.modal = Some(Modal::PickTask { task: tid, mode: TaskPick::Child, query: String::new() });
+                    }
+                    ui.add_space(16.0);
+                    self.relationships_section(ui, &t, win_id, tid);
                     ui.add_space(16.0);
                     // checklist
                     ui.horizontal(|ui| {
@@ -2565,23 +2619,7 @@ impl App {
                         let d = task.checklist.iter().filter(|c| c.done).count() as f32 / task.checklist.len() as f32;
                         ui.add(egui::ProgressBar::new(d).desired_height(5.0).fill(rgb([0x00, 0x88, 0x44])));
                     }
-                    let mut remove = None;
-                    for (i, item) in task.checklist.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut item.done, "");
-                            let mut txt = RichText::new(&item.text);
-                            if item.done {
-                                txt = txt.strikethrough().color(t.text3);
-                            }
-                            ui.label(txt);
-                            if ui.add(egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text3)).frame(false)).on_hover_text("Remove").clicked() {
-                                remove = Some(i);
-                            }
-                        });
-                    }
-                    if let Some(i) = remove {
-                        task.checklist.remove(i);
-                    }
+                    self.checklist_rows(ui, &t, win_id, &mut task);
                     let ck_on_id = win_id.with(("adding_check", tid));
                     let mut ck_on: bool = ui.data(|d| d.get_temp(ck_on_id)).unwrap_or(false);
                     if ck_on {
@@ -2591,7 +2629,7 @@ impl App {
                             focus_once(ui, &r);
                             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                             if (ui.button("Save").clicked() || enter) && !self.check_text.trim().is_empty() {
-                                task.checklist.push(CheckItem { text: self.check_text.trim().to_string(), done: false });
+                                task.checklist.push(CheckItem { text: self.check_text.trim().to_string(), done: false, assignee: None });
                                 self.check_text.clear();
                                 r.request_focus();
                             } else if r.lost_focus() && self.check_text.trim().is_empty() {
@@ -2602,6 +2640,8 @@ impl App {
                         ck_on = true;
                     }
                     ui.data_mut(|d| d.insert_temp(ck_on_id, ck_on));
+                    ui.add_space(16.0);
+                    self.attachments_section(ui, &t, &mut task);
                     ui.add_space(30.0);
                 });
                 // ---- right: activity
@@ -2777,7 +2817,15 @@ impl App {
                     st.store(right_ui.ctx(), comment_id);
                 }
             });
-        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
+        // a dialog opened from the window (picker, Move to) must stay above
+        // it: egui keeps the old order between two layers that both ask
+        if self.modal.is_none() {
+            ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
+        }
+        // pictures and videos dropped on the window attach to the task
+        for f in ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect::<Vec<_>>()) {
+            self.add_task_file(tid, f);
+        }
         // Escape in a text field (subtask, checklist, comment) only leaves the field
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open && !self.typing_was_on {
             close = true;
@@ -3573,6 +3621,13 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.checklist.len() != b.checklist.len()
         || a.custom.iter().filter(|(_, v)| !v.is_empty()).ne(b.custom.iter().filter(|(_, v)| !v.is_empty()))
         || a.checklist.iter().zip(b.checklist.iter()).any(|(x, y)| x.done != y.done || x.text != y.text)
+        || a.checklist.iter().zip(b.checklist.iter()).any(|(x, y)| x.assignee != y.assignee)
+        || a.time_entries.iter().map(|e| (e.start, e.end)).ne(b.time_entries.iter().map(|e| (e.start, e.end)))
+        || a.milestone != b.milestone
+        || a.watchers != b.watchers
+        || a.waiting_on != b.waiting_on
+        || a.linked != b.linked
+        || a.attachments != b.attachments
 }
 
 fn kind_label(k: StatusKind) -> &'static str {

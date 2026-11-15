@@ -650,7 +650,7 @@ fn closing_a_recurring_task_reopens_it_with_the_next_date() {
     let mut t = a.task(id).unwrap().clone();
     t.due = Some(due);
     t.recur = Some("weekly".into());
-    t.checklist = vec![CheckItem { text: "send".into(), done: true }];
+    t.checklist = vec![CheckItem { text: "send".into(), done: true, assignee: None }];
     a.apply(Action::Replace(t));
     let mut t = a.task(id).unwrap().clone();
     t.status = "complete".into();
@@ -1559,4 +1559,82 @@ fn deleting_offers_undo() {
     assert_eq!(a.data.tasks.len(), n - 3, "the task and its two subtasks");
     let (trash, _) = a.undo_trash.clone().expect("undo offered");
     assert_eq!(trash.len(), 1);
+}
+
+// ---------------------------------------------------------------- task window fields (sf-taskfields)
+
+#[test]
+fn estimates_read_hours_and_minutes() {
+    use super::taskfields::{fmt_estimate, parse_estimate};
+    assert_eq!(parse_estimate("2h 30m"), Some(150));
+    assert_eq!(parse_estimate("2h30m"), Some(150));
+    assert_eq!(parse_estimate("45m"), Some(45));
+    assert_eq!(parse_estimate("1.5h"), Some(90));
+    assert_eq!(parse_estimate("2"), Some(120), "a bare number is hours");
+    assert_eq!(parse_estimate("2h 15"), Some(135));
+    assert_eq!(parse_estimate("1d"), Some(480));
+    assert_eq!(parse_estimate("1:45"), Some(105));
+    assert_eq!(parse_estimate("soon"), None);
+    assert_eq!(parse_estimate(""), None);
+    assert_eq!(fmt_estimate(150), "2h 30m");
+    assert_eq!(fmt_estimate(120), "2h");
+    assert_eq!(fmt_estimate(45), "45m");
+}
+
+#[test]
+fn relations_show_on_both_sides_and_come_off() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let x = add_task(&mut a, list, "X");
+    let y = add_task(&mut a, list, "Y");
+    let z = add_task(&mut a, list, "Z");
+    a.set_relation(x, TaskPick::WaitingOn, y);
+    a.set_relation(x, TaskPick::Blocking, z);
+    a.set_relation(x, TaskPick::Linked, y);
+    assert_eq!(a.relations(x), (vec![y], vec![z], vec![y]));
+    assert_eq!(a.relations(y), (vec![], vec![x], vec![x]));
+    assert_eq!(a.relations(z), (vec![x], vec![], vec![]));
+    assert!(!a.pick_candidates(x, TaskPick::WaitingOn).contains(&y), "already waiting on it");
+    a.remove_relation(y, TaskPick::Linked, x);
+    a.remove_relation(z, TaskPick::WaitingOn, x);
+    a.remove_relation(x, TaskPick::WaitingOn, y);
+    assert_eq!(a.relations(x), (vec![], vec![], vec![]));
+    // a deleted task drops out
+    a.set_relation(x, TaskPick::WaitingOn, y);
+    a.apply(Action::DeleteTask(y));
+    assert!(a.relations(x).0.is_empty());
+}
+
+#[test]
+fn parent_picker_skips_loops_and_top_level_undoes_it() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    let p = add_task(&mut a, lists[0], "Parent");
+    let c = add_task(&mut a, lists[1], "Child");
+    a.set_relation(c, TaskPick::Parent, p);
+    let t = a.task(c).unwrap();
+    assert_eq!((t.parent, t.list_id), (Some(p), lists[0]));
+    assert!(!a.pick_candidates(p, TaskPick::Parent).contains(&c), "a task can't go under its own subtask");
+    assert!(!a.pick_candidates(c, TaskPick::Child).contains(&p), "nor take its parent as a subtask");
+    a.make_top_level(c);
+    assert_eq!(a.task(c).unwrap().parent, None);
+    assert!(a.task(c).unwrap().activity.iter().any(|x| x.text.contains("top-level")));
+}
+
+#[test]
+fn new_task_fields_load_from_old_files_and_stay_out_when_empty() {
+    let a = app();
+    let t = a.data.tasks[0].clone();
+    let json = serde_json::to_string(&t).unwrap();
+    for k in ["milestone", "watchers", "waiting_on", "linked", "attachments", "assignee"] {
+        assert!(!json.contains(&format!("\"{}\"", k)), "{} is left out when empty", k);
+    }
+    let back: Task = serde_json::from_str(&json).unwrap();
+    assert!(!back.milestone && back.watchers.is_empty() && back.checklist.iter().all(|c| c.assignee.is_none()));
+    let mut w = t.clone();
+    w.watchers.push(2);
+    assert!(task_changed(&t, &w));
+    let mut e = t.clone();
+    e.time_entries.push(TimeEntry { start: 0, end: 60 });
+    assert!(task_changed(&t, &e));
 }

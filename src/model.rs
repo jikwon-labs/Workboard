@@ -169,6 +169,9 @@ impl Member {
 pub struct CheckItem {
     pub text: String,
     pub done: bool,
+    /// The one person this item is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -246,6 +249,22 @@ pub struct Task {
     /// When the task last moved into a closed status (Date closed).
     #[serde(default)]
     pub closed_at: Option<i64>,
+    /// Task type: a milestone instead of a plain task.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub milestone: bool,
+    /// People following the task besides its assignees.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watchers: Vec<u64>,
+    /// Tasks this one waits on. The other side shows it as Blocking, so
+    /// only this side is stored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting_on: Vec<u64>,
+    /// Related tasks; shown on both sides but stored on one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked: Vec<u64>,
+    /// Pictures and videos attached to the task (see Attachment on ids).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
 }
 
 /// `Data::fix_activity_ids` for one task.
@@ -1280,6 +1299,11 @@ impl Data {
                 archived: false,
                 done_at: None,
                 closed_at: None,
+                milestone: false,
+                watchers: vec![],
+                waiting_on: vec![],
+                linked: vec![],
+                attachments: vec![],
             });
         }
         // Subtasks and a checklist on the first task.
@@ -1311,13 +1335,18 @@ impl Data {
                 archived: false,
                 done_at: None,
                 closed_at: None,
+                milestone: false,
+                watchers: vec![],
+                waiting_on: vec![],
+                linked: vec![],
+                attachments: vec![],
             });
         }
         d.tasks[0].description = "Refresh the homepage with a cleaner hero, clear call to action and a lighter grid.".into();
         d.tasks[0].checklist = vec![
-            CheckItem { text: "Review competitors".into(), done: true },
-            CheckItem { text: "Sketch three options".into(), done: false },
-            CheckItem { text: "Share with the team".into(), done: false },
+            CheckItem { text: "Review competitors".into(), done: true, assignee: None },
+            CheckItem { text: "Sketch three options".into(), done: false, assignee: None },
+            CheckItem { text: "Share with the team".into(), done: false, assignee: None },
         ];
         let now2 = now_ts();
         let doc_id = d.new_id();

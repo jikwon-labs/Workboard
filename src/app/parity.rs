@@ -739,6 +739,14 @@ impl App {
             self.modal = Some(Modal::MoveTasks { ids: vec![tid], query: String::new() });
             close_any(ui);
         }
+        if ui.button("Make subtask of...").clicked() {
+            self.modal = Some(Modal::PickTask { task: tid, mode: TaskPick::Parent, query: String::new() });
+            close_any(ui);
+        }
+        if task.parent.is_some() && ui.button("Make top-level task").clicked() {
+            self.make_top_level(tid);
+            close_any(ui);
+        }
         if ui.button("Duplicate").clicked() {
             if self.duplicate_task(tid).is_some() {
                 self.toast = Some(("Task duplicated".into(), now_ts()));

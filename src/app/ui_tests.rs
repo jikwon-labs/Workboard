@@ -9972,3 +9972,19 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
         marks
     );
 }
+
+/// The profile menu, opened at the right end of the top bar, keeps a margin
+/// from the window's edge instead of touching it.
+#[test]
+fn profile_menu_keeps_off_the_window_edge() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.settle();
+    let r = h.rect("Set status");
+    // 8 pt of margin outside the menu's own frame (about 7 pt)
+    assert!(
+        r.right() <= h.size.x - 14.0,
+        "Set status ends at {}",
+        r.right()
+    );
+}

@@ -401,12 +401,23 @@ pub fn popup<R>(
         egui::PopupCloseBehavior::CloseOnClickOutside,
         |ui| {
             ui.set_min_width(width);
-            if tall > room {
+            let out = if tall > room {
                 egui::ScrollArea::vertical()
                     .id_salt(id.with("scroll"))
                     .max_height(room)
                     .auto_shrink([true, true])
                     .show(ui, |ui| {
+    // egui only pushes a popup back inside the window, so near the right
+    // edge it touched the edge: move it left to leave a margin (the width
+    // is last frame's, or the minimum before it has been shown)
+    let wide_id = id.with("__wide");
+    let wide: f32 = ui.data(|d| d.get_temp(wide_id)).unwrap_or(width + 24.0);
+    let over = resp.rect.left() + wide + 8.0 - screen.right();
+    let mut at = resp.clone();
+    if over > 0.0 {
+        at.rect = at.rect.translate(vec2(-over, 0.0));
+    }
+    let resp = &at;
                         ui.set_min_width(width);
                         let r = add(ui);
                         let h = ui.min_rect().height();
@@ -420,7 +431,12 @@ pub fn popup<R>(
                 let h = ui.min_rect().bottom() - top;
                 ui.data_mut(|d| d.insert_temp(tall_id, h));
                 r
-            }
+            };
+            // the frame's margin on both sides
+            let w =
+                ui.min_rect().width() + 2.0 * egui::Frame::popup(ui.style()).total_margin().left;
+            ui.data_mut(|d| d.insert_temp(wide_id, w));
+            out
         },
     )
 }

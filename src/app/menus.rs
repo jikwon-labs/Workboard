@@ -1945,7 +1945,7 @@ impl App {
                 if let Some(list) = self.default_list() {
                     let me = self.data.me;
                     self.actions.push(Action::Add { list, name, status: None, priority: 0, assignees: vec![me], due: None, parent: None, open: false });
-                    self.toast = Some((format!("Task created in {}", self.data.list_name(list)), now_ts()));
+                    self.toast = Some((trf!("Task created in {}", self.data.list_name(list)), now_ts()));
                 }
             }
         });

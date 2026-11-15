@@ -173,7 +173,7 @@ impl App {
             let heads: Vec<(u8, String, usize)> = self.data.docs.iter().find(|d| d.id == open).map(|d| doc_headings(&d.body)).unwrap_or_default();
             if !heads.is_empty() {
                 ui.add_space(12.0);
-                ui.label(RichText::new("On this page").small().color(t.text3));
+                ui.label(RichText::new(tr("On this page")).small().color(t.text3));
                 for (level, text, line) in heads {
                     ui.horizontal(|ui| {
                         ui.add_space((level as f32 - 1.0) * 12.0);
@@ -1138,7 +1138,7 @@ impl App {
         ui.set_min_width(210.0);
         if rename {
             let mut title = d.title.clone();
-            let r = ui.add(egui::TextEdit::singleline(&mut title).hint_text("Doc name").desired_width(190.0));
+            let r = ui.add(egui::TextEdit::singleline(&mut title).hint_text(tr("Doc name")).desired_width(190.0));
             name_field(&r, "Rename doc");
             if r.changed() {
                 if let Some(x) = self.data.docs.iter_mut().find(|x| x.id == id) {
@@ -1152,14 +1152,14 @@ impl App {
             }
             ui.separator();
         }
-        if ui.button("Open").clicked() {
+        if ui.button(tr("Open")).clicked() {
             self.doc_open = Some(id);
             self.section = Section::Docs;
             close_any(ui);
         }
         let key = format!("doc:{}", id);
         let starred = self.data.extra.starred.contains(&key);
-        if ui.button(if starred { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
+        if ui.button(tr(if starred { "Remove from Favorites" } else { "Add to Favorites" })).clicked() {
             if starred {
                 self.data.extra.starred.retain(|s| s != &key);
             } else {
@@ -1168,22 +1168,22 @@ impl App {
             self.dirty = true;
             close_any(ui);
         }
-        if ui.button("Copy link").clicked() {
+        if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://doc/{}", id));
-            self.toast = Some(("Link copied".into(), now_ts()));
+            self.toast = Some((tr("Link copied").into(), now_ts()));
             close_any(ui);
         }
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_doc(id) {
-                self.toast = Some(("Doc duplicated".into(), now_ts()));
+                self.toast = Some((tr("Doc duplicated").into(), now_ts()));
                 if self.doc_open.is_some() {
                     self.doc_open = Some(n);
                 }
             }
             close_any(ui);
         }
-        ui.menu_button("Move to Space", |ui| {
-            let mut spaces: Vec<(Option<u64>, String)> = vec![(None, "Workspace (no Space)".into())];
+        ui.menu_button(tr("Move to Space"), |ui| {
+            let mut spaces: Vec<(Option<u64>, String)> = vec![(None, tr("Workspace (no Space)").into())];
             spaces.extend(self.open_spaces().iter().map(|s| (Some(s.id), s.name.clone())));
             for (sid, name) in spaces {
                 if ui.add(egui::Button::new(name).selected(d.space == sid)).clicked() {
@@ -1192,7 +1192,7 @@ impl App {
                 }
             }
         });
-        if ui.button(if d.meeting_note { "Unmark as Meeting Note" } else { "Mark as Meeting Note" }).clicked() {
+        if ui.button(tr(if d.meeting_note { "Unmark as Meeting Note" } else { "Mark as Meeting Note" })).clicked() {
             if let Some(x) = self.data.docs.iter_mut().find(|x| x.id == id) {
                 x.meeting_note = !x.meeting_note;
             }
@@ -1200,11 +1200,11 @@ impl App {
             close_any(ui);
         }
         ui.separator();
-        if ui.button(if d.archived { "Unarchive" } else { "Archive" }).clicked() {
+        if ui.button(tr(if d.archived { "Unarchive" } else { "Archive" })).clicked() {
             self.toggle_archive(id);
             close_any(ui);
         }
-        if ui.button(RichText::new("Delete").color(self.t().danger)).clicked() {
+        if ui.button(RichText::new(tr("Delete")).color(self.t().danger)).clicked() {
             self.trash_doc(id);
             close_any(ui);
         }
@@ -1213,30 +1213,30 @@ impl App {
     /// A sub page's menu in the pages panel.
     fn page_menu(&mut self, ui: &mut Ui, id: u64) {
         ui.set_min_width(200.0);
-        if ui.button("Open").clicked() {
+        if ui.button(tr("Open")).clicked() {
             self.doc_open = Some(id);
             close_any(ui);
         }
-        if ui.button("Add sub page").clicked() {
+        if ui.button(tr("Add sub page")).clicked() {
             self.add_page(id);
             close_any(ui);
         }
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_doc(id) {
                 self.doc_open = Some(n);
             }
             close_any(ui);
         }
         ui.separator();
-        if ui.button("Move up").clicked() {
+        if ui.button(tr("Move up")).clicked() {
             self.shift_page(id, true);
             close_any(ui);
         }
-        if ui.button("Move down").clicked() {
+        if ui.button(tr("Move down")).clicked() {
             self.shift_page(id, false);
             close_any(ui);
         }
-        ui.menu_button("Move to", |ui| {
+        ui.menu_button(tr("Move to"), |ui| {
             // any page of this doc that is not this page or under it
             let root = self.doc_root(id);
             let skip = self.doc_subtree(id);
@@ -1250,7 +1250,7 @@ impl App {
             }
         });
         ui.separator();
-        if ui.button(RichText::new("Delete").color(self.t().danger)).clicked() {
+        if ui.button(RichText::new(tr("Delete")).color(self.t().danger)).clicked() {
             self.trash_doc(id);
             close_any(ui);
         }
@@ -1265,19 +1265,19 @@ impl App {
         let mut add: Option<String> = None;
         ui.horizontal_wrapped(|ui| {
             for g in &tags {
-                let r = chip(ui, &format!("{}  \u{00D7}", g), tag_color(g)).on_hover_text("Remove tag");
+                let r = chip(ui, &format!("{}  \u{00D7}", g), tag_color(g)).on_hover_text(tr("Remove tag"));
                 name_it(&r, &format!("Remove tag {}", g));
                 if r.clicked() {
                     remove = Some(g.clone());
                 }
             }
-            let r = ui.add(egui::Button::new(RichText::new("+ Tag").small().color(t.text3)).frame(false));
+            let r = ui.add(egui::Button::new(RichText::new(tr("+ Tag")).small().color(t.text3)).frame(false));
             name_it(&r, "Add tag");
             let known: Vec<String> = self.doc_tags().into_iter().filter(|g| !tags.contains(g)).collect();
             popup(ui, &r, ui.id().with(("doc_tag_add", id)), 200.0, |ui| {
                 let nid = egui::Id::new(("doc_tag_new", id));
                 let mut s: String = ui.data(|m| m.get_temp(nid)).unwrap_or_default();
-                let te = ui.add(egui::TextEdit::singleline(&mut s).hint_text("New tag").desired_width(180.0));
+                let te = ui.add(egui::TextEdit::singleline(&mut s).hint_text(tr("New tag")).desired_width(180.0));
                 name_field(&te, "New tag");
                 focus_once(ui, &te);
                 if te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !s.trim().is_empty() {

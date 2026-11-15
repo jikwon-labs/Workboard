@@ -814,8 +814,8 @@ impl App {
             close_any(ui);
         }
         let cur = self.data.list_item(lid).and_then(|l| l.color);
-        ui.menu_button("Color", |ui| {
-            ui.label(RichText::new("List color").small().color(t.text3));
+        ui.menu_button(tr("Color"), |ui| {
+            ui.label(RichText::new(tr("List color")).small().color(t.text3));
             ui.horizontal_wrapped(|ui| {
                 ui.set_max_width(190.0);
                 for c in STATUS_PALETTE.iter().skip(1) {
@@ -834,7 +834,7 @@ impl App {
                     }
                 }
             });
-            if cur.is_some() && ui.button("No color").clicked() {
+            if cur.is_some() && ui.button(tr("No color")).clicked() {
                 if let Some(l) = self.data.list_item_mut(lid) {
                     l.color = None;
                     self.dirty = true;
@@ -955,7 +955,7 @@ impl App {
         if archived && here {
             self.loc = Location::Home;
         }
-        let msg = if archived { format!("Archived \"{}\". Restore it from Settings > Spaces.", name) } else { format!("Restored \"{}\".", name) };
+        let msg = if archived { trf!("Archived \"{}\". Restore it from Settings > Spaces.", name) } else { trf!("Restored \"{}\".", name) };
         self.toast = Some((msg, now_ts()));
     }
 
@@ -984,7 +984,7 @@ impl App {
                 t.status = statuses[0].name.clone();
             }
         }
-        self.toast = Some((format!("Moved {} to {}", name, self.data.location_name(Location::Space(space))), now_ts()));
+        self.toast = Some((trf!("Moved {} to {}", name, self.data.location_name(Location::Space(space))), now_ts()));
         self.dirty = true;
     }
 
@@ -1436,10 +1436,10 @@ impl App {
                 tags.dedup();
                 tags.into_iter().map(|g| (g.clone(), g)).collect()
             }
-            FilterField::StartDate => START_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), l.to_string())).collect(),
-            FilterField::Created | FilterField::Updated => AGE_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), l.to_string())).collect(),
+            FilterField::StartDate => START_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), tr(l).to_string())).collect(),
+            FilterField::Created | FilterField::Updated => AGE_FILTERS.iter().enumerate().skip(1).map(|(i, l)| (i.to_string(), tr(l).to_string())).collect(),
             FilterField::CreatedBy => self.data.members.iter().map(|m| (m.id.to_string(), m.name.clone())).collect(),
-            FilterField::HasSubtasks => vec![("yes".into(), "Has subtasks".into()), ("no".into(), "No subtasks".into())],
+            FilterField::HasSubtasks => vec![("yes".into(), tr("Has subtasks").into()), ("no".into(), tr("No subtasks").into())],
         }
     }
 
@@ -1612,12 +1612,12 @@ impl App {
                             }
                         }
                         ui.separator();
-                        if menu_row(ui, &t, "Unassign all", false, |_, _| {}).clicked() {
+                        if menu_row(ui, &t, tr("Unassign all"), false, |_, _| {}).clicked() {
                             unassign = true;
                             close_popup(ui);
                         }
                     });
-                    let r = ui.button("Tags");
+                    let r = ui.button(tr("Tags"));
                     let mut add_tags: Option<Vec<String>> = None;
                     let all_tags = self.all_tags();
                     let tag_before: Vec<String> = all_tags.iter().filter(|g| sel_tasks.iter().all(|x| x.tags.contains(g))).cloned().collect();
@@ -1636,7 +1636,7 @@ impl App {
                             due_set = true;
                         }
                     });
-                    let r = ui.button("Start date");
+                    let r = ui.button(tr("Start date"));
                     let mut start: Option<NaiveDate> = None;
                     let mut start_set = false;
                     popup(ui, &r, pid.with("bsd"), 380.0, |ui| {
@@ -1644,11 +1644,11 @@ impl App {
                             start_set = true;
                         }
                     });
-                    let r = ui.button("Repeat");
+                    let r = ui.button(tr("Repeat"));
                     let mut recur: Option<Option<String>> = None;
                     popup(ui, &r, pid.with("brc"), 160.0, |ui| {
                         for (v, label) in RECUR {
-                            if menu_row(ui, &t, label, false, |_, _| {}).clicked() {
+                            if menu_row(ui, &t, tr(label), false, |_, _| {}).clicked() {
                                 recur = Some(if v.is_empty() { None } else { Some(v.to_string()) });
                                 close_popup(ui);
                             }

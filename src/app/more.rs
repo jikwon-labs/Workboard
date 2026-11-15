@@ -365,7 +365,7 @@ impl App {
                             handled = true;
                         }
                         // Later items can go back to the inbox
-                        if self.inbox_tab == 2 && put_over(ui, lr, egui::Button::new("Primary").corner_radius(6)).on_hover_text("Back to the inbox").clicked() {
+                        if self.inbox_tab == 2 && put_over(ui, lr, egui::Button::new(tr("Primary")).corner_radius(6)).on_hover_text(tr("Back to the inbox")).clicked() {
                             self.data.extra.inbox_later.retain(|x| x != &key);
                             self.dirty = true;
                             handled = true;
@@ -438,20 +438,20 @@ impl App {
         let t = self.t();
         let me = self.data.me;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-            ui.label(RichText::new("Replies").size(20.0).strong());
-            ui.label(RichText::new("Comments from others on tasks and replies to your chat messages").color(t.text2));
+            ui.label(RichText::new(tr("Replies")).size(20.0).strong());
+            ui.label(RichText::new(tr("Comments from others on tasks and replies to your chat messages")).color(t.text2));
             ui.add_space(8.0);
             let tab_id = egui::Id::new(("inbox_tab", 1u8));
             let mut tab: u8 = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
             ui.horizontal(|ui| {
                 for (i, l) in ["Unread", "Read"].iter().enumerate() {
-                    if ui.selectable_label(tab == i as u8, *l).clicked() {
+                    if ui.selectable_label(tab == i as u8, tr(l)).clicked() {
                         tab = i as u8;
                     }
                 }
                 if tab == 0 {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Mark all as read").clicked() {
+                        if ui.button(tr("Mark all as read")).clicked() {
                             self.data.extra.replies_seen = now_ts();
                             self.dirty = true;
                         }
@@ -468,10 +468,10 @@ impl App {
                 }
             }
             for c in &self.data.channels {
-                let place = if c.kind == ChannelKind::Direct { "Direct message".to_string() } else { format!("#{}", c.name) };
+                let place = if c.kind == ChannelKind::Direct { tr("Direct message").to_string() } else { format!("#{}", c.name) };
                 for m in c.messages.iter().filter(|m| m.author == me) {
                     for r in m.replies.iter().filter(|r| r.author != me) {
-                        items.push((format!("msg:{}", r.id), r.ts, r.author, format!("Reply in {}", place), r.text.clone(), Err((c.id, m.id))));
+                        items.push((format!("msg:{}", r.id), r.ts, r.author, trf!("Reply in {}", place), r.text.clone(), Err((c.id, m.id))));
                     }
                 }
             }
@@ -481,7 +481,7 @@ impl App {
             items.sort_by_key(|x| std::cmp::Reverse(x.1));
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if items.is_empty() {
-                    ui.label(RichText::new("You're all caught up").color(t.text3));
+                    ui.label(RichText::new(tr("You're all caught up")).color(t.text3));
                 }
                 for (key, ts, author, title, text, open) in items.into_iter().take(200) {
                     let w = ui.available_width();
@@ -496,13 +496,13 @@ impl App {
                     }
                     ui.painter().text(r.left_top() + vec2(48.0, 16.0), Align2::LEFT_CENTER, &title, FontId::proportional(13.5), t.text);
                     let who = self.data.member(author).map(|m| m.name.clone()).unwrap_or_default();
-                    let verb = if open.is_ok() { "commented" } else { "replied" };
-                    ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 200.0, r.bottom()))).text(r.left_top() + vec2(48.0, 38.0), Align2::LEFT_CENTER, format!("{} {}: {}", who, verb, text), FontId::proportional(12.5), t.text2);
+                    let line = if open.is_ok() { trf!("{} commented: {}", who, text) } else { trf!("{} replied: {}", who, text) };
+                    ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 200.0, r.bottom()))).text(r.left_top() + vec2(48.0, 38.0), Align2::LEFT_CENTER, line, FontId::proportional(12.5), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(11.5), t.text3);
                     let mut handled = false;
                     if tab == 0 {
                         let br = Rect::from_min_size(pos2(r.right() - 190.0, r.center().y - 13.0), vec2(90.0, 26.0));
-                        let b = put_over(ui, br, egui::Button::new("Mark read").corner_radius(6));
+                        let b = put_over(ui, br, egui::Button::new(tr("Mark read")).corner_radius(6));
                         name_it(&b, &format!("Mark read {}", text));
                         if b.clicked() {
                             self.data.extra.replies_read.push(key.clone());
@@ -1128,7 +1128,7 @@ impl App {
                                 ch |= ui.selectable_value(&mut fld.map, k.to_string(), tr(n)).changed();
                             }
                         });
-                        let rq = ui.checkbox(&mut fld.required, "Required");
+                        let rq = ui.checkbox(&mut fld.required, tr("Required"));
                         name_it(&rq, &format!("Required {}", i + 1));
                         ch |= rq.changed();
                         let up = ui.add_enabled(i > 0, egui::Button::new("\u{2191}").frame(false));
@@ -1148,10 +1148,10 @@ impl App {
                     if fld.map == "dropdown" {
                         ui.horizontal(|ui| {
                             ui.add_space(12.0);
-                            ui.label(RichText::new("Choices").small().color(t.text2));
+                            ui.label(RichText::new(tr("Choices")).small().color(t.text2));
                             // empty pieces are kept while typing so "a, " can grow into "a, b"
                             let mut text = fld.options.join(", ");
-                            let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Red, Green, Blue").desired_width(300.0));
+                            let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(tr("Red, Green, Blue")).desired_width(300.0));
                             name_it(&r, &format!("Choices {}", i + 1));
                             if r.changed() {
                                 fld.options = text.split(',').map(|x| x.trim().to_string()).collect();
@@ -1217,21 +1217,21 @@ impl App {
                             }
                             "due" => {
                                 let mut d = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok();
-                                let b = ui.button(d.map(fmt_date).unwrap_or_else(|| "\u{1F4C5} Pick a date".into()));
+                                let b = ui.button(d.map(fmt_date).unwrap_or_else(|| tr("\u{1F4C5} Pick a date").into()));
                                 name_it(&b, &format!("Answer {}", i + 1));
                                 if let Some(true) = popup(ui, &b, ui.id().with(("form_due", fid, i)), 380.0, |ui| date_menu(ui, &t, ui.id().with(("form_due_cal", fid, i)), &mut d)) {
                                     *v = d.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
                                 }
                             }
                             "dropdown" => {
-                                egui::ComboBox::from_id_salt(("fd", i)).selected_text(if v.is_empty() { "Choose".to_string() } else { v.clone() }).show_ui(ui, |ui| {
+                                egui::ComboBox::from_id_salt(("fd", i)).selected_text(if v.is_empty() { tr("Choose").to_string() } else { v.clone() }).show_ui(ui, |ui| {
                                     for o in fld.options.iter().filter(|o| !o.is_empty()) {
                                         ui.selectable_value(v, o.clone(), o);
                                     }
                                 });
                             }
                             "assignee" => {
-                                let cur = v.parse::<u64>().ok().and_then(|id| members.iter().find(|m| m.0 == id)).map(|m| m.1.clone()).unwrap_or_else(|| "Choose someone".into());
+                                let cur = v.parse::<u64>().ok().and_then(|id| members.iter().find(|m| m.0 == id)).map(|m| m.1.clone()).unwrap_or_else(|| tr("Choose someone").into());
                                 egui::ComboBox::from_id_salt(("fa", i)).selected_text(cur).show_ui(ui, |ui| {
                                     for (id, n) in &members {
                                         ui.selectable_value(v, id.to_string(), n);
@@ -1240,7 +1240,7 @@ impl App {
                             }
                             "checkbox" => {
                                 let mut on = v == "Yes";
-                                let cb = ui.checkbox(&mut on, "Yes");
+                                let cb = ui.checkbox(&mut on, tr("Yes"));
                                 name_it(&cb, &format!("Answer {}", i + 1));
                                 if cb.changed() {
                                     *v = if on { "Yes".into() } else { String::new() };
@@ -1269,7 +1269,7 @@ impl App {
                         match form_answers(&f, &self.form_fill) {
                             Err(e) => self.sweep.form_error = Some(e),
                             Ok(_) if self.data.space_of_list(f.list_id).is_none() => {
-                                self.sweep.form_error = Some("This form has no List to put answers in. Pick one under Edit.".into());
+                                self.sweep.form_error = Some(tr("This form has no List to put answers in. Pick one under Edit.").into());
                             }
                             Ok(a) => {
                                 let name = if a.name.trim().is_empty() { format!("{} submission", f.name) } else { a.name };
@@ -1336,7 +1336,7 @@ impl App {
                         self.wb_color = c;
                     }
                 }
-                let wr = ui.add(egui::DragValue::new(&mut self.sweep.wb_width).range(1.0..=16.0).speed(0.2).max_decimals(1).prefix("width "));
+                let wr = ui.add(egui::DragValue::new(&mut self.sweep.wb_width).range(1.0..=16.0).speed(0.2).max_decimals(1).prefix(tr("width ")));
                 name_it(&wr, "Pen width");
                 ui.separator();
                 let can_undo = self.sweep.wb_undo.iter().any(|u| u.0 == wid);
@@ -1555,11 +1555,11 @@ impl App {
                 ui.horizontal(|ui| {
                     let te = ui.add(egui::TextEdit::singleline(text).desired_width(220.0));
                     name_it(&te, "Reminder text");
-                    let b = ui.button(date.map(fmt_date).unwrap_or_else(|| "\u{1F4C5} Date".into()));
+                    let b = ui.button(date.map(fmt_date).unwrap_or_else(|| tr("\u{1F4C5} Date").into()));
                     popup(ui, &b, ui.id().with(("rem_edit_date", id)), 380.0, |ui| date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date));
                     ui.add(egui::TextEdit::singleline(time).hint_text("09:00").desired_width(54.0));
-                    save = ui.button("Save").clicked() || (te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-                    cancel = ui.button("Cancel").clicked();
+                    save = ui.button(tr("Save")).clicked() || (te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                    cancel = ui.button(tr("Cancel")).clicked();
                 });
                 if save && !text.trim().is_empty() {
                     let ts = reminder_ts(date.unwrap_or_else(today), time);
@@ -1984,7 +1984,7 @@ impl App {
         let t = self.t();
         let starred = self.data.extra.starred.iter().any(|s| s == key);
         let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" }).size(16.0).color(if starred { Color32::from_rgb(0xf8, 0xae, 0x00) } else { t.text2 });
-        let b = ui.add(egui::Button::new(star).frame(false)).on_hover_text(if starred { "Remove from Favorites" } else { "Add to Favorites" });
+        let b = ui.add(egui::Button::new(star).frame(false)).on_hover_text(tr(if starred { "Remove from Favorites" } else { "Add to Favorites" }));
         name_it(&b, if starred { "Unstar" } else { "Star" });
         if b.clicked() {
             if starred {
@@ -2026,14 +2026,14 @@ impl App {
     pub(super) fn planner_add_row(&mut self, ui: &mut Ui, d: NaiveDate, w: f32) {
         let t = self.t();
         let Some((_, text)) = self.sweep.planner_add.as_mut().filter(|p| p.0 == d) else {
-            let b = ui.add(egui::Button::new(RichText::new("+ Add task").color(t.text3)).frame(false));
+            let b = ui.add(egui::Button::new(RichText::new(tr("+ Add task")).color(t.text3)).frame(false));
             name_it(&b, &format!("Add task on {}", d.format("%a %-d")));
             if b.clicked() {
                 self.sweep.planner_add = Some((d, String::new()));
             }
             return;
         };
-        let r = ui.add(egui::TextEdit::singleline(text).hint_text("Task name").desired_width(w - 8.0));
+        let r = ui.add(egui::TextEdit::singleline(text).hint_text(tr("Task name")).desired_width(w - 8.0));
         if r.lost_focus() {
             let name = text.trim().to_string();
             self.sweep.planner_add = None;
@@ -2065,7 +2065,7 @@ impl App {
         if !self.data.extra.notify.reminders || self.data.extra.muted_until > now {
             return;
         }
-        let msg = if due.len() == 1 { format!("Reminder: {}", due[0].1) } else { format!("{} reminders are due", due.len()) };
+        let msg = if due.len() == 1 { trf!("Reminder: {}", due[0].1) } else { trf!("{} reminders are due", due.len()) };
         self.toast = Some((msg.clone(), now));
         if self.persist {
             os_notify("Workboard", &msg);
@@ -2107,12 +2107,12 @@ impl App {
             let hit = match k {
                 "task" => self.task(id).map(|t| ("\u{2611}", t.name.clone(), self.data.list_name(t.list_id), Hit::Task(id))),
                 "list" => self.data.location_exists(Location::List(id)).then(|| ("\u{2630}", self.data.list_name(id), self.data.space_of_list(id).map(|s| s.name.clone()).unwrap_or_default(), Hit::Go(Location::List(id)))),
-                "folder" => self.data.location_exists(Location::Folder(id)).then(|| ("\u{1F4C1}", self.data.location_name(Location::Folder(id)), "Folder".into(), Hit::Go(Location::Folder(id)))),
-                _ => self.data.location_exists(Location::Space(id)).then(|| ("\u{25A0}", self.data.location_name(Location::Space(id)), "Space".into(), Hit::Go(Location::Space(id)))),
+                "folder" => self.data.location_exists(Location::Folder(id)).then(|| ("\u{1F4C1}", self.data.location_name(Location::Folder(id)), tr("Folder").into(), Hit::Go(Location::Folder(id)))),
+                _ => self.data.location_exists(Location::Space(id)).then(|| ("\u{25A0}", self.data.location_name(Location::Space(id)), tr("Space").into(), Hit::Go(Location::Space(id)))),
             };
             match hit {
                 Some((g, title, place, hit)) => rows.push(("Link", g, title, place, hit)),
-                None => rows.push(("Link", "\u{26A0}", "Nothing with this link here (it may have been deleted)".into(), String::new(), Hit::Query(String::new()))),
+                None => rows.push(("Link", "\u{26A0}", tr("Nothing with this link here (it may have been deleted)").into(), String::new(), Hit::Query(String::new()))),
             }
             return rows;
         }
@@ -2133,7 +2133,7 @@ impl App {
         if show(2) {
             let mut locs: Vec<SearchRow> = vec![];
             for s in self.data.spaces.iter().filter(|s| !s.archived) {
-                locs.push(("Locations", "\u{25A0}", s.name.clone(), "Space".into(), Hit::Go(Location::Space(s.id))));
+                locs.push(("Locations", "\u{25A0}", s.name.clone(), tr("Space").into(), Hit::Go(Location::Space(s.id))));
                 for f in &s.folders {
                     locs.push(("Locations", "\u{1F4C1}", f.name.clone(), s.name.clone(), Hit::Go(Location::Folder(f.id))));
                     for l in f.lists.iter().filter(|l| !l.archived) {
@@ -2152,16 +2152,16 @@ impl App {
         }
         if show(3) {
             let docs = self.data.docs.iter().filter(|d| !d.archived && (has(&d.title) || (ql.len() > 2 && d.body.to_lowercase().contains(&ql)))).take(many(3));
-            rows.extend(docs.map(|d| ("Docs", "\u{1F4C4}", d.title.clone(), "Doc".into(), Hit::Doc(d.id))));
+            rows.extend(docs.map(|d| ("Docs", "\u{1F4C4}", d.title.clone(), tr("Doc").into(), Hit::Doc(d.id))));
         }
         if show(4) {
             let chans = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && has(&c.name)).take(many(4));
-            rows.extend(chans.map(|c| ("Channels", "#", c.name.clone(), "Channel".into(), Hit::Chat(c.id))));
+            rows.extend(chans.map(|c| ("Channels", "#", c.name.clone(), tr("Channel").into(), Hit::Chat(c.id))));
         }
         if show(5) && ql.len() > 1 {
             let mut n = 0;
             'outer: for c in &self.data.channels {
-                let place = if c.kind == ChannelKind::Direct { "Direct message".to_string() } else { format!("#{}", c.name) };
+                let place = if c.kind == ChannelKind::Direct { tr("Direct message").to_string() } else { format!("#{}", c.name) };
                 for m in c.messages.iter().chain(c.messages.iter().flat_map(|m| m.replies.iter())) {
                     if m.text.to_lowercase().contains(&ql) {
                         rows.push(("Messages", "\u{1F4AC}", truncate(&m.text, 60), place.clone(), Hit::Chat(c.id)));
@@ -2176,17 +2176,17 @@ impl App {
         if show(6) {
             let x = &self.data.extra;
             let mut apps: Vec<SearchRow> = vec![];
-            apps.extend(x.whiteboards.iter().filter(|w| has(&w.name)).map(|w| ("Apps", "\u{1F3A8}", w.name.clone(), "Whiteboard".into(), Hit::Whiteboard(w.id))));
-            apps.extend(x.forms.iter().filter(|f| has(&f.name)).map(|f| ("Apps", "\u{1F4CB}", f.name.clone(), "Form".into(), Hit::Form(f.id))));
-            apps.extend(x.dashboards.iter().filter(|d| has(&d.name)).map(|d| ("Apps", "\u{1F4CA}", d.name.clone(), "Dashboard".into(), Hit::Dashboard(d.id))));
-            apps.extend(x.goals.iter().filter(|g| has(&g.name)).map(|g| ("Apps", "\u{25CE}", g.name.clone(), "Goal".into(), Hit::Goal(g.id))));
+            apps.extend(x.whiteboards.iter().filter(|w| has(&w.name)).map(|w| ("Apps", "\u{1F3A8}", w.name.clone(), tr("Whiteboard").into(), Hit::Whiteboard(w.id))));
+            apps.extend(x.forms.iter().filter(|f| has(&f.name)).map(|f| ("Apps", "\u{1F4CB}", f.name.clone(), tr("Form").into(), Hit::Form(f.id))));
+            apps.extend(x.dashboards.iter().filter(|d| has(&d.name)).map(|d| ("Apps", "\u{1F4CA}", d.name.clone(), tr("Dashboard").into(), Hit::Dashboard(d.id))));
+            apps.extend(x.goals.iter().filter(|g| has(&g.name)).map(|g| ("Apps", "\u{25CE}", g.name.clone(), tr("Goal").into(), Hit::Goal(g.id))));
             if !(ql.is_empty() && kind == 0) {
                 rows.extend(apps.into_iter().take(many(6)));
             }
         }
         if show(7) && !(ql.is_empty() && kind == 0) {
             let people = self.data.members.iter().filter(|m| has(&m.name) || (!ql.is_empty() && m.email.to_lowercase().contains(&ql))).take(many(7));
-            rows.extend(people.map(|m| ("People", "\u{1F464}", m.name.clone(), if m.email.is_empty() { m.role.clone() } else { m.email.clone() }, Hit::Person(m.id))));
+            rows.extend(people.map(|m| ("People", "\u{1F464}", m.name.clone(), if m.email.is_empty() { super::menus::role_text(&m.role).to_string() } else { m.email.clone() }, Hit::Person(m.id))));
         }
         rows
     }

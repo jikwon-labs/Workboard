@@ -159,7 +159,7 @@ impl App {
                 self.actions.push(Action::Replace(e));
             }
         } else if !manual {
-            self.toast = Some(("Sort by Manual to drag tasks into your own order".into(), now_ts()));
+            self.toast = Some((tr("Sort by Manual to drag tasks into your own order").into(), now_ts()));
         }
     }
 
@@ -278,15 +278,15 @@ impl App {
         let mut close = false;
         egui::Window::new("Delete tasks").title_bar(false).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).order(egui::Order::Foreground).show(ctx, |ui| {
             ui.set_width(320.0);
-            ui.label(RichText::new(if n == 1 { "Delete 1 task?".to_string() } else { format!("Delete {} tasks?", n) }).strong().size(16.0));
+            ui.label(RichText::new(if n == 1 { tr("Delete 1 task?").to_string() } else { trf!("Delete {} tasks?", n) }).strong().size(16.0));
             ui.add_space(4.0);
-            ui.label(RichText::new("Their subtasks go too. You can undo right after, or restore them from Trash.").color(t.text2));
+            ui.label(RichText::new(tr("Their subtasks go too. You can undo right after, or restore them from Trash.")).color(t.text2));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
-                let del = ui.add(egui::Button::new(RichText::new("Delete").color(Color32::WHITE)).fill(t.danger));
+                let del = ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger));
                 name_it(&del, "Confirm delete");
                 if del.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     for id in self.selected.drain() {
@@ -313,9 +313,9 @@ impl App {
         egui::Area::new(egui::Id::new("undo_bar")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -24.0]).show(ctx, |ui| {
             egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).corner_radius(8).inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(if n == 1 { "Task deleted".to_string() } else { format!("{} tasks deleted", n) }).color(Color32::WHITE));
+                    ui.label(RichText::new(if n == 1 { tr("Task deleted").to_string() } else { trf!("{} tasks deleted", n) }).color(Color32::WHITE));
                     ui.add_space(8.0);
-                    let b = ui.add(egui::Button::new(RichText::new("Undo").color(Color32::from_rgb(140, 170, 255)).strong()).frame(false));
+                    let b = ui.add(egui::Button::new(RichText::new(tr("Undo")).color(Color32::from_rgb(140, 170, 255)).strong()).frame(false));
                     name_it(&b, "Undo delete");
                     if b.clicked() {
                         undo = true;
@@ -340,7 +340,7 @@ impl App {
     pub(super) fn group_menu(&mut self, ui: &mut Ui, g: &Group) {
         ui.set_min_width(200.0);
         let collapsed = self.collapsed.contains(&g.key);
-        if ui.button(if collapsed { "Expand group" } else { "Collapse group" }).clicked() {
+        if ui.button(tr(if collapsed { "Expand group" } else { "Collapse group" })).clicked() {
             if collapsed {
                 self.collapsed.remove(&g.key);
             } else {
@@ -348,22 +348,22 @@ impl App {
             }
             parity::close_any(ui);
         }
-        if ui.button("Collapse all groups").clicked() {
+        if ui.button(tr("Collapse all groups")).clicked() {
             let tasks = self.filtered();
             let keys: Vec<String> = self.groups(&tasks, false).into_iter().map(|g| g.key).collect();
             self.collapsed.extend(keys);
             parity::close_any(ui);
         }
-        if ui.button("Expand all groups").clicked() {
+        if ui.button(tr("Expand all groups")).clicked() {
             self.collapsed.clear();
             parity::close_any(ui);
         }
         ui.separator();
-        if ui.button("Select all in group").clicked() {
+        if ui.button(tr("Select all in group")).clicked() {
             self.selected.extend(g.tasks.iter().copied());
             parity::close_any(ui);
         }
-        if ui.button("+ Add task").clicked() {
+        if ui.button(tr("+ Add task")).clicked() {
             self.adding = Some((g.key.clone(), String::new()));
             self.collapsed.remove(&g.key);
             parity::close_any(ui);
@@ -391,7 +391,7 @@ impl App {
                 ui.painter().rect_filled(r.shrink(1.0), 4.0, t.hover);
             }
             ui.painter().text(r.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(12.0), t.text2);
-            let resp = resp.on_hover_text(what);
+            let resp = resp.on_hover_text(tr(what));
             match what {
                 "Add subtask" => {
                     if resp.clicked() {
@@ -464,7 +464,7 @@ impl App {
         let w = ui.available_width();
         ui.horizontal(|ui| {
             ui.add_space(14.0 + 26.0 + 40.0);
-            let r = ui.add(egui::TextEdit::singleline(text).hint_text("Subtask name").desired_width((w - 300.0).max(200.0)));
+            let r = ui.add(egui::TextEdit::singleline(text).hint_text(tr("Subtask name")).desired_width((w - 300.0).max(200.0)));
             name_field(&r, "Subtask name");
             focus_once(ui, &r);
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -476,10 +476,10 @@ impl App {
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(tr("Cancel")).clicked() {
                 cancel = true;
             }
-            if primary_button(ui, &t, "Save").clicked() {
+            if primary_button(ui, &t, tr("Save")).clicked() {
                 submit = true;
             }
         });
@@ -499,7 +499,7 @@ pub(super) fn tag_menu(ui: &mut Ui, t: &Theme, all: &[String], tags: &mut Vec<St
     let mut changed = false;
     let id = ui.id().with("new_tag");
     let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Search or add tags...").desired_width(f32::INFINITY));
+    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(tr("Search or add tags...")).desired_width(f32::INFINITY));
     name_field(&r, "Tag name");
     focus_once(ui, &r);
     let q = text.trim().to_lowercase();

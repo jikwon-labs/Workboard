@@ -884,7 +884,7 @@ impl App {
                 }
                 let ids: Vec<u64> = tasks.iter().filter(|x| x.tags.is_empty()).map(|x| x.id).collect();
                 if !ids.is_empty() || include_empty {
-                    out.push(Group { key: "t:".into(), label: "NO TAGS".into(), color: t.text3, status: None, priority: None, assignee: None, due: None, tasks: ids });
+                    out.push(Group { key: "t:".into(), label: tr("NO TAGS").into(), color: t.text3, status: None, priority: None, assignee: None, due: None, tasks: ids });
                 }
             }
             GroupBy::List => {
@@ -2169,13 +2169,13 @@ impl App {
             name_it(&pr, "Table columns");
             ui.painter().vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
             ui.painter().text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(15.0), if pr.hovered() { t.text } else { t.text3 });
-            let mut choices: Vec<(String, String)> = TableCol::FIXED.iter().map(|c| (c.key(), c.label().to_string())).collect();
-            choices.extend(fields.iter().map(|f| (TableCol::Field(f.id).key(), f.name.clone())));
+            let mut choices: Vec<(String, String, String)> = TableCol::FIXED.iter().map(|c| (c.key(), c.label().to_string(), tr(c.label()).to_string())).collect();
+            choices.extend(fields.iter().map(|f| (TableCol::Field(f.id).key(), f.name.clone(), f.name.clone())));
             popup(ui, &pr, ui.id().with("thead_plus_pop"), 220.0, |ui| {
-                ui.label(RichText::new("Columns").small().color(t.text3));
-                for (key, label) in &choices {
+                ui.label(RichText::new(tr("Columns")).small().color(t.text3));
+                for (key, label, shown) in &choices {
                     let mut on = !self.hidden_cols.contains(key);
-                    let r = ui.checkbox(&mut on, label.as_str());
+                    let r = ui.checkbox(&mut on, shown.as_str());
                     name_it(&r, &format!("Column {}", label));
                     if r.changed() {
                         if on {
@@ -2186,7 +2186,7 @@ impl App {
                     }
                 }
                 if fields.is_empty() {
-                    ui.label(RichText::new("Custom Fields you add show here too.").small().color(t.text3));
+                    ui.label(RichText::new(tr("Custom Fields you add show here too.")).small().color(t.text3));
                 }
             });
             if new_sort != sort {
@@ -2560,7 +2560,7 @@ impl App {
                         let br = Rect::from_center_size(r.right_center() - vec2(118.0, 0.0), vec2(26.0, 26.0));
                         let b = put_over(ui, br, egui::Button::new("\u{2610}").frame(false));
                         name_it(&b, &format!("Resolve comment on {}", tname));
-                        if b.on_hover_text("Resolve").clicked() {
+                        if b.on_hover_text(tr("Resolve")).clicked() {
                             if let Some(c) = self.data.tasks.iter_mut().find(|x| x.id == tid).and_then(|x| x.activity.iter_mut().find(|c| c.id == a.id && a.id != 0)) {
                                 c.resolved = true;
                                 self.dirty = true;
@@ -2992,10 +2992,10 @@ impl App {
                         if hover {
                             let b = ui.put(Rect::from_center_size(pos2(r.right() - 162.0, r.center().y), vec2(22.0, 22.0)), egui::Button::new(RichText::new("\u{2B11}").size(12.0).color(t.text2)).frame(false));
                             name_it(&b, &format!("Make top-level {}", s.name));
-                            top = b.on_hover_text("Make it a task of its own").clicked();
+                            top = b.on_hover_text(tr("Make it a task of its own")).clicked();
                             let b = ui.put(Rect::from_center_size(pos2(r.right() - 186.0, r.center().y), vec2(22.0, 22.0)), egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text2)).frame(false));
                             name_it(&b, &format!("Delete subtask {}", s.name));
-                            del = b.on_hover_text("Delete").clicked();
+                            del = b.on_hover_text(tr("Delete")).clicked();
                         }
                         if del {
                             self.actions.push(Action::DeleteTask(s.id));
@@ -3029,7 +3029,7 @@ impl App {
                         sub_on = true;
                     }
                     ui.data_mut(|d| d.insert_temp(sub_on_id, sub_on));
-                    if add_line(ui, &t, "+  Add existing task").clicked() {
+                    if add_line(ui, &t, tr("+  Add existing task")).clicked() {
                         self.modal = Some(Modal::PickTask { task: tid, mode: TaskPick::Child, query: String::new() });
                     }
                     ui.add_space(16.0);
@@ -3152,7 +3152,7 @@ impl App {
                             find = if find.is_some() { None } else { Some(String::new()) };
                         }
                         // hide the "changed status..." lines
-                        let only = ui.selectable_label(only_comments, RichText::new("Comments only").small());
+                        let only = ui.selectable_label(only_comments, RichText::new(tr("Comments only")).small());
                         name_it(&only, "Comments only");
                         if only.clicked() {
                             only_comments = !only_comments;
@@ -3188,7 +3188,7 @@ impl App {
                     let members: Vec<(u64, String)> = self.data.members.iter().filter(|m| !m.invited && m.name.to_lowercase().starts_with(&typed)).map(|m| (m.id, m.name.clone())).collect();
                     popup(ui, &at, win_id.with("mention_popup"), 200.0, |ui| {
                         if members.is_empty() {
-                            ui.label(RichText::new("No one by that name").color(t.text3));
+                            ui.label(RichText::new(tr("No one by that name")).color(t.text3));
                         }
                         for (id, name) in &members {
                             let m = self.data.member(*id).cloned().unwrap_or_default();

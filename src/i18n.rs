@@ -23,6 +23,7 @@ mod ko_more;
 mod ko_parity;
 mod ko_shell;
 mod ko_small;
+mod ko_sweep;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
@@ -77,7 +78,7 @@ fn table() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-const ALL: [&[(&str, &str)]; 9] = [
+const ALL: [&[(&str, &str)]; 10] = [
     ko_common::T,
     ko_app::T,
     ko_chat::T,
@@ -87,6 +88,7 @@ const ALL: [&[(&str, &str)]; 9] = [
     ko_parity::T,
     ko_shell::T,
     ko_small::T,
+    ko_sweep::T,
 ];
 
 /// The text in the interface language.
@@ -130,7 +132,7 @@ pub fn history_line(who: &str, text: &str) -> String {
 
 fn history_ko(text: &str) -> Option<String> {
     // (English pattern, Korean): {} values in order, {0} {1} in Korean
-    const LINES: [(&str, &str); 12] = [
+    const LINES: [(&str, &str); 23] = [
         ("changed status from {} to {}", "\u{c0c1}\u{d0dc}\u{b97c} {0}\u{c5d0}\u{c11c} {1}(\u{c73c})\u{b85c} \u{bcc0}\u{acbd}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("set priority to {}", "\u{c6b0}\u{c120}\u{c21c}\u{c704}\u{b97c} {0}(\u{c73c})\u{b85c} \u{c124}\u{c815}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("changed due date to {}", "\u{b9c8}\u{ac10}\u{c77c}\u{c744} {0}(\u{c73c})\u{b85c} \u{bcc0}\u{acbd}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
@@ -143,6 +145,17 @@ fn history_ko(text: &str) -> Option<String> {
         ("archived this task", "\u{c774} \u{c791}\u{c5c5}\u{c744} \u{bcf4}\u{ad00}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("unarchived this task", "\u{c774} \u{c791}\u{c5c5}\u{c758} \u{bcf4}\u{ad00}\u{c744} \u{d574}\u{c81c}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("completed a {} repeat; next due {}", "{0} \u{bc18}\u{bcf5}\u{c744} \u{c644}\u{b8cc}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}. \u{b2e4}\u{c74c} \u{b9c8}\u{ac10}\u{c77c}: {1}"),
+        ("renamed this task to \"{}\"", "작업 이름을 바꿨습니다: \"{0}\""),
+        ("updated the description", "설명을 수정했습니다"),
+        ("set the time estimate to {}", "예상 시간을 {0}(으)로 설정했습니다"),
+        ("removed the time estimate", "예상 시간을 제거했습니다"),
+        ("added tag {}", "태그 {0}을(를) 추가했습니다"),
+        ("removed tag {}", "태그 {0}을(를) 제거했습니다"),
+        ("made this a subtask of {}", "이 작업을 {0}의 하위 작업으로 만들었습니다"),
+        ("made this a top-level task", "이 작업을 최상위 작업으로 만들었습니다"),
+        ("is waiting on {}", "이 작업이 {0}을(를) 기다리도록 설정했습니다"),
+        ("linked {}", "{0}을(를) 연결했습니다"),
+        ("attached {}", "{0}을(를) 첨부했습니다"),
     ];
     for (en, ko) in LINES {
         if let Some(vals) = match_pattern(en, text) {
@@ -455,6 +468,8 @@ mod tests {
         assert_eq!(history_line("Alex", "removed assignee 민준"), "Alex님이 담당자 민준을 제거했습니다");
         assert_eq!(history_line("Alex", "removed assignee 지우"), "Alex님이 담당자 지우를 제거했습니다");
         assert_eq!(history_line("Alex", "commented something odd"), "Alex commented something odd");
+        assert_eq!(history_line("Alex", "added tag 디자인"), "Alex님이 태그 디자인을 추가했습니다");
+        assert_eq!(history_line("Alex", "made this a top-level task"), "Alex님이 이 작업을 최상위 작업으로 만들었습니다");
         set_lang(Lang::En);
         assert_eq!(history_line("Alex", "created this task"), "Alex created this task");
         set_lang(Lang::Ko);

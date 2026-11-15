@@ -250,7 +250,7 @@ impl App {
             ui.label(RichText::new(tr("Tags in use")).small().color(t.text3));
             for g in &sugg {
                 let c = tag_color(g);
-                if menu_row(ui, t, &format!("Tag {}", g), false, |p, at| {
+                if menu_row(ui, t, &trf!("Tag {}", g), false, |p, at| {
                     p.circle_filled(at, 5.0, c);
                 }).clicked() {
                     task.tags.push(g.clone());
@@ -265,7 +265,7 @@ impl App {
     pub(super) fn watchers_header(&mut self, ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) {
         let me = self.data.me;
         let on = task.watchers.contains(&me);
-        let b = ui.add(egui::Button::new(RichText::new(if on { "\u{1F441} Watching" } else { "\u{1F441} Watch" }).size(12.0).color(if on { t.text } else { t.text2 })).frame(false));
+        let b = ui.add(egui::Button::new(RichText::new(tr(if on { "\u{1F441} Watching" } else { "\u{1F441} Watch" })).size(12.0).color(if on { t.text } else { t.text2 })).frame(false));
         name_it(&b, if on { "Stop watching" } else { "Watch task" });
         if b.on_hover_text(tr(if on { "Stop getting updates" } else { "Get updates on this task" })).clicked() {
             if on {
@@ -287,14 +287,14 @@ impl App {
             let shown: Vec<u64> = task.watchers.iter().take(4).copied().collect();
             paint_avatars(ui.painter(), r.left_center() + vec2(2.0, 0.0), 9.0, &shown, &self.data, t.card);
         }
-        let resp = resp.on_hover_text(format!("{} watching", task.watchers.len()));
+        let resp = resp.on_hover_text(trf!("{} watching", task.watchers.len()));
         let data = &self.data;
         popup(ui, &resp, id.with("watchers"), 220.0, |ui| {
             ui.label(RichText::new(tr("Watchers")).small().color(t.text3));
             for m in data.members.iter().filter(|m| !m.invited) {
                 let sel = task.watchers.contains(&m.id);
                 let ring = t.card;
-                let r = menu_row(ui, t, &format!("Watcher {}", m.name), sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
+                let r = menu_row(ui, t, &trf!("Watcher {}", m.name), sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
                 if sel {
                     ui.painter().text(r.rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, "\u{2714}", FontId::proportional(12.0), t.selected_text);
                 }
@@ -610,7 +610,7 @@ impl App {
                 TaskPick::Blocking => ("\u{26A0}  Blocking", t.danger),
                 _ => ("\u{1F517}  Linked", t.text2),
             };
-            ui.label(RichText::new(head).small().color(col));
+            ui.label(RichText::new(tr(head)).small().color(col));
             for oid in ids.iter() {
                 let Some(o) = self.task(*oid).cloned() else { continue };
                 let st = self.data.status_of(&o);
@@ -639,7 +639,7 @@ impl App {
         let r = add_line(ui, t, tr("+  Add relationship"));
         popup(ui, &r, id.with(("rel_add", tid)), 200.0, |ui| {
             for mode in [TaskPick::WaitingOn, TaskPick::Blocking, TaskPick::Linked] {
-                if menu_row(ui, t, mode.title(), false, |_, _| {}).clicked() {
+                if menu_row(ui, t, tr(mode.title()), false, |_, _| {}).clicked() {
                     self.modal = Some(Modal::PickTask { task: tid, mode, query: String::new() });
                     close_popup(ui);
                 }
@@ -678,7 +678,7 @@ impl App {
                     break;
                 }
                 let st = self.data.status_of(o);
-                if menu_row(ui, t, &format!("Pick {}", o.name), false, |p, c| paint_status_circle(p, c, 6.0, &st)).clicked() {
+                if menu_row(ui, t, &trf!("Pick {}", o.name), false, |p, c| paint_status_circle(p, c, 6.0, &st)).clicked() {
                     picked = Some(oid);
                 }
             }
@@ -738,7 +738,7 @@ impl App {
                 ui.label(RichText::new(task.attachments.len().to_string()).color(t.text3));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let b = ui.add(egui::Button::new(RichText::new("\u{1F4CE} Attach").color(t.text2)).frame(false));
+                let b = ui.add(egui::Button::new(RichText::new(tr("\u{1F4CE} Attach")).color(t.text2)).frame(false));
                 name_it(&b, "Attach file");
                 if b.on_hover_text(tr("Attach pictures or videos (or drop them here)")).clicked() {
                     attach = true;
@@ -794,7 +794,7 @@ impl App {
                     let _ = std::process::Command::new("open").arg(p).spawn();
                 }
             } else {
-                self.toast = Some((format!("{} is still downloading", a.name), now_ts()));
+                self.toast = Some((trf!("{} is still downloading", a.name), now_ts()));
             }
         }
         // files on their way
@@ -815,7 +815,7 @@ impl App {
                     }
                     None => {
                         ui.add(egui::Spinner::new().size(12.0));
-                        ui.label(RichText::new(format!("Adding {}...", p.name)).small().color(t.text2));
+                        ui.label(RichText::new(trf!("Adding {}...", p.name)).small().color(t.text2));
                     }
                 }
             });

@@ -455,15 +455,15 @@ impl App {
                             None => (tr("Couldn't save the file").into(), now_ts()),
                         });
                     }
-                    if ui.add(egui::Button::new("Duplicate").frame(false)).on_hover_text("Copy this doc and its pages").clicked() {
+                    if ui.add(egui::Button::new(tr("Duplicate")).frame(false)).on_hover_text(tr("Copy this doc and its pages")).clicked() {
                         if let Some(n) = self.duplicate_doc(id) {
                             self.doc_open = Some(n);
-                            self.toast = Some(("Doc duplicated".into(), now_ts()));
+                            self.toast = Some((tr("Doc duplicated").into(), now_ts()));
                         }
                     }
-                    if ui.add(egui::Button::new("Copy link").frame(false)).clicked() {
+                    if ui.add(egui::Button::new(tr("Copy link")).frame(false)).clicked() {
                         ui.ctx().copy_text(format!("workboard://doc/{}", id));
-                        self.toast = Some(("Link copied".into(), now_ts()));
+                        self.toast = Some((tr("Link copied").into(), now_ts()));
                     }
                     let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else { return };
                     let d = &mut self.data.docs[idx];
@@ -795,7 +795,7 @@ impl App {
         });
     }
 
-    fn new_team(&mut self) {
+    pub(super) fn new_team(&mut self) {
         let id = self.data.new_id();
         let n = self.data.extra.teams.len();
         self.data.extra.teams.push(Team { id, name: format!("Team {}", n + 1), members: vec![self.data.me], color: STATUS_PALETTE[1 + (n * 3) % 13] });
@@ -817,7 +817,7 @@ impl App {
                 let me = self.data.me;
                 let teams: Vec<Team> = self.data.extra.teams.iter().filter(|x| !mine || x.members.contains(&me)).cloned().collect();
                 if teams.is_empty() && mine && !self.data.extra.teams.is_empty() {
-                    ui.label(RichText::new("You're not in any team yet").color(t.text3));
+                    ui.label(RichText::new(tr("You're not in any team yet")).color(t.text3));
                 } else if teams.is_empty() {
                     ui.add_space(60.0);
                     ui.vertical_centered(|ui| {
@@ -1198,7 +1198,7 @@ impl App {
                     task.time_entries.retain(|e| !((0..7).contains(&(ts_day(e.start) - ws).num_days()) && entry_is(e, &assignees, me)));
                     if task.time_entries.len() != before {
                         self.dirty = true;
-                        self.toast = Some((format!("Removed this week's time on {}", task.name), now_ts()));
+                        self.toast = Some((trf!("Removed this week's time on {}", task.name), now_ts()));
                     }
                 }
             }
@@ -1286,7 +1286,7 @@ impl App {
                         if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
                             remove = Some((*id, *k));
                         }
-                        let ed = ui.add(egui::Button::new(RichText::new("Edit").small()).frame(false));
+                        let ed = ui.add(egui::Button::new(RichText::new(tr("Edit")).small()).frame(false));
                         name_it(&ed, &format!("Edit entry {}", name));
                         if ed.clicked() {
                             let start = local.map(|d| d.format("%H:%M").to_string()).unwrap_or_else(|| "09:00".into());

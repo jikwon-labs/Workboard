@@ -180,7 +180,55 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
     if let Some(t) = task {
         v.push(("modal track time".into(), Box::new(move |a: &mut App| a.modal = Some(Modal::TrackTime { task: t }))));
         v.push(("modal move tasks".into(), Box::new(move |a: &mut App| a.modal = Some(Modal::MoveTasks { ids: vec![t], query: String::new() }))));
+        for mode in [TaskPick::Parent, TaskPick::Child, TaskPick::WaitingOn, TaskPick::Blocking, TaskPick::Linked] {
+            v.push((format!("modal pick task {:?}", mode), Box::new(move |a: &mut App| a.modal = Some(Modal::PickTask { task: t, mode, query: String::new() }))));
+        }
+        v.push(("bulk delete".into(), Box::new(move |a: &mut App| {
+            a.section = Section::Home;
+            a.loc = Location::List(list);
+            a.view = ViewKind::List;
+            a.selected = [t].into_iter().collect();
+            a.confirm_bulk_delete = true;
+        })));
     }
+    // the small apps, each with one item made the way the app makes it
+    v.push(("modal trash".into(), Box::new(move |a: &mut App| {
+        a.open_task = None;
+        a.confirm_bulk_delete = false;
+        a.selected.clear();
+        let id = a.data.new_id();
+        a.data.extra.trash.push(TrashItem { id, kind: "Doc".into(), title: String::new(), deleted: now_ts(), payload: String::new() });
+        a.modal = Some(Modal::Trash);
+    })));
+    v.push(("search".into(), Box::new(move |a: &mut App| a.palette = Some("e".into()))));
+    v.push(("whiteboard".into(), Box::new(move |a: &mut App| {
+        a.palette = None;
+        a.new_whiteboard();
+    })));
+    v.push(("form".into(), Box::new(move |a: &mut App| a.new_form())));
+    v.push(("dashboard".into(), Box::new(move |a: &mut App| {
+        a.section = Section::Dashboards;
+        a.new_dashboard("Workspace overview");
+    })));
+    v.push(("team".into(), Box::new(move |a: &mut App| {
+        a.section = Section::Teams;
+        a.new_team();
+    })));
+    for f in 1..=4u8 {
+        v.push((format!("teams tab {}", f), Box::new(move |a: &mut App| {
+            a.section = Section::Teams;
+            a.team_open = None;
+            a.hub_filter = f;
+        })));
+    }
+    for tab in 0..4u8 {
+        v.push((format!("inbox tab {}", tab), Box::new(move |a: &mut App| {
+            a.section = Section::Home;
+            a.loc = Location::Inbox;
+            a.inbox_tab = tab;
+        })));
+    }
+    v.push(("notepad".into(), Box::new(move |a: &mut App| a.notepad_open = true)));
     v
 }
 
@@ -190,12 +238,13 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
 fn korean_screens_have_no_english_left() {
     let mut h = Ui1::new();
     set_lang(Lang::Ko);
-    let data = data_strings(&h.app.data);
     let mut left: Vec<String> = vec![];
     for (name, go) in screens(&h) {
         h.app.modal = None;
         go(&mut h.app);
         h.settle();
+        // names of things a screen made (a new team, form...) are workspace data
+        let data = data_strings(&h.app.data);
         let mut shown = vec![];
         texts(&h.shapes, &mut shown);
         for s in shown {

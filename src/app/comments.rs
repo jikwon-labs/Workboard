@@ -317,7 +317,7 @@ impl App {
                 }
                 ui.label(RichText::new(fmt_ago(a.ts)).small().color(t.text3));
                 if a.edited.is_some() {
-                    ui.label(RichText::new("(edited)").small().color(t.text3));
+                    ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let more = ui.add(egui::Button::new(RichText::new("\u{22EF}").color(t.text2)).frame(false));

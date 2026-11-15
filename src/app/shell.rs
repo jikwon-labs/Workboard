@@ -1118,7 +1118,7 @@ impl App {
                                     Location::Folder(id) => self.folder_menu(ui, id),
                                     Location::Space(id) => self.space_menu(ui, id),
                                     _ => {
-                                        if ui.button("Remove from Favorites").clicked() {
+                                        if ui.button(tr("Remove from Favorites")).clicked() {
                                             self.actions.push(Action::ToggleFavorite(f));
                                             ui.close_menu();
                                         }
@@ -2495,7 +2495,7 @@ impl App {
                                 self.group_pill(ui, g);
                                 ui.label(RichText::new(g.tasks.len().to_string()).color(accent));
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    let b = ui.add(egui::Button::new(RichText::new("\u{2039}").color(t.text3).size(15.0)).frame(false)).on_hover_text("Collapse group");
+                                    let b = ui.add(egui::Button::new(RichText::new("\u{2039}").color(t.text3).size(15.0)).frame(false)).on_hover_text(tr("Collapse group"));
                                     name_it(&b, &format!("Collapse group {}", g.label));
                                     if b.clicked() {
                                         self.collapsed.insert(ckey.clone());
@@ -2589,10 +2589,10 @@ impl App {
                 cancel = true;
             }
             ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     cancel = true;
                 }
-                if primary_button(ui, &t, "Save").clicked() {
+                if primary_button(ui, &t, tr("Save")).clicked() {
                     submit = true;
                 }
             });

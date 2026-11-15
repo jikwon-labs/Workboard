@@ -711,3 +711,38 @@ fn sidebar_shortens_long_names_with_an_ellipsis() {
         "shortened with an ellipsis"
     );
 }
+
+#[test]
+fn table_fits_its_columns_and_shortens_names_and_tags() {
+    let mut h = Ui1::new();
+    let base = task_named(&h, "Write copy for landing page").clone();
+    let mut long = base.clone();
+    long.id = 60_000;
+    long.name = LONG_TASK.into();
+    long.tags = vec![
+        "release-blocker-for-launch".into(),
+        "bug".into(),
+        "design".into(),
+    ];
+    long.parent = None;
+    h.app.data.tasks.push(long);
+    h.click("View Table");
+    let created = h.rect("Sort by Date created");
+    assert!(
+        created.right() <= h.size.x - 6.0,
+        "Created {:?} fits the window",
+        created
+    );
+    let page = Rect::from_min_max(pos2(320.0, 120.0), h.size.to_pos2());
+    let cut = h.cut_texts(page);
+    assert!(cut.is_empty(), "cut in the table: {:?}", cut);
+    let row_y = h.rect(&format!("Rename {}", LONG_TASK)).center().y;
+    assert!(
+        h.painted_text("+2")
+            .iter()
+            .chain(h.painted_text("+1").iter())
+            .chain(h.painted_text("+3").iter())
+            .any(|(r, _)| (r.center().y - row_y).abs() < 10.0),
+        "the tags that don't fit are counted"
+    );
+}

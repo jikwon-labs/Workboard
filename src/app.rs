@@ -3619,12 +3619,15 @@ impl App {
                                     }
                                     on_cell = true;
                                 } else {
-                                    ui.painter().with_clip_rect(cell.shrink(2.0)).text(
+                                    // shortened to leave room for the pencil
+                                    paint_fit(
+                                        ui,
                                         cell.left_center() + vec2(8.0, 0.0),
                                         Align2::LEFT_CENTER,
                                         &task.name,
                                         FontId::proportional(13.0),
                                         t.text,
+                                        cell.width() - 8.0 - 32.0,
                                     );
                                     // a pencil on hover renames in place
                                     let pen = Rect::from_center_size(
@@ -3742,8 +3745,38 @@ impl App {
                                         .layout(Layout::left_to_right(Align::Center)),
                                 );
                                 child.set_clip_rect(cell);
-                                for tag in &task.tags {
-                                    chip(&mut child, tag, tag_color(tag));
+                                // the tags that fit whole, then "+N" (hover lists all)
+                                let font = FontId::proportional(11.0);
+                                let gap = child.spacing().item_spacing.x;
+                                let measure = child.painter().clone();
+                                let width_of = |s: &str| {
+                                    measure
+                                        .layout_no_wrap(s.to_string(), font.clone(), t.text)
+                                        .size()
+                                        .x
+                                        + 12.0
+                                };
+                                let plus_w = width_of(&format!("+{}", task.tags.len()));
+                                let mut shown = 0;
+                                for (k, tag) in task.tags.iter().enumerate() {
+                                    let short = fit_text(&measure, tag, &font, 90.0);
+                                    let rest = task.tags.len() - k - 1;
+                                    let need = width_of(&short)
+                                        + if rest > 0 { gap + plus_w } else { 0.0 };
+                                    if need > child.available_width() {
+                                        break;
+                                    }
+                                    chip(&mut child, &short, tag_color(tag))
+                                        .on_hover_text(tag.as_str());
+                                    shown += 1;
+                                }
+                                if shown < task.tags.len() {
+                                    chip(
+                                        &mut child,
+                                        &format!("+{}", task.tags.len() - shown),
+                                        t.text3,
+                                    )
+                                    .on_hover_text(task.tags.join(", "));
                                 }
                             }
                             TableCol::Tracked => {

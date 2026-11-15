@@ -3092,7 +3092,12 @@ impl App {
                     .order(egui::Order::Tooltip)
                     .fixed_pos(pos + vec2(10.0, 6.0))
                     .show(ui.ctx(), |ui| {
-                        ui.label(RichText::new(tr("\u{1F4C5} Drop on a day")).small());
+                        icons::icon_label(
+                            ui,
+                            "calendar",
+                            RichText::new(tr("Drop on a day")).small(),
+                            t.text2,
+                        );
                     });
             }
         }
@@ -3239,7 +3244,8 @@ impl App {
                                 &st,
                             );
                             // the name shortened to leave room for the subtask count
-                            let badge = format!("\u{2934} {}", nsub);
+                            // a subtasks icon and the count
+                            let badge = nsub.to_string();
                             let badge_w = if *nsub > 0 {
                                 ui.painter()
                                     .layout_no_wrap(
@@ -3250,6 +3256,7 @@ impl App {
                                     .size()
                                     .x
                                     + 6.0
+                                    + 16.0
                             } else {
                                 0.0
                             };
@@ -3263,8 +3270,15 @@ impl App {
                                 r.right() - 6.0 - badge_w - (x0 + 26.0),
                             );
                             if *nsub > 0 {
+                                icons::line_icon_scaled(
+                                    ui.painter(),
+                                    "subtasks",
+                                    pos2(nr.right() + 12.0, r.center().y),
+                                    t.text3,
+                                    0.75,
+                                );
                                 ui.painter().text(
-                                    pos2(nr.right() + 6.0, r.center().y),
+                                    pos2(nr.right() + 21.0, r.center().y),
                                     Align2::LEFT_CENTER,
                                     badge,
                                     FontId::proportional(11.5),
@@ -3725,12 +3739,12 @@ impl App {
                                             5.0,
                                             if pr.hovered() { t.border } else { t.card },
                                         );
-                                        ui.painter().text(
+                                        icons::line_icon_scaled(
+                                            ui.painter(),
+                                            "pen",
                                             pen.center(),
-                                            Align2::CENTER_CENTER,
-                                            "\u{270E}",
-                                            FontId::proportional(13.0),
                                             t.text2,
+                                            0.8,
                                         );
                                     }
                                     if pr.clicked() {
@@ -4479,7 +4493,9 @@ impl App {
                 let seen = self.data.extra.replies_seen;
                 if mode == 0 {
                     self.reminders_block(ui);
-                    if ui.button(tr("\u{23F0}  Create Reminder")).clicked() {
+                    if icons::icon_button(ui, &t, "alarm", tr("Create Reminder"), "Create Reminder", true)
+                        .clicked()
+                    {
                         self.modal = Some(Modal::Reminder {
                             text: String::new(),
                             date: Some(today()),
@@ -4632,7 +4648,8 @@ impl App {
                                     r.right_center() - vec2(118.0, 0.0),
                                     vec2(26.0, 26.0),
                                 );
-                                let b = put_over(ui, br, ghost(egui::Button::new("\u{2610}")));
+                                let b = put_over(ui, br, ghost(egui::Button::new("")));
+                                icons::line_icon(ui.painter(), "task", br.center(), t.text2);
                                 name_it(&b, &format!("Resolve comment on {}", tname));
                                 if b.on_hover_text(tr("Resolve")).clicked() {
                                     if let Some(c) =
@@ -4784,10 +4801,7 @@ impl App {
                                 }
                             }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui
-                                    .add(ghost(egui::Button::new(
-                                        RichText::new("\u{2716}").size(14.0),
-                                    )))
+                                if icons::icon_button(ui, &t, "close", "", "Close task", false)
                                     .on_hover_text(tr("Close"))
                                     .clicked()
                                 {
@@ -4969,7 +4983,12 @@ impl App {
                             .min_col_width(90.0)
                             .show(ui, |ui| {
                                 // Status
-                                ui.label(RichText::new(tr("\u{25CE}  Status")).color(t.text2));
+                                icons::icon_label(
+                                    ui,
+                                    "status",
+                                    RichText::new(tr("Status")).color(t.text2),
+                                    t.text2,
+                                );
                                 ui.horizontal(|ui| {
                                     ui.set_width(field_w - 110.0);
                                     let st = self.data.status_of(&task);
@@ -4982,23 +5001,32 @@ impl App {
                                         statuses.iter().find(|s| s.kind == StatusKind::Closed)
                                     {
                                         let is_done = task.status == done.name;
-                                        let txt = if is_done {
-                                            tr("\u{2714} Done")
-                                        } else {
-                                            "\u{2714}"
-                                        };
-                                        let b = Tint(
-                                            egui::Button::new(RichText::new(txt).color(
-                                                if is_done { Color32::WHITE } else { t.text2 },
-                                            ))
-                                            .fill(if is_done {
-                                                rgb(done.color)
-                                            } else {
-                                                Color32::TRANSPARENT
-                                            })
-                                            .stroke(Stroke::new(1.0, t.border)),
+                                        // a tick drawn on the button, with "Done" once done
+                                        let txt = if is_done { tr("Done") } else { "" };
+                                        let fg = if is_done { Color32::WHITE } else { t.text2 };
+                                        let slot = ui.painter().add(egui::Shape::Noop);
+                                        let b = icons::icon_button_ex(
+                                            ui,
+                                            &t,
+                                            "check",
+                                            txt,
+                                            "Mark complete",
+                                            !is_done,
+                                            0.0,
+                                            fg,
+                                            fg,
                                         );
-                                        if ui.add(b).on_hover_text(tr("Mark complete")).clicked() {
+                                        if is_done {
+                                            ui.painter().set(
+                                                slot,
+                                                egui::epaint::RectShape::filled(
+                                                    b.rect,
+                                                    6.0,
+                                                    rgb(done.color),
+                                                ),
+                                            );
+                                        }
+                                        if b.on_hover_text(tr("Mark complete")).clicked() {
                                             task.status = if is_done {
                                                 statuses[0].name.clone()
                                             } else {
@@ -5011,7 +5039,12 @@ impl App {
                                     ui.end_row();
                                 }
                                 // Assignees
-                                ui.label(RichText::new(tr("\u{1F464}  Assignees")).color(t.text2));
+                                icons::icon_label(
+                                    ui,
+                                    "person",
+                                    RichText::new(tr("Assignees")).color(t.text2),
+                                    t.text2,
+                                );
                                 let (ar, aresp) = ui.allocate_exact_size(
                                     vec2(field_w - 110.0, 26.0),
                                     Sense::click(),
@@ -5042,7 +5075,12 @@ impl App {
                                 });
                                 ui.end_row();
                                 // Dates
-                                ui.label(RichText::new(tr("\u{1F4C5}  Dates")).color(t.text2));
+                                icons::icon_label(
+                                    ui,
+                                    "calendar",
+                                    RichText::new(tr("Dates")).color(t.text2),
+                                    t.text2,
+                                );
                                 ui.horizontal(|ui| {
                                     let s_txt =
                                         fmt_start(&task).unwrap_or_else(|| tr("Start").into());
@@ -5080,13 +5118,13 @@ impl App {
                                         dates_menu(ui, &t, win_id.with("dates2"), &mut task)
                                     });
                                     if task.recur.is_some() {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "\u{1F501} {}",
-                                                tr(recur_label(&task.recur))
-                                            ))
-                                            .small()
-                                            .color(t.text2),
+                                        icons::icon_label(
+                                            ui,
+                                            "repeat",
+                                            RichText::new(tr(recur_label(&task.recur)))
+                                                .small()
+                                                .color(t.text2),
+                                            t.text2,
                                         )
                                         .on_hover_text(tr("Repeats when closed"));
                                     }
@@ -5101,8 +5139,11 @@ impl App {
                                         ui.label("");
                                     }
                                 } else {
-                                    ui.label(
-                                        RichText::new(tr("\u{2691}  Priority")).color(t.text2),
+                                    icons::icon_label(
+                                        ui,
+                                        "flag",
+                                        RichText::new(tr("Priority")).color(t.text2),
+                                        t.text2,
                                     );
                                     let (pr, presp) = ui.allocate_exact_size(
                                         vec2(field_w - 110.0, 26.0),
@@ -5143,8 +5184,11 @@ impl App {
                                 }
                                 // Time estimate
                                 if apps.time_estimates {
-                                    ui.label(
-                                        RichText::new(tr("\u{231B}  Time estimate")).color(t.text2),
+                                    icons::icon_label(
+                                        ui,
+                                        "hourglass",
+                                        RichText::new(tr("Time estimate")).color(t.text2),
+                                        t.text2,
                                     );
                                     ui.horizontal(|ui| {
                                         taskfields::estimate_field(
@@ -5167,25 +5211,36 @@ impl App {
                                         ui.label("");
                                     }
                                 } else {
-                                    ui.label(
-                                        RichText::new(tr("\u{23F1}  Track time")).color(t.text2),
+                                    icons::icon_label(
+                                        ui,
+                                        "clock",
+                                        RichText::new(tr("Track time")).color(t.text2),
+                                        t.text2,
                                     );
                                     ui.horizontal(|ui| {
                                         let running = self.data.is_my_timer(&task);
-                                        let (txt, fill) = if running {
-                                            ("\u{23F9}", t.danger)
+                                        let (kind, fill, name) = if running {
+                                            ("stop", t.danger, "Stop timer")
                                         } else {
-                                            ("\u{25B6}", t.primary)
+                                            ("play", t.primary, "Start timer")
                                         };
-                                        if ui
-                                            .add(Tint(
-                                                egui::Button::new(
-                                                    RichText::new(txt).color(Color32::WHITE),
-                                                )
+                                        let tb = ui.add(Tint(
+                                            egui::Button::new("")
                                                 .fill(fill)
                                                 .corner_radius(12)
                                                 .min_size(vec2(24.0, 24.0)),
-                                            ))
+                                        ));
+                                        name_it(&tb, name);
+                                        // play and stop drawn small inside the round button
+                                        icons::line_icon_scaled(
+                                            ui.painter(),
+                                            kind,
+                                            tb.rect.center()
+                                                + vec2(if running { 0.0 } else { 0.8 }, 0.0),
+                                            Color32::WHITE,
+                                            0.7,
+                                        );
+                                        if tb
                                             .on_hover_text(if running {
                                                 tr("Stop timer")
                                             } else {
@@ -5234,14 +5289,19 @@ impl App {
                                 }
                                 // Tags (when the Tags ClickApp is on)
                                 if apps.tags {
-                                    ui.label(RichText::new(tr("\u{1F3F7}  Tags")).color(t.text2));
+                                    icons::icon_label(
+                                        ui,
+                                        "tag",
+                                        RichText::new(tr("Tags")).color(t.text2),
+                                        t.text2,
+                                    );
                                     ui.horizontal_wrapped(|ui| {
                                         ui.set_max_width(field_w * 2.0);
                                         let mut remove = None;
                                         for (i, tag) in task.tags.iter().enumerate() {
                                             if chip(
                                                 ui,
-                                                &format!("{}  \u{2716}", tag),
+                                                &format!("{}  \u{00D7}", tag),
                                                 tag_color(tag),
                                             )
                                             .on_hover_text(tr("Remove tag"))
@@ -5260,9 +5320,11 @@ impl App {
                                 // custom fields, two per row
                                 if apps.custom_fields {
                                     for (i, f) in fields.iter().enumerate() {
-                                        ui.label(
-                                            RichText::new(format!("\u{25A4}  {}", f.name))
-                                                .color(t.text2),
+                                        icons::icon_label(
+                                            ui,
+                                            "fields",
+                                            RichText::new(&f.name).color(t.text2),
+                                            t.text2,
                                         );
                                         let v = task.custom.entry(f.id).or_default();
                                         match f.kind.as_str() {
@@ -5432,12 +5494,12 @@ impl App {
                             ) == 0.0
                                 && hover
                             {
-                                ui.painter().text(
-                                    ar.left_center() + vec2(6.0, 0.0),
-                                    Align2::LEFT_CENTER,
-                                    "\u{1F464}",
-                                    FontId::proportional(12.0),
+                                icons::line_icon_scaled(
+                                    ui.painter(),
+                                    "person",
+                                    ar.left_center() + vec2(12.0, 0.0),
                                     t.text3,
+                                    0.8,
                                 );
                             }
                             let data = &self.data;
@@ -5468,12 +5530,12 @@ impl App {
                                     );
                                 }
                                 None if hover => {
-                                    ui.painter().text(
-                                        dr.right_center() - vec2(4.0, 0.0),
-                                        Align2::RIGHT_CENTER,
-                                        "\u{1F4C5}",
-                                        FontId::proportional(12.0),
+                                    icons::line_icon_scaled(
+                                        ui.painter(),
+                                        "calendar",
+                                        dr.right_center() - vec2(10.0, 0.0),
                                         t.text3,
+                                        0.8,
                                     );
                                 }
                                 None => {}
@@ -5499,12 +5561,13 @@ impl App {
                                         pos2(r.right() - 162.0, r.center().y),
                                         vec2(22.0, 22.0),
                                     ),
-                                    ghost(
-                                        egui::Button::new(
-                                            RichText::new("\u{2B11}").size(12.0).color(t.text2),
-                                        )
-                                        .small(),
-                                    ),
+                                    ghost(egui::Button::new("").small()),
+                                );
+                                icons::line_icon(
+                                    ui.painter(),
+                                    "arrow_up_left",
+                                    b.rect.center(),
+                                    t.text2,
                                 );
                                 name_it(&b, &format!("Make top-level {}", s.name));
                                 top = b.on_hover_text(tr("Make it a task of its own")).clicked();
@@ -5513,13 +5576,9 @@ impl App {
                                         pos2(r.right() - 186.0, r.center().y),
                                         vec2(22.0, 22.0),
                                     ),
-                                    ghost(
-                                        egui::Button::new(
-                                            RichText::new("\u{2716}").size(10.0).color(t.text2),
-                                        )
-                                        .small(),
-                                    ),
+                                    ghost(egui::Button::new("").small()),
                                 );
+                                icons::line_icon(ui.painter(), "close", b.rect.center(), t.text2);
                                 name_it(&b, &format!("Delete subtask {}", s.name));
                                 del = b.on_hover_text(tr("Delete")).clicked();
                             }
@@ -5676,8 +5735,7 @@ impl App {
                         );
                         name_field(&r, "Search comments");
                         focus_once(ui, &r);
-                        if ui
-                            .add(ghost(egui::Button::new("\u{2716}")))
+                        if icons::icon_button(ui, &t, "close", "", "Close search", false)
                             .on_hover_text(tr("Close search"))
                             .clicked()
                         {
@@ -5731,7 +5789,14 @@ impl App {
                         bui.memory_mut(|m| m.request_focus(comment_id));
                     }
                     if !alone {
-                        assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                        assign_resp = Some(icons::icon_button(
+                            &mut bui,
+                            &t,
+                            "person",
+                            tr("Assign this task"),
+                            "Assign this task",
+                            true,
+                        ));
                     }
                 }
                 if let Some(r) = assign_resp {
@@ -5775,8 +5840,14 @@ impl App {
                         post = true;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let r = ui.add(ghost(egui::Button::new("\u{1F50D}")));
-                        name_it(&r, "Search comments button");
+                        let r = icons::icon_button(
+                            ui,
+                            &t,
+                            "search",
+                            "",
+                            "Search comments button",
+                            false,
+                        );
                         if r.on_hover_text(tr("Search comments")).clicked() {
                             find = if find.is_some() {
                                 None
@@ -5860,10 +5931,7 @@ impl App {
                             }
                         }
                     });
-                    let em = ui.add(ghost(
-                        egui::Button::new("\u{263A}").min_size(vec2(24.0, 24.0)),
-                    ));
-                    name_it(&em, "Emoji");
+                    let em = icons::icon_button(ui, &t, "smile", "", "Emoji", false);
                     popup(ui, &em, win_id.with("emoji_popup"), 180.0, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             for e in [
@@ -5890,10 +5958,8 @@ impl App {
                             }
                         });
                     });
-                    let ck = ui.add(ghost(
-                        egui::Button::new("\u{2611}").min_size(vec2(24.0, 24.0)),
-                    ));
-                    name_it(&ck, "Checklist item in comment");
+                    let ck =
+                        icons::icon_button(ui, &t, "task", "", "Checklist item in comment", false);
                     if ck.on_hover_text(tr("Add a checklist item")).clicked() {
                         let lead =
                             if self.comment_text.is_empty() || self.comment_text.ends_with('\n') {
@@ -6120,7 +6186,7 @@ impl App {
                                     }
                                 }
                             });
-                            if n > 1 && ui.add(ghost(egui::Button::new(RichText::new("\u{2716}").color(t.text3)))).clicked() {
+                            if n > 1 && icons::icon_button(ui, &t, "close", "", "Remove status", false).clicked() {
                                 remove = Some(i);
                             }
                         });
@@ -6255,38 +6321,38 @@ impl App {
                             }
                         }
                         let a_txt = if qa.assignees.is_empty() {
-                            tr("\u{1F464} Assignee").to_string()
+                            tr("Assignee").to_string()
                         } else {
                             let names: Vec<String> = qa
                                 .assignees
                                 .iter()
                                 .filter_map(|id| self.data.member(*id).map(|m| m.name.clone()))
                                 .collect();
-                            format!("\u{1F464} {}", truncate(&names.join(", "), 20))
+                            truncate(&names.join(", "), 20)
                         };
-                        let r = ui.button(a_txt);
+                        let r = icons::icon_button(ui, &t, "person", &a_txt, "Assignee", true);
                         let data = &self.data;
                         popup(ui, &r, egui::Id::new("qa_as"), 220.0, |ui| {
                             assignee_menu(ui, &t, data, &mut qa.assignees)
                         });
                         let d_txt = qa
                             .due
-                            .map(|d| format!("\u{1F4C5} {}", fmt_date(d)))
-                            .unwrap_or_else(|| tr("\u{1F4C5} Due date").into());
-                        let r = ui.button(d_txt);
+                            .map(fmt_date)
+                            .unwrap_or_else(|| tr("Due date").into());
+                        let r = icons::icon_button(ui, &t, "calendar", &d_txt, "Due date", true);
                         popup(ui, &r, egui::Id::new("qa_due"), 380.0, |ui| {
                             date_menu(ui, &t, egui::Id::new("qa_cal"), &mut qa.due)
                         });
                         let p_txt = if qa.priority > 0 {
-                            format!("\u{2691} {}", tr(PRIORITIES[qa.priority as usize].label))
+                            tr(PRIORITIES[qa.priority as usize].label).to_string()
                         } else {
-                            tr("\u{2691} Priority").into()
+                            tr("Priority").into()
                         };
-                        let r = ui.button(p_txt);
+                        let r = icons::icon_button(ui, &t, "flag", &p_txt, "Priority", true);
                         popup(ui, &r, egui::Id::new("qa_pr"), 180.0, |ui| {
                             priority_menu(ui, &t, &mut qa.priority)
                         });
-                        let r = ui.button(tr("\u{1F3F7} Tags"));
+                        let r = icons::icon_button(ui, &t, "tag", tr("Tags"), "Tags", true);
                         popup(ui, &r, egui::Id::new("qa_tags"), 220.0, |ui| {
                             let tag_r = ui.add(
                                 field(&mut qa.tag_text)

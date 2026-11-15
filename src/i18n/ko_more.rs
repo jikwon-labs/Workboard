@@ -113,9 +113,9 @@ pub const T: &[(&str, &str)] = &[
     ("Submitted. A task was created in {}", "제출했습니다. {}에 작업이 만들어졌습니다"),
     // whiteboards
     ("Create a whiteboard to sketch ideas and add sticky notes.", "화이트보드를 만들어 아이디어를 그리고 스티커 메모를 붙이세요."),
-    ("\u{1F4DD} Pen", "\u{1F4DD} 펜"),
-    ("\u{1F4DD} Sticky note", "\u{1F4DD} 스티커 메모"),
-    ("\u{270B} Move notes", "\u{270B} 메모 이동"),
+    ("Pen", "펜"),
+    ("Sticky note", "스티커 메모"),
+    ("Move notes", "메모 이동"),
     ("Undo", "실행 취소"),
     // reminders, AI
     ("Reminders", "리마인더"),

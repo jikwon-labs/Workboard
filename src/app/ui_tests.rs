@@ -370,12 +370,12 @@ fn click_task_row_opens_it_then_complete_and_timer() {
     let mut h = Ui1::new();
     h.click_left("Task Write copy for landing page", 120.0);
     let id = h.app.open_task.expect("task window opens");
-    h.click("\u{25B6}");
+    h.click("Start timer");
     assert!(
         h.app.task(id).unwrap().timer_started.is_some(),
         "the play button starts the timer"
     );
-    h.click("\u{2714}");
+    h.click("Mark complete");
     assert_eq!(
         h.app.task(id).unwrap().status,
         "complete",
@@ -2132,7 +2132,7 @@ fn create_task_window_has_description_status_and_tags() {
     h.type_text("Some details");
     h.click("Task status");
     h.click("IN PROGRESS");
-    h.click("\u{1F3F7} Tags");
+    h.click("Tags");
     h.type_text("urgent-fix");
     h.key(egui::Key::Enter);
     h.key(egui::Key::Escape);
@@ -2392,7 +2392,7 @@ fn task_window_comment_post_tabs_tools_and_search() {
         .retain(|a| !a.comment);
     h.settle();
     // empty: the two shortcut buttons
-    assert!(h.has("@  Mention a teammate") && h.has("\u{1F464}  Assign this task"));
+    assert!(h.has("@  Mention a teammate") && h.has("Assign this task"));
     h.click("@  Mention a teammate");
     assert!(
         h.ctx.memory(|m| m.any_popup_open()),
@@ -2442,7 +2442,7 @@ fn task_window_assign_this_task_button() {
         t.assignees.clear();
     }
     h.settle();
-    h.click("\u{1F464}  Assign this task");
+    h.click("Assign this task");
     h.click_side("Sam Lee", true);
     h.settle();
     assert!(h.app.task(id).unwrap().assignees.contains(&3));
@@ -3454,10 +3454,10 @@ fn narrow_task_window_fields_stay_left_of_the_comments() {
     for name in [
         "Time entries",
         "Time estimate value",
-        "\u{23F1}  Track time",
-        "\u{2691}  Priority",
-        "\u{1F464}  Assignees",
-        "\u{231B}  Time estimate",
+        "Track time",
+        "Priority",
+        "Assignees",
+        "Time estimate",
     ] {
         let r = h.rect(name);
         assert!(
@@ -3471,7 +3471,7 @@ fn narrow_task_window_fields_stay_left_of_the_comments() {
     // the wide window keeps two fields per row
     let mut w = Ui1::new();
     w.click_left("Task Write copy for landing page", 120.0);
-    let (st, asg) = (w.rect("\u{25CE}  Status"), w.rect("\u{1F464}  Assignees"));
+    let (st, asg) = (w.rect("Status"), w.rect("Assignees"));
     assert!(
         (st.center().y - asg.center().y).abs() < 4.0,
         "Status and Assignees share a row: {:?} {:?}",
@@ -3600,10 +3600,10 @@ fn narrow_task_window_has_no_blank_rows_when_fields_are_off() {
     h.app.data.extra.apps.time_tracking = false;
     h.settle();
     h.click_left("Task Write copy for landing page", 60.0);
-    let dates = h.rect("\u{1F4C5}  Dates");
-    let est = h.rect("\u{231B}  Time estimate");
-    let tags = h.rect("\u{1F3F7}  Tags");
-    let step = h.rect("\u{1F464}  Assignees").center().y - h.rect("\u{25CE}  Status").center().y;
+    let dates = h.rect("Dates");
+    let est = h.rect("Time estimate");
+    let tags = h.rect("Tags");
+    let step = h.rect("Assignees").center().y - h.rect("Status").center().y;
     assert!(
         est.center().y - dates.center().y < step * 1.5,
         "no gap after Dates: {:?} {:?} (row step {})",
@@ -6996,7 +6996,7 @@ fn ownerless_old_timer_can_be_stopped_from_the_task() {
     h.app.apply(Action::Open(id));
     h.settle();
     // it isn't mine, so my play button starts my own timer beside it
-    h.click("\u{25B6}");
+    h.click("Start timer");
     let t = task_named(&h, "Write copy for landing page");
     assert_eq!(t.timer_started, Some(started));
     assert!(h.app.data.is_my_timer(t));

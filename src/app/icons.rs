@@ -117,6 +117,23 @@ pub(super) fn line_icon_scaled(
     ok
 }
 
+/// A line icon before a label, in one row (a field's name in the task
+/// window, "Drop on a day").
+pub(super) fn icon_label(
+    ui: &mut Ui,
+    kind: &str,
+    text: impl Into<egui::WidgetText>,
+    color: Color32,
+) -> Response {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = ICON_GAP;
+        let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+        line_icon(ui.painter(), kind, r.center(), color);
+        ui.label(text)
+    })
+    .inner
+}
+
 /// The gap between an icon and the text after it.
 pub(super) const ICON_GAP: f32 = 6.0;
 
@@ -1158,6 +1175,16 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
             line(vec2(-2.5, 1.5), vec2(2.5, 1.5));
+        }
+        "close" => {
+            line(vec2(-5.0, -5.0), vec2(5.0, 5.0));
+            line(vec2(5.0, -5.0), vec2(-5.0, 5.0));
+        }
+        "arrow_up_left" => {
+            line(vec2(5.0, 6.0), vec2(5.0, -1.0));
+            line(vec2(5.0, -1.0), vec2(-5.0, -1.0));
+            line(vec2(-5.0, -1.0), vec2(-1.5, -4.5));
+            line(vec2(-5.0, -1.0), vec2(-1.5, 2.5));
         }
         _ => return false,
     }

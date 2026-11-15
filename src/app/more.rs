@@ -1970,10 +1970,22 @@ impl App {
                         self.dirty = true;
                     }
                     ui.separator();
-                    ui.selectable_value(&mut self.wb_tool, 0, tr("\u{1F4DD} Pen"));
-                    ui.selectable_value(&mut self.wb_tool, 3, tr("\u{232B} Eraser"));
-                    ui.selectable_value(&mut self.wb_tool, 1, tr("\u{1F4DD} Sticky note"));
-                    ui.selectable_value(&mut self.wb_tool, 2, tr("\u{270B} Move notes"));
+                    // the tool in use is outlined; each tool has its own icon
+                    // (the pen and the sticky note shared one emoji)
+                    for (tool, kind, label) in [
+                        (0u8, "pen", "Pen"),
+                        (3, "eraser", "Eraser"),
+                        (1, "sticky", "Sticky note"),
+                        (2, "move", "Move notes"),
+                    ] {
+                        let sel = self.wb_tool == tool;
+                        let text_color = if sel { t.text } else { t.text2 };
+                        if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, text_color, t.text2)
+                            .clicked()
+                        {
+                            self.wb_tool = tool;
+                        }
+                    }
                     for c in WB_COLORS {
                         let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                         ui.painter().circle_filled(r.center(), 8.0, rgb(c));
@@ -2051,10 +2063,9 @@ impl App {
                             if ui.button(tr("Clear")).clicked() {
                                 self.sweep.confirm = Some(format!("wb_clear:{}", wid));
                             }
+                            // framed like the other buttons in this bar
                             if ui
-                                .add(ghost(egui::Button::new(
-                                    RichText::new(tr("Delete")).color(t.danger),
-                                )))
+                                .button(RichText::new(tr("Delete")).color(t.danger))
                                 .clicked()
                             {
                                 delete = true;

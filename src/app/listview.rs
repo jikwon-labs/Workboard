@@ -373,7 +373,14 @@ impl App {
             ui.set_width(320.0);
             ui.label(RichText::new(if n == 1 { tr("Delete 1 task?").to_string() } else { trf!("Delete {} tasks?", n) }).strong().size(16.0));
             ui.add_space(4.0);
-            ui.label(RichText::new(tr("Their subtasks go too. You can undo right after, or restore them from Trash.")).color(t.text2));
+            // only mention subtasks when some of these tasks have them
+            let subs = self.data.tasks.iter().any(|x| x.parent.is_some_and(|p| self.selected.contains(&p)));
+            let note = match (subs, n) {
+                (true, _) => tr("Their subtasks go too. You can undo right after, or restore them from Trash."),
+                (false, 1) => tr("You can undo right after, or restore it from Trash."),
+                (false, _) => tr("You can undo right after, or restore them from Trash."),
+            };
+            ui.label(RichText::new(note).color(t.text2));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.button(tr("Cancel")).clicked() {

@@ -1287,7 +1287,10 @@ impl App {
     /// The list new tasks go to from the current location.
     fn default_list(&self) -> Option<u64> {
         match self.loc {
-            Location::List(id) => Some(id),
+            // (a List that is gone: somewhere else)
+            Location::List(id) => (self.data.space_of_list(id).is_some())
+                .then_some(id)
+                .or_else(|| self.data.first_list()),
             _ => self
                 .data
                 .lists_in(self.loc)
@@ -1338,41 +1341,46 @@ impl App {
         }
     }
 
-    fn add_from_group(&mut self, g: &Group, name: String, open: bool) {
-        if let Some(list) = Self::group_list(g).or_else(|| self.default_list()) {
-            if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
-                self.pending_tags.push(tag.to_string());
-            }
-            let mut assignees = vec![];
-            if let Some(a) = g.assignee {
-                assignees.push(a);
-            }
-            // on the personal views a new task is mine (and due today on Today &
-            // Overdue), or it would leave the page as soon as it's made
-            let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
-            if personal && !assignees.contains(&self.data.me) {
-                // with Multiple Assignees off a task has one: me
-                if !self.data.extra.apps.multiple_assignees {
-                    assignees.clear();
-                }
-                assignees.push(self.data.me);
-            }
-            let due = if self.loc == Location::TodayOverdue {
-                g.due.filter(|d| *d <= today()).or(Some(today()))
-            } else {
-                g.due
-            };
-            self.actions.push(Action::Add {
-                list,
-                name,
-                status: g.status.as_ref().map(|s| s.name.clone()),
-                priority: g.priority.unwrap_or(0),
-                assignees,
-                due,
-                parent: None,
-                open,
-            });
+    /// Adds a task in the group; false (and the next step offered) when
+    /// there is no List for it.
+    fn add_from_group(&mut self, g: &Group, name: String, open: bool) -> bool {
+        let Some(list) = Self::group_list(g).or_else(|| self.default_list()) else {
+            self.need_a_list();
+            return false;
+        };
+        if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
+            self.pending_tags.push(tag.to_string());
         }
+        let mut assignees = vec![];
+        if let Some(a) = g.assignee {
+            assignees.push(a);
+        }
+        // on the personal views a new task is mine (and due today on Today &
+        // Overdue), or it would leave the page as soon as it's made
+        let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
+        if personal && !assignees.contains(&self.data.me) {
+            // with Multiple Assignees off a task has one: me
+            if !self.data.extra.apps.multiple_assignees {
+                assignees.clear();
+            }
+            assignees.push(self.data.me);
+        }
+        let due = if self.loc == Location::TodayOverdue {
+            g.due.filter(|d| *d <= today()).or(Some(today()))
+        } else {
+            g.due
+        };
+        self.actions.push(Action::Add {
+            list,
+            name,
+            status: g.status.as_ref().map(|s| s.name.clone()),
+            priority: g.priority.unwrap_or(0),
+            assignees,
+            due,
+            parent: None,
+            open,
+        });
+        true
     }
 
     // ---------------------------------------------------------------- actions
@@ -1668,7 +1676,7 @@ impl App {
                     list_id: list,
                     parent,
                     name: if name.trim().is_empty() {
-                        "Untitled task".into()
+                        tr("Untitled task").into()
                     } else {
                         name.trim().to_string()
                     },
@@ -1838,20 +1846,20 @@ impl App {
                 let color = STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13];
                 self.data.spaces.push(Space {
                     id,
-                    name: "New Space".into(),
+                    name: tr("New Space").into(),
                     color,
                     statuses: default_statuses(),
                     folders: vec![],
                     lists: vec![ListItem {
                         id: lid,
-                        name: "List".into(),
+                        name: tr("List").into(),
                         ..Default::default()
                     }],
                     expanded: true,
                     private_owner: None,
                     ..Default::default()
                 });
-                self.rename = Some((Target::Space(id), "New Space".into()));
+                self.rename = Some((Target::Space(id), tr("New Space").into()));
                 self.dirty = true;
             }
             Action::NewFolder(sid) => {
@@ -1860,10 +1868,10 @@ impl App {
                 if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
                     s.folders.push(Folder {
                         id,
-                        name: "New Folder".into(),
+                        name: tr("New Folder").into(),
                         lists: vec![ListItem {
                             id: lid,
-                            name: "List".into(),
+                            name: tr("List").into(),
                             ..Default::default()
                         }],
                         expanded: true,
@@ -1871,7 +1879,7 @@ impl App {
                     });
                     s.expanded = true;
                 }
-                self.rename = Some((Target::Folder(id), "New Folder".into()));
+                self.rename = Some((Target::Folder(id), tr("New Folder").into()));
                 self.dirty = true;
             }
             Action::NewList { space, folder } => {
@@ -1880,7 +1888,7 @@ impl App {
                     s.expanded = true;
                     let item = ListItem {
                         id,
-                        name: "New List".into(),
+                        name: tr("New List").into(),
                         ..Default::default()
                     };
                     match folder {
@@ -1894,7 +1902,7 @@ impl App {
                     }
                 }
                 self.loc = Location::List(id);
-                self.rename = Some((Target::List(id), "New List".into()));
+                self.rename = Some((Target::List(id), tr("New List").into()));
                 self.dirty = true;
             }
             Action::StartRename(tg) => {
@@ -2466,6 +2474,33 @@ impl App {
                 }
             }
             self.quick_add = Some(qa);
+        } else {
+            self.need_a_list();
+        }
+    }
+
+    /// No List a new task could go in: say why and open the next step, a
+    /// new List (or a new Space first, which comes with a List).
+    pub(super) fn need_a_list(&mut self) {
+        let msg = if self.open_spaces().is_empty() {
+            "Tasks live in a List. Make a Space first: it comes with one."
+        } else {
+            "Tasks live in a List. Make one first."
+        };
+        self.toast = Some((tr(msg).into(), now_ts()));
+        self.offer_new_list(self.current_space());
+    }
+
+    /// The New List dialog, or New Space when there is no Space to put a
+    /// List in yet (the Home Lists card does the same).
+    pub(super) fn offer_new_list(&mut self, space: Option<u64>) {
+        if self.open_spaces().is_empty() {
+            self.modal = Some(Modal::NewSpace {
+                name: String::new(),
+                color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
+            });
+        } else {
+            self.open_new_list(space, None);
         }
     }
 
@@ -3177,7 +3212,7 @@ impl App {
                         ui.painter().text(
                             r.left_center() + vec2(10.0, 0.0),
                             Align2::LEFT_CENTER,
-                            tr("+ Add Task"),
+                            tr("+ Add task"),
                             FontId::proportional(13.0),
                             t.text3,
                         );
@@ -3379,7 +3414,13 @@ impl App {
                 }
             });
         }
-        let widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        let mut widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        // Name takes the room the other columns leave (at least 200), so the
+        // last column and the "+" fit instead of running off the right edge
+        if let Some(ni) = cols.iter().position(|c| *c == TableCol::Name) {
+            let others: f32 = widths.iter().sum::<f32>() - widths[ni];
+            widths[ni] = (ui.available_width() - others - 36.0 - 12.0).max(200.0);
+        }
         let edit_id = egui::Id::new("table_rename");
         let mut renaming: Option<(u64, String)> = ui.data(|d| d.get_temp(edit_id));
         egui::ScrollArea::both()
@@ -3778,7 +3819,7 @@ impl App {
                 ui.painter().text(
                     r.left_center() + vec2(8.0, 0.0),
                     Align2::LEFT_CENTER,
-                    tr("+ Add Task"),
+                    tr("+ Add task"),
                     FontId::proportional(13.0),
                     t.text3,
                 );
@@ -3892,7 +3933,15 @@ impl App {
                                         ui.set_width(card_w - 34.0);
                                         ui.label(RichText::new(tr("My Work")).size(16.0).strong());
                                         ui.add_space(6.0);
-                                        for (name, list) in &sections {
+                                        // nothing of mine at all: say so, not five rows of 0
+                                        let (rs, ms) = self.home_due_extras();
+                                        let nothing = sections.iter().all(|s| s.1.is_empty())
+                                            && rs.is_empty()
+                                            && ms.is_empty();
+                                        if nothing {
+                                            self.home_nothing_yet(ui);
+                                        }
+                                        for (name, list) in sections.iter().filter(|_| !nothing) {
                                             let collapsed = self.home_collapsed.contains(name);
                                             let (r, resp) = ui.allocate_exact_size(
                                                 vec2(card_w - 34.0, 28.0),
@@ -4010,6 +4059,8 @@ impl App {
                                                 }
                                             }
                                         }
+                                        // due reminders and today's and tomorrow's meetings
+                                        self.home_extras_rows(ui, card_w - 34.0);
                                     })
                                 });
                             ui.add_space(12.0);
@@ -4041,7 +4092,7 @@ impl App {
                                                         .iter()
                                                         .flat_map(|f| f.lists.iter().cloned()),
                                                 )
-                                                .filter(|l| !l.archived)
+                                                .filter(|l| !self.data.list_archived(l.id))
                                                 .collect();
                                             for l in lists {
                                                 shown += 1;
@@ -4088,23 +4139,33 @@ impl App {
                                                     FontId::proportional(13.0),
                                                     t.text,
                                                 );
+                                                // an empty List: no bar and "0/0", just say so
+                                                if total == 0 {
+                                                    ui.painter().text(
+                                                        r.right_center() - vec2(6.0, 0.0),
+                                                        Align2::RIGHT_CENTER,
+                                                        tr("No tasks yet"),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                    );
+                                                    if resp.clicked() {
+                                                        self.actions
+                                                            .push(Action::Go(Location::List(l.id)));
+                                                    }
+                                                    continue;
+                                                }
                                                 // progress bar
                                                 let bar = Rect::from_min_size(
                                                     pos2(r.right() - 150.0, r.center().y - 3.0),
                                                     vec2(100.0, 6.0),
                                                 );
                                                 ui.painter().rect_filled(bar, 3.0, t.hover);
-                                                if total > 0 {
-                                                    let f = done as f32 / total as f32;
-                                                    ui.painter().rect_filled(
-                                                        Rect::from_min_size(
-                                                            bar.min,
-                                                            vec2(100.0 * f, 6.0),
-                                                        ),
-                                                        3.0,
-                                                        rgb([0x00, 0x88, 0x44]),
-                                                    );
-                                                }
+                                                let f = done as f32 / total as f32;
+                                                ui.painter().rect_filled(
+                                                    Rect::from_min_size(bar.min, vec2(100.0 * f, 6.0)),
+                                                    3.0,
+                                                    rgb([0x00, 0x88, 0x44]),
+                                                );
                                                 ui.painter().text(
                                                     r.right_center() - vec2(6.0, 0.0),
                                                     Align2::RIGHT_CENTER,
@@ -4120,33 +4181,55 @@ impl App {
                                         }
                                         // nothing to list yet: say so and offer the next step
                                         if shown == 0 {
-                                            ui.label(
-                                                RichText::new(tr(
-                                                    "No Lists yet. Lists keep a Space's tasks together.",
-                                                ))
-                                                .color(t.text2),
-                                            );
+                                            // Lists that are all archived are not "no Lists"
+                                            let archived = spaces
+                                                .iter()
+                                                .filter(|s| {
+                                                    s.private_owner
+                                                        .is_none_or(|o| o == self.data.me)
+                                                })
+                                                .flat_map(|s| {
+                                                    s.lists.iter().chain(
+                                                        s.folders.iter().flat_map(|f| f.lists.iter()),
+                                                    )
+                                                })
+                                                .count();
+                                            let text = match archived {
+                                                0 => tr("No Lists yet. Lists keep a Space's tasks together.")
+                                                    .to_string(),
+                                                1 => tr("The only List is archived.").to_string(),
+                                                n => trf!("All {} Lists are archived.", n),
+                                            };
+                                            ui.label(RichText::new(text).color(t.text2));
                                             ui.add_space(8.0);
-                                            let has_space = !self.open_spaces().is_empty();
-                                            let label =
-                                                if has_space { "+ New List" } else { "+ New Space" };
-                                            let b = ui.add(
-                                                egui::Button::new(tr(label))
-                                                    .stroke(Stroke::new(1.0, t.border))
-                                                    .corner_radius(7),
-                                            );
-                                            name_it(&b, "Home new list");
-                                            if b.clicked() {
-                                                if has_space {
-                                                    self.open_new_list(None, None);
-                                                } else {
-                                                    self.modal = Some(Modal::NewSpace {
-                                                        name: String::new(),
-                                                        color: STATUS_PALETTE
-                                                            [1 + (self.data.spaces.len() * 3) % 13],
-                                                    });
+                                            ui.horizontal(|ui| {
+                                                if archived > 0 {
+                                                    let b = ui.add(
+                                                        egui::Button::new(tr("See archived Lists"))
+                                                            .stroke(Stroke::new(1.0, t.border))
+                                                            .corner_radius(7),
+                                                    );
+                                                    name_it(&b, "Home archived lists");
+                                                    if b.clicked() {
+                                                        self.open_settings("Spaces");
+                                                    }
                                                 }
-                                            }
+                                                let has_space = !self.open_spaces().is_empty();
+                                                let label = if has_space {
+                                                    "+ New List"
+                                                } else {
+                                                    "+ New Space"
+                                                };
+                                                let b = ui.add(
+                                                    egui::Button::new(tr(label))
+                                                        .stroke(Stroke::new(1.0, t.border))
+                                                        .corner_radius(7),
+                                                );
+                                                name_it(&b, "Home new list");
+                                                if b.clicked() {
+                                                    self.offer_new_list(None);
+                                                }
+                                            });
                                         }
                                     })
                                 });
@@ -4155,14 +4238,33 @@ impl App {
             });
     }
 
+    /// The replies Replies lists under Unread, counted for the sidebar.
+    pub(super) fn unread_replies(&self) -> usize {
+        let seen = self.data.extra.replies_seen;
+        let read = &self.data.extra.replies_read;
+        let unread = |k: String| !read.contains(&k);
+        let me = self.data.me;
+        let on_tasks = self
+            .data
+            .tasks
+            .iter()
+            .flat_map(|t| t.activity.iter().map(move |a| (t.id, a)))
+            .filter(|(id, a)| {
+                a.comment
+                    && a.author != me
+                    && a.ts > seen
+                    && unread(reply_key(nav::InboxSrc::Task(*id), a.ts, a.author))
+            })
+            .count();
+        let in_chat = self
+            .chat_replies()
+            .into_iter()
+            .filter(|r| r.ts > seen && unread(reply_key(r.src, r.ts, r.author)))
+            .count();
+        on_tasks + in_chat
+    }
+
     fn inbox(&mut self, ui: &mut Ui, mode: u8) {
-        // what Replies' per-item "Mark read" keeps: "taskid:ts:author" or "chat:channel:message"
-        fn reply_key(src: nav::InboxSrc, ts: i64, author: u64) -> String {
-            match src {
-                nav::InboxSrc::Task(id) => format!("{}:{}:{}", id, ts, author),
-                nav::InboxSrc::Chat { ch, msg, .. } => format!("chat:{}:{}", ch, msg),
-            }
-        }
         let t = self.t();
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(24, 16))
@@ -4171,7 +4273,7 @@ impl App {
                     1 => ("Replies", "Comments from others on tasks and chat replies"),
                     2 => (
                         "Assigned Comments",
-                        "Comments assigned to someone, or that @mention them, until resolved",
+                        "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
                     ),
                     _ => ("Inbox", "Recent activity across your workspace"),
                 };
@@ -4194,8 +4296,15 @@ impl App {
                             }
                         }
                         if mode == 1 && tab == 0 {
+                            // off with nothing unread (known from the last frame's list)
+                            let any: bool = ui
+                                .data(|d| d.get_temp(egui::Id::new("replies_unread")))
+                                .unwrap_or(true);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.button(tr("Mark all as read")).clicked() {
+                                if ui
+                                    .add_enabled(any, egui::Button::new(tr("Mark all as read")))
+                                    .clicked()
+                                {
                                     self.data.extra.replies_seen = now_ts();
                                     self.dirty = true;
                                 }
@@ -4299,6 +4408,10 @@ impl App {
                     }
                 }
                 items.sort_by_key(|x| std::cmp::Reverse(x.0));
+                if mode == 1 && tab == 0 {
+                    let any = !items.is_empty();
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("replies_unread"), any));
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -5414,6 +5527,8 @@ impl App {
                 }
                 let has_comments = task.activity.iter().any(|a| a.comment);
                 let mut assign_resp: Option<egui::Response> = None;
+                // alone in the workspace: nobody to mention or hand it to
+                let alone = self.data.solo();
                 if !has_comments {
                     let r = right_ui.available_rect_before_wrap();
                     let c = pos2(r.left() + 10.0, r.top() + r.height() * 0.32);
@@ -5427,7 +5542,11 @@ impl App {
                     right_ui.painter().text(
                         c + vec2(0.0, 8.0),
                         Align2::LEFT_TOP,
-                        tr("Ask a question, share an update, or loop someone in."),
+                        tr(if alone {
+                            "Keep notes and updates on this task here."
+                        } else {
+                            "Ask a question, share an update, or loop someone in."
+                        }),
                         FontId::proportional(13.0),
                         t.text2,
                     );
@@ -5438,7 +5557,7 @@ impl App {
                             .max_rect(row)
                             .layout(Layout::left_to_right(Align::Center)),
                     );
-                    if bui.button(tr("@  Mention a teammate")).clicked() {
+                    if !alone && bui.button(tr("@  Mention a teammate")).clicked() {
                         if !self.comment_text.ends_with('@') {
                             if !self.comment_text.is_empty() && !self.comment_text.ends_with(' ') {
                                 self.comment_text.push(' ');
@@ -5448,7 +5567,9 @@ impl App {
                         bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
                         bui.memory_mut(|m| m.request_focus(comment_id));
                     }
-                    assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                    if !alone {
+                        assign_resp = Some(bui.button(tr("\u{1F464}  Assign this task")));
+                    }
                 }
                 if let Some(r) = assign_resp {
                     let data = &self.data;
@@ -5525,6 +5646,8 @@ impl App {
                         .id(comment_id)
                         .hint_text(if post {
                             tr("Write a post...")
+                        } else if alone {
+                            tr("Write a comment")
                         } else {
                             tr("Write a comment, @mention someone")
                         })
@@ -6554,6 +6677,14 @@ fn task_changed(a: &Task, b: &Task) -> bool {
         || a.waiting_on != b.waiting_on
         || a.linked != b.linked
         || a.attachments != b.attachments
+}
+
+/// What Replies' per-item "Mark read" keeps: "taskid:ts:author" or "chat:channel:message".
+fn reply_key(src: nav::InboxSrc, ts: i64, author: u64) -> String {
+    match src {
+        nav::InboxSrc::Task(id) => format!("{}:{}:{}", id, ts, author),
+        nav::InboxSrc::Chat { ch, msg, .. } => format!("chat:{}:{}", ch, msg),
+    }
 }
 
 fn kind_label(k: StatusKind) -> &'static str {

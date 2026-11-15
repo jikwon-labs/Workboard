@@ -4034,7 +4034,9 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
         )),
         "not silently done"
     );
-    assert!(!a.pending_ready(false).0);
+    // the message may go: the picture waits in the backlog and follows
+    assert!(a.pending_ready(false).0);
+    assert_eq!(a.pending_ready(false).1, vec![att.clone()]);
     // a sign-in is seen at once (the cached token is dropped when one is saved)
     super::together::save_token("127.0.0.1:9", "dev1", "tok");
     assert!(
@@ -5361,11 +5363,15 @@ fn a_picture_added_before_sharing_goes_up_when_the_message_is_sent() {
 fn file_errors_are_shown_in_the_interface_language() {
     crate::i18n::set_lang(crate::i18n::Lang::Ko);
     let shown = App::error_text("cat.gif isn't a picture or a video.");
-    let net = App::error_text("Couldn't reach the server: refused");
+    let net = App::error_text("Couldn't reach the server: Connection refused (os error 61)");
     let plain = App::error_text("The server doesn't have this file.");
     crate::i18n::set_lang(crate::i18n::Lang::En);
     assert_eq!(shown, "cat.gif은(는) 사진이나 동영상이 아닙니다.");
-    assert_eq!(net, "서버에 연결하지 못했습니다: refused");
+    // the system's English words are left out
+    assert_eq!(
+        net,
+        "지금은 팀 서버에 연결할 수 없습니다. 저절로 다시 시도합니다."
+    );
     assert_eq!(plain, "서버에 이 파일이 없습니다.");
     assert_eq!(
         App::error_text("Couldn't put a.png in the shared folder: full"),
@@ -6374,6 +6380,62 @@ fn server_refusals_are_shown_in_the_interface_language() {
 }
 
 #[test]
+fn a_server_that_cannot_be_reached_is_said_plainly() {
+    use super::together::{net_problem, net_status_text, reach_text, FAILS_BEFORE_CANT_REACH};
+    use crate::i18n::{set_lang, Lang};
+    let refused = "Can't reach 127.0.0.1:9: Connection refused (os error 61)";
+    let lost = wb_net::Status::Reconnecting(refused.into());
+    set_lang(Lang::Ko);
+    let said = [
+        reach_text(refused),
+        reach_text("Can't reach macmini:8787: Operation timed out (os error 60)"),
+        reach_text("Can't find macmini: failed to lookup address information"),
+        reach_text("IO error: Connection reset by peer (os error 54)"),
+        reach_text("The server didn't answer like Workboard: HTTP error: 404 Not Found"),
+        reach_text("The server stopped answering."),
+    ];
+    let first = net_status_text(true, Some(&lost), 1);
+    let later = net_status_text(true, Some(&lost), FAILS_BEFORE_CANT_REACH);
+    let why = net_problem(Some(&lost)).unwrap();
+    set_lang(Lang::En);
+    for s in &said {
+        assert!(
+            s.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))
+                && !s.contains("os error")
+                && !s.contains("refused")
+                && !s.contains("lookup"),
+            "plain Korean: {:?}",
+            s
+        );
+    }
+    assert!(said[0].contains("127.0.0.1:9") && said[0].contains("workboard-server"));
+    assert!(said[1].contains("macmini:8787") && said[2].contains("macmini"));
+    // after a few failed tries it no longer says it is about to reconnect
+    assert_eq!(first, "다시 연결하는 중\u{2026}");
+    assert_eq!(later, "서버에 연결할 수 없음");
+    assert!(why.starts_with(&said[0]), "{}", why);
+    assert_eq!(
+        net_status_text(true, Some(&wb_net::Status::Connected), 9),
+        "Connected"
+    );
+}
+
+#[test]
+fn a_long_folder_path_is_cut_from_the_front_at_folder_names() {
+    use super::together::short_path;
+    assert_eq!(short_path("/Users/me/Dropbox", 48), "/Users/me/Dropbox");
+    let p = "/Users/someone/Library/Mobile Documents/com~apple~CloudDocs/team-shared/_shared";
+    let s = short_path(p, 42);
+    assert_eq!(s, "\u{2026}/com~apple~CloudDocs/team-shared/_shared");
+    assert!(s.chars().count() <= 42);
+    // one folder name longer than the room is kept whole
+    assert_eq!(
+        short_path("/a/a-very-long-folder-name-that-will-not-fit", 10),
+        "\u{2026}/a-very-long-folder-name-that-will-not-fit"
+    );
+}
+
+#[test]
 fn back_and_forward_to_another_place_clear_the_selection() {
     let mut a = app();
     let lists = list_ids(&a);
@@ -7141,4 +7203,42 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
     b.sync_note_change();
     b.write_shared();
     net_until(&mut a, "A keeps it all", |a| a.task(task.id).is_some());
+}
+
+#[test]
+fn a_list_deleted_while_archived_comes_back_not_archived() {
+    let mut a = app();
+    let ideas = a.data.spaces[1].lists[0].id;
+    a.data.list_item_mut(ideas).unwrap().archived = true;
+    a.do_delete(Target::List(ideas));
+    let i = a
+        .data
+        .extra
+        .trash
+        .iter()
+        .position(|x| x.kind == "List")
+        .unwrap();
+    a.restore_trash(i);
+    assert!(a.data.list_item(ideas).is_some());
+    assert!(
+        !a.data.list_archived(ideas),
+        "restored where it can be seen"
+    );
+    // back in an archived Space: it says so
+    let web = a.data.spaces[0].folders[0].lists[0].id;
+    a.do_delete(Target::List(web));
+    a.data.spaces[0].archived = true;
+    let i = a
+        .data
+        .extra
+        .trash
+        .iter()
+        .position(|x| x.kind == "List")
+        .unwrap();
+    a.toast = None;
+    a.restore_trash(i);
+    assert!(a
+        .toast
+        .as_ref()
+        .is_some_and(|t| t.0.contains("archived Folder or Space")));
 }

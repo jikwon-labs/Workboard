@@ -11,12 +11,12 @@ pub const SETTINGS: [(&str, &str); 15] = [
     ("Admin", "Spaces"),
     ("Admin", "Trash"),
     ("Features", "Apps"),
-    ("Features", "Custom Fields"),
-    ("Features", "Tag Manager"),
+    ("Features", "Custom fields"),
+    ("Features", "Tag manager"),
     ("Features", "Templates"),
     ("Features", "Automations"),
     ("Features", "Work together"),
-    ("Personal", "My Settings"),
+    ("Personal", "My settings"),
     ("Personal", "Notifications"),
     ("Personal", "Themes"),
     ("Personal", "Language"),
@@ -37,12 +37,12 @@ impl App {
             },
             "Trash" => Modal::Trash,
             "Apps" => Modal::ClickApps,
-            "Custom Fields" => Modal::CustomFields {
+            "Custom fields" => Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
                 opts: String::new(),
             },
-            "Tag Manager" => Modal::TagManager {
+            "Tag manager" => Modal::TagManager {
                 from: String::new(),
                 to: String::new(),
             },
@@ -54,7 +54,7 @@ impl App {
                 scope: None,
             },
             "Work together" => self.together_modal(),
-            "My Settings" => {
+            "My settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();
                 Modal::Profile {
                     name: m.name,
@@ -208,15 +208,19 @@ impl App {
             .open_spaces()
             .iter()
             .map(|s| {
-                let lists = self
+                // archived Lists and tasks are counted under Archived below
+                let lists: Vec<u64> = self
                     .data
                     .lists_in(Location::Space(s.id))
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|l| !self.data.list_archived(*l))
+                    .collect();
                 let tasks = self
                     .data
                     .tasks
                     .iter()
-                    .filter(|t| lists.contains(&t.list_id))
+                    .filter(|t| lists.contains(&t.list_id) && !t.archived)
                     .count();
                 (s.id, s.name.clone(), s.color, lists.len(), tasks)
             })
@@ -233,11 +237,23 @@ impl App {
             });
         });
         ui.add_space(8.0);
+        if spaces.is_empty() {
+            ui.label(
+                RichText::new(tr(
+                    "No spaces yet. A Space holds your Lists and their tasks: make one with + New Space.",
+                ))
+                .color(t.text3),
+            );
+        }
         egui::Grid::new("spaces_table")
             .num_columns(5)
             .striped(true)
             .spacing(vec2(24.0, 10.0))
             .show(ui, |ui| {
+                // no header over an empty table
+                if spaces.is_empty() {
+                    return;
+                }
                 for h in ["Name", "Lists", "Tasks", "", ""] {
                     ui.label(RichText::new(tr(h)).small().color(t.text3));
                 }
@@ -283,19 +299,24 @@ impl App {
             .filter(|s| s.archived && s.private_owner.is_none())
             .map(|s| (s.id, s.name.clone()))
             .collect();
-        let arch_lists: Vec<(u64, String)> = self
-            .data
-            .spaces
-            .iter()
-            .filter(|s| !s.archived)
-            .flat_map(|s| {
-                s.lists
-                    .iter()
-                    .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
-                    .filter(|l| l.archived)
-                    .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
-            })
-            .collect();
+        let arch_lists: Vec<(u64, String)> =
+            self.data
+                .spaces
+                .iter()
+                .filter(|s| !s.archived)
+                .flat_map(|s| {
+                    // a List in a Folder shows its Folder too, as Move tasks does
+                    s.lists
+                        .iter()
+                        .filter(|l| l.archived)
+                        .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
+                        .chain(s.folders.iter().flat_map(move |f| {
+                            f.lists.iter().filter(|l| l.archived).map(move |l| {
+                                (l.id, format!("{} / {} / {}", s.name, f.name, l.name))
+                            })
+                        }))
+                })
+                .collect();
         let arch_folders: Vec<(u64, String)> = self
             .data
             .spaces

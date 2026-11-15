@@ -1552,15 +1552,17 @@ impl Data {
         };
         let sid = d.new_id();
         let lid = d.new_id();
+        // named in the language the screen is in; a new workspace has one
+        // person, so the space isn't called a team's
         d.spaces.push(Space {
             id: sid,
-            name: "Team Space".into(),
+            name: crate::i18n::tr("Main space").into(),
             color: [0x5f, 0x55, 0xee],
             statuses: default_statuses(),
             folders: vec![],
             lists: vec![ListItem {
                 id: lid,
-                name: "List".into(),
+                name: crate::i18n::tr("List").into(),
                 ..Default::default()
             }],
             expanded: true,
@@ -1579,6 +1581,12 @@ impl Data {
             ..Default::default()
         });
         d.extra.demo_removed = true;
+        // a new workspace leaves out what needs an online service Workboard
+        // doesn't have (Customize brings them back); files saved before keep
+        // their own choices, and files without these fields keep the old
+        // defaults (`Extra::default`)
+        d.extra.pinned_tools = vec!["create_task".into()];
+        d.extra.hidden_nav = vec!["Skills".into(), "Artifacts".into()];
         d
     }
 
@@ -1674,7 +1682,7 @@ impl Data {
             role: "Owner".into(),
             ..Default::default()
         };
-        let mut d = Self::blank("My Workspace", owner);
+        let mut d = Self::blank(crate::i18n::tr("My Workspace"), owner);
         d.extra.welcome = true;
         d
     }
@@ -1895,6 +1903,20 @@ impl Data {
                         .iter()
                         .any(|f| f.archived && f.lists.iter().any(|l| l.id == id))
             })
+    }
+
+    /// True when the Space, Folder or List, or what it sits in, is archived.
+    pub fn location_archived(&self, loc: Location) -> bool {
+        match loc {
+            Location::Space(id) => self.spaces.iter().any(|s| s.id == id && s.archived),
+            Location::Folder(id) => self.spaces.iter().any(|s| {
+                s.folders
+                    .iter()
+                    .any(|f| f.id == id && (f.archived || s.archived))
+            }),
+            Location::List(id) => self.list_archived(id),
+            _ => false,
+        }
     }
 
     /// Not archived, and not in an archived list or space.

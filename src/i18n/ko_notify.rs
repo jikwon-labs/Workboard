@@ -34,10 +34,10 @@ pub const T: &[(&str, &str)] = &[
     ("Keep working: your changes are shared when it comes back.", "계속 작업하세요. 다시 연결되면 변경 사항이 공유됩니다."),
     // settings
     ("Desktop notifications", "데스크톱 알림"),
-    ("Show banners when Workboard isn't in front", "Workboard 가 앞에 있지 않을 때 배너 보이기"),
+    ("Show banners when Workboard isn't in front", "Workboard가 앞에 있지 않을 때 배너 보이기"),
     ("Play a sound", "소리 내기"),
     ("Show a count on the Dock icon", "Dock 아이콘에 숫자 보이기"),
-    ("Mentions, assignments, comments and reminders follow the Inbox choices above. Also tell me about:", "멘션, 배정, 댓글, 리마인더는 위의 받은 편지함 설정을 따릅니다. 그 밖에 알려 줄 것:"),
+    ("Mentions, assignments, comments and reminders follow the Inbox choices above. Also tell me about:", "멘션, 할당, 댓글, 리마인더는 위의 받은 편지함 설정을 따릅니다. 그 밖에 알려 줄 것:"),
     ("Replies in threads I'm in", "내가 참여한 스레드의 답글"),
     ("Huddles and calls", "허들과 통화"),
     ("Reactions to my messages", "내 메시지에 남긴 반응"),
@@ -55,7 +55,7 @@ pub const T: &[(&str, &str)] = &[
     ("Set one channel apart with the bell at the top of that channel. Direct messages follow \"Direct messages\" above.", "채널마다 따로 정하려면 그 채널 위쪽의 종 버튼을 누르세요. DM은 위의 \"다이렉트 메시지\" 설정을 따릅니다."),
     ("Send a test notification", "테스트 알림 보내기"),
     ("Notifications are working.", "알림이 잘 동작합니다."),
-    ("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.", "테스트 알림을 보냈습니다. 배너가 안 보이면 시스템 설정 > 알림에서 Workboard 를 허용하세요."),
+    ("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.", "테스트 알림을 보냈습니다. 배너가 안 보이면 시스템 설정 > 알림에서 Workboard를 허용하세요."),
     // channel bell
     ("Notifications for this channel", "이 채널의 알림"),
     ("Notify me about", "알려 줄 것"),

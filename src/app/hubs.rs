@@ -454,7 +454,7 @@ impl App {
                             ui,
                             &t,
                             "\u{1F465}",
-                            tr("Once you join or create a Team you will see it here"),
+                            tr("Once you join or create a team, you will see it here"),
                         );
                     }
                     for tm in teams {
@@ -573,15 +573,8 @@ impl App {
                     if primary_button(ui, &tt, tr("New Doc")).clicked() {
                         s.new_doc(s.current_space());
                     }
-                    if ui
-                        .add(egui::Button::new(tr("\u{2B07}  Import")).min_size(vec2(0.0, 28.0)))
-                        .clicked()
-                    {
-                        s.modal = Some(Modal::Import {
-                            path: String::new(),
-                            result: String::new(),
-                        });
-                    }
+                    // no Import here: the only importer reads tasks from a CSV
+                    // into a List, which is not what a Docs page promises
                 });
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -1127,7 +1120,7 @@ impl App {
         }
         if plus {
             self.modal = Some(Modal::NewDashboard {
-                name: "New Dashboard".into(),
+                name: tr("New Dashboard").into(),
             });
         }
         let mine_only = self.hub_filter.min(1) == 1;
@@ -1175,7 +1168,7 @@ impl App {
                             "Project Management" => "project",
                             _ => "",
                         };
-                        let n = if name == "Start from scratch" { "New Dashboard".to_string() } else { name };
+                        let n = if name == "Start from scratch" { tr("New Dashboard").to_string() } else { tr(&name).to_string() };
                         self.data.extra.dashboards.push(Dashboard { id, name: n, space: None, owner: me, kind: kind.into(), ..Default::default() });
                         self.dash_open = Some(id);
                         self.dirty = true;
@@ -1295,7 +1288,7 @@ impl App {
                         }
                     });
                 }
-                let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans, brainstorm feature\nconcepts, or help remote co-workers work better together!"), &[
+                let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans and brainstorm feature\nconcepts, on your own or with your team."), &[
                     ([0xb6, 0x60, 0xe0], "\u{1F465}", "Organizational Chart", "Visualize your team structure", false),
                     ([0x0f, 0x9d, 0x9f], "\u{2630}", "Action Plan", "Turn goals into actionable steps", false),
                     ([0x10, 0x90, 0xe0], "\u{27A4}", "Customer Journey Map", "Optimize every customer touchpoint", false),
@@ -1387,8 +1380,8 @@ impl App {
                     };
                     if let Some(f) = self.form_open.and_then(|id| self.data.extra.forms.iter_mut().find(|f| f.id == id)) {
                         if name != "Start from scratch" {
-                            f.name = name.clone();
-                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: l.to_string(), map: m.to_string(), ..Default::default() }).collect();
+                            f.name = tr(&name).to_string();
+                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: form_question(l).to_string(), map: m.to_string(), ..Default::default() }).collect();
                         }
                     }
                 }
@@ -1413,7 +1406,8 @@ impl App {
                 sw: 8,
                 se: 8,
             },
-            Color32::from_rgb(243, 244, 247),
+            // the theme's panel grey: a fixed light grey hid the dark theme's text
+            t.sidebar,
         );
         ui.add_space(110.0);
         ui.vertical_centered(|ui| {
@@ -1422,12 +1416,12 @@ impl App {
             ui.label(RichText::new(tr("Create Goals, break them down into measurable targets, and track progress in real-time.")).size(16.0).color(t.text3));
             ui.add_space(30.0);
             let (pr, _) = ui.allocate_exact_size(vec2(480.0, 300.0), Sense::hover());
-            ui.painter().rect_filled(pr, 6.0, Color32::WHITE);
+            ui.painter().rect_filled(pr, 6.0, t.card);
             ui.painter().rect_stroke(pr, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             let band = Rect::from_min_size(pr.min + vec2(0.0, 34.0), vec2(pr.width(), 100.0));
             ui.painter().rect_filled(band, 0.0, Color32::from_rgb(0xe3, 0x9b, 0x6f));
             let card = Rect::from_min_size(pr.min + vec2(66.0, 76.0), vec2(pr.width() - 132.0, 120.0));
-            ui.painter().rect_filled(card, 3.0, Color32::WHITE);
+            ui.painter().rect_filled(card, 3.0, t.card);
             ui.painter().rect_stroke(card, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             for (i, c) in [[0x3d, 0xb8, 0x8b], [0x44, 0x66, 0xff], [0xe1, 0x6b, 0x16]].iter().enumerate() {
                 let y = card.top() + 28.0 + i as f32 * 32.0;
@@ -1440,7 +1434,7 @@ impl App {
             ui.add_space(30.0);
             if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
                 let id = self.data.new_id();
-                self.data.extra.goals.push(Goal { id, name: "New goal".into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
+                self.data.extra.goals.push(Goal { id, name: tr("New goal").into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
                 self.goal_open = Some(id);
                 self.dirty = true;
             }
@@ -1500,7 +1494,7 @@ impl App {
         let n = self.data.extra.teams.len();
         self.data.extra.teams.push(Team {
             id,
-            name: format!("Team {}", n + 1),
+            name: crate::trf!("Team {}", n + 1),
             members: vec![self.data.me],
             color: STATUS_PALETTE[1 + (n * 3) % 13],
         });
@@ -1513,7 +1507,7 @@ impl App {
         let t = self.t();
         self.page_bar(ui, if mine { "My Teams" } else { "All Teams" }, |s, ui| {
             let tt = s.t();
-            if primary_button(ui, &tt, tr("Create Team")).clicked() {
+            if primary_button(ui, &tt, tr("Create team")).clicked() {
                 s.new_team();
             }
         });
@@ -1523,13 +1517,25 @@ impl App {
                 let teams: Vec<Team> = self.data.extra.teams.iter().filter(|x| !mine || x.members.contains(&me)).cloned().collect();
                 if teams.is_empty() && mine && !self.data.extra.teams.is_empty() {
                     ui.label(RichText::new(tr("You're not in any team yet")).color(t.text3));
+                } else if teams.is_empty() && self.data.solo() {
+                    // alone: a team of one means nothing yet, so invite first;
+                    // Create team stays in the bar above
+                    ui.add_space(60.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(tr("Invite people to make teams")).size(24.0));
+                        ui.label(RichText::new(tr("You're the only one in this workspace. Invite the people you work with, then group them into teams.")).color(t.text2));
+                        ui.add_space(12.0);
+                        if primary_button(ui, &t, tr("Invite people")).clicked() {
+                            self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
+                        }
+                    });
                 } else if teams.is_empty() {
                     ui.add_space(60.0);
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new(tr("Manage teams and see their work")).size(24.0));
                         ui.label(RichText::new(tr("Coordinate teams, organize members and see the details of their work.")).color(t.text2));
                         ui.add_space(12.0);
-                        if primary_button(ui, &t, tr("Create Team")).clicked() {
+                        if primary_button(ui, &t, tr("Create team")).clicked() {
                             self.new_team();
                         }
                     });
@@ -1541,7 +1547,7 @@ impl App {
                             let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                             ui.painter().rect_filled(r, 5.0, rgb(tm.color));
                             ui.label(RichText::new(&tm.name).size(16.0));
-                            ui.label(RichText::new(trf!("{} members", tm.members.len())).color(t.text2));
+                            ui.label(RichText::new(if tm.members.len() == 1 { tr("1 member").to_string() } else { trf!("{} members", tm.members.len()) }).color(t.text2));
                             let (r, _) = ui.allocate_exact_size(vec2(90.0, 22.0), Sense::hover());
                             paint_avatars(ui.painter(), r.left_center(), 10.0, &tm.members, &self.data, t.card);
                         });
@@ -1608,7 +1614,12 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     for m in &members {
                         let mut on = tm.members.contains(&m.id);
-                        if check(ui, &mut on, &m.name).changed() {
+                        let label = if m.invited {
+                            trf!("{} (invited)", m.name)
+                        } else {
+                            m.name.clone()
+                        };
+                        if check(ui, &mut on, label).changed() {
                             if on {
                                 tm.members.push(m.id);
                             } else {
@@ -1661,7 +1672,12 @@ impl App {
                                 paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
                                 ui.label(RichText::new(&m.name).strong());
                                 ui.label(
-                                    RichText::new(trf!("{} open tasks", open.len())).color(t.text2),
+                                    RichText::new(if open.len() == 1 {
+                                        tr("1 open task").to_string()
+                                    } else {
+                                        trf!("{} open tasks", open.len())
+                                    })
+                                    .color(t.text2),
                                 );
                             });
                             for task in open.iter().take(6) {
@@ -1803,7 +1819,8 @@ impl App {
         let r = ui.available_rect_before_wrap();
         ui.painter()
             .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
-        let bg = Color32::from_rgb(249, 249, 249);
+        // the theme's panel grey (a fixed light grey hid the dark theme's text)
+        let bg = t.sidebar;
         ui.painter().rect_filled(
             Rect::from_min_max(r.min + vec2(0.0, 1.0), r.max),
             egui::CornerRadius {
@@ -1857,6 +1874,7 @@ impl App {
                                     ui.add_space(((w - 4.0 * cw - 30.0) / 2.0).max(0.0));
                                     for (icon, label) in [("\u{1F465}", "All assigned tasks"), ("\u{25A4}", "Last week's tasks"), ("+", "Individual tasks"), ("\u{23F1}", "Track time")] {
                                         let (r, resp) = ui.allocate_exact_size(vec2(cw, 84.0), Sense::click());
+                                        name_it(&resp, label);
                                         ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
                                         ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                                         let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
@@ -1866,8 +1884,12 @@ impl App {
                                         if resp.clicked() {
                                             match label {
                                                 "All assigned tasks" => {
-                                                    let rows = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).map(|x| x.id).collect();
+                                                    let rows: Vec<u64> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).map(|x| x.id).collect();
+                                                    let none = rows.is_empty();
                                                     self.add_sheet_rows(ws, rows);
+                                                    if none {
+                                                        self.toast = Some((tr("No open tasks are assigned to you").into(), now_ts()));
+                                                    }
                                                 }
                                                 "Last week's tasks" => {
                                                     let lw = ws - Duration::days(7);
@@ -1881,6 +1903,10 @@ impl App {
                                                 "Individual tasks" => {
                                                     // show the grid; pick tasks with "+ Add task"
                                                     self.sheet_force = true;
+                                                }
+                                                // nothing to pick from: say why instead of an empty list
+                                                _ if !self.data.tasks.iter().any(|x| self.data.task_live(x)) => {
+                                                    self.toast = Some((tr("Make a task first: time is tracked on tasks").into(), now_ts()));
                                                 }
                                                 _ => {
                                                     let first = self.data.tasks.iter().find(|x| x.assignees.contains(&me) && self.data.task_live(x)).map(|x| x.id).unwrap_or(0);
@@ -1977,6 +2003,13 @@ impl App {
                             per[i as usize] += now - st;
                         }
                     }
+                    // time on an archived task still counts: mark the row so
+                    let archived = !self.data.task_live(&self.data.tasks[ti]);
+                    let shown = if archived {
+                        trf!("{} (archived)", name)
+                    } else {
+                        name.clone()
+                    };
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         let (nr, nresp) =
@@ -1986,9 +2019,9 @@ impl App {
                             .text(
                                 nr.left_center() + vec2(8.0, 0.0),
                                 Align2::LEFT_CENTER,
-                                &name,
+                                &shown,
                                 FontId::proportional(14.0),
-                                t.text,
+                                if archived { t.text3 } else { t.text },
                             );
                         // take the row off (and my time on it this week)
                         let xr = Rect::from_center_size(
@@ -2025,8 +2058,14 @@ impl App {
                                     .range(0.0..=24.0)
                                     .clamp_existing_to_range(false)
                                     .speed(0.05)
-                                    .max_decimals(2)
-                                    .suffix(tr("h")),
+                                    .custom_formatter(|h, _| fmt_hm((h * 3600.0).round() as i64))
+                                    .custom_parser(|s| {
+                                        if s.trim() == "-" {
+                                            return Some(0.0);
+                                        }
+                                        super::taskfields::parse_estimate(s)
+                                            .map(|m| m as f64 / 60.0)
+                                    }),
                             );
                             ui.add_space(8.0);
                             if r.changed() && hours != before {
@@ -2038,7 +2077,7 @@ impl App {
                         ui.painter().text(
                             tr.center(),
                             Align2::CENTER_CENTER,
-                            fmt_duration(sum),
+                            fmt_hm(sum),
                             FontId::proportional(13.0),
                             t.text,
                         );
@@ -2085,7 +2124,7 @@ impl App {
                             fr.center().y,
                         ),
                         Align2::CENTER_CENTER,
-                        if *v > 0 { fmt_duration(*v) } else { "-".into() },
+                        fmt_hm(*v),
                         FontId::proportional(12.5),
                         t.text2,
                     );
@@ -2093,7 +2132,7 @@ impl App {
                 ui.painter().text(
                     pos2(fr.left() + name_w + col * 7.5, fr.center().y),
                     Align2::CENTER_CENTER,
-                    fmt_duration(all),
+                    fmt_hm(all),
                     FontId::proportional(13.0),
                     t.text,
                 );
@@ -2253,7 +2292,13 @@ impl App {
             for (k, e) in x.time_entries.iter().enumerate() {
                 let i = (ts_day(e.start) - ws).num_days();
                 if (0..7).contains(&i) && self.data.is_my_entry(x, e) {
-                    rows.push((e.start, e.end, x.name.clone(), x.id, k));
+                    // time on an archived task still counts: mark the entry so
+                    let name = if self.data.task_live(x) {
+                        x.name.clone()
+                    } else {
+                        trf!("{} (archived)", x.name)
+                    };
+                    rows.push((e.start, e.end, name, x.id, k));
                 }
             }
         }
@@ -2427,4 +2472,29 @@ pub(super) fn ts_day(ts: i64) -> NaiveDate {
 /// How a week is stored with a timesheet row: its first day, counted in days.
 fn sheet_week_key(ws: NaiveDate) -> u64 {
     ws.num_days_from_ce().max(0) as u64
+}
+
+/// A form template's question in the interface language: it is saved as the
+/// question's text, so a Korean screen starts with Korean questions. Some
+/// read differently in a form than elsewhere ("Comments" is 의견 here, not 댓글).
+fn form_question(label: &str) -> &str {
+    match label {
+        "Your name" => crate::i18n::tr_ctx("Your name (form question)", label),
+        "Comments" => crate::i18n::tr_ctx("Comments (form question)", label),
+        "Goal" => crate::i18n::tr_ctx("Goal (form question)", label),
+        "Role" => crate::i18n::tr_ctx("Role (form question)", label),
+        "Full name" => crate::i18n::tr_ctx("Full name (form question)", label),
+        "How was your experience?" => tr("How was your experience?"),
+        "Project name" => tr("Project name"),
+        "Deadline" => tr("Deadline"),
+        "Customer" => tr("Customer"),
+        "Items" => tr("Items"),
+        "Quantity" => tr("Quantity"),
+        "Needed by" => tr("Needed by"),
+        "Experience" => tr("Experience"),
+        "Links" => tr("Links"),
+        "Issue" => tr("Issue"),
+        "Urgency" => tr("Urgency"),
+        _ => tr(label),
+    }
 }

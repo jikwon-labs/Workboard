@@ -31,6 +31,14 @@ pub const T: &[(&str, &str)] = &[
         "Their subtasks go too. You can undo right after, or restore them from Trash.",
         "하위 작업도 함께 삭제됩니다. 바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
     ),
+    (
+        "You can undo right after, or restore it from Trash.",
+        "바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
+    ),
+    (
+        "You can undo right after, or restore them from Trash.",
+        "바로 실행 취소하거나 휴지통에서 복원할 수 있습니다.",
+    ),
     ("Task deleted", "작업을 삭제했습니다"),
     ("{} tasks deleted", "작업 {}개를 삭제했습니다"),
     // filters
@@ -63,14 +71,12 @@ pub const T: &[(&str, &str)] = &[
     ("Task type", "작업 유형"),
     ("Milestone", "마일스톤"),
     ("Tags in use", "사용 중인 태그"),
-    ("Tag {}", "태그 {}"),
     ("\u{1F441} Watching", "\u{1F441} 지켜보는 중"),
     ("\u{1F441} Watch", "\u{1F441} 지켜보기"),
     ("Stop getting updates", "업데이트 받지 않기"),
     ("Get updates on this task", "이 작업의 업데이트 받기"),
     ("{} watching", "{}명이 지켜보는 중"),
     ("Watchers", "지켜보는 사람"),
-    ("Watcher {}", "{}"),
     ("Click to rename", "클릭해서 이름 바꾸기"),
     ("Move up", "위로 이동"),
     ("Move down", "아래로 이동"),
@@ -110,7 +116,6 @@ pub const T: &[(&str, &str)] = &[
         "\"{}\"에 연결할 작업을 고르세요.",
     ),
     ("No tasks match", "일치하는 작업이 없습니다"),
-    ("Pick {}", "{} 선택"),
     // attachments
     ("Attachments", "첨부 파일"),
     ("\u{1F4CE} Attach", "\u{1F4CE} 첨부"),
@@ -176,8 +181,8 @@ pub const T: &[(&str, &str)] = &[
     ("Team", "팀"),
     // replies and inbox
     (
-        "Comments assigned to someone, or that @mention them, until resolved",
-        "누군가에게 할당되었거나 @멘션한 댓글 (해결될 때까지)",
+        "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
+        "누군가에게 할당되었거나 @멘션한 작업 댓글 (해결될 때까지). 채팅 @멘션은 받은 편지함에 있습니다.",
     ),
     ("{} commented: {}", "{}님의 댓글: {}"),
     ("{} replied: {}", "{}님의 답장: {}"),
@@ -270,4 +275,6 @@ pub const T: &[(&str, &str)] = &[
         "Only you see a private dashboard",
         "비공개 대시보드는 나만 볼 수 있습니다",
     ),
+    ("No other tasks to pick. Archived tasks are not offered here.", "고를 다른 작업이 없습니다. 보관된 작업은 여기에 나오지 않습니다."),
+    ("No other tasks to pick yet.", "아직 고를 다른 작업이 없습니다."),
 ];

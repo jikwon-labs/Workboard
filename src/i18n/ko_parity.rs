@@ -62,7 +62,7 @@ pub const T: &[(&str, &str)] = &[
     ("Restored \"{}\".", "\"{}\"을(를) 복원했습니다."),
     ("Location", "위치"),
     ("Archived tasks", "보관된 작업"),
-    ("{} ({} open, {} closed)", "{} (진행 {}, 닫힘 {})"),
+    ("{} ({} open, {} closed)", "{} (열림 {}, 닫힘 {})"),
     ("What is this List for?", "이 목록은 어떤 용도인가요?"),
     ("Color & Icon", "색상 및 아이콘"),
     ("Space color", "스페이스 색상"),

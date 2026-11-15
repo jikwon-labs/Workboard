@@ -298,7 +298,8 @@ impl App {
                         }
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
-                    ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, tr(st), FontId::proportional(13.0), col);
+                    let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
+                    ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col);
                     if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr("Remove")).color(t.danger)))).clicked() {

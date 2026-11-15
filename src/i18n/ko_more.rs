@@ -11,6 +11,7 @@ pub const T: &[(&str, &str)] = &[
     ("Member", "멤버"),
     ("Guest", "게스트"),
     ("Invited", "초대됨"),
+    ("Active (member)", "활성"),
     ("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.", "초대한 사람은 공유 서버에 연결되면 접근할 수 있습니다. 그전까지는 이 컴퓨터에서 로그아웃 \u{2192} 사람 전환으로 사용할 수 있습니다."),
     // inbox
     ("Primary", "주요"),

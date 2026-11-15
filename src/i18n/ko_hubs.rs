@@ -198,7 +198,7 @@ pub const T: &[(&str, &str)] = &[
     ("No time tracked this week. Start a timer from any task.", "이번 주 기록된 시간이 없습니다. 아무 작업에서나 타이머를 시작하세요."),
     ("Add time", "시간 추가"),
     (" min", "분"),
-    ("Open (tasks)", "진행 중"),
+    ("Open (tasks)", "열린 작업"),
     // timesheets and dashboards
     ("Unknown", "알 수 없음"),
     ("Time tracked this week by person", "이번 주 사람별 기록 시간"),

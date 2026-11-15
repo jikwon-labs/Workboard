@@ -8292,3 +8292,89 @@ fn planner_add_without_a_list_keeps_the_name_and_says_why() {
     assert!(h.app.toast.is_some());
     assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
 }
+
+/// The seed with every List and task archived (the audit's "archived" state).
+fn archived_workspace() -> Ui1 {
+    let mut h = Ui1::new();
+    for s in h.app.data.spaces.iter_mut() {
+        for l in s.lists.iter_mut() {
+            l.archived = true;
+        }
+        for f in s.folders.iter_mut() {
+            for l in f.lists.iter_mut() {
+                l.archived = true;
+            }
+        }
+    }
+    for t in h.app.data.tasks.iter_mut() {
+        t.archived = true;
+    }
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    h
+}
+
+fn list_id(h: &Ui1, name: &str) -> u64 {
+    h.app
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| {
+            s.lists
+                .iter()
+                .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
+        })
+        .find(|l| l.name == name)
+        .map(|l| l.id)
+        .unwrap()
+}
+
+#[test]
+fn archived_favorite_leaves_the_sidebar_and_its_page_says_archived() {
+    let h0 = Ui1::new();
+    assert!(h0.has("Website Redesign"), "a favorite in the sidebar");
+    let mut h = archived_workspace();
+    let web = list_id(&h, "Website Redesign");
+    assert!(h.app.data.favorites.contains(&Location::List(web)));
+    assert!(!h.has("Website Redesign"), "archived: out of Favorites");
+    // opened another way (a link), the page says it is archived and restores it
+    h.app.actions.push(Action::Go(Location::List(web)));
+    h.settle();
+    assert!(h.has("Restore archived here"));
+    h.click("Restore archived here");
+    assert!(!h.app.data.list_archived(web));
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.has("Website Redesign"), "back in Favorites");
+}
+
+#[test]
+fn views_with_only_archived_tasks_say_so_and_show_the_way_back() {
+    let mut h = archived_workspace();
+    h.click("All Tasks");
+    assert!(!h.has("No tasks here yet"));
+    let n = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.parent.is_none())
+        .count();
+    assert!(h.has(&format!("All {} tasks here are archived", n)));
+    // the tasks sit in archived Lists: they come back from Settings > Spaces
+    assert!(!h.has("Show archived tasks"));
+    h.click("See archived Lists");
+    assert_eq!(h.app.section, Section::Settings);
+    // a List that is not archived, with only archived tasks: the Archived filter
+    let mut h = Ui1::new();
+    let web = list_id(&h, "Website Redesign");
+    for t in h.app.data.tasks.iter_mut().filter(|t| t.list_id == web) {
+        t.archived = true;
+    }
+    h.app.actions.push(Action::Go(Location::List(web)));
+    h.settle();
+    h.click("Show archived tasks");
+    assert!(h.app.filter.archived);
+    assert!(h.has("Task Design new homepage layout"));
+}

@@ -2052,15 +2052,22 @@ impl App {
 
                             // (while searching, the heading only shows with a match under it)
                             let fav_tasks: Vec<(u64, String)> = self.favorite_tasks();
-                            let fav_match = self
+                            // an archived Space, Folder or List leaves Favorites
+                            // until it is restored
+                            let favs: Vec<Location> = self
                                 .data
                                 .favorites
+                                .iter()
+                                .copied()
+                                .filter(|f| !self.data.location_archived(*f))
+                                .collect();
+                            let fav_match = favs
                                 .iter()
                                 .any(|f| self.matches_search(&self.data.location_name(*f)))
                                 || fav_tasks.iter().any(|(_, n)| self.matches_search(n));
                             if fav_match && !self.hidden("Favorites") {
                                 self.side_header(ui, "Favorites", &[]);
-                                for f in self.data.favorites.clone() {
+                                for f in favs {
                                     let name = self.data.location_name(f);
                                     if !self.matches_search(&name) {
                                         continue;
@@ -2948,9 +2955,95 @@ impl App {
             .iter()
             .filter_map(|s| s.strip_prefix("task:")?.parse::<u64>().ok())
             .filter_map(|id| self.task(id))
-            .filter(|t| !t.archived)
+            .filter(|t| self.data.task_live(t))
             .map(|t| (t.id, t.name.clone()))
             .collect()
+    }
+
+    /// Top-level tasks here hidden only because they are archived: (archived
+    /// tasks the Archived filter would show, tasks in archived Lists, which
+    /// come back with their List). Nothing while the Archived filter is on.
+    pub(super) fn archived_here(&mut self) -> (usize, usize) {
+        if self.filter.archived {
+            return (0, 0);
+        }
+        self.filter.archived = true;
+        let own = self.filtered().len();
+        self.filter.archived = false;
+        if matches!(self.loc, Location::List(_)) {
+            return (own, 0);
+        }
+        let lists = self.data.lists_in(self.loc);
+        let me = self.data.me;
+        let in_lists = self
+            .data
+            .tasks
+            .iter()
+            .filter(|t| t.parent.is_none() && self.data.list_archived(t.list_id))
+            .filter(|t| match self.loc {
+                Location::MyTasks => t.assignees.contains(&me),
+                Location::TodayOverdue => {
+                    t.assignees.contains(&me)
+                        && t.due.is_some_and(|d| d <= today())
+                        && !self.data.is_closed(t)
+                }
+                _ => lists.as_ref().is_none_or(|l| l.contains(&t.list_id)),
+            })
+            .filter(|t| {
+                self.data
+                    .space_of_list(t.list_id)
+                    .and_then(|s| s.private_owner)
+                    .is_none_or(|o| o == me)
+            })
+            .count();
+        (own, in_lists)
+    }
+
+    /// Beside the title of an archived Space, Folder or List: says so, and
+    /// restores it when it is archived itself (not only what it sits in).
+    fn archived_note(&mut self, ui: &mut Ui, t: &Theme) {
+        if !self.data.location_archived(self.loc) {
+            return;
+        }
+        let own = match self.loc {
+            Location::Space(id) => self.data.spaces.iter().any(|s| s.id == id && s.archived),
+            Location::Folder(id) => self
+                .data
+                .spaces
+                .iter()
+                .any(|s| s.folders.iter().any(|f| f.id == id && f.archived)),
+            Location::List(id) => self.data.list_item(id).is_some_and(|l| l.archived),
+            _ => false,
+        };
+        let hover = if own {
+            "Archived: hidden from the sidebar and from other views."
+        } else {
+            "What this sits in is archived. Restore it from Settings > Spaces."
+        };
+        egui::Frame::new()
+            .fill(t.hover)
+            .corner_radius(4)
+            .inner_margin(egui::Margin::symmetric(6, 1))
+            .show(ui, |ui| {
+                ui.label(RichText::new(tr("Archived")).small().color(t.text2))
+                    .on_hover_text(tr(hover));
+            });
+        if own {
+            let b = ui.small_button(tr("Restore"));
+            name_it(&b, "Restore archived here");
+            if b.clicked() {
+                match self.loc {
+                    Location::Space(id) => {
+                        self.set_space_archived(id, false);
+                        let name = self.data.location_name(self.loc);
+                        self.toast = Some((trf!("Restored \"{}\".", name), now_ts()));
+                    }
+                    Location::Folder(id) => self.set_folder_archived(id, false),
+                    Location::List(id) => self.set_list_archived(id, false),
+                    _ => {}
+                }
+            }
+        }
     }
 
     /// While a sidebar item is dragged over `rect`: marks the spot and, when
@@ -3163,6 +3256,7 @@ impl App {
                         }
                     }
                     self.level_note(ui, &t, self.loc_level(self.loc));
+                    self.archived_note(ui, &t);
                     let right_start = ui.max_rect().right();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -3995,6 +4089,12 @@ impl App {
                         self.show_closed = false;
                         n.saturating_sub(self.filtered().len())
                     };
+                    // archived ones are hidden too: say how many, and where they are
+                    let (arch_tasks, arch_in_lists) = if hidden > 0 {
+                        (0, 0)
+                    } else {
+                        self.archived_here()
+                    };
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {
                         if hidden > 0 {
@@ -4026,6 +4126,49 @@ impl App {
                                     self.show_closed = true;
                                 }
                                 if primary_button(ui, &t, tr("Add Task")).clicked() {
+                                    self.open_quick_add(None);
+                                }
+                            });
+                        } else if arch_tasks + arch_in_lists > 0 {
+                            let n = arch_tasks + arch_in_lists;
+                            ui.label(
+                                RichText::new(if n == 1 {
+                                    tr("The 1 task here is archived").to_string()
+                                } else {
+                                    trf!("All {} tasks here are archived", n)
+                                })
+                                .size(16.0)
+                                .color(t.text2),
+                            );
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
+                                let ghost_btn = |ui: &mut Ui, label: &str| {
+                                    ui.add(
+                                        egui::Button::new(label)
+                                            .stroke(Stroke::new(1.0, t.border))
+                                            .corner_radius(6),
+                                    )
+                                };
+                                // archived tasks in Lists that are not: the Archived filter
+                                if arch_tasks > 0 {
+                                    let b = ghost_btn(ui, tr("Show archived tasks"));
+                                    name_it(&b, "Show archived tasks");
+                                    if b.clicked() {
+                                        self.filter.archived = true;
+                                    }
+                                }
+                                // tasks in archived Lists come back with their List
+                                if arch_in_lists > 0 {
+                                    let b = ghost_btn(ui, tr("See archived Lists"));
+                                    name_it(&b, "See archived Lists");
+                                    if b.clicked() {
+                                        self.open_settings("Spaces");
+                                    }
+                                }
+                                if !self.on_personal_list()
+                                    && primary_button(ui, &t, tr("Add Task")).clicked()
+                                {
                                     self.open_quick_add(None);
                                 }
                             });

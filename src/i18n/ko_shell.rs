@@ -122,4 +122,22 @@ pub const T: &[(&str, &str)] = &[
     // board view
     ("+  Add Task", "+  작업 추가"),
     ("+  Add group", "+  그룹 추가"),
+    (
+        "The 1 task here is archived",
+        "이곳의 작업 1개가 보관되어 있습니다",
+    ),
+    (
+        "All {} tasks here are archived",
+        "이곳의 작업 {}개가 모두 보관되어 있습니다",
+    ),
+    ("Show archived tasks", "보관된 작업 보기"),
+    ("See archived Lists", "보관된 목록 보기"),
+    (
+        "Archived: hidden from the sidebar and from other views.",
+        "보관됨: 사이드바와 다른 보기에서 숨겨집니다.",
+    ),
+    (
+        "What this sits in is archived. Restore it from Settings > Spaces.",
+        "이 항목이 들어 있는 곳이 보관되어 있습니다. 설정 > 스페이스에서 복원하세요.",
+    ),
 ];

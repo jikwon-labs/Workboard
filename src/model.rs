@@ -1897,6 +1897,20 @@ impl Data {
             })
     }
 
+    /// True when the Space, Folder or List, or what it sits in, is archived.
+    pub fn location_archived(&self, loc: Location) -> bool {
+        match loc {
+            Location::Space(id) => self.spaces.iter().any(|s| s.id == id && s.archived),
+            Location::Folder(id) => self.spaces.iter().any(|s| {
+                s.folders
+                    .iter()
+                    .any(|f| f.id == id && (f.archived || s.archived))
+            }),
+            Location::List(id) => self.list_archived(id),
+            _ => false,
+        }
+    }
+
     /// Not archived, and not in an archived list or space.
     pub fn task_live(&self, t: &Task) -> bool {
         !t.archived && !self.list_archived(t.list_id)

@@ -6976,10 +6976,10 @@ fn timesheet_rows_added_by_hand_stay_in_their_week() {
     h.click("+ Add task");
     h.click("Renew passport");
     assert!(h.has("Remove row Renew passport"));
-    h.click(">");
+    h.click("Next period");
     assert_eq!(h.app.sheet_week, ws + Duration::days(7));
     assert!(!h.has("Remove row Renew passport"), "not in the next week");
-    h.click("<");
+    h.click("Previous period");
     assert!(h.has("Remove row Renew passport"));
     h.click("Remove row Renew passport");
     assert!(!h.has("Remove row Renew passport"), "the x takes it off");

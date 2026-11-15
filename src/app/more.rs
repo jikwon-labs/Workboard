@@ -843,14 +843,15 @@ impl App {
                                 ui.separator();
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(tr("Title:")).color(t.text2));
-                                    ui.add(
+                                    // frameless like the body below, so a hint shows where to type
+                                    let r = ui.add(
                                         egui::TextEdit::singleline(&mut self.post_title)
-                                            .frame(false)
                                             .hint_text(tr("Add a title"))
+                                            .frame(false)
                                             .desired_width(f32::INFINITY),
                                     );
-                                });
                                     name_field(&r, "Post title");
+                                });
                                 ui.separator();
                                 ui.add(
                                     egui::TextEdit::multiline(&mut self.post_body)

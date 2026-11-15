@@ -1637,6 +1637,8 @@ impl App {
                         }
                     }
                 });
+                ui.add_space(4.0);
+                // a framed button like Delete on dashboards and whiteboards
                 if ui
                     .button(RichText::new(tr("Delete team")).color(t.danger))
                     .clicked()
@@ -1864,10 +1866,11 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.add(ghost(egui::Button::new(RichText::new("<").size(16.0)))).clicked() {
+                    let (back, fwd) = super::icons::period_arrows(ui, &t);
+                    if back {
                         self.sheet_week = ws - Duration::days(7);
                     }
-                    if ui.add(ghost(egui::Button::new(RichText::new(">").size(16.0)))).clicked() {
+                    if fwd {
                         self.sheet_week = ws + Duration::days(7);
                     }
                     let r = ui.add(ghost(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0))));

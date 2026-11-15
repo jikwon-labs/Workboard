@@ -2610,9 +2610,7 @@ impl App {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     // both framed buttons, the second in red
                                     if ui
-                                        .add(ghost(egui::Button::new(
-                                            RichText::new(tr("Delete forever")).color(t.danger),
-                                        )))
+                                        .button(RichText::new(tr("Delete forever")).color(t.danger))
                                         .clicked()
                                     {
                                         purge = Some(i);

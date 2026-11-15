@@ -194,21 +194,14 @@ impl App {
                         self.planner_week =
                             week_start(today()) + Duration::days(if monday { 1 } else { 0 });
                     }
-                    if ui.button("<").clicked() {
+                    let (back, fwd) = super::icons::period_arrows(ui, &t);
+                    if back {
                         self.planner_week = week - Duration::days(7);
                     }
-                    if ui.button(">").clicked() {
+                    if fwd {
                         self.planner_week = week + Duration::days(7);
                     }
-                    let end = week + Duration::days(6);
-                    ui.label(
-                        RichText::new(format!(
-                            "{} - {}",
-                            week.text("%b %-d"),
-                            end.text("%b %-d, %Y")
-                        ))
-                        .size(15.0),
-                    );
+                    ui.label(RichText::new(week_range(week)).size(15.0));
                 });
                 ui.add_space(10.0);
                 let mine: Vec<Task> = self
@@ -741,7 +734,7 @@ impl App {
                                         kind,
                                         tr(label),
                                         label,
-                                        false,
+                                        true,
                                         0.0,
                                         t.text,
                                         t.text2,
@@ -823,7 +816,6 @@ impl App {
                                             cards.push(DashCard {
                                                 kind: k.into(),
                                                 title: String::new(),
-                                // framed like the other controls in this row
                                             });
                                             self.data.extra.dashboards[di].cards = Some(cards);
                                             self.dirty = true;
@@ -831,10 +823,9 @@ impl App {
                                         }
                                     }
                                 });
+                                // framed like the other controls in this row
                                 if ui
-                                    .add(ghost(egui::Button::new(
-                                        RichText::new(tr("Delete")).color(t.danger),
-                                    )))
+                                    .button(RichText::new(tr("Delete")).color(t.danger))
                                     .clicked()
                                 {
                                     let d = &self.data.extra.dashboards[di];
@@ -1346,20 +1337,14 @@ impl App {
                             if ui.button(tr("This week")).clicked() {
                                 self.sheet_week = week_start(today());
                             }
-                            if ui.button("<").clicked() {
+                            let (back, fwd) = super::icons::period_arrows(ui, &t);
+                            if back {
                                 self.sheet_week = ws - Duration::days(7);
                             }
-                            if ui.button(">").clicked() {
+                            if fwd {
                                 self.sheet_week = ws + Duration::days(7);
                             }
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} - {}",
-                                    ws.text("%b %-d"),
-                                    (ws + Duration::days(6)).text("%b %-d, %Y")
-                                ))
-                                .size(15.0),
-                            );
+                            ui.label(RichText::new(week_range(ws)).size(15.0));
                         });
                         ui.add_space(12.0);
                         // rows: tasks with time in this week

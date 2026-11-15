@@ -162,4 +162,8 @@ pub const T: &[(&str, &str)] = &[
     ("{} tasks", "작업 {}개"),
     // the name a new workspace starts with
     ("My Workspace", "내 워크스페이스"),
+    // a week as a range of dates, the year first in Korean
+    ("{} \u{2013} {}, {}", "{2}년 {0} \u{2013} {1}"),
+    // the back button beside a week or month
+    ("Previous", "이전"),
 ];

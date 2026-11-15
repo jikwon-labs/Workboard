@@ -251,6 +251,19 @@ pub fn due_color(task: &Task, closed: bool, t: &Theme) -> Color32 {
     }
 }
 
+/// A week shown as a range: "Nov 15 – Nov 21, 2026" in English, the year
+/// first in Korean ("2026년 11월 15일 – 11월 21일"; it used to land between
+/// the two dates).
+pub fn week_range(start: NaiveDate) -> String {
+    let end = start + Duration::days(6);
+    crate::trf!(
+        "{} \u{2013} {}, {}",
+        start.text("%b %-d"),
+        end.text("%b %-d"),
+        end.year()
+    )
+}
+
 pub fn date_color(d: NaiveDate, closed: bool, t: &Theme) -> Color32 {
     if closed {
         return t.text3;
@@ -394,6 +407,17 @@ pub fn popup<R>(
     let room = (screen.bottom() - resp.rect.bottom() - 32.0).max(screen.height() * 0.6);
     let tall_id = id.with("__tall");
     let tall: f32 = ui.data(|d| d.get_temp(tall_id)).unwrap_or(0.0);
+    // egui only pushes a popup back inside the window, so near the right
+    // edge it touched the edge: move it left to leave a margin (the width
+    // is last frame's, or the minimum before it has been shown)
+    let wide_id = id.with("__wide");
+    let wide: f32 = ui.data(|d| d.get_temp(wide_id)).unwrap_or(width + 24.0);
+    let over = resp.rect.left() + wide + 8.0 - screen.right();
+    let mut at = resp.clone();
+    if over > 0.0 {
+        at.rect = at.rect.translate(vec2(-over, 0.0));
+    }
+    let resp = &at;
     egui::popup_below_widget(
         ui,
         id,
@@ -407,17 +431,6 @@ pub fn popup<R>(
                     .max_height(room)
                     .auto_shrink([true, true])
                     .show(ui, |ui| {
-    // egui only pushes a popup back inside the window, so near the right
-    // edge it touched the edge: move it left to leave a margin (the width
-    // is last frame's, or the minimum before it has been shown)
-    let wide_id = id.with("__wide");
-    let wide: f32 = ui.data(|d| d.get_temp(wide_id)).unwrap_or(width + 24.0);
-    let over = resp.rect.left() + wide + 8.0 - screen.right();
-    let mut at = resp.clone();
-    if over > 0.0 {
-        at.rect = at.rect.translate(vec2(-over, 0.0));
-    }
-    let resp = &at;
                         ui.set_min_width(width);
                         let r = add(ui);
                         let h = ui.min_rect().height();
@@ -869,13 +882,15 @@ pub fn secondary_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Respo
 /// A small action button in a list row: room around the text, rounded like
 /// the rest (egui's small_button has no vertical padding, so the text touched
 /// the outline).
+/// It is as tall as the other buttons (CONTROL_H), so it lines up with them
+/// where a dialog puts it beside a primary button.
 pub fn row_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
     ui.scope(|ui| {
-        ui.spacing_mut().button_padding = vec2(10.0, 3.0);
+        ui.spacing_mut().button_padding.x = 10.0;
         ui.add(
             egui::Button::new(text)
                 .corner_radius(6)
-                .min_size(vec2(0.0, 26.0)),
+                .min_size(vec2(0.0, CONTROL_H)),
         )
     })
     .inner

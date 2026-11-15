@@ -147,9 +147,16 @@ public enum Edits {
         }
     }
 
-    /// Like Action::Add: the list's first status, "created this task" logged.
+    /// Like Action::Add: the list's first status, "created this task" logged,
+    /// and "assigned to <name>" (with the person's id in "target", which the
+    /// Mac app's Inbox goes by) for everyone else put on it.
     public static func addTask(_ data: inout JSON, list: UInt64, name: String, assignees: [UInt64], me: UInt64, id: UInt64, ts: Int64) {
         let view = WorkspaceView(data)
+        var activity: [JSON] = [["ts": .int(ts), "author": .id(me), "text": "created this task", "comment": false, "post": false]]
+        for who in assignees where who != me {
+            let name = view.member(who)?.name ?? ""
+            activity.append(["ts": .int(ts), "author": .id(me), "text": .string("assigned to \(name)"), "comment": false, "post": false, "target": .id(who)])
+        }
         let status = view.statuses(forList: list)[0].name
         let order = ((data["tasks"]?.array ?? []).compactMap { $0["order"]?.int }.max() ?? 0) + 1
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -159,7 +166,7 @@ public enum Edits {
             "description": "", "status": .string(status), "priority": 0,
             "assignees": .array(assignees.map(JSON.id)),
             "start": nil, "due": nil, "tags": [], "checklist": [],
-            "activity": [["ts": .int(ts), "author": .id(me), "text": "created this task", "comment": false, "post": false]],
+            "activity": .array(activity),
             "time_entries": [], "timer_started": nil, "estimate_min": nil,
             "created": .int(ts), "updated": .int(ts), "order": .int(order),
             "custom": [:], "recur": nil, "archived": false, "done_at": nil, "closed_at": nil,

@@ -18,6 +18,30 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(t["order"], 207)
     }
 
+    func testNewTaskLogsEveryoneElsePutOnIt() {
+        var d = SampleWorkspace.make()
+        Edits.addTask(&d, list: 111, name: "For Alex", assignees: [1, 2], me: 1, id: 9000, ts: 50)
+        let act = d["tasks"]!.array!.last!["activity"]!.array!
+        XCTAssertEqual(act.map { $0["text"] }, ["created this task", "assigned to Alex Kim"])
+        XCTAssertEqual(act[1]["target"], 2)
+        XCTAssertNil(act[0]["target"])
+    }
+
+    func testIdsTheMacAppKeepsSurviveEditsHere() {
+        var d = SampleWorkspace.make()
+        d.updateItem(at: "tasks", id: 201) { t in
+            var act = t["activity"]?.array ?? []
+            act.append(["ts": 5, "author": 2, "text": "assigned to Jamie Park", "comment": false, "target": 1])
+            act.append(["ts": 6, "author": 2, "text": "@Jamie Park look", "comment": true, "mentions": [1]])
+            t["activity"] = .array(act)
+        }
+        XCTAssertTrue(Edits.addComment(&d, task: 201, text: "ok", me: 1, ts: 7))
+        XCTAssertTrue(Edits.setStatus(&d, task: 201, to: "complete", me: 1, ts: 8))
+        let act = d["tasks"]!.array!.first { $0["id"] == 201 }!["activity"]!.array!
+        XCTAssertEqual(act.first { $0["ts"] == 5 }!["target"], 1)
+        XCTAssertEqual(act.first { $0["ts"] == 6 }!["mentions"], [1])
+    }
+
     func testMessagesAndRepliesHaveRequiredFields() {
         var d = SampleWorkspace.make()
         XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "hello", me: 1, id: 9001, ts: 60))

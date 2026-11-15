@@ -1411,7 +1411,8 @@ impl App {
                 sw: 8,
                 se: 8,
             },
-            Color32::from_rgb(243, 244, 247),
+            // the theme's panel grey: a fixed light grey hid the dark theme's text
+            t.sidebar,
         );
         ui.add_space(110.0);
         ui.vertical_centered(|ui| {
@@ -1420,12 +1421,12 @@ impl App {
             ui.label(RichText::new(tr("Create Goals, break them down into measurable targets, and track progress in real-time.")).size(16.0).color(t.text3));
             ui.add_space(30.0);
             let (pr, _) = ui.allocate_exact_size(vec2(480.0, 300.0), Sense::hover());
-            ui.painter().rect_filled(pr, 6.0, Color32::WHITE);
+            ui.painter().rect_filled(pr, 6.0, t.card);
             ui.painter().rect_stroke(pr, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             let band = Rect::from_min_size(pr.min + vec2(0.0, 34.0), vec2(pr.width(), 100.0));
             ui.painter().rect_filled(band, 0.0, Color32::from_rgb(0xe3, 0x9b, 0x6f));
             let card = Rect::from_min_size(pr.min + vec2(66.0, 76.0), vec2(pr.width() - 132.0, 120.0));
-            ui.painter().rect_filled(card, 3.0, Color32::WHITE);
+            ui.painter().rect_filled(card, 3.0, t.card);
             ui.painter().rect_stroke(card, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             for (i, c) in [[0x3d, 0xb8, 0x8b], [0x44, 0x66, 0xff], [0xe1, 0x6b, 0x16]].iter().enumerate() {
                 let y = card.top() + 28.0 + i as f32 * 32.0;
@@ -1806,7 +1807,8 @@ impl App {
         let r = ui.available_rect_before_wrap();
         ui.painter()
             .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
-        let bg = Color32::from_rgb(249, 249, 249);
+        // the theme's panel grey (a fixed light grey hid the dark theme's text)
+        let bg = t.sidebar;
         ui.painter().rect_filled(
             Rect::from_min_max(r.min + vec2(0.0, 1.0), r.max),
             egui::CornerRadius {

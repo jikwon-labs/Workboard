@@ -815,7 +815,7 @@ impl App {
                                     let (r, resp) = ui.allocate_exact_size(vec2(cw, 54.0), Sense::click());
                                     ui.painter().rect_filled(r, 8.0, rgb(bg).gamma_multiply(if resp.hovered() { 0.14 } else { 0.07 }));
                                     let ib = Rect::from_center_size(r.left_center() + vec2(26.0, 0.0), vec2(34.0, 34.0));
-                                    ui.painter().rect_filled(ib, 8.0, Color32::WHITE);
+                                    ui.painter().rect_filled(ib, 8.0, t.card);
                                     ui.painter().text(ib.center(), Align2::CENTER_CENTER, icon, FontId::proportional(15.0), rgb(bg));
                                     ui.painter().text(r.left_center() + vec2(54.0, -9.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(14.5), t.text);
                                     ui.painter().text(r.left_center() + vec2(54.0, 10.0), Align2::LEFT_CENTER, tr(sub), FontId::proportional(12.5), t.text2);

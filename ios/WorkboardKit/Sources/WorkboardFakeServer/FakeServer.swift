@@ -25,9 +25,11 @@
 //
 // Access requests like the real server (Hub::request): create_invite,
 // set_role, revoke and access_list for owners and admins, backup_list and
-// restore for the owner, with the same permission rules; after any change
-// everyone gets their own `access`, the asker too, after its answer (the
-// real server's access broadcast). Member 1 is the owner unless
+// restore for the owner, with the same permission rules; each request gets
+// one answer, and after a change every other connection gets its own
+// `access` (the real server's access broadcast, which skips the connection
+// whose request made the change). Lists say whether they answer
+// (`answer`). Member 1 is the owner unless
 // setRole(member:role:) says otherwise. Backups are added with
 // addBackup(name:snapshot:); a restore puts that snapshot back as is.
 //
@@ -107,14 +109,17 @@ public final class FakeServer: @unchecked Sendable {
     /// Tests: the next delta goes to nobody, as if it were lost.
     public func dropNextDelta() { queue.sync { loseNextDelta = true } }
     private var meddle: (member: UInt64, role: Role)?
-    private var dropAnswer = false
+    private var lateAnswer: TimeInterval?
     /// Tests: another admin gives `member` this role just as the next
     /// set_role or revoke is made, before its answer is worked out (the
     /// real server answers with access_for after letting go of its lock),
-    /// so that answer shows the other admin's change instead.
+    /// so that answer shows the other admin's change instead. The other
+    /// admin's list reaches the asker first, unasked.
     public func meddleBeforeNextAnswer(member: UInt64, role: Role) { queue.sync { meddle = (member, role) } }
-    /// Tests: the next access or backup request is never answered.
-    public func dropNextAnswer() { queue.sync { dropAnswer = true } }
+    /// Tests: the next access or backup request takes `secs` to answer, and
+    /// nothing else reaches that connection meanwhile (the real server
+    /// handles a connection's messages one at a time).
+    public func lateNextAnswer(after secs: TimeInterval) { queue.sync { lateAnswer = secs } }
     /// Tests: how many resync requests came in.
     public var resyncs: Int { queue.sync { resyncCount } }
     /// What /auth/forgot answers for "mail" (false: this server can't send email).
@@ -123,7 +128,7 @@ public final class FakeServer: @unchecked Sendable {
     /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T[&imported=KEY],
     /// /admin/reset-code?email=E, /admin/drop-account?member=N,
     /// /admin/offline?secs=N, /admin/online, /admin/find?text=T,
-    /// /admin/drop-answer), so UI
+    /// /admin/late-answer?secs=N), so UI
     /// tests in the simulator can drive sign-in, incoming messages and the
     /// server going away.
     public var adminHTTP = false
@@ -154,6 +159,8 @@ public final class FakeServer: @unchecked Sendable {
         var welcomed = false
         var fragments = Data()
         var deltas = false
+        /// Messages held back while a late answer is being "worked out".
+        var held: [ServerMessage]?
         init(_ c: NWConnection) { conn = c }
     }
 
@@ -418,9 +425,10 @@ public final class FakeServer: @unchecked Sendable {
                     c.messages.contains { $0.text == text || $0.replies.contains { $0.text == text } }
                 }
                 respond(p, 200, ["found": .bool(found)])
-            case "/admin/drop-answer":
-                // the next access or backup request gets no answer
-                dropAnswer = true
+            case "/admin/late-answer":
+                // the next access or backup request is answered after secs
+                let secs = comps?.queryItems?.first { $0.name == "secs" }?.value.flatMap(Double.init) ?? 30
+                lateAnswer = secs
                 respond(p, 200, ["ok": true])
             case "/admin/revoke":
                 revokeOnQueue(member)
@@ -709,10 +717,10 @@ public final class FakeServer: @unchecked Sendable {
     /// Hub::request: access and backup requests with the real server's rules.
     private func request(_ m: ClientMessage, from p: Peer) {
         func deny(_ why: String) { send(.error(code: ServerErrorCode.denied.rawValue, message: why), to: p) }
-        if dropAnswer {
-            dropAnswer = false
-            log("request left unanswered")
-            return
+        if let secs = lateAnswer {
+            lateAnswer = nil
+            log("answering in \(secs)s")
+            hold(p, for: secs)
         }
         guard requireSignIn, let member = p.member else { return deny("This server has no sign-in.") }
         let me = roleOf(member)
@@ -753,7 +761,7 @@ public final class FakeServer: @unchecked Sendable {
             let email = canMail ? memberEmail(who) : nil
             log("invite for member \(who): \(code)" + (email.map { " (emailed to \($0))" } ?? ""))
             send(.invite(member: who, code: code, emailed: email), to: p)
-            broadcastAccess()
+            broadcastAccess(except: p)
             return
         case let .setRole(who, role):
             if role == .owner || roleOf(who) == .owner { return deny("The owner's role can't be changed here.") }
@@ -767,25 +775,34 @@ public final class FakeServer: @unchecked Sendable {
         default:
             return
         }
-        // someone else's change landing between this one and its answer
-        var meddled = false
-        if let (who, role) = meddle, m != .accessList {
+        if m == .accessList { return send(accessFor(member, answer: true), to: p) }
+        // someone else's change landing between this one and its answer:
+        // their list reaches everyone, this connection too
+        if let (who, role) = meddle {
             meddle = nil
-            meddled = true
             roles[who] = role == .member ? nil : role
             log("another admin made member \(who) \(role.rawValue)")
+            broadcastAccess()
         }
-        send(accessFor(member), to: p)
-        // Hub::request tells every connection, the asker's too (and the
-        // other admin's change does the same)
-        broadcastAccess()
-        if meddled { broadcastAccess() }
+        send(accessFor(member, answer: true), to: p)
+        // Hub::request tells every other connection
+        broadcastAccess(except: p)
+    }
+
+    /// Keep what goes to `p` for `secs`, then send it in order.
+    private func hold(_ p: Peer, for secs: TimeInterval) {
+        if p.held == nil { p.held = [] }
+        queue.asyncAfter(deadline: .now() + secs) { [weak self] in
+            guard let self, let held = p.held else { return }
+            p.held = nil
+            for m in held { self.send(m, to: p) }
+        }
     }
 
     /// Hub::access_for: everyone's access as `member` may see it.
-    private func accessFor(_ member: UInt64) -> ServerMessage {
+    private func accessFor(_ member: UInt64, answer: Bool = false) -> ServerMessage {
         let viewer = roleOf(member)
-        guard viewer.manages else { return .access(people: [], role: viewer) }
+        guard viewer.manages else { return .access(people: [], role: viewer, answer: answer) }
         var ids = WorkspaceView(snapshot ?? [:]).members.map(\.id)
         for t in tokens.values where !ids.contains(t.member) { ids.append(t.member) }
         let people = ids.map { m in
@@ -793,7 +810,7 @@ public final class FakeServer: @unchecked Sendable {
                    invite: inviteCode(of: m).flatMap { viewer == .owner || (roleOf(m) == .member && accounts[m] == nil) ? $0 : nil },
                    account: accounts[m] != nil)
         }
-        return .access(people: people, role: viewer)
+        return .access(people: people, role: viewer, answer: answer)
     }
 
     private func broadcastAccess(except: Peer? = nil) {
@@ -846,6 +863,8 @@ public final class FakeServer: @unchecked Sendable {
         accounts[m] = Account(email: e, password: password)
         log("account for member \(m): \(e)")
         send(.account(email: e), to: p)
+        // Hub::set_password tells every connection, this one too
+        broadcastAccess()
     }
 
     private func assignTag(device: String, wanted: UInt64?) -> UInt64 {
@@ -890,6 +909,7 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     private func send(_ m: ServerMessage, to p: Peer) {
+        if p.held != nil { return p.held!.append(m) }
         frame(p, opcode: 0x1, Data(m.text.utf8))
     }
 }

@@ -809,6 +809,13 @@ final class Round3ClientTests: XCTestCase {
         XCTAssertEqual(ServerMessage(text: #"{"type":"access","people":[{"member":2,"role":"admin","devices":1}],"role":"admin"}"#),
                        .access(people: [Person(member: 2, role: .admin, devices: 1)], role: .admin))
         XCTAssertEqual(ServerMessage(text: #"{"type":"invite","member":3,"code":"C","mail_error":"no route"}"#), .invite(member: 3, code: "C", mailError: "no route"))
+        // whether a list answers a request (servers from round 6 on say)
+        for answer in [true, false] {
+            let m = ServerMessage.access(people: [Person(member: 2, role: .admin)], role: .owner, answer: answer)
+            XCTAssertEqual(ServerMessage(text: m.text), m)
+        }
+        XCTAssertEqual(ServerMessage(text: #"{"type":"access","people":[],"role":"owner","answer":true}"#), .access(people: [], role: .owner, answer: true))
+        XCTAssertEqual(ServerMessage(text: #"{"type":"access","people":[],"role":"owner"}"#), .access(people: [], role: .owner, answer: nil))
         XCTAssertEqual(Backup(name: "hourly-20261115-03.json", bytes: 0).label, "2026-11-15 03:00 (hourly)")
         XCTAssertEqual(Backup(name: "daily-20261115.json", bytes: 0).label, "2026-11-15 (daily)")
         XCTAssertEqual(Backup(name: "before-restore-20261115-031522.json", bytes: 0).label, "2026-11-15 03:15:22 (before a restore)")
@@ -1545,44 +1552,176 @@ final class Round5ClientTests: XCTestCase {
         XCTAssertNil(owner.adminUnconfirmed)
     }
 
-    /// A request whose answer never comes is given up on after a while,
-    /// with a gentle note, so it can't take a later request's refusal.
-    func testUnansweredRequestIsDroppedWithANote() async throws {
+    /// A request whose answer is slow is given up on after a while, with a
+    /// gentle note. Its answer still comes (the server answers every
+    /// request, in order) and is taken as its own, not a later request's,
+    /// so the later request's refusal still lands on it.
+    func testSlowRequestIsGivenUpWithANoteAndItsLateAnswerIsItsOwn() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
         let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
         defer { server.stop() }
         let owner = await signedIn(server, url, member: 1)
-        owner.askTimeout = 0.4
+        owner.askTimeout = 1
         owner.requestAccessList()
         await until("listed") { owner.people != nil && owner.adminPending == 0 }
 
-        server.dropNextAnswer()
+        server.lateNextAnswer(after: 1.6)
         owner.setRole(member: 3, role: .admin)
         XCTAssertEqual(owner.adminPending, 1)
         await until("given up", timeout: 3) { owner.adminPending == 0 }
         XCTAssertEqual(owner.adminUnconfirmed, SyncClient.unconfirmedNote)
         XCTAssertNil(owner.adminError)
+        XCTAssertEqual(owner.lateAnswersOwed, 1)
+        // it comes after all: the note goes
+        await until("confirmed late", timeout: 3) { owner.lateAnswersOwed == 0 }
+        XCTAssertNil(owner.adminUnconfirmed)
+        XCTAssertEqual(owner.people?.first { $0.member == 3 }?.role, .admin)
 
-        // a later refusal is its own request's
+        server.lateNextAnswer(after: 1.6)
+        owner.setRole(member: 3, role: .member)
+        await until("given up again", timeout: 3) { owner.adminPending == 0 }
+        XCTAssertEqual(owner.lateAnswersOwed, 1)
+
+        // sent before the late answer comes: the late list is the role
+        // change's, and the refusal after it is this request's
         owner.revoke(member: 1)
         XCTAssertNil(owner.adminUnconfirmed, "a new request starts afresh")
-        await until("refused") { owner.adminError != nil }
+        await until("refused", timeout: 4) { owner.adminError != nil || owner.notice != nil }
         XCTAssertEqual(owner.adminError, "The owner's access can't be removed.")
+        XCTAssertNil(owner.notice)
         XCTAssertEqual(owner.adminPending, 0)
+        XCTAssertEqual(owner.lateAnswersOwed, 0)
+        XCTAssertEqual(owner.people?.first { $0.member == 3 }?.role, .member, "the late answer's list is taken")
 
         // invites and restores may take longer (email, a whole workspace)
         owner.asks = [.invite(member: 2), .setRole(member: 3, role: .admin)]
-        owner.expireAsks(now: Date().addingTimeInterval(0.5))
+        owner.expireAsks(now: Date().addingTimeInterval(1.5))
         XCTAssertEqual(owner.asks, [.invite(member: 2)])
-        owner.expireAsks(now: Date().addingTimeInterval(2))
+        owner.expireAsks(now: Date().addingTimeInterval(5))
         XCTAssertEqual(owner.adminPending, 0)
+        XCTAssertEqual(owner.lateAnswersOwed, 2)
+        // answers that never come are forgotten in the end
+        owner.expireAsks(now: Date().addingTimeInterval(11))
+        XCTAssertEqual(owner.lateAnswersOwed, 1, "the invite is owed longer")
+        owner.expireAsks(now: Date().addingTimeInterval(41))
+        XCTAssertEqual(owner.lateAnswersOwed, 0)
 
         // a password change that gets no answer stops spinning
         owner.asks = [.password]
         owner.accountRequest = .sending
         owner.clearAdminMessages()
-        owner.expireAsks(now: Date().addingTimeInterval(1))
+        owner.expireAsks(now: Date().addingTimeInterval(1.5))
         XCTAssertEqual(owner.accountRequest, .failed(SyncClient.passwordUnconfirmed))
         XCTAssertNil(owner.adminUnconfirmed, "not an admin request")
+    }
+
+    /// Lists say whether they answer: one sent unasked (another admin's
+    /// change) never takes a request's place, and a late answer to a request
+    /// given up on is taken as that request's.
+    func testListsThatSayTheyAnswerSettleOnlyTheirRequests() {
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        c.askTimeout = 1
+        let list = [Person(member: 1, role: .owner), Person(member: 2, role: .admin)]
+
+        c.asks = [.setRole(member: 2, role: .admin), .revoke(member: 1)]
+        c.receiveForTests(.access(people: list, role: .owner, answer: false))
+        XCTAssertEqual(c.asks, [.setRole(member: 2, role: .admin), .revoke(member: 1)], "unasked: no answer")
+        XCTAssertEqual(c.people, list, "but the list is taken")
+        c.receiveForTests(.access(people: list, role: .owner, answer: true))
+        XCTAssertEqual(c.asks, [.revoke(member: 1)])
+        c.receiveForTests(.access(people: list, role: .owner, answer: false))
+        c.receiveForTests(.error(code: "denied", message: "The owner's access can't be removed."))
+        XCTAssertEqual(c.adminError, "The owner's access can't be removed.")
+        XCTAssertNil(c.notice)
+        XCTAssertEqual(c.adminPending, 0)
+
+        // a late answer: the request given up on takes it, the newer one waits on
+        c.clearAdminMessages()
+        c.asks = [.setRole(member: 2, role: .member)]
+        c.expireAsks(now: Date().addingTimeInterval(1.5))
+        XCTAssertEqual(c.adminUnconfirmed, SyncClient.unconfirmedNote)
+        c.asked.append(WaitingAsk(ask: .revoke(member: 1), sent: Date()))
+        c.receiveForTests(.access(people: list, role: .owner, answer: true))
+        XCTAssertEqual(c.asks, [.revoke(member: 1)])
+        XCTAssertEqual(c.lateAnswersOwed, 0)
+        XCTAssertNil(c.adminUnconfirmed, "confirmed after all")
+        c.receiveForTests(.error(code: "denied", message: "The owner's access can't be removed."))
+        XCTAssertEqual(c.adminError, "The owner's access can't be removed.")
+        XCTAssertNil(c.notice)
+
+        // a late refusal with nothing newer waiting replaces the note
+        c.clearAdminMessages()
+        c.asks = [.revoke(member: 1)]
+        c.expireAsks(now: Date().addingTimeInterval(1.5))
+        c.receiveForTests(.error(code: "denied", message: "The owner's access can't be removed."))
+        XCTAssertEqual(c.adminError, "The owner's access can't be removed.")
+        XCTAssertNil(c.adminUnconfirmed)
+        XCTAssertEqual(c.lateAnswersOwed, 0)
+
+        // with a newer request waiting it's shown briefly, not as that one's
+        c.clearAdminMessages()
+        c.asks = [.revoke(member: 1)]
+        c.expireAsks(now: Date().addingTimeInterval(1.5))
+        c.asked.append(WaitingAsk(ask: .accessList, sent: Date()))
+        c.receiveForTests(.error(code: "denied", message: "The owner's access can't be removed."))
+        XCTAssertNil(c.adminError)
+        XCTAssertEqual(c.notice, "The owner's access can't be removed.")
+        c.receiveForTests(.access(people: list, role: .owner, answer: true))
+        XCTAssertEqual(c.adminPending, 0)
+
+        // a late password refusal replaces the "didn't answer" failure
+        c.asks = [.password]
+        c.accountRequest = .sending
+        c.expireAsks(now: Date().addingTimeInterval(1.5))
+        c.receiveForTests(.error(code: "denied", message: "Your current password isn't right."))
+        XCTAssertEqual(c.accountRequest, .failed("Your current password isn't right."))
+
+        // from a server too old to say, a late list still goes to its request
+        c.asks = [.setRole(member: 2, role: .admin)]
+        c.expireAsks(now: Date().addingTimeInterval(1.5))
+        c.asked.append(WaitingAsk(ask: .revoke(member: 1), sent: Date()))
+        c.receiveForTests(.access(people: list, role: .owner))
+        XCTAssertEqual(c.asks, [.revoke(member: 1)])
+        XCTAssertEqual(c.lateAnswersOwed, 0)
+    }
+
+    /// Two requests back to back: each gets its own answer, and the second
+    /// one's refusal shows where its request was made, even when another
+    /// admin's list arrives just before the first answer.
+    func testBackToBackRequestsEachGetTheirOwnAnswer() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
+        defer { server.stop() }
+        let owner = await signedIn(server, url, member: 1)
+        owner.requestAccessList()
+        await until("listed") { owner.people != nil && owner.adminPending == 0 }
+
+        owner.setRole(member: 2, role: .admin)
+        owner.revoke(member: 1)
+        XCTAssertEqual(owner.adminPending, 2)
+        await until("both answered") { owner.adminPending == 0 }
+        XCTAssertEqual(owner.adminError, "The owner's access can't be removed.")
+        XCTAssertNil(owner.notice)
+        XCTAssertEqual(owner.people?.first { $0.member == 2 }?.role, .admin)
+
+        // another admin's change lands first; its list isn't an answer
+        owner.clearAdminMessages()
+        server.meddleBeforeNextAnswer(member: 3, role: .admin)
+        owner.setRole(member: 2, role: .member)
+        owner.revoke(member: 1)
+        await until("both answered again") { owner.adminPending == 0 }
+        XCTAssertEqual(owner.adminError, "The owner's access can't be removed.")
+        XCTAssertNil(owner.notice)
+        XCTAssertEqual(owner.people?.first { $0.member == 2 }?.role, .member)
+        XCTAssertEqual(owner.people?.first { $0.member == 3 }?.role, .admin)
+
+        // an invite and a role change back to back: the invite brings no extra list
+        owner.clearAdminMessages()
+        owner.createInvite(member: 3)
+        owner.setRole(member: 1, role: .admin)
+        await until("answered") { owner.adminPending == 0 }
+        XCTAssertNotNil(owner.lastInvite)
+        XCTAssertEqual(owner.adminError, "The owner's role can't be changed here.")
+        XCTAssertNil(owner.notice)
     }
 }

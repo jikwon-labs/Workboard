@@ -71,7 +71,7 @@ swift run wb-cli ws://127.0.0.1:8787 watch
 테스트:
 
 ```sh
-cd ios/WorkboardKit && swift test          # 127개 (2026-11-16)
+cd ios/WorkboardKit && swift test          # 129개 (2026-11-16)
 
 # UI 테스트용 가짜 서버 3개
 swift run wb-fake-server --port 18787 &
@@ -83,7 +83,7 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
 
-`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 답하지 않기(`/admin/drop-answer`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
+`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 N초 늦게 답하기(`/admin/late-answer?secs=N`, 그동안 그 연결에는 아무것도 가지 않는다)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.
 
@@ -262,6 +262,13 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **남는 한계:** 다른 관리자의 변경으로 생긴 `access` 가 내 요청이 서버에 닿기 전에 출발하면, 그것을 내 요청의 답으로 받는다. 진짜 답은 기다리는 요청이 없으면 목록으로만 쓰이므로 화면은 맞다. 이때 내 요청이 거절되면 그 거절은 관리 화면 오류 대신 화면 위 알림으로 보인다.
 - **가짜 서버:** 실제 서버처럼 `access` 변경 알림을 요청한 연결에도 (답 다음에) 보낸다. 테스트용으로 `meddleBeforeNextAnswer(member:role:)`(답을 만들기 직전에 다른 관리자가 같은 사람을 바꿈)와 `dropNextAnswer()`(다음 관리 요청에 답하지 않음)가 있다.
 
+## 6차 고침 (2026-11-16)
+
+- **요청 하나에 답 하나:** 서버가 변경 뒤에 모든 연결에 보내던 `access` 가 요청한 연결에도 (답 바로 뒤에) 가서, 관리 요청 둘을 잇달아 보내면 그 `access` 가 둘째 요청의 답으로 잡히고 둘째 요청의 거절은 화면 위 알림으로 갔다. 이제 실제 서버는 변경을 요청한 연결에는 이 알림을 보내지 않고, `access` 에 `answer`(true: 이 연결의 요청에 대한 답, false: 묻지 않았는데 보낸 것)를 붙인다. iPhone 은 `answer: true` 인 목록만 답으로 친다. 그래서 다른 관리자의 변경으로 생긴 `access` 가 내 답보다 먼저 와도(5차의 "남는 한계") 내 요청을 가로채지 않는다. `answer` 가 없는(예전) 서버에는 5차의 순서 규칙을 그대로 쓴다.
+- **늦은 답은 그 요청의 것:** 기다리다 놓아 준 요청도 목록(`asked`)에 표시(`givenUp`)만 하고 남겨 둔다. 서버는 요청마다 순서대로 꼭 답하므로, 나중에 온 답은 놓아 준 그 요청이 가져가고 그 뒤 요청의 답·거절은 제자리에 간다. 늦은 답이 다 오면 "didn't confirm" 안내가 사라지고, 늦은 거절은 더 새 요청이 기다리지 않을 때 그 안내 대신 관리 화면 오류로, 기다리면 화면 위 알림으로 보인다. 놓아 준 뒤 그 열 배를 기다려도 안 오는 답은 잊는다. 연결이 끊기면 모두 비운다.
+- **가짜 서버:** 실제 서버처럼 요청한 연결에는 변경 알림을 보내지 않고 `answer` 를 붙인다. `dropNextAnswer()` 대신 `lateNextAnswer(after:)`(다음 관리 요청의 답을 N초 늦게, 그동안 그 연결로 가는 것도 붙잡음)가 있다. `meddleBeforeNextAnswer` 는 다른 관리자의 목록을 내 답보다 먼저 보낸다. 비밀번호를 정하면 실제 서버처럼 모든 연결에 `access` 를 보낸다.
+- **실제 서버를 바꿨다:** Mac mini 에서 서버를 다시 설치해야 한다. 그 전까지 예전 서버에서는 잇달아 보낸 관리 요청의 거절이 화면 위 알림으로 갈 수 있다(앱은 그대로 동작한다).
+
 ## 설계와 달라진 점
 
 1. **merge 도 Swift 로 옮겼다(1단계 설계 6번 변경).** 프로토콜에 "push 가 반영됐다"는 확인이 없어서, 다시 얹을 변경을 언제 지울지 알 수 없었다. 이제 iOS 는 맥 앱처럼 `merge(내 것, [정본])` 을 한다. Rust 정적 라이브러리 방식은 크로스 컴파일과 FFI 부담에 비해 이득이 적어 쓰지 않았다.
@@ -286,7 +293,7 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 ```
 
 - `push` 는 예전에 `snapshot` 필드로 보냈는데 실제 서버는 `data` 를 읽는다. 지금은 `data` 로 보낸다.
-- owner·admin 용 메시지도 쓴다(설정 > Team, `Admin.swift`). 보내는 것: `access_list`, `create_invite {member, role}`, `set_role {member, role}`, `revoke {member}`, `backup_list`, `restore {name}`. 받는 것: `access {people, role}`(요청의 답이기도 하고, 누군가 바꾼 뒤 모든 연결에 가기도 한다. 내 역할도 여기서 갱신), `invite {member, code, emailed?, mail_error?}`, `backups {backups}`, `restored {name}`, 거절은 `error {code: "denied"}`. 답은 요청 순서로 맞추고 15초(초대·되돌리기 60초) 안에 안 오면 놓아 준다("5차 고침" 참고). 일반 멤버에게는 Team 화면이 없다.
+- owner·admin 용 메시지도 쓴다(설정 > Team, `Admin.swift`). 보내는 것: `access_list`, `create_invite {member, role}`, `set_role {member, role}`, `revoke {member}`, `backup_list`, `restore {name}`. 받는 것: `access {people, role, answer}`(`answer: true` 면 이 연결의 요청에 대한 답, `false` 면 다른 곳의 변경 뒤에 온 것. 내 역할도 여기서 갱신), `invite {member, code, emailed?, mail_error?}`, `backups {backups}`, `restored {name}`, 거절은 `error {code: "denied"}`. 답은 요청 순서로 맞추고 15초(초대·되돌리기 60초) 안에 안 오면 놓아 주되, 늦게 온 답은 그 요청의 것으로 받는다("5차 고침", "6차 고침" 참고). 일반 멤버에게는 Team 화면이 없다.
 - HTTP(같은 host:port): `GET /health`, `POST /auth/forgot`. 통화용 `POST /call-token` 은 가짜 서버에만 있다(아래 "실제 서버와 아직 다른 점").
 - 30초마다 ping, 75초 동안 아무것도 없으면 다시 연결한다. 간격은 1, 2, 4, 8, 16, 30... 초.
 - WebSocket 메시지 최대 크기를 64MB 로 늘렸다(URLSession 기본은 1MB).

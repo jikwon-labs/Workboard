@@ -238,8 +238,10 @@ public enum ServerMessage: Equatable, Sendable {
     /// the server mailed it to, `mailError` why mailing failed.
     case invite(member: UInt64, code: String, emailed: String? = nil, mailError: String? = nil)
     /// Everyone's access as the asker may see it (empty for plain members)
-    /// and the asker's own role.
-    case access(people: [Person], role: Role)
+    /// and the asker's own role. `answer`: true when it answers this
+    /// connection's own access_list, set_role or revoke, false when it was
+    /// sent unasked after a change; nil from servers older than that.
+    case access(people: [Person], role: Role, answer: Bool? = nil)
     case backups([Backup])
     case restored(name: String)
     case ping
@@ -278,8 +280,10 @@ public enum ServerMessage: Equatable, Sendable {
             if let emailed { o["emailed"] = .string(emailed) }
             if let mailError { o["mail_error"] = .string(mailError) }
             return .object(o)
-        case let .access(people, role):
-            return ["type": "access", "people": .array(people.map(\.json)), "role": .string(role.rawValue)]
+        case let .access(people, role, answer):
+            var o: [String: JSON] = ["type": "access", "people": .array(people.map(\.json)), "role": .string(role.rawValue)]
+            if let answer { o["answer"] = .bool(answer) }
+            return .object(o)
         case let .backups(list):
             return ["type": "backups", "backups": .array(list.map(\.json))]
         case let .restored(name):
@@ -330,7 +334,8 @@ public enum ServerMessage: Equatable, Sendable {
         case "invite":
             self = .invite(member: j["member"]?.uint ?? 0, code: j["code"]?.string ?? "", emailed: j["emailed"]?.string, mailError: j["mail_error"]?.string)
         case "access":
-            self = .access(people: (j["people"]?.array ?? []).compactMap(Person.init), role: Role(rawValue: j["role"]?.string ?? "") ?? .member)
+            self = .access(people: (j["people"]?.array ?? []).compactMap(Person.init), role: Role(rawValue: j["role"]?.string ?? "") ?? .member,
+                           answer: j["answer"]?.bool)
         case "backups":
             self = .backups((j["backups"]?.array ?? []).compactMap(Backup.init))
         case "restored":

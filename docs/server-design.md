@@ -77,7 +77,7 @@
 | 앱 → 서버 | `resync` | `rev` 를 하나 놓쳤을 때(`base` 가 내 `rev` 보다 크다): 서버가 전체 `update` 로 답한다 |
 | 서버 → 모두 | `update` | 합친 정본과 `rev`, `hidden`. 정본은 사람마다 걸러서 보낸다: 내가 멤버가 아닌 DM·비공개 채널, 남의 Personal 스페이스(와 그 작업), 고른 사람에게만 공유됐는데 내가 빠진 스페이스(와 그 안의 모든 것), 남의 비공개 문서는 빠진다(`wb_sync::hidden_from`, 아래 "스페이스 공유와 권한"). 앱은 `hidden` 의 항목을 툼스톤 없이 자기 사본에서 뺀다(`wb_sync::hide`). 그래서 다른 사람에게서 지워지지 않고, 다시 볼 수 있게 되면 돌아온다. 예전 앱은 이 필드를 무시한다 |
 | 앱 → 서버 | `create_invite` / `set_role` / `revoke` / `access_list` | owner·admin 만 |
-| 서버 → 앱 | `invite` / `access` | 만든 코드(메일로 보냈으면 `emailed`, 실패했으면 `mail_error`), 사람별 역할·컴퓨터 수·열린 코드·계정 여부(`account`) |
+| 서버 → 앱 | `invite` / `access` | 만든 코드(메일로 보냈으면 `emailed`, 실패했으면 `mail_error`), 사람별 역할·컴퓨터 수·열린 코드·계정 여부(`account`). 요청 하나에 답은 하나다: `access` 는 그 연결의 `access_list`·`set_role`·`revoke` 의 답이면 `answer: true`, 누군가의 변경 뒤에 묻지 않았는데 보낸 것이면 `answer: false`. 변경 뒤의 `access` 는 그 변경을 요청한 연결에는 가지 않는다(답이 이미 말해 준다). `access_list` 는 아무것도 바꾸지 않으므로 다른 연결에 알리지 않는다 |
 | 앱 → 서버 | `backup_list` / `restore` | owner 만. 서버가 `backups`(목록) / `restored` 로 답한다 |
 | 앱 → 서버 | `call_join` | 대화 id → 서버가 `call_token`(LiveKit 주소와 JWT)으로 답한다 |
 | 서버 → 앱 | `error` | `code: "auth"` 면 앱이 다시 연결을 멈춘다, `"denied"` 는 요청만 거절. `"denied"` 에 `put_back: true` 가 붙으면 보낸 사본의 일부 변경을 권한 때문에 되돌렸다는 뜻(예전 앱은 보통 거절로 보여 준다) |

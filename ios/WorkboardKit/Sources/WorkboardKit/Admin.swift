@@ -23,12 +23,13 @@ public struct InviteResult: Equatable, Sendable {
 }
 
 /// A request sent to the server whose answer hasn't come yet. The server
-/// answers the requests on one connection one by one, in order, but it also
-/// sends access lists nobody asked for (after anyone's change, the asker's
-/// own included) and refusals of pushed changes, so each answer is matched
-/// to the kind of request it can answer, never to what it shows: an answer
-/// is worked out after the change, so another admin's change to the same
-/// person can already be in it.
+/// answers the requests on one connection once each, in order. It also
+/// sends access lists nobody asked for (after a change made elsewhere: a
+/// connection's own requests don't bring it one) and refusals of pushed
+/// changes. A list says whether it answers (`answer`), and each answer is
+/// matched to the kind of request it can answer, never to what it shows:
+/// an answer is worked out after the change, so another admin's change to
+/// the same person can already be in it.
 public enum PendingAsk: Equatable, Sendable {
     case password
     case accessList
@@ -85,6 +86,9 @@ public enum PendingAsk: Equatable, Sendable {
 struct WaitingAsk: Equatable, Sendable {
     var ask: PendingAsk
     var sent: Date
+    /// Waited too long: no longer shown as waiting, but its answer is
+    /// still owed and is taken as that request's when it comes.
+    var givenUp = false
 }
 
 /// What someone with `role` may do to `person` (the server's rules).
@@ -180,29 +184,77 @@ extension SyncClient {
         }
     }
 
-    /// Drop the requests that waited too long, with a gentle note: the
-    /// change may well have been made, but the answer never came.
+    /// Give up on the requests that waited too long, with a gentle note:
+    /// the change may well have been made, but the answer hasn't come. They
+    /// stay on the list, marked, because the server still answers them
+    /// (one answer per request, in order); a late answer is then taken as
+    /// theirs instead of a later request's. One whose answer hasn't come
+    /// even after ten times as long is forgotten.
     func expireAsks(now: Date = Date()) {
-        let late = asked.filter { now.timeIntervalSince($0.sent) >= $0.ask.patience(askTimeout) }
+        let waited = { (a: WaitingAsk) in now.timeIntervalSince(a.sent) }
+        asked.removeAll { $0.givenUp && waited($0) >= 10 * $0.ask.patience(askTimeout) }
+        let late = asked.filter { !$0.givenUp && waited($0) >= $0.ask.patience(askTimeout) }
         guard !late.isEmpty else { return }
-        asked.removeAll { late.contains($0) }
+        for i in asked.indices where late.contains(asked[i]) { asked[i].givenUp = true }
         if late.contains(where: { $0.ask == .password }), accountRequest == .sending {
             accountRequest = .failed(Self.passwordUnconfirmed)
         }
         if late.contains(where: \.ask.isAdmin) { adminUnconfirmed = Self.unconfirmedNote }
     }
 
-    /// Take the request `m` answers off the waiting list. Answers come in
-    /// order, so an access list answers the oldest request only when that
-    /// one asked for one (otherwise it was sent unasked after someone's
-    /// change); what the list shows doesn't matter. An answer only ever
-    /// sent to the asker also shows the ones before it were answered.
+    /// Take the request `m` answers off the list (a late answer takes the
+    /// request given up on, not a later one). Answers come in order, one per
+    /// request. An access list answers only when it says so (`answer`);
+    /// what it shows doesn't matter. From a server too old to say, a list
+    /// answers the oldest request when that one asked for one. An answer
+    /// only ever sent to the asker also shows the ones before it were
+    /// answered. Once the late answers of admin requests given up on have
+    /// all come, their "didn't confirm" note goes.
     func settle(_ m: ServerMessage) {
+        let owedBefore = asked.filter { $0.givenUp && $0.ask.isAdmin }.count
+        defer {
+            if owedBefore > 0, !asked.contains(where: { $0.givenUp && $0.ask.isAdmin }) { adminUnconfirmed = nil }
+        }
         if PendingAsk.onlyAnswers(m) {
             guard let i = asked.firstIndex(where: { $0.ask.answered(by: m) }) else { return }
             asked.removeFirst(i + 1)
-        } else if let first = asked.first, first.ask.wantsAccess, first.ask.answered(by: m) {
-            asked.removeFirst()
+        } else if case let .access(_, _, answer) = m {
+            switch answer {
+            case true?:
+                guard let i = asked.firstIndex(where: \.ask.wantsAccess) else { return }
+                asked.removeFirst(i + 1)
+            case nil:
+                if let first = asked.first, first.ask.wantsAccess { asked.removeFirst() }
+            case false?:
+                break
+            }
+        }
+    }
+
+    /// A refusal: the answer to the oldest request on the list. With none
+    /// it's a refusal of its own, shown briefly. A late refusal of a
+    /// request given up on replaces its "didn't confirm" note while nothing
+    /// newer waits; otherwise it's shown briefly, so it's never taken for a
+    /// later request's.
+    func refused(_ m: String) {
+        guard !asked.isEmpty else {
+            notice = m
+            return
+        }
+        let first = asked.removeFirst()
+        if first.givenUp {
+            if first.ask == .password {
+                if accountRequest == .failed(Self.passwordUnconfirmed) { accountRequest = .failed(m) } else { notice = m }
+            } else if adminUnconfirmed != nil, adminPending == 0 {
+                adminUnconfirmed = nil
+                adminError = m
+            } else {
+                notice = m
+            }
+        } else if first.ask == .password {
+            accountRequest = .failed(m)
+        } else {
+            adminError = m
         }
     }
 
@@ -217,7 +269,7 @@ extension SyncClient {
                 list[i].invite = code
                 people = list
             }
-        case let .access(list, role):
+        case let .access(list, role, _):
             // also an answer to set_role, revoke and access_list
             settle(m)
             people = list

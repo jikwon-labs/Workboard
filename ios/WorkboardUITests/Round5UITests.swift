@@ -1,5 +1,6 @@
 // UI tests for round 5: Slack history brought in by a Mac doesn't notify,
-// and an access request the server never answers ends with a gentle note.
+// and an access request the server answers late shows a gentle note until
+// its answer comes (round 6: the late answer is taken as its own).
 // Needs the fake servers from docs/ios-design.md:
 //   swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev
 //   swift run wb-fake-server --port 18789 --admin-http
@@ -39,7 +40,7 @@ final class Round5UITests: XCTestCase {
         XCTAssertTrue(banner(fresh).waitForExistence(timeout: 10), "a new message still notifies")
     }
 
-    func testUnansweredRoleChangeEndsWithANote() {
+    func testLateRoleChangeShowsANoteUntilItsAnswerComes() {
         let a = launch(["-wbReset", "YES", "-wbServer", signInServer, "-wbAskTimeout", "2"])
         join(a, member: 1, email: "jamie@example.com", password: "jamie-password-5")
         a.buttons["settingsButton"].tap()
@@ -48,12 +49,17 @@ final class Round5UITests: XCTestCase {
         people.tap()
         let alex = a.buttons["personMenu-2"]
         XCTAssertTrue(alex.waitForExistence(timeout: 8))
-        admin("drop-answer")
+        admin("late-answer?secs=7")
         alex.tap()
         let makeAdmin = a.buttons["Make admin"].exists ? a.buttons["Make admin"] : a.buttons["Make member"]
         XCTAssertTrue(makeAdmin.waitForExistence(timeout: 5))
         makeAdmin.tap()
-        waitLabel(a.staticTexts["adminUnconfirmed"].firstMatch, contains: "didn't confirm", timeout: 8)
+        let note = a.staticTexts["adminUnconfirmed"].firstMatch
+        waitLabel(note, contains: "didn't confirm", timeout: 8)
         XCTAssertFalse(a.staticTexts["adminError"].exists, "not an error")
+        // the answer comes after all: the note goes, nothing shows as refused
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: note)
+        wait(for: [gone], timeout: 12)
+        XCTAssertFalse(a.staticTexts["adminError"].exists)
     }
 }

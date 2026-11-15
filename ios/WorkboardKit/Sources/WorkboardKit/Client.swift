@@ -178,7 +178,7 @@ public final class SyncClient {
     /// A sign-in attempt is on its way.
     public var signingIn: Bool { pendingSignIn != nil }
     /// A request the server turned down (error code "denied"), shown briefly.
-    public private(set) var notice: String?
+    public internal(set) var notice: String?
     public internal(set) var accountRequest: AccountRequest = .idle
     /// Bumped every time a snapshot from the server is merged in.
     public private(set) var updatesReceived = 0
@@ -195,19 +195,24 @@ public final class SyncClient {
     /// The newest invite code made here, with where it was emailed.
     public internal(set) var lastInvite: InviteResult?
     /// Requests whose answers are on their way, oldest first, with when
-    /// they were sent. The server answers each request on a connection in
-    /// the order they were sent, so a refusal belongs to the oldest one
-    /// (see `settle`); one that waits longer than `askTimeout` is dropped.
+    /// they were sent. The server answers each request on a connection
+    /// once, in the order they were sent, so a refusal belongs to the
+    /// oldest one (see `settle`). One that waits longer than `askTimeout`
+    /// is given up on but stays here, marked, until its late answer comes,
+    /// so that answer can't be taken for a later request's.
     var asked: [WaitingAsk] = []
-    /// The requests in `asked` (tests set it to start from a known list).
+    /// The requests in `asked` still waited for (tests set it to start
+    /// from a known list).
     public internal(set) var asks: [PendingAsk] {
-        get { asked.map(\.ask) }
+        get { asked.filter { !$0.givenUp }.map(\.ask) }
         set { asked = newValue.map { WaitingAsk(ask: $0, sent: Date()) } }
     }
+    /// Requests given up on whose answers are still owed.
+    public var lateAnswersOwed: Int { asked.filter(\.givenUp).count }
     /// Seconds to wait for an answer (longer for invites and restores).
     @ObservationIgnored public var askTimeout: TimeInterval = 15
     /// Access or backup requests on their way.
-    public var adminPending: Int { asked.filter(\.ask.isAdmin).count }
+    public var adminPending: Int { asked.filter { !$0.givenUp && $0.ask.isAdmin }.count }
     /// The last access or backup request the server turned down.
     public internal(set) var adminError: String?
     /// Said after a restore ("Restored the team's workspace to ...").
@@ -748,17 +753,7 @@ public final class SyncClient {
             attempt = 0
         case .denied:
             let m = message.isEmpty ? "The server turned that down." : message
-            // the answer to the oldest request still waiting; with none
-            // waiting it's a refusal of its own, shown briefly
-            guard !asked.isEmpty else {
-                notice = m
-                return
-            }
-            if asked.removeFirst().ask == .password {
-                accountRequest = .failed(m)
-            } else {
-                adminError = m
-            }
+            refused(m)
         case nil:
             // no code: like losing the connection
             lost(generation, message.isEmpty ? "The server reported an error." : message)

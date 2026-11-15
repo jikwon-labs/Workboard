@@ -780,14 +780,28 @@ pub fn row_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
 
 pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let font = FontId::proportional(11.0);
+    let bg = color;
+    // on a dark theme the full colour is too dark to read on its own tint
+    let color = if ui.visuals().dark_mode {
+        chip_text_on_dark(color)
+    } else {
+        color
+    };
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 18.0), Sense::click());
     let strength = if resp.hovered() { 0.28 } else { 0.16 };
     ui.painter()
-        .rect_filled(rect, 4.0, color.gamma_multiply(strength));
+        .rect_filled(rect, 4.0, bg.gamma_multiply(strength));
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, color);
     resp
+}
+
+/// A chip's text colour on a dark theme: the colour mixed halfway to white,
+/// so a dark green or purple tag stays readable on its tinted background.
+pub fn chip_text_on_dark(c: Color32) -> Color32 {
+    let mix = |x: u8| x + ((255 - x as u16) / 2) as u8;
+    Color32::from_rgb(mix(c.r()), mix(c.g()), mix(c.b()))
 }
 
 pub fn tag_color(tag: &str) -> Color32 {

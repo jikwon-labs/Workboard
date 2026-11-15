@@ -424,3 +424,48 @@ fn timesheet_options_with_no_tasks_say_why() {
         Some("Make a task first: time is tracked on tasks")
     );
 }
+
+/// WCAG contrast ratio of two opaque colours.
+fn contrast(a: Color32, b: Color32) -> f32 {
+    fn lum(c: Color32) -> f32 {
+        let lin = |x: u8| {
+            let x = x as f32 / 255.0;
+            if x <= 0.03928 {
+                x / 12.92
+            } else {
+                ((x + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+    }
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+#[test]
+fn dark_mode_tag_chips_are_readable() {
+    let card = crate::theme::theme(true).card;
+    for c in STATUS_PALETTE.iter().skip(1) {
+        let c = rgb(*c);
+        // the chip's tint (hovered, the stronger one) over a dark card
+        let mix = |x: u8, y: u8| (x as f32 * 0.28 + y as f32 * 0.72) as u8;
+        let bg = Color32::from_rgb(
+            mix(c.r(), card.r()),
+            mix(c.g(), card.g()),
+            mix(c.b(), card.b()),
+        );
+        let text = crate::widgets::chip_text_on_dark(c);
+        assert!(contrast(text, bg) >= 4.5, "{:?} on {:?}", text, bg);
+    }
+    // and the chips really use it in the dark theme
+    let mut h = Ui1::new();
+    h.app.data.dark = true;
+    h.app.open_settings("Tag Manager");
+    h.settle();
+    let tag = h.app.data.tasks.iter().flat_map(|t| t.tags.clone()).next();
+    let tag = tag.expect("the example data has tags");
+    let painted = h.painted_text(&tag);
+    assert!(!painted.is_empty(), "{} chip", tag);
+    let want = crate::widgets::chip_text_on_dark(tag_color(&tag));
+    assert!(painted.iter().all(|p| p.1 == want), "{:?}", painted);
+}

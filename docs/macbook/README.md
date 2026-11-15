@@ -6,12 +6,12 @@
 
 ## 할 일
 
-- [ ] **small-features 워크트리 마무리**: main 에 없는 커밋 13개와 미커밋 파일이 있다(다른 세션 작업). 끝나면 `scripts/wt ship` 후 `scripts/wt rm small-features`
 - [ ] **새 버전 배포**: 로그인·초대 메일 기능(`248a7d5`)과 그 뒤 변경을 담아 `/release`. 서버 코드도 바뀌었으니 Mac mini 재설치와 같이 간다(`docs/macmini/README.md`)
 - [ ] **데스크톱 알림 직접 확인 (설치된 앱에서)**: 알림 배너는 서명된 `Workboard.app` 으로 실행해야 앱 아이콘으로 뜨고, 눌렀을 때 해당 대화·작업이 열린다(`cargo run` 으로는 스크립트 편집기 이름으로 뜨고 눌러도 안 열린다). 새 버전 배포 뒤 확인: 첫 알림 때 권한 창이 뜨는지, 설정 > 알림의 "테스트 알림 보내기", 다른 계정에서 DM을 보내 창이 뒤에 있을 때 배너·소리·Dock 튀기기·Dock 숫자가 나오는지, 배너를 누르면 그 DM이 열리는지.
 
 ## 끝난 일
 
+- [x] small-features 워크트리 마무리: 커밋이 main 에 들어갔고(`07ab5d5`) 워크트리와 브랜치도 지워졌다 (2026-11-16 확인)
 - [x] 전체 코드 rustfmt 정리, `scripts/wt verify` 에 `cargo fmt --all --check` 추가, 정리 커밋은 `.git-blame-ignore-revs` 로 blame 에서 제외 (2026-11-16, `38d9c65`)
 - [x] rustfmt 설치, 이미 정리된 파일만 자동 정리하는 훅 (2026-11-16)
 - [x] main 체크아웃 최신으로: 미추적 iOS 파일 정리 후 pull (2026-11-16, 직접 함)

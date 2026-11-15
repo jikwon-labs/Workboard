@@ -6,11 +6,27 @@
 
     cargo test --workspace
 
-- 2026-11-15 기준 158개. 로직 테스트, 실제 화면 입력(포인터·스크롤·드래그·키보드)으로 누르는 UI 테스트, 실제 서버를 띄우는 통합 테스트가 들어 있다.
+- 2026-11-16 기준 444개. 로직 테스트, 실제 화면 입력(포인터·스크롤·드래그·키보드)으로 누르는 UI 테스트, 실제 서버를 띄우는 통합 테스트가 들어 있다.
 - 음성·영상 테스트(`crates/wb-voice/tests/huddle.rs`, 앱의 허들 테스트)는 실제 `livekit-server` 를 임시 포트로 띄운다. 설치돼 있지 않으면(`brew install livekit`) 그 테스트들은 "skipped" 를 찍고 건너뛴다.
 - 실제 마이크·카메라·화면은 쓰지 않는다. 테스트에서는 신호음과 색 패턴(화면 공유도 색 패턴)을 보내고, 받는 쪽에서 소리 크기와 색, 받은 영상 크기를 잰다.
 - 실제 화면 캡처는 손으로 돌리는 테스트로 따로 있다: `cargo test -p wb-voice real_ -- --ignored --nocapture`. 주 화면과 창 하나를 ScreenCaptureKit 으로 실제로 받아 본다. 터미널에 화면 기록 권한이 있어야 한다(없으면 "no Screen Recording permission" 으로 실패한다).
 - cargo 가 PATH 에 없으면 `export PATH="$HOME/.cargo/bin:$PATH"`.
+
+### iPhone 앱
+
+    swift test --package-path ios/WorkboardKit
+
+- 2026-11-16 기준 66개. 합치기 규칙, 서버 클라이언트, 로그인, 통화 토큰 같은 iPhone 앱의 로직을 가짜 서버로 확인한다.
+- 시뮬레이터에서 앱을 직접 누르는 UI 테스트 17개는 따로 돌린다. 가짜 서버를 먼저 띄우는 순서와 명령은 [`docs/ios-design.md`](ios-design.md) "실행 방법" 의 테스트.
+
+### push 전 검증 (`scripts/wt verify`)
+
+`scripts/wt ship` 이 push 전에 부른다. 바뀐 파일을 보고 돌릴 테스트를 고른다.
+
+- `ios/` 아래: `swift test`. `WB_IOS_UI=1` 이면 시뮬레이터 UI 테스트까지(`WB_IOS_SIM` 으로 시뮬레이터 이름을 바꾼다. 기본 `iPhone 17`).
+- 문서(`*.md`, `docs/`)만: 아무것도 돌리지 않는다.
+- 그 밖: `cargo fmt --all --check` 로 rustfmt 정리를 확인한 뒤 `cargo test --workspace`. 정리가 안 돼 있으면 `cargo fmt --all` 을 돌려 커밋하고 다시 검증한다.
+- `WB_VERIFY_ALL=1` 이면 전부 돌린다.
 
 ## Mac mini 에서 손으로 확인하기
 
@@ -52,9 +68,10 @@
 
 **2. 서버에 연결**
 
-- Workspace menu > Work together > "Or connect to your team's server" 에 `100.121.190.50`, 초대 코드는 비우고 Connect.
-- 실제 서버가 아직 비어 있다면, 이게 팀 서버의 첫 등록이 되어 owner 가 되고 그때 열려 있던 작업공간이 팀 작업공간으로 올라간다. 개인 작업공간을 올리고 싶지 않으면 먼저 Create Workspace 로 팀용 작업공간을 만들고 연결한다.
-- 이미 owner 가 있는 서버라면 owner·admin 에게 초대 코드를 받아 넣는다.
+- Workspace menu > Work together > "Or connect to your team's server" 에 서버 주소 `100.121.190.50` 을 넣고, 아래 탭 셋 중 하나로 Connect 한다.
+  - **New server**: 실제 서버가 아직 비어 있을 때. 이메일과 비밀번호를 넣으면 팀 서버의 첫 등록이 되어 owner 가 되고, 그때 열려 있던 작업공간이 팀 작업공간으로 올라간다. 개인 작업공간을 올리고 싶지 않으면 먼저 Create Workspace 로 팀용 작업공간을 만들고 연결한다.
+  - **Invite code**: 이미 owner 가 있는 서버에 처음 들어올 때. owner·admin 이 Invite 로 이메일을 넣으면 메일로 코드와 링크가 온다(메일 설정 전이면 owner 가 People 에서 코드를 복사해 건넨다). 코드와 함께 비밀번호를 정한다.
+  - **Email and password**: 이미 계정이 있을 때. 다른 컴퓨터나 폰에서 새 코드 없이 들어온다.
 
 **3. 카메라 확인 (그 Mac 혼자서)**
 

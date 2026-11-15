@@ -6,7 +6,7 @@
 
 ## 할 일
 
-- [ ] **서버 코드 받고 다시 설치**: `cd ~/Documents/workboard && git pull && deploy/install-launchd.sh` 후 `/join` 이 200 인지 확인 (`accounts-and-mail.md` 1). 2026-11-16 결함 수정 1·2차의 서버 변경(사람별 대화·개인 공간 숨김, 로그인 잠금, 파일 정리, ProcessType Standard)도 이 재설치로 들어간다
+- [ ] **서버 코드 받고 다시 설치**: `cd ~/Documents/workboard && git pull && deploy/install-launchd.sh` 후 `/join` 이 200 인지 확인 (`accounts-and-mail.md` 1). 이 한 번으로 계정·초대 메일, iPhone 푸시, 2026-11-16 결함 수정 1·2차의 서버 변경(사람별 대화·개인 공간 숨김, 로그인 잠금, 파일 정리, ProcessType Standard)이 모두 들어간다. APNs 키를 두기 전에는 로그(`~/Library/Logs/workboard-server.log`)에 `iPhone notifications off: not set up ...` 한 줄이 찍히면 정상이다
 - [ ] **메일 설정**: Gmail 앱 비밀번호 → MagicDNS 이름 확인 → `mail.json` 작성·`chmod 600` → `workboard-server mail-test` 로 시험 메일 (`accounts-and-mail.md` 2)
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
 - [ ] **팀원 초대**: Tailscale 초대 → Workboard 초대에 이메일 → 메일로 코드·링크 (`accounts-and-mail.md` 4)
@@ -16,7 +16,6 @@
   - 시스템 설정 > 일반 > Time Machine > 백업 디스크 추가 → 그 디스크 선택 → **백업 암호화** 켜기(이 Mac mini 는 FileVault 를 켜 두므로 백업도 암호화한다). 디스크를 지워도 된다고 물으면 그 디스크가 비어 있는지 먼저 확인한다.
   - 옵션에서 `~/Library` 가 제외 목록에 없는지 본다(기본값은 포함). 서버 데이터 `~/Library/Application Support/WorkboardServer/` 가 여기 있다.
   - 확인: `tmutil destinationinfo` 에 디스크가 보이고, `tmutil startbackup --block` 뒤 `tmutil latestbackup` 이 오늘 날짜 경로를 찍으면 끝. 그 뒤로는 매시간 저절로 돈다.
-- [ ] **서버 다시 설치(iPhone 푸시 들어간 서버)**: `cd ~/Documents/workboard && git pull && deploy/install-launchd.sh`. 키를 두기 전에는 로그(`~/Library/Logs/workboard-server.log`)에 `iPhone notifications off: not set up ...` 한 줄이 찍히면 정상이다. 위 첫 줄과 같이 해도 된다.
 - [ ] **APNs 키 두고 푸시 켜기** (iPhone 앱의 실제 번들 ID 를 정하고 Push Notifications capability 를 켠 뒤. `docs/ios-design.md` "알림")
   - Apple Developer > Certificates, Identifiers & Profiles > Keys 에서 "Apple Push Notifications service (APNs)" 키를 만들고 `.p8` 을 받는다(한 번만 받을 수 있다). 키 id 와 팀 id 를 적어 둔다.
   - `.p8` 을 Mac mini 서버 폴더로 옮기고 권한을 600 으로: `cd ~/Library/Application\ Support/WorkboardServer && chmod 600 AuthKey_*.p8`

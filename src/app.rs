@@ -3110,23 +3110,35 @@ impl App {
                                 6.5,
                                 &st,
                             );
-                            ui.painter().with_clip_rect(r.shrink(2.0)).text(
+                            // the name shortened to leave room for the subtask count
+                            let badge = format!("\u{2934} {}", nsub);
+                            let badge_w = if *nsub > 0 {
+                                ui.painter()
+                                    .layout_no_wrap(
+                                        badge.clone(),
+                                        FontId::proportional(11.5),
+                                        t.text3,
+                                    )
+                                    .size()
+                                    .x
+                                    + 6.0
+                            } else {
+                                0.0
+                            };
+                            let nr = paint_fit(
+                                ui,
                                 pos2(x0 + 26.0, r.center().y),
                                 Align2::LEFT_CENTER,
                                 &task.name,
                                 FontId::proportional(13.0),
                                 t.text,
+                                r.right() - 6.0 - badge_w - (x0 + 26.0),
                             );
                             if *nsub > 0 {
-                                let g = ui.painter().layout_no_wrap(
-                                    task.name.clone(),
-                                    FontId::proportional(13.0),
-                                    t.text,
-                                );
-                                ui.painter().with_clip_rect(r.shrink(2.0)).text(
-                                    pos2(x0 + 32.0 + g.size().x, r.center().y),
+                                ui.painter().text(
+                                    pos2(nr.right() + 6.0, r.center().y),
                                     Align2::LEFT_CENTER,
-                                    format!("\u{2934} {}", nsub),
+                                    badge,
                                     FontId::proportional(11.5),
                                     t.text3,
                                 );
@@ -3152,6 +3164,19 @@ impl App {
                         );
                         if resp.clicked() {
                             self.open_quick_add(None);
+                        }
+                        if rows.is_empty() {
+                            ui.add_space(12.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(tr(
+                                        "No tasks here yet. Add one, then click or drag across the days in its row to give it dates.",
+                                    ))
+                                    .small()
+                                    .color(t.text3),
+                                )
+                                .wrap(),
+                            );
                         }
                     });
                     // the divider only runs as far as the rows (it used to run to the bottom)

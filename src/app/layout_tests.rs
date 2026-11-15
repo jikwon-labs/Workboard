@@ -17,8 +17,12 @@ impl Ui1 {
                     if text.is_empty() || !area.contains(r.center()) {
                         return;
                     }
-                    // scrolled out of view vertically is fine
-                    if r.center().y < clip.top() || r.center().y > clip.bottom() {
+                    // scrolled out of view is fine; partly in view is cut
+                    if r.center().y < clip.top()
+                        || r.center().y > clip.bottom()
+                        || r.right() <= clip.left()
+                        || r.left() >= clip.right()
+                    {
                         return;
                     }
                     if r.right() > clip.right() + 1.0 || r.left() < clip.left() - 1.0 {
@@ -329,4 +333,62 @@ fn home_overdue_is_by_date_and_capped_with_show_all() {
     assert!(h.has(&format!("Complete {}", hidden)));
     h.click("Home show all Overdue");
     assert!(!h.has(&format!("Complete {}", hidden)));
+}
+
+#[test]
+fn gantt_marks_bars_out_of_sight_and_shortens_names() {
+    let mut h = Ui1::new();
+    let td = today();
+    let base = task_named(&h, "Write copy for landing page").clone();
+    let sc = super::timebar::DayScale::new(0, td);
+    // ended a week before the first day drawn
+    let ended = sc.start - Duration::days(7);
+    let mut x = base.clone();
+    x.id = 30_000;
+    x.name = LONG_TASK.into();
+    x.start = None;
+    x.due = Some(ended);
+    h.app.data.tasks.push(x);
+    let mut late = base.clone();
+    late.id = 30_001;
+    late.name = "Late one".into();
+    late.start = None;
+    late.due = Some(td - Duration::days(1));
+    h.app.data.tasks.push(late);
+    h.click("View Gantt");
+    let names = h.painted_text(tr("Name"))[0].0.left() - 8.0;
+    let timeline_left = names + 260.0;
+    // the row says the bar is to the left and when it ended, inside the timeline
+    let mark = h.painted_text(&format!("\u{2039} {}", fmt_date(ended)));
+    assert_eq!(mark.len(), 1, "one marker for the bar out of sight");
+    assert!(mark[0].0.left() >= timeline_left, "{:?}", mark[0].0);
+    // the full long name is not drawn anywhere: the name column shortens it
+    assert!(h.painted_text(LONG_TASK).is_empty());
+    let column = Rect::from_min_max(pos2(names, 0.0), pos2(timeline_left, h.size.y));
+    let cut = h.cut_texts(column);
+    assert!(cut.is_empty(), "cut names {:?}", cut);
+    // an overdue bar is red
+    let bar = h.rect("Bar Late one");
+    let t = h.app.t();
+    let red = h.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Rect(r) => {
+            r.rect.center().distance(bar.center()) < 2.0
+                && (r.fill == t.danger || r.fill == t.danger.gamma_multiply(0.85))
+        }
+        _ => false,
+    });
+    assert!(red, "the overdue bar is drawn red");
+}
+
+#[test]
+fn gantt_without_tasks_says_how_to_start() {
+    let mut h = Ui1::new();
+    let list = task_named(&h, "Write copy for landing page").list_id;
+    h.app.data.tasks.retain(|x| x.list_id != list);
+    h.click("View Gantt");
+    assert!(!h
+        .painted_text(tr(
+            "No tasks here yet. Add one, then click or drag across the days in its row to give it dates."
+        ))
+        .is_empty());
 }

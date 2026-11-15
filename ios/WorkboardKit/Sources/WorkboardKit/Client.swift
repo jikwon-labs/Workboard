@@ -192,6 +192,10 @@ public final class SyncClient {
     @ObservationIgnored private var pendingSignIn: SignInRequest?
     /// What the hello on the current connection carried.
     @ObservationIgnored private var helloUsedToken = false
+    /// call_join requests waiting for the server's answer, by channel.
+    @ObservationIgnored private var pendingCalls: [UInt64: [CheckedContinuation<CallGrant, Error>]] = [:]
+    /// How long to wait for a call_token.
+    @ObservationIgnored public var callTimeout: TimeInterval = 15
 
     /// Timings, shortened in tests.
     @ObservationIgnored public var pingInterval: TimeInterval = 30
@@ -226,12 +230,23 @@ public final class SyncClient {
 
     // MARK: settings
 
+    /// Whether moving to `address` means leaving for a different server
+    /// (and so starting from a fresh copy of that server's workspace).
+    public func isDifferentServer(_ address: String) -> Bool {
+        let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !settings.server.isEmpty && !a.isEmpty && !ServerAddress.same(a, settings.server)
+    }
+
     /// Use another server address. `freshCopy` drops this device's copy of
-    /// the workspace (and edits still waiting), for moving to a different
-    /// server, so one workspace is never merged into another.
-    public func setServer(_ address: String, freshCopy: Bool = false) {
+    /// the workspace (and edits still waiting), so one workspace is never
+    /// merged into another; by default that happens whenever the address
+    /// points at a different server than before (the same server typed
+    /// another way keeps the copy). Ask the person first when there are
+    /// edits waiting (`waitingCount`).
+    public func setServer(_ address: String, freshCopy: Bool? = nil) {
         let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard a != settings.server else { return }
+        let freshCopy = freshCopy ?? isDifferentServer(a)
         settings.server = a
         if settings.meFromServer {
             settings.me = nil
@@ -245,6 +260,9 @@ public final class SyncClient {
             data = nil
             view = .empty
             rev = 0
+            // people are numbered per workspace: pick again on the new one
+            settings.me = nil
+            settings.meFromServer = false
             settings.waitingStamps = [:]
             settings.waitingTombs = [:]
             try? FileManager.default.removeItem(at: storage.snapshotURL)
@@ -391,6 +409,7 @@ public final class SyncClient {
     }
 
     private func closeSocket() {
+        failCalls()
         pingTask?.cancel()
         pingTask = nil
         pushTask?.cancel()
@@ -445,24 +464,31 @@ public final class SyncClient {
             }
             storage.save(settings)
             self.rev = w.rev
-            if let snapshot = w.snapshot { take(snapshot, announce: false) }
+            if let snapshot = w.snapshot { take(snapshot, announce: false, hidden: w.hidden) }
             state = .connected
             if let t = settings.pushToken { send(.pushToken(token: t, platform: "ios", env: settings.pushEnv), on: ws) }
             // after (re)connecting the whole copy goes up, as the server design says
             if data != nil { pushNow() }
-        case let .update(snapshot, rev):
+        case let .update(snapshot, rev, hidden):
             self.rev = rev
-            take(snapshot, announce: true)
+            take(snapshot, announce: true, hidden: hidden)
         case let .account(email):
             settings.accountEmail = email
             storage.save(settings)
             accountRequest = .done
+        case let .callToken(channel, url, token):
+            finishCall(channel, .success(CallGrant(url: url, token: token, room: CallAPI.room(channel: channel))))
         case .ping:
             send(.pong, on: ws)
         case .pong:
             break
-        case let .error(code, message):
-            handleError(code.flatMap(ServerErrorCode.init(rawValue:)), message: message)
+        case let .error(code, message, channel):
+            if let channel, pendingCalls[channel] != nil {
+                // a call_join turned down; the connection stays
+                finishCall(channel, .failure(CallAPI.meansNotSetUp(message) ? CallError.notAvailable : CallError.denied(message)))
+            } else {
+                handleError(code.flatMap(ServerErrorCode.init(rawValue:)), message: message)
+            }
         case .unknown:
             break
         }
@@ -506,7 +532,7 @@ public final class SyncClient {
     }
 
     /// Merge a snapshot from the server into this device's copy.
-    private func take(_ snapshot: JSON, announce: Bool) {
+    private func take(_ snapshot: JSON, announce: Bool, hidden: [UInt64] = []) {
         let before = data
         if var local = data {
             Sync.merge(&local, [snapshot])
@@ -520,6 +546,18 @@ public final class SyncClient {
             meta.v = 1
             fresh.set("extra.sync", meta.json)
             data = fresh
+        }
+        if !hidden.isEmpty, var d = data {
+            // out of this copy without a tombstone: nothing is deleted for the others
+            let gone = Sync.hide(&d, ids: hidden)
+            if !gone.isEmpty {
+                var meta = SyncMeta(of: d)
+                meta.hashes = Sync.fingerprints(d)
+                d.set("extra.sync", meta.json)
+                data = d
+                settings.waitingStamps = settings.waitingStamps.filter { !gone.contains($0.key) }
+                storage.save(settings)
+            }
         }
         clearWaiting(seenIn: SyncMeta(of: snapshot))
         updatesReceived += 1
@@ -606,6 +644,46 @@ public final class SyncClient {
     /// Try again right away (the "Retry now" button).
     public func retryNow() {
         if case .waiting = state { connect() }
+    }
+
+    // MARK: huddles
+
+    /// Ask the server for a way into a conversation's huddle (call_join).
+    /// Throws CallError.notAvailable when the server has no LiveKit,
+    /// .denied with the server's words, .offline or .noAnswer.
+    public func requestCall(channel: UInt64) async throws -> CallGrant {
+        guard state.isConnected, let ws = socket else { throw CallError.offline }
+        // a conversation made a moment ago goes to the server first, so the
+        // server knows it (the Mac app does the same)
+        if pushTask != nil {
+            pushTask?.cancel()
+            pushTask = nil
+            pushNow()
+        }
+        send(.callJoin(channel: channel), on: ws)
+        let timeout = callTimeout
+        let gen = generation
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard let self, self.generation == gen else { return }
+            self.finishCall(channel, .failure(CallError.noAnswer))
+        }
+        return try await withCheckedThrowingContinuation { cont in
+            pendingCalls[channel, default: []].append(cont)
+        }
+    }
+
+    private func finishCall(_ channel: UInt64, _ result: Result<CallGrant, Error>) {
+        guard let waiting = pendingCalls.removeValue(forKey: channel) else { return }
+        for c in waiting { c.resume(with: result) }
+    }
+
+    private func failCalls() {
+        let all = pendingCalls
+        pendingCalls = [:]
+        for (_, waiting) in all {
+            for c in waiting { c.resume(throwing: CallError.offline) }
+        }
     }
 
     // MARK: edits

@@ -133,4 +133,126 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(doc["title"], "Untitled")
         XCTAssertEqual(doc["owner"], 1)
     }
+
+    // MARK: message actions, channels, deletes, repeats (round 2)
+
+    func testEditDeleteAndPinMyMessagesOnly() {
+        var d = SampleWorkspace.make()
+        Edits.sendMessage(&d, channel: 301, text: "mine", me: 1, id: 9100, ts: 80)
+        XCTAssertTrue(Edits.editMessage(&d, channel: 301, message: 9100, text: "mine, fixed", me: 1, ts: 90))
+        let v = WorkspaceView(d).channels.first { $0.id == 301 }!
+        XCTAssertEqual(v.messages.last?.text, "mine, fixed")
+        XCTAssertEqual(v.messages.last?.edited, 90)
+        XCTAssertFalse(Edits.editMessage(&d, channel: 301, message: 313, text: "not mine", me: 1, ts: 91), "someone else's message")
+        XCTAssertFalse(Edits.editMessage(&d, channel: 301, message: 9100, text: "  ", me: 1, ts: 92))
+        // a reply of mine
+        Edits.sendReply(&d, channel: 301, to: 313, text: "reply", me: 1, id: 9101, ts: 93)
+        XCTAssertTrue(Edits.editMessage(&d, channel: 301, message: 9101, text: "reply 2", me: 1, ts: 94))
+        XCTAssertTrue(Edits.deleteMessage(&d, channel: 301, message: 9101, me: 1))
+        XCTAssertFalse(Edits.deleteMessage(&d, channel: 301, message: 313, me: 1))
+        XCTAssertTrue(Edits.togglePin(&d, channel: 301, message: 313))
+        XCTAssertTrue(WorkspaceView(d).channels.first { $0.id == 301 }!.messages.first { $0.id == 313 }!.pinned)
+        XCTAssertTrue(Edits.deleteMessage(&d, channel: 301, message: 9100, me: 1))
+        XCTAssertNil(WorkspaceView(d).channels.first { $0.id == 301 }!.messages.first { $0.id == 9100 })
+    }
+
+    func testDeletedMessageStaysDeletedAfterMerge() {
+        var phone = SampleWorkspace.make()
+        Edits.sendMessage(&phone, channel: 301, text: "oops", me: 1, id: 9200, ts: 100)
+        var meta = SyncMeta(of: phone)
+        Sync.stamp(phone, &meta, now: 1_000)
+        phone.set("extra.sync", meta.json)
+        let server = phone
+        Edits.deleteMessage(&phone, channel: 301, message: 9200, me: 1)
+        Sync.stamp(phone, &meta, now: 2_000)
+        phone.set("extra.sync", meta.json)
+        XCTAssertNotNil(meta.tombs[9200], "a delete leaves a tombstone for the others")
+        var merged = server
+        Sync.merge(&merged, [phone])
+        XCTAssertNil(WorkspaceView(merged).channels.first { $0.id == 301 }!.messages.first { $0.id == 9200 })
+    }
+
+    func testCreateChannelPublicAndPrivate() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.createChannel(&d, name: " Road Map ", isPrivate: false, me: 2, id: 9300, ts: 5))
+        XCTAssertTrue(Edits.createChannel(&d, name: "secret", isPrivate: true, me: 2, id: 9301, ts: 5))
+        XCTAssertFalse(Edits.createChannel(&d, name: "  ", isPrivate: false, me: 2, id: 9302, ts: 5))
+        let v = WorkspaceView(d)
+        let pub = v.channels.first { $0.id == 9300 }!
+        XCTAssertEqual(pub.name, "road-map")
+        XCTAssertEqual(pub.members, [1, 2, 3])
+        for k in ["id", "name", "kind", "topic", "members", "messages"] { XCTAssertNotNil(d["channels"]!.array!.last![k], k) }
+        XCTAssertTrue(v.visibleChannels(me: 2).contains { $0.id == 9301 })
+        XCTAssertFalse(v.visibleChannels(me: 1).contains { $0.id == 9301 }, "a private channel is only for its members")
+    }
+
+    func testMessageWithOnlyAPicture() {
+        var d = SampleWorkspace.make()
+        let a = FileAPI.attachment(sha: String(repeating: "a", count: 64), name: "IMG_1.jpg", isVideo: false, bytes: 1234, w: 640, h: 480, secs: 0)
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "", attachments: [a], me: 1, id: 9400, ts: 9))
+        let m = WorkspaceView(d).channels.first { $0.id == 301 }!.messages.last!
+        XCTAssertEqual(m.text, "")
+        XCTAssertEqual(m.attachments.first?.name, "IMG_1.jpg")
+        XCTAssertEqual(m.attachments.first?.isVideo, false)
+        XCTAssertEqual(d["channels"]![0]!["messages"]!.array!.last!["attachments"]![0]!["kind"], "Image")
+        XCTAssertFalse(Edits.sendMessage(&d, channel: 301, text: "", me: 1, id: 9401, ts: 9), "nothing to send")
+    }
+
+    func testDeleteTaskTakesSubtasksAndDeleteDocTakesSubPages() {
+        var d = SampleWorkspace.make()
+        Edits.addTask(&d, list: 111, name: "child", assignees: [], me: 1, id: 9500, ts: 1)
+        d.updateItem(at: "tasks", id: 9500) { $0["parent"] = 201 }
+        XCTAssertTrue(Edits.deleteTask(&d, task: 201))
+        XCTAssertNil(WorkspaceView(d).tasks.first { $0.id == 201 || $0.id == 9500 })
+        XCTAssertFalse(Edits.deleteTask(&d, task: 201))
+        Edits.addDoc(&d, title: "sub", space: 100, me: 1, id: 9600, ts: 1)
+        d.updateItem(at: "docs", id: 9600) { $0["parent"] = 401 }
+        XCTAssertTrue(Edits.deleteDoc(&d, doc: 401))
+        XCTAssertNil(WorkspaceView(d).docs.first { $0.id == 401 || $0.id == 9600 })
+        XCTAssertNotNil(WorkspaceView(d).docs.first { $0.id == 402 })
+    }
+
+    func testClosingARepeatingTaskRollsItOn() {
+        var d = SampleWorkspace.make()
+        let today = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 1, day: 31, hour: 12))!
+        d.updateItem(at: "tasks", id: 204) { t in
+            t["recur"] = "monthly"
+            t["due"] = "2026-01-31"
+            t["start"] = "2026-01-29"
+            t["checklist"] = [["text": "a", "done": true]]
+        }
+        XCTAssertTrue(Edits.setDone(&d, task: 204, done: true, me: 1, ts: 500, today: today))
+        let t = d["tasks"]!.array!.first { $0["id"] == 204 }!
+        XCTAssertEqual(t["status"], "to do", "open again")
+        XCTAssertEqual(t["due"], "2026-02-28", "a month on (end of month kept, like chrono)")
+        XCTAssertEqual(t["start"], "2026-02-26", "moved by as many days as the due date")
+        XCTAssertEqual(t["done_at"], .null)
+        XCTAssertEqual(t["closed_at"], .null)
+        XCTAssertEqual(t["checklist"]?[0]?["done"], false)
+        let texts = (t["activity"]?.array ?? []).compactMap { $0["text"]?.string }
+        XCTAssertTrue(texts.contains("changed status from TO DO to COMPLETE"))
+        XCTAssertEqual(texts.last, "completed a monthly repeat; next due Feb 28")
+        // a task without a repeat just closes
+        XCTAssertTrue(Edits.setDone(&d, task: 202, done: true, me: 1, ts: 500))
+        XCTAssertEqual(d["tasks"]!.array!.first { $0["id"] == 202 }!["status"], "complete")
+    }
+
+    func testStatusAutomationsRun() {
+        var d = SampleWorkspace.make()
+        d.set("extra.automations", [
+            ["id": 1, "enabled": true, "trigger_status": "review", "action": "assign", "value": "3", "list": nil],
+            ["id": 2, "enabled": true, "trigger_status": "review", "action": "priority", "value": "1", "list": 100],
+            ["id": 3, "enabled": true, "trigger_status": "review", "action": "comment", "value": "Please review", "list": 111],
+            ["id": 4, "enabled": false, "trigger_status": "review", "action": "priority", "value": "4", "list": nil],
+            ["id": 5, "enabled": true, "trigger_status": "review", "action": "priority", "value": "4", "list": 120],
+        ])
+        XCTAssertTrue(Edits.setStatus(&d, task: 202, to: "review", me: 1, ts: 600))
+        let t = WorkspaceView(d).tasks.first { $0.id == 202 }!
+        XCTAssertEqual(t.assignees, [1, 2, 3])
+        XCTAssertEqual(t.priority, 1, "the space rule ran, the other list's and the disabled one didn't")
+        XCTAssertTrue(t.activity.contains { $0.comment && $0.text == "Please review" })
+        let ran = t.activity.filter { $0.text.hasPrefix("Automation ran: ") }.map(\.text)
+        XCTAssertEqual(ran, ["Automation ran: assign to Sam Lee", "Automation ran: set priority to Urgent", "Automation ran: comment \"Please review\""])
+    }
 }
+

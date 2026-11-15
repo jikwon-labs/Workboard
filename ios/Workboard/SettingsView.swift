@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(Notifier.self) private var notifier
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
+    @State private var confirmSwitch = false
 
     var body: some View {
         NavigationStack {
@@ -93,9 +94,8 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text(client.settings.pushToken == nil
-                         ? "Messages from others show up while the app is open or just closed. Push from the server needs the server's push setup."
-                         : "Registered with the server for push.")
+                    Text("Messages from others show up while the app is open or was just closed. The server can't send push notifications yet, so nothing arrives while the app has been closed for a while.")
+                        .accessibilityIdentifier("notifyFooter")
                 }
                 Section("Workspace") {
                     LabeledContent("Name", value: client.view.name)
@@ -110,6 +110,13 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
             .onAppear { address = client.settings.server }
+            .alert("Switch servers?", isPresented: $confirmSwitch) {
+                Button("Switch", role: .destructive) { apply(confirmed: true) }
+                    .accessibilityIdentifier("confirmServerSwitch")
+                Button("Cancel", role: .cancel) { address = client.settings.server }
+            } message: {
+                Text("\(client.waitingCount) \(client.waitingCount == 1 ? "change hasn't" : "changes haven't") reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
+            }
         }
     }
 
@@ -123,7 +130,15 @@ struct SettingsView: View {
         }
     }
 
-    func apply() {
+    /// A different server has its own workspace: the copy here starts over
+    /// from it (never merged into it). Ask first when edits would be lost.
+    func apply() { apply(confirmed: false) }
+
+    func apply(confirmed: Bool) {
+        if !confirmed, client.isDifferentServer(address), client.waitingCount > 0 {
+            confirmSwitch = true
+            return
+        }
         client.setServer(address)
         if client.state == .idle { client.connect() }
     }

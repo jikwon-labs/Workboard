@@ -4,12 +4,14 @@
 // everyone as an `update`. Real merging is the server's job.
 //
 // Like the real axum server, WebSocket and plain HTTP share one port:
-//   GET  /health       -> {"ok":true,"rev":N}
+//   GET  /health       -> {"ok":true,"rev":N,"workspace":bool}
 //   POST /auth/forgot  -> {"ok":true,"mail":true}; the reset code is logged
 //                         (printed by wb-fake-server) instead of mailed
-//   POST /call-token   -> a LiveKit join token, when calls are set up (the
-//                         real server has no such route: it uses call_join)
+//   PUT/GET /files/<sha256>  pictures and videos (server/src/files.rs), with
+//                         Authorization: Bearer <device>:<token>
 // so the WebSocket handshake and frames are done by hand on a TCP listener.
+// Huddles go over the WebSocket like the real server: call_join {channel}
+// -> call_token {channel, url, token}, or error {code: "denied", channel}.
 //
 // Optional sign-in (`requireSignIn`), like the real server: hello must carry
 // a reset code, an invite code, an email and password, or a device token,
@@ -57,6 +59,8 @@ public final class FakeServer: @unchecked Sendable {
     /// normalized reset code -> (email, made at)
     private var resets: [String: (email: String, made: Date)] = [:]
     private var lastResetCode: [String: String] = [:]
+    /// sha256 -> (contents, content type)
+    private var files: [String: (data: Data, type: String)] = [:]
 
     struct Account {
         var email: String
@@ -251,11 +255,11 @@ public final class FakeServer: @unchecked Sendable {
         }
         switch (method, path) {
         case ("GET", "/health"):
-            respond(p, 200, ["ok": true, "rev": .int(rev)])
+            respond(p, 200, ["ok": true, "rev": .int(rev), "workspace": .bool(snapshot != nil), "devices": .int(Int64(tokens.count))])
         case ("POST", "/auth/forgot"):
             forgot(p, body: body)
-        case ("POST", "/call-token"):
-            callToken(p, headers: headers, body: body)
+        case (_, _) where path.hasPrefix("/files/"):
+            file(p, method: method, name: String(path.dropFirst(7)), headers: headers, body: body)
         case ("POST", _) where adminHTTP && path.hasPrefix("/admin/"):
             let comps = URLComponents(string: path)
             let member = comps?.queryItems?.first { $0.name == "member" }?.value.flatMap { UInt64($0) } ?? 0
@@ -311,36 +315,56 @@ public final class FakeServer: @unchecked Sendable {
 
     private func respond(_ p: Peer, _ status: Int, _ body: JSON) {
         let text = body.serialized()
-        let reason = [200: "OK", 401: "Unauthorized", 404: "Not Found", 400: "Bad Request", 501: "Not Implemented"][status] ?? "Error"
+        let reason = [200: "OK", 201: "Created", 401: "Unauthorized", 404: "Not Found", 400: "Bad Request", 501: "Not Implemented"][status] ?? "Error"
         let resp = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(text.utf8.count)\r\nConnection: close\r\n\r\n\(text)"
         p.conn.send(content: Data(resp.utf8), completion: .contentProcessed { _ in p.conn.cancel() })
     }
 
-    private func callToken(_ p: Peer, headers: [String: String], body: Data) {
-        guard let lk = livekit else {
-            respond(p, 501, ["error": "calls_not_configured"])
-            return
-        }
-        var member: UInt64 = 0
+    /// call_join, like Hub::call in server/src/lib.rs.
+    private func callJoin(_ ch: UInt64, from p: Peer) {
+        func deny(_ why: String) { send(.error(code: ServerErrorCode.denied.rawValue, message: why, channel: ch), to: p) }
+        guard let lk = livekit else { return deny("Voice huddles aren't set up on this server yet.") }
+        guard let snap = snapshot else { return deny("There's no workspace on the server yet.") }
+        let view = WorkspaceView(snap)
+        guard let c = view.channels.first(where: { $0.id == ch }) else { return deny("That conversation isn't on the server yet. Try again in a moment.") }
+        let member = p.member ?? 0
+        if requireSignIn, !c.members.isEmpty, !c.members.contains(member) { return deny("You're not in that conversation.") }
+        let identity = "\(member)-\(p.device ?? "device")"
+        let name = view.member(member)?.name ?? ""
+        let jwt = Self.livekitToken(key: lk.key, secret: lk.secret, identity: identity, name: name, room: CallAPI.room(channel: ch))
+        log("call token for \(identity) in \(CallAPI.room(channel: ch))")
+        send(.callToken(channel: ch, url: lk.url, token: jwt), to: p)
+    }
+
+    /// PUT/GET/HEAD /files/<sha256>, like server/src/files.rs (no ranges).
+    private func file(_ p: Peer, method: String, name: String, headers: [String: String], body: Data) {
+        guard name.count == 64, name.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else { return respond(p, 404, ["error": "no such file"]) }
         if requireSignIn {
             let auth = headers["authorization"] ?? ""
-            guard auth.hasPrefix("Bearer "), let t = tokens[String(auth.dropFirst(7))] else {
-                respond(p, 401, ["error": "unauthorized"])
-                return
-            }
-            member = t.member
+            let rest = auth.hasPrefix("Bearer ") ? String(auth.dropFirst(7)) : ""
+            let parts = rest.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let t = tokens[parts[1]], t.device == parts[0] else { return respond(p, 401, ["error": "sign in first"]) }
         }
-        guard let j = try? JSON(parsing: body), let ch = j["channel"]?.uint else {
-            respond(p, 400, ["error": "channel missing"])
-            return
+        switch method {
+        case "PUT":
+            if files[name] != nil { return respond(p, 200, ["ok": "already here"]) }
+            let sha = SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
+            guard sha == name else { return respond(p, 400, ["error": "contents don't match the name"]) }
+            files[name] = (body, headers["content-type"] ?? "application/octet-stream")
+            log("stored file \(name.prefix(8)) (\(body.count) bytes)")
+            respond(p, 201, ["ok": "stored"])
+        case "GET", "HEAD":
+            guard let f = files[name] else { return respond(p, 404, ["error": "no such file"]) }
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: \(f.type)\r\nContent-Length: \(f.data.count)\r\nConnection: close\r\n\r\n"
+            let payload = method == "GET" ? Data(head.utf8) + f.data : Data(head.utf8)
+            p.conn.send(content: payload, completion: .contentProcessed { _ in p.conn.cancel() })
+        default:
+            respond(p, 404, ["error": "not_found"])
         }
-        let room = "workboard-\(ch)"
-        let identity = member == 0 ? "guest-\(UUID().uuidString.prefix(8))" : "member-\(member)"
-        let name = WorkspaceView(snapshot ?? [:]).member(member)?.name ?? identity
-        let jwt = Self.livekitToken(key: lk.key, secret: lk.secret, identity: identity, name: name, room: room)
-        log("call-token for \(identity) in \(room)")
-        respond(p, 200, ["url": .string(lk.url), "token": .string(jwt), "room": .string(room)])
     }
+
+    /// A file put here (tests).
+    public func storedFile(_ sha: String) -> Data? { queue.sync { files[sha]?.data } }
 
     /// A LiveKit access token (HS256 JWT with a video grant).
     public static func livekitToken(key: String, secret: String, identity: String, name: String, room: String, now: Date = Date()) -> String {
@@ -451,6 +475,8 @@ public final class FakeServer: @unchecked Sendable {
         case let .pushToken(token, platform, env):
             if let d = p.device { pushTokens[d] = token }
             log("push token from \(p.device?.prefix(8) ?? "?") (\(platform), \(env))")
+        case let .callJoin(ch):
+            callJoin(ch, from: p)
         case .ping:
             send(.pong, to: p)
         case .pong:

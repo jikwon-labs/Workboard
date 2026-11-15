@@ -1,9 +1,11 @@
+import PhotosUI
 import SwiftUI
 import WorkboardKit
 
 struct ChatListView: View {
     @Environment(SyncClient.self) private var client
     @Environment(Notifier.self) private var notifier
+    @State private var newChannel = false
 
     var body: some View {
         let me = client.me ?? 0
@@ -46,7 +48,65 @@ struct ChatListView: View {
             }
         }
         .navigationTitle("Chat")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsButton() } }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { newChannel = true } label: { Image(systemName: "square.and.pencil") }
+                    .disabled(!client.canEdit)
+                    .accessibilityLabel("New channel")
+                    .accessibilityIdentifier("newChannelButton")
+            }
+            ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
+        }
+        .sheet(isPresented: $newChannel) { NewChannelSheet() }
+    }
+}
+
+/// Like the Mac app's Create Channel window (create_channel in src/app/parity.rs).
+struct NewChannelSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var isPrivate = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("e.g. marketing", text: $name)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit(create)
+                        .accessibilityIdentifier("channelNameField")
+                } header: {
+                    Text("Name")
+                }
+                Section {
+                    Toggle("Make Private", isOn: $isPrivate)
+                        .accessibilityIdentifier("channelPrivateToggle")
+                } footer: {
+                    Text(isPrivate ? "Only invited people can find this channel." : "Everyone in the workspace is in it.")
+                }
+            }
+            .navigationTitle("Create Channel")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create", action: create)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .accessibilityIdentifier("createChannelButton")
+                }
+            }
+        }
+    }
+
+    func create() {
+        let id = client.newId()
+        let ok = client.edit { d, me in Edits.createChannel(&d, name: name, isPrivate: isPrivate, me: me, id: id, ts: nowTs()) }
+        guard ok else { return }
+        dismiss()
+        nav.chat.append(Nav.Route.channel(id))
     }
 }
 
@@ -101,7 +161,11 @@ struct ChannelRow: View {
     var preview: String {
         guard let m = channel.messages.last else { return channel.topic.isEmpty ? "No messages yet" : channel.topic }
         let who = m.author == client.me ? "You" : (client.view.member(m.author)?.name.split(separator: " ").first.map(String.init) ?? "")
-        return who.isEmpty ? m.text : "\(who): \(m.text)"
+        var text = m.text
+        if text.isEmpty, let a = m.attachments.first {
+            text = a.isVideo ? "Video" : (m.attachments.count == 1 ? "Photo" : "\(m.attachments.count) photos")
+        }
+        return who.isEmpty ? text : "\(who): \(text)"
     }
 }
 
@@ -147,9 +211,9 @@ struct ConversationView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))") { text in
+                Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files in
                     client.edit { d, me in
-                        Edits.sendMessage(&d, channel: c.id, text: text, me: me, id: client.newId(), ts: nowTs())
+                        Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, me: me, id: client.newId(), ts: nowTs())
                     }
                 }
             }
@@ -206,15 +270,15 @@ struct ThreadView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    ForEach(m.replies) { r in MessageRow(message: r, channelId: c.id, compact: false) }
+                    ForEach(m.replies) { r in MessageRow(message: r, channelId: c.id, compact: false, isReply: true) }
                 }
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Reply…") { text in
+                Composer(placeholder: "Reply…", attachments: true) { text, files in
                     client.edit { d, me in
-                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, me: me, id: client.newId(), ts: nowTs())
+                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, me: me, id: client.newId(), ts: nowTs())
                     }
                 }
             }
@@ -228,15 +292,22 @@ struct ThreadView: View {
 
 struct MessageRow: View {
     @Environment(SyncClient.self) private var client
+    @Environment(CallManager.self) private var calls
+    @Environment(\.openURL) private var openURL
     let message: MessageView
     let channelId: UInt64
     let compact: Bool
+    var isReply = false
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var confirmDelete = false
 
     /// Quick reactions offered on a long press.
     static let quick = ["👍", "❤️", "😂", "🎉", "👀", "✅"]
 
     var body: some View {
         let author = client.view.member(message.author)
+        let mine = message.author == client.me
         HStack(alignment: .top, spacing: 12) {
             if compact {
                 Color.clear.frame(width: 36, height: 1)
@@ -248,18 +319,35 @@ struct MessageRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(author?.name ?? "Someone").font(.subheadline.weight(.semibold))
                         Text(Fmt.time(message.ts)).font(.caption).foregroundStyle(.secondary)
-                        if message.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
+                        if message.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
                     }
                 }
                 if let title = message.postTitle, !title.isEmpty {
                     Text(title).font(.headline)
                 }
-                Text(message.text)
-                    .textSelection(.enabled)
-                if let call = message.call, let url = URL(string: call) {
-                    Link(destination: url) { Label("Join call", systemImage: "phone.fill") }
-                        .font(.subheadline.weight(.medium))
-                        .padding(.top, 2)
+                if !message.text.isEmpty || message.edited != nil {
+                    (Text(message.text) + (message.edited != nil ? Text(message.text.isEmpty ? "(edited)" : " (edited)").font(.caption).foregroundColor(.secondary) : Text("")))
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("messageText-\(message.id)")
+                }
+                if !message.attachments.isEmpty {
+                    AttachmentsView(attachments: message.attachments)
+                        .padding(.top, 4)
+                }
+                if let call = message.call {
+                    if let ch = CallAPI.huddleChannel(call) {
+                        Button {
+                            Task { _ = await calls.start(channel: ch, client: client, announce: false) }
+                        } label: { Label("Join huddle", systemImage: "headphones") }
+                            .font(.subheadline.weight(.medium))
+                            .padding(.top, 2)
+                            .disabled(!client.state.isConnected)
+                            .accessibilityIdentifier("joinHuddle-\(message.id)")
+                    } else if let url = URL(string: call) {
+                        Link(destination: url) { Label("Join call", systemImage: "phone.fill") }
+                            .font(.subheadline.weight(.medium))
+                            .padding(.top, 2)
+                    }
                 }
                 if !message.reactions.isEmpty {
                     HStack(spacing: 6) {
@@ -294,8 +382,54 @@ struct MessageRow: View {
                         Button("React \(e)") { react(e) }
                     }
                 }
+                Section {
+                    if mine {
+                        Button { draft = message.text; editing = true } label: { Label("Edit message", systemImage: "pencil") }
+                    }
+                    if !isReply {
+                        Button { client.edit { d, _ in Edits.togglePin(&d, channel: channelId, message: message.id) } } label: {
+                            Label(message.pinned ? "Unpin" : "Pin to channel", systemImage: message.pinned ? "pin.slash" : "pin")
+                        }
+                    }
+                }
             }
-            Button { UIPasteboard.general.string = message.text } label: { Label("Copy text", systemImage: "doc.on.doc") }
+            if !message.text.isEmpty {
+                Button { UIPasteboard.general.string = message.text } label: { Label("Copy text", systemImage: "doc.on.doc") }
+            }
+            if client.canEdit && mine {
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete message", systemImage: "trash") }
+            }
+        }
+        .confirmationDialog("Delete this message?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                client.edit { d, me in Edits.deleteMessage(&d, channel: channelId, message: message.id, me: me) }
+            }
+            .accessibilityIdentifier("confirmDeleteMessage")
+        } message: {
+            Text(isReply || message.replies.isEmpty ? "It's removed for everyone." : "It's removed for everyone, with its replies.")
+        }
+        .sheet(isPresented: $editing) {
+            NavigationStack {
+                Form {
+                    TextField("Message", text: $draft, axis: .vertical)
+                        .lineLimit(1...10)
+                        .accessibilityIdentifier("editMessageField")
+                }
+                .navigationTitle("Edit message")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editing = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
+                            editing = false
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("saveEditButton")
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.id)")
@@ -328,43 +462,102 @@ struct RepliesChip: View {
 }
 
 /// The message box. Works offline too: messages wait and go up on reconnect.
+/// With `attachments`, a photo button adds pictures and videos: they go up
+/// to the server first (PUT /files) and the message names them.
 struct Composer: View {
     @Environment(SyncClient.self) private var client
     let placeholder: String
-    let send: (String) -> Bool
+    let allowsAttachments: Bool
+    let send: (String, [JSON]) -> Bool
     @State private var text = ""
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var pending: [PendingFile] = []
     @FocusState private var focused: Bool
 
     init(placeholder: String, send: @escaping (String) -> Bool) {
         self.placeholder = placeholder
+        self.allowsAttachments = false
+        self.send = { text, _ in send(text) }
+    }
+
+    init(placeholder: String, attachments: Bool, send: @escaping (String, [JSON]) -> Bool) {
+        self.placeholder = placeholder
+        self.allowsAttachments = attachments
         self.send = send
     }
 
+    var ready: [JSON] { pending.compactMap(\.attachment) }
+    var uploading: Bool { pending.contains { $0.attachment == nil && $0.error == nil } }
+
     var body: some View {
         let can = client.canEdit
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(can ? placeholder : "Sign in to send messages", text: $text, axis: .vertical)
-                .lineLimit(1...5)
-                .focused($focused)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(.secondarySystemBackground)))
-                .disabled(!can)
-                .accessibilityIdentifier("composer")
-            Button {
-                if send(text) { text = "" }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 32))
-                    .symbolRenderingMode(.hierarchical)
+        VStack(spacing: 6) {
+            if !pending.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(pending) { f in PendingChip(file: f) { pending.removeAll { $0.id == f.id } } }
+                    }
+                    .padding(.horizontal, 4)
+                }
             }
-            .disabled(!can || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityLabel("Send")
-            .accessibilityIdentifier("sendButton")
+            HStack(alignment: .bottom, spacing: 8) {
+                if allowsAttachments {
+                    PhotosPicker(selection: $picked, maxSelectionCount: 10, matching: .any(of: [.images, .videos])) {
+                        Image(systemName: "photo.on.rectangle").font(.system(size: 22)).padding(.bottom, 5)
+                    }
+                    .disabled(!can || !client.state.isConnected)
+                    .accessibilityLabel("Add photos or videos")
+                    .accessibilityIdentifier("attachButton")
+                }
+                TextField(can ? placeholder : "Sign in to send messages", text: $text, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($focused)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(.secondarySystemBackground)))
+                    .disabled(!can)
+                    .accessibilityIdentifier("composer")
+                Button {
+                    if send(text, ready) {
+                        text = ""
+                        pending = []
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 32))
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .disabled(!can || uploading || (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ready.isEmpty))
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("sendButton")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+        .onChange(of: picked) {
+            let items = picked
+            picked = []
+            for item in items { upload(item) }
+        }
+    }
+
+    func upload(_ item: PhotosPickerItem) {
+        let f = PendingFile()
+        pending.append(f)
+        let (server, auth) = (client.settings.server, client.fileAuth)
+        Task {
+            do {
+                let a = try await MediaUpload.prepare(item)
+                let sha = try await FileAPI.upload(server: server, auth: auth, data: a.data, contentType: a.contentType)
+                f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.data.count, w: a.w, h: a.h, secs: a.secs)
+                f.preview = a.preview
+            } catch let e as FileError {
+                f.error = e.explanation
+            } catch {
+                f.error = error.localizedDescription
+            }
+        }
     }
 }

@@ -1,8 +1,8 @@
-// Huddles (voice, then video) through LiveKit, as in docs/server-design.md
-// phases 3 and 4: the app asks workboard-server for a join token
-// (POST /call-token) and joins the channel's room. A server without calls
-// gets the Mac app's link call instead: a "Started a call" message with a
-// Jitsi link, opened in Safari.
+// Huddles (voice, then video) through LiveKit. The app asks workboard-server
+// for a join token over the open WebSocket (call_join -> call_token, the same
+// as the Mac app) and joins the conversation's room. A server without LiveKit
+// turns that down; then the app makes the Mac app's link call instead: a
+// "Started a call" message with a Jitsi link, opened in Safari.
 
 import LiveKit
 import SwiftUI
@@ -28,9 +28,11 @@ final class CallManager {
 
     var isActive: Bool { phase == .joining || phase == .inCall }
 
-    /// Start or join the huddle in a channel. Returns a link to open when the
-    /// server has no calls and a link call was posted instead.
-    func start(channel ch: UInt64, client: SyncClient, video: Bool = false) async -> URL? {
+    /// Start or join the huddle in a channel. `announce` posts the Mac
+    /// app's "Started a huddle" card once in (not when joining from one).
+    /// Returns a link to open when the server has no huddles and a link call
+    /// was posted instead.
+    func start(channel ch: UInt64, client: SyncClient, video: Bool = false, announce: Bool = true) async -> URL? {
         if isActive {
             showCall = true
             return nil
@@ -39,15 +41,9 @@ final class CallManager {
         phase = .joining
         showCall = true
         cameraOn = video
+        let grant: CallGrant
         do {
-            let grant = try await CallAPI.requestToken(server: client.settings.server, deviceToken: client.deviceToken, channel: ch)
-            let r = Room()
-            room = r
-            try await r.connect(url: grant.url, token: grant.token)
-            phase = .inCall
-            try? await r.localParticipant.setMicrophone(enabled: micOn)
-            if video { try? await r.localParticipant.setCamera(enabled: true) }
-            return nil
+            grant = try await client.requestCall(channel: ch)
         } catch CallError.notAvailable {
             showCall = false
             phase = .idle
@@ -55,10 +51,26 @@ final class CallManager {
             let link = CallAPI.linkCall()
             client.edit { d, me in Edits.postCall(&d, channel: ch, link: link, me: me, id: client.newId(), ts: nowTs()) }
             return URL(string: link)
-        } catch CallError.unauthorized {
-            phase = .failed("Sign in again to join huddles.")
-        } catch CallError.failed(let why) {
-            phase = .failed("Couldn't reach the server: \(why)")
+        } catch CallError.denied(let why) {
+            phase = .failed(why)
+            return nil
+        } catch CallError.offline {
+            phase = .failed("Huddles need the connection to the server. Try again when you're back online.")
+            return nil
+        } catch {
+            phase = .failed("The server didn't answer, so the huddle didn't start. Try again in a moment.")
+            return nil
+        }
+        do {
+            let r = Room()
+            room = r
+            try await r.connect(url: grant.url, token: grant.token)
+            phase = .inCall
+            if announce {
+                client.edit { d, me in Edits.postHuddle(&d, channel: ch, me: me, id: client.newId(), ts: nowTs()) }
+            }
+            try? await r.localParticipant.setMicrophone(enabled: micOn)
+            if video { try? await r.localParticipant.setCamera(enabled: true) }
         } catch {
             phase = .failed("Couldn't join the huddle. Is the call server running? (\(error.localizedDescription))")
         }

@@ -44,8 +44,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let info = notification.request.content.userInfo
         let ch = Notifier.channel(in: info)
-        let current = await MainActor.run { currentChannel() }
-        if let ch, ch == current, UIApplication.shared.applicationState == .active { return [] }
+        // UIApplication is main-thread only; this delegate method is not
+        let (current, active) = await MainActor.run { (currentChannel(), UIApplication.shared.applicationState == .active) }
+        if let ch, ch == current, active { return [] }
         return [.banner, .list, .sound]
     }
 
@@ -95,7 +96,7 @@ final class Notifier {
             let place = c.kind == .channel ? "#\(c.name)" : nil
             content.title = place.map { "\(who) in \($0)" } ?? who
             if m.parent != nil { content.subtitle = "Thread reply" }
-            content.body = m.text
+            content.body = m.text.isEmpty ? "Sent a photo or video" : m.text
             content.sound = .default
             content.threadIdentifier = "ch-\(m.channel)"
             var info: [String: Any] = ["channel": m.channel]

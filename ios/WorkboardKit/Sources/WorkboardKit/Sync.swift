@@ -410,6 +410,36 @@ extension Sync {
         return v
     }
 
+    /// Takes items the server hides from this person (`hidden` in welcome and
+    /// update: others' DMs and private channels, others' personal spaces and
+    /// private docs) out of this copy WITHOUT tombstones, so nothing is
+    /// deleted for the others, and forgets their stamps and fingerprints
+    /// (wb_sync::hide). Returns the ids of everything that left, inner items too.
+    @discardableResult
+    public static func hide(_ data: inout JSON, ids: [UInt64]) -> Set<UInt64> {
+        guard !ids.isEmpty else { return [] }
+        let wanted = Set(ids)
+        var gone: [JSON] = []
+        for path in shared {
+            guard let a = data.at(path)?.array else { continue }
+            let out = a.filter { idOf($0).map(wanted.contains) ?? false }
+            guard !out.isEmpty else { continue }
+            gone += out
+            data.set(path, .array(a.filter { !(idOf($0).map(wanted.contains) ?? false) }))
+        }
+        guard !gone.isEmpty else { return [] }
+        var inner: [UInt64: UInt64] = [:]
+        walk(.array(gone), parent: nil, placed: false, &inner)
+        if data.at("extra.sync")?.object != nil {
+            for key in ["stamps", "hashes", "moved", "parents"] {
+                guard var m = data.at("extra.sync." + key)?.object else { continue }
+                for id in inner.keys { m[String(id)] = nil }
+                data.set("extra.sync." + key, .object(m))
+            }
+        }
+        return Set(inner.keys)
+    }
+
     // MARK: activity ids (wb_sync::activity_id / fill_activity_ids)
 
     /// The id a task comment or activity line gets when it was written

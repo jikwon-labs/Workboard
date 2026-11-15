@@ -1,5 +1,6 @@
 import XCTest
 @testable import WorkboardKit
+import WorkboardFakeServer
 
 /// The four tests in src/sync.rs, ported one to one.
 final class RustPortTests: XCTestCase {
@@ -330,5 +331,36 @@ final class RustPortTests2: XCTestCase {
         d = Sync.outgoing(d)
         XCTAssertEqual(d.at("extra.sync.value_hashes"), .object([:]))
         XCTAssertEqual(d.at("extra.sync.v"), 1)
+    }
+}
+
+/// `hidden` from newer servers (wb_sync::hide): out of the copy, no tombstone.
+final class HideTests: XCTestCase {
+    func testHiddenItemsLeaveWithoutTombstones() throws {
+        var d = SampleWorkspace.make()
+        var meta = SyncMeta()
+        Sync.stamp(d, &meta, now: 10)
+        d.set("extra.sync", meta.json)
+        let gone = Sync.hide(&d, ids: [303, 999])
+        XCTAssertEqual(gone, [303, 331], "the DM and the message in it")
+        XCTAssertNil(WorkspaceView(d).channels.first { $0.id == 303 })
+        var m = SyncMeta(of: d)
+        XCTAssertNil(m.stamps[331])
+        XCTAssertNil(m.hashes[303])
+        Sync.stamp(d, &m, now: 20)
+        XCTAssertNil(m.tombs[303], "hiding is not deleting")
+        XCTAssertNil(m.tombs[331])
+        // and the server's merge keeps it for the others
+        var server = SampleWorkspace.make()
+        var sm = SyncMeta()
+        Sync.stamp(server, &sm, now: 10)
+        server.set("extra.sync", sm.json)
+        d.set("extra.sync", m.json)
+        Sync.merge(&server, [d])
+        XCTAssertNotNil(WorkspaceView(server).channels.first { $0.id == 303 })
+        // the field is read from welcome and update; older servers leave it out
+        XCTAssertEqual(ServerMessage(text: #"{"type":"update","data":{},"rev":2,"hidden":[303]}"#), .update(data: [:], rev: 2, hidden: [303]))
+        guard case let .welcome(w) = ServerMessage(text: #"{"type":"welcome","tag":1,"snapshot":null,"rev":0,"member":1,"role":"member","hidden":[5,6]}"#) else { return XCTFail() }
+        XCTAssertEqual(w.hidden, [5, 6])
     }
 }

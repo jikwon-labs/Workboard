@@ -2010,7 +2010,14 @@ impl App {
                 for (tag, n) in &counts {
                     ui.horizontal(|ui| {
                         chip(ui, tag, tag_color(tag));
-                        ui.label(RichText::new(crate::trf!("{} tasks", n)).color(t.text2));
+                        ui.label(
+                            RichText::new(if *n == 1 {
+                                tr("1 task").to_string()
+                            } else {
+                                crate::trf!("{} tasks", n)
+                            })
+                            .color(t.text2),
+                        );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
                                 .add(ghost(egui::Button::new(

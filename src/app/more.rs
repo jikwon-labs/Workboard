@@ -2623,7 +2623,8 @@ impl App {
                     }
                     ui.horizontal_wrapped(|ui| {
                         for (id, n, c) in &folders {
-                            if ui.add(egui::Button::new(trf!("\u{1F4C1} {}  ({} lists)", n, c)).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
+                            let label = if *c == 1 { trf!("\u{1F4C1} {}  (1 list)", n) } else { trf!("\u{1F4C1} {}  ({} lists)", n, c) };
+                            if ui.add(egui::Button::new(label).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
                                 s.actions.push(Action::Go(Location::Folder(*id)));
                             }
                         }

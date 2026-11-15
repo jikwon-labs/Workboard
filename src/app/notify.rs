@@ -649,6 +649,7 @@ impl App {
                 let title = match (today_n, late) {
                     (1, 0) => tr("1 task is due today").to_string(),
                     (d, 0) => trf!("{} tasks are due today", d),
+                    (0, 1) => tr("1 overdue task").to_string(),
                     (0, l) => trf!("{} overdue tasks", l),
                     (d, l) => trf!("{} due today, {} overdue", d, l),
                 };

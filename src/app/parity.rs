@@ -3069,8 +3069,14 @@ impl App {
                                 for id in &ids {
                                     self.duplicate_task(*id);
                                 }
-                                self.toast =
-                                    Some((trf!("Duplicated {} tasks", ids.len()), now_ts()));
+                                self.toast = Some((
+                                    if ids.len() == 1 {
+                                        tr("Duplicated 1 task").to_string()
+                                    } else {
+                                        trf!("Duplicated {} tasks", ids.len())
+                                    },
+                                    now_ts(),
+                                ));
                                 self.selected.clear();
                             }
                             // archived tasks (Show archived tasks only) can be brought back

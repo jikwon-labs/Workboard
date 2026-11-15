@@ -1539,7 +1539,7 @@ impl App {
                             let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                             ui.painter().rect_filled(r, 5.0, rgb(tm.color));
                             ui.label(RichText::new(&tm.name).size(16.0));
-                            ui.label(RichText::new(trf!("{} members", tm.members.len())).color(t.text2));
+                            ui.label(RichText::new(if tm.members.len() == 1 { tr("1 member").to_string() } else { trf!("{} members", tm.members.len()) }).color(t.text2));
                             let (r, _) = ui.allocate_exact_size(vec2(90.0, 22.0), Sense::hover());
                             paint_avatars(ui.painter(), r.left_center(), 10.0, &tm.members, &self.data, t.card);
                         });
@@ -1659,7 +1659,12 @@ impl App {
                                 paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
                                 ui.label(RichText::new(&m.name).strong());
                                 ui.label(
-                                    RichText::new(trf!("{} open tasks", open.len())).color(t.text2),
+                                    RichText::new(if open.len() == 1 {
+                                        tr("1 open task").to_string()
+                                    } else {
+                                        trf!("{} open tasks", open.len())
+                                    })
+                                    .color(t.text2),
                                 );
                             });
                             for task in open.iter().take(6) {

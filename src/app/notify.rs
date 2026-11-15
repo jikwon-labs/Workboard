@@ -639,7 +639,12 @@ impl App {
                 })
                 .collect();
             if !mine.is_empty() {
-                let today_n = mine.iter().filter(|t| t.due == Some(day)).count();
+                // due today with a time that has passed counts as overdue
+                let now_dt = local.naive_local();
+                let today_n = mine
+                    .iter()
+                    .filter(|t| t.due == Some(day) && !t.is_overdue_at(now_dt))
+                    .count();
                 let late = mine.len() - today_n;
                 let title = match (today_n, late) {
                     (1, 0) => tr("1 task is due today").to_string(),
@@ -659,6 +664,44 @@ impl App {
                     title,
                     body,
                     target: "today".into(),
+                });
+            }
+        }
+        // ---- my tasks with a due time, when that time comes (one missed
+        // by more than an hour, the app being closed, is left to the daily
+        // notice above)
+        if n.due {
+            let now_dt = local.naive_local();
+            let due_now: Vec<(u64, String, String, String)> = self
+                .data
+                .tasks
+                .iter()
+                .filter(|t| t.assignees.contains(&me) && !t.archived && !self.data.is_closed(t))
+                .filter_map(|t| {
+                    let (d, at) = (t.due?, t.due_at()?);
+                    let when = d.and_time(at);
+                    (when <= now_dt && now_dt - when < chrono::Duration::hours(1)).then(|| {
+                        (
+                            t.id,
+                            t.name.clone(),
+                            fmt_when(d, Some(at)),
+                            when.format("%Y-%m-%dT%H:%M").to_string(),
+                        )
+                    })
+                })
+                .collect();
+            for (id, name, when, stamp) in due_now {
+                let key = format!("due-at:{}:{}", id, stamp);
+                if self.fired(&key) {
+                    continue;
+                }
+                self.mark_fired(key.clone());
+                self.deliver(Note {
+                    key,
+                    kind: Kind::Due,
+                    title: trf!("{} is due now", name),
+                    body: trf!("Due {}", when),
+                    target: format!("task:{}", id),
                 });
             }
         }

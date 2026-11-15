@@ -10,9 +10,12 @@ struct HomeView: View {
         let v = client.view
         let mine = v.myTasks(me: me)
         let today = dayString()
-        let overdue = mine.filter { ($0.due ?? "9999") < today }.sorted { ($0.due ?? "") < ($1.due ?? "") }
-        let due = mine.filter { $0.due == today }
-        let later = mine.filter { ($0.due ?? "") > today }.sorted { ($0.due ?? "") < ($1.due ?? "") }
+        let now = timeString()
+        // by day, then by time within it (a day without one last)
+        let key = { (t: TaskView) in (t.due ?? "") + (t.dueTime ?? "99:99") }
+        let overdue = mine.filter { $0.isOverdue(today: today, now: now) }.sorted { key($0) < key($1) }
+        let due = mine.filter { $0.due == today && !$0.isOverdue(today: today, now: now) }.sorted { key($0) < key($1) }
+        let later = mine.filter { ($0.due ?? "") > today }.sorted { key($0) < key($1) }
         let undated = mine.filter { $0.due == nil }
         List {
             if mine.isEmpty {
@@ -65,9 +68,9 @@ struct TaskRow: View {
                     if showList, let l = v.list(task.listId) {
                         Text(l.name)
                     }
-                    if let due = task.due {
-                        Label(Fmt.due(due), systemImage: "calendar")
-                            .foregroundStyle(due < dayString() && !status.isClosed ? .red : .secondary)
+                    if let due = Fmt.due(task) {
+                        Label(due, systemImage: "calendar")
+                            .foregroundStyle(task.isOverdue(today: dayString(), now: timeString()) && !status.isClosed ? .red : .secondary)
                     }
                     if task.priority == 1 {
                         Label("Urgent", systemImage: "flag.fill").foregroundStyle(.red)

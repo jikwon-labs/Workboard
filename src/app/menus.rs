@@ -49,12 +49,8 @@ pub enum Modal {
         from: String,
         to: String,
     },
-    Templates {
-        name: String,
-        desc: String,
-        checklist: String,
-        priority: u8,
-    },
+    /// Browse, preview and use templates; manage the team's.
+    TemplateCenter(Box<super::templates::TemplateCenter>),
     Import {
         path: String,
         result: String,
@@ -341,12 +337,7 @@ impl App {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 self.modal = Some(match label {
                     "Apps" => Modal::ClickApps,
-                    "Templates" => Modal::Templates {
-                        name: String::new(),
-                        desc: String::new(),
-                        checklist: String::new(),
-                        priority: 0,
-                    },
+                    "Templates" => self.template_center(super::templates::Category::All, None),
                     "Custom Fields" => Modal::CustomFields {
                         name: String::new(),
                         kind: "text".into(),
@@ -967,12 +958,7 @@ impl App {
                 )
                 .clicked()
             {
-                self.modal = Some(Modal::Templates {
-                    name: String::new(),
-                    desc: String::new(),
-                    checklist: String::new(),
-                    priority: 0,
-                });
+                self.open_templates(super::templates::Category::All, None);
                 close_popup(ui);
             }
         });
@@ -1125,7 +1111,7 @@ impl App {
             Modal::CustomFields { .. } => tr("Custom Fields").into(),
             Modal::Automations { .. } => tr("Automations").into(),
             Modal::TagManager { .. } => tr("Tag Manager").into(),
-            Modal::Templates { .. } => tr("Templates").into(),
+            Modal::TemplateCenter(_) => tr("Template Center").into(),
             Modal::Import { .. } => tr("Import and export").into(),
             Modal::ChannelSettings(_) => tr("Channel Settings").into(),
             Modal::SavedMessages => tr("Saved messages").into(),
@@ -1175,17 +1161,20 @@ impl App {
                 }
             });
         let win_id = egui::Id::new("modal_window");
+        // the Template Center has a list beside its preview
+        let wide = matches!(modal, Modal::TemplateCenter(_));
+        let (min_w, max_w) = if wide { (800.0, 820.0) } else { (460.0, 620.0) };
         egui::Window::new(RichText::new(&title).size(17.0))
             .id(win_id)
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, [0.0, -20.0])
-            .min_width(460.0)
-            .max_width(620.0)
+            .min_width(min_w)
+            .max_width(max_w)
             .frame(dialog_frame(&t))
             .show(ctx, |ui| {
-                ui.set_min_width(440.0);
+                ui.set_min_width(min_w - 20.0);
                 if dialog_header(ui, &t, &title) {
                     open = false;
                 }
@@ -2039,166 +2028,7 @@ impl App {
                     });
                 }
             }
-            Modal::Templates {
-                name,
-                desc,
-                checklist,
-                priority,
-            } => {
-                let list = self.default_list();
-                ui.label(RichText::new(tr("Start new tasks from a saved shape: name, description, checklist and priority.")).color(t.text2));
-                ui.add_space(6.0);
-                let mut remove = None;
-                for (i, tp) in self.data.extra.templates.clone().iter().enumerate() {
-                    egui::Frame::new()
-                        .stroke(Stroke::new(1.0, t.border))
-                        .corner_radius(8)
-                        .inner_margin(egui::Margin::symmetric(12, 8))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.label(RichText::new(&tp.name).strong());
-                                    let mut bits = vec![];
-                                    if !tp.checklist.is_empty() {
-                                        bits.push(if tp.checklist.len() == 1 {
-                                            tr("1 checklist item").to_string()
-                                        } else {
-                                            crate::trf!("{} checklist items", tp.checklist.len())
-                                        });
-                                    }
-                                    if tp.priority > 0 {
-                                        bits.push(crate::trf!(
-                                            "{} priority",
-                                            tr(PRIORITIES[tp.priority as usize].label)
-                                        ));
-                                    }
-                                    if !tp.description.is_empty() {
-                                        bits.push(truncate(&tp.description, 40));
-                                    }
-                                    if !bits.is_empty() {
-                                        ui.label(
-                                            RichText::new(bits.join(" \u{2022} "))
-                                                .small()
-                                                .color(t.text3),
-                                        );
-                                    }
-                                });
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if ui
-                                        .add(ghost(egui::Button::new(
-                                            RichText::new(tr("Delete")).color(t.danger),
-                                        )))
-                                        .clicked()
-                                    {
-                                        remove = Some(i);
-                                    }
-                                    if primary_button(ui, t, tr("Use"))
-                                        .on_hover_text(tr("Create a task from this template"))
-                                        .clicked()
-                                    {
-                                        if let Some(l) = list {
-                                            self.actions.push(Action::Add {
-                                                list: l,
-                                                name: tp.task_name.clone(),
-                                                status: None,
-                                                priority: tp.priority,
-                                                assignees: vec![],
-                                                due: None,
-                                                parent: None,
-                                                open: true,
-                                            });
-                                            self.pending_template = Some(tp.clone());
-                                            close = true;
-                                        }
-                                    }
-                                });
-                            });
-                        });
-                    ui.add_space(4.0);
-                }
-                if let Some(i) = remove {
-                    self.data.extra.templates.remove(i);
-                    self.dirty = true;
-                }
-                if self.data.extra.templates.is_empty() {
-                    ui.label(RichText::new(tr("No templates yet. Make one below, or open a task and choose \u{2026} > Save as template.")).color(t.text3));
-                }
-                ui.add_space(4.0);
-                ui.separator();
-                ui.label(RichText::new(tr("New template")).strong());
-                ui.add(
-                    egui::TextEdit::singleline(name)
-                        .hint_text(tr("Template name, e.g. Bug report"))
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(8, 6)),
-                );
-                ui.add(
-                    egui::TextEdit::multiline(desc)
-                        .hint_text(tr("Description (optional)"))
-                        .desired_rows(2)
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(8, 6)),
-                );
-                ui.add(
-                    egui::TextEdit::multiline(checklist)
-                        .hint_text(tr("Checklist, one item per line (optional)"))
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(8, 6)),
-                );
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Priority")).color(t.text2));
-                    let cur = if *priority > 0 {
-                        tr(PRIORITIES[*priority as usize].label)
-                    } else {
-                        tr("None")
-                    };
-                    egui::ComboBox::from_id_salt("tp_pr")
-                        .selected_text(cur)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(priority, 0, tr("None"));
-                            for p in 1..PRIORITIES.len() {
-                                ui.selectable_value(priority, p as u8, tr(PRIORITIES[p].label));
-                            }
-                        });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let ok = !name.trim().is_empty();
-                        let b = ui.add_enabled(
-                            ok,
-                            Tint(
-                                egui::Button::new(
-                                    RichText::new(tr("Create template")).color(Color32::WHITE),
-                                )
-                                .fill(t.primary)
-                                .corner_radius(7)
-                                .min_size(vec2(0.0, 30.0)),
-                            ),
-                        );
-                        if b.clicked() {
-                            let id = self.data.new_id();
-                            let items: Vec<String> = checklist
-                                .lines()
-                                .map(|l| l.trim().to_string())
-                                .filter(|l| !l.is_empty())
-                                .collect();
-                            self.data.extra.templates.push(TaskTemplate {
-                                id,
-                                name: name.trim().to_string(),
-                                task_name: name.trim().to_string(),
-                                description: desc.trim().to_string(),
-                                checklist: items,
-                                tags: vec![],
-                                priority: *priority,
-                            });
-                            name.clear();
-                            desc.clear();
-                            checklist.clear();
-                            *priority = 0;
-                            self.dirty = true;
-                        }
-                    });
-                });
-            }
+            Modal::TemplateCenter(c) => close = self.template_center_body(ui, t, c),
             Modal::Import { path, result } => {
                 ui.label(tr("Import tasks from a CSV file (columns: name, status, priority, due date YYYY-MM-DD, assignee name). They go into the current list."));
                 ui.add(

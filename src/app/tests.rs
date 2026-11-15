@@ -349,6 +349,7 @@ fn templates_fill_the_new_task() {
         checklist: vec!["Repro".into(), "Fix".into()],
         tags: vec!["bug".into()],
         priority: 2,
+        ..Default::default()
     });
     a.apply(Action::Add {
         list,

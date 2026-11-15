@@ -275,7 +275,7 @@ public enum Edits {
         // it's open again: no Date done / Date closed until it next closes
         j["done_at"] = .null
         j["closed_at"] = .null
-        log(&j, me: me, text: "completed a \(r) repeat; next due \(macDate(nextDay, today: today))", ts: ts)
+        log(&j, me: me, text: "completed a \(r) repeat; next due \(macWhen(nextDay, time: j["due_time"]?.string, today: today))", ts: ts)
         if var items = j["checklist"]?.array {
             for i in items.indices where items[i].object != nil { items[i]["done"] = false }
             j["checklist"] = .array(items)
@@ -389,15 +389,37 @@ public enum Edits {
         }
     }
 
-    /// Due date as "YYYY-MM-DD" or nil; logged like the Mac app.
+    /// Due date as "YYYY-MM-DD" or nil; logged like the Mac app. The due
+    /// time (`due_time`, set on the Mac) stays when the day moves, and goes
+    /// with the date when it is cleared, like Task::tidy_times: a removed time
+    /// is written as null, never left out, so the merge doesn't bring it back.
     @discardableResult
     public static func setDue(_ data: inout JSON, task: UInt64, to day: String?, me: UInt64, ts: Int64, today: Date = Date()) -> Bool {
         data.updateItem(at: "tasks", id: task) { j in
-            guard j["due"]?.string != day else { return }
+            let before = j["due"]?.string
+            guard before != day else { return }
             j["due"] = day.map(JSON.string) ?? .null
-            log(&j, me: me, text: "changed due date to \(day.map { macDate($0, today: today) } ?? "none")", ts: ts)
+            if day == nil || before == nil, let t = j["due_time"], !t.isNull {
+                j["due_time"] = .null
+            }
+            log(&j, me: me, text: "changed due date to \(day.map { macWhen($0, time: j["due_time"]?.string, today: today) } ?? "none")", ts: ts)
             j["updated"] = .int(ts)
         }
+    }
+
+    /// A time of day as the Mac app writes it in history: "14:30" -> "2:30 PM".
+    public static func macTime(_ hhmm: String) -> String {
+        let p = hhmm.split(separator: ":").compactMap { Int($0) }
+        guard p.count >= 2 else { return hhmm }
+        let h = p[0] % 12 == 0 ? 12 : p[0] % 12
+        return String(format: "%d:%02d %@", h, p[1], p[0] < 12 ? "AM" : "PM")
+    }
+
+    /// A date with its time like the Mac app's history: "Tomorrow at 2:30 PM".
+    static func macWhen(_ day: String, time: String?, today: Date) -> String {
+        let d = macDate(day, today: today)
+        guard let t = time.flatMap(TaskView.hhmm) else { return d }
+        return "\(d) at \(macTime(t))"
     }
 
     /// Adds or removes one assignee, logged like the Mac app.

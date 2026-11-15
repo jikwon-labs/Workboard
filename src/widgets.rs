@@ -5,7 +5,7 @@
 use crate::i18n::{tr, DateText};
 use crate::model::*;
 use crate::theme::{rgb, Theme};
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use egui::{pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui};
 
 pub fn paint_status_circle(p: &egui::Painter, center: Pos2, r: f32, st: &Status) {
@@ -215,6 +215,39 @@ pub fn fmt_date(d: NaiveDate) -> String {
                 d.text("%-m/%-d/%y")
             }
         }
+    }
+}
+
+/// A time of day in the date style ("2:30 PM").
+pub fn fmt_time(time: NaiveTime) -> String {
+    time.text("%-I:%M %p")
+}
+
+/// A date with its time of day when there is one ("Today 2:30 PM").
+pub fn fmt_when(d: NaiveDate, time: Option<NaiveTime>) -> String {
+    match time {
+        Some(time) => format!("{} {}", fmt_date(d), fmt_time(time)),
+        None => fmt_date(d),
+    }
+}
+
+/// A task's due date (and time) for display.
+pub fn fmt_due(task: &Task) -> Option<String> {
+    task.due.map(|d| fmt_when(d, task.due_at()))
+}
+
+/// A task's start date (and time) for display.
+pub fn fmt_start(task: &Task) -> Option<String> {
+    task.start.map(|d| fmt_when(d, task.start_at()))
+}
+
+/// The colour of a task's due date: red once it is overdue (with a due time,
+/// from that time on), orange later today.
+pub fn due_color(task: &Task, closed: bool, t: &Theme) -> Color32 {
+    match task.due {
+        Some(_) if !closed && task.is_overdue() => t.danger,
+        Some(d) => date_color(d, closed, t),
+        None => t.text3,
     }
 }
 
@@ -779,22 +812,117 @@ pub fn next_recur(d: NaiveDate, r: &str) -> NaiveDate {
     }
 }
 
-/// Start date / Due date picker with a repeat choice, as in the original's
-/// date popup. Returns true when anything changed.
-pub fn dates_menu(
+/// Under a task's date picker: "Add time", or the time in a field (typed as
+/// "14:30" or "2:30 pm", kept on Enter or when the field is left) and
+/// "Remove time". Returns the new time when it changed (None inside: removed).
+pub fn time_row(
     ui: &mut Ui,
     t: &Theme,
     id: egui::Id,
-    start: &mut Option<NaiveDate>,
-    due: &mut Option<NaiveDate>,
-    recur: &mut Option<String>,
+    time: Option<NaiveTime>,
+) -> Option<Option<NaiveTime>> {
+    let mut out = None;
+    ui.horizontal(|ui| match time {
+        None => {
+            let b = ui.add(ghost(egui::Button::new(
+                egui::RichText::new(tr("Add time")).color(t.text2),
+            )));
+            name_it(&b, "Add time");
+            if b.clicked() {
+                out = Some(NaiveTime::from_hms_opt(9, 0, 0));
+            }
+        }
+        Some(cur) => {
+            ui.label(egui::RichText::new(tr("Time")).color(t.text2));
+            let buf_id = id.with("time_buf");
+            let mut buf: String = ui
+                .data(|d| d.get_temp(buf_id))
+                .unwrap_or_else(|| cur.format("%H:%M").to_string());
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut buf)
+                    .hint_text("14:30")
+                    .desired_width(64.0),
+            );
+            name_field(&r, "Time of day");
+            if r.lost_focus() {
+                if let Some(nt) = parse_time_of_day(&buf).filter(|nt| *nt != cur) {
+                    out = Some(Some(nt));
+                }
+                ui.data_mut(|d| d.remove::<String>(buf_id));
+            } else if r.has_focus() {
+                ui.data_mut(|d| d.insert_temp(buf_id, buf));
+            } else {
+                ui.data_mut(|d| d.remove::<String>(buf_id));
+            }
+            let b = ui.add(ghost(egui::Button::new(
+                egui::RichText::new(tr("Remove time")).color(t.danger),
+            )));
+            name_it(&b, "Remove time");
+            if b.clicked() {
+                out = Some(None);
+            }
+        }
+    });
+    out
+}
+
+/// A task date picker changed `date` (it was `before`): a cleared date takes
+/// its time along, and a date set where there was none starts without one.
+fn date_picked(
+    before: Option<NaiveDate>,
+    date: Option<NaiveDate>,
+    slot: &mut Option<Option<NaiveTime>>,
+) {
+    if date.is_none() || before.is_none() {
+        set_slot(slot, None);
+    }
+}
+
+/// Puts a `time_row` result on a task date. A time needs a date: adding one
+/// to no date sets the date to today.
+fn time_picked(
+    date: &mut Option<NaiveDate>,
+    slot: &mut Option<Option<NaiveTime>>,
+    new: Option<NaiveTime>,
+) {
+    if new.is_some() && date.is_none() {
+        *date = Some(today());
+    }
+    set_slot(slot, new);
+}
+
+/// `date_menu` for a task's date, with `time_row` under it. Returns true
+/// when the date or the time changed.
+pub fn date_time_menu(
+    ui: &mut Ui,
+    t: &Theme,
+    id: egui::Id,
+    date: &mut Option<NaiveDate>,
+    time: &mut Option<Option<NaiveTime>>,
 ) -> bool {
+    let before = *date;
+    let mut changed = date_menu_inner(ui, t, id, date, true);
+    if changed {
+        date_picked(before, *date, time);
+    }
+    ui.separator();
+    if let Some(nt) = time_row(ui, t, id.with("time"), date.and(time.flatten())) {
+        time_picked(date, time, nt);
+        changed = true;
+    }
+    changed
+}
+
+/// Start date / Due date picker with times and a repeat choice, as in the
+/// original's date popup. Returns true when anything changed.
+pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) -> bool {
     let mut which: u8 = ui.data(|d| d.get_temp(id.with("which"))).unwrap_or(1);
     let mut changed = false;
+    let (start_txt, due_txt) = (fmt_start(task), fmt_due(task));
     ui.horizontal(|ui| {
-        for (k, label, v) in [(0u8, "Start date", *start), (1u8, "Due date", *due)] {
+        for (k, label, v) in [(0u8, "Start date", start_txt), (1u8, "Due date", due_txt)] {
             let txt = match v {
-                Some(d) => format!("{}: {}", tr(label), fmt_date(d)),
+                Some(d) => format!("{}: {}", tr(label), d),
                 None => tr(label).to_string(),
             };
             let sel = which == k;
@@ -820,12 +948,17 @@ pub fn dates_menu(
     ui.data_mut(|d| d.insert_temp(id.with("which"), which));
     ui.add_space(4.0);
     // the calendar closes the popup on a pick; keep it open while choosing start
-    let target = if which == 0 { start } else { due };
+    let (target, slot) = if which == 0 {
+        (&mut task.start, &mut task.start_time)
+    } else {
+        (&mut task.due, &mut task.due_time)
+    };
     let before = *target;
     let mut tmp = before;
     let picked = date_menu_inner(ui, t, id.with(which), &mut tmp, false);
     if picked {
         *target = tmp;
+        date_picked(before, tmp, slot);
         changed = true;
         if which == 0 && tmp.is_some() {
             // after the start date, pick the due date
@@ -835,6 +968,12 @@ pub fn dates_menu(
         }
     }
     ui.separator();
+    if let Some(nt) = time_row(ui, t, id.with(("time", which)), target.and(slot.flatten())) {
+        time_picked(target, slot, nt);
+        changed = true;
+    }
+    ui.separator();
+    let recur = &mut task.recur;
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(tr("\u{1F501}  Set Recurring")).color(t.text2));
         // plain buttons: a combo box would close this popup

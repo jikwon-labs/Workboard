@@ -230,7 +230,7 @@ fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
     };
     let week_start = td - Duration::days(back as i64);
     match due {
-        1 => t.due.map_or(false, |d| d < td) && !data.is_closed(t),
+        1 => t.is_overdue() && !data.is_closed(t),
         2 => t.due == Some(td),
         3 => t.due.map_or(false, |d| {
             d >= week_start && d < week_start + Duration::days(7)
@@ -1362,6 +1362,7 @@ impl App {
                 checklist: task.checklist.iter().map(|c| c.text.clone()).collect(),
                 tags: task.tags.clone(),
                 priority: task.priority,
+                ..Default::default()
             });
             self.toast = Some((tr("Saved as a template").into(), now_ts()));
             self.dirty = true;
@@ -1484,6 +1485,12 @@ impl App {
                 self.section = Section::Home;
                 self.loc = Location::List(n);
                 self.toast = Some((tr("List duplicated").into(), now_ts()));
+            }
+            close_any(ui);
+        }
+        if ui.button(tr("Save as template")).clicked() {
+            if self.save_list_as_template(lid).is_some() {
+                self.toast = Some((tr("Saved as a template").into(), now_ts()));
             }
             close_any(ui);
         }
@@ -2035,6 +2042,10 @@ impl App {
                 self.new_doc(Some(sid));
                 close_any(ui);
             }
+            if ui.button(tr("From a template")).clicked() {
+                self.open_templates(super::templates::Category::Lists, Some(sid));
+                close_any(ui);
+            }
         });
         ui.menu_button(tr("Color & Icon"), |ui| {
             ui.label(RichText::new(tr("Space color")).small().color(t.text3));
@@ -2209,7 +2220,7 @@ impl App {
             "Date closed" => t.closed_at.map(day).unwrap_or_default(),
             "Date done" => t.done_at.map(day).unwrap_or_default(),
             "Date updated" => day(t.updated),
-            "Start date" => t.start.map(fmt_date).unwrap_or_default(),
+            "Start date" => fmt_start(t).unwrap_or_default(),
             "Time estimate" => t
                 .estimate_min
                 .map(|m| fmt_duration(m as i64 * 60))
@@ -3206,7 +3217,11 @@ impl App {
             text: format!(
                 "completed a {} repeat; next due {}",
                 r,
-                crate::i18n::in_english(|| fmt_date(next))
+                crate::i18n::in_english(|| match new.due_at() {
+                    // the time stays with the task
+                    Some(at) => format!("{} at {}", fmt_date(next), fmt_time(at)),
+                    None => fmt_date(next),
+                })
             ),
             comment: false,
             ..Default::default()

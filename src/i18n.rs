@@ -26,6 +26,7 @@ mod ko_parity;
 mod ko_shell;
 mod ko_small;
 mod ko_sweep;
+mod ko_templates;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
@@ -80,7 +81,7 @@ fn table() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-const ALL: [&[(&str, &str)]; 12] = [
+const ALL: [&[(&str, &str)]; 13] = [
     ko_common::T,
     ko_account::T,
     ko_app::T,
@@ -93,6 +94,7 @@ const ALL: [&[(&str, &str)]; 12] = [
     ko_shell::T,
     ko_small::T,
     ko_sweep::T,
+    ko_templates::T,
 ];
 
 /// The text in the interface language.
@@ -250,6 +252,12 @@ fn match_pattern<'a>(pattern: &str, text: &'a str) -> Option<Vec<&'a str>> {
 /// A value inside a history line: default statuses, priorities, repeats and
 /// the dates `fmt_date` wrote ("Today", "Nov 16", "11/16/25") in Korean.
 fn history_value(v: &str) -> String {
+    // a date with a time ("Nov 16 at 2:30 PM")
+    if let Some((day, time)) = v.rsplit_once(" at ") {
+        if let Ok(t) = chrono::NaiveTime::parse_from_str(time, "%I:%M %p") {
+            return format!("{} {}", history_value(day), t.text("%-I:%M %p"));
+        }
+    }
     let low = v.to_lowercase();
     if matches!(low.as_str(), "to do" | "in progress" | "complete") {
         return tr(&low).to_string();
@@ -353,6 +361,12 @@ impl<Tz: chrono::TimeZone> DateText for chrono::DateTime<Tz>
 where
     Tz::Offset: std::fmt::Display,
 {
+    fn text(&self, pattern: &str) -> String {
+        names(self.format(date_pattern(pattern)).to_string())
+    }
+}
+
+impl DateText for chrono::NaiveTime {
     fn text(&self, pattern: &str) -> String {
         names(self.format(date_pattern(pattern)).to_string())
     }

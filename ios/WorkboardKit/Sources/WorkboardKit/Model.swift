@@ -130,6 +130,9 @@ public struct TaskView: Identifiable, Hashable, Sendable {
     public let priority: Int
     public let assignees: [UInt64]
     public let due: String?
+    /// Time of day on the due date as "HH:mm" (the Mac app's `due_time`),
+    /// only when there is a due date.
+    public let dueTime: String?
     public let tags: [String]
     public let activity: [ActivityView]
     public let order: Int64
@@ -146,12 +149,34 @@ public struct TaskView: Identifiable, Hashable, Sendable {
         priority = Int(j["priority"]?.int ?? 0)
         assignees = (j["assignees"]?.array ?? []).compactMap(\.uint)
         due = j["due"]?.string
+        dueTime = due == nil ? nil : j["due_time"]?.string.flatMap(TaskView.hhmm)
         tags = (j["tags"]?.array ?? []).compactMap(\.string)
         activity = (j["activity"]?.array ?? []).map(ActivityView.init)
         order = j["order"]?.int ?? 0
         archived = j["archived"]?.bool ?? false
         updated = j["updated"]?.int ?? 0
     }
+}
+
+extension TaskView {
+    /// "14:30" or "14:30:00" -> "14:30"; nil when it isn't a time.
+    static func hhmm(_ s: String) -> String? {
+        let p = s.split(separator: ":")
+        guard p.count >= 2, let h = Int(p[0]), let m = Int(p[1]), (0..<24).contains(h), (0..<60).contains(m) else { return nil }
+        return String(format: "%02d:%02d", h, m)
+    }
+
+    /// Past due: a day gone by, or today from its due time on (like the Mac
+    /// app's `is_overdue_at`). `today` is "YYYY-MM-DD", `now` "HH:mm".
+    public func isOverdue(today: String, now: String) -> Bool {
+        guard let due else { return false }
+        if due < today { return true }
+        if due == today, let t = dueTime { return t <= now }
+        return false
+    }
+
+    /// The due time as the Mac app shows it ("2:30 PM").
+    public var dueTimeLabel: String? { dueTime.map(Edits.macTime) }
 }
 
 public struct DocView: Identifiable, Hashable, Sendable {
@@ -351,6 +376,15 @@ public struct WorkspaceView: Sendable {
 }
 
 /// "YYYY-MM-DD" in the device's time zone, as the Mac app's dates are local.
+/// The time of day as "HH:mm" (what `TaskView.isOverdue` compares).
+public func timeString(_ date: Date = Date()) -> String {
+    let f = DateFormatter()
+    f.calendar = Calendar(identifier: .gregorian)
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "HH:mm"
+    return f.string(from: date)
+}
+
 public func dayString(_ date: Date = Date()) -> String {
     let f = DateFormatter()
     f.calendar = Calendar(identifier: .gregorian)

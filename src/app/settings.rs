@@ -46,12 +46,7 @@ impl App {
                 from: String::new(),
                 to: String::new(),
             },
-            "Templates" => Modal::Templates {
-                name: String::new(),
-                desc: String::new(),
-                checklist: String::new(),
-                priority: 0,
-            },
+            "Templates" => self.template_center(super::templates::Category::All, None),
             "Automations" => Modal::Automations {
                 status: "complete".into(),
                 action: "comment".into(),

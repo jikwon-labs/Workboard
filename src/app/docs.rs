@@ -1732,6 +1732,12 @@ impl App {
             }
             close_any(ui);
         }
+        if ui.button(tr("Save as template")).clicked() {
+            if self.save_doc_as_template(id).is_some() {
+                self.toast = Some((tr("Saved as a template").into(), now_ts()));
+            }
+            close_any(ui);
+        }
         ui.menu_button(tr("Move to Space"), |ui| {
             let mut spaces: Vec<(Option<u64>, String)> =
                 vec![(None, tr("Workspace (no Space)").into())];

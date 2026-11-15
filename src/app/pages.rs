@@ -289,7 +289,13 @@ impl App {
                                 let carried = |x: &&Task| {
                                     is_today && x.due.map(|dd| dd < week).unwrap_or(false)
                                 };
-                                for task in mine.iter().filter(|x| x.due == Some(d) || carried(x)) {
+                                let mut day: Vec<&Task> = mine
+                                    .iter()
+                                    .filter(|x| x.due == Some(d) || carried(x))
+                                    .collect();
+                                // in the order of their due times
+                                day.sort_by_key(|x| x.due_moment());
+                                for task in day {
                                     let resp = ui.dnd_drag_source(
                                         egui::Id::new(("plan", task.id)),
                                         task.id,
@@ -346,10 +352,11 @@ impl App {
                             10.0,
                         );
                     }
-                    if let Some(d) = task.due {
-                        if d < today() {
-                            ui.label(RichText::new(tr("Overdue")).small().color(t.danger));
-                        }
+                    if let Some(at) = task.due_at() {
+                        ui.label(RichText::new(fmt_time(at)).small().color(t.text2));
+                    }
+                    if task.is_overdue() {
+                        ui.label(RichText::new(tr("Overdue")).small().color(t.danger));
                     }
                 });
             });
@@ -360,7 +367,6 @@ impl App {
 
     pub(super) fn teams_workload(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let td = today();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -389,7 +395,7 @@ impl App {
                         for m in row {
                             let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
                             let active = open.iter().filter(|x| self.data.status_of(x).kind == StatusKind::Custom).count();
-                            let overdue = open.iter().filter(|x| x.due.map(|d| d < td).unwrap_or(false)).count();
+                            let overdue = open.iter().filter(|x| x.is_overdue()).count();
                             let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x) && self.data.task_live(x)).count();
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                                 ui.vertical(|ui| {
@@ -420,8 +426,8 @@ impl App {
                                         let st = self.data.status_of(task);
                                         paint_status_circle(ui.painter(), r.left_center() + vec2(10.0, 0.0), 5.5, &st);
                                         ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 64.0, r.bottom()))).text(r.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(12.5), t.text);
-                                        if let Some(d) = task.due {
-                                            ui.painter().text(r.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, fmt_date(d), FontId::proportional(11.5), date_color(d, false, &t));
+                                        if let Some(d) = fmt_due(task) {
+                                            ui.painter().text(r.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, d, FontId::proportional(11.5), due_color(task, false, &t));
                                         }
                                         if resp.clicked() {
                                             self.actions.push(Action::Open(task.id));
@@ -960,7 +966,7 @@ impl App {
         let now = now_ts();
         let overdue: Vec<&&Task> = top
             .iter()
-            .filter(|x| !self.data.is_closed(x) && x.due.map(|d| d < td).unwrap_or(false))
+            .filter(|x| !self.data.is_closed(x) && x.is_overdue())
             .collect();
         match kind {
             "stats" => {
@@ -1175,11 +1181,11 @@ impl App {
                         FontId::proportional(13.0),
                         t.text,
                     );
-                    if let Some(d) = task.due {
+                    if let Some(d) = fmt_due(task) {
                         ui.painter().text(
                             r.right_center() - vec2(6.0, 0.0),
                             Align2::RIGHT_CENTER,
-                            fmt_date(d),
+                            d,
                             FontId::proportional(12.0),
                             t.danger,
                         );

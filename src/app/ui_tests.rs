@@ -3580,7 +3580,14 @@ fn dark_theme_post_chip_and_ai_hint_read() {
     let chips: Vec<_> = h.painted_text("Post");
     assert!(!chips.is_empty());
     for (r, c) in chips {
-        assert!(best(c) >= 3.0, "Post at {:?} contrast {:.1}", r, best(c));
+        // the comment box's Post button is the theme colour, which is light
+        // with dark text in the black theme: that label reads on its fill
+        let on = if c == t.on_primary {
+            contrast(c, t.primary)
+        } else {
+            best(c)
+        };
+        assert!(on >= 3.0, "Post at {:?} contrast {:.1}", r, on);
     }
     h.key(egui::Key::Escape);
     h.key(egui::Key::Escape);

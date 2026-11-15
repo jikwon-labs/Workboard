@@ -305,4 +305,5 @@ pub const T: &[(&str, &str)] = &[
     ("in {}", "{}에서"),
     ("Lists live in a Space. Make a Space first: it comes with a List.", "목록은 스페이스 안에 들어갑니다. 먼저 스페이스를 만드세요. 목록이 함께 생깁니다."),
     (" \u{2022} {} archived", " \u{2022} 보관됨 {}개"),
+    ("\"{}\" is back in an archived Folder or Space. Restore that from Settings > Spaces.", "\"{}\" 목록을 되돌렸지만 보관된 폴더나 스페이스 안에 있습니다. 설정 > 스페이스에서 그곳을 복원하세요."),
 ];

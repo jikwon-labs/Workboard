@@ -2880,7 +2880,11 @@ impl App {
                 self.restore_doc_pages(pages);
             }
             "List" => {
-                if let Some(lt) = ListTrash::parse(&item.payload) {
+                if let Some(mut lt) = ListTrash::parse(&item.payload) {
+                    // a List deleted while archived comes back to be seen, not
+                    // archived again where only Settings > Spaces shows it
+                    lt.list.archived = false;
+                    let lid = lt.list.id;
                     // back into its folder, else its space, else the first space
                     let folder = lt.folder.and_then(|f| {
                         self.data
@@ -2931,6 +2935,16 @@ impl App {
                         self.fit_statuses(tasks.iter_mut().collect(), &lt.statuses, into);
                     }
                     self.data.tasks.extend(tasks);
+                    // its Folder or Space is archived: it is back, but hidden with them
+                    if self.data.list_archived(lid) {
+                        self.toast = Some((
+                            crate::trf!(
+                                "\"{}\" is back in an archived Folder or Space. Restore that from Settings > Spaces.",
+                                name
+                            ),
+                            now_ts(),
+                        ));
+                    }
                 }
             }
             "Space" => {

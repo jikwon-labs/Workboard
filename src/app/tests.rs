@@ -7142,3 +7142,41 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
     b.write_shared();
     net_until(&mut a, "A keeps it all", |a| a.task(task.id).is_some());
 }
+
+#[test]
+fn a_list_deleted_while_archived_comes_back_not_archived() {
+    let mut a = app();
+    let ideas = a.data.spaces[1].lists[0].id;
+    a.data.list_item_mut(ideas).unwrap().archived = true;
+    a.do_delete(Target::List(ideas));
+    let i = a
+        .data
+        .extra
+        .trash
+        .iter()
+        .position(|x| x.kind == "List")
+        .unwrap();
+    a.restore_trash(i);
+    assert!(a.data.list_item(ideas).is_some());
+    assert!(
+        !a.data.list_archived(ideas),
+        "restored where it can be seen"
+    );
+    // back in an archived Space: it says so
+    let web = a.data.spaces[0].folders[0].lists[0].id;
+    a.do_delete(Target::List(web));
+    a.data.spaces[0].archived = true;
+    let i = a
+        .data
+        .extra
+        .trash
+        .iter()
+        .position(|x| x.kind == "List")
+        .unwrap();
+    a.toast = None;
+    a.restore_trash(i);
+    assert!(a
+        .toast
+        .as_ref()
+        .is_some_and(|t| t.0.contains("archived Folder or Space")));
+}

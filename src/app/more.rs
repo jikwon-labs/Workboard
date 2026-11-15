@@ -37,6 +37,45 @@ pub enum WbUndo {
     NoteMoved(usize, [f32; 2]),
 }
 
+/// How a whiteboard is shown: board coordinates (where strokes and notes
+/// are stored) map to the screen as `origin + pan + board * zoom`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WbView {
+    pub pan: egui::Vec2,
+    pub zoom: f32,
+}
+
+impl Default for WbView {
+    fn default() -> Self {
+        WbView {
+            pan: egui::Vec2::ZERO,
+            zoom: 1.0,
+        }
+    }
+}
+
+impl WbView {
+    pub const MIN_ZOOM: f32 = 0.2;
+    pub const MAX_ZOOM: f32 = 4.0;
+
+    pub fn to_screen(&self, origin: egui::Pos2, b: [f32; 2]) -> egui::Pos2 {
+        origin + self.pan + vec2(b[0], b[1]) * self.zoom
+    }
+
+    pub fn to_board(&self, origin: egui::Pos2, p: egui::Pos2) -> [f32; 2] {
+        let v = (p - origin - self.pan) / self.zoom;
+        [v.x, v.y]
+    }
+
+    /// Zooms by `factor`, keeping the board point under `anchor` in place.
+    pub fn zoom_at(&mut self, origin: egui::Pos2, anchor: egui::Pos2, factor: f32) {
+        let before = self.to_board(origin, anchor);
+        self.zoom = (self.zoom * factor).clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+        let after = self.to_screen(origin, before);
+        self.pan += anchor - after;
+    }
+}
+
 /// Screen state of the app pages (not saved).
 #[derive(Default)]
 pub struct SweepUi {
@@ -57,6 +96,8 @@ pub struct SweepUi {
     /// Whiteboard pen width (0 = the standard 2.5).
     pub wb_width: f32,
     pub wb_undo: Vec<(u64, WbUndo)>,
+    /// Each whiteboard's pan and zoom on screen (not saved).
+    pub wb_view: HashMap<u64, WbView>,
     /// The form `form_fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,
@@ -1799,6 +1840,8 @@ impl App {
                 };
                 let wid = self.data.extra.whiteboards[wi].id;
                 let mut delete = false;
+                let mut btn_zoom: Option<f32> = None;
+                let mut reset_view = false;
                 if self.sweep.wb_width <= 0.0 {
                     self.sweep.wb_width = 2.5;
                 }
@@ -1848,6 +1891,30 @@ impl App {
                     {
                         self.wb_undo(wid);
                     }
+                    ui.separator();
+                    let zr = ui.button("\u{2212}").on_hover_text(tr("Zoom out"));
+                    name_it(&zr, "Zoom out");
+                    if zr.clicked() {
+                        btn_zoom = Some(1.0 / 1.25);
+                    }
+                    let zoom_now = self.sweep.wb_view.get(&wid).map_or(1.0, |v| v.zoom);
+                    ui.label(
+                        RichText::new(format!("{:.0}%", zoom_now * 100.0))
+                            .color(t.text2)
+                            .small(),
+                    );
+                    let zr = ui.button("+").on_hover_text(tr("Zoom in"));
+                    name_it(&zr, "Zoom in");
+                    if zr.clicked() {
+                        btn_zoom = Some(1.25);
+                    }
+                    let rr = ui.button(tr("Reset view")).on_hover_text(tr(
+                        "Back to 100% at the board's top left corner. Drag with Space or the middle button, or scroll, to move around; pinch or \u{2318}+scroll to zoom.",
+                    ));
+                    name_it(&rr, "Reset view");
+                    if rr.clicked() {
+                        reset_view = true;
+                    }
                     // the question belongs to this board only
                     let asking = self
                         .sweep
@@ -1888,120 +1955,202 @@ impl App {
                 });
                 let (rect, resp) =
                     ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+                name_it(&resp, "Whiteboard canvas");
                 crate::widgets::no_pointer(&resp);
+                let origin = rect.min;
+                // pan and zoom: Space or middle-button drag and two-finger
+                // scroll move the view; pinch, Cmd+scroll and the buttons zoom
+                let mut view = self.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+                if reset_view {
+                    view = WbView::default();
+                }
+                if let Some(f) = btn_zoom {
+                    view.zoom_at(origin, rect.center(), f);
+                }
+                let space = !ui.ctx().wants_keyboard_input()
+                    && ui.input(|i| i.key_down(egui::Key::Space));
+                let panning = resp.dragged_by(egui::PointerButton::Middle)
+                    || (space && resp.dragged_by(egui::PointerButton::Primary));
+                if panning {
+                    let started = resp.drag_started_by(egui::PointerButton::Middle)
+                        || resp.drag_started_by(egui::PointerButton::Primary);
+                    // the first step counts from where the button went down
+                    let from_press = ui.input(|i| {
+                        i.pointer
+                            .press_origin()
+                            .zip(i.pointer.interact_pos())
+                            .map(|(o, p)| p - o)
+                    });
+                    view.pan += match from_press {
+                        Some(d) if started => d,
+                        _ => resp.drag_delta(),
+                    };
+                }
+                if ui.rect_contains_pointer(rect) {
+                    let (zoom, scroll, at) = ui.input(|i| {
+                        (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.hover_pos())
+                    });
+                    if zoom != 1.0 {
+                        if let Some(at) = at {
+                            view.zoom_at(origin, at, zoom);
+                        }
+                    } else if scroll != egui::Vec2::ZERO {
+                        view.pan += scroll;
+                    }
+                }
+                if space && ui.rect_contains_pointer(rect) {
+                    ui.ctx().set_cursor_icon(if panning {
+                        egui::CursorIcon::Grabbing
+                    } else {
+                        egui::CursorIcon::Grab
+                    });
+                }
+                if view == WbView::default() {
+                    self.sweep.wb_view.remove(&wid);
+                } else {
+                    self.sweep.wb_view.insert(wid, view);
+                }
+                let z = view.zoom;
                 let p = ui.painter_at(rect);
                 p.rect_filled(rect, 8.0, t.column_bg);
-                // dot grid
-                let step = 24.0;
-                let mut y = rect.top() + step;
-                while y < rect.bottom() {
-                    let mut x = rect.left() + step;
-                    while x < rect.right() {
-                        p.circle_filled(pos2(x, y), 1.0, t.border);
-                        x += step;
+                // dot grid, moving with the board
+                let step = 24.0 * z;
+                if step >= 6.0 {
+                    let off = view.pan;
+                    let first = |lo: f32, o: f32| lo + (o.rem_euclid(step));
+                    let mut y = first(rect.top(), off.y);
+                    while y < rect.bottom() {
+                        let mut x = first(rect.left(), off.x);
+                        while x < rect.right() {
+                            p.circle_filled(pos2(x, y), 1.0, t.border);
+                            x += step;
+                        }
+                        y += step;
                     }
-                    y += step;
                 }
-                let origin = rect.min;
                 let wb = &mut self.data.extra.whiteboards[wi];
                 for s in &wb.strokes {
                     let pts: Vec<egui::Pos2> =
-                        s.points.iter().map(|q| origin + vec2(q[0], q[1])).collect();
-                    p.add(egui::Shape::line(pts, Stroke::new(s.width, rgb(s.color))));
+                        s.points.iter().map(|q| view.to_screen(origin, *q)).collect();
+                    p.add(egui::Shape::line(
+                        pts,
+                        Stroke::new(s.width * z, rgb(s.color)),
+                    ));
                 }
                 let mut drag_note = None;
                 let mut move_from = None;
                 let mut drop_note = None;
                 let mut recolor = None;
                 for (i, n) in wb.notes.iter_mut().enumerate() {
-                    let r =
-                        Rect::from_min_size(origin + vec2(n.pos[0], n.pos[1]), vec2(160.0, 120.0));
+                    let r = Rect::from_min_size(view.to_screen(origin, n.pos), vec2(160.0, 120.0) * z);
+                    // notes off the visible part of the board are not drawn
+                    if !r.intersects(rect) {
+                        continue;
+                    }
                     p.rect_filled(
-                        r.translate(vec2(2.0, 3.0)),
-                        4.0,
+                        r.translate(vec2(2.0, 3.0) * z),
+                        4.0 * z,
                         Color32::from_black_alpha(25),
                     );
-                    p.rect_filled(r, 4.0, rgb(n.color).gamma_multiply(0.35).to_opaque());
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(
-                        Rect::from_min_max(r.min + vec2(8.0, 18.0), r.max - vec2(8.0, 8.0)),
-                    ));
-                    if child
-                        .add(
-                            egui::TextEdit::multiline(&mut n.text)
-                                .frame(false)
-                                .desired_width(144.0)
-                                .desired_rows(4),
-                        )
-                        .changed()
+                    p.rect_filled(r, 4.0 * z, rgb(n.color).gamma_multiply(0.35).to_opaque());
+                    let inner =
+                        Rect::from_min_max(r.min + vec2(8.0, 18.0) * z, r.max - vec2(8.0, 8.0) * z);
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+                    child.set_clip_rect(inner.intersect(rect));
+                    if z >= 0.45
+                        && child
+                            .add(
+                                egui::TextEdit::multiline(&mut n.text)
+                                    .frame(false)
+                                    .font(FontId::proportional(13.0 * z))
+                                    .desired_width(144.0 * z)
+                                    .desired_rows(4),
+                            )
+                            .changed()
                     {
                         self.dirty = true;
                     }
-                    if self.wb_tool == 2 {
-                        let h = ui.interact(r, ui.id().with(("note", i)), Sense::drag());
+                    if z < 0.45 {
+                        // too small to type in: the text is only drawn
+                        p.with_clip_rect(inner.intersect(rect)).text(
+                            inner.left_top(),
+                            Align2::LEFT_TOP,
+                            &n.text,
+                            FontId::proportional(13.0 * z),
+                            t.text,
+                        );
+                    }
+                    if self.wb_tool == 2 && !space {
+                        let h = ui.interact(r.intersect(rect), ui.id().with(("note", i)), Sense::drag());
                         if h.drag_started() {
                             move_from = Some((i, n.pos));
                         }
                         if h.dragged() {
-                            drag_note = Some((i, h.drag_delta()));
+                            drag_note = Some((i, h.drag_delta() / z));
                         }
                     }
                     // a colour dot along the note's top edge recolours it
                     let dot =
-                        Rect::from_center_size(r.left_top() + vec2(12.0, 10.0), vec2(14.0, 14.0));
-                    let dr = ui.interact(dot, ui.id().with(("note_color", wid, i)), Sense::click());
-                    name_it(&dr, &format!("Note colour {}", i + 1));
-                    p.circle_filled(dot.center(), 5.0, rgb(n.color));
-                    hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
-                    p.circle_stroke(
-                        dot.center(),
-                        5.0,
-                        Stroke::new(1.0, Color32::from_black_alpha(60)),
-                    );
-                    popup(
-                        ui,
-                        &dr,
-                        ui.id().with(("note_color_pop", wid, i)),
-                        150.0,
-                        |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                for c in WB_COLORS
-                                    .iter()
-                                    .skip(1)
-                                    .chain(STATUS_PALETTE.iter().skip(5).step_by(2))
-                                {
-                                    let (cr, cresp) =
-                                        ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
-                                    ui.painter().circle_filled(cr.center(), 8.0, rgb(*c));
-                                    hover_ring(ui, &cresp, cr.shrink(1.0), 9.0);
-                                    if *c == n.color {
-                                        ui.painter().circle_stroke(
-                                            cr.center(),
-                                            10.0,
-                                            Stroke::new(1.5, t.text),
-                                        );
+                        Rect::from_center_size(r.left_top() + vec2(12.0, 10.0) * z, vec2(14.0, 14.0));
+                    if rect.contains_rect(dot) {
+                        let dr =
+                            ui.interact(dot, ui.id().with(("note_color", wid, i)), Sense::click());
+                        name_it(&dr, &format!("Note colour {}", i + 1));
+                        p.circle_filled(dot.center(), 5.0, rgb(n.color));
+                        hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
+                        p.circle_stroke(
+                            dot.center(),
+                            5.0,
+                            Stroke::new(1.0, Color32::from_black_alpha(60)),
+                        );
+                        popup(
+                            ui,
+                            &dr,
+                            ui.id().with(("note_color_pop", wid, i)),
+                            150.0,
+                            |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    for c in WB_COLORS
+                                        .iter()
+                                        .skip(1)
+                                        .chain(STATUS_PALETTE.iter().skip(5).step_by(2))
+                                    {
+                                        let (cr, cresp) = ui
+                                            .allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                                        ui.painter().circle_filled(cr.center(), 8.0, rgb(*c));
+                                        hover_ring(ui, &cresp, cr.shrink(1.0), 9.0);
+                                        if *c == n.color {
+                                            ui.painter().circle_stroke(
+                                                cr.center(),
+                                                10.0,
+                                                Stroke::new(1.5, t.text),
+                                            );
+                                        }
+                                        if cresp.clicked() {
+                                            recolor = Some((i, *c));
+                                            close_popup(ui);
+                                        }
                                     }
-                                    if cresp.clicked() {
-                                        recolor = Some((i, *c));
-                                        close_popup(ui);
-                                    }
-                                }
-                            });
-                        },
-                    );
+                                });
+                            },
+                        );
+                    }
                     // a small x on the corner deletes just this note
                     let xr =
-                        Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0), vec2(16.0, 16.0));
-                    let x = ui
-                        .put(
-                            xr,
-                            ghost(egui::Button::new(
-                                RichText::new("\u{2716}").size(9.0).color(t.text3),
-                            )),
-                        )
-                        .on_hover_text(tr("Delete note"));
-                    name_it(&x, &format!("Delete note {}", i));
-                    if x.clicked() {
-                        drop_note = Some(i);
+                        Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0) * z, vec2(16.0, 16.0));
+                    if rect.contains_rect(xr) {
+                        let x = ui
+                            .put(
+                                xr,
+                                ghost(egui::Button::new(
+                                    RichText::new("\u{2716}").size(9.0).color(t.text3),
+                                )),
+                            )
+                            .on_hover_text(tr("Delete note"));
+                        name_it(&x, &format!("Delete note {}", i));
+                        if x.clicked() {
+                            drop_note = Some(i);
+                        }
                     }
                 }
                 if let Some((i, c)) = recolor {
@@ -2022,15 +2171,28 @@ impl App {
                     wb.notes[i].pos[1] += d.y;
                     self.dirty = true;
                 }
-                if let Some(pos) = resp.interact_pointer_pos() {
-                    let local = pos - origin;
+                // the tools draw with the left button, in board coordinates;
+                // a pan (Space or the middle button) never draws
+                let primary = resp.dragged_by(egui::PointerButton::Primary)
+                    || resp.drag_started_by(egui::PointerButton::Primary)
+                    || resp.drag_stopped_by(egui::PointerButton::Primary)
+                    || resp.clicked();
+                if let Some(pos) = resp.interact_pointer_pos().filter(|_| primary && !space) {
+                    let b = view.to_board(origin, pos);
+                    let local = vec2(b[0], b[1]);
                     match self.wb_tool {
                         0 => {
                             if resp.drag_started() {
+                                // the line starts where the button went down
+                                let start = ui
+                                    .input(|i| i.pointer.press_origin())
+                                    .map(|o| view.to_board(origin, o));
+                                let mut points: Vec<[f32; 2]> = start.into_iter().collect();
+                                points.push([local.x, local.y]);
                                 wb.strokes.push(WbStroke {
                                     color: self.wb_color,
                                     width: self.sweep.wb_width,
-                                    points: vec![[local.x, local.y]],
+                                    points,
                                 });
                                 self.sweep.wb_undo.push((wid, WbUndo::Stroke));
                             } else if resp.dragged() {
@@ -2063,7 +2225,7 @@ impl App {
                                 let hit = |s: &WbStroke| {
                                     s.points.iter().any(|q| {
                                         vec2(q[0] - local.x, q[1] - local.y).length()
-                                            < s.width + 6.0
+                                            < s.width + 6.0 / z
                                     })
                                 };
                                 while let Some(i) = wb.strokes.iter().position(hit) {
@@ -2928,6 +3090,12 @@ impl App {
                     String::new(),
                     Hit::Go(l),
                 )),
+                super::nav::Link::Doc(id) => self
+                    .data
+                    .docs
+                    .iter()
+                    .find(|d| d.id == id)
+                    .map(|d| ("\u{1F4C4}", d.title.clone(), tr("Doc").into(), Hit::Doc(id))),
             };
             match hit {
                 // archived, or in someone else's Personal space

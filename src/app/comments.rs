@@ -29,35 +29,20 @@ const CHECKED: &str = "\u{2611} ";
 pub(super) enum Seg<'a> {
     Text(&'a str),
     Mention(&'a str),
-    Link(&'a str, LinkTo),
+    Link(&'a str, Link),
 }
 
-/// Where a workboard:// link points.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub(super) enum LinkTo {
-    Task(u64),
-    List(u64),
-    Folder(u64),
-    Space(u64),
-}
-
-/// Reads `workboard://task/12` (or list/folder/space) at the start of `s`; returns
-/// the target and how many bytes the link takes.
-pub(super) fn parse_link(s: &str) -> Option<(LinkTo, usize)> {
-    let rest = s.strip_prefix("workboard://")?;
-    for (kind, mk) in [
-        ("task/", LinkTo::Task as fn(u64) -> LinkTo),
-        ("list/", LinkTo::List),
-        ("folder/", LinkTo::Folder),
-        ("space/", LinkTo::Space),
-    ] {
-        if let Some(r) = rest.strip_prefix(kind) {
-            let digits = r.bytes().take_while(|b| b.is_ascii_digit()).count();
-            let n: u64 = r[..digits].parse().ok()?;
-            return Some((mk(n), "workboard://".len() + kind.len() + digits));
-        }
+/// Reads a workboard:// link (any kind `nav::parse_link` knows) at the
+/// start of `s`; returns where it points and how many bytes it takes
+/// (trailing punctuation such as "," or "." is not part of it).
+pub(super) fn parse_link(s: &str) -> Option<(Link, usize)> {
+    if !s.starts_with("workboard://") {
+        return None;
     }
-    None
+    let word = &s[..s.find(char::is_whitespace).unwrap_or(s.len())];
+    let clean =
+        word.trim_end_matches(|c: char| matches!(c, '/' | '.' | ',' | ')' | '>' | '"' | '\''));
+    super::nav::parse_link(clean).map(|l| (l, clean.len()))
 }
 
 /// Splits a line into plain text, @mentions of the given people (longest
@@ -141,7 +126,7 @@ pub(super) fn toggle_reaction(rs: &mut Vec<Reaction>, emoji: &str, me: u64) {
 /// What a click in a comment asked for; applied after the comments are drawn.
 enum Act {
     Check { id: u64, line: usize },
-    Link(LinkTo),
+    Link(Link),
     React { id: u64, emoji: String },
     Reply(u64),
     SendReply { parent: u64, text: String },
@@ -170,17 +155,6 @@ impl App {
         }
         self.comment_text = self.comment_drafts.remove(&id).unwrap_or_default();
         self.comment_for = Some(id);
-    }
-
-    /// Goes where a workboard:// link points, like a link in chat: not
-    /// to archived places or someone else's Personal space.
-    pub(super) fn follow_link(&mut self, to: LinkTo) {
-        self.go_link(Some(match to {
-            LinkTo::Task(id) => Link::Task(id),
-            LinkTo::List(id) => Link::Loc(Location::List(id)),
-            LinkTo::Folder(id) => Link::Loc(Location::Folder(id)),
-            LinkTo::Space(id) => Link::Loc(Location::Space(id)),
-        }));
     }
 
     /// The task window's comments and activity lines, oldest first.
@@ -299,7 +273,9 @@ impl App {
                         task.activity[i].text = toggle_comment_check(&task.activity[i].text, line);
                     }
                 }
-                Act::Link(to) => self.follow_link(to),
+                Act::Link(to) => {
+                    self.open_link_to(Some(to));
+                }
                 Act::React { id, emoji } => {
                     if let Some(i) = find(task, id) {
                         toggle_reaction(&mut task.activity[i].reactions, &emoji, me);

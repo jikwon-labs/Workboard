@@ -404,6 +404,44 @@ pub struct Doc {
     /// Labels shown in the Docs list's Tags column and used by its filter.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Marked as a Wiki (Popular Wikis, the Wikis filter). Left out until
+    /// first marked; unmarking writes `false` rather than leaving it out, so
+    /// it never goes back to missing and needs no wb-sync default rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wiki: Option<bool>,
+    /// Who opened the doc and when: one entry per person (and device), each
+    /// changed only by its owner, so wb-sync merges them one by one and no
+    /// view is lost when two people read the doc at once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<DocViews>,
+}
+
+/// One person's recent opens of a doc (see `Doc::views`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DocViews {
+    pub id: u64,
+    pub member: u64,
+    /// When the doc was opened, oldest first; opens older than
+    /// `DOC_VIEW_DAYS` are dropped the next time this person opens it.
+    #[serde(default)]
+    pub at: Vec<i64>,
+}
+
+/// How far back Popular Wikis counts views.
+pub const DOC_VIEW_DAYS: i64 = 30;
+
+impl Doc {
+    pub fn is_wiki(&self) -> bool {
+        self.wiki == Some(true)
+    }
+
+    /// Opens by everyone since `since`.
+    pub fn views_since(&self, since: i64) -> usize {
+        self.views
+            .iter()
+            .map(|v| v.at.iter().filter(|t| **t >= since).count())
+            .sum()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -1626,6 +1664,22 @@ impl Data {
         })
     }
 
+    /// My time on a task: my time entries plus my running timer (not my
+    /// teammates' time, which `Task::tracked_secs` adds in).
+    pub fn my_tracked_secs(&self, t: &Task, now: i64) -> i64 {
+        let solo = self.solo();
+        let done: i64 = t
+            .time_entries
+            .iter()
+            .filter(|e| {
+                let owner = t.entry_owner(e);
+                owner == self.me || (owner == 0 && solo)
+            })
+            .map(|e| e.end - e.start)
+            .sum();
+        done + self.my_timer_start(t).map(|st| now - st).unwrap_or(0)
+    }
+
     /// A timer from an older app that didn't record who started it, in a
     /// workspace with more people: nobody's to stop, so it is offered to
     /// stop by hand.
@@ -2263,6 +2317,8 @@ impl Data {
             private: false,
             archived: false,
             meeting_note: false,
+            wiki: None,
+            views: vec![],
             parent: None,
             title: "Project brief".into(),
             body: "Goals\n- Launch the new website\n- Grow the newsletter\n\nNotes\nKeep the design light and simple.".into(),

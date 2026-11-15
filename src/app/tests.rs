@@ -2279,7 +2279,8 @@ fn one_message_takes_at_most_ten_pictures() {
 
 // ---- task comments and activity (sf-comments)
 
-use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, LinkTo, Seg};
+use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, Seg};
+use super::nav::Link as LinkTo;
 
 #[test]
 fn comment_lines_split_into_mentions_and_links() {
@@ -2299,11 +2300,11 @@ fn comment_lines_split_into_mentions_and_links() {
     assert_eq!(segments("mail@Alex", &names), vec![Seg::Text("mail@Alex")]);
     assert_eq!(
         parse_link("workboard://list/7").map(|x| x.0),
-        Some(LinkTo::List(7))
+        Some(LinkTo::Loc(Location::List(7)))
     );
     assert_eq!(
         parse_link("workboard://space/9 more").map(|x| x.0),
-        Some(LinkTo::Space(9))
+        Some(LinkTo::Loc(Location::Space(9)))
     );
     assert_eq!(parse_link("workboard://task/"), None);
 }
@@ -3422,12 +3423,13 @@ fn renaming_or_deleting_a_status_carries_its_tasks() {
         .iter()
         .position(|s| s.name == "in progress")
         .unwrap();
+    let mut rules = orig.clone();
     // a rename that matches another status waits, so tasks never merge
     a.data.spaces[si].statuses[i].name = "to do".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     assert_eq!(a.task(id).unwrap().status, "in progress");
     a.data.spaces[si].statuses[i].name = "doing".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     assert_eq!(a.task(id).unwrap().status, "doing");
     // the other space still has "in progress", so the automation stays
     assert_eq!(a.data.extra.automations[0].trigger_status, "in progress");
@@ -5257,8 +5259,9 @@ fn status_renames_and_deletes_carry_automations_of_that_space() {
         .iter()
         .position(|s| s.name == "in progress")
         .unwrap();
+    let mut rules = orig.clone();
     a.data.spaces[si].statuses[i].name = "doing".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     let trig: Vec<String> = a
         .data
         .extra
@@ -5458,6 +5461,8 @@ fn search_leaves_out_archived_lists_and_other_peoples_private_docs() {
             private,
             archived: false,
             meeting_note: false,
+            wiki: None,
+            views: vec![],
             parent: None,
             title: title.into(),
             body: String::new(),
@@ -6014,4 +6019,126 @@ fn server_refusals_are_shown_in_the_interface_language() {
         server_text("Too many wrong tries. Wait 15 minutes and try again, or use Forgot password.");
     crate::i18n::set_lang(crate::i18n::Lang::En);
     assert!(tries.contains("15분"), "{}", tries);
+}
+
+
+#[test]
+fn back_and_forward_to_another_place_clear_the_selection() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    a.apply(Action::Go(Location::List(lists[0])));
+    a.track_history();
+    a.apply(Action::Go(Location::List(lists[1])));
+    a.track_history();
+    let t = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == lists[1])
+        .map(|t| t.id);
+    if let Some(t) = t {
+        a.selected.insert(t);
+        a.open_task = Some(t);
+    }
+    a.go_back();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[0]));
+    assert!(a.selected.is_empty() && a.open_task.is_none());
+    let t0 = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == lists[0])
+        .unwrap()
+        .id;
+    a.selected.insert(t0);
+    a.go_forward();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[1]));
+    assert!(a.selected.is_empty());
+}
+
+#[test]
+fn my_timer_counts_only_my_time() {
+    let mut a = app();
+    let me = a.data.me;
+    let other = a.data.members.iter().find(|m| m.id != me).unwrap().id;
+    let now = now_ts();
+    let t = &mut a.data.tasks[0];
+    t.time_entries = vec![
+        TimeEntry {
+            start: 0,
+            end: 100,
+            member: me,
+        },
+        TimeEntry {
+            start: 0,
+            end: 1000,
+            member: other,
+        },
+    ];
+    t.timer_started = None;
+    t.timer_by = None;
+    t.timers = vec![
+        RunningTimer {
+            member: me,
+            start: now - 10,
+        },
+        RunningTimer {
+            member: other,
+            start: now - 500,
+        },
+    ];
+    let t = a.data.tasks[0].clone();
+    assert_eq!(a.data.my_tracked_secs(&t, now), 110);
+    assert_eq!(t.tracked_secs(now), 1610);
+}
+
+#[test]
+fn a_status_name_another_status_still_carries_waits_and_closing_settles_names() {
+    let mut a = app();
+    let si = 0;
+    let sid = a.data.spaces[si].id;
+    let list = a.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let t1 = add_task(&mut a, list, "On to do");
+    let t2 = add_task(&mut a, list, "On doing");
+    let mut t = a.task(t2).unwrap().clone();
+    t.status = "in progress".into();
+    a.apply(Action::Replace(t));
+    let mut orig: Vec<Option<String>> = a.data.spaces[si]
+        .statuses
+        .iter()
+        .map(|s| Some(s.name.clone()))
+        .collect();
+    let mut rules = orig.clone();
+    // "to do" emptied, then "in progress" renamed to "to do": the name is
+    // still carried by the first status's tasks, so the rename waits
+    a.data.spaces[si].statuses[0].name = String::new();
+    a.data.spaces[si].statuses[1].name = "to do".into();
+    a.commit_status_renames(si, &mut orig, &mut rules);
+    assert_eq!(a.task(t1).unwrap().status, "to do");
+    assert_eq!(a.task(t2).unwrap().status, "in progress");
+    // swapping two names at once works
+    a.data.spaces[si].statuses[0].name = "in progress".into();
+    a.commit_status_renames(si, &mut orig, &mut rules);
+    assert_eq!(a.task(t1).unwrap().status, "in progress");
+    assert_eq!(a.task(t2).unwrap().status, "to do");
+    // an added status with an empty or taken name gets a free one on close
+    a.data.spaces[si]
+        .statuses
+        .push(Status::new("", [1, 1, 1], StatusKind::Custom));
+    orig.push(None);
+    a.data.spaces[si].statuses[1].name = "".into();
+    assert!(a.settle_status_names(si, &orig));
+    let names: Vec<String> = a.data.spaces[si]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert_eq!(names[1], "to do");
+    assert_eq!(names.last().unwrap(), "new status");
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len());
 }

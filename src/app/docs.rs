@@ -120,6 +120,8 @@ impl App {
             private,
             archived: false,
             meeting_note: false,
+            wiki: None,
+            views: vec![],
             parent: Some(parent),
             title: format!("Page {}", n),
             body: String::new(),
@@ -1561,6 +1563,8 @@ impl App {
                 d.owner = self.data.me;
                 d.created = now;
                 d.updated = now;
+                // a copy starts unread (and the view entries' ids are the original's)
+                d.views.clear();
                 d
             })
             .collect();
@@ -1756,6 +1760,26 @@ impl App {
         {
             if let Some(x) = self.data.docs.iter_mut().find(|x| x.id == id) {
                 x.meeting_note = !x.meeting_note;
+            }
+            self.dirty = true;
+            close_any(ui);
+        }
+        let wr = ui.button(tr(if d.is_wiki() {
+            "Unmark as Wiki"
+        } else {
+            "Mark as Wiki"
+        }));
+        name_it(
+            &wr,
+            if d.is_wiki() {
+                "Unmark as Wiki"
+            } else {
+                "Mark as Wiki"
+            },
+        );
+        if wr.clicked() {
+            if let Some(x) = self.data.docs.iter_mut().find(|x| x.id == id) {
+                x.wiki = Some(!x.is_wiki());
             }
             self.dirty = true;
             close_any(ui);

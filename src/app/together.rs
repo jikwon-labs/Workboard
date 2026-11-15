@@ -464,7 +464,9 @@ impl App {
                 self.data = d;
                 // fingerprints of what the app writes, which can differ a
                 // little from what came in (fields an older app left out)
-                self.data.extra.sync.hashes = sync::fingerprints(&self.data_value());
+                let v = self.data_value();
+                self.data.extra.sync.hashes = sync::fingerprints(&v);
+                self.data.extra.sync.field_hashes = sync::part_hashes(&v);
             }
             Err(e) => {
                 // most likely saved by a newer version of the app
@@ -1039,6 +1041,7 @@ impl App {
         d.extra.closed_dms.clear();
         d.extra.shared = Some(cfg);
         d.extra.sync.hashes.clear();
+        d.extra.sync.field_hashes.clear();
         d.me = 0;
         if self.persist {
             self.data.save_file(&self.ws_file);
@@ -1064,7 +1067,9 @@ impl App {
     }
 
     fn after_join(&mut self) {
-        self.data.extra.sync.hashes = sync::fingerprints(&self.data_value());
+        let v = self.data_value();
+        self.data.extra.sync.hashes = sync::fingerprints(&v);
+        self.data.extra.sync.field_hashes = sync::part_hashes(&v);
         self.loc = self
             .data
             .first_list()

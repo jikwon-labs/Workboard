@@ -3088,6 +3088,7 @@ fn whiteboard_undo_brings_back_a_deleted_note() {
         .unwrap();
     assert_eq!(wb.owner, 1);
     let n = Sticky {
+        id: 0,
         pos: [0.0, 0.0],
         text: "Idea".into(),
         color: [1, 1, 1],
@@ -5812,4 +5813,43 @@ fn files_from_before_ids_were_kept_still_load_and_new_fields_stay_out_when_empty
         .inbox_items()
         .iter()
         .any(|i| i.assigned && i.text == "assigned to Me"));
+}
+
+#[test]
+fn whiteboard_strokes_and_notes_get_the_ids_every_app_works_out() {
+    let mut d = Data::seed();
+    d.extra.whiteboards = vec![Whiteboard {
+        id: 4,
+        name: "W".into(),
+        strokes: vec![WbStroke {
+            id: 0,
+            color: [0, 0, 0],
+            width: 2.0,
+            points: vec![[0.1, 1.25], [1.1, 2.0]],
+        }],
+        notes: vec![Sticky {
+            id: 0,
+            pos: [1.0, 2.0],
+            text: "old".into(),
+            color: [1, 2, 3],
+        }],
+        owner: 0,
+    }];
+    // what a copy from before ids looks like to wb-sync
+    let mut v = serde_json::to_value(&d).unwrap();
+    crate::sync::fill_board_ids(&mut v);
+    d.fix_activity_ids();
+    let w = &d.extra.whiteboards[0];
+    assert!(w.strokes[0].id >= 1 << 62 && w.notes[0].id >= 1 << 62);
+    assert_eq!(
+        v["extra"]["whiteboards"][0]["strokes"][0]["id"],
+        w.strokes[0].id
+    );
+    assert_eq!(
+        v["extra"]["whiteboards"][0]["notes"][0]["id"],
+        w.notes[0].id
+    );
+    // and the ids are kept from then on
+    let back: Data = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
+    assert_eq!(back.extra.whiteboards[0].strokes[0].id, w.strokes[0].id);
 }

@@ -5,12 +5,17 @@
 // every app sends its copy there and gets the merged one back; the merging
 // below is the same in both cases.
 //
-// Copies are merged item by item. Every item with an `id` (task, list, doc,
-// channel, message, reply, member...) remembers when its own fields last
-// changed on the device that changed it; the newest version wins, while the
-// items inside it (messages in a channel, lists in a space) are merged one by
-// one, so two people chatting or editing different tasks never overwrite each
-// other. Deleted items leave a tombstone so they don't come back; restoring
+// Copies are merged item by item, and inside an item field by field. Every
+// item with an `id` (task, list, doc, channel, message, reply, member...)
+// remembers when it last changed on the device that changed it, and when each
+// of its own fields did (`SyncMeta::fields`): two people changing different
+// fields of one task both keep their change, and for the same field the
+// newest change wins. The items inside it (messages in a channel, lists in a
+// space) are merged one by one, so two people chatting or editing different
+// tasks never overwrite each other. Reactions are merged per (emoji, person)
+// and running timers per person, so reacting or starting a timer at the same
+// moment as someone else keeps both; whiteboard strokes and notes have ids
+// (`fill_board_ids`) and merge like any other item. Deleted items leave a tombstone so they don't come back; restoring
 // one from the trash revives it. Task comments and activity lines have ids
 // too, so edits, deletes and reactions carry over; lines saved before they
 // had ids get one worked out from their contents (`activity_id`).
@@ -110,7 +115,7 @@ pub struct SyncMeta {
     /// How `hashes` were made: 0 = before an item's place (the item it sits
     /// in) counted as one of its fields, 1 = since; 2 = also `moved` is kept,
     /// and fields left at their default are left out of the file (see the
-    /// app's `legacy_shape`).
+    /// app's `legacy_shape`); 3 = also `fields` is kept.
     pub v: u32,
     /// id -> when it last moved into another item (a list into another space
     /// or folder). Where an item sits follows this, not `stamps`, so someone
@@ -125,6 +130,20 @@ pub struct SyncMeta {
     pub values: BTreeMap<String, i64>,
     /// Shared setting -> fingerprint when last saved (this computer only).
     pub value_hashes: BTreeMap<String, u64>,
+    /// id -> when each of its own fields last changed ("field stamps"; see
+    /// `read_part`). A part is a field name, or for fields merged element
+    /// by element (reactions, running timers) "reactions/<emoji>/<member>"
+    /// and "timers/<member>". The entry "" is the item's base: when every
+    /// field not listed last changed (missing: the item's stamp). A field
+    /// that is there and not listed changed at the base; a field that was
+    /// taken away is listed with when that happened. Items without an entry
+    /// (copies from apps before field stamps) count every field as changed
+    /// at the item's stamp.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub fields: BTreeMap<u64, BTreeMap<String, i64>>,
+    /// id -> fingerprint of each part when last saved (this computer only).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub field_hashes: BTreeMap<u64, BTreeMap<String, u32>>,
 }
 
 pub fn fnv(bytes: &[u8]) -> u64 {
@@ -198,6 +217,142 @@ fn own_hash(obj: &Map<String, Value>) -> u64 {
         .as_bytes())
 }
 
+/// The fields of a task that together hold its running timers: the one
+/// older apps read (`timer_started`, with `timer_by`) and everyone else's
+/// (`timers`). They merge as one set of timers, one per person.
+const TIMER_KEYS: &[&str] = &["timer_started", "timer_by", "timers"];
+
+fn is_empty_arr(v: &Value) -> bool {
+    v.as_array().is_some_and(|a| a.is_empty())
+}
+
+/// The (emoji, member) pairs of a `reactions` field, in order. None when it
+/// isn't a list of `{emoji, users}`.
+fn reaction_pairs(v: &Value) -> Option<Vec<(String, u64)>> {
+    let mut out = vec![];
+    for r in v.as_array()? {
+        let emoji = r.get("emoji")?.as_str()?;
+        for u in r.get("users")?.as_array()? {
+            let u = u.as_u64()?;
+            if !out.iter().any(|(e, x)| e == emoji && *x == u) {
+                out.push((emoji.to_string(), u));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The running timers of a task as (member, start), member 0 for an old
+/// timer that didn't record who started it; whether each came from
+/// `timers` (true) or the field older apps read (false).
+fn timer_list(obj: &Map<String, Value>) -> Vec<(u64, i64, bool)> {
+    let mut out: Vec<(u64, i64, bool)> = vec![];
+    if let Some(st) = obj.get("timer_started").and_then(|t| t.as_i64()) {
+        let by = obj.get("timer_by").and_then(|b| b.as_u64()).unwrap_or(0);
+        out.push((by, st, false));
+    }
+    for r in obj
+        .get("timers")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+    {
+        if let (Some(m), Some(st)) = (
+            r.get("member").and_then(|m| m.as_u64()),
+            r.get("start").and_then(|s| s.as_i64()),
+        ) {
+            if !out.iter().any(|x| x.0 == m) {
+                out.push((m, st, true));
+            }
+        }
+    }
+    out
+}
+
+/// The parts of an item's own fields with their values (see
+/// `SyncMeta::fields`): every field except personal ones, ever-growing
+/// ones and the items inside it, with reactions and running timers split
+/// into one part per element. An empty list counts as no field.
+fn parts_of(obj: &Map<String, Value>) -> Vec<(String, Value)> {
+    let mut out = vec![];
+    for (k, v) in obj {
+        let k = k.as_str();
+        if LOCAL_KEYS.contains(&k)
+            || APPEND_KEYS.contains(&k)
+            || TIMER_KEYS.contains(&k)
+            || is_empty_arr(v)
+            || is_id_array(v)
+        {
+            continue;
+        }
+        if k == "reactions" {
+            if let Some(pairs) = reaction_pairs(v) {
+                for (e, u) in pairs {
+                    out.push((format!("reactions/{}/{}", e, u), Value::Bool(true)));
+                }
+                continue;
+            }
+        }
+        out.push((k.to_string(), v.clone()));
+    }
+    for (m, st, _) in timer_list(obj) {
+        out.push((
+            format!("timers/{}", m),
+            serde_json::json!({"member": m, "start": st}),
+        ));
+    }
+    out
+}
+
+/// The field a part belongs to ("reactions/👍/3" -> "reactions").
+fn part_field(part: &str) -> &str {
+    part.split_once('/').map_or(part, |(f, _)| f)
+}
+
+fn part_hash(v: &Value) -> u32 {
+    fnv(serde_json::to_string(v).unwrap_or_default().as_bytes()) as u32
+}
+
+/// Every shared item: its id, the item it sits in, its fields.
+fn visit<'a>(data: &'a Value, f: &mut dyn FnMut(u64, Option<u64>, &'a Map<String, Value>)) {
+    fn go<'a>(
+        v: &'a Value,
+        parent: Option<u64>,
+        f: &mut dyn FnMut(u64, Option<u64>, &'a Map<String, Value>),
+    ) {
+        for item in v.as_array().into_iter().flatten() {
+            if let (Some(id), Some(obj)) = (id_of(item), item.as_object()) {
+                f(id, parent, obj);
+                for (_, child) in obj {
+                    if is_id_array(child) {
+                        go(child, Some(id), f);
+                    }
+                }
+            }
+        }
+    }
+    for path in SHARED {
+        if let Some(v) = get_path(data, path) {
+            go(v, None, f);
+        }
+    }
+}
+
+/// Fingerprints of every part of every shared item (`SyncMeta::field_hashes`).
+pub fn part_hashes(data: &Value) -> BTreeMap<u64, BTreeMap<String, u32>> {
+    let mut out = BTreeMap::new();
+    visit(data, &mut |id, _, obj| {
+        out.insert(
+            id,
+            parts_of(obj)
+                .into_iter()
+                .map(|(p, v)| (p, part_hash(&v)))
+                .collect(),
+        );
+    });
+    out
+}
+
 /// `parent` is the item this array sits in (None at the top). With `placed`,
 /// an inner item's fingerprint includes its parent, so moving a list to
 /// another space or folder counts as a change to the list.
@@ -262,7 +417,7 @@ fn parents_of(data: &Value) -> BTreeMap<u64, u64> {
 }
 
 /// The `SyncMeta::v` this version writes.
-pub const META_V: u32 = 2;
+pub const META_V: u32 = 3;
 
 /// After the app changed how items are written (`legacy` is the workspace as
 /// the old way wrote it, `current` the new way): fingerprints that still
@@ -270,13 +425,89 @@ pub const META_V: u32 = 2;
 /// count as an edit.
 pub fn carry_hashes(meta: &mut SyncMeta, legacy: &Value, current: &Value) {
     let cur = fingerprints(current);
+    let parts = part_hashes(current);
     for (id, old) in fingerprints(legacy) {
         if meta.hashes.get(&id) == Some(&old) {
             if let Some(h) = cur.get(&id) {
                 meta.hashes.insert(id, *h);
+                if let Some(p) = parts.get(&id) {
+                    meta.field_hashes.insert(id, p.clone());
+                }
             }
         }
     }
+}
+
+/// An item's own fields changed at `next` (it last changed at `before`):
+/// note which ones in its field stamps. Without fingerprints of its fields
+/// from the last save there's no telling which, so all of them did.
+fn note_fields(
+    meta: &mut SyncMeta,
+    id: u64,
+    before: i64,
+    now_parts: Option<&BTreeMap<String, u32>>,
+    next: i64,
+) {
+    let empty = BTreeMap::new();
+    let now_parts = now_parts.unwrap_or(&empty);
+    let Some(old_parts) = meta.field_hashes.get(&id) else {
+        if let Some(e) = meta.fields.get_mut(&id) {
+            e.retain(|p, _| !p.is_empty() && !now_parts.contains_key(p));
+        }
+        return;
+    };
+    let mut changed: Vec<String> = now_parts
+        .iter()
+        .filter(|(p, h)| old_parts.get(*p) != Some(h))
+        .map(|(p, _)| p.clone())
+        .collect();
+    changed.extend(
+        old_parts
+            .keys()
+            .filter(|p| !now_parts.contains_key(*p))
+            .cloned(),
+    );
+    let e = meta.fields.entry(id).or_default();
+    let base = e.get("").copied().unwrap_or(before);
+    for p in changed {
+        e.insert(p, next);
+    }
+    tidy_fields(e, |p| now_parts.contains_key(p), base, next);
+}
+
+/// Leave out what an entry of field stamps doesn't need: fields that are
+/// there and changed at the base, and the base when it is the item's stamp.
+fn tidy_fields(
+    e: &mut BTreeMap<String, i64>,
+    present: impl Fn(&str) -> bool,
+    base: i64,
+    stamp: i64,
+) {
+    e.retain(|p, t| p.is_empty() || !(present(p) && *t == base));
+    if base == stamp {
+        e.remove("");
+    } else {
+        e.insert(String::new(), base);
+    }
+}
+
+/// Note that `fields` of the item `id` changed at `now` (for code that
+/// edits a workspace's JSON directly, like the server labelling roles).
+pub fn touch_fields(meta: &mut SyncMeta, id: u64, fields: &[&str], now: i64) -> i64 {
+    let before = meta.stamps.get(&id).copied().unwrap_or(0);
+    let next = now.max(before + 1);
+    let e = meta.fields.entry(id).or_default();
+    let base = e.get("").copied().unwrap_or(before);
+    for f in fields {
+        e.insert(f.to_string(), next);
+    }
+    if base == next {
+        e.remove("");
+    } else {
+        e.insert(String::new(), base);
+    }
+    meta.stamps.insert(id, next);
+    next
 }
 
 fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
@@ -323,15 +554,20 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     }
     meta.parents = places;
     meta.v = META_V;
+    let parts = part_hashes(data);
     for (id, h) in &cur {
         let next = meta.stamps.get(id).map_or(now, |s| now.max(s + 1));
         match meta.hashes.get(id) {
             Some(old) if old == h => {}
             Some(_) => {
+                let before = meta.stamps.get(id).copied().unwrap_or(0);
+                note_fields(meta, *id, before, parts.get(id), next);
                 meta.stamps.insert(*id, next);
             }
             None => {
                 meta.stamps.insert(*id, next);
+                // new (or back): every field changed now
+                meta.fields.insert(*id, BTreeMap::new());
                 if let Some(t) = meta.tombs.get(id) {
                     if meta.revived.get(id).map_or(true, |r| r < t) {
                         meta.revived.insert(*id, now.max(*t + 1));
@@ -354,9 +590,11 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
             meta.tombs.insert(*id, t);
             meta.stamps.remove(id);
             meta.moved.remove(id);
+            meta.fields.remove(id);
         }
     }
     meta.hashes = cur;
+    meta.field_hashes = parts;
     // shared settings: a changed one gets a new stamp; one seen for the first
     // time keeps none, so it wins only once someone changes it
     for (path, h) in value_hashes(data) {
@@ -385,6 +623,9 @@ struct Ctx<'a> {
     /// source -> whether that copy knows the `DEFAULT_WHEN_MISSING` fields
     /// (`SyncMeta.v` 2 and later).
     omits_defaults: Vec<bool>,
+    /// source -> its field stamps
+    fields: Vec<&'a BTreeMap<u64, BTreeMap<String, i64>>>,
+    out_fields: BTreeMap<u64, BTreeMap<String, i64>>,
 }
 
 /// Every item with an id in one source, with the item it sits in.
@@ -404,6 +645,7 @@ fn collect<'a>(src: usize, arr: &'a [Value], parent: Option<u64>, out: &mut Cand
 impl<'a> Ctx<'a> {
     fn new(
         stamps: Vec<&'a BTreeMap<u64, i64>>,
+        fields: Vec<&'a BTreeMap<u64, BTreeMap<String, i64>>>,
         moved: Vec<Option<&'a BTreeMap<u64, i64>>>,
         tombs: BTreeMap<u64, i64>,
         revived: BTreeMap<u64, i64>,
@@ -448,6 +690,8 @@ impl<'a> Ctx<'a> {
             home_moved,
             out_moved: BTreeMap::new(),
             omits_defaults,
+            fields,
+            out_fields: BTreeMap::new(),
         }
     }
 
@@ -457,6 +701,225 @@ impl<'a> Ctx<'a> {
             Some(t) => self.revived.get(&id).map_or(false, |r| r > t),
         }
     }
+}
+
+/// One copy of an item, as `merge_fields` sees it.
+struct Side<'a> {
+    obj: &'a Map<String, Value>,
+    parts: Vec<(String, Value)>,
+    /// when its fields not listed in `listed` changed
+    base: i64,
+    listed: Option<&'a BTreeMap<String, i64>>,
+    omits: bool,
+}
+
+/// When a copy's version of `part` was set, or None when the copy can't
+/// tell (it doesn't have the part, and may simply not know the field).
+/// A part that is there changed at its stamp in the field stamps, or else
+/// at the base. A missing part is taken away as of its stamp, or as of the
+/// base when the copy knows it would be there: a field the app leaves out
+/// at its default (`DEFAULT_WHEN_MISSING`, from apps that do), an element
+/// missing from a list the copy has.
+fn read_part(
+    sd: &Side,
+    part: &str,
+    present: bool,
+    in_vec: &std::collections::HashSet<u64>,
+) -> Option<i64> {
+    if let Some(t) = sd.listed.and_then(|e| e.get(part)) {
+        return Some(*t);
+    }
+    let counts = present
+        || match part.split_once('/') {
+            Some(("reactions", _)) => {
+                sd.omits || sd.obj.get("reactions").is_some_and(|v| !is_empty_arr(v))
+            }
+            Some(("timers", m)) => {
+                let m: u64 = m.parse().unwrap_or(0);
+                // an app that doesn't know `timers` can't have stopped one there
+                sd.omits
+                    || sd.obj.contains_key("timers")
+                    || (sd.obj.contains_key("timer_started") && !in_vec.contains(&m))
+            }
+            _ => DEFAULT_WHEN_MISSING.contains(&part) && sd.omits,
+        };
+    counts.then_some(sd.base)
+}
+
+/// Merge the own fields of one item's copies part by part (see
+/// `SyncMeta::fields`): for each part the copy that set it last wins.
+/// `stamp` is the item's merged stamp, `newest` the newest copy's fields.
+/// Returns the fields and the field names it decided (ones it left out
+/// stay out).
+fn merge_fields<'a>(
+    cx: &mut Ctx<'a>,
+    id: u64,
+    list: &[(usize, &'a Value)],
+    stamp: i64,
+    newest: &Map<String, Value>,
+) -> (Map<String, Value>, std::collections::HashSet<String>) {
+    use std::collections::HashSet;
+    // fields holding items in any copy merge as items
+    let child: HashSet<&str> = list
+        .iter()
+        .filter_map(|c| c.1.as_object())
+        .flat_map(|o| {
+            o.iter()
+                .filter(|(_, v)| is_id_array(v))
+                .map(|(k, _)| k.as_str())
+        })
+        .collect();
+    let sides: Vec<Side> = list
+        .iter()
+        .filter_map(|c| {
+            let obj = c.1.as_object()?;
+            let s = cx.stamps[c.0].get(&id).copied().unwrap_or(0);
+            let listed = cx.fields[c.0].get(&id);
+            Some(Side {
+                obj,
+                parts: parts_of(obj)
+                    .into_iter()
+                    .filter(|(p, _)| !child.contains(part_field(p)))
+                    .collect(),
+                base: listed.and_then(|e| e.get("")).copied().unwrap_or(s),
+                listed,
+                omits: cx.omits_defaults.get(c.0).copied().unwrap_or(false),
+            })
+        })
+        .collect();
+    let any_entry = sides.iter().any(|s| s.listed.is_some());
+    // parts in the order the newest copy has them, so every side ends up
+    // with the same order
+    let mut order: Vec<&str> = vec![];
+    let mut seen = HashSet::new();
+    let first = sides
+        .iter()
+        .position(|sd| std::ptr::eq(sd.obj, newest))
+        .unwrap_or(0);
+    for sd in sides[first..].iter().chain(&sides[..first]) {
+        for (p, _) in &sd.parts {
+            if seen.insert(p.as_str()) {
+                order.push(p);
+            }
+        }
+        for p in sd.listed.into_iter().flat_map(|e| e.keys()) {
+            if !p.is_empty() && !child.contains(part_field(p)) && seen.insert(p.as_str()) {
+                order.push(p);
+            }
+        }
+    }
+    let in_vec: HashSet<u64> = sides
+        .iter()
+        .flat_map(|sd| timer_list(sd.obj).into_iter().filter(|t| t.2).map(|t| t.0))
+        .collect();
+    let base_out = sides.iter().map(|s| s.base).min().unwrap_or(stamp);
+    let mut entry = BTreeMap::new();
+    let mut obj = Map::new();
+    let mut decided: HashSet<String> = HashSet::new();
+    let mut reactions: Vec<(String, u64)> = vec![];
+    let mut timers: Vec<(u64, i64)> = vec![];
+    for p in order {
+        let mut win: Option<(i64, &Side, Option<&Value>)> = None;
+        for sd in &sides {
+            let val = sd.parts.iter().find(|(q, _)| q == p).map(|(_, v)| v);
+            let Some(t) = read_part(sd, p, val.is_some(), &in_vec) else {
+                continue;
+            };
+            if win.as_ref().map_or(true, |w| t > w.0) {
+                win = Some((t, sd, val));
+            }
+        }
+        let Some((t, sd, val)) = win else { continue };
+        if any_entry && (val.is_none() || t != base_out) {
+            entry.insert(p.to_string(), t);
+        }
+        match p.split_once('/') {
+            Some(("reactions", rest)) => {
+                decided.insert("reactions".into());
+                if let (Some(_), Some((e, u))) = (val, rest.rsplit_once('/')) {
+                    if let Ok(u) = u.parse() {
+                        reactions.push((e.to_string(), u));
+                    }
+                }
+            }
+            Some(("timers", _)) => {
+                for k in TIMER_KEYS {
+                    decided.insert(k.to_string());
+                }
+                if let Some(v) = val {
+                    timers.push((
+                        v["member"].as_u64().unwrap_or(0),
+                        v["start"].as_i64().unwrap_or(0),
+                    ));
+                }
+            }
+            _ => {
+                decided.insert(p.to_string());
+                match val {
+                    Some(v) => {
+                        obj.insert(p.to_string(), v.clone());
+                    }
+                    // taken away there; keep how that copy writes it (an empty list)
+                    None => {
+                        if let Some(v) = sd.obj.get(p) {
+                            obj.insert(p.to_string(), v.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if decided.contains("reactions") {
+        let mut out: Vec<(String, Vec<u64>)> = vec![];
+        for (e, u) in reactions {
+            match out.iter_mut().find(|(x, _)| *x == e) {
+                Some((_, users)) => users.push(u),
+                None => out.push((e, vec![u])),
+            }
+        }
+        if !out.is_empty() || newest.contains_key("reactions") {
+            obj.insert(
+                "reactions".into(),
+                Value::Array(
+                    out.into_iter()
+                        .map(|(e, users)| serde_json::json!({"emoji": e, "users": users}))
+                        .collect(),
+                ),
+            );
+        }
+    }
+    if decided.contains("timers") {
+        // the same order everywhere: an old timer nobody owns first (only
+        // the field older apps read can hold it), then by start
+        timers.sort_by_key(|(m, st)| (*m != 0, *st, *m));
+        let mut rest = timers.into_iter();
+        match rest.next() {
+            Some((m, st)) => {
+                obj.insert("timer_started".into(), Value::from(st));
+                if m != 0 {
+                    obj.insert("timer_by".into(), Value::from(m));
+                }
+            }
+            None => {
+                if sides.iter().any(|sd| sd.obj.contains_key("timer_started")) {
+                    obj.insert("timer_started".into(), Value::Null);
+                }
+            }
+        }
+        let rest: Vec<Value> = rest
+            .map(|(m, st)| serde_json::json!({"member": m, "start": st}))
+            .collect();
+        if !rest.is_empty() {
+            obj.insert("timers".into(), Value::Array(rest));
+        }
+    }
+    if any_entry {
+        if base_out != stamp {
+            entry.insert(String::new(), base_out);
+        }
+        cx.out_fields.insert(id, entry);
+    }
+    (obj, decided)
 }
 
 /// Merge one array of items. `parent` is the item it sits in (None at the
@@ -517,8 +980,12 @@ fn merge_arr<'a>(
                 }
             }
         }
-        let mut obj = Map::new();
+        // own fields first, field by field (see `merge_fields`)
+        let (mut obj, decided) = merge_fields(cx, id, list, best_stamp, wobj);
         for k in keys {
+            if decided.contains(k.as_str()) || obj.contains_key(&k) {
+                continue;
+            }
             let vals: Vec<(usize, &'a Value)> = list
                 .iter()
                 .filter_map(|c| c.1.get(&k).map(|v| (c.0, v)))
@@ -581,11 +1048,13 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     // copies from before activity had ids: give their entries the same ids
     // here as everywhere else, or their comments would not be matched up
     fill_activity_ids(local);
+    fill_board_ids(local);
     let filled: Vec<Value> = others
         .iter()
         .map(|o| {
             let mut o = o.clone();
             fill_activity_ids(&mut o);
+            fill_board_ids(&mut o);
             o
         })
         .collect();
@@ -609,9 +1078,12 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     let merged: Vec<(String, Value)>;
     let out_stamps;
     let out_moved;
+    let out_fields;
     {
         let mut stamps: Vec<&BTreeMap<u64, i64>> = vec![&lmeta.stamps];
         stamps.extend(metas.iter().map(|m| &m.stamps));
+        let mut fields: Vec<&BTreeMap<u64, BTreeMap<String, i64>>> = vec![&lmeta.fields];
+        fields.extend(metas.iter().map(|m| &m.fields));
         let keeps = |m: &SyncMeta| m.v >= 2;
         let mut moved: Vec<Option<&BTreeMap<u64, i64>>> =
             vec![keeps(&lmeta).then_some(&lmeta.moved)];
@@ -635,7 +1107,7 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
             }
             all.push(sources);
         }
-        let mut cx = Ctx::new(stamps, moved, tombs.clone(), revived.clone(), cands);
+        let mut cx = Ctx::new(stamps, fields, moved, tombs.clone(), revived.clone(), cands);
         let mut res = vec![];
         for (path, sources) in SHARED.iter().zip(&all) {
             res.push((
@@ -646,6 +1118,7 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         merged = res;
         out_stamps = cx.out;
         out_moved = cx.out_moved;
+        out_fields = cx.out_fields;
     }
     for (path, v) in merged {
         set_path(local, &path, v);
@@ -674,7 +1147,9 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     lmeta.revived = revived;
     lmeta.stamps = out_stamps;
     lmeta.moved = out_moved;
+    lmeta.fields = out_fields;
     lmeta.hashes = fingerprints(local);
+    lmeta.field_hashes = part_hashes(local);
     lmeta.parents = parents_of(local);
     lmeta.value_hashes = value_hashes(local);
     lmeta.v = META_V;
@@ -730,6 +1205,7 @@ pub fn shareable(data: &Value) -> Value {
             s.insert("hashes".into(), Value::Object(Map::new()));
             s.insert("value_hashes".into(), Value::Object(Map::new()));
             s.remove("parents");
+            s.remove("field_hashes");
         }
     }
     v
@@ -850,7 +1326,14 @@ pub fn hide(data: &mut Value, ids: &[u64]) -> Vec<Value> {
     let mut inner = BTreeMap::new();
     walk(&Value::Array(gone.clone()), None, false, &mut inner);
     if let Some(sync) = get_path_mut(data, "extra.sync").and_then(|s| s.as_object_mut()) {
-        for key in ["stamps", "hashes", "moved", "parents"] {
+        for key in [
+            "stamps",
+            "hashes",
+            "moved",
+            "parents",
+            "fields",
+            "field_hashes",
+        ] {
             if let Some(m) = sync.get_mut(key).and_then(|m| m.as_object_mut()) {
                 for id in inner.keys() {
                     m.remove(&id.to_string());
@@ -991,6 +1474,78 @@ pub fn fill_activity_ids(data: &mut Value) -> bool {
             }
         }
         *acts = out;
+    }
+    changed
+}
+
+/// The id a whiteboard stroke or sticky note gets when it was drawn before
+/// they had ids, worked out from what it looks like (rounded, so every app
+/// reads the same numbers) so every computer gives it the same id. `nth`
+/// counts earlier entries on the board that look the same. Bit 62 set, as
+/// in `activity_id`.
+pub fn board_item_id(board: u64, kind: &str, sig: &str, nth: usize) -> u64 {
+    let h = fnv(format!("wb|{}|{}|{}|{}", board, kind, nth, sig).as_bytes());
+    (h & ((1u64 << 62) - 1)) | (1u64 << 62)
+}
+
+fn board_sig(kind: &str, item: &Value) -> String {
+    let r10 = |v: Option<&Value>| (v.and_then(|x| x.as_f64()).unwrap_or(0.0) * 10.0).round() as i64;
+    let color: Vec<String> = item
+        .get("color")
+        .and_then(|c| c.as_array())
+        .into_iter()
+        .flatten()
+        .map(|c| c.as_u64().unwrap_or(0).to_string())
+        .collect();
+    if kind == "strokes" {
+        let pts: Vec<String> = item
+            .get("points")
+            .and_then(|p| p.as_array())
+            .into_iter()
+            .flatten()
+            .map(|p| format!("{},{}", r10(p.get(0)), r10(p.get(1))))
+            .collect();
+        format!("{}|{}", color.join(","), pts.join(";"))
+    } else {
+        let pos = item.get("pos");
+        format!(
+            "{}|{}|{}|{}",
+            color.join(","),
+            item.get("text").and_then(|t| t.as_str()).unwrap_or(""),
+            r10(pos.and_then(|p| p.get(0))),
+            r10(pos.and_then(|p| p.get(1)))
+        )
+    }
+}
+
+/// Gives every whiteboard stroke and sticky note without an id one (see
+/// `board_item_id`), so they merge one by one: strokes two people draw at
+/// once are both kept and an erased one stays erased. True when anything
+/// changed.
+pub fn fill_board_ids(data: &mut Value) -> bool {
+    let mut changed = false;
+    let Some(boards) = get_path_mut(data, "extra.whiteboards").and_then(|b| b.as_array_mut())
+    else {
+        return false;
+    };
+    for b in boards {
+        let bid = id_of(b).unwrap_or(0);
+        for kind in ["strokes", "notes"] {
+            let Some(items) = b.get_mut(kind).and_then(|a| a.as_array_mut()) else {
+                continue;
+            };
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for it in items.iter_mut() {
+                if !it.is_object() || id_of(it).is_some_and(|i| i != 0) {
+                    continue;
+                }
+                let sig = board_sig(kind, it);
+                let n = counts.entry(sig.clone()).or_insert(0);
+                it["id"] = Value::from(board_item_id(bid, kind, &sig, *n));
+                *n += 1;
+                changed = true;
+            }
+        }
     }
     changed
 }
@@ -1534,8 +2089,7 @@ mod tests {
     fn a_field_set_back_to_its_default_stays_there() {
         // a task with a running timer (fields left out at their default)
         let (mut a, mut ma, mut b, mut mb) = pair(json!([]));
-        a["tasks"] =
-            json!([{"id": 7, "name": "T", "timer_by": 2, "timers": [{"member": 3, "start": 5}]}]);
+        a["tasks"] = json!([{"id": 7, "name": "T", "timer_started": 4, "timer_by": 2, "timers": [{"member": 3, "start": 5}]}]);
         stamp(&a.clone(), &mut ma, 20);
         a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
         merge(&mut b, &[a.clone()]);
@@ -1558,6 +2112,7 @@ mod tests {
         let mut old = b.clone();
         let mut mo = mb.clone();
         mo.v = 1;
+        mo.fields.clear();
         old["tasks"] = json!([{"id": 7, "name": "T renamed"}]);
         mo.stamps.insert(7, 40);
         old["extra"]["sync"] = serde_json::to_value(&mo).unwrap();
@@ -1580,5 +2135,281 @@ mod tests {
         d["tasks"] = json!([{"id": 7, "name": "T", "attachments": [{"file": "x"}]}]);
         merge(&mut d, &[newer]);
         assert_eq!(d["tasks"][0]["attachments"], json!([{"file": "x"}]));
+    }
+
+    /// Record `v`'s changes at `now` into `m` and write the bookkeeping into `v`.
+    fn save(v: &mut Value, m: &mut SyncMeta, now: i64) {
+        fill_activity_ids(v);
+        fill_board_ids(v);
+        stamp(&v.clone(), m, now);
+        v["extra"]["sync"] = serde_json::to_value(&*m).unwrap();
+    }
+
+    /// Both merge the other's copy as it was before.
+    fn swap(a: &mut Value, b: &mut Value) {
+        let (a0, b0) = (a.clone(), b.clone());
+        merge(a, &[b0]);
+        merge(b, &[a0]);
+    }
+
+    #[test]
+    fn two_people_changing_different_fields_of_one_task_keep_both() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "status": "to do", "priority": 0}]),
+            json!([]),
+            &ma,
+        );
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        a["tasks"][0]["name"] = json!("renamed by A");
+        save(&mut a, &mut ma, 20);
+        b["tasks"][0]["status"] = json!("done");
+        save(&mut b, &mut mb, 30);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(v["tasks"][0]["name"], "renamed by A", "{}", v["tasks"][0]);
+            assert_eq!(v["tasks"][0]["status"], "done");
+        }
+        assert_eq!(meta_of(&a).fields, meta_of(&b).fields, "both sides agree");
+        // the same field: the newest change wins on both sides
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        b["tasks"][0]["name"] = json!("B early");
+        save(&mut b, &mut mb, 40);
+        a["tasks"][0]["name"] = json!("A late");
+        a["tasks"][0]["priority"] = json!(2);
+        save(&mut a, &mut ma, 50);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(v["tasks"][0]["name"], "A late");
+            assert_eq!(v["tasks"][0]["priority"], 2);
+            assert_eq!(v["tasks"][0]["status"], "done");
+        }
+        // nothing left to merge
+        assert!(!merge(&mut a.clone(), &[b.clone()]));
+        // a field taken away (at its default) stays away while another
+        // field changes elsewhere
+        let mut ma = meta_of(&a);
+        a["tasks"][0]["watchers"] = json!([7]);
+        save(&mut a, &mut ma, 60);
+        merge(&mut b, &[a.clone()]);
+        let mut mb = meta_of(&b);
+        mb.field_hashes = part_hashes(&b);
+        b["tasks"][0].as_object_mut().unwrap().remove("watchers");
+        save(&mut b, &mut mb, 70);
+        a["tasks"][0]["name"] = json!("A again");
+        save(&mut a, &mut ma, 80);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(v["tasks"][0]["name"], "A again");
+            assert!(v["tasks"][0].get("watchers").is_none(), "{}", v["tasks"][0]);
+        }
+    }
+
+    #[test]
+    fn a_copy_without_field_stamps_counts_every_field_at_its_stamp() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "status": "to do"}]),
+            json!([]),
+            &ma,
+        );
+        save(&mut a, &mut ma, 10);
+        let mut old = a.clone();
+        a["tasks"][0]["status"] = json!("done");
+        save(&mut a, &mut ma, 20);
+        // an app from before field stamps renames it later: its whole copy wins
+        old["tasks"][0]["name"] = json!("old app");
+        old["extra"]["sync"] = json!({"stamps": {"1": 30}, "v": 2});
+        merge(&mut a, &[old]);
+        assert_eq!(a["tasks"][0]["name"], "old app");
+        assert_eq!(a["tasks"][0]["status"], "to do");
+    }
+
+    fn chat(reactions: Value) -> Value {
+        json!([{"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [{"id": 11, "author": 1, "text": "hi", "ts": 5, "reactions": reactions}]}])
+    }
+
+    fn reactions_of(v: &Value) -> Vec<(String, u64)> {
+        reaction_pairs(&v["channels"][0]["messages"][0]["reactions"]).unwrap()
+    }
+
+    #[test]
+    fn reactions_made_at_once_are_all_kept_and_removals_stick() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([]), chat(json!([])), &ma);
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        a["channels"] = chat(json!([{"emoji": "👍", "users": [1]}]));
+        save(&mut a, &mut ma, 20);
+        b["channels"] = chat(json!([{"emoji": "❤️", "users": [2]}, {"emoji": "👍", "users": [2]}]));
+        save(&mut b, &mut mb, 30);
+        swap(&mut a, &mut b);
+        let want = vec![
+            ("👍".to_string(), 1),
+            ("👍".to_string(), 2),
+            ("❤️".to_string(), 2),
+        ];
+        let mut got = reactions_of(&a);
+        got.sort();
+        let mut w = want.clone();
+        w.sort();
+        assert_eq!(got, w);
+        assert_eq!(reactions_of(&a), reactions_of(&b));
+        assert_eq!(
+            a["channels"][0]["messages"][0]["reactions"],
+            b["channels"][0]["messages"][0]["reactions"]
+        );
+        // A takes back their 👍 while B, not knowing, adds 🎉
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        ma.field_hashes = part_hashes(&a);
+        mb.field_hashes = part_hashes(&b);
+        a["channels"][0]["messages"][0]["reactions"] =
+            json!([{"emoji": "👍", "users": [2]}, {"emoji": "❤️", "users": [2]}]);
+        save(&mut a, &mut ma, 40);
+        b["channels"][0]["messages"][0]["reactions"] = json!([{"emoji": "👍", "users": [1, 2]}, {"emoji": "❤️", "users": [2]}, {"emoji": "🎉", "users": [2]}]);
+        save(&mut b, &mut mb, 50);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            let mut got = reactions_of(v);
+            got.sort();
+            assert_eq!(
+                got,
+                vec![
+                    ("❤️".to_string(), 2),
+                    ("🎉".to_string(), 2),
+                    ("👍".to_string(), 2)
+                ],
+                "the removed 👍 stays removed: {}",
+                v["channels"][0]["messages"][0]
+            );
+        }
+    }
+
+    #[test]
+    fn timers_started_at_once_both_keep_running() {
+        let mut ma = SyncMeta::default();
+        let task = |extra: Value| {
+            let mut t = json!({"id": 1, "name": "t", "timer_started": null});
+            for (k, v) in extra.as_object().unwrap() {
+                t[k] = v.clone();
+            }
+            json!([t])
+        };
+        let mut a = ws(task(json!({})), json!([]), &ma);
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        // both start their timer in the field older apps read
+        a["tasks"] = task(json!({"timer_started": 100, "timer_by": 1}));
+        save(&mut a, &mut ma, 20);
+        b["tasks"] = task(json!({"timer_started": 105, "timer_by": 2}));
+        save(&mut b, &mut mb, 21);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            let t = &v["tasks"][0];
+            assert_eq!(t["timer_started"], 100, "{}", t);
+            assert_eq!(t["timer_by"], 1);
+            assert_eq!(t["timers"], json!([{"member": 2, "start": 105}]));
+        }
+        // A stops theirs (B's moves into the old field) while B renames the task
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        ma.field_hashes = part_hashes(&a);
+        mb.field_hashes = part_hashes(&b);
+        a["tasks"] = task(json!({"timer_started": 105, "timer_by": 2}));
+        save(&mut a, &mut ma, 30);
+        b["tasks"][0]["name"] = json!("renamed");
+        save(&mut b, &mut mb, 40);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            let t = &v["tasks"][0];
+            assert_eq!(t["name"], "renamed");
+            assert_eq!(t["timer_started"], 105, "A's stop sticks: {}", t);
+            assert_eq!(t["timer_by"], 2);
+            assert!(t.get("timers").is_none());
+        }
+    }
+
+    #[test]
+    fn strokes_drawn_at_once_are_all_kept_and_erasing_sticks() {
+        let stroke = |x: f64| json!({"color": [0, 0, 0], "width": 2.0, "points": [[x, 1.25], [x + 1.0, 2.0]]});
+        let board = |strokes: Value| json!([{"id": 50, "name": "B", "strokes": strokes, "notes": [{"pos": [1.0, 2.0], "text": "old", "color": [1, 2, 3]}]}]);
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &ma);
+        a["extra"]["whiteboards"] = board(json!([stroke(0.1)]));
+        // a copy saved before strokes had ids works out the same ids
+        let mut old = a.clone();
+        save(&mut a, &mut ma, 10);
+        fill_board_ids(&mut old);
+        let x_id = a["extra"]["whiteboards"][0]["strokes"][0]["id"].clone();
+        assert!(x_id.as_u64().unwrap() >= 1 << 62);
+        assert_eq!(old["extra"]["whiteboards"][0]["strokes"][0]["id"], x_id);
+        assert_eq!(
+            old["extra"]["whiteboards"][0]["notes"][0]["id"],
+            a["extra"]["whiteboards"][0]["notes"][0]["id"]
+        );
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        // A erases the old stroke and draws one; B draws another
+        let wa = &mut a["extra"]["whiteboards"][0]["strokes"];
+        *wa = json!([stroke(5.0)]);
+        save(&mut a, &mut ma, 20);
+        b["extra"]["whiteboards"][0]["strokes"]
+            .as_array_mut()
+            .unwrap()
+            .push(stroke(9.0));
+        save(&mut b, &mut mb, 30);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            let xs: Vec<f64> = v["extra"]["whiteboards"][0]["strokes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s["points"][0][0].as_f64().unwrap())
+                .collect();
+            let mut xs = xs;
+            xs.sort_by(|p, q| p.partial_cmp(q).unwrap());
+            assert_eq!(xs, vec![5.0, 9.0], "{}", v["extra"]["whiteboards"]);
+        }
+    }
+
+    #[test]
+    fn touching_a_field_by_hand_wins_for_that_field_only() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &ma);
+        a["members"] = json!([{"id": 3, "name": "Kim", "role": "Member"}]);
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        b["members"][0]["name"] = json!("Kim Lee");
+        save(&mut b, &mut mb, 20);
+        // the server labels the role later, not having seen the rename
+        a["members"][0]["role"] = json!("Admin");
+        let mut m = meta_of(&a);
+        touch_fields(&mut m, 3, &["role"], 30);
+        a["extra"]["sync"] = serde_json::to_value(&m).unwrap();
+        merge(&mut a, &[b]);
+        assert_eq!(a["members"][0]["name"], "Kim Lee");
+        assert_eq!(a["members"][0]["role"], "Admin");
+    }
+
+    #[test]
+    fn board_ids_are_the_same_on_the_phone() {
+        // the iPhone test (testBoardIdsMatchTheRustOnes) checks the same values
+        assert_eq!(
+            board_item_id(50, "strokes", "0,0,0|1,13;11,20", 0),
+            6148156056053566450
+        );
+        assert_eq!(
+            board_sig(
+                "strokes",
+                &json!({"color": [0, 0, 0], "points": [[0.1, 1.25], [1.1, 2.0]]})
+            ),
+            "0,0,0|1,13;11,20"
+        );
+        assert_eq!(
+            board_sig(
+                "notes",
+                &json!({"color": [1, 2, 3], "text": "old", "pos": [1.0, 2.0]})
+            ),
+            "1,2,3|old|10|20"
+        );
     }
 }

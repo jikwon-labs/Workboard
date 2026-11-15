@@ -1231,7 +1231,7 @@ impl App {
                             w.name = name.clone();
                         }
                         for (i, (txt, pos)) in notes.into_iter().enumerate() {
-                            w.notes.push(Sticky { pos, text: txt.to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
+                            w.notes.push(Sticky { id: 0, pos, text: txt.to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
                         }
                     }
                 }

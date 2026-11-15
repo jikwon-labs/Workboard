@@ -704,6 +704,10 @@ pub struct Form {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WbStroke {
+    /// So strokes merge one by one (`wb_sync::fill_board_ids`); 0 until
+    /// `Data::fix_activity_ids` gives it one.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub id: u64,
     pub color: [u8; 3],
     pub width: f32,
     pub points: Vec<[f32; 2]>,
@@ -711,6 +715,9 @@ pub struct WbStroke {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sticky {
+    /// As `WbStroke::id`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub id: u64,
     pub pos: [f32; 2],
     pub text: String,
     pub color: [u8; 3],
@@ -1186,6 +1193,25 @@ impl Data {
     pub fn fix_activity_ids(&mut self) {
         for t in &mut self.tasks {
             fix_task_activity_ids(t);
+        }
+        self.fix_board_ids();
+    }
+
+    /// Gives whiteboard strokes and notes without an id one, the same one
+    /// every computer works out (`wb_sync::fill_board_ids`).
+    pub fn fix_board_ids(&mut self) {
+        let boards = &mut self.extra.whiteboards;
+        if boards
+            .iter()
+            .all(|w| w.strokes.iter().all(|s| s.id != 0) && w.notes.iter().all(|n| n.id != 0))
+        {
+            return;
+        }
+        let mut v = serde_json::json!({"extra": {"whiteboards": serde_json::to_value(&*boards).unwrap_or_default()}});
+        if wb_sync::fill_board_ids(&mut v) {
+            if let Ok(b) = serde_json::from_value(v["extra"]["whiteboards"].take()) {
+                *boards = b;
+            }
         }
     }
 

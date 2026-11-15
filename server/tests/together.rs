@@ -226,12 +226,28 @@ impl App {
         self.push();
     }
 
+    /// Edit like an app from before field stamps (and before fields at
+    /// their default were left out): its copy says only when each item
+    /// changed.
+    fn change_old(&mut self, f: impl FnOnce(&mut Value)) {
+        f(&mut self.data);
+        let mut meta = self.meta();
+        wb_sync::stamp(&self.data, &mut meta, now());
+        meta.fields.clear();
+        meta.field_hashes.clear();
+        meta.moved.clear();
+        meta.v = 1;
+        self.data["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+        self.push();
+    }
+
     fn take_in(&mut self, other: Value) {
         if self.data.is_null() {
             // joining: start from the team's copy
             self.data = other;
             let mut meta = self.meta();
             meta.hashes = wb_sync::fingerprints(&self.data);
+            meta.field_hashes = wb_sync::part_hashes(&self.data);
             self.data["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
         } else {
             wb_sync::merge(&mut self.data, &[other]);
@@ -1205,7 +1221,7 @@ fn attachments_survive_an_app_that_does_not_know_them() {
         texts(d).contains(&"look".to_string())
     });
     // B is the old app: it never keeps the field, and it reacts to the message
-    b.change(|d| {
+    b.change_old(|d| {
         for m in d["channels"][0]["messages"].as_array_mut().unwrap() {
             m.as_object_mut().unwrap().remove("attachments");
             if m["id"] == 4001 {
@@ -2567,6 +2583,45 @@ fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
     });
     let tokens = saved_tokens(&home);
     assert_eq!(tokens.len(), 1, "only the good token: {:?}", tokens);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------------- field-level merge
+
+#[test]
+fn two_people_editing_one_task_at_once_both_keep_their_change() {
+    let home = temp_home("fields");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    // both edit task 100 before seeing the other's change: different fields
+    a.change(|d| d["tasks"][0]["name"] = json!("Plan (A)"));
+    b.change(|d| d["tasks"][0]["status"] = json!("done"));
+    for app in [&mut a, &mut b] {
+        app.wait("both changes to the task", |d| {
+            d["tasks"][0]["name"] == "Plan (A)" && d["tasks"][0]["status"] == "done"
+        });
+    }
+    // reactions and timers made at the same moment
+    a.change(|d| {
+        d["channels"][0]["messages"][0]["reactions"] = json!([{"emoji": "👍", "users": [1]}]);
+        d["tasks"][1]["timer_started"] = json!(1000);
+        d["tasks"][1]["timer_by"] = json!(1);
+    });
+    b.change(|d| {
+        d["channels"][0]["messages"][0]["reactions"] = json!([{"emoji": "🎉", "users": [2]}]);
+        d["tasks"][1]["timer_started"] = json!(1005);
+        d["tasks"][1]["timer_by"] = json!(2);
+    });
+    for app in [&mut a, &mut b] {
+        app.wait("both reactions and both timers", |d| {
+            let r = &d["channels"][0]["messages"][0]["reactions"];
+            let t = &d["tasks"][1];
+            r.as_array().is_some_and(|r| r.len() == 2)
+                && t["timer_by"] == 1
+                && t["timers"] == json!([{"member": 2, "start": 1005}])
+        });
+    }
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

@@ -215,11 +215,15 @@ public final class SyncClient {
             // a copy saved by an older build: give activity lines their ids
             // and take today's fingerprints as the baseline (every edit made
             // here was stamped when it was made), so nothing reads as edited
-            if Sync.fillActivityIds(&snap) || SyncMeta(of: snap).v < 1 {
-                var meta = SyncMeta(of: snap)
+            let filledActivity = Sync.fillActivityIds(&snap)
+            let filled = Sync.fillBoardIds(&snap) || filledActivity
+            let old = SyncMeta(of: snap)
+            if filled || old.v < 1 || (old.fieldHashes.isEmpty && !old.hashes.isEmpty) {
+                var meta = old
                 meta.hashes = Sync.fingerprints(snap)
+                meta.fieldHashes = Sync.partHashes(snap)
                 meta.valueHashes = Sync.valueHashes(snap)
-                meta.v = 1
+                meta.v = max(meta.v, 1)
                 snap.set("extra.sync", meta.json)
             }
             self.data = snap
@@ -542,6 +546,7 @@ public final class SyncClient {
             Sync.fillActivityIds(&fresh)
             var meta = SyncMeta(of: fresh)
             meta.hashes = Sync.fingerprints(fresh)
+            meta.fieldHashes = Sync.partHashes(fresh)
             meta.valueHashes = Sync.valueHashes(fresh)
             meta.v = 1
             fresh.set("extra.sync", meta.json)
@@ -553,6 +558,7 @@ public final class SyncClient {
             if !gone.isEmpty {
                 var meta = SyncMeta(of: d)
                 meta.hashes = Sync.fingerprints(d)
+                meta.fieldHashes = Sync.partHashes(d)
                 d.set("extra.sync", meta.json)
                 data = d
                 settings.waitingStamps = settings.waitingStamps.filter { !gone.contains($0.key) }
@@ -706,6 +712,7 @@ public final class SyncClient {
         // activity lines are written without ids; give them theirs before
         // stamping, as the Mac app does before it saves
         Sync.fillActivityIds(&d)
+        Sync.fillBoardIds(&d)
         let old = SyncMeta(of: d)
         var meta = old
         Sync.stamp(d, &meta, now: nowMs())

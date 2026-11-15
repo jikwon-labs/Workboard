@@ -403,3 +403,209 @@ final class DefaultFieldTests: XCTestCase {
         XCTAssertEqual(phone2["tasks"]?.array?.first?["watchers"], [4])
     }
 }
+
+/// Field-level merging (wb_sync merge_fields), ported one to one from the
+/// Rust tests of the same names.
+final class FieldMergeTests: XCTestCase {
+    func ws(_ tasks: JSON, _ channels: JSON, _ meta: SyncMeta) -> JSON {
+        ["workspace": "W", "spaces": [], "tasks": tasks, "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": channels, "docs": [], "extra": ["sync": meta.json]]
+    }
+
+    func save(_ v: inout JSON, _ m: inout SyncMeta, _ now: Int64) {
+        Sync.fillActivityIds(&v)
+        Sync.fillBoardIds(&v)
+        Sync.stamp(v, &m, now: now)
+        v.set("extra.sync", m.json)
+    }
+
+    func swap(_ a: inout JSON, _ b: inout JSON) {
+        let (a0, b0) = (a, b)
+        Sync.merge(&a, [b0])
+        Sync.merge(&b, [a0])
+    }
+
+    func setTask(_ v: inout JSON, _ i: Int, _ k: String, _ x: JSON?) {
+        var tasks = v["tasks"]?.array ?? []
+        tasks[i][k] = x
+        v["tasks"] = .array(tasks)
+    }
+
+    func testTwoPeopleChangingDifferentFieldsOfOneTaskKeepBoth() {
+        var ma = SyncMeta()
+        var a = ws([["id": 1, "name": "t", "status": "to do", "priority": 0]], [], ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        setTask(&a, 0, "name", "renamed by A")
+        save(&a, &ma, 20)
+        setTask(&b, 0, "status", "done")
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["name"], "renamed by A")
+            XCTAssertEqual(v["tasks"]?[0]?["status"], "done")
+        }
+        XCTAssertEqual(SyncMeta(of: a).fields, SyncMeta(of: b).fields, "both sides agree")
+        // the same field: the newest change wins on both sides
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        setTask(&b, 0, "name", "B early")
+        save(&b, &mb, 40)
+        setTask(&a, 0, "name", "A late")
+        setTask(&a, 0, "priority", 2)
+        save(&a, &ma, 50)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["name"], "A late")
+            XCTAssertEqual(v["tasks"]?[0]?["priority"], 2)
+            XCTAssertEqual(v["tasks"]?[0]?["status"], "done")
+        }
+        var a2 = a
+        XCTAssertFalse(Sync.merge(&a2, [b]), "nothing left to merge")
+        // a field taken away stays away while another field changes elsewhere
+        ma = SyncMeta(of: a)
+        setTask(&a, 0, "watchers", [7])
+        save(&a, &ma, 60)
+        Sync.merge(&b, [a])
+        mb = SyncMeta(of: b)
+        setTask(&b, 0, "watchers", nil)
+        save(&b, &mb, 70)
+        setTask(&a, 0, "name", "A again")
+        save(&a, &ma, 80)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(v["tasks"]?[0]?["name"], "A again")
+            XCTAssertNil(v["tasks"]?[0]?["watchers"])
+        }
+    }
+
+    func testACopyWithoutFieldStampsCountsEveryFieldAtItsStamp() {
+        var ma = SyncMeta()
+        var a = ws([["id": 1, "name": "t", "status": "to do"]], [], ma)
+        save(&a, &ma, 10)
+        var old = a
+        setTask(&a, 0, "status", "done")
+        save(&a, &ma, 20)
+        setTask(&old, 0, "name", "old app")
+        old.set("extra.sync", ["stamps": ["1": 30], "v": 2])
+        Sync.merge(&a, [old])
+        XCTAssertEqual(a["tasks"]?[0]?["name"], "old app")
+        XCTAssertEqual(a["tasks"]?[0]?["status"], "to do")
+    }
+
+    func chat(_ reactions: JSON) -> JSON {
+        [["id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [["id": 11, "author": 1, "text": "hi", "ts": 5, "reactions": reactions]]]]
+    }
+
+    func pairs(_ v: JSON) -> [String] {
+        (Sync.reactionPairs(v.at("channels")?[0]?["messages"]?[0]?["reactions"] ?? []) ?? []).map { "\($0.0)/\($0.1)" }.sorted()
+    }
+
+    func setReactions(_ v: inout JSON, _ r: JSON) {
+        var ch = v["channels"]!
+        var chans = ch.array!
+        var msgs = chans[0]["messages"]!.array!
+        msgs[0]["reactions"] = r
+        chans[0]["messages"] = .array(msgs)
+        ch = .array(chans)
+        v["channels"] = ch
+    }
+
+    func testReactionsMadeAtOnceAreAllKeptAndRemovalsStick() {
+        var ma = SyncMeta()
+        var a = ws([], chat([]), ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        a["channels"] = chat([["emoji": "👍", "users": [1]]])
+        save(&a, &ma, 20)
+        b["channels"] = chat([["emoji": "❤️", "users": [2]], ["emoji": "👍", "users": [2]]])
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        XCTAssertEqual(pairs(a), ["❤️/2", "👍/1", "👍/2"].sorted())
+        XCTAssertEqual(a.at("channels")?[0]?["messages"]?[0]?["reactions"], b.at("channels")?[0]?["messages"]?[0]?["reactions"])
+        // A takes back their 👍 while B, not knowing, adds 🎉
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        setReactions(&a, [["emoji": "👍", "users": [2]], ["emoji": "❤️", "users": [2]]])
+        save(&a, &ma, 40)
+        setReactions(&b, [["emoji": "👍", "users": [1, 2]], ["emoji": "❤️", "users": [2]], ["emoji": "🎉", "users": [2]]])
+        save(&b, &mb, 50)
+        swap(&a, &b)
+        for v in [a, b] {
+            XCTAssertEqual(pairs(v), ["❤️/2", "🎉/2", "👍/2"].sorted(), "the removed 👍 stays removed")
+        }
+    }
+
+    func testTimersStartedAtOnceBothKeepRunning() {
+        func task(_ extra: [String: JSON]) -> JSON {
+            var t: [String: JSON] = ["id": 1, "name": "t", "timer_started": .null]
+            for (k, v) in extra { t[k] = v }
+            return [.object(t)]
+        }
+        var ma = SyncMeta()
+        var a = ws(task([:]), [], ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        a["tasks"] = task(["timer_started": 100, "timer_by": 1])
+        save(&a, &ma, 20)
+        b["tasks"] = task(["timer_started": 105, "timer_by": 2])
+        save(&b, &mb, 21)
+        swap(&a, &b)
+        for v in [a, b] {
+            let t = v["tasks"]?[0]
+            XCTAssertEqual(t?["timer_started"], 100)
+            XCTAssertEqual(t?["timer_by"], 1)
+            XCTAssertEqual(t?["timers"], [["member": 2, "start": 105]])
+        }
+        // A stops theirs (B's moves into the old field) while B renames the task
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        a["tasks"] = task(["timer_started": 105, "timer_by": 2])
+        save(&a, &ma, 30)
+        setTask(&b, 0, "name", "renamed")
+        save(&b, &mb, 40)
+        swap(&a, &b)
+        for v in [a, b] {
+            let t = v["tasks"]?[0]
+            XCTAssertEqual(t?["name"], "renamed")
+            XCTAssertEqual(t?["timer_started"], 105, "A's stop sticks")
+            XCTAssertEqual(t?["timer_by"], 2)
+            XCTAssertNil(t?["timers"])
+        }
+    }
+
+    func testStrokesDrawnAtOnceAreAllKeptAndErasingSticks() {
+        func stroke(_ x: Double) -> JSON { ["color": [0, 0, 0], "width": 2.0, "points": [[.double(x), 1.25], [.double(x + 1), 2.0]]] }
+        func board(_ strokes: JSON) -> JSON { [["id": 50, "name": "B", "strokes": strokes, "notes": [["pos": [1.0, 2.0], "text": "old", "color": [1, 2, 3]]]]] }
+        var ma = SyncMeta()
+        var a = ws([], [], ma)
+        a.set("extra.whiteboards", board([stroke(0.1)]))
+        var old = a
+        save(&a, &ma, 10)
+        Sync.fillBoardIds(&old)
+        let xid = a.at("extra.whiteboards")?[0]?["strokes"]?[0]?["id"]
+        XCTAssertGreaterThanOrEqual(xid?.uint ?? 0, 1 << 62)
+        XCTAssertEqual(old.at("extra.whiteboards")?[0]?["strokes"]?[0]?["id"], xid)
+        XCTAssertEqual(old.at("extra.whiteboards")?[0]?["notes"]?[0]?["id"], a.at("extra.whiteboards")?[0]?["notes"]?[0]?["id"])
+        var (b, mb) = (a, ma)
+        var wa = a.at("extra.whiteboards")!.array!
+        wa[0]["strokes"] = [stroke(5)]
+        a.set("extra.whiteboards", .array(wa))
+        save(&a, &ma, 20)
+        var wb = b.at("extra.whiteboards")!.array!
+        wb[0]["strokes"] = .array(wb[0]["strokes"]!.array! + [stroke(9)])
+        b.set("extra.whiteboards", .array(wb))
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        for v in [a, b] {
+            let xs = (v.at("extra.whiteboards")?[0]?["strokes"]?.array ?? []).compactMap { $0["points"]?[0]?[0]?.double }.sorted()
+            XCTAssertEqual(xs, [5, 9])
+        }
+    }
+
+    func testBoardIdsMatchTheRustOnes() {
+        // values printed by wb_sync::board_item_id
+        XCTAssertEqual(Sync.boardItemId(board: 50, kind: "strokes", sig: "0,0,0|1,13;11,20", nth: 0), 6148156056053566450)
+        XCTAssertEqual(Sync.boardSig("strokes", ["color": [0, 0, 0], "points": [[0.1, 1.25], [1.1, 2.0]]]), "0,0,0|1,13;11,20")
+        XCTAssertEqual(Sync.boardSig("notes", ["color": [1, 2, 3], "text": "old", "pos": [1.0, 2.0]]), "1,2,3|old|10|20")
+    }
+}

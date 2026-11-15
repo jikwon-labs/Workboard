@@ -573,7 +573,10 @@ pub fn mark_restored(data: &mut Value, now: i64) {
         meta.stamps.insert(id, now);
         meta.revived.insert(id, now);
     }
+    // every field of every item counts as changed now
+    meta.fields.clear();
     meta.hashes.clear();
+    meta.field_hashes.clear();
     if data.get("extra").is_none() {
         data["extra"] = json!({});
     }
@@ -599,6 +602,20 @@ fn label_role(canon: &mut Value, member: u64, role: Role) -> bool {
         return false;
     }
     m["role"] = json!(role.label());
+    let sync = canon.get("extra").and_then(|e| e.get("sync"));
+    let meta: Option<wb_sync::SyncMeta> = match sync {
+        None | Some(Value::Null) => Some(Default::default()),
+        Some(s) => serde_json::from_value(s.clone()).ok(),
+    };
+    if let Some(mut meta) = meta {
+        // only the role field changed, so a rename made meanwhile still counts
+        wb_sync::touch_fields(&mut meta, member, &["role"], now_ms());
+        if canon.get("extra").is_none_or(|e| e.is_null()) {
+            canon["extra"] = json!({});
+        }
+        canon["extra"]["sync"] = serde_json::to_value(&meta).unwrap_or_default();
+        return true;
+    }
     let stamps = &mut canon["extra"]["sync"]["stamps"];
     if !stamps.is_object() {
         *stamps = json!({});
@@ -694,7 +711,7 @@ fn guard_push(canon: &Value, data: &mut Value, member: u64) {
     }
     drop_ids(
         data.get_mut("extra").and_then(|e| e.get_mut("sync")),
-        &["stamps", "tombs", "revived", "moved"],
+        &["stamps", "tombs", "revived", "moved", "fields"],
         &ids,
     );
 }

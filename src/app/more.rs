@@ -2010,6 +2010,7 @@ impl App {
                         0 => {
                             if resp.drag_started() {
                                 wb.strokes.push(WbStroke {
+                                    id: 0,
                                     color: self.wb_color,
                                     width: self.sweep.wb_width,
                                     points: vec![[local.x, local.y]],
@@ -2027,6 +2028,7 @@ impl App {
                         1 => {
                             if resp.clicked() {
                                 wb.notes.push(Sticky {
+                                    id: 0,
                                     pos: [local.x - 80.0, local.y - 60.0],
                                     text: String::new(),
                                     color: if self.wb_color == [32, 32, 32] {

@@ -2,9 +2,12 @@
 // same code the Mac app and workboard-server use) so that a copy pushed from
 // the phone merges exactly like a Mac's copy.
 //
-// Every item with an `id` remembers when its own fields last changed
-// (`stamps`, in milliseconds). The newest version of an item wins; the items
-// inside it (messages in a channel, lists in a space) are merged one by one,
+// Every item with an `id` remembers when it last changed (`stamps`, in
+// milliseconds) and when each of its own fields did (`fields`): for each
+// field the newest change wins, so two people changing different fields of
+// one task both keep theirs. Reactions merge per (emoji, person), running
+// timers per person, whiteboard strokes and notes have ids (`fillBoardIds`).
+// The items inside an item (messages in a channel, lists in a space) are merged one by one,
 // and an item that moved (a list to another space) sits only where its newest
 // copy puts it. Deleted items leave a tombstone (`tombs`); restoring one
 // records a revival. A few single settings (SHARED_VALUES) are shared too,
@@ -43,9 +46,15 @@ public struct SyncMeta: Equatable, Sendable {
     public var values: [String: Int64] = [:]
     /// Shared setting -> fingerprint when last saved (this device only).
     public var valueHashes: [String: UInt64] = [:]
+    /// id -> part -> when that field last changed (wb_sync SyncMeta::fields;
+    /// "" is the item's base).
+    public var fields: [UInt64: [String: Int64]] = [:]
+    /// id -> part -> fingerprint when last saved (this device only).
+    public var fieldHashes: [UInt64: [String: UInt32]] = [:]
 
     public init(stamps: [UInt64: Int64] = [:], tombs: [UInt64: Int64] = [:], revived: [UInt64: Int64] = [:], hashes: [UInt64: UInt64] = [:],
-                v: UInt32 = 0, values: [String: Int64] = [:], valueHashes: [String: UInt64] = [:]) {
+                v: UInt32 = 0, values: [String: Int64] = [:], valueHashes: [String: UInt64] = [:],
+                fields: [UInt64: [String: Int64]] = [:], fieldHashes: [UInt64: [String: UInt32]] = [:]) {
         self.stamps = stamps
         self.tombs = tombs
         self.revived = revived
@@ -53,6 +62,8 @@ public struct SyncMeta: Equatable, Sendable {
         self.v = v
         self.values = values
         self.valueHashes = valueHashes
+        self.fields = fields
+        self.fieldHashes = fieldHashes
     }
 
     /// Reads `extra.sync` of a workspace; missing or broken parts read as empty.
@@ -81,11 +92,23 @@ public struct SyncMeta: Equatable, Sendable {
         for (k, x) in json["value_hashes"]?.object ?? [:] {
             if let h = x.uint { valueHashes[k] = h }
         }
+        for (k, x) in json["fields"]?.object ?? [:] {
+            guard let id = UInt64(k), let o = x.object else { continue }
+            var e: [String: Int64] = [:]
+            for (p, t) in o { if let t = t.int { e[p] = t } }
+            fields[id] = e
+        }
+        for (k, x) in json["field_hashes"]?.object ?? [:] {
+            guard let id = UInt64(k), let o = x.object else { continue }
+            var e: [String: UInt32] = [:]
+            for (p, h) in o { if let h = h.uint { e[p] = UInt32(truncatingIfNeeded: h) } }
+            fieldHashes[id] = e
+        }
     }
 
     public var json: JSON {
         func obj(_ m: [UInt64: Int64]) -> JSON { .object(Dictionary(uniqueKeysWithValues: m.map { (String($0.key), JSON.int($0.value)) })) }
-        return .object([
+        var o: [String: JSON] = [
             "stamps": obj(stamps),
             "tombs": obj(tombs),
             "revived": obj(revived),
@@ -93,7 +116,14 @@ public struct SyncMeta: Equatable, Sendable {
             "v": .int(Int64(v)),
             "values": .object(values.mapValues { JSON.int($0) }),
             "value_hashes": .object(valueHashes.mapValues { JSON.id($0) }),
-        ])
+        ]
+        if !fields.isEmpty {
+            o["fields"] = .object(Dictionary(uniqueKeysWithValues: fields.map { (String($0.key), JSON.object($0.value.mapValues { JSON.int($0) })) }))
+        }
+        if !fieldHashes.isEmpty {
+            o["field_hashes"] = .object(Dictionary(uniqueKeysWithValues: fieldHashes.map { (String($0.key), JSON.object($0.value.mapValues { JSON.int(Int64($0)) })) }))
+        }
+        return .object(o)
     }
 }
 
@@ -155,6 +185,115 @@ extension Sync {
         fingerprints(data, placed: true)
     }
 
+    // MARK: field stamps (wb_sync parts_of / note_fields)
+
+    /// The fields that together hold a task's running timers (TIMER_KEYS).
+    static let timerKeys: Set<String> = ["timer_started", "timer_by", "timers"]
+
+    static func isEmptyArr(_ v: JSON) -> Bool { v.array?.isEmpty == true }
+
+    /// The (emoji, member) pairs of a reactions field, in order.
+    static func reactionPairs(_ v: JSON) -> [(String, UInt64)]? {
+        guard let a = v.array else { return nil }
+        var out: [(String, UInt64)] = []
+        for r in a {
+            guard let e = r["emoji"]?.string, let users = r["users"]?.array else { return nil }
+            for u in users {
+                guard let u = u.uint else { return nil }
+                if !out.contains(where: { $0.0 == e && $0.1 == u }) { out.append((e, u)) }
+            }
+        }
+        return out
+    }
+
+    /// A task's running timers: (member, start, from `timers`).
+    static func timerList(_ obj: [String: JSON]) -> [(member: UInt64, start: Int64, inVec: Bool)] {
+        var out: [(member: UInt64, start: Int64, inVec: Bool)] = []
+        if let st = obj["timer_started"]?.int {
+            out.append((obj["timer_by"]?.uint ?? 0, st, false))
+        }
+        for r in obj["timers"]?.array ?? [] {
+            if let m = r["member"]?.uint, let st = r["start"]?.int, !out.contains(where: { $0.member == m }) {
+                out.append((m, st, true))
+            }
+        }
+        return out
+    }
+
+    /// The parts of an item's own fields with their values (wb_sync parts_of).
+    static func partsOf(_ obj: [String: JSON]) -> [(String, JSON)] {
+        var out: [(String, JSON)] = []
+        for k in obj.keys.sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }) {
+            let v = obj[k]!
+            if localKeys.contains(k) || appendKeys.contains(k) || timerKeys.contains(k) || isEmptyArr(v) || isIdArray(v) { continue }
+            if k == "reactions", let pairs = reactionPairs(v) {
+                for (e, u) in pairs { out.append(("reactions/\(e)/\(u)", .bool(true))) }
+                continue
+            }
+            out.append((k, v))
+        }
+        for t in timerList(obj) {
+            out.append(("timers/\(t.member)", ["member": .id(t.member), "start": .int(t.start)]))
+        }
+        return out
+    }
+
+    static func partField(_ p: String) -> String {
+        if let i = p.firstIndex(of: "/") { return String(p[..<i]) }
+        return p
+    }
+
+    static func partHash(_ v: JSON) -> UInt32 { UInt32(truncatingIfNeeded: fnv(v.serialized().utf8)) }
+
+    /// Every shared item: id, the item it sits in, its fields.
+    static func visit(_ data: JSON, _ f: (UInt64, UInt64?, [String: JSON]) -> Void) {
+        func go(_ v: JSON, _ parent: UInt64?) {
+            for item in v.array ?? [] {
+                guard let id = idOf(item), let obj = item.object else { continue }
+                f(id, parent, obj)
+                for (_, child) in obj where isIdArray(child) { go(child, id) }
+            }
+        }
+        for path in shared {
+            if let v = data.at(path) { go(v, nil) }
+        }
+    }
+
+    /// Fingerprints of every part of every shared item (field_hashes).
+    public static func partHashes(_ data: JSON) -> [UInt64: [String: UInt32]] {
+        var out: [UInt64: [String: UInt32]] = [:]
+        visit(data) { id, _, obj in
+            var m: [String: UInt32] = [:]
+            for (p, v) in partsOf(obj) { m[p] = partHash(v) }
+            out[id] = m
+        }
+        return out
+    }
+
+    /// An item's own fields changed at `next` (wb_sync note_fields).
+    static func noteFields(_ meta: inout SyncMeta, _ id: UInt64, before: Int64, _ nowParts: [String: UInt32]?, next: Int64) {
+        let nowParts = nowParts ?? [:]
+        guard let oldParts = meta.fieldHashes[id] else {
+            if var e = meta.fields[id] {
+                e = e.filter { !$0.key.isEmpty && nowParts[$0.key] == nil }
+                meta.fields[id] = e
+            }
+            return
+        }
+        var changed = nowParts.filter { oldParts[$0.key] != $0.value }.map(\.key)
+        changed += oldParts.keys.filter { nowParts[$0] == nil }
+        var e = meta.fields[id] ?? [:]
+        let base = e[""] ?? before
+        for p in changed { e[p] = next }
+        tidyFields(&e, present: { nowParts[$0] != nil }, base: base, stamp: next)
+        meta.fields[id] = e
+    }
+
+    static func tidyFields(_ e: inout [String: Int64], present: (String) -> Bool, base: Int64, stamp: Int64) {
+        e = e.filter { $0.key.isEmpty || !(present($0.key) && $0.value == base) }
+        if base == stamp { e[""] = nil } else { e[""] = base }
+    }
+
     static func valueHashes(_ data: JSON) -> [String: UInt64] {
         var out: [String: UInt64] = [:]
         for p in sharedValues { out[p] = fnv((data.at(p) ?? .null).serialized().utf8) }
@@ -176,12 +315,18 @@ extension Sync {
             }
             meta.v = 1
         }
+        let parts = partHashes(data)
         for (id, h) in cur {
             let next = meta.stamps[id].map { max(now, $0 + 1) } ?? now
             if let old = meta.hashes[id] {
-                if old != h { meta.stamps[id] = next }
+                if old != h {
+                    noteFields(&meta, id, before: meta.stamps[id] ?? 0, parts[id], next: next)
+                    meta.stamps[id] = next
+                }
             } else {
                 meta.stamps[id] = next
+                // new (or back): every field changed now
+                meta.fields[id] = [:]
                 if let t = meta.tombs[id], meta.revived[id].map({ $0 < t }) ?? true {
                     meta.revived[id] = max(now, t + 1)
                 }
@@ -195,8 +340,10 @@ extension Sync {
             if let r = meta.revived[id] { t = max(t, r + 1) }
             meta.tombs[id] = t
             meta.stamps[id] = nil
+            meta.fields[id] = nil
         }
         meta.hashes = cur
+        meta.fieldHashes = parts
         // shared settings: a changed one gets a new stamp; one seen for the
         // first time keeps none, so it wins only once someone changes it
         for (path, h) in valueHashes(data) {
@@ -233,6 +380,9 @@ extension Sync {
         /// timer, an unpinned message) and is not filled back in from another
         /// copy (wb_sync Ctx::omits_defaults).
         var omitsDefaults: [Bool] = []
+        /// source -> its field stamps
+        var fields: [[UInt64: [String: Int64]]] = []
+        var outFields: [UInt64: [String: Int64]] = [:]
 
         init(stamps: [[UInt64: Int64]], tombs: [UInt64: Int64], revived: [UInt64: Int64], all: [UInt64: [(src: Int, parent: UInt64?, value: JSON)]]) {
             self.stamps = stamps
@@ -272,6 +422,132 @@ extension Sync {
         }
     }
 
+    /// One copy of an item, as mergeFields sees it.
+    private struct Side {
+        let obj: [String: JSON]
+        let parts: [(String, JSON)]
+        let base: Int64
+        let listed: [String: Int64]?
+        let omits: Bool
+        let src: Int
+
+        func value(_ p: String) -> JSON? { parts.first(where: { $0.0 == p })?.1 }
+    }
+
+    /// When a copy's version of `part` was set, or nil when it can't tell
+    /// (wb_sync read_part).
+    private static func readPart(_ sd: Side, _ part: String, present: Bool, inVec: Set<UInt64>) -> Int64? {
+        if let t = sd.listed?[part] { return t }
+        var counts = present
+        if !counts {
+            let f = partField(part)
+            if f == "reactions" && part != f {
+                counts = sd.omits || (sd.obj["reactions"].map { !isEmptyArr($0) } ?? false)
+            } else if f == "timers" && part != f {
+                let m = UInt64(part.dropFirst("timers/".count)) ?? 0
+                // an app that doesn't know `timers` can't have stopped one there
+                counts = sd.omits || sd.obj["timers"] != nil || (sd.obj["timer_started"] != nil && !inVec.contains(m))
+            } else {
+                counts = defaultWhenMissing.contains(part) && sd.omits
+            }
+        }
+        return counts ? sd.base : nil
+    }
+
+    /// Merge the own fields of one item's copies part by part
+    /// (wb_sync merge_fields). Returns the fields and the field names decided.
+    private static func mergeFields(_ cx: Ctx, _ id: UInt64, _ list: [Cand], stamp: Int64, newest: [String: JSON]) -> ([String: JSON], Set<String>) {
+        var child = Set<String>()
+        for c in list {
+            for (k, v) in c.value.object ?? [:] where isIdArray(v) { child.insert(k) }
+        }
+        let sides: [Side] = list.compactMap { c in
+            guard let obj = c.value.object else { return nil }
+            let s = cx.stamps[c.src][id] ?? 0
+            let listed = cx.fields.indices.contains(c.src) ? cx.fields[c.src][id] : nil
+            return Side(obj: obj, parts: partsOf(obj).filter { !child.contains(partField($0.0)) }, base: listed?[""] ?? s, listed: listed,
+                        omits: cx.omitsDefaults.indices.contains(c.src) && cx.omitsDefaults[c.src], src: c.src)
+        }
+        let anyEntry = sides.contains { $0.listed != nil }
+        // parts in the order the newest copy has them, so every side ends up with the same order
+        var order: [String] = []
+        var seen = Set<String>()
+        let first = sides.firstIndex(where: { $0.obj == newest }) ?? 0
+        for sd in Array(sides[first...]) + Array(sides[..<first]) {
+            for (p, _) in sd.parts where seen.insert(p).inserted { order.append(p) }
+            for p in (sd.listed?.keys ?? [String: Int64]().keys).sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) })
+            where !p.isEmpty && !child.contains(partField(p)) && seen.insert(p).inserted {
+                order.append(p)
+            }
+        }
+        var inVec = Set<UInt64>()
+        for sd in sides { for t in timerList(sd.obj) where t.inVec { inVec.insert(t.member) } }
+        let baseOut = sides.map(\.base).min() ?? stamp
+        var entry: [String: Int64] = [:]
+        var obj: [String: JSON] = [:]
+        var decided = Set<String>()
+        var reactions: [(String, UInt64)] = []
+        var timers: [(UInt64, Int64)] = []
+        for p in order {
+            var win: (Int64, Side, JSON?)?
+            for sd in sides {
+                let val = sd.value(p)
+                guard let t = readPart(sd, p, present: val != nil, inVec: inVec) else { continue }
+                if win == nil || t > win!.0 { win = (t, sd, val) }
+            }
+            guard let (t, sd, val) = win else { continue }
+            if anyEntry && (val == nil || t != baseOut) { entry[p] = t }
+            let f = partField(p)
+            if f == "reactions" && p != f {
+                decided.insert("reactions")
+                let rest = p.dropFirst("reactions/".count)
+                if val != nil, let slash = rest.lastIndex(of: "/"), let u = UInt64(rest[rest.index(after: slash)...]) {
+                    reactions.append((String(rest[..<slash]), u))
+                }
+            } else if f == "timers" && p != f {
+                decided.formUnion(timerKeys)
+                if let v = val { timers.append((v["member"]?.uint ?? 0, v["start"]?.int ?? 0)) }
+            } else {
+                decided.insert(p)
+                if let v = val {
+                    obj[p] = v
+                } else if let v = sd.obj[p] {
+                    // taken away there; keep how that copy writes it (an empty list)
+                    obj[p] = v
+                }
+            }
+        }
+        if decided.contains("reactions") {
+            var out: [(String, [UInt64])] = []
+            for (e, u) in reactions {
+                if let i = out.firstIndex(where: { $0.0 == e }) { out[i].1.append(u) } else { out.append((e, [u])) }
+            }
+            if !out.isEmpty || newest["reactions"] != nil {
+                obj["reactions"] = .array(out.map { ["emoji": .string($0.0), "users": .array($0.1.map { JSON.id($0) })] })
+            }
+        }
+        if decided.contains("timers") {
+            // the same order everywhere: an old timer nobody owns first, then by start
+            timers.sort { l, r in
+                let kl = (l.0 != 0 ? 1 : 0, l.1, l.0), kr = (r.0 != 0 ? 1 : 0, r.1, r.0)
+                return kl < kr
+            }
+            if let (m, st) = timers.first {
+                obj["timer_started"] = .int(st)
+                if m != 0 { obj["timer_by"] = .id(m) }
+            } else if sides.contains(where: { $0.obj["timer_started"] != nil }) {
+                obj["timer_started"] = .null
+            }
+            let rest = timers.dropFirst().map { JSON.object(["member": .id($0.0), "start": .int($0.1)]) }
+            if !rest.isEmpty { obj["timers"] = .array(Array(rest)) }
+        }
+        if anyEntry {
+            if baseOut != stamp { entry[""] = baseOut }
+            cx.outFields[id] = entry
+        }
+        return (obj, decided)
+    }
+
     private static func mergeArr(_ cx: Ctx, _ sources: [(Int, [JSON])], parent: UInt64?) -> [JSON] {
         var order: [UInt64] = []
         var seen = Set<UInt64>()
@@ -303,8 +579,10 @@ extension Sync {
             for c in list {
                 for k in c.value.object?.keys ?? [String: JSON]().keys { keys.insert(k) }
             }
-            var obj: [String: JSON] = [:]
+            // own fields first, field by field (see mergeFields)
+            var (obj, decided) = mergeFields(cx, id, list, stamp: bestStamp, newest: wobj)
             for k in keys {
+                if decided.contains(k) || obj[k] != nil { continue }
                 let vals: [(Int, JSON)] = list.compactMap { c in c.value[k].map { (c.src, $0) } }
                 let value: JSON
                 if vals.contains(where: { isIdArray($0.1) }) {
@@ -351,9 +629,11 @@ extension Sync {
         // copies from before activity had ids: give their entries the same ids
         // here as everywhere else, or their comments would not be matched up
         fillActivityIds(&local)
+        fillBoardIds(&local)
         let others = others.map { o -> JSON in
             var o = o
             fillActivityIds(&o)
+            fillBoardIds(&o)
             return o
         }
         let before = local
@@ -378,6 +658,7 @@ extension Sync {
         }
         let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), tombs: tombs, revived: revived, all: all)
         cx.omitsDefaults = [lmeta.v >= 2] + metas.map { $0.v >= 2 }
+        cx.fields = [lmeta.fields] + metas.map(\.fields)
         var merged: [(String, JSON)] = []
         for (path, sources) in perPath {
             merged.append((path, .array(mergeArr(cx, sources, parent: nil))))
@@ -400,7 +681,9 @@ extension Sync {
         lmeta.tombs = tombs
         lmeta.revived = revived
         lmeta.stamps = cx.out
+        lmeta.fields = cx.outFields
         lmeta.hashes = fingerprints(local)
+        lmeta.fieldHashes = partHashes(local)
         lmeta.valueHashes = valueHashes(local)
         lmeta.v = 1
         local.set("extra.sync", lmeta.json)
@@ -423,6 +706,9 @@ extension Sync {
         if v.at("extra.sync")?.object != nil {
             v.set("extra.sync.hashes", .object([:]))
             v.set("extra.sync.value_hashes", .object([:]))
+            var sync = v.at("extra.sync") ?? .object([:])
+            sync["field_hashes"] = nil
+            v.set("extra.sync", sync)
         }
         return v
     }
@@ -448,7 +734,7 @@ extension Sync {
         var inner: [UInt64: UInt64] = [:]
         walk(.array(gone), parent: nil, placed: false, &inner)
         if data.at("extra.sync")?.object != nil {
-            for key in ["stamps", "hashes", "moved", "parents"] {
+            for key in ["stamps", "hashes", "moved", "parents", "fields", "field_hashes"] {
                 guard var m = data.at("extra.sync." + key)?.object else { continue }
                 for id in inner.keys { m[String(id)] = nil }
                 data.set("extra.sync." + key, .object(m))
@@ -504,6 +790,56 @@ extension Sync {
             tasks[ti]["activity"] = .array(out)
         }
         if changed { data["tasks"] = .array(tasks) }
+        return changed
+    }
+
+    // MARK: whiteboard ids (wb_sync::board_item_id / fill_board_ids)
+
+    /// The id a whiteboard stroke or note gets when it was drawn without one,
+    /// worked out from what it looks like; bit 62 set.
+    public static func boardItemId(board: UInt64, kind: String, sig: String, nth: Int) -> UInt64 {
+        let h = fnv("wb|\(board)|\(kind)|\(nth)|\(sig)".utf8)
+        return (h & ((1 << 62) - 1)) | (1 << 62)
+    }
+
+    static func boardSig(_ kind: String, _ item: JSON) -> String {
+        func r10(_ v: JSON?) -> Int64 { Int64(((v?.double ?? 0) * 10).rounded()) }
+        let color = (item["color"]?.array ?? []).map { String($0.uint ?? 0) }.joined(separator: ",")
+        if kind == "strokes" {
+            let pts = (item["points"]?.array ?? []).map { p in "\(r10(p[0])),\(r10(p[1]))" }
+            return "\(color)|\(pts.joined(separator: ";"))"
+        }
+        let pos = item["pos"]
+        return "\(color)|\(item["text"]?.string ?? "")|\(r10(pos?[0]))|\(r10(pos?[1]))"
+    }
+
+    /// Gives every whiteboard stroke and note without an id one, so they
+    /// merge one by one. True when anything changed.
+    @discardableResult
+    public static func fillBoardIds(_ data: inout JSON) -> Bool {
+        guard var boards = data.at("extra.whiteboards")?.array else { return false }
+        var changed = false
+        for bi in boards.indices {
+            let bid = idOf(boards[bi]) ?? 0
+            for kind in ["strokes", "notes"] {
+                guard var items = boards[bi][kind]?.array else { continue }
+                var counts: [String: Int] = [:]
+                var touched = false
+                for i in items.indices {
+                    guard items[i].object != nil, (idOf(items[i]) ?? 0) == 0 else { continue }
+                    let sig = boardSig(kind, items[i])
+                    let n = counts[sig, default: 0]
+                    items[i]["id"] = .id(boardItemId(board: bid, kind: kind, sig: sig, nth: n))
+                    counts[sig] = n + 1
+                    touched = true
+                }
+                if touched {
+                    boards[bi][kind] = .array(items)
+                    changed = true
+                }
+            }
+        }
+        if changed { data.set("extra.whiteboards", .array(boards)) }
         return changed
     }
 }

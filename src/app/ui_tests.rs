@@ -5104,11 +5104,13 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
         .find(|w| w.id == wid)
         .unwrap();
     wb.notes.push(Sticky {
+        id: 0,
         pos: [40.0, 40.0],
         text: "One".into(),
         color: [0xf8, 0xae, 0x00],
     });
     wb.strokes.push(WbStroke {
+        id: 0,
         color: [0, 0, 0],
         width: 2.0,
         points: vec![[1.0, 1.0], [5.0, 5.0]],
@@ -6114,6 +6116,7 @@ fn whiteboard_undo_puts_a_moved_note_back() {
         .find(|w| w.id == wid)
         .unwrap();
     wb.notes.push(Sticky {
+        id: 0,
         pos: [60.0, 60.0],
         text: "One".into(),
         color: [0xf8, 0xae, 0x00],

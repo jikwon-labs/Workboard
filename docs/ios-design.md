@@ -226,11 +226,10 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 ```
 
 - **서버 쪽(2026-11-16):** workboard-server 가 `push_token` 을 기기별로 저장하고, 새 메시지·멘션·DM 이 오면 위 모양으로 APNs 에 보낸다(답글이면 `parent` 와 `"subtitle": "Thread reply"` 도). 보낸 사람 자신의 기기와 **지금 서버에 연결된 기기**에는 보내지 않는다. 연결된 앱은 로컬 알림을 띄우므로 "그 대화를 보고 있는 기기" 를 이것으로 대신했다. 규칙 전체는 `server/src/push.rs` 맨 위와 `docs/server-design.md` 7단계.
-- **푸시를 실제로 켜려면(남은 일):**
-  1. 실제 번들 ID 를 정한다(지금 `com.example.workboard.temporary`).
-  2. Apple Developer 에서 그 App ID 에 Push Notifications capability 를 켜고, `Config/Workboard.entitlements`(`aps-environment`)를 빌드 설정 `CODE_SIGN_ENTITLEMENTS` 에 연결한다.
-  3. Apple Developer > Keys 에서 APNs 키(.p8)를 만들어 Mac mini 서버 폴더에 두고 `apns.json` 을 쓴다(`docs/macmini/README.md`). `topic` 은 1번의 번들 ID.
-  4. 실기기에서 앱을 끄거나 백그라운드로 보낸 뒤 다른 사람이 DM 을 보내 배너가 뜨는지 본다. Xcode 로 설치한 개발 빌드는 `env: "development"` 라 sandbox 로 간다.
+- **푸시 설정(2026-11-16):**
+  1. 번들 ID 는 `com.seojigwon.workboard`(UI 테스트는 `com.seojigwon.workboard.uitests`), 팀은 `K6599UJ4KM` 이다. Apple Developer 의 App ID 에 Push Notifications capability 를 켰고, `Config/Workboard.entitlements`(`aps-environment`)를 `CODE_SIGN_ENTITLEMENTS` 에 연결했다.
+  2. APNs 키는 "Workboard APNs"(Key ID `7NH56246WD`, Team Scoped, Sandbox & Production). `.p8` 파일은 비밀이라 레포에 넣지 않는다. Mac mini 서버 폴더에 두고 `apns.json` 을 쓴다(`docs/macmini/README.md`). `topic` 은 위 번들 ID.
+  3. 남은 일: Mac mini 에 키를 두고, 실기기에서 앱을 끄거나 백그라운드로 보낸 뒤 다른 사람이 DM 을 보내 배너가 뜨는지 본다. Xcode 로 설치한 개발 빌드는 `env: "development"` 라 sandbox 로, 그 밖의 빌드는 `"production"` 으로 간다.
 - **확인한 것:** 권한 허용 -> 다른 탭에서 메시지 도착 -> 배너 -> 눌러서 #general 열기(UI 테스트).
 - **확인 못 한 것:** `xcrun simctl push` 로 원격 페이로드를 보냈을 때 배너가 뜨는 것은 이 시뮬레이터에서 확인하지 못했다. 추측: 테스트가 끝난 뒤 권한 상태가 바뀌었거나, 이 iOS 27 시뮬레이터의 동작 차이일 수 있다. 실기기에서 다시 확인해야 한다.
 

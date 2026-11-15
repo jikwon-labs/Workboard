@@ -16,10 +16,10 @@
   - 시스템 설정 > 일반 > Time Machine > 백업 디스크 추가 → 그 디스크 선택 → **백업 암호화** 켜기(이 Mac mini 는 FileVault 를 켜 두므로 백업도 암호화한다). 디스크를 지워도 된다고 물으면 그 디스크가 비어 있는지 먼저 확인한다.
   - 옵션에서 `~/Library` 가 제외 목록에 없는지 본다(기본값은 포함). 서버 데이터 `~/Library/Application Support/WorkboardServer/` 가 여기 있다.
   - 확인: `tmutil destinationinfo` 에 디스크가 보이고, `tmutil startbackup --block` 뒤 `tmutil latestbackup` 이 오늘 날짜 경로를 찍으면 끝. 그 뒤로는 매시간 저절로 돈다.
-- [ ] **APNs 키 두고 푸시 켜기** (iPhone 앱의 실제 번들 ID 를 정하고 Push Notifications capability 를 켠 뒤. `docs/ios-design.md` "알림")
-  - Apple Developer > Certificates, Identifiers & Profiles > Keys 에서 "Apple Push Notifications service (APNs)" 키를 만들고 `.p8` 을 받는다(한 번만 받을 수 있다). 키 id 와 팀 id 를 적어 둔다.
+- [ ] **APNs 키 두고 푸시 켜기** (번들 ID `com.seojigwon.workboard`, Push Notifications capability, APNs 키는 2026-11-16 에 만들어 두었다. `docs/ios-design.md` "알림")
+  - (2026-11-16 완료) Apple Developer > Keys 에 "Workboard APNs" 키를 만들고 `.p8` 을 받았다. Key ID `7NH56246WD`, 팀 id `K6599UJ4KM`.
   - `.p8` 을 Mac mini 서버 폴더로 옮기고 권한을 600 으로: `cd ~/Library/Application\ Support/WorkboardServer && chmod 600 AuthKey_*.p8`
-  - 같은 폴더에 `apns.json` 을 쓰고 `chmod 600 apns.json`. 형식(값은 실제 것으로): `{"key": "AuthKey_<키 id>.p8", "key_id": "<키 id>", "team_id": "<팀 id>", "topic": "<iPhone 앱 번들 ID>"}`. 비밀 값이므로 레포에 넣지 않는다. 설명은 `server/src/push.rs` 맨 위.
+  - 같은 폴더에 `apns.json` 을 쓰고 `chmod 600 apns.json`. 값: `{"key": "AuthKey_7NH56246WD.p8", "key_id": "7NH56246WD", "team_id": "K6599UJ4KM", "topic": "com.seojigwon.workboard"}`. 키 파일은 MacBook 의 `~/Downloads/AuthKey_7NH56246WD.p8` 에 있다(Apple 은 다시 받게 해 주지 않으니 백업해 둔다). 비밀 값이므로 레포에 넣지 않는다. 설명은 `server/src/push.rs` 맨 위.
   - 서버 다시 켜기: `launchctl kickstart -k gui/$(id -u)/com.jikwon-labs.workboard-server` → 로그에 `iPhone notifications on (APNs, topic ...)` 이 보이면 된다. `off: ...` 면 뒤에 적힌 이유(빠진 항목, 키 파일 못 읽음)를 고친다.
   - 확인: iPhone 에서 알림을 허용하고 앱을 백그라운드로 보낸 뒤 1~2분 기다린다(서버가 연결이 끊긴 걸 알아챌 때까지). 다른 사람이 DM 을 보내면 배너가 떠야 한다. 안 뜨면 로그의 `couldn't send a notification ...` 줄을 본다.
 

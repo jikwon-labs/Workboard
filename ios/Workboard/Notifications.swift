@@ -8,7 +8,7 @@
 // Remote (APNs): after permission is given the app registers for remote
 // notifications and sends the device token to the server (`push_token`).
 // The server sends them once its apns.json is set up (server/src/push.rs);
-// the aps-environment entitlement is not set up yet, see docs/ios-design.md.
+// the app needs a signed build with the aps-environment entitlement (Config/Workboard.entitlements); see docs/ios-design.md.
 // The payload the app understands:
 //   {"aps": {"alert": {"title": "...", "body": "..."}, "thread-id": "ch-301"},
 //    "channel": 301, "parent": 311}
@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        // expected until the app is signed with the aps-environment entitlement
+        // expected in the simulator and in unsigned builds (no aps-environment entitlement)
         print("remote notifications not available: \(error.localizedDescription)")
     }
 

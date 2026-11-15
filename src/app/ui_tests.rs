@@ -6425,3 +6425,76 @@ fn a_shared_folder_says_private_items_are_readable_from_its_files() {
     assert!(!h.has(together::FOLDER_PRIVACY));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn comment_links_to_private_or_archived_places_do_not_open() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let me = h.app.data.me;
+    let task_list = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .list_id;
+    // a list in another space, made someone else's Personal space
+    let (sid, lid) = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .filter(|s| s.lists.iter().all(|l| l.id != task_list))
+        .find_map(|s| s.lists.first().map(|l| (s.id, l.id)))
+        .unwrap();
+    h.app
+        .data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me + 100);
+    let link = format!("workboard://list/{}", lid);
+    let folder_link = "workboard://folder/987654".to_string();
+    {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.activity.push(Activity {
+            ts: now_ts(),
+            author: 2,
+            text: format!("see {}\nand {}", link, folder_link),
+            comment: true,
+            id: 77_002,
+            ..Default::default()
+        });
+    }
+    h.settle();
+    let loc = h.app.loc;
+    h.click(&link);
+    assert_eq!(h.app.open_task, Some(id), "the task stays open");
+    assert_eq!(h.app.loc, loc);
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("archived or private")));
+    // a folder link is a link too, and one this workspace doesn't have says so
+    h.app.toast = None;
+    h.click(&folder_link);
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("can't be opened")));
+    // my own Personal space opens like a link in chat: task window closed
+    h.app
+        .data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me);
+    h.click(&link);
+    assert_eq!(h.app.open_task, None);
+    assert_eq!(h.app.loc, Location::List(lid));
+}

@@ -485,7 +485,13 @@ impl App {
     /// Opens a workboard:// link; false when it isn't one this workspace has
     /// (or it is archived or in someone else's Personal space).
     pub(super) fn open_link(&mut self, url: &str) -> bool {
-        let link = parse_link(url);
+        self.go_link(parse_link(url))
+    }
+
+    /// Opens a link already read (`None`: not one this app can read), the
+    /// same way wherever it was clicked: chat, task comments, search or a
+    /// link from macOS.
+    pub(super) fn go_link(&mut self, link: Option<Link>) -> bool {
         let shown = link.and_then(|l| self.link_shown(l));
         match (link, shown) {
             (Some(Link::Task(id)), Some(true)) => self.actions.push(Action::Open(id)),

@@ -2,6 +2,7 @@
 // items, @mentions and workboard:// links, reactions, replies, editing,
 // deleting, assigning and resolving, and the per-task unsent drafts.
 
+use super::nav::Link;
 use super::*;
 
 /// Reactions offered on a comment.
@@ -36,16 +37,18 @@ pub(super) enum Seg<'a> {
 pub(super) enum LinkTo {
     Task(u64),
     List(u64),
+    Folder(u64),
     Space(u64),
 }
 
-/// Reads `workboard://task/12` (or list/space) at the start of `s`; returns
+/// Reads `workboard://task/12` (or list/folder/space) at the start of `s`; returns
 /// the target and how many bytes the link takes.
 pub(super) fn parse_link(s: &str) -> Option<(LinkTo, usize)> {
     let rest = s.strip_prefix("workboard://")?;
     for (kind, mk) in [
         ("task/", LinkTo::Task as fn(u64) -> LinkTo),
         ("list/", LinkTo::List),
+        ("folder/", LinkTo::Folder),
         ("space/", LinkTo::Space),
     ] {
         if let Some(r) = rest.strip_prefix(kind) {
@@ -169,29 +172,15 @@ impl App {
         self.comment_for = Some(id);
     }
 
-    /// Goes where a workboard:// link points.
+    /// Goes where a workboard:// link points, like a link in chat: not
+    /// to archived places or someone else's Personal space.
     pub(super) fn follow_link(&mut self, to: LinkTo) {
-        match to {
-            LinkTo::Task(id) => {
-                if self.task(id).is_some() {
-                    self.actions.push(Action::Open(id));
-                } else {
-                    self.toast = Some((tr("That task no longer exists").into(), now_ts()));
-                }
-            }
-            LinkTo::List(id) if self.data.space_of_list(id).is_some() => {
-                self.open_task = None;
-                self.section = Section::Home;
-                self.loc = Location::List(id);
-                self.view = ViewKind::List;
-            }
-            LinkTo::Space(id) if self.data.spaces.iter().any(|s| s.id == id) => {
-                self.open_task = None;
-                self.section = Section::Home;
-                self.loc = Location::Space(id);
-            }
-            _ => self.toast = Some((tr("That place no longer exists").into(), now_ts())),
-        }
+        self.go_link(Some(match to {
+            LinkTo::Task(id) => Link::Task(id),
+            LinkTo::List(id) => Link::Loc(Location::List(id)),
+            LinkTo::Folder(id) => Link::Loc(Location::Folder(id)),
+            LinkTo::Space(id) => Link::Loc(Location::Space(id)),
+        }));
     }
 
     /// The task window's comments and activity lines, oldest first.

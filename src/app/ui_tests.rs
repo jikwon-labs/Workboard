@@ -1285,7 +1285,7 @@ fn inviting_while_the_server_is_down_says_the_codes_wait_and_the_dialog_stays_na
         w
     );
     h.type_text("dana@example.com");
-    h.click("Send free invite");
+    h.click("Send invite");
     assert_eq!(
         h.app.toast.as_ref().map(|t| t.0.as_str()),
         Some("Invited 1 people. Their invite codes are asked for once the server is back.")
@@ -6245,7 +6245,7 @@ fn invited_people_are_marked_in_channel_and_team_member_lists() {
     h.key(egui::Key::Escape);
     h.app.section = Section::Teams;
     h.settle();
-    h.click_side("Create Team", true);
+    h.click_side("Create team", true);
     assert!(h.has("Dana Reed (invited)"));
 }
 

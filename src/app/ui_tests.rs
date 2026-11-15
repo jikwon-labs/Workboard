@@ -9282,6 +9282,9 @@ fn invite_note_wraps_inside_the_dialog() {
         tag: 5,
         server: Some("127.0.0.1:1".into()),
     });
+    // connected as the owner: the longest note
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
     h.app.modal = Some(Modal::Invite {
         emails: String::new(),
         role: "Member".into(),

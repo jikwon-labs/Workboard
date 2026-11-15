@@ -2721,6 +2721,173 @@ fn new_filter_fields() {
     assert!(!a.filtered().is_empty());
 }
 
+/// Four tasks with known priority and tags, and which of them a filter keeps.
+fn filter_fixture() -> (App, impl Fn(&App, &parity::TaskFilter) -> Vec<&'static str>) {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    for (name, priority, tag) in [
+        ("A", 1, true),
+        ("B", 1, false),
+        ("C", 3, true),
+        ("D", 3, false),
+    ] {
+        let id = add_task(&mut a, list, name);
+        let t = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.priority = priority;
+        t.tags = if tag { vec!["x".into()] } else { vec![] };
+    }
+    let hits = |a: &App, f: &parity::TaskFilter| {
+        ["A", "B", "C", "D"]
+            .into_iter()
+            .filter(|n| f.matches(a.task(tid(a, n)).unwrap(), &a.data))
+            .collect()
+    };
+    (a, hits)
+}
+
+fn urgent() -> parity::FilterRow {
+    parity::FilterRow {
+        field: Some(parity::FilterField::Priority),
+        not: false,
+        values: vec!["1".into()],
+    }
+}
+
+fn tagged_x() -> parity::FilterRow {
+    parity::FilterRow {
+        field: Some(parity::FilterField::Tags),
+        not: false,
+        values: vec!["x".into()],
+    }
+}
+
+#[test]
+fn filter_rows_combine_with_and_or_or() {
+    use parity::{Join, TaskFilter};
+    let (a, hits) = filter_fixture();
+    let mut f = TaskFilter {
+        rows: vec![urgent(), tagged_x()],
+        ..Default::default()
+    };
+    assert_eq!(hits(&a, &f), vec!["A"], "And: both");
+    f.join = Join::Or;
+    assert_eq!(hits(&a, &f), vec!["A", "B", "C"], "Or: either");
+    // is not
+    f.rows[1].not = true;
+    assert_eq!(hits(&a, &f), vec!["A", "B", "D"], "urgent or not tagged");
+    f.join = Join::And;
+    assert_eq!(hits(&a, &f), vec!["B"], "urgent and not tagged");
+    // an unfinished row doesn't count, with Or as well as And
+    f.rows = vec![urgent(), parity::FilterRow::default()];
+    assert_eq!(hits(&a, &f), vec!["A", "B"]);
+    f.join = Join::Or;
+    assert_eq!(
+        hits(&a, &f),
+        vec!["A", "B"],
+        "an empty row doesn't match everything"
+    );
+    assert_eq!(f.count(), 1);
+}
+
+#[test]
+fn filter_groups_nest_one_level() {
+    use parity::{FilterGroup, Join, TaskFilter};
+    let (a, hits) = filter_fixture();
+    // tagged x, and (urgent or not tagged): only A
+    let mut f = TaskFilter {
+        rows: vec![tagged_x()],
+        groups: vec![FilterGroup {
+            join: Join::Or,
+            rows: vec![
+                urgent(),
+                parity::FilterRow {
+                    not: true,
+                    ..tagged_x()
+                },
+            ],
+        }],
+        ..Default::default()
+    };
+    assert_eq!(hits(&a, &f), vec!["A"]);
+    assert_eq!(f.count(), 3, "every row counts, the ones in groups too");
+    // top level Or: tagged x, or (urgent or not tagged) = everything
+    f.join = Join::Or;
+    assert_eq!(hits(&a, &f), vec!["A", "B", "C", "D"]);
+    // a group with And inside, top level Or: (urgent and tagged) or (not urgent and not tagged)
+    f.rows.clear();
+    f.groups = vec![
+        FilterGroup {
+            join: Join::And,
+            rows: vec![urgent(), tagged_x()],
+        },
+        FilterGroup {
+            join: Join::And,
+            rows: vec![
+                parity::FilterRow {
+                    not: true,
+                    ..urgent()
+                },
+                parity::FilterRow {
+                    not: true,
+                    ..tagged_x()
+                },
+            ],
+        },
+    ];
+    assert_eq!(hits(&a, &f), vec!["A", "D"]);
+    f.join = Join::And;
+    assert!(hits(&a, &f).is_empty(), "nothing is both");
+}
+
+#[test]
+fn empty_filter_groups_are_left_out() {
+    use parity::{FilterGroup, Join, TaskFilter};
+    let (a, hits) = filter_fixture();
+    // only empty groups: nothing is filtered, and the badge shows nothing
+    let mut f = TaskFilter {
+        join: Join::Or,
+        groups: vec![
+            FilterGroup::default(),
+            FilterGroup {
+                join: Join::Or,
+                rows: vec![parity::FilterRow::default()],
+            },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(hits(&a, &f), vec!["A", "B", "C", "D"]);
+    assert_eq!(f.count(), 0);
+    // with Or at the top, an empty group doesn't let everything through
+    f.rows = vec![urgent()];
+    assert_eq!(hits(&a, &f), vec!["A", "B"]);
+    f.join = Join::And;
+    assert_eq!(hits(&a, &f), vec!["A", "B"]);
+    assert_eq!(f.count(), 1);
+}
+
+#[test]
+fn view_settings_from_before_filter_groups_still_load() {
+    use parity::{FilterGroup, Join};
+    let p: super::listview::ViewPrefs = serde_json::from_value(serde_json::json!({
+        "group_by": "Status", "sort_by": "Manual",
+        "filter_rows": [{"field": "Priority", "not": false, "values": ["1"]}]
+    }))
+    .unwrap();
+    assert_eq!(p.filter_rows.len(), 1);
+    assert!(p.filter_groups.is_empty() && p.filter_join == Join::And);
+    // groups are remembered per location like the rows
+    let mut a = app();
+    a.filter.join = Join::Or;
+    a.filter.groups = vec![FilterGroup {
+        join: Join::Or,
+        rows: vec![urgent(), tagged_x()],
+    }];
+    let v = serde_json::to_value(a.current_prefs()).unwrap();
+    let back: super::listview::ViewPrefs = serde_json::from_value(v).unwrap();
+    assert_eq!(back.filter_join, Join::Or);
+    assert_eq!(back.filter_groups, a.filter.groups);
+}
+
 #[test]
 fn search_finds_subtasks() {
     let mut a = app();

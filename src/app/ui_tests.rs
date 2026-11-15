@@ -2163,6 +2163,65 @@ fn filter_builder_rows_are_joined_with_and() {
 }
 
 #[test]
+fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
+    use parity::Join;
+    let mut h = Ui1::new();
+    h.app.loc = Location::Everything;
+    h.settle();
+    h.click("\u{2261}  Filter");
+    // Priority is Urgent
+    h.click("+ Add filter");
+    h.click("Filter 1 field");
+    h.click("Priority");
+    h.click("Filter 1 values");
+    h.click("Urgent");
+    h.key(egui::Key::Escape);
+    // or a group: Status is TO DO or Priority is High
+    h.click("+ Add group");
+    assert_eq!(h.app.filter.groups.len(), 1);
+    h.click("Group 1 filter 1 field");
+    h.click("Status");
+    h.click("Group 1 filter 1 values");
+    h.click("TO DO");
+    h.key(egui::Key::Escape);
+    h.click("Add filter to group 1");
+    h.click("Group 1 filter 2 field");
+    h.click("Priority");
+    h.click("Group 1 filter 2 values");
+    h.click("High");
+    h.key(egui::Key::Escape);
+    assert!(h.app.filter_open, "the panel stays open");
+    assert_eq!(h.app.filter.groups[0].rows.len(), 2);
+    // And inside the group: TO DO and High
+    let and_inside = h.app.filtered().len();
+    h.click("Group 1 join");
+    assert_eq!(h.app.filter.groups[0].join, Join::Or);
+    h.click("Filter join");
+    assert_eq!(h.app.filter.join, Join::Or);
+    let shown: Vec<(u8, String)> = h
+        .app
+        .filtered()
+        .iter()
+        .map(|t| (t.priority, t.status.clone()))
+        .collect();
+    assert!(shown.len() > and_inside, "Or lets more through");
+    assert!(shown
+        .iter()
+        .all(|(p, s)| *p == 1 || s == "to do" || *p == 2));
+    assert!(shown.iter().any(|(p, _)| *p != 1), "not only Urgent");
+    // the badge counts every condition, the ones in the group too
+    assert_eq!(h.app.filter.count(), 3);
+    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    // removing a row in the group, then the group
+    h.click("Remove group 1 filter 2");
+    assert_eq!(h.app.filter.count(), 2);
+    h.click("Remove group 1");
+    assert!(h.app.filter.groups.is_empty());
+    assert_eq!(h.app.filter.count(), 1);
+    assert!(h.has("\u{2261}  Filter \u{00B7} 1"));
+}
+
+#[test]
 fn space_overview_customize_and_lists_card_columns() {
     let mut h = Ui1::new();
     let sid = h

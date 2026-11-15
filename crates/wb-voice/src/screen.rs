@@ -16,7 +16,7 @@
 // & Security > Screen & System Audio Recording). `allowed` checks it without
 // asking, `ask` shows macOS's request (once), `open_settings` opens the page.
 
-use crate::quality::{self, Kind};
+use crate::quality;
 use crate::video::{self, Feed, Limits};
 use livekit::webrtc::native::yuv_helper;
 use livekit::webrtc::prelude::I420Buffer;
@@ -879,6 +879,7 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quality::Kind;
 
     #[test]
     fn frames_convert_and_scale_to_the_limit() {
@@ -948,7 +949,11 @@ mod tests {
             .await
         });
         drop(feed);
-        assert!(ended.lock().unwrap().is_none(), "{:?}", ended.lock().unwrap());
+        assert!(
+            ended.lock().unwrap().is_none(),
+            "{:?}",
+            ended.lock().unwrap()
+        );
         got.expect("a frame within 10 s").expect("stream open")
     }
 

@@ -329,7 +329,11 @@ fn run_pattern(
     while !stop.load(Ordering::Relaxed) {
         // the camera's size (or less on a poor connection); a light bar
         // moves across, so frames differ like real video
-        let (w, h) = send_size(quality::CAMERA_WIDTH, quality::CAMERA_WIDTH * 9 / 16, limits.width());
+        let (w, h) = send_size(
+            quality::CAMERA_WIDTH,
+            quality::CAMERA_WIDTH * 9 / 16,
+            limits.width(),
+        );
         let bar = (n * w / 40) % w;
         send(source, pattern_i420(w, h, rgb, bar), started, preview);
         n += 1;

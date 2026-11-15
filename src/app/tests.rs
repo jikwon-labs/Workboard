@@ -1891,6 +1891,21 @@ fn a_huddle_on_the_server_connects_two_computers() {
             && !a.huddle.pictures.contains_key(wb_voice::ME)
     });
 
+    // A shares a screen (a test picture stands in for it): B gets it as A's screen
+    a.open_share_menu();
+    let display = a.huddle.screen_sources[0].share();
+    a.set_huddle_screen(Some(display));
+    let a_screen = wb_voice::screen_key(&a_identity);
+    huddle_until(&mut a, &mut b, "B sees A's screen", |a, b| {
+        b.huddle.pictures.contains_key(&a_screen)
+            && b.huddle.people.iter().any(|p| !p.me && p.screen)
+            && a.huddle.people.iter().any(|p| p.me && p.screen)
+    });
+    a.set_huddle_screen(None);
+    huddle_until(&mut a, &mut b, "A's screen is gone at B", |_, b| {
+        !b.huddle.pictures.contains_key(&a_screen)
+    });
+
     // B mutes, then leaves
     b.set_huddle_muted(true);
     huddle_until(&mut a, &mut b, "A sees B muted", |a, _| {

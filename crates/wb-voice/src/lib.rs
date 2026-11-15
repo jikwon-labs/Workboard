@@ -27,8 +27,8 @@ pub use video::{Picture, Video};
 
 use futures_util::StreamExt;
 use livekit::options::TrackPublishOptions;
-use livekit::track::VideoQuality;
 use livekit::prelude::*;
+use livekit::track::VideoQuality;
 use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
@@ -340,7 +340,11 @@ async fn watch(
 
 /// Ask the server for the layer of each received video that fits how large
 /// it is drawn here (only when that changes).
-fn ask_layers(room: &Room, views: &HashMap<String, f32>, asked: &mut HashMap<String, VideoQuality>) {
+fn ask_layers(
+    room: &Room,
+    views: &HashMap<String, f32>,
+    asked: &mut HashMap<String, VideoQuality>,
+) {
     for p in room.remote_participants().into_values() {
         let id = p.identity().to_string();
         for publication in p.track_publications().into_values() {
@@ -437,9 +441,9 @@ async fn run(
     options.adaptive_stream = true;
     options.dynacast = true;
     let (room, mut events) = match Room::connect(&join.url, &join.token, options).await {
-            Ok(x) => x,
-            Err(e) => return Some(format!("Couldn't join the call: {}", e)),
-        };
+        Ok(x) => x,
+        Err(e) => return Some(format!("Couldn't join the call: {}", e)),
+    };
     let source = match (&platform, audio) {
         (Some(p), _) => p.rtc_source(),
         (None, Audio::Tone(hz)) => {

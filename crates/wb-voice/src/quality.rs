@@ -12,7 +12,7 @@
 
 use livekit::options::{DegradationPreference, TrackPublishOptions, VideoEncoding, VideoPreset};
 use livekit::prelude::TrackSource;
-use livekit::track::VideoQuality;
+pub use livekit::track::VideoQuality;
 
 /// What the camera is captured at (the top simulcast layer).
 pub const CAMERA_WIDTH: u32 = 1280;

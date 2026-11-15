@@ -7,7 +7,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Role, SignIn, Status};
-use wb_voice::{screen_key, Audio, Call, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME};
+use wb_voice::{
+    screen_key, Audio, Call, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME,
+};
 
 const SECRET: &str = "test-secret-test-secret-test-secret-0123";
 

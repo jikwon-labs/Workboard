@@ -2657,7 +2657,7 @@ fn a_list_restored_into_another_space_takes_that_spaces_statuses() {
     a.restore_trash(i);
     assert!(a.data.spaces[0].lists.iter().any(|l| l.id == ideas), "into the team space");
     let st: Vec<String> = ids.iter().map(|t| a.task(*t).unwrap().status.clone()).collect();
-    assert_eq!(st, vec!["to do", "in progress", "complete", "to do"], "same kind, else the same name");
+    assert_eq!(st, vec!["to do", "in progress", "complete", "to do"], "same name, else the same kind");
     assert!(a.task(ids[1]).unwrap().activity.iter().any(|x| x.text.contains("changed status from DOING to IN PROGRESS")));
 }
 

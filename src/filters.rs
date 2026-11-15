@@ -1,6 +1,6 @@
-// The shape of a task filter as it is kept: condition rows and groups of
-// rows with their own And / Or. Matching and the Filter panel are in
-// src/app/parity.rs.
+// The shape of a task filter as it is kept: condition rows, groups of rows
+// with their own And / Or, and filters saved under a name. Matching and the
+// Filter panel are in src/app/parity.rs.
 
 use serde::{Deserialize, Serialize};
 
@@ -79,4 +79,21 @@ pub struct FilterGroup {
     #[serde(skip_serializing_if = "Join::is_and")]
     pub join: Join,
     pub rows: Vec<FilterRow>,
+}
+
+/// A filter kept under a name to bring back later. It is the person's own:
+/// it stays in their copy of the workspace and is left out of the copy
+/// teammates get (`wb_sync::shareable`).
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedFilter {
+    pub id: u64,
+    pub name: String,
+    /// How the top-level rows and groups combine.
+    #[serde(skip_serializing_if = "Join::is_and")]
+    pub join: Join,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rows: Vec<FilterRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<FilterGroup>,
 }

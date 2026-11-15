@@ -53,8 +53,8 @@ pub fn prop_width(name: &str) -> f32 {
     }
 }
 
-// the stored shapes: condition rows and groups
-pub use crate::filters::{FilterField, FilterGroup, FilterRow, Join};
+// the stored shapes: condition rows, groups and saved filters
+pub use crate::filters::{FilterField, FilterGroup, FilterRow, Join, SavedFilter};
 
 /// Choices for the start date filter (index = stored value).
 pub const START_FILTERS: [&str; 6] = [
@@ -313,6 +313,20 @@ impl TaskFilter {
             return false;
         }
         due_matches(self.due, t, data)
+    }
+}
+
+impl SavedFilter {
+    /// Whether the builder shows exactly this saved filter.
+    pub fn is_shown(&self, f: &TaskFilter) -> bool {
+        self.join == f.join && self.rows == f.rows && self.groups == f.groups
+    }
+
+    /// Puts this filter's conditions in the builder (the other settings stay).
+    pub fn apply_to(&self, f: &mut TaskFilter) {
+        f.join = self.join;
+        f.rows = self.rows.clone();
+        f.groups = self.groups.clone();
     }
 }
 
@@ -2536,9 +2550,153 @@ impl App {
         flip
     }
 
+    /// Saved filters, below the conditions: the conditions saved under a
+    /// name, and the saved ones to bring back, rename or delete. They are
+    /// the person's own (`Extra::saved_filters`).
+    fn saved_filters_ui(&mut self, ui: &mut Ui, t: &Theme) {
+        let name_id = egui::Id::new("saved_filter_name");
+        let edit_id = egui::Id::new("saved_filter_rename");
+        let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
+        let mut editing: Option<(u64, String)> = ui.data(|d| d.get_temp(edit_id));
+        ui.label(RichText::new(tr("Saved filters")).strong());
+        let mut apply: Option<u64> = None;
+        let mut delete: Option<u64> = None;
+        let mut renamed: Option<(u64, String)> = None;
+        let mut start_rename: Option<(u64, String)> = None;
+        for s in &self.data.extra.saved_filters {
+            ui.horizontal(|ui| match &mut editing {
+                Some((id, text)) if *id == s.id => {
+                    let r = ui.add(egui::TextEdit::singleline(text).desired_width(260.0));
+                    name_field(&r, "Saved filter new name");
+                    focus_once(ui, &r);
+                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let ok = ui.button(tr("Done"));
+                    name_it(&ok, "Done renaming");
+                    if enter || ok.clicked() {
+                        renamed = Some((s.id, text.clone()));
+                    }
+                }
+                _ => {
+                    // the name is as the person typed it
+                    if ui
+                        .selectable_label(s.is_shown(&self.filter), &s.name)
+                        .on_hover_text(tr("Show this filter"))
+                        .clicked()
+                    {
+                        apply = Some(s.id);
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let d = ui.add(ghost(egui::Button::new(
+                            RichText::new(tr("Delete")).color(t.text3),
+                        )));
+                        name_it(&d, &format!("Delete saved filter {}", s.name));
+                        if d.clicked() {
+                            delete = Some(s.id);
+                        }
+                        let r = ui.add(ghost(egui::Button::new(
+                            RichText::new(tr("Rename")).color(t.text3),
+                        )));
+                        name_it(&r, &format!("Rename saved filter {}", s.name));
+                        if r.clicked() {
+                            start_rename = Some((s.id, s.name.clone()));
+                        }
+                    });
+                }
+            });
+        }
+        if let Some(id) = apply {
+            if let Some(s) = self.data.extra.saved_filters.iter().find(|s| s.id == id) {
+                s.apply_to(&mut self.filter);
+            }
+        }
+        if let Some(id) = delete {
+            self.data.extra.saved_filters.retain(|s| s.id != id);
+            self.dirty = true;
+        }
+        if let Some((id, text)) = renamed {
+            let text = text.trim();
+            if let Some(s) = self
+                .data
+                .extra
+                .saved_filters
+                .iter_mut()
+                .find(|s| s.id == id)
+            {
+                if !text.is_empty() && s.name != text {
+                    s.name = text.to_string();
+                    self.dirty = true;
+                }
+            }
+            editing = None;
+        }
+        if start_rename.is_some() {
+            editing = start_rename;
+        }
+        ui.horizontal(|ui| {
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut name)
+                    .hint_text(tr("Name this filter"))
+                    .desired_width(260.0),
+            );
+            name_field(&r, "Saved filter name");
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let can = !name.trim().is_empty() && self.filter.conditions() > 0;
+            let b = ui
+                .add_enabled(can, egui::Button::new(tr("Save filter")))
+                .on_disabled_hover_text(tr("Pick a condition and type a name first"));
+            name_it(&b, "Save filter");
+            if can && (b.clicked() || enter) {
+                self.save_filter(&name);
+                name.clear();
+            }
+        });
+        ui.data_mut(|d| {
+            d.insert_temp(name_id, name);
+            match editing {
+                Some(e) => d.insert_temp(edit_id, e),
+                None => d.remove::<(u64, String)>(edit_id),
+            }
+        });
+    }
+
+    /// Saves the builder's conditions under `name`; a saved filter with the
+    /// same name takes the new conditions.
+    pub(super) fn save_filter(&mut self, name: &str) {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let f = &self.filter;
+        let mut saved = SavedFilter {
+            id: 0,
+            name,
+            join: f.join,
+            rows: f.rows.clone(),
+            groups: f.groups.clone(),
+        };
+        match self
+            .data
+            .extra
+            .saved_filters
+            .iter_mut()
+            .find(|s| s.name == saved.name)
+        {
+            Some(s) => {
+                saved.id = s.id;
+                *s = saved;
+            }
+            None => {
+                saved.id = self.data.new_id();
+                self.data.extra.saved_filters.push(saved);
+            }
+        }
+        self.dirty = true;
+    }
+
     /// The Filter panel: a search field, condition rows ("Select filter",
-    /// is / is not, values) and groups of rows, combined with And or Or.
-    /// Drawn as a panel, not a popup, so the drop-downs in its rows can open.
+    /// is / is not, values) and groups of rows, combined with And or Or, and
+    /// saved filters. Drawn as a panel, not a popup, so the drop-downs in its
+    /// rows can open.
     pub(super) fn filter_panel(&mut self, ctx: &egui::Context, at: Pos2, pill: Rect) {
         let t = self.t();
         let mut close = false;
@@ -2664,6 +2822,8 @@ impl App {
                         ui.separator();
                         ui.checkbox(&mut self.filter.archived, tr("Show archived tasks only"));
                         ui.checkbox(&mut self.me_mode, tr("Only my tasks"));
+                        ui.separator();
+                        self.saved_filters_ui(ui, &t);
                     });
             });
         // close on Escape, or a press outside the panel and its drop-downs
@@ -2680,6 +2840,7 @@ impl App {
         }
         if close {
             self.filter_open = false;
+            ctx.data_mut(|d| d.remove::<(u64, String)>(egui::Id::new("saved_filter_rename")));
         }
     }
 

@@ -2222,6 +2222,69 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
 }
 
 #[test]
+fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
+    use parity::{FilterField, FilterGroup, FilterRow, Join};
+    let mut h = Ui1::new();
+    h.app.loc = Location::Everything;
+    h.settle();
+    h.click("\u{2261}  Filter");
+    // nothing to save yet
+    h.click("Saved filter name");
+    h.type_text("Urgent or to do");
+    h.click("Save filter");
+    assert!(h.app.data.extra.saved_filters.is_empty(), "no conditions");
+    // Urgent, or (TO DO or High)
+    let row = |field, v: &str| FilterRow {
+        field: Some(field),
+        not: false,
+        values: vec![v.to_string()],
+    };
+    h.app.filter.rows = vec![row(FilterField::Priority, "1")];
+    h.app.filter.join = Join::Or;
+    h.app.filter.groups = vec![FilterGroup {
+        join: Join::Or,
+        rows: vec![
+            row(FilterField::Status, "to do"),
+            row(FilterField::Priority, "2"),
+        ],
+    }];
+    h.settle();
+    let shown = h.app.filtered().len();
+    h.click("Save filter");
+    assert_eq!(h.app.data.extra.saved_filters.len(), 1);
+    let saved = h.app.data.extra.saved_filters[0].clone();
+    assert_eq!(saved.name, "Urgent or to do");
+    assert_eq!(saved.groups[0].rows.len(), 2);
+    assert_eq!((saved.join, saved.groups[0].join), (Join::Or, Join::Or));
+    assert!(h.has("Urgent or to do"));
+    // clear, then bring it back by its name
+    h.click("Clear all");
+    assert_eq!(h.app.filter.count(), 0);
+    h.click("Urgent or to do");
+    assert_eq!(h.app.filter.count(), 3);
+    assert_eq!(h.app.filter.groups, saved.groups);
+    assert_eq!(h.app.filtered().len(), shown);
+    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    // rename
+    h.click("Rename saved filter Urgent or to do");
+    h.type_text(" soon");
+    h.click("Done renaming");
+    assert_eq!(
+        h.app.data.extra.saved_filters[0].name,
+        "Urgent or to do soon"
+    );
+    assert!(h.has("Urgent or to do soon"));
+    // changing the builder leaves the saved filter as it was
+    h.click("Remove group 1");
+    assert_eq!(h.app.filter.count(), 1);
+    assert_eq!(h.app.data.extra.saved_filters[0].groups.len(), 1);
+    // delete
+    h.click("Delete saved filter Urgent or to do soon");
+    assert!(h.app.data.extra.saved_filters.is_empty());
+    assert!(!h.has("Urgent or to do soon"));
+}
+
+#[test]
 fn space_overview_customize_and_lists_card_columns() {
     let mut h = Ui1::new();
     let sid = h

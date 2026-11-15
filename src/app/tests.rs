@@ -2889,6 +2889,54 @@ fn view_settings_from_before_filter_groups_still_load() {
 }
 
 #[test]
+fn saved_filters_keep_the_nested_shape_and_old_files_still_load() {
+    use parity::{FilterGroup, Join};
+    let mut a = app();
+    a.filter.rows = vec![urgent()];
+    a.filter.join = Join::Or;
+    a.filter.groups = vec![FilterGroup {
+        join: Join::Or,
+        rows: vec![tagged_x()],
+    }];
+    a.save_filter("  Hot  ");
+    assert_eq!(a.data.extra.saved_filters.len(), 1);
+    let saved = a.data.extra.saved_filters[0].clone();
+    assert_eq!(saved.name, "Hot");
+    assert!(saved.is_shown(&a.filter));
+    // saving under the same name updates it
+    a.filter.join = Join::And;
+    a.save_filter("Hot");
+    assert_eq!(a.data.extra.saved_filters.len(), 1);
+    assert_eq!(a.data.extra.saved_filters[0].id, saved.id);
+    assert_eq!(a.data.extra.saved_filters[0].join, Join::And);
+    // written to the workspace file and read back with the groups
+    let v = serde_json::to_value(&a.data).unwrap();
+    let back: Data = serde_json::from_value(v.clone()).unwrap();
+    assert_eq!(back.extra.saved_filters, a.data.extra.saved_filters);
+    assert_eq!(
+        v["extra"]["saved_filters"][0]["groups"][0]["join"],
+        serde_json::json!("Or")
+    );
+    // bringing it back after the builder was cleared
+    a.filter = Default::default();
+    back.extra.saved_filters[0].apply_to(&mut a.filter);
+    assert_eq!(a.filter.groups.len(), 1);
+    assert_eq!(a.filter.count(), 2);
+    // a file from before saved filters and groups still loads
+    let mut old = v.clone();
+    old["extra"]
+        .as_object_mut()
+        .unwrap()
+        .remove("saved_filters");
+    let d: Data = serde_json::from_value(old).unwrap();
+    assert!(d.extra.saved_filters.is_empty());
+    // nothing about the saved filters reaches the copy teammates get
+    assert!(crate::sync::shareable(&v)["extra"]
+        .get("saved_filters")
+        .is_none());
+}
+
+#[test]
 fn search_finds_subtasks() {
     let mut a = app();
     a.loc = Location::Everything;

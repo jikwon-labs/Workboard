@@ -439,6 +439,7 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
                 join: parity::Join::Or,
                 rows: vec![parity::FilterRow::default(), parity::FilterRow::default()],
             }];
+            a.save_filter("Mine");
             a.filter_open = true;
         }),
     ));

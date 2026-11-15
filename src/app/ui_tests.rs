@@ -3613,6 +3613,74 @@ fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
 }
 
 #[test]
+fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-ui-offline-pic".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    super::together::save_token("127.0.0.1:9", "dev-ui-offline-pic", "tok");
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("offline.png", 60, 40)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    // nothing listens on port 9: the upload fails, but the message may go
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !matches!(
+        h.app
+            .chat_files
+            .first()
+            .and_then(|p| p.transfer(&h.app.files)),
+        Some(super::files::Transfer::Failed(_))
+    ) && std::time::Instant::now() < until
+    {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let Some(super::files::Transfer::Failed(why)) = h.app.chat_files[0].transfer(&h.app.files)
+    else {
+        panic!("the upload failed");
+    };
+    // said without the system's English words
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown = App::error_text(&why);
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(
+        !shown.contains("os error") && !shown.contains("refused"),
+        "{}",
+        shown
+    );
+    let (ok, files) = h.app.pending_ready(false);
+    assert!(ok && files.len() == 1, "the message can go");
+    h.click("Message composer");
+    h.type_text("from the train");
+    h.key(egui::Key::Enter);
+    let m = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone();
+    super::together::forget_token("127.0.0.1:9", "dev-ui-offline-pic");
+    assert_eq!(m.text, "from the train");
+    assert_eq!(m.attachments.len(), 1);
+    assert!(
+        h.app.files.is_waiting(&m.attachments[0].file),
+        "the picture waits to go up, also after a restart"
+    );
+}
+
+#[test]
 fn drop_a_picture_send_it_and_open_it_large() {
     let mut h = Ui1::new();
     h.click("general");

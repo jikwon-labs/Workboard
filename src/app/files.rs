@@ -4,7 +4,9 @@
 // Every file sits in a cache folder named by its sha256 (the attachment's
 // `file`). Sending: the file is checked (kind, size, picture/video size),
 // hashed and copied into the cache on a worker thread, then put on the server
-// (or in the shared folder's files/), and only then can the message go.
+// (or in the shared folder's files/), and only then can the message go;
+// while the server can't be reached (or this computer isn't signed in) the
+// message goes anyway and its files follow from the backlog.
 // Showing: a message's file comes from the cache, else the server, else the
 // shared folder; pictures for the screen are decoded on a worker thread.
 //
@@ -74,6 +76,13 @@ pub(super) struct Pending {
     pub error: Option<String>,
 }
 
+/// A file waits for the server rather than failed for good: the server
+/// can't be reached, or this computer isn't signed in to it. It goes up by
+/// itself once it can.
+pub(super) fn waits_for_server(e: &str) -> bool {
+    e == NOT_SIGNED_IN || e.starts_with("Couldn't reach the server")
+}
+
 impl Pending {
     /// Ready to go out: checked, and on the server when there is one (with
     /// a video's still).
@@ -83,6 +92,22 @@ impl Pending {
                 parts(a)
                     .iter()
                     .all(|p| files.state(&p.file) == Some(Transfer::Done))
+            })
+    }
+
+    /// A message may go with it: ready, or in the cache while the server
+    /// can't be reached; then the file follows (`send_files` puts it in the
+    /// backlog).
+    pub fn sendable(&self, files: &Files) -> bool {
+        self.error.is_none()
+            && self.att.as_ref().is_some_and(|a| {
+                parts(a).iter().all(|p| match files.state(&p.file) {
+                    Some(Transfer::Done) => true,
+                    Some(Transfer::Failed(e)) => {
+                        waits_for_server(&e) && files.local(&p.file).is_some()
+                    }
+                    _ => false,
+                })
             })
     }
 
@@ -1441,8 +1466,11 @@ impl App {
     /// Error text from the files and media threads, in the interface
     /// language (some carry a file name or a reason inside).
     pub(super) fn error_text(e: &str) -> String {
-        const WITH_VALUES: [&str; 6] = [
-            "Couldn't reach the server: {}",
+        if e.starts_with("Couldn't reach the server") {
+            // the system's own words would follow, untranslated
+            return tr("Can't reach the team server right now. It's tried again by itself.").into();
+        }
+        const WITH_VALUES: [&str; 5] = [
             "{} isn't a picture or a video.",
             "{} can't be read.",
             "{} is larger than 500 MB.",
@@ -1633,26 +1661,33 @@ impl App {
                     );
                 }
                 if let Some(why) = &failed {
-                    painter.rect_stroke(
-                        rect,
-                        8.0,
-                        Stroke::new(2.0, t.danger),
-                        egui::StrokeKind::Inside,
-                    );
+                    // waiting for the server isn't a failure: the message can go
+                    let waits = p.error.is_none() && waits_for_server(why);
+                    let c = if waits {
+                        super::together::WARN
+                    } else {
+                        t.danger
+                    };
+                    painter.rect_stroke(rect, 8.0, Stroke::new(2.0, c), egui::StrokeKind::Inside);
                     painter.text(
                         rect.center(),
                         Align2::CENTER_CENTER,
                         "!",
                         FontId::proportional(18.0),
-                        t.danger,
+                        c,
                     );
-                    let r =
-                        resp.clone()
-                            .on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN {
-                                format!("{}\n{}", App::error_text(why), tr("Click to try again"))
-                            } else {
-                                App::error_text(why)
-                            });
+                    let mut tip = App::error_text(why);
+                    if waits {
+                        tip = format!(
+                            "{}\n{}",
+                            tip,
+                            tr("You can send the message now. The file follows once the server is back.")
+                        );
+                    }
+                    if p.error.is_none() && why != NOT_SIGNED_IN {
+                        tip = format!("{}\n{}", tip, tr("Click to try again"));
+                    }
+                    let r = resp.clone().on_hover_text(tip);
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
@@ -1726,7 +1761,7 @@ impl App {
         } else {
             &self.chat_files
         };
-        let ok = list.iter().all(|p| p.ready(&self.files));
+        let ok = list.iter().all(|p| p.sendable(&self.files));
         (
             ok,
             if ok {

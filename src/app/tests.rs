@@ -4034,7 +4034,9 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
         )),
         "not silently done"
     );
-    assert!(!a.pending_ready(false).0);
+    // the message may go: the picture waits in the backlog and follows
+    assert!(a.pending_ready(false).0);
+    assert_eq!(a.pending_ready(false).1, vec![att.clone()]);
     // a sign-in is seen at once (the cached token is dropped when one is saved)
     super::together::save_token("127.0.0.1:9", "dev1", "tok");
     assert!(
@@ -5361,11 +5363,15 @@ fn a_picture_added_before_sharing_goes_up_when_the_message_is_sent() {
 fn file_errors_are_shown_in_the_interface_language() {
     crate::i18n::set_lang(crate::i18n::Lang::Ko);
     let shown = App::error_text("cat.gif isn't a picture or a video.");
-    let net = App::error_text("Couldn't reach the server: refused");
+    let net = App::error_text("Couldn't reach the server: Connection refused (os error 61)");
     let plain = App::error_text("The server doesn't have this file.");
     crate::i18n::set_lang(crate::i18n::Lang::En);
     assert_eq!(shown, "cat.gif은(는) 사진이나 동영상이 아닙니다.");
-    assert_eq!(net, "서버에 연결하지 못했습니다: refused");
+    // the system's English words are left out
+    assert_eq!(
+        net,
+        "지금은 팀 서버에 연결할 수 없습니다. 저절로 다시 시도합니다."
+    );
     assert_eq!(plain, "서버에 이 파일이 없습니다.");
     assert_eq!(
         App::error_text("Couldn't put a.png in the shared folder: full"),

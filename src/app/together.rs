@@ -297,12 +297,15 @@ pub(super) fn forget_token(addr: &str, device: &str) {
 /// What the team server (or its client) said, in the interface language:
 /// the server sends English, and some of it carries a number inside.
 pub(super) fn server_text(s: &str) -> String {
-    const WITH_VALUES: [&str; 5] = [
+    if s.starts_with("Couldn't reach the server: ") {
+        // the system's own words follow, untranslated
+        return tr("Couldn't reach the server. Check the address and your connection.").into();
+    }
+    const WITH_VALUES: [&str; 4] = [
         "Choose a password of at least {} characters.",
         "Too many wrong tries. Wait {} minutes and try again, or use Forgot password.",
         "That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.",
         "The server answered {}.",
-        "Couldn't reach the server: {}",
     ];
     for pattern in WITH_VALUES {
         if let Some(values) = super::files::fill_back(pattern, s) {

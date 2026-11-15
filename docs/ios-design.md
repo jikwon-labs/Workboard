@@ -28,9 +28,9 @@ ios/
     Sources/WorkboardFakeServer/  테스트용 가짜 서버(합치기 없음)와 예제 작업공간
     Sources/wb-fake-server/    가짜 서버 실행 파일
     Sources/wb-cli/            손 검증용 명령줄 클라이언트(다른 기기 역할)
-    Tests/WorkboardKitTests/   단위·통합 테스트 43개
+    Tests/WorkboardKitTests/   단위·통합 테스트 67개
   Workboard/               SwiftUI 앱(화면, 통화, 알림)
-  WorkboardUITests/        시뮬레이터에서 앱을 직접 조작하는 UI 테스트 15개
+  WorkboardUITests/        시뮬레이터에서 앱을 직접 조작하는 UI 테스트 17개
   Workboard.xcodeproj      손으로 쓴 프로젝트(폴더 동기화 그룹, objectVersion 77)
   Config/Info.plist        ATS 예외, 마이크·카메라 문구, 백그라운드 모드, workboard:// URL 스킴
   Config/Workboard.entitlements  푸시용(아직 빌드에 연결 안 함, 아래 "푸시" 참고)
@@ -71,14 +71,14 @@ swift run wb-cli ws://127.0.0.1:8787 watch
 테스트:
 
 ```sh
-cd ios/WorkboardKit && swift test          # 43개
+cd ios/WorkboardKit && swift test          # 67개 (2026-11-16)
 
 # UI 테스트용 가짜 서버 3개
 swift run wb-fake-server --port 18787 &
 swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev &
 swift run wb-fake-server --port 18789 --admin-http &
 xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
-  -destination 'platform=iOS Simulator,name=iPhone 17' test   # 15개
+  -destination 'platform=iOS Simulator,name=iPhone 17' test   # 17개 (2026-11-16)
 #   이 맥에는 "iPhone 17" 이 런타임별로 두 개 있어서 id 로 골랐다:
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
@@ -205,6 +205,13 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **확인한 것:** 토큰 요청, JWT 서명(가짜 서버, dev 키), 통화 없는 서버에서의 링크 대체, 통화 서버에 못 붙을 때의 실패 표시.
 - **확인 못 한 것:** 실제 LiveKit 서버로 음성·영상 주고받기. 이 맥에 livekit-server 를 설치하지 않았고(사용자 결정), 시뮬레이터는 카메라가 없다. 실기기 두 대와 livekit-server 가 있어야 확인할 수 있다.
 
+### CallKit (2026-11-16)
+
+- 허들을 시작하거나 참여하면 CallKit 에 나가는 통화로 알린다(`ios/Workboard/CallKit.swift`). 잠금 화면, 상태 막대, 제어 센터에 통화로 보이고, 음소거와 끊기는 앱과 시스템 화면 어느 쪽에서 눌러도 같이 바뀐다.
+- CallKit 이 오디오 세션을 맡는다. LiveKit 의 자동 세션 설정을 끄고, CallKit 이 세션을 켤 때(`didActivate`) LiveKit 오디오 엔진을 허용한다. 통화가 끝나면 LiveKit 자동 설정으로 돌아간다.
+- 방이 스스로 끊기면(서버·네트워크) CallKit 에도 끝났다고 알린다. 걸려 오는 통화 벨은 없다(VoIP 푸시 필요).
+- 시뮬레이터에는 CallKit 이 없어서 그때는 CallKit 없이 예전처럼 돈다. **실기기에서는 아직 확인하지 못했다.**
+
 ## 알림
 
 - **로컬 알림:** 서버에서 온 정본에 다른 사람이 쓴 새 메시지·답글이 있으면, 지금 보고 있는 대화가 아닐 때 알림을 띄운다. 앱이 백그라운드로 막 들어갔을 때도 연결이 살아 있는 동안은 뜬다.
@@ -226,11 +233,21 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **확인한 것:** 권한 허용 -> 다른 탭에서 메시지 도착 -> 배너 -> 눌러서 #general 열기(UI 테스트).
 - **확인 못 한 것:** `xcrun simctl push` 로 원격 페이로드를 보냈을 때 배너가 뜨는 것은 이 시뮬레이터에서 확인하지 못했다. 추측: 테스트가 끝난 뒤 권한 상태가 바뀌었거나, 이 iOS 27 시뮬레이터의 동작 차이일 수 있다. 실기기에서 다시 확인해야 한다.
 
+- **로그아웃·서버 바꾸기(2026-11-16):** 빈 토큰으로 `push_token` 을 보내 그 서버가 이 기기에 알림(메시지 미리보기)을 그만 보내게 한다. 연결돼 있으면 그 연결로, 아니면 예전 기기 토큰으로 잠깐 따로 붙어서 보낸다. 서버에 닿지 못하면 기억해 두었다가 연결할 때마다 다시 시도한다(`SyncClient.stopPushes`).
+
+## 3차 고침 (2026-11-16)
+
+- **관리:** 설정 > Team(소유자·관리자만). People 에서 사람별 역할·기기 수를 보고, 초대 코드 만들기(서버가 메일로 보냈으면 그 주소를 보여 주고, 복사·공유 링크), 역할 바꾸기, 접근 빼기. Backups(소유자만)에서 백업 목록과 되돌리기. 서버 규칙(`Hub::request`)을 `AccessRules` 로 옮겨 할 수 없는 버튼은 숨긴다. 메시지: `create_invite`/`invite`, `set_role`, `revoke`, `access_list`/`access`, `backup_list`/`backups`, `restore`/`restored`.
+- **휴지통:** 작업·문서를 지우면 다른 사람에게는 지워지고(tombstone), 이 iPhone 의 휴지통(`trash.json`, 맥의 `TrashItem` 모양, 서버로 안 감)에 사본이 남는다. 설정 > Workspace > Trash 에서 되살리면 모두에게 돌아온다(revive).
+- **자동화:** 상태 자동화의 "move"(하위 작업과 상태 맞추기), Multiple Assignees 꺼짐이면 담당자 바꾸기, "assigned to" 줄에 `target`.
+- **멘션:** 메시지·답글·댓글을 쓸 때와 메시지를 고칠 때 `mentioned_ids` 와 같은 규칙으로 `mentions` 를 채운다(`Mentions.swift`).
+- 허들·통화 카드는 고칠 수 없다. 새 채널에 `creator`. 영상은 파일에서 바로 올리고(sha256 도 조금씩 읽어서 계산) 통째로 메모리에 읽지 않는다.
+
 ## 설계와 달라진 점
 
 1. **merge 도 Swift 로 옮겼다(1단계 설계 6번 변경).** 프로토콜에 "push 가 반영됐다"는 확인이 없어서, 다시 얹을 변경을 언제 지울지 알 수 없었다. 이제 iOS 는 맥 앱처럼 `merge(내 것, [정본])` 을 한다. Rust 정적 라이브러리 방식은 크로스 컴파일과 FFI 부담에 비해 이득이 적어 쓰지 않았다.
 2. **고친 항목의 stamp 를 "이전 stamp + 1" 이상으로 찍는다.** iPhone 시계가 늦어도 방금 고친 것이 지지 않게 하려는 것이다. 새 항목·삭제·되살리기는 Rust 와 같다.
-3. **상태 변경 때 Automations, 반복 작업(recur)은 처리하지 않는다.** 추측: 자동화는 서버에서 돌리는 편이 맞다.
+3. **상태 변경 때 Automations, 반복 작업(recur)도 맥 앱과 같이 처리한다**(처음에는 빼 두었다가 2·3차에 넣었다).
 4. **오프라인 편집은 처음엔 범위 밖이었지만 이번에 넣었다.** 위 "오프라인 편집" 참고.
 5. **가짜 서버를 TCP 위에서 직접 WebSocket·HTTP 로 다시 만들었다.** `/call-token` 과 `/health` 를 WebSocket 과 같은 포트에서 받기 위해서다. 계획된 axum 서버와 같은 모양이다.
 6. **활동 기록 문구를 맞추는 데 쓰는 날짜 규칙(`fmt_date`)도 옮겼다** (`Edits.macDate`).

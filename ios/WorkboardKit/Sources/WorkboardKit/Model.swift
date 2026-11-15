@@ -193,6 +193,10 @@ public struct AttachmentView: Hashable, Sendable {
     public let w: Int
     public let h: Int
     public let secs: Double
+    /// A video's still (a small JPEG on the server, by sha256 like `file`),
+    /// shown instead of fetching the whole video; nil for pictures and for
+    /// videos sent before stills were made.
+    public let thumb: String?
 
     init(_ j: JSON) {
         file = j["file"]?.string ?? ""
@@ -202,6 +206,8 @@ public struct AttachmentView: Hashable, Sendable {
         w = Int(j["w"]?.int ?? 0)
         h = Int(j["h"]?.int ?? 0)
         secs = j["secs"]?.double ?? 0
+        let t = j["thumb"]?.string ?? ""
+        thumb = isVideo && FileAPI.isFileName(t) ? t : nil
     }
 }
 
@@ -232,6 +238,10 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         pinned = j["pinned"]?.bool ?? false
         call = j["call"]?.string
     }
+
+    /// Only my own messages, and not huddle or call cards (the Mac app
+    /// offers no Edit for a message with `call`).
+    public func isEditable(by me: UInt64?) -> Bool { me == author && call == nil }
 }
 
 public enum ChannelKind: String, Sendable { case channel = "Channel", direct = "Direct" }

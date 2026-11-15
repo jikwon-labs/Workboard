@@ -104,7 +104,66 @@ fn gallery_card(
     resp
 }
 
+/// The small "Wiki" label after a doc's title.
+pub(super) fn wiki_badge(p: &egui::Painter, t: &Theme, left_center: egui::Pos2) {
+    let c = Color32::from_rgb(0x44, 0x66, 0xff);
+    let g = p.layout_no_wrap(tr("Wiki").to_string(), FontId::proportional(11.0), c);
+    let r = Rect::from_min_size(
+        pos2(left_center.x + 8.0, left_center.y - 9.0),
+        vec2(g.size().x + 12.0, 18.0),
+    );
+    p.rect_filled(r, 4.0, c.gamma_multiply(if t.dark { 0.3 } else { 0.14 }));
+    p.galley(r.center() - g.size() / 2.0, g, c);
+}
+
 impl App {
+    /// The Wikis I can see, most popular first: views in the last 30 days,
+    /// then the latest edit. (id, title, views)
+    pub(super) fn popular_wikis(&self, now: i64) -> Vec<(u64, String, usize)> {
+        let since = now - DOC_VIEW_DAYS * 86_400;
+        let mut v: Vec<(u64, String, usize, i64)> = self
+            .data
+            .docs
+            .iter()
+            .filter(|d| d.is_wiki() && self.doc_shown(d))
+            .map(|d| (d.id, d.title.clone(), d.views_since(since), d.updated))
+            .collect();
+        v.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
+        v.into_iter().map(|(id, t, n, _)| (id, t, n)).collect()
+    }
+
+    /// Counts an open of a doc by me (for Popular Wikis), once each time it
+    /// is opened, not every frame. Opens older than 30 days are dropped.
+    pub(super) fn count_doc_view(&mut self, id: u64, now: i64) {
+        let me = self.data.me;
+        let fresh = if self
+            .data
+            .docs
+            .iter()
+            .any(|d| d.id == id && d.views.iter().all(|v| v.member != me))
+        {
+            Some(self.data.new_id())
+        } else {
+            None
+        };
+        let Some(d) = self.data.docs.iter_mut().find(|d| d.id == id) else {
+            return;
+        };
+        if let Some(nid) = fresh {
+            d.views.push(DocViews {
+                id: nid,
+                member: me,
+                at: vec![],
+            });
+        }
+        if let Some(v) = d.views.iter_mut().find(|v| v.member == me) {
+            let since = now - DOC_VIEW_DAYS * 86_400;
+            v.at.retain(|t| *t >= since);
+            v.at.push(now);
+        }
+        self.dirty = true;
+    }
+
     /// The sidebar used by every app hub. Returns (clicked item, plus clicked).
     fn hub_sidebar(
         &mut self,
@@ -321,7 +380,7 @@ impl App {
                         };
                         if let Some(n) = name {
                             if ui
-                                .add(egui::Button::new(format!("\u{2605}  {}", n)).frame(false))
+                                .add(ghost(egui::Button::new(format!("\u{2605}  {}", n))))
                                 .clicked()
                             {
                                 match id {
@@ -341,12 +400,51 @@ impl App {
                             .size(13.0)
                             .color(t.text2),
                     );
-                    empty_card(
-                        ui,
-                        &t,
-                        "\u{2714}",
-                        tr("Most viewed and active Wikis appear here"),
-                    );
+                    let wikis = self.popular_wikis(now_ts());
+                    if wikis.is_empty() {
+                        empty_card(
+                            ui,
+                            &t,
+                            "\u{2714}",
+                            tr("Most viewed and active Wikis appear here"),
+                        );
+                    }
+                    for (wid, title, views) in wikis.into_iter().take(5) {
+                        let w = ui.available_width();
+                        let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+                        name_it(&resp, &format!("Popular Wiki {}", title));
+                        if self.doc_open == Some(wid) {
+                            ui.painter().rect_filled(r, 7.0, t.row_selected);
+                        } else if resp.hovered() {
+                            ui.painter().rect_filled(r, 7.0, t.hover);
+                        }
+                        ui.painter().text(
+                            r.left_center() + vec2(16.0, 0.0),
+                            Align2::CENTER_CENTER,
+                            "\u{1F4D3}",
+                            FontId::proportional(12.0),
+                            t.text2,
+                        );
+                        let p = ui.painter().with_clip_rect(r.shrink2(vec2(50.0, 0.0)));
+                        p.text(
+                            r.left_center() + vec2(34.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            &title,
+                            FontId::proportional(13.5),
+                            t.text,
+                        );
+                        ui.painter().text(
+                            r.right_center() - vec2(10.0, 0.0),
+                            Align2::RIGHT_CENTER,
+                            views.to_string(),
+                            FontId::proportional(12.0),
+                            t.text3,
+                        );
+                        let resp = resp.on_hover_text(trf!("{} views in the last 30 days", views));
+                        if resp.clicked() {
+                            self.doc_open = Some(wid);
+                        }
+                    }
                 }
                 if id == "teams" {
                     ui.add_space(4.0);
@@ -434,20 +532,26 @@ impl App {
     pub(super) fn docs_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        let counts = [None, Some(self.my_docs_count()), None, None, None, None];
-        let items: [(&str, &str, Option<usize>); 6] = [
-            ("\u{1F4C4}", "All Docs", counts[0]),
-            ("@me", "My Docs", counts[1]),
+        let items: [(&str, &str, Option<usize>); 7] = [
+            ("\u{1F4C4}", "All Docs", None),
+            ("@me", "My Docs", Some(self.my_docs_count())),
             ("\u{1F465}", "Shared with me", None),
             ("\u{1F512}", "Private", None),
             ("\u{1F4DD}", "Meeting Notes", None),
+            ("\u{1F4D3}", "Wikis", None),
             ("\u{1F5D1}", "Archived", None),
         ];
         let sel = if self.doc_open.is_some() {
             99
         } else {
-            self.hub_filter.min(5)
+            self.hub_filter.min(6)
         };
+        if self.doc_open != self.doc_viewed {
+            self.doc_viewed = self.doc_open;
+            if let Some(id) = self.doc_open {
+                self.count_doc_view(id, now_ts());
+            }
+        }
         let (clicked, plus) = self.hub_sidebar(ui, "docs", "Docs", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -463,7 +567,7 @@ impl App {
                     self.doc_editor(ui);
                     return;
                 }
-                let title = items[self.hub_filter.min(5) as usize].1;
+                let title = items[self.hub_filter.min(6) as usize].1;
                 self.page_bar(ui, title, |s, ui| {
                     let tt = s.t();
                     if primary_button(ui, &tt, tr("New Doc")).clicked() {
@@ -683,16 +787,19 @@ impl App {
                                     .data
                                     .docs
                                     .iter()
-                                    .filter(|d| match filter {
+                                    .filter(|d| match filter.min(6) {
                                         1 => d.owner == me && !d.archived,
                                         2 => d.owner != me && !d.private && !d.archived,
                                         3 => d.private && !d.archived,
                                         4 => d.meeting_note && !d.archived,
-                                        5 => d.archived,
+                                        5 => d.is_wiki() && !d.archived,
+                                        6 => d.archived,
                                         _ => !d.archived,
                                     })
-                                    // someone's Private docs are for them alone
-                                    .filter(|d| !d.private || d.owner == me)
+                                    // someone's Private docs are for them alone, and
+                                    // docs in archived spaces or other people's
+                                    // Personal spaces stay out, as in the sidebar
+                                    .filter(|d| self.doc_reachable(d))
                                     .filter(|d| d.parent.is_none())
                                     .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                                     .filter(|d| !mine_only || d.owner == me)
@@ -732,13 +839,16 @@ impl App {
                                         2.0,
                                         Color32::from_rgb(16, 144, 224),
                                     );
-                                    ui.painter().text(
+                                    let tr_ = ui.painter().text(
                                         r.left_center() + vec2(60.0, 0.0),
                                         Align2::LEFT_CENTER,
                                         &d.title,
                                         FontId::proportional(14.5),
                                         t.text,
                                     );
+                                    if d.is_wiki() {
+                                        wiki_badge(ui.painter(), &t, tr_.right_center());
+                                    }
                                     let loc = d
                                         .space
                                         .and_then(|sid| {
@@ -851,12 +961,9 @@ impl App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(tr("\u{2190}  All Docs")).color(t.text2),
-                            )
-                            .frame(false),
-                        )
+                        .add(ghost(egui::Button::new(
+                            RichText::new(tr("\u{2190}  All Docs")).color(t.text2),
+                        )))
                         .clicked()
                     {
                         self.doc_open = None;
@@ -868,12 +975,9 @@ impl App {
                         .unwrap_or_else(|| tr("Workspace").into());
                     // the location moves the doc to another Space
                     let lr = ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(format!("/  {}  \u{25BE}", loc)).color(t.text3),
-                            )
-                            .frame(false),
-                        )
+                        .add(ghost(egui::Button::new(
+                            RichText::new(format!("/  {}  \u{25BE}", loc)).color(t.text3),
+                        )))
                         .on_hover_text(tr("Move to another Space"));
                     name_it(&lr, "Doc location");
                     let cur_space = self.data.docs[idx].space;
@@ -893,6 +997,11 @@ impl App {
                             }
                         }
                     });
+                    if self.data.docs[idx].is_wiki() {
+                        let (r, br) = ui.allocate_exact_size(vec2(44.0, 18.0), Sense::hover());
+                        name_it(&br, "Wiki badge");
+                        wiki_badge(ui.painter(), &t, r.left_center() - vec2(8.0, 0.0));
+                    }
                     if self.data.docs[idx].meeting_note {
                         ui.label(
                             RichText::new(format!("\u{1F4DD} {}", tr("Meeting Note")))
@@ -902,19 +1011,16 @@ impl App {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let mr = ui
-                            .add(
-                                egui::Button::new("\u{22EF}")
-                                    .frame(false)
-                                    .min_size(vec2(24.0, 24.0)),
-                            )
+                            .add(ghost(
+                                egui::Button::new("\u{22EF}").min_size(vec2(24.0, 24.0)),
+                            ))
                             .on_hover_text(tr("More"));
                         name_it(&mr, "Doc options");
                         click_menu(&mr, |ui| self.doc_menu(ui, id, false));
                         if ui
-                            .add(
-                                egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
-                                    .frame(false),
-                            )
+                            .add(ghost(egui::Button::new(
+                                RichText::new(tr("Delete")).color(t.danger),
+                            )))
                             .clicked()
                         {
                             delete = true;
@@ -925,14 +1031,14 @@ impl App {
                             "Archive"
                         };
                         if ui
-                            .add(egui::Button::new(tr(arch)).frame(false))
+                            .add(ghost(egui::Button::new(tr(arch))))
                             .on_hover_text(tr("Move to Archived and save a Markdown copy"))
                             .clicked()
                         {
                             self.toggle_archive(id);
                         }
                         if ui
-                            .add(egui::Button::new(tr("Export")).frame(false))
+                            .add(ghost(egui::Button::new(tr("Export"))))
                             .on_hover_text(tr("Save as a Markdown file"))
                             .clicked()
                         {
@@ -942,7 +1048,7 @@ impl App {
                             });
                         }
                         if ui
-                            .add(egui::Button::new(tr("Duplicate")).frame(false))
+                            .add(ghost(egui::Button::new(tr("Duplicate"))))
                             .on_hover_text(tr("Copy this doc and its pages"))
                             .clicked()
                         {
@@ -951,10 +1057,7 @@ impl App {
                                 self.toast = Some((tr("Doc duplicated").into(), now_ts()));
                             }
                         }
-                        if ui
-                            .add(egui::Button::new(tr("Copy link")).frame(false))
-                            .clicked()
-                        {
+                        if ui.add(ghost(egui::Button::new(tr("Copy link")))).clicked() {
                             ui.ctx().copy_text(format!("workboard://doc/{}", id));
                             self.toast = Some((tr("Link copied").into(), now_ts()));
                         }
@@ -963,14 +1066,11 @@ impl App {
                         };
                         let d = &mut self.data.docs[idx];
                         if ui
-                            .add(
-                                egui::Button::new(if d.private {
-                                    tr("\u{1F512} Private")
-                                } else {
-                                    tr("\u{1F465} Shared")
-                                })
-                                .frame(false),
-                            )
+                            .add(ghost(egui::Button::new(if d.private {
+                                tr("\u{1F512} Private")
+                            } else {
+                                tr("\u{1F465} Shared")
+                            })))
                             .on_hover_text(tr("Who can see this Doc"))
                             .clicked()
                         {
@@ -984,7 +1084,7 @@ impl App {
                             } else {
                                 t.text2
                             });
-                        if ui.add(egui::Button::new(star).frame(false)).clicked() {
+                        if ui.add(ghost(egui::Button::new(star))).clicked() {
                             if starred {
                                 self.data.extra.starred.retain(|s| s != &key);
                             } else {
@@ -1055,17 +1155,17 @@ impl App {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Dashboards")).size(15.0));
                         // My: the ones I made (older ones without a maker show in both)
-                        for d in self.data.extra.dashboards.clone().into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0)
-                            // someone else's private dashboard stays out of the list
-                            .filter(|d| !d.private || d.owner == me || d.owner == 0) {
+                        // someone else's private dashboard stays out of the list
+                        let shown: Vec<Dashboard> = self.data.extra.dashboards.iter().filter(|d| self.dash_shown(d)).cloned().collect();
+                        for d in shown.into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("dash:{}", d.id));
-                                if ui.add(egui::Button::new(format!("\u{1F4CA}  {}", d.name)).frame(false)).clicked() {
+                                if ui.add(ghost(egui::Button::new(format!("\u{1F4CA}  {}", d.name)))).clicked() {
                                     self.dash_open = Some(d.id);
                                 }
                             });
                         }
-                        if ui.add(egui::Button::new(tr("\u{1F4CA}  Workspace overview")).frame(false)).clicked() {
+                        if ui.add(ghost(egui::Button::new(tr("\u{1F4CA}  Workspace overview")))).clicked() {
                             self.dash_open = Some(WORKSPACE_OVERVIEW);
                         }
                     });
@@ -1112,7 +1212,7 @@ impl App {
                 t.text2
             });
         let r = ui
-            .add(egui::Button::new(star).frame(false))
+            .add(ghost(egui::Button::new(star)))
             .on_hover_text(if starred {
                 tr("Remove from Favorites")
             } else {
@@ -1202,7 +1302,7 @@ impl App {
                         for w in self.data.extra.whiteboards.clone().into_iter().filter(|w| !mine_only || w.owner == me || w.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("wb:{}", w.id));
-                                if ui.add(egui::Button::new(format!("\u{1F3A8}  {}", w.name)).frame(false)).clicked() {
+                                if ui.add(ghost(egui::Button::new(format!("\u{1F3A8}  {}", w.name)))).clicked() {
                                     self.wb_open = Some(w.id);
                                 }
                             });
@@ -1270,10 +1370,10 @@ impl App {
                         let me = self.data.me;
                         let mine_only = self.hub_filter.min(1) == 1;
                         // My: the ones I made (older ones without a maker show in both)
-                        for f in self.data.extra.forms.clone().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
+                        for f in self.data.extra.forms.clone().into_iter().filter(|f| self.form_shown(f)).collect::<Vec<_>>().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("form:{}", f.id));
-                                if ui.add(egui::Button::new(format!("\u{1F4CB}  {}", f.name)).frame(false)).clicked() {
+                                if ui.add(ghost(egui::Button::new(format!("\u{1F4CB}  {}", f.name)))).clicked() {
                                     self.form_open = Some(f.id);
                                 }
                             });
@@ -1350,7 +1450,7 @@ impl App {
             ui.painter().circle_stroke(pr.min + vec2(80.0, 60.0), 14.0, Stroke::new(3.0, Color32::WHITE));
             ui.painter().text(pr.min + vec2(80.0, 60.0), Align2::CENTER_CENTER, "30%", FontId::proportional(8.0), Color32::WHITE);
             ui.add_space(30.0);
-            if ui.add(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0))).clicked() {
+            if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
                 let id = self.data.new_id();
                 self.data.extra.goals.push(Goal { id, name: "New goal".into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
                 self.goal_open = Some(id);
@@ -1458,7 +1558,9 @@ impl App {
                             paint_avatars(ui.painter(), r.left_center(), 10.0, &tm.members, &self.data, t.card);
                         });
                     });
-                    if ui.interact(resp.response.rect, ui.id().with(("team", tm.id)), Sense::click()).clicked() {
+                    let card = ui.interact(resp.response.rect, ui.id().with(("team", tm.id)), Sense::click());
+                    hover_bg(ui, &card, card.rect, 8.0);
+                    if card.clicked() {
                         self.team_open = Some(tm.id);
                         self.hub_filter = 9;
                     }
@@ -1499,6 +1601,7 @@ impl App {
                         let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                         name_it(&resp, &format!("Team color {}", i + 1));
                         ui.painter().rect_filled(r.shrink(2.0), 4.0, rgb(*c));
+                        hover_ring(ui, &resp, r.shrink(1.0), 5.0);
                         if tm.color == *c {
                             ui.painter().rect_stroke(
                                 r,
@@ -1528,10 +1631,9 @@ impl App {
                     }
                 });
                 if ui
-                    .add(
-                        egui::Button::new(RichText::new(tr("Delete team")).color(t.danger))
-                            .frame(false),
-                    )
+                    .add(ghost(egui::Button::new(
+                        RichText::new(tr("Delete team")).color(t.danger),
+                    )))
                     .clicked()
                 {
                     self.modal = Some(Modal::ConfirmRemove {
@@ -1691,6 +1793,7 @@ impl App {
                         let (r, resp) =
                             ui.allocate_exact_size(vec2(g.size().x + 16.0, 40.0), Sense::click());
                         name_it(&resp, label);
+                        hover_bg(ui, &resp, r.shrink2(vec2(0.0, 6.0)), 6.0);
                         ui.painter().galley(
                             r.center() - g.size() / 2.0,
                             g,
@@ -1726,13 +1829,13 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(RichText::new("<").size(16.0)).frame(false)).clicked() {
+                    if ui.add(ghost(egui::Button::new(RichText::new("<").size(16.0)))).clicked() {
                         self.sheet_week = ws - Duration::days(7);
                     }
-                    if ui.add(egui::Button::new(RichText::new(">").size(16.0)).frame(false)).clicked() {
+                    if ui.add(ghost(egui::Button::new(RichText::new(">").size(16.0)))).clicked() {
                         self.sheet_week = ws + Duration::days(7);
                     }
-                    let r = ui.add(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0)).frame(false));
+                    let r = ui.add(ghost(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0))));
                     name_it(&r, "Pick a week");
                     // a calendar: the week of the picked day opens
                     let mut d = Some(ws);
@@ -2226,17 +2329,15 @@ impl App {
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
-                                .add(
-                                    egui::Button::new(RichText::new("\u{2716}").color(t.text3))
-                                        .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(
+                                    RichText::new("\u{2716}").color(t.text3),
+                                )))
                                 .clicked()
                             {
                                 remove = Some((*id, *k));
                             }
-                            let ed = ui.add(
-                                egui::Button::new(RichText::new(tr("Edit")).small()).frame(false),
-                            );
+                            let ed =
+                                ui.add(ghost(egui::Button::new(RichText::new(tr("Edit")).small())));
                             name_it(&ed, &format!("Edit entry {}", name));
                             if ed.clicked() {
                                 let start = local

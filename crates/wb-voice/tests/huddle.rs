@@ -7,7 +7,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Role, SignIn, Status};
-use wb_voice::{Audio, Call, Event as VoiceEvent, Join, Person, Picture, Video, ME};
+use wb_voice::{
+    screen_key, Audio, Call, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME,
+};
 
 const SECRET: &str = "test-secret-test-secret-test-secret-0123";
 
@@ -234,6 +236,7 @@ impl Talker {
                     VoiceEvent::People(p) => self.people = p,
                     VoiceEvent::Left(why) => self.left = Some(why),
                     VoiceEvent::Trouble(why) => panic!("trouble: {}", why),
+                    VoiceEvent::ScreenEnded(why) => panic!("screen sharing ended: {:?}", why),
                 }
             }
             for (id, p) in self.call.new_pictures() {
@@ -362,10 +365,24 @@ fn two_people_hear_each_other_in_a_huddle() {
     a.until("Ann sees herself", |t| {
         t.pictures.get(ME).is_some_and(|p| reddish(p))
     });
-    b.until("Bo sees Ann's red picture", |t| {
+    // nothing drawn yet: the smallest layer (320 of the 1280 sent)
+    b.until("Bo sees Ann's red picture, small", |t| {
         t.other().is_some_and(|p| p.camera)
             && t.their_picture()
                 .is_some_and(|p| reddish(p) && p.width == 320 && p.height == 180)
+    });
+    // Bo draws Ann large: the full layer comes; small again: the small one
+    let ann_id = b.other().unwrap().identity.clone();
+    b.call
+        .set_view_sizes([(ann_id.clone(), 1400.0)].into_iter().collect());
+    b.until("Ann's picture at full size", |t| {
+        t.their_picture()
+            .is_some_and(|p| reddish(p) && p.width == 1280 && p.height == 720)
+    });
+    b.call
+        .set_view_sizes([(ann_id.clone(), 600.0)].into_iter().collect());
+    b.until("Ann's picture at the middle layer", |t| {
+        t.their_picture().is_some_and(|p| p.width == 640)
     });
     a.until("Ann sees Bo's blue picture", |t| {
         t.their_picture().is_some_and(|p| bluish(p))
@@ -376,6 +393,39 @@ fn two_people_hear_each_other_in_a_huddle() {
     b.until("Ann's picture changes", |t| {
         t.their_picture().is_some_and(|p| *p != first)
     });
+
+    // Ann shares her screen (a green test picture): Bo sees it as a screen,
+    // larger than video, next to her camera
+    a.call.share_screen(Some(Share::Pattern([30, 200, 60])));
+    let greenish = |p: &Picture| {
+        let c = p.average();
+        c[1] > 150 && c[0] < 100 && c[2] < 110
+    };
+    let ann_screen = screen_key(&ann_id);
+    b.call.set_view_sizes(
+        [(ann_id.clone(), 300.0), (ann_screen.clone(), 1800.0)]
+            .into_iter()
+            .collect(),
+    );
+    b.until("Bo sees Ann's screen", |t| {
+        t.other().is_some_and(|p| p.screen && p.camera)
+            && t.pictures
+                .get(&ann_screen)
+                .is_some_and(|p| greenish(p) && p.width == 1920 && p.height == 1080)
+            && t.their_picture().is_some_and(|p| reddish(p))
+    });
+    a.until("Ann sees she is sharing", |t| {
+        t.people.iter().any(|p| p.me && p.screen)
+    });
+    assert!(
+        !a.pictures.keys().any(|k| k.ends_with("#screen")),
+        "no picture of your own screen"
+    );
+    a.call.share_screen(None);
+    b.until("Ann's screen is gone", |t| {
+        t.other().is_some_and(|p| !p.screen) && !t.pictures.contains_key(&ann_screen)
+    });
+    assert!(b.their_picture().is_some(), "her camera stays");
 
     // Ann turns her camera off: her picture goes away for Bo
     a.call.set_camera(false);

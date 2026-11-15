@@ -40,10 +40,12 @@ public enum Edits {
     public static func sendMessage(_ data: inout JSON, channel: UInt64, text: String, attachments: [JSON] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return false }
+        let mentions = Mentions.ids(in: text, data: data)
         return data.updateItem(at: "channels", id: channel) { c in
             var msgs = c["messages"]?.array ?? []
             var m = message(id: id, author: me, text: text, ts: ts)
             if !attachments.isEmpty { m["attachments"] = .array(attachments) }
+            Mentions.put(mentions, on: &m)
             msgs.append(m)
             c["messages"] = .array(msgs)
             c["last_read"] = .int(ts)
@@ -54,12 +56,14 @@ public enum Edits {
     public static func sendReply(_ data: inout JSON, channel: UInt64, to parent: UInt64, text: String, attachments: [JSON] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return false }
+        let mentions = Mentions.ids(in: text, data: data)
         var done = false
         data.updateItem(at: "channels", id: channel) { c in
             done = c.updateItem(at: "messages", id: parent) { m in
                 var reps = m["replies"]?.array ?? []
                 var r = message(id: id, author: me, text: text, ts: ts)
                 if !attachments.isEmpty { r["attachments"] = .array(attachments) }
+                Mentions.put(mentions, on: &r)
                 reps.append(r)
                 m["replies"] = .array(reps)
             }
@@ -112,8 +116,8 @@ public enum Edits {
 
     /// Like Action::Replace with a new status: logs the change, keeps Date
     /// done / Date closed in step, runs the status automations (assign,
-    /// priority, comment; "move" is left to the Mac app) and rolls a
-    /// repeating task on when it closes (roll_recurring in src/app/parity.rs).
+    /// priority, move, comment, as in src/app.rs) and rolls a repeating task
+    /// on when it closes (roll_recurring in src/app/parity.rs).
     @discardableResult
     public static func setStatus(_ data: inout JSON, task: UInt64, to status: String, me: UInt64, ts: Int64, today: Date = Date()) -> Bool {
         let view = WorkspaceView(data)
@@ -128,9 +132,14 @@ public enum Edits {
             guard let l = a["list"]?.uint else { return a["list"] == nil || a["list"] == .null }
             return l == t.listId || l == space
         }
+        // Apps > Multiple Assignees (on unless turned off)
+        let multiple = data.at("extra.apps.multiple_assignees")?.bool ?? true
+        let members = Mentions.members(of: data)
         // a status name that closes, by the list's statuses (like `closes` in roll_recurring)
         let closes = { (name: String) in sts.contains { $0.name == name && isDone($0.kind) } }
-        return data.updateItem(at: "tasks", id: task) { j in
+        let lists = rawLists(data)
+        var moveTo: UInt64?
+        let changed = data.updateItem(at: "tasks", id: task) { j in
             log(&j, me: me, text: "changed status from \(t.status.uppercased()) to \(status.uppercased())", ts: ts)
             j["status"] = .string(status)
             if isDone(now) && !isDone(was) {
@@ -150,7 +159,15 @@ public enum Edits {
                 case "assign":
                     if let uid = UInt64(value) {
                         var asg = (j["assignees"]?.array ?? []).compactMap(\.uint)
-                        if !asg.contains(uid) { asg.append(uid) }
+                        if !multiple {
+                            asg = [uid]
+                        } else if !asg.contains(uid) {
+                            asg.append(uid)
+                            var act = j["activity"]?.array ?? []
+                            act.append(["ts": .int(ts), "author": .id(me), "text": .string("assigned to \(view.member(uid)?.name ?? "")"),
+                                        "comment": false, "post": false, "target": .id(uid)])
+                            j["activity"] = .array(act)
+                        }
                         j["assignees"] = .array(asg.map(JSON.id))
                     }
                     what = "assign to \(UInt64(value).flatMap { view.member($0)?.name } ?? "")"
@@ -158,11 +175,14 @@ public enum Edits {
                     if let p = UInt8(value) { j["priority"] = .int(Int64(min(p, 4))) }
                     what = "set priority to \(Int(value).flatMap { $0 >= 0 && $0 < 5 ? priorityLabels[$0] : nil } ?? "")"
                 case "move":
-                    // moving takes subtasks and statuses along; left to the Mac app
-                    continue
+                    // moved below, with subtasks and statuses, as Move does
+                    if let l = UInt64(value), lists[l] != nil { moveTo = l }
+                    what = "move to \(UInt64(value).flatMap { lists[$0]?.name } ?? "List")"
                 default:
                     var act = j["activity"]?.array ?? []
-                    act.append(["ts": .int(ts), "author": .id(me), "text": .string(value), "comment": true, "post": false])
+                    var line: JSON = ["ts": .int(ts), "author": .id(me), "text": .string(value), "comment": true, "post": false]
+                    Mentions.put(Mentions.ids(in: value, members: members), on: &line)
+                    act.append(line)
                     j["activity"] = .array(act)
                     what = "comment \"\(value)\""
                 }
@@ -171,6 +191,59 @@ public enum Edits {
             rollRecurring(&j, wasClosing: closes(t.status), closes: closes, first: sts[0].name, me: me, ts: ts, today: today)
             j["updated"] = .int(ts)
         }
+        if changed, let l = moveTo { moveTasks(&data, ids: [task], to: l, me: me, ts: ts) }
+        return changed
+    }
+
+    /// Every list in the workspace (archived ones and those in archived
+    /// spaces too, like space_of_list in src/model.rs): its name and the
+    /// statuses of its space.
+    static func rawLists(_ data: JSON) -> [UInt64: (name: String, statuses: [StatusView])] {
+        var out: [UInt64: (name: String, statuses: [StatusView])] = [:]
+        for s in data["spaces"]?.array ?? [] {
+            let st = (s["statuses"]?.array ?? []).map(StatusView.init)
+            let statuses = st.isEmpty ? StatusView.defaults : st
+            let all = (s["lists"]?.array ?? []) + (s["folders"]?.array ?? []).flatMap { $0["lists"]?.array ?? [] }
+            for l in all {
+                guard let id = l["id"]?.uint, out[id] == nil else { continue }
+                out[id] = (l["name"]?.string ?? "", statuses)
+            }
+        }
+        return out
+    }
+
+    /// move_tasks in src/app/parity.rs: tasks (and their subtasks) go to
+    /// another list; statuses that list doesn't have fall back to its first
+    /// status. A moved subtask whose parent stays becomes a task of its own.
+    @discardableResult
+    public static func moveTasks(_ data: inout JSON, ids: [UInt64], to list: UInt64, me: UInt64, ts: Int64) -> Bool {
+        guard let target = rawLists(data)[list] else { return false }
+        var tasks = data["tasks"]?.array ?? []
+        var all = ids
+        var i = 0
+        while i < all.count {
+            let k = all[i]
+            all += tasks.filter { $0["parent"]?.uint == k && !all.contains($0["id"]?.uint ?? 0) }.compactMap { $0["id"]?.uint }
+            i += 1
+        }
+        var moved = false
+        for ti in tasks.indices {
+            guard let id = tasks[ti]["id"]?.uint, all.contains(id), tasks[ti]["list_id"]?.uint != list else { continue }
+            var t = tasks[ti]
+            t["list_id"] = .id(list)
+            if !target.statuses.contains(where: { $0.name == t["status"]?.string }) {
+                t["status"] = .string(target.statuses[0].name)
+            }
+            if ids.contains(id) {
+                log(&t, me: me, text: "moved this task to \(target.name)", ts: ts)
+                if let p = t["parent"]?.uint, !all.contains(p) { t["parent"] = .null }
+            }
+            t["updated"] = .int(ts)
+            tasks[ti] = t
+            moved = true
+        }
+        if moved { data["tasks"] = .array(tasks) }
+        return moved
     }
 
     /// roll_recurring in src/app/parity.rs: a repeating task that just closed
@@ -291,9 +364,12 @@ public enum Edits {
     public static func addComment(_ data: inout JSON, task: UInt64, text: String, me: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return false }
+        let mentions = Mentions.ids(in: text, data: data)
         return data.updateItem(at: "tasks", id: task) { j in
             var act = j["activity"]?.array ?? []
-            act.append(["ts": .int(ts), "author": .id(me), "text": .string(text), "comment": true, "post": false])
+            var line: JSON = ["ts": .int(ts), "author": .id(me), "text": .string(text), "comment": true, "post": false]
+            Mentions.put(mentions, on: &line)
+            act.append(line)
             j["activity"] = .array(act)
             j["updated"] = .int(ts)
         }
@@ -393,14 +469,19 @@ public enum Edits {
 
     // MARK: message actions (src/app/chat.rs)
 
-    /// Changes one of my messages or replies (ChatAction::SaveEdit).
+    /// Changes one of my messages or replies (ChatAction::SaveEdit), with
+    /// its `mentions` worked out again from the new text.
     @discardableResult
     public static func editMessage(_ data: inout JSON, channel: UInt64, message: UInt64, text: String, me: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return false }
+        let members = Mentions.members(of: data)
         var done = false
         func change(_ m: inout JSON) {
-            guard m["author"]?.uint == me, m["text"]?.string != text else { return }
+            // a huddle or call card isn't edited (the Mac app offers no Edit for it)
+            guard m["author"]?.uint == me, m["text"]?.string != text, m["call"]?.string == nil else { return }
+            let picked = (m["mentions"]?.array ?? []).compactMap(\.uint)
+            Mentions.put(Mentions.ids(in: text, members: members, picked: picked), on: &m)
             m["text"] = .string(text)
             m["edited"] = .int(ts)
             done = true
@@ -459,7 +540,7 @@ public enum Edits {
         data.append(at: "channels", [
             "id": .id(id), "name": .string(clean), "kind": "Channel", "topic": "",
             "members": .array(members.map(JSON.id)), "messages": [], "last_read": .int(ts),
-            "private": .bool(isPrivate), "list": nil,
+            "private": .bool(isPrivate), "list": nil, "creator": .id(me),
         ])
         return true
     }

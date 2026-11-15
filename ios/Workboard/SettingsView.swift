@@ -97,7 +97,39 @@ struct SettingsView: View {
                     Text("Messages from others show up while the app is open or was just closed. Push notifications also need the team server's Apple push key and an app build with push turned on; until both are set up, nothing arrives while the app has been closed for a while.")
                         .accessibilityIdentifier("notifyFooter")
                 }
+                if client.settings.meFromServer, let role = client.myRole, role.manages {
+                    Section {
+                        NavigationLink {
+                            PeopleView()
+                        } label: {
+                            Label("People and invite codes", systemImage: "person.2")
+                        }
+                        .accessibilityIdentifier("peopleLink")
+                        if client.accessRules.seesBackups {
+                            NavigationLink {
+                                BackupsView()
+                            } label: {
+                                Label("Backups", systemImage: "clock.arrow.circlepath")
+                            }
+                            .accessibilityIdentifier("backupsLink")
+                        }
+                    } header: {
+                        Text("Team")
+                    } footer: {
+                        Text(role == .owner ? "You're the owner of this server." : "You're an admin on this server.")
+                    }
+                }
                 Section("Workspace") {
+                    NavigationLink {
+                        TrashView()
+                    } label: {
+                        LabeledContent {
+                            Text(client.trash.isEmpty ? "" : "\(client.trash.count)")
+                        } label: {
+                            Label("Trash", systemImage: "trash")
+                        }
+                    }
+                    .accessibilityIdentifier("trashLink")
                     LabeledContent("Name", value: client.view.name)
                     LabeledContent("Members", value: "\(client.view.members.count)")
                     LabeledContent("Server revision", value: "\(client.rev)")

@@ -19,6 +19,19 @@
 //   app -> server  set_password {email, password, old_password?}
 //   server -> app  account      {email}
 //   app -> server  push_token   {token, platform: "ios", env}   (ignored by servers that don't know it)
+//   app -> server  push_token   {token: ""}  stops notifications to this device
+//                                (sent on sign-out and before leaving for another server)
+//   app -> server  create_invite {member, role}   owner or admin
+//   server -> app  invite       {member, code, emailed?, mail_error?}
+//   app -> server  set_role     {member, role}    owner or admin
+//   app -> server  revoke       {member}          owner or admin
+//   app -> server  access_list
+//   server -> app  access       {people: [{member, role, devices, invite?, account?}], role}
+//                                (also sent unasked after any access change)
+//   app -> server  backup_list                    owner only
+//   server -> app  backups      {backups: [{name, bytes}]}
+//   app -> server  restore      {name}            owner only
+//   server -> app  restored     {name}
 //   app -> server  call_join    {channel}
 //   server -> app  call_token   {channel, url, token}   (a LiveKit address and join token)
 //   both           ping / pong, every 30 seconds
@@ -78,6 +91,12 @@ public enum ClientMessage: Equatable, Sendable {
     case pushToken(token: String, platform: String, env: String)
     case callJoin(channel: UInt64)
     case resync
+    case createInvite(member: UInt64, role: Role)
+    case setRole(member: UInt64, role: Role)
+    case revoke(member: UInt64)
+    case accessList
+    case backupList
+    case restore(name: String)
     case ping
     case pong
 
@@ -109,6 +128,16 @@ public enum ClientMessage: Equatable, Sendable {
         case let .callJoin(channel):
             return ["type": "call_join", "channel": .id(channel)]
         case .resync: return ["type": "resync"]
+        case let .createInvite(member, role):
+            return ["type": "create_invite", "member": .id(member), "role": .string(role.rawValue)]
+        case let .setRole(member, role):
+            return ["type": "set_role", "member": .id(member), "role": .string(role.rawValue)]
+        case let .revoke(member):
+            return ["type": "revoke", "member": .id(member)]
+        case .accessList: return ["type": "access_list"]
+        case .backupList: return ["type": "backup_list"]
+        case let .restore(name):
+            return ["type": "restore", "name": .string(name)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         }
@@ -139,6 +168,20 @@ public enum ClientMessage: Equatable, Sendable {
             guard let ch = j["channel"]?.uint else { return nil }
             self = .callJoin(channel: ch)
         case "resync": self = .resync
+        case "create_invite":
+            guard let m = j["member"]?.uint else { return nil }
+            self = .createInvite(member: m, role: Role(rawValue: j["role"]?.string ?? "") ?? .member)
+        case "set_role":
+            guard let m = j["member"]?.uint, let r = Role(rawValue: j["role"]?.string ?? "") else { return nil }
+            self = .setRole(member: m, role: r)
+        case "revoke":
+            guard let m = j["member"]?.uint else { return nil }
+            self = .revoke(member: m)
+        case "access_list": self = .accessList
+        case "backup_list": self = .backupList
+        case "restore":
+            guard let n = j["name"]?.string else { return nil }
+            self = .restore(name: n)
         case "ping": self = .ping
         case "pong": self = .pong
         default: return nil
@@ -191,6 +234,14 @@ public enum ServerMessage: Equatable, Sendable {
     case delta(data: JSON, rev: Int64, base: Int64, hidden: [UInt64] = [])
     case account(email: String)
     case callToken(channel: UInt64, url: String, token: String)
+    /// A new invite code (answer to create_invite); `emailed` is the address
+    /// the server mailed it to, `mailError` why mailing failed.
+    case invite(member: UInt64, code: String, emailed: String? = nil, mailError: String? = nil)
+    /// Everyone's access as the asker may see it (empty for plain members)
+    /// and the asker's own role.
+    case access(people: [Person], role: Role)
+    case backups([Backup])
+    case restored(name: String)
     case ping
     case pong
     /// `channel` is set when a call_join for it was turned down.
@@ -220,6 +271,17 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "account", "email": .string(email)]
         case let .callToken(channel, url, token):
             return ["type": "call_token", "channel": .id(channel), "url": .string(url), "token": .string(token)]
+        case let .invite(member, code, emailed, mailError):
+            var o: [String: JSON] = ["type": "invite", "member": .id(member), "code": .string(code)]
+            if let emailed { o["emailed"] = .string(emailed) }
+            if let mailError { o["mail_error"] = .string(mailError) }
+            return .object(o)
+        case let .access(people, role):
+            return ["type": "access", "people": .array(people.map(\.json)), "role": .string(role.rawValue)]
+        case let .backups(list):
+            return ["type": "backups", "backups": .array(list.map(\.json))]
+        case let .restored(name):
+            return ["type": "restored", "name": .string(name)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         case let .error(code, m, channel):
@@ -262,10 +324,112 @@ public enum ServerMessage: Equatable, Sendable {
             self = .account(email: j["email"]?.string ?? "")
         case "call_token":
             self = .callToken(channel: j["channel"]?.uint ?? 0, url: j["url"]?.string ?? "", token: j["token"]?.string ?? "")
+        case "invite":
+            self = .invite(member: j["member"]?.uint ?? 0, code: j["code"]?.string ?? "", emailed: j["emailed"]?.string, mailError: j["mail_error"]?.string)
+        case "access":
+            self = .access(people: (j["people"]?.array ?? []).compactMap(Person.init), role: Role(rawValue: j["role"]?.string ?? "") ?? .member)
+        case "backups":
+            self = .backups((j["backups"]?.array ?? []).compactMap(Backup.init))
+        case "restored":
+            self = .restored(name: j["name"]?.string ?? "")
         case "ping": self = .ping
         case "pong": self = .pong
         case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint)
         default: self = .unknown(type)
         }
+    }
+}
+
+/// What someone may do on the server (wb_net::Role). The owner set the
+/// workspace up; owners and admins manage access.
+public enum Role: String, Comparable, Sendable, CaseIterable {
+    case member, admin, owner
+
+    /// May invite people, change roles and remove access.
+    public var manages: Bool { self >= .admin }
+
+    public var label: String {
+        switch self {
+        case .member: return "Member"
+        case .admin: return "Admin"
+        case .owner: return "Owner"
+        }
+    }
+
+    var rank: Int { Role.allCases.firstIndex(of: self) ?? 0 }
+    public static func < (a: Role, b: Role) -> Bool { a.rank < b.rank }
+}
+
+/// One person's access (wb_net::Person).
+public struct Person: Equatable, Identifiable, Sendable {
+    public var member: UInt64
+    public var role: Role
+    /// Devices signed in as this person.
+    public var devices: Int
+    /// An invite code not used yet (only the ones the asker may see).
+    public var invite: String?
+    /// Has set up an account (email and password).
+    public var account: Bool
+
+    public var id: UInt64 { member }
+
+    public init(member: UInt64, role: Role, devices: Int = 0, invite: String? = nil, account: Bool = false) {
+        self.member = member
+        self.role = role
+        self.devices = devices
+        self.invite = invite
+        self.account = account
+    }
+
+    init?(_ j: JSON) {
+        guard let m = j["member"]?.uint else { return nil }
+        self.init(member: m, role: Role(rawValue: j["role"]?.string ?? "") ?? .member, devices: Int(j["devices"]?.int ?? 0),
+                  invite: j["invite"]?.string, account: j["account"]?.bool ?? false)
+    }
+
+    var json: JSON {
+        var o: [String: JSON] = ["member": .id(member), "role": .string(role.rawValue), "devices": .int(Int64(devices))]
+        if let invite { o["invite"] = .string(invite) }
+        if account { o["account"] = true }
+        return .object(o)
+    }
+}
+
+/// A backup of the team's copy on the server (wb_net::Backup).
+public struct Backup: Equatable, Identifiable, Sendable {
+    /// File name in the server's backups folder, e.g. hourly-20261115-03.json
+    public var name: String
+    public var bytes: UInt64
+
+    public var id: String { name }
+
+    public init(name: String, bytes: UInt64) {
+        self.name = name
+        self.bytes = bytes
+    }
+
+    init?(_ j: JSON) {
+        guard let n = j["name"]?.string else { return nil }
+        self.init(name: n, bytes: j["bytes"]?.uint ?? 0)
+    }
+
+    var json: JSON { ["name": .string(name), "bytes": .id(bytes)] }
+
+    /// "2026-11-15 03:00 (hourly)" from the file name (Backup::label).
+    public var label: String {
+        let stem = name.hasSuffix(".json") ? String(name.dropLast(5)) : name
+        let kinds = [("hourly-", "hourly"), ("daily-", "daily"), ("before-restore-", "before a restore")]
+        guard let (prefix, kind) = kinds.first(where: { stem.hasPrefix($0.0) }) else { return name }
+        let rest = String(stem.dropFirst(prefix.count))
+        let d = Array(rest.filter { $0.isASCII && $0.isNumber })
+        func cut(_ a: Int, _ b: Int) -> String { String(d[a..<b]) }
+        let date = d.count >= 8 ? "\(cut(0, 4))-\(cut(4, 6))-\(cut(6, 8))" : rest
+        let time: String
+        switch d.count {
+        case 10: time = " \(cut(8, 10)):00"
+        case 14: time = " \(cut(8, 10)):\(cut(10, 12)):\(cut(12, 14))"
+        default: time = ""
+        }
+        return "\(date)\(time) (\(kind))"
     }
 }

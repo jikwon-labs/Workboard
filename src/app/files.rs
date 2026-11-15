@@ -12,15 +12,27 @@
 // lane for pictures and one for videos, so a big video never holds up a
 // picture; "workboard-media" prepares and decodes. A file that couldn't be
 // fetched is tried again later (see RETRY_SECS), as is one that a sent
-// message refers to but that didn't get to the server (`upload_soon`).
+// message refers to but that didn't get to the server (`upload_soon`). Those
+// waiting uploads are written to <cache>/.uploads.json, so quitting doesn't
+// lose them: they carry on at the next start.
+//
+// A video goes out with a still (a small JPEG, `Attachment::thumb`), so the
+// others show the still and fetch the video only when it's played.
+//
+// Cleaning up (`clean_cache`, `clean_shared_folder`): the cache drops files
+// no workspace on this computer refers to (the Trash counts) after a while,
+// and the least recently used shared ones past a size cap; the shared
+// folder's files/ drops files none of the members' copies refer to once
+// they're 30 days old.
 
 use super::*;
 use crate::media::{self, Rgba};
 use std::cell::RefCell;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Longer side of a picture in the chat.
 pub(super) const THUMB: u32 = 720;
@@ -37,6 +49,20 @@ const RETRY_SECS: [u64; 4] = [5, 15, 60, 300];
 /// isn't signed in to (it goes up by itself once it is).
 pub(super) const NOT_SIGNED_IN: &str =
     "This computer isn't signed in to the team server yet. The file goes up once it is.";
+/// The waiting uploads, kept in the cache folder.
+const BACKLOG: &str = ".uploads.json";
+/// A cached file no workspace refers to is kept this long (a message box
+/// may be about to send it, a deleted message may come back by undo).
+pub(super) const CACHE_GRACE: Duration = Duration::from_secs(14 * 24 * 3600);
+/// The cache's size past which the least recently used team files go
+/// (they can be fetched again).
+pub(super) const CACHE_CAP: u64 = 2 << 30;
+/// A file in the shared folder no member's copy refers to is removed once
+/// it's this old.
+pub(super) const FOLDER_GRACE: Duration = Duration::from_secs(30 * 24 * 3600);
+/// How often the cleaning runs (and the first time, after the start).
+const CLEAN_EVERY: Duration = Duration::from_secs(6 * 3600);
+const CLEAN_FIRST: Duration = Duration::from_secs(90);
 
 /// An attachment waiting in the message box.
 #[derive(Clone, Debug)]
@@ -49,14 +75,58 @@ pub(super) struct Pending {
 }
 
 impl Pending {
-    /// Ready to go out: checked, and on the server when there is one.
+    /// Ready to go out: checked, and on the server when there is one (with
+    /// a video's still).
     pub fn ready(&self, files: &Files) -> bool {
         self.error.is_none()
-            && self
-                .att
-                .as_ref()
-                .is_some_and(|a| files.state(&a.file) == Some(Transfer::Done))
+            && self.att.as_ref().is_some_and(|a| {
+                parts(a)
+                    .iter()
+                    .all(|p| files.state(&p.file) == Some(Transfer::Done))
+            })
     }
+
+    /// Where it is: getting ready, going up (0..1), failed (why), or done.
+    pub fn transfer(&self, files: &Files) -> Option<Transfer> {
+        if let Some(e) = &self.error {
+            return Some(Transfer::Failed(e.clone()));
+        }
+        let a = self.att.as_ref()?;
+        let states: Vec<Option<Transfer>> = parts(a).iter().map(|p| files.state(&p.file)).collect();
+        if let Some(f) = states
+            .iter()
+            .flatten()
+            .find(|t| matches!(t, Transfer::Failed(_)))
+        {
+            return Some(f.clone());
+        }
+        states.into_iter().next().flatten()
+    }
+}
+
+/// A video's still as an attachment of its own (a picture), for fetching
+/// and showing it like one.
+pub(super) fn still_of(a: &Attachment) -> Option<Attachment> {
+    let sha = a.thumb.as_ref().filter(|t| wb_server_name_ok(t))?;
+    (a.kind == MediaKind::Video).then(|| Attachment {
+        file: sha.clone(),
+        name: "still.jpg".into(),
+        kind: MediaKind::Image,
+        w: a.w,
+        h: a.h,
+        ..Default::default()
+    })
+}
+
+/// What shows for an attachment in a tile: a video's still when it has
+/// one (so the video itself isn't fetched), else the attachment.
+pub(super) fn shown(a: &Attachment) -> Attachment {
+    still_of(a).unwrap_or_else(|| a.clone())
+}
+
+/// The files an attachment is made of: itself, and a video's still.
+pub(super) fn parts(a: &Attachment) -> Vec<Attachment> {
+    std::iter::once(a.clone()).chain(still_of(a)).collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,8 +149,37 @@ pub(super) enum Remote {
     Folder(PathBuf),
     /// the team server
     Server { addr: String, auth: wb_net::Auth },
-    /// a team server, but no sign-in for it on this computer (yet)
-    SignedOut,
+    /// a team server (its address), but no sign-in for it on this
+    /// computer (yet)
+    SignedOut(String),
+}
+
+impl Remote {
+    /// Where an upload is meant to end up, as kept in the backlog:
+    /// "server:<addr>" or "folder:<path>"; None without anywhere to go.
+    pub fn target(&self) -> Option<String> {
+        match self {
+            Remote::None => None,
+            Remote::Folder(f) => Some(format!("folder:{}", f.display())),
+            Remote::Server { addr, .. } | Remote::SignedOut(addr) => {
+                Some(format!("server:{}", addr))
+            }
+        }
+    }
+}
+
+/// One upload waiting in the backlog file.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+struct Waiting {
+    target: String,
+    att: Attachment,
+}
+
+/// A file that must get somewhere: where, and the tries so far.
+struct Bg {
+    att: Attachment,
+    target: String,
+    fetch: Fetch,
 }
 
 enum Job {
@@ -151,10 +250,17 @@ pub(super) struct Files {
     wants: RefCell<Vec<(String, String, MediaKind, u32)>>,
     asked: HashSet<String>,
     fetches: HashMap<String, Fetch>,
-    /// files that must get to the server though no message box waits for
-    /// them (sent messages, earlier ones when sharing starts), tried again
-    /// like fetches until they're there
-    background: HashMap<String, (Attachment, Fetch)>,
+    /// files that must get to the server (or the shared folder) though no
+    /// message box waits for them (sent messages, earlier ones when sharing
+    /// starts, task attachments), tried again like fetches until they're
+    /// there; kept in BACKLOG
+    background: HashMap<String, Bg>,
+    /// `background` changed since it was last written
+    backlog_dirty: bool,
+    /// when the cleaning last started, and whether it's running
+    cleaned: Option<Instant>,
+    cleaning: Arc<AtomicBool>,
+    started: Instant,
     /// "server\nsha" for each file known to be on a server
     on_server: Arc<Mutex<HashSet<String>>>,
     /// uploads to stop (their attachment was taken out of the message box)
@@ -240,10 +346,13 @@ impl Files {
                                 ext,
                                 kind,
                                 max,
-                            } => Done::Decoded {
-                                key,
-                                img: media::thumbnail(&with_ext(&dir, &sha, &ext), kind, max),
-                            },
+                            } => {
+                                touch(&dir.join(&sha));
+                                Done::Decoded {
+                                    key,
+                                    img: media::thumbnail(&with_ext(&dir, &sha, &ext), kind, max),
+                                }
+                            }
                             _ => continue,
                         };
                         if done_tx.send(out).is_err() {
@@ -253,6 +362,22 @@ impl Files {
                     }
                 });
         }
+        let background = load_backlog(&dir)
+            .into_iter()
+            .map(|w| {
+                (
+                    w.att.file.clone(),
+                    Bg {
+                        att: w.att,
+                        target: w.target,
+                        fetch: Fetch {
+                            tries: 1,
+                            next: None,
+                        },
+                    },
+                )
+            })
+            .collect();
         Files {
             dir,
             small,
@@ -263,7 +388,11 @@ impl Files {
             wants: Default::default(),
             asked: Default::default(),
             fetches: Default::default(),
-            background: Default::default(),
+            background,
+            backlog_dirty: false,
+            cleaned: None,
+            cleaning: Default::default(),
+            started: Instant::now(),
             on_server,
             cancelled,
             token: Default::default(),
@@ -341,9 +470,15 @@ impl Files {
     /// ready as it is. On a server this computer isn't signed in to, it
     /// waits with NOT_SIGNED_IN as its error.
     pub fn upload(&self, att: &Attachment, remote: &Remote) {
+        for p in parts(att) {
+            self.upload_one(&p, remote);
+        }
+    }
+
+    fn upload_one(&self, att: &Attachment, remote: &Remote) {
         let (addr, auth) = match remote {
             Remote::Server { addr, auth } => (addr, auth),
-            Remote::SignedOut => {
+            Remote::SignedOut(_) => {
                 self.states
                     .lock()
                     .unwrap()
@@ -379,27 +514,78 @@ impl Files {
     /// A file a sent message refers to (or one from before sharing started):
     /// get it where the team can fetch it, and on a server keep trying
     /// (after RETRY_SECS) until it's there. Only files this computer has.
+    /// The backlog is kept on disk, so this carries on after a restart.
     pub fn upload_soon(&mut self, att: &Attachment, remote: &Remote) {
-        match remote {
-            Remote::None => {}
-            Remote::Folder(f) => self.to_folder(att, &f.join("files")),
-            Remote::Server { addr, .. } if self.is_on_server(addr, &att.file) => {}
-            Remote::Server { .. } | Remote::SignedOut => {
-                if self.local(&att.file).is_none() {
-                    return;
+        let Some(target) = remote.target() else {
+            return;
+        };
+        for p in parts(att) {
+            match remote {
+                Remote::None => {}
+                Remote::Folder(f) => {
+                    if self.local(&p.file).is_none() || f.join("files").join(&p.file).is_file() {
+                        continue;
+                    }
+                    self.wait_for(&p, &target);
+                    self.to_folder(&p, &f.join("files"));
                 }
-                self.background.entry(att.file.clone()).or_insert_with(|| {
-                    (
-                        att.clone(),
-                        Fetch {
-                            tries: 1,
-                            next: None,
-                        },
-                    )
-                });
-                self.upload(att, remote);
+                Remote::Server { addr, .. } if self.is_on_server(addr, &p.file) => {}
+                Remote::Server { .. } | Remote::SignedOut(_) => {
+                    if self.local(&p.file).is_none() {
+                        continue;
+                    }
+                    self.wait_for(&p, &target);
+                    self.upload_one(&p, remote);
+                }
             }
         }
+    }
+
+    /// Like `upload_soon`, without trusting what this computer last knew
+    /// of the server: a file the server had may be gone since (cleaned up
+    /// while only someone's Trash named it).
+    pub fn reupload(&mut self, att: &Attachment, remote: &Remote) {
+        if let Remote::Server { addr, .. } = remote {
+            self.on_server
+                .lock()
+                .unwrap()
+                .remove(&format!("{}\n{}", addr, att.file));
+        }
+        self.upload_soon(att, remote);
+    }
+
+    /// Put a file in the backlog (once).
+    fn wait_for(&mut self, att: &Attachment, target: &str) {
+        if !self.background.contains_key(&att.file) {
+            self.background.insert(
+                att.file.clone(),
+                Bg {
+                    att: att.clone(),
+                    target: target.to_string(),
+                    fetch: Fetch {
+                        tries: 1,
+                        next: None,
+                    },
+                },
+            );
+            self.backlog_dirty = true;
+        }
+    }
+
+    /// Take a file out of the backlog and stop its upload (a task
+    /// attachment dismissed before it got there).
+    pub fn forget(&mut self, att: &Attachment) {
+        for p in parts(att) {
+            if self.background.remove(&p.file).is_some() {
+                self.backlog_dirty = true;
+            }
+            self.cancel_upload(&p.file);
+        }
+    }
+
+    /// Files waiting in the backlog (they must stay in the cache).
+    pub fn waiting(&self) -> impl Iterator<Item = &String> {
+        self.background.keys()
     }
 
     fn is_on_server(&self, addr: &str, sha: &str) -> bool {
@@ -419,6 +605,13 @@ impl Files {
         if matches!(s.get(sha), Some(Transfer::Up(_))) {
             self.cancelled.lock().unwrap().insert(sha.to_string());
             s.remove(sha);
+        }
+    }
+
+    /// Stop an attachment's upload (with its still), see `cancel_upload`.
+    pub fn cancel_attachment(&self, att: &Attachment) {
+        for p in parts(att) {
+            self.cancel_upload(&p.file);
         }
     }
 
@@ -443,7 +636,7 @@ impl Files {
     /// The cached file under a name with the attachment's extension, for
     /// AVFoundation (which goes by the extension, not the contents).
     pub fn playable(&self, a: &Attachment) -> Option<PathBuf> {
-        self.local(&a.file)?;
+        touch(&self.local(&a.file)?);
         Some(with_ext(&self.dir, &a.file, &ext_of(&a.name)))
     }
 
@@ -494,6 +687,20 @@ impl Files {
             }
         }
         self.tick_background(ctx, remote);
+        if self.backlog_dirty {
+            self.backlog_dirty = false;
+            save_backlog(
+                &self.dir,
+                &self
+                    .background
+                    .values()
+                    .map(|b| Waiting {
+                        target: b.target.clone(),
+                        att: b.att.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
         for (sha, ext, kind, max) in self.wants.take() {
             let k = key(&sha, max);
             if self.textures.contains_key(&k) || self.asked.contains(&k) {
@@ -512,7 +719,7 @@ impl Files {
                 continue;
             }
             // not here yet: fetch it, and when that fails try again a while later
-            if matches!(remote, Remote::None | Remote::SignedOut)
+            if matches!(remote, Remote::None | Remote::SignedOut(_))
                 || matches!(self.state(&sha), Some(Transfer::Down(_) | Transfer::Up(_)))
             {
                 continue;
@@ -549,48 +756,113 @@ impl Files {
                     sha: sha.clone(),
                     folder: f.join("files"),
                 },
-                Remote::None | Remote::SignedOut => continue,
+                Remote::None | Remote::SignedOut(_) => continue,
             };
             self.states.lock().unwrap().insert(sha, Transfer::Down(0.0));
             let _ = self.lane(kind).send(job);
         }
     }
 
-    /// Files that must get to the server: start the ones not sent there yet
-    /// (or waiting for a sign-in), and try failed ones again when due.
+    /// Files that must get to the server (or the shared folder): start the
+    /// ones not sent there yet (or waiting for a sign-in), and try failed
+    /// ones again when due. Only the ones meant for where this workspace
+    /// is shared now; the rest wait for theirs.
     fn tick_background(&mut self, ctx: Option<&egui::Context>, remote: &Remote) {
-        let Remote::Server { addr, .. } = remote else {
+        let Some(target) = remote.target() else {
             return;
         };
         let now = Instant::now();
-        let shas: Vec<String> = self.background.keys().cloned().collect();
+        let shas: Vec<String> = self
+            .background
+            .iter()
+            .filter(|(_, b)| b.target == target)
+            .map(|(s, _)| s.clone())
+            .collect();
         for sha in shas {
-            if self.is_on_server(addr, &sha) {
-                self.background.remove(&sha);
-                continue;
-            }
-            let state = self.state(&sha);
-            if matches!(state, Some(Transfer::Up(_))) {
-                continue;
-            }
-            let Some((att, f)) = self.background.get_mut(&sha) else {
-                continue;
-            };
-            if matches!(&state, Some(Transfer::Failed(e)) if e != NOT_SIGNED_IN) {
-                let at = *f.next.get_or_insert_with(|| {
-                    now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)])
-                });
-                if now < at {
-                    if let Some(c) = ctx {
-                        c.request_repaint_after(at - now);
+            match remote {
+                Remote::Folder(f) => {
+                    let folder = f.join("files");
+                    let Some(b) = self.background.get(&sha) else {
+                        continue;
+                    };
+                    // copied a moment ago: look again a little later
+                    if let Some(at) = b.fetch.next {
+                        if now < at {
+                            if let Some(c) = ctx {
+                                c.request_repaint_after(at - now);
+                            }
+                            continue;
+                        }
                     }
-                    continue;
+                    // there now, or gone from the cache (nothing to copy)
+                    if folder.join(&sha).is_file() || self.local(&sha).is_none() {
+                        self.background.remove(&sha);
+                        self.backlog_dirty = true;
+                        continue;
+                    }
+                    let Some(b) = self.background.get_mut(&sha) else {
+                        continue;
+                    };
+                    if b.fetch.next.is_some() {
+                        b.fetch.tries += 1;
+                    }
+                    b.fetch.next = Some(
+                        now + Duration::from_secs(
+                            RETRY_SECS[(b.fetch.tries - 1).min(RETRY_SECS.len() - 1)],
+                        ),
+                    );
+                    let att = b.att.clone();
+                    let _ = self.lane(att.kind).send(Job::ToFolder { sha, folder });
                 }
-                f.tries += 1;
-                f.next = None;
+                Remote::Server { addr, .. } => {
+                    if self.is_on_server(addr, &sha) {
+                        self.background.remove(&sha);
+                        self.backlog_dirty = true;
+                        continue;
+                    }
+                    let state = self.state(&sha);
+                    if matches!(state, Some(Transfer::Up(_))) {
+                        continue;
+                    }
+                    // gone from the cache (cleaned up): nothing to send
+                    if state.is_none() && self.local(&sha).is_none() {
+                        self.background.remove(&sha);
+                        self.backlog_dirty = true;
+                        continue;
+                    }
+                    let Some(b) = self.background.get_mut(&sha) else {
+                        continue;
+                    };
+                    let f = &mut b.fetch;
+                    if matches!(&state, Some(Transfer::Failed(e)) if e != NOT_SIGNED_IN) {
+                        let at = *f.next.get_or_insert_with(|| {
+                            now + Duration::from_secs(
+                                RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)],
+                            )
+                        });
+                        if now < at {
+                            if let Some(c) = ctx {
+                                c.request_repaint_after(at - now);
+                            }
+                            continue;
+                        }
+                        f.tries += 1;
+                        f.next = None;
+                    }
+                    let att = b.att.clone();
+                    self.upload_one(&att, remote);
+                }
+                // waits for a sign-in (upload says why)
+                Remote::SignedOut(_) => {
+                    if self.state(&sha).is_none() {
+                        if let Some(b) = self.background.get(&sha) {
+                            let att = b.att.clone();
+                            self.upload_one(&att, remote);
+                        }
+                    }
+                }
+                Remote::None => {}
             }
-            let att = att.clone();
-            self.upload(&att, remote);
         }
     }
 
@@ -632,8 +904,8 @@ impl Files {
         if let Some(f) = self.fetches.get_mut(sha) {
             f.next = Some(Instant::now());
         }
-        if let Some((_, f)) = self.background.get_mut(sha) {
-            f.next = Some(Instant::now());
+        if let Some(b) = self.background.get_mut(sha) {
+            b.fetch.next = Some(Instant::now());
         }
     }
 
@@ -641,9 +913,79 @@ impl Files {
     /// one waits (tests).
     #[cfg(test)]
     pub fn upload_tries(&self, sha: &str) -> Option<(usize, bool)> {
-        self.background
-            .get(sha)
-            .map(|(_, f)| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
+        self.background.get(sha).map(|b| {
+            (
+                b.fetch.tries,
+                b.fetch.next.is_some_and(|n| n > Instant::now()),
+            )
+        })
+    }
+
+    /// Whether a file waits in the backlog (tests).
+    #[cfg(test)]
+    pub fn is_waiting(&self, sha: &str) -> bool {
+        self.background.contains_key(sha)
+    }
+
+    /// Start the cleaning on a worker thread when it's due (not while the
+    /// last one runs). `job` does the work there.
+    pub fn clean_due(&mut self) -> bool {
+        let due = match self.cleaned {
+            None => self.started.elapsed() >= CLEAN_FIRST,
+            Some(at) => at.elapsed() >= CLEAN_EVERY,
+        };
+        due && !self.cleaning.load(Ordering::SeqCst)
+    }
+
+    pub fn clean_in_background(&mut self, job: impl FnOnce(&Path) + Send + 'static) {
+        self.cleaned = Some(Instant::now());
+        self.cleaning.store(true, Ordering::SeqCst);
+        let (dir, flag) = (self.dir.clone(), self.cleaning.clone());
+        let _ = std::thread::Builder::new()
+            .name("workboard-clean".into())
+            .spawn(move || {
+                job(&dir);
+                flag.store(false, Ordering::SeqCst);
+            });
+    }
+
+    /// The cache folder.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+}
+
+/// The waiting uploads saved in the cache folder.
+fn load_backlog(dir: &Path) -> Vec<Waiting> {
+    std::fs::read_to_string(dir.join(BACKLOG))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<Waiting>>(&s).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|w| wb_server_name_ok(&w.att.file))
+        .collect()
+}
+
+fn save_backlog(dir: &Path, list: &[Waiting]) {
+    let path = dir.join(BACKLOG);
+    if list.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let _ = std::fs::create_dir_all(dir);
+    if let Ok(s) = serde_json::to_string(list) {
+        let tmp = dir.join(format!(".uploads-{:x}", wb_sync::random_u64()));
+        if std::fs::write(&tmp, s).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
+/// Mark a cached file as just used (the cleaning keeps the most recently
+/// used ones).
+fn touch(p: &Path) {
+    if let Ok(f) = std::fs::File::options().write(true).open(p) {
+        let _ = f.set_modified(SystemTime::now());
     }
 }
 
@@ -684,16 +1026,39 @@ fn wb_server_name_ok(sha: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// Copy `from` into the cache under its hash (temporary name first).
+/// Copy `from` into the cache (or the shared folder) under its hash
+/// (temporary name first). It's marked as changed now, whatever the
+/// original's date: the cleaning goes by when a file was put there.
 fn store(dir: &Path, from: &Path, sha: &str) -> Result<(), String> {
     let dest = dir.join(sha);
     if dest.is_file() {
+        touch(&dest);
         return Ok(());
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let tmp = dir.join(format!(".copy-{:x}", wb_sync::random_u64()));
     std::fs::copy(from, &tmp).map_err(|e| e.to_string())?;
+    touch(&tmp);
     std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())
+}
+
+/// A video's still: made, put in the cache (and the shared folder) under
+/// its own hash. None when the video gives no picture.
+fn make_still(dir: &Path, video: &Path, folder: Option<&Path>) -> Option<String> {
+    let jpeg = media::video_still_jpeg(video, media::STILL)?;
+    std::fs::create_dir_all(dir).ok()?;
+    let tmp = dir.join(format!(".still-{:x}.jpg", wb_sync::random_u64()));
+    std::fs::write(&tmp, jpeg).ok()?;
+    let out = (|| {
+        let (sha, _) = wb_net::sha256_file(&tmp).ok()?;
+        store(dir, &tmp, &sha).ok()?;
+        if let Some(f) = folder {
+            store(f, &tmp, &sha).ok()?;
+        }
+        Some(sha)
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    out
 }
 
 /// Check a file and get it into the cache (and the shared folder).
@@ -731,6 +1096,10 @@ fn prepare(
             store(f, &src, &sha)
                 .map_err(|e| format!("Couldn't put {} in the shared folder: {}", name, e))?;
         }
+        let thumb = match kind {
+            MediaKind::Video => make_still(dir, &src, folder),
+            MediaKind::Image => None,
+        };
         Ok(Attachment {
             file: sha,
             name: name.to_string(),
@@ -739,6 +1108,7 @@ fn prepare(
             w,
             h,
             secs,
+            thumb,
         })
     })();
     if let Some(t) = tmp {
@@ -891,7 +1261,7 @@ impl App {
                         token,
                     },
                 },
-                None => Remote::SignedOut,
+                None => Remote::SignedOut(addr.clone()),
             },
             Some(cfg) if !cfg.folder.is_empty() => Remote::Folder(PathBuf::from(&cfg.folder)),
             _ => Remote::None,
@@ -921,7 +1291,11 @@ impl App {
             if let Some((_, p)) = self.task_files.iter_mut().find(|(_, p)| p.local == local) {
                 match &result {
                     Ok(a) => {
+                        // into the backlog too: tried again after a failure
+                        // (waiting longer each time), carried on after a
+                        // restart, and sent once there's a sign-in
                         self.files.upload(a, &remote);
+                        self.files.upload_soon(a, &remote);
                         p.att = Some(a.clone());
                     }
                     Err(e) => p.error = Some(e.clone()),
@@ -929,6 +1303,7 @@ impl App {
             }
         }
         self.attach_ready_task_files();
+        self.clean_tick();
         // attachments that waited for a sign-in go up once there is one
         if matches!(remote, Remote::Server { .. }) {
             let waiting: Vec<Attachment> = self.boxed_attachments().into_iter().filter(|a| matches!(self.files.state(&a.file), Some(Transfer::Failed(e)) if e == NOT_SIGNED_IN)).collect();
@@ -963,31 +1338,90 @@ impl App {
             .chain(self.drafts.thread_files.saved.values());
         boxes
             .flat_map(|l| l.iter().filter_map(|p| p.att.clone()))
+            .chain(self.task_files.iter().filter_map(|(_, p)| p.att.clone()))
             .collect()
     }
 
-    /// Sharing just started: the pictures and videos earlier messages refer
-    /// to (the ones this computer has), and the ones waiting in message boxes
-    /// (which were ready with nowhere to go), go where the team can get them;
-    /// failed uploads are tried again.
+    /// Whether a sent message, a task (or anything else in the workspace,
+    /// the Trash too) or a message box still has this file.
+    pub(super) fn file_in_use(&self, sha: &str) -> bool {
+        let data = serde_json::to_value(&self.data).unwrap_or_default();
+        shas_in(&data).contains(sha)
+            || self
+                .boxed_attachments()
+                .iter()
+                .any(|a| parts(a).iter().any(|p| p.file == sha))
+    }
+
+    /// Now and then: tidy the cache (and the shared folder's files/) on a
+    /// worker thread. Only for the real data folder.
+    fn clean_tick(&mut self) {
+        if !self.persist || !self.files.clean_due() {
+            return;
+        }
+        let current = (
+            self.data.extra.shared.is_some(),
+            shas_in(&serde_json::to_value(&self.data).unwrap_or_default()),
+        );
+        let keep: HashSet<String> = self
+            .files
+            .waiting()
+            .cloned()
+            .chain(
+                self.boxed_attachments()
+                    .iter()
+                    .flat_map(parts)
+                    .map(|p| p.file),
+            )
+            .collect();
+        let folder = match self.media_remote() {
+            Remote::Folder(f) => Some(f),
+            _ => None,
+        };
+        self.files.clean_in_background(move |dir| {
+            let mut spaces = workspaces_on_disk(&Data::dir());
+            let now = SystemTime::now();
+            if let Some(f) = folder {
+                let refs = folder_refs(&f).map(|mut r| {
+                    r.extend(current.1.iter().cloned());
+                    r
+                });
+                clean_shared_folder(&f.join("files"), &refs, now, FOLDER_GRACE);
+            }
+            spaces.push(current);
+            clean_cache(dir, &spaces, &keep, now, CACHE_GRACE, CACHE_CAP);
+        });
+    }
+
+    /// Sharing just started: the pictures and videos anything in the
+    /// workspace refers to (messages and replies, tasks, the Trash ...; the
+    /// ones this computer has), and the ones waiting in message boxes (which
+    /// were ready with nowhere to go), go where the team can get them;
+    /// failed uploads are tried again. The list is kept on disk, so a
+    /// restart carries on with it.
     pub(super) fn share_cached_files(&mut self) {
         let remote = self.media_remote();
         let mut seen = HashSet::new();
-        let mut atts: Vec<Attachment> = self
-            .data
-            .channels
-            .iter()
-            .flat_map(|c| {
-                c.messages
-                    .iter()
-                    .flat_map(|m| std::iter::once(m).chain(m.replies.iter()))
-            })
-            .flat_map(|m| m.attachments.iter())
-            .cloned()
-            .collect();
+        let mut atts = vec![];
+        attachments_in(
+            &serde_json::to_value(&self.data).unwrap_or_default(),
+            &mut atts,
+        );
         atts.extend(self.boxed_attachments());
         for a in atts.iter().filter(|a| seen.insert(a.file.clone())) {
             self.files.upload_soon(a, &remote);
+        }
+    }
+
+    /// Items came back from Trash: their pictures and videos (the ones this
+    /// computer has) go where the team can get them again.
+    pub(super) fn reupload_files(&mut self, atts: &[Attachment]) {
+        if atts.is_empty() {
+            return;
+        }
+        let remote = self.media_remote();
+        for a in atts {
+            self.files.reupload(a, &remote);
         }
     }
 
@@ -1152,6 +1586,10 @@ impl App {
                         format!("Attachment {}", p.name),
                     )
                 });
+                // a click only means something on a failed upload (try again)
+                if failed.is_none() || p.error.is_some() {
+                    no_pointer(&resp);
+                }
                 let painter = ui.painter_at(rect.expand(6.0));
                 match p.att.as_ref().and_then(|a| {
                     self.files.want(a, THUMB);
@@ -1271,21 +1709,11 @@ impl App {
                 .find(|p| p.local == l)
                 .and_then(|p| p.att.clone());
             list.retain(|p| p.local != l);
-            // stop its upload, unless another message box or a sent message
-            // has the same file
+            // stop its upload, unless another message box, a sent message or
+            // a task has the same file
             if let Some(a) = gone {
-                let sent = self
-                    .data
-                    .channels
-                    .iter()
-                    .flat_map(|c| {
-                        c.messages
-                            .iter()
-                            .flat_map(|m| std::iter::once(m).chain(m.replies.iter()))
-                    })
-                    .any(|m| m.attachments.iter().any(|x| x.file == a.file));
-                if !sent && !self.boxed_attachments().iter().any(|x| x.file == a.file) {
-                    self.files.cancel_upload(&a.file);
+                if !self.file_in_use(&a.file) {
+                    self.files.cancel_attachment(&a);
                 }
             }
         }
@@ -1349,9 +1777,12 @@ impl App {
                 if !ui.is_rect_visible(rect) {
                     continue;
                 }
-                self.files.want(a, THUMB);
+                // a video with a still shows the still; the video itself is
+                // fetched when it's played
+                let s = shown(a);
+                self.files.want(&s, THUMB);
                 let painter = ui.painter_at(rect);
-                match self.files.texture(&a.file, THUMB) {
+                match self.files.texture(&s.file, THUMB) {
                     Some(tex) => {
                         let uv = cover_uv(tex.size_vec2(), size);
                         painter.add(
@@ -1361,12 +1792,12 @@ impl App {
                     }
                     None => {
                         painter.rect_filled(rect, 8.0, t.hover);
-                        let status = match self.files.state(&a.file) {
+                        let status = match self.files.state(&s.file) {
                             Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
                             Some(Transfer::Failed(e)) => {
                                 format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
                             }
-                            _ if self.files.broken(&a.file, THUMB) => {
+                            _ if self.files.broken(&s.file, THUMB) => {
                                 tr("Can't show this file").into()
                             }
                             _ => a.name.clone(),
@@ -1403,7 +1834,7 @@ impl App {
                     }
                 }
                 if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    painter.rect_filled(rect, 8.0, Color32::from_white_alpha(16));
                 }
                 if resp.clicked() {
                     clicked = Some(i);
@@ -1449,9 +1880,13 @@ impl App {
             }
         }
         let local = self.files.local(&a.file);
+        let still = still_of(&a);
         if a.kind == MediaKind::Image {
             self.files.want(&a, FULL);
             self.files.want(&a, THUMB);
+        } else if let Some(s) = &still {
+            // the still shows while the video comes
+            self.files.want(s, THUMB);
         } else if local.is_none() {
             self.files.want(&a, THUMB);
         }
@@ -1512,6 +1947,7 @@ impl App {
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
                 let (bg, bg_resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+                crate::widgets::no_pointer(&bg_resp);
                 ui.painter()
                     .rect_filled(bg, 0.0, Color32::from_black_alpha(225));
                 let bar_h = 56.0;
@@ -1526,10 +1962,13 @@ impl App {
                         .texture(&a.file, FULL)
                         .or_else(|| self.files.texture(&a.file, THUMB))
                         .cloned(),
-                    MediaKind::Video => v
-                        .frame
-                        .clone()
-                        .or_else(|| self.files.texture(&a.file, THUMB).cloned()),
+                    MediaKind::Video => v.frame.clone().or_else(|| {
+                        still
+                            .as_ref()
+                            .and_then(|s| self.files.texture(&s.file, THUMB))
+                            .or_else(|| self.files.texture(&a.file, THUMB))
+                            .cloned()
+                    }),
                 };
                 let (w, h) = fit(
                     a.w.max(1) as f32,
@@ -1546,6 +1985,12 @@ impl App {
                         format!("Large {}", a.name),
                     )
                 });
+                // the picture takes a click only to retry a failed download
+                let retryable =
+                    tex.is_none() && matches!(self.files.state(&a.file), Some(Transfer::Failed(_)));
+                if !retryable {
+                    no_pointer(&pic_resp);
+                }
                 match &tex {
                     Some(tex) => {
                         ui.painter().image(
@@ -1601,12 +2046,12 @@ impl App {
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let b = |ui: &mut Ui, s: &str| {
-                                ui.add(
+                                ui.add(Tint(
                                     egui::Button::new(RichText::new(s).color(Color32::WHITE))
                                         .fill(Color32::from_white_alpha(28))
                                         .corner_radius(6)
                                         .min_size(vec2(0.0, 28.0)),
-                                )
+                                ))
                             };
                             if b(ui, tr("Close")).on_hover_text("Esc").clicked() {
                                 close = true;
@@ -1689,7 +2134,7 @@ impl App {
                                 .layout(Layout::left_to_right(Align::Center)),
                             |ui| {
                                 let playing = p.playing();
-                                let pb = ui.add(
+                                let pb = ui.add(ghost(
                                     egui::Button::new(
                                         RichText::new(if playing {
                                             "\u{23F8}"
@@ -1699,9 +2144,8 @@ impl App {
                                         .color(Color32::WHITE)
                                         .size(16.0),
                                     )
-                                    .frame(false)
                                     .min_size(vec2(32.0, 32.0)),
-                                );
+                                ));
                                 pb.widget_info(|| {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Button,
@@ -1769,7 +2213,7 @@ impl App {
                                         .size(12.0),
                                 );
                                 let muted = p.muted();
-                                let mb = ui.add(
+                                let mb = ui.add(ghost(
                                     egui::Button::new(
                                         RichText::new(if muted {
                                             "\u{1F507}"
@@ -1779,9 +2223,8 @@ impl App {
                                         .color(Color32::WHITE)
                                         .size(15.0),
                                     )
-                                    .frame(false)
                                     .min_size(vec2(32.0, 32.0)),
-                                );
+                                ));
                                 mb.widget_info(|| {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Button,
@@ -1834,7 +2277,7 @@ impl App {
 
 /// The values in `text` that fill the "{}"s of `pattern`, when it was made
 /// from it.
-fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
+pub(super) fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
     let parts: Vec<&str> = pattern.split("{}").collect();
     let mut rest = text.strip_prefix(parts[0])?;
     let mut values = vec![];
@@ -1907,4 +2350,288 @@ fn save_copy(from: &Path, name: &str) -> Result<PathBuf, String> {
     }
     std::fs::copy(from, &dest).map_err(|e| e.to_string())?;
     Ok(dest)
+}
+
+/// The pictures and videos named anywhere in a Trash item (a channel's
+/// messages, tasks, the tasks of a list, folder or space), each once.
+pub(super) fn trash_attachments(payload: &str) -> Vec<Attachment> {
+    fn walk(v: &serde_json::Value, out: &mut Vec<Attachment>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                for (k, x) in o {
+                    if k == "attachments" {
+                        if let Ok(a) = serde_json::from_value::<Vec<Attachment>>(x.clone()) {
+                            for a in a {
+                                if !out.iter().any(|o| o.file == a.file) {
+                                    out.push(a);
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    walk(x, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+        walk(&v, &mut out);
+    }
+    out
+}
+
+// ------------------------------------------------------------------ cleaning
+
+/// Every attachment anywhere in a workspace (messages and replies, tasks,
+/// the Trash's saved JSON text, ...), found by its shape so nothing that
+/// holds one is missed.
+pub(super) fn attachments_in(v: &serde_json::Value, out: &mut Vec<Attachment>) {
+    match v {
+        serde_json::Value::Object(o) => {
+            let looks = o
+                .get("file")
+                .and_then(|f| f.as_str())
+                .is_some_and(wb_server_name_ok)
+                && o.get("name").is_some_and(|n| n.is_string());
+            if looks {
+                if let Ok(a) = serde_json::from_value::<Attachment>(v.clone()) {
+                    out.push(a);
+                    return;
+                }
+            }
+            for x in o.values() {
+                attachments_in(x, out);
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for x in a {
+                attachments_in(x, out);
+            }
+        }
+        // the Trash keeps what was deleted as JSON text
+        serde_json::Value::String(t) if t.starts_with('{') || t.starts_with('[') => {
+            if let Ok(inner) = serde_json::from_str::<serde_json::Value>(t) {
+                attachments_in(&inner, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The files (and video stills) a workspace refers to.
+pub(super) fn shas_in(v: &serde_json::Value) -> HashSet<String> {
+    let mut atts = vec![];
+    attachments_in(v, &mut atts);
+    atts.iter().flat_map(parts).map(|p| p.file).collect()
+}
+
+/// Every 64-hex-digit word in a text (for a file that can't be read as a
+/// workspace: anything that looks like a file name counts as used).
+fn hex_words(text: &str) -> HashSet<String> {
+    text.split(|c: char| !c.is_ascii_hexdigit())
+        .filter(|w| wb_server_name_ok(w))
+        .map(String::from)
+        .collect()
+}
+
+/// The workspaces saved on this computer: whether each is shared, and the
+/// files it refers to.
+pub(super) fn workspaces_on_disk(dir: &Path) -> Vec<(bool, HashSet<String>)> {
+    let mut out = vec![];
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().is_none_or(|x| x != "json") || !p.is_file() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(v) => {
+                let shared = v
+                    .get("extra")
+                    .and_then(|x| x.get("shared"))
+                    .is_some_and(|s| !s.is_null());
+                out.push((shared, shas_in(&v)));
+            }
+            Err(_) => out.push((false, hex_words(&text))),
+        }
+    }
+    out
+}
+
+/// The files the members' copies in a shared folder refer to. None when
+/// one of them can't be read (half synced, say): then nothing is cleaned.
+pub(super) fn folder_refs(folder: &Path) -> Option<HashSet<String>> {
+    let mut refs = HashSet::new();
+    let mut any = false;
+    for e in std::fs::read_dir(folder).ok()?.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !name.ends_with(wb_sync::FILE_SUFFIX) || name.starts_with('.') {
+            continue;
+        }
+        let v = wb_sync::read_json(&e.path())?;
+        refs.extend(shas_in(&v));
+        any = true;
+    }
+    any.then_some(refs)
+}
+
+/// A cached file name: the hash, or the hash with an extension (a link
+/// made for the player); the hash it belongs to.
+fn cache_base(name: &str) -> Option<&str> {
+    let base = name.split('.').next()?;
+    wb_server_name_ok(base).then_some(base)
+}
+
+fn age(m: &std::fs::Metadata, now: SystemTime) -> Duration {
+    m.modified()
+        .ok()
+        .and_then(|t| now.duration_since(t).ok())
+        .unwrap_or_default()
+}
+
+/// Tidy the cache: a file no workspace refers to (the Trash counts) goes
+/// once it's older than `grace`; then, past `cap` bytes, the least recently
+/// used files that only shared workspaces refer to go (they're on the
+/// server or in the shared folder and come back when needed). Files in
+/// `keep` (waiting to go up, in a message box) and files a workspace that
+/// isn't shared refers to (the cache is their only copy) always stay.
+/// Returns the hashes removed.
+pub(super) fn clean_cache(
+    dir: &Path,
+    spaces: &[(bool, HashSet<String>)],
+    keep: &HashSet<String>,
+    now: SystemTime,
+    grace: Duration,
+    cap: u64,
+) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return vec![];
+    };
+    let used: HashSet<&String> = spaces.iter().flat_map(|(_, s)| s).collect();
+    let only_here: HashSet<&String> = spaces
+        .iter()
+        .filter(|(shared, _)| !shared)
+        .flat_map(|(_, s)| s)
+        .chain(keep)
+        .collect();
+    // hash -> (size, last used); links by the hash they belong to
+    let mut bases: HashMap<String, (u64, SystemTime)> = HashMap::new();
+    let mut links: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Ok(m) = e.metadata() else { continue };
+        if !m.is_file() {
+            continue;
+        }
+        if name.starts_with('.') {
+            // a copy, paste or still left half made
+            if name != BACKLOG && age(&m, now) > Duration::from_secs(24 * 3600) {
+                let _ = std::fs::remove_file(e.path());
+            }
+            continue;
+        }
+        let Some(base) = cache_base(&name) else {
+            continue;
+        };
+        if base == name {
+            bases.insert(
+                name.clone(),
+                (m.len(), m.modified().unwrap_or(SystemTime::UNIX_EPOCH)),
+            );
+        } else {
+            links.entry(base.to_string()).or_default().push(e.path());
+        }
+    }
+    let mut removed = vec![];
+    let drop_file = |sha: &str, removed: &mut Vec<String>| {
+        let _ = std::fs::remove_file(dir.join(sha));
+        for l in links.get(sha).into_iter().flatten() {
+            let _ = std::fs::remove_file(l);
+        }
+        removed.push(sha.to_string());
+    };
+    // links whose file is gone
+    for (base, paths) in &links {
+        if !bases.contains_key(base) {
+            for p in paths {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+    let stale: Vec<String> = bases
+        .iter()
+        .filter(|(sha, (_, used_at))| {
+            !used.contains(sha)
+                && !keep.contains(*sha)
+                && now.duration_since(*used_at).unwrap_or_default() > grace
+        })
+        .map(|(sha, _)| sha.clone())
+        .collect();
+    for sha in stale {
+        bases.remove(&sha);
+        drop_file(&sha, &mut removed);
+    }
+    let mut total: u64 = bases.values().map(|(n, _)| n).sum();
+    if total > cap {
+        let mut team: Vec<(&String, &(u64, SystemTime))> = bases
+            .iter()
+            .filter(|(sha, _)| used.contains(sha) && !only_here.contains(sha))
+            .collect();
+        team.sort_by_key(|(_, (_, at))| *at);
+        let mut gone = vec![];
+        for (sha, (n, _)) in team {
+            if total <= cap {
+                break;
+            }
+            total -= n;
+            gone.push(sha.clone());
+        }
+        for sha in gone {
+            drop_file(&sha, &mut removed);
+        }
+    }
+    removed
+}
+
+/// Tidy a shared folder's files/: a file none of the members' copies refer
+/// to (`refs`, see `folder_refs`) goes once it's older than `grace` (it was
+/// put there that long ago, so every member's copy has long caught up).
+/// Any member's app may do this; a file still in use is never touched.
+pub(super) fn clean_shared_folder(
+    files: &Path,
+    refs: &Option<HashSet<String>>,
+    now: SystemTime,
+    grace: Duration,
+) -> Vec<String> {
+    let Some(refs) = refs else {
+        return vec![];
+    };
+    let Ok(rd) = std::fs::read_dir(files) else {
+        return vec![];
+    };
+    let mut removed = vec![];
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Ok(m) = e.metadata() else { continue };
+        if !m.is_file() || age(&m, now) <= grace {
+            continue;
+        }
+        if name.starts_with(".copy-") || name.starts_with(".still-") {
+            let _ = std::fs::remove_file(e.path());
+            continue;
+        }
+        if wb_server_name_ok(&name) && !refs.contains(&name) {
+            let _ = std::fs::remove_file(e.path());
+            removed.push(name);
+        }
+    }
+    removed
 }

@@ -1,4 +1,5 @@
 mod app;
+mod filters;
 mod i18n;
 mod links;
 mod model;

@@ -2,6 +2,7 @@
 // items, @mentions and workboard:// links, reactions, replies, editing,
 // deleting, assigning and resolving, and the per-task unsent drafts.
 
+use super::nav::Link;
 use super::*;
 
 /// Reactions offered on a comment.
@@ -28,33 +29,20 @@ const CHECKED: &str = "\u{2611} ";
 pub(super) enum Seg<'a> {
     Text(&'a str),
     Mention(&'a str),
-    Link(&'a str, LinkTo),
+    Link(&'a str, Link),
 }
 
-/// Where a workboard:// link points.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub(super) enum LinkTo {
-    Task(u64),
-    List(u64),
-    Space(u64),
-}
-
-/// Reads `workboard://task/12` (or list/space) at the start of `s`; returns
-/// the target and how many bytes the link takes.
-pub(super) fn parse_link(s: &str) -> Option<(LinkTo, usize)> {
-    let rest = s.strip_prefix("workboard://")?;
-    for (kind, mk) in [
-        ("task/", LinkTo::Task as fn(u64) -> LinkTo),
-        ("list/", LinkTo::List),
-        ("space/", LinkTo::Space),
-    ] {
-        if let Some(r) = rest.strip_prefix(kind) {
-            let digits = r.bytes().take_while(|b| b.is_ascii_digit()).count();
-            let n: u64 = r[..digits].parse().ok()?;
-            return Some((mk(n), "workboard://".len() + kind.len() + digits));
-        }
+/// Reads a workboard:// link (any kind `nav::parse_link` knows) at the
+/// start of `s`; returns where it points and how many bytes it takes
+/// (trailing punctuation such as "," or "." is not part of it).
+pub(super) fn parse_link(s: &str) -> Option<(Link, usize)> {
+    if !s.starts_with("workboard://") {
+        return None;
     }
-    None
+    let word = &s[..s.find(char::is_whitespace).unwrap_or(s.len())];
+    let clean =
+        word.trim_end_matches(|c: char| matches!(c, '/' | '.' | ',' | ')' | '>' | '"' | '\''));
+    super::nav::parse_link(clean).map(|l| (l, clean.len()))
 }
 
 /// Splits a line into plain text, @mentions of the given people (longest
@@ -138,7 +126,7 @@ pub(super) fn toggle_reaction(rs: &mut Vec<Reaction>, emoji: &str, me: u64) {
 /// What a click in a comment asked for; applied after the comments are drawn.
 enum Act {
     Check { id: u64, line: usize },
-    Link(LinkTo),
+    Link(Link),
     React { id: u64, emoji: String },
     Reply(u64),
     SendReply { parent: u64, text: String },
@@ -167,31 +155,6 @@ impl App {
         }
         self.comment_text = self.comment_drafts.remove(&id).unwrap_or_default();
         self.comment_for = Some(id);
-    }
-
-    /// Goes where a workboard:// link points.
-    pub(super) fn follow_link(&mut self, to: LinkTo) {
-        match to {
-            LinkTo::Task(id) => {
-                if self.task(id).is_some() {
-                    self.actions.push(Action::Open(id));
-                } else {
-                    self.toast = Some((tr("That task no longer exists").into(), now_ts()));
-                }
-            }
-            LinkTo::List(id) if self.data.space_of_list(id).is_some() => {
-                self.open_task = None;
-                self.section = Section::Home;
-                self.loc = Location::List(id);
-                self.view = ViewKind::List;
-            }
-            LinkTo::Space(id) if self.data.spaces.iter().any(|s| s.id == id) => {
-                self.open_task = None;
-                self.section = Section::Home;
-                self.loc = Location::Space(id);
-            }
-            _ => self.toast = Some((tr("That place no longer exists").into(), now_ts())),
-        }
     }
 
     /// The task window's comments and activity lines, oldest first.
@@ -310,7 +273,9 @@ impl App {
                         task.activity[i].text = toggle_comment_check(&task.activity[i].text, line);
                     }
                 }
-                Act::Link(to) => self.follow_link(to),
+                Act::Link(to) => {
+                    self.open_link_to(Some(to));
+                }
                 Act::React { id, emoji } => {
                     if let Some(i) = find(task, id) {
                         toggle_reaction(&mut task.activity[i].reactions, &emoji, me);
@@ -423,10 +388,9 @@ impl App {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let more = ui.add(
-                            egui::Button::new(RichText::new("\u{22EF}").color(t.text2))
-                                .frame(false),
-                        );
+                        let more = ui.add(ghost(egui::Button::new(
+                            RichText::new("\u{22EF}").color(t.text2),
+                        )));
                         name_it(&more, "Comment actions");
                         click_menu(&more, |ui| {
                             if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
@@ -480,19 +444,15 @@ impl App {
                                 }
                             }
                         });
-                        let react = ui.add(
-                            egui::Button::new(RichText::new("\u{263A}").color(t.text2))
-                                .frame(false),
-                        );
+                        let react = ui.add(ghost(egui::Button::new(
+                            RichText::new("\u{263A}").color(t.text2),
+                        )));
                         name_it(&react, "Add reaction");
                         popup(ui, &react, ui.id().with(("react", a.id)), 180.0, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 for e in REACTIONS {
                                     if ui
-                                        .add(
-                                            egui::Button::new(RichText::new(e).size(18.0))
-                                                .frame(false),
-                                        )
+                                        .add(ghost(egui::Button::new(RichText::new(e).size(18.0))))
                                         .clicked()
                                     {
                                         acts.push(Act::React {
@@ -514,10 +474,11 @@ impl App {
                             .member(to)
                             .map(|m| m.name.clone())
                             .unwrap_or_else(|| tr("someone").into());
-                        let tick = ui.add(
-                            egui::Button::new(if a.resolved { "\u{2611}" } else { "\u{2610}" })
-                                .frame(false),
-                        );
+                        let tick = ui.add(ghost(egui::Button::new(if a.resolved {
+                            "\u{2611}"
+                        } else {
+                            "\u{2610}"
+                        })));
                         name_it(
                             &tick,
                             if a.resolved {
@@ -581,13 +542,15 @@ impl App {
                     ui.horizontal_wrapped(|ui| {
                         for rc in &a.reactions {
                             let on = rc.users.contains(&me);
-                            let b = egui::Button::new(
-                                RichText::new(format!("{} {}", rc.emoji, rc.users.len()))
-                                    .size(12.0),
-                            )
-                            .fill(if on { t.selected_bg } else { t.hover })
-                            .stroke(Stroke::new(1.0_f32, if on { t.primary } else { t.border }))
-                            .corner_radius(10);
+                            let b = Tint(
+                                egui::Button::new(
+                                    RichText::new(format!("{} {}", rc.emoji, rc.users.len()))
+                                        .size(12.0),
+                                )
+                                .fill(if on { t.selected_bg } else { t.hover })
+                                .stroke(Stroke::new(1.0_f32, if on { t.primary } else { t.border }))
+                                .corner_radius(10),
+                            );
                             let who: Vec<String> = rc
                                 .users
                                 .iter()
@@ -633,9 +596,11 @@ impl App {
                 };
                 if let Some((done, r)) = check {
                     rest = r;
-                    let b = ui.add(
-                        egui::Button::new(if done { "\u{2611}" } else { "\u{2610}" }).frame(false),
-                    );
+                    let b = ui.add(ghost(egui::Button::new(if done {
+                        "\u{2611}"
+                    } else {
+                        "\u{2610}"
+                    })));
                     name_it(&b, &format!("Tick {}", r.trim()));
                     if b.clicked() {
                         acts.push(Act::Check { id: a.id, line: li });

@@ -550,11 +550,9 @@ fn date_menu_inner(
                 ("8 weeks", td + Duration::days(56)),
             ];
             for (label, d) in opts {
-                let r = ui.add(
-                    egui::Button::new(tr(label))
-                        .frame(false)
-                        .min_size(vec2(126.0, 24.0)),
-                );
+                let r = ui.add(ghost(
+                    egui::Button::new(tr(label)).min_size(vec2(126.0, 24.0)),
+                ));
                 if r.clicked() {
                     *current = Some(d);
                     changed = true;
@@ -564,10 +562,9 @@ fn date_menu_inner(
             if current.is_some() {
                 ui.separator();
                 if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new(tr("Clear")).color(t.danger))
-                            .frame(false),
-                    )
+                    .add(ghost(egui::Button::new(
+                        egui::RichText::new(tr("Clear")).color(t.danger),
+                    )))
                     .clicked()
                 {
                     *current = None;
@@ -665,12 +662,12 @@ pub fn add_months(d: NaiveDate, n: i32) -> NaiveDate {
 
 /// Rounded primary button.
 pub fn primary_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
-    ui.add(
+    ui.add(Tint(
         egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).strong())
             .fill(t.primary)
             .corner_radius(6)
             .min_size(vec2(0.0, 28.0)),
-    )
+    ))
 }
 
 /// A small action button in a list row: room around the text, rounded like
@@ -692,8 +689,9 @@ pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let font = FontId::proportional(11.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 18.0), Sense::click());
+    let strength = if resp.hovered() { 0.28 } else { 0.16 };
     ui.painter()
-        .rect_filled(rect, 4.0, color.gamma_multiply(0.16));
+        .rect_filled(rect, 4.0, color.gamma_multiply(strength));
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, color);
     resp
@@ -800,18 +798,20 @@ pub fn dates_menu(
                 None => tr(label).to_string(),
             };
             let sel = which == k;
-            let b = egui::Button::new(egui::RichText::new(txt).color(if sel {
-                t.text
-            } else {
-                t.text2
-            }))
-            .fill(if sel {
-                t.selected_bg
-            } else {
-                Color32::TRANSPARENT
-            })
-            .stroke(Stroke::new(1.0, t.border))
-            .min_size(vec2(170.0, 28.0));
+            let b = Tint(
+                egui::Button::new(egui::RichText::new(txt).color(if sel {
+                    t.text
+                } else {
+                    t.text2
+                }))
+                .fill(if sel {
+                    t.selected_bg
+                } else {
+                    Color32::TRANSPARENT
+                })
+                .stroke(Stroke::new(1.0, t.border))
+                .min_size(vec2(170.0, 28.0)),
+            );
             if ui.add(b).clicked() {
                 which = k;
             }
@@ -902,6 +902,7 @@ pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
     }
     let bg = if *on { t.primary } else { t.border };
     ui.painter().rect_filled(r, 10.0, bg);
+    hover_bg(ui, &resp, r, 10.0);
     let x = if *on {
         r.right() - 10.0
     } else {
@@ -936,4 +937,152 @@ pub fn add_line(ui: &mut Ui, t: &Theme, label: &str) -> Response {
         t.text2,
     );
     resp
+}
+
+// ---------------------------------------------------------------- hover feedback
+
+const NO_POINTER: &str = "no_pointer_ids";
+
+/// Keeps the plain arrow over a click area that is not a control: the dim
+/// backdrop behind a dialog, the media viewer's surround, a drawing canvas.
+pub fn no_pointer(resp: &Response) {
+    let id = resp.id;
+    resp.ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(NO_POINTER))
+            .push(id);
+    });
+}
+
+/// Run once at the end of every frame: if the pointer rests on something that
+/// can be clicked and no widget picked a cursor of its own (a text field's
+/// I-beam, a resize arrow), show the pointing hand. egui's own buttons get it
+/// from `Visuals::interact_cursor`; this covers the painted controls, toggles,
+/// selectable labels and pickers.
+pub fn pointer_over_clickables(ctx: &egui::Context) {
+    let skip: Vec<egui::Id> = ctx.data_mut(|d| {
+        std::mem::take(d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(NO_POINTER)))
+    });
+    if ctx.output(|o| o.cursor_icon) != egui::CursorIcon::Default || ctx.dragged_id().is_some() {
+        return;
+    }
+    let hovered = ctx.interaction_snapshot(|s| s.hovered.clone());
+    let clickable = hovered.into_iter().any(|id| {
+        !skip.contains(&id)
+            && ctx.read_response(id).is_some_and(|r| {
+                // a popup or panel's own background takes clicks only to come to the front
+                let area_bg = r.id == r.layer_id.id.with("move");
+                r.enabled() && r.sense.senses_click() && !area_bg
+            })
+    });
+    if clickable {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+}
+
+/// The soft fill behind a frameless control under the pointer. Translucent so it
+/// reads the same on the page, a card, the sidebar or a popup; about as strong
+/// as the theme's `hover` grey on the page background.
+pub fn hover_fill(ui: &Ui) -> Color32 {
+    hover_fill_for(ui.visuals().dark_mode)
+}
+
+pub fn hover_fill_for(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_white_alpha(12)
+    } else {
+        Color32::from_black_alpha(10)
+    }
+}
+
+/// The outline drawn around a swatch or card under the pointer: a step above
+/// the border colour, not the bright grey egui uses for framed buttons.
+pub fn hover_line(ui: &Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_gray(88)
+    } else {
+        Color32::from_gray(190)
+    }
+}
+
+/// Fills a rounded rectangle into a slot reserved with `painter.add(Shape::Noop)`
+/// before the control was drawn, so the fill sits behind its text.
+pub fn paint_hover_slot(ui: &Ui, slot: egui::layers::ShapeIdx, rect: Rect, fill: Color32) {
+    ui.painter().set(
+        slot,
+        egui::epaint::RectShape::filled(rect, egui::CornerRadius::same(6), fill),
+    );
+}
+
+/// A button without a frame (toolbar icons, text actions, emoji in the reaction
+/// bar). egui draws nothing on hover for these, so this adds a rounded fill a
+/// little larger than the label; the layout is the same as `frame(false)`.
+pub struct Ghost<'a>(pub egui::Button<'a>);
+
+/// `ghost(egui::Button::new(..))` in place of `egui::Button::new(..).frame(false)`.
+pub fn ghost(button: egui::Button<'_>) -> Ghost<'_> {
+    Ghost(button)
+}
+
+impl egui::Widget for Ghost<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let slot = ui.painter().add(egui::Shape::Noop);
+        let r = ui.add(self.0.frame(false));
+        if r.enabled() && (r.hovered() || r.is_pointer_button_down_on()) {
+            let fill = hover_fill(ui);
+            let fill = if r.is_pointer_button_down_on() {
+                fill.gamma_multiply(1.5)
+            } else {
+                fill
+            };
+            let pad = vec2(
+                if r.rect.width() < 28.0 { 3.0 } else { 6.0 },
+                if r.rect.height() < 22.0 { 2.0 } else { 0.0 },
+            );
+            // a button laid over an exact cell (put_over) keeps the fill inside it
+            let rect = r.rect.expand2(pad).intersect(ui.max_rect().union(r.rect));
+            paint_hover_slot(ui, slot, rect, fill);
+        }
+        r
+    }
+}
+
+/// For a button with a fill of its own (primary, danger, a selected tab, a
+/// reaction chip): egui keeps that fill on hover, so this lays a light tint over
+/// it while the pointer is there.
+pub struct Tint<W>(pub W);
+
+impl<W: egui::Widget> egui::Widget for Tint<W> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let r = ui.add(self.0);
+        if r.enabled() && r.hovered() {
+            let tint = if r.is_pointer_button_down_on() {
+                hover_fill(ui).gamma_multiply(1.5)
+            } else {
+                hover_fill(ui)
+            };
+            ui.painter().rect_filled(r.rect, 6.0, tint);
+        }
+        r
+    }
+}
+
+/// For a painted control: draws the hover fill over `rect` while the pointer is
+/// on it. Call it before painting the control's own shapes.
+pub fn hover_bg(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
+    if resp.enabled() && resp.hovered() {
+        ui.painter().rect_filled(rect, radius, hover_fill(ui));
+    }
+}
+
+/// For a painted swatch, avatar or icon tile: a thin ring around `rect` while the
+/// pointer is on it (`radius` half the width makes it a circle).
+pub fn hover_ring(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
+    if resp.enabled() && resp.hovered() {
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.5, hover_line(ui)),
+            egui::StrokeKind::Outside,
+        );
+    }
 }

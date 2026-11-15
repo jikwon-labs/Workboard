@@ -1891,6 +1891,21 @@ fn a_huddle_on_the_server_connects_two_computers() {
             && !a.huddle.pictures.contains_key(wb_voice::ME)
     });
 
+    // A shares a screen (a test picture stands in for it): B gets it as A's screen
+    a.open_share_menu();
+    let display = a.huddle.screen_sources[0].share();
+    a.set_huddle_screen(Some(display));
+    let a_screen = wb_voice::screen_key(&a_identity);
+    huddle_until(&mut a, &mut b, "B sees A's screen", |a, b| {
+        b.huddle.pictures.contains_key(&a_screen)
+            && b.huddle.people.iter().any(|p| !p.me && p.screen)
+            && a.huddle.people.iter().any(|p| p.me && p.screen)
+    });
+    a.set_huddle_screen(None);
+    huddle_until(&mut a, &mut b, "A's screen is gone at B", |_, b| {
+        !b.huddle.pictures.contains_key(&a_screen)
+    });
+
     // B mutes, then leaves
     b.set_huddle_muted(true);
     huddle_until(&mut a, &mut b, "A sees B muted", |a, _| {
@@ -2279,7 +2294,8 @@ fn one_message_takes_at_most_ten_pictures() {
 
 // ---- task comments and activity (sf-comments)
 
-use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, LinkTo, Seg};
+use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, Seg};
+use super::nav::Link as LinkTo;
 
 #[test]
 fn comment_lines_split_into_mentions_and_links() {
@@ -2299,11 +2315,11 @@ fn comment_lines_split_into_mentions_and_links() {
     assert_eq!(segments("mail@Alex", &names), vec![Seg::Text("mail@Alex")]);
     assert_eq!(
         parse_link("workboard://list/7").map(|x| x.0),
-        Some(LinkTo::List(7))
+        Some(LinkTo::Loc(Location::List(7)))
     );
     assert_eq!(
         parse_link("workboard://space/9 more").map(|x| x.0),
-        Some(LinkTo::Space(9))
+        Some(LinkTo::Loc(Location::Space(9)))
     );
     assert_eq!(parse_link("workboard://task/"), None);
 }
@@ -2703,6 +2719,221 @@ fn new_filter_fields() {
     assert!(!a.filtered().is_empty());
     a.filter.rows = vec![row(FilterField::Updated, "1")];
     assert!(!a.filtered().is_empty());
+}
+
+/// Four tasks with known priority and tags, and which of them a filter keeps.
+fn filter_fixture() -> (App, impl Fn(&App, &parity::TaskFilter) -> Vec<&'static str>) {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    for (name, priority, tag) in [
+        ("A", 1, true),
+        ("B", 1, false),
+        ("C", 3, true),
+        ("D", 3, false),
+    ] {
+        let id = add_task(&mut a, list, name);
+        let t = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.priority = priority;
+        t.tags = if tag { vec!["x".into()] } else { vec![] };
+    }
+    let hits = |a: &App, f: &parity::TaskFilter| {
+        ["A", "B", "C", "D"]
+            .into_iter()
+            .filter(|n| f.matches(a.task(tid(a, n)).unwrap(), &a.data))
+            .collect()
+    };
+    (a, hits)
+}
+
+fn urgent() -> parity::FilterRow {
+    parity::FilterRow {
+        field: Some(parity::FilterField::Priority),
+        not: false,
+        values: vec!["1".into()],
+    }
+}
+
+fn tagged_x() -> parity::FilterRow {
+    parity::FilterRow {
+        field: Some(parity::FilterField::Tags),
+        not: false,
+        values: vec!["x".into()],
+    }
+}
+
+#[test]
+fn filter_rows_combine_with_and_or_or() {
+    use parity::{Join, TaskFilter};
+    let (a, hits) = filter_fixture();
+    let mut f = TaskFilter {
+        rows: vec![urgent(), tagged_x()],
+        ..Default::default()
+    };
+    assert_eq!(hits(&a, &f), vec!["A"], "And: both");
+    f.join = Join::Or;
+    assert_eq!(hits(&a, &f), vec!["A", "B", "C"], "Or: either");
+    // is not
+    f.rows[1].not = true;
+    assert_eq!(hits(&a, &f), vec!["A", "B", "D"], "urgent or not tagged");
+    f.join = Join::And;
+    assert_eq!(hits(&a, &f), vec!["B"], "urgent and not tagged");
+    // an unfinished row doesn't count, with Or as well as And
+    f.rows = vec![urgent(), parity::FilterRow::default()];
+    assert_eq!(hits(&a, &f), vec!["A", "B"]);
+    f.join = Join::Or;
+    assert_eq!(
+        hits(&a, &f),
+        vec!["A", "B"],
+        "an empty row doesn't match everything"
+    );
+    assert_eq!(f.count(), 1);
+}
+
+#[test]
+fn filter_groups_nest_one_level() {
+    use parity::{FilterGroup, Join, TaskFilter};
+    let (a, hits) = filter_fixture();
+    // tagged x, and (urgent or not tagged): only A
+    let mut f = TaskFilter {
+        rows: vec![tagged_x()],
+        groups: vec![FilterGroup {
+            join: Join::Or,
+            rows: vec![
+                urgent(),
+                parity::FilterRow {
+                    not: true,
+                    ..tagged_x()
+                },
+            ],
+        }],
+        ..Default::default()
+    };
+    assert_eq!(hits(&a, &f), vec!["A"]);
+    assert_eq!(f.count(), 3, "every row counts, the ones in groups too");
+    // top level Or: tagged x, or (urgent or not tagged) = everything
+    f.join = Join::Or;
+    assert_eq!(hits(&a, &f), vec!["A", "B", "C", "D"]);
+    // a group with And inside, top level Or: (urgent and tagged) or (not urgent and not tagged)
+    f.rows.clear();
+    f.groups = vec![
+        FilterGroup {
+            join: Join::And,
+            rows: vec![urgent(), tagged_x()],
+        },
+        FilterGroup {
+            join: Join::And,
+            rows: vec![
+                parity::FilterRow {
+                    not: true,
+                    ..urgent()
+                },
+                parity::FilterRow {
+                    not: true,
+                    ..tagged_x()
+                },
+            ],
+        },
+    ];
+    assert_eq!(hits(&a, &f), vec!["A", "D"]);
+    f.join = Join::And;
+    assert!(hits(&a, &f).is_empty(), "nothing is both");
+}
+
+#[test]
+fn empty_filter_groups_are_left_out() {
+    use parity::{FilterGroup, Join, TaskFilter};
+    let (a, hits) = filter_fixture();
+    // only empty groups: nothing is filtered, and the badge shows nothing
+    let mut f = TaskFilter {
+        join: Join::Or,
+        groups: vec![
+            FilterGroup::default(),
+            FilterGroup {
+                join: Join::Or,
+                rows: vec![parity::FilterRow::default()],
+            },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(hits(&a, &f), vec!["A", "B", "C", "D"]);
+    assert_eq!(f.count(), 0);
+    // with Or at the top, an empty group doesn't let everything through
+    f.rows = vec![urgent()];
+    assert_eq!(hits(&a, &f), vec!["A", "B"]);
+    f.join = Join::And;
+    assert_eq!(hits(&a, &f), vec!["A", "B"]);
+    assert_eq!(f.count(), 1);
+}
+
+#[test]
+fn view_settings_from_before_filter_groups_still_load() {
+    use parity::{FilterGroup, Join};
+    let p: super::listview::ViewPrefs = serde_json::from_value(serde_json::json!({
+        "group_by": "Status", "sort_by": "Manual",
+        "filter_rows": [{"field": "Priority", "not": false, "values": ["1"]}]
+    }))
+    .unwrap();
+    assert_eq!(p.filter_rows.len(), 1);
+    assert!(p.filter_groups.is_empty() && p.filter_join == Join::And);
+    // groups are remembered per location like the rows
+    let mut a = app();
+    a.filter.join = Join::Or;
+    a.filter.groups = vec![FilterGroup {
+        join: Join::Or,
+        rows: vec![urgent(), tagged_x()],
+    }];
+    let v = serde_json::to_value(a.current_prefs()).unwrap();
+    let back: super::listview::ViewPrefs = serde_json::from_value(v).unwrap();
+    assert_eq!(back.filter_join, Join::Or);
+    assert_eq!(back.filter_groups, a.filter.groups);
+}
+
+#[test]
+fn saved_filters_keep_the_nested_shape_and_old_files_still_load() {
+    use parity::{FilterGroup, Join};
+    let mut a = app();
+    a.filter.rows = vec![urgent()];
+    a.filter.join = Join::Or;
+    a.filter.groups = vec![FilterGroup {
+        join: Join::Or,
+        rows: vec![tagged_x()],
+    }];
+    a.save_filter("  Hot  ");
+    assert_eq!(a.data.extra.saved_filters.len(), 1);
+    let saved = a.data.extra.saved_filters[0].clone();
+    assert_eq!(saved.name, "Hot");
+    assert!(saved.is_shown(&a.filter));
+    // saving under the same name updates it
+    a.filter.join = Join::And;
+    a.save_filter("Hot");
+    assert_eq!(a.data.extra.saved_filters.len(), 1);
+    assert_eq!(a.data.extra.saved_filters[0].id, saved.id);
+    assert_eq!(a.data.extra.saved_filters[0].join, Join::And);
+    // written to the workspace file and read back with the groups
+    let v = serde_json::to_value(&a.data).unwrap();
+    let back: Data = serde_json::from_value(v.clone()).unwrap();
+    assert_eq!(back.extra.saved_filters, a.data.extra.saved_filters);
+    assert_eq!(
+        v["extra"]["saved_filters"][0]["groups"][0]["join"],
+        serde_json::json!("Or")
+    );
+    // bringing it back after the builder was cleared
+    a.filter = Default::default();
+    back.extra.saved_filters[0].apply_to(&mut a.filter);
+    assert_eq!(a.filter.groups.len(), 1);
+    assert_eq!(a.filter.count(), 2);
+    // a file from before saved filters and groups still loads
+    let mut old = v.clone();
+    old["extra"]
+        .as_object_mut()
+        .unwrap()
+        .remove("saved_filters");
+    let d: Data = serde_json::from_value(old).unwrap();
+    assert!(d.extra.saved_filters.is_empty());
+    // nothing about the saved filters reaches the copy teammates get
+    assert!(crate::sync::shareable(&v)["extra"]
+        .get("saved_filters")
+        .is_none());
 }
 
 #[test]
@@ -3423,12 +3654,13 @@ fn renaming_or_deleting_a_status_carries_its_tasks() {
         .iter()
         .position(|s| s.name == "in progress")
         .unwrap();
+    let mut rules = orig.clone();
     // a rename that matches another status waits, so tasks never merge
     a.data.spaces[si].statuses[i].name = "to do".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     assert_eq!(a.task(id).unwrap().status, "in progress");
     a.data.spaces[si].statuses[i].name = "doing".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     assert_eq!(a.task(id).unwrap().status, "doing");
     // the other space still has "in progress", so the automation stays
     assert_eq!(a.data.extra.automations[0].trigger_status, "in progress");
@@ -3756,6 +3988,7 @@ fn a_missing_file_is_fetched_again_later() {
         w: 30,
         h: 20,
         secs: 0.0,
+        thumb: None,
     };
     let mut f = super::files::Files::new(temp_folder("retry-cache"));
     let remote = super::files::Remote::Folder(folder.clone());
@@ -3782,7 +4015,10 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
         tag: 1,
         server: Some("127.0.0.1:9".into()),
     });
-    assert_eq!(a.media_remote(), super::files::Remote::SignedOut);
+    assert_eq!(
+        a.media_remote(),
+        super::files::Remote::SignedOut("127.0.0.1:9".into())
+    );
     a.add_media(false, Some(picture_file("wait.png", 20, 20)), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while a.chat_files[0].att.is_none() && std::time::Instant::now() < end {
@@ -3804,7 +4040,10 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
         matches!(a.media_remote(), super::files::Remote::Server { auth, .. } if auth.token == "tok")
     );
     super::together::forget_token("127.0.0.1:9", "dev1");
-    assert_eq!(a.media_remote(), super::files::Remote::SignedOut);
+    assert_eq!(
+        a.media_remote(),
+        super::files::Remote::SignedOut("127.0.0.1:9".into())
+    );
 }
 
 #[test]
@@ -5009,9 +5248,27 @@ fn only_a_channels_maker_or_an_admin_may_delete_it() {
     assert!(a.may_manage_channel(&c));
     let mut theirs = c.clone();
     theirs.creator = 2;
+    // alone or in a shared folder, the role in People decides
+    let me = a.data.me;
+    assert!(a.may_manage_channel(&theirs), "the owner may");
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Admin".into();
+    assert!(a.may_manage_channel(&theirs), "an admin may");
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Member".into();
     assert!(
         !a.may_manage_channel(&theirs),
         "a member who didn't make it"
+    );
+    // on a server, the server's role decides (People can't be trusted there)
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Owner".into();
+    assert!(
+        !a.may_manage_channel(&theirs),
+        "a role in People alone isn't enough"
     );
     a.sync_rt.role = Some(wb_net::Role::Admin);
     assert!(a.may_manage_channel(&theirs), "the server's admins may");
@@ -5030,14 +5287,19 @@ fn only_a_channels_maker_or_an_admin_may_delete_it() {
 
 #[test]
 fn a_mention_needs_the_whole_name() {
-    use super::chat::mentions;
-    assert!(mentions("hi @Bob", "Bob"));
-    assert!(mentions("@Bob, look", "Bob"));
-    assert!(mentions("(cc @Bob)", "Bob"));
-    assert!(!mentions("hi @Bobby", "Bob"));
-    assert!(!mentions("hi @Bob", "Bo"), "@Bo is not the start of @Bob");
-    assert!(mentions("hi @Alex Kim!", "Alex Kim"));
-    assert!(!mentions("hi @Bob", ""));
+    let a = app();
+    let ids = |t: &str| crate::model::mentioned_ids(t, &a.data.members, &[]);
+    let alex = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    assert_eq!(ids("hi @Alex Kim!"), vec![alex]);
+    assert_eq!(ids("(cc @Alex Kim)"), vec![alex]);
+    assert!(ids("hi @Alex Kimberly").is_empty());
+    assert!(ids("mail@Alex Kim").is_empty());
 }
 
 #[test]
@@ -5235,8 +5497,9 @@ fn status_renames_and_deletes_carry_automations_of_that_space() {
         .iter()
         .position(|s| s.name == "in progress")
         .unwrap();
+    let mut rules = orig.clone();
     a.data.spaces[si].statuses[i].name = "doing".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     let trig: Vec<String> = a
         .data
         .extra
@@ -5436,6 +5699,8 @@ fn search_leaves_out_archived_lists_and_other_peoples_private_docs() {
             private,
             archived: false,
             meeting_note: false,
+            wiki: None,
+            views: vec![],
             parent: None,
             title: title.into(),
             body: String::new(),
@@ -5926,4 +6191,841 @@ fn bookmarks_from_before_sharing_stay_personal_and_new_ones_are_shared() {
     let back: Data = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
     assert_eq!(back.extra.bookmarks.len(), 2);
     assert!(Data::seed().extra.bookmarks_shared);
+}
+
+#[test]
+fn search_leaves_out_other_peoples_private_dashboards_and_personal_forms() {
+    use super::more::Hit;
+    let mut a = app();
+    let me = a.data.me;
+    let lists = list_ids(&a);
+    let hits =
+        |a: &App, q: &str| -> Vec<Hit> { a.search_rows(q, 6).into_iter().map(|r| r.4).collect() };
+    a.new_dashboard("Salary plans");
+    let did = a.dash_open.unwrap();
+    fn dash(a: &mut App, did: u64) -> &mut Dashboard {
+        a.data
+            .extra
+            .dashboards
+            .iter_mut()
+            .find(|d| d.id == did)
+            .unwrap()
+    }
+    dash(&mut a, did).private = true;
+    assert!(
+        hits(&a, "salary").contains(&Hit::Dashboard(did)),
+        "my own private one shows"
+    );
+    dash(&mut a, did).owner = me + 100;
+    assert!(
+        !hits(&a, "salary").contains(&Hit::Dashboard(did)),
+        "someone else's stays out"
+    );
+    // older dashboards without a maker are everyone's
+    dash(&mut a, did).owner = 0;
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    // a public dashboard in someone else's Personal space stays out too
+    let sid = a.data.space_of_list(lists[0]).unwrap().id;
+    let d = dash(&mut a, did);
+    d.private = false;
+    d.owner = me + 100;
+    d.space = Some(sid);
+    a.data.extra.forms.push(Form {
+        id: 777_001,
+        name: "Secret survey".into(),
+        list_id: lists[0],
+        description: String::new(),
+        fields: vec![],
+        owner: me + 100,
+    });
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me + 100);
+    assert!(!hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(!hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+    let d = a
+        .data
+        .extra
+        .dashboards
+        .iter()
+        .find(|d| d.id == did)
+        .unwrap()
+        .clone();
+    let f = a.data.extra.forms.last().unwrap().clone();
+    assert!(!a.dash_shown(&d) && !a.form_shown(&f));
+    // my own Personal space: both show
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me);
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+}
+
+#[test]
+fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
+    let mut a = app();
+    let folder = temp_folder("trash-reupload");
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    a.add_media(false, Some(picture_file("trash.png", 24, 24)), None);
+    let files = until_ready(&mut a, false);
+    let ch = a.data.channels[0].id;
+    a.apply_chat(vec![ChatAction::Send {
+        ch,
+        text: "with a picture".into(),
+        parent: None,
+        files: files.clone(),
+    }]);
+    let dest = folder.join("files").join(&files[0].file);
+    let wait = |ok: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !ok() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    wait(&|| dest.is_file());
+    assert!(dest.is_file());
+    // the channel goes to Trash, and the shared copy of its picture is cleaned up
+    let gone = a.data.channels.remove(0);
+    a.data.extra.trash.push(TrashItem {
+        id: 990_001,
+        kind: "Channel".into(),
+        title: format!("#{}", gone.name),
+        deleted: now_ts(),
+        payload: serde_json::to_string(&gone).unwrap(),
+    });
+    assert_eq!(
+        super::files::trash_attachments(&a.data.extra.trash.last().unwrap().payload)
+            .iter()
+            .map(|x| x.file.clone())
+            .collect::<Vec<_>>(),
+        vec![files[0].file.clone()]
+    );
+    std::fs::remove_file(&dest).unwrap();
+    let i = a.data.extra.trash.len() - 1;
+    a.restore_trash(i);
+    assert!(a.data.channels.iter().any(|c| c.id == ch));
+    wait(&|| dest.is_file());
+    assert!(dest.is_file(), "the picture is back in the shared folder");
+}
+
+/// Every sentence the team server can send an app (refusals, sign-in and
+/// account errors) and the ones its client adds read in Korean, numbers
+/// included. Texts only the server's command line prints are left out.
+#[test]
+fn server_refusals_are_shown_in_the_interface_language() {
+    use super::together::server_text;
+    const CLI_ONLY: [&str; 4] = [
+        "Invite code for member {} as {}: {}  (works once, for {} days)",
+        "No member with id {} in the workspace (see `workboard-server people`).",
+        "Restored {}. Everyone's app gets it now (the copy from before is in {}/before-restore-*.json).",
+        "This address takes Workboard's WebSocket connection.",
+    ];
+    let sentences = |src: &str| -> Vec<String> {
+        let src = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let mut out = vec![];
+        // each `"` followed by a capital letter, up to the next `"`
+        let starts = src.match_indices('"').map(|(i, _)| i + 1);
+        for part in starts.filter_map(|i| src[i..].split('"').next()) {
+            let long = part.chars().count() > 10;
+            if long
+                && part.starts_with(|c: char| c.is_ascii_uppercase())
+                && part.ends_with(['.', '?', '!', ')'])
+                && !part.contains('\\')
+                && !CLI_ONLY.contains(&part)
+            {
+                out.push(part.to_string());
+            }
+        }
+        out
+    };
+    let mut all = sentences(include_str!("../../server/src/lib.rs"));
+    all.extend(sentences(include_str!("../../crates/wb-net/src/lib.rs")));
+    all.extend(sentences(include_str!("../../crates/wb-net/src/files.rs")));
+    assert!(all.len() > 30, "found the texts: {}", all.len());
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown: Vec<(String, String)> = all
+        .iter()
+        .map(|s| {
+            let filled = s.replace("{}", "5");
+            (filled.clone(), server_text(&filled))
+        })
+        .collect();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let english: Vec<&String> = shown
+        .iter()
+        .filter(|(en, ko)| en == ko || !ko.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c)))
+        .map(|(en, _)| en)
+        .collect();
+    assert!(english.is_empty(), "no Korean for: {:#?}", english);
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let tries =
+        server_text("Too many wrong tries. Wait 15 minutes and try again, or use Forgot password.");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(tries.contains("15분"), "{}", tries);
+}
+
+#[test]
+fn back_and_forward_to_another_place_clear_the_selection() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    a.apply(Action::Go(Location::List(lists[0])));
+    a.track_history();
+    a.apply(Action::Go(Location::List(lists[1])));
+    a.track_history();
+    let t = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == lists[1])
+        .map(|t| t.id);
+    if let Some(t) = t {
+        a.selected.insert(t);
+        a.open_task = Some(t);
+    }
+    a.go_back();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[0]));
+    assert!(a.selected.is_empty() && a.open_task.is_none());
+    let t0 = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == lists[0])
+        .unwrap()
+        .id;
+    a.selected.insert(t0);
+    a.go_forward();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[1]));
+    assert!(a.selected.is_empty());
+}
+
+#[test]
+fn my_timer_counts_only_my_time() {
+    let mut a = app();
+    let me = a.data.me;
+    let other = a.data.members.iter().find(|m| m.id != me).unwrap().id;
+    let now = now_ts();
+    let t = &mut a.data.tasks[0];
+    t.time_entries = vec![
+        TimeEntry {
+            start: 0,
+            end: 100,
+            member: me,
+        },
+        TimeEntry {
+            start: 0,
+            end: 1000,
+            member: other,
+        },
+    ];
+    t.timer_started = None;
+    t.timer_by = None;
+    t.timers = vec![
+        RunningTimer {
+            member: me,
+            start: now - 10,
+        },
+        RunningTimer {
+            member: other,
+            start: now - 500,
+        },
+    ];
+    let t = a.data.tasks[0].clone();
+    assert_eq!(a.data.my_tracked_secs(&t, now), 110);
+    assert_eq!(t.tracked_secs(now), 1610);
+}
+
+#[test]
+fn a_status_name_another_status_still_carries_waits_and_closing_settles_names() {
+    let mut a = app();
+    let si = 0;
+    let sid = a.data.spaces[si].id;
+    let list = a.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let t1 = add_task(&mut a, list, "On to do");
+    let t2 = add_task(&mut a, list, "On doing");
+    let mut t = a.task(t2).unwrap().clone();
+    t.status = "in progress".into();
+    a.apply(Action::Replace(t));
+    let mut orig: Vec<Option<String>> = a.data.spaces[si]
+        .statuses
+        .iter()
+        .map(|s| Some(s.name.clone()))
+        .collect();
+    let mut rules = orig.clone();
+    // "to do" emptied, then "in progress" renamed to "to do": the name is
+    // still carried by the first status's tasks, so the rename waits
+    a.data.spaces[si].statuses[0].name = String::new();
+    a.data.spaces[si].statuses[1].name = "to do".into();
+    a.commit_status_renames(si, &mut orig, &mut rules);
+    assert_eq!(a.task(t1).unwrap().status, "to do");
+    assert_eq!(a.task(t2).unwrap().status, "in progress");
+    // swapping two names at once works
+    a.data.spaces[si].statuses[0].name = "in progress".into();
+    a.commit_status_renames(si, &mut orig, &mut rules);
+    assert_eq!(a.task(t1).unwrap().status, "in progress");
+    assert_eq!(a.task(t2).unwrap().status, "to do");
+    // an added status with an empty or taken name gets a free one on close
+    a.data.spaces[si]
+        .statuses
+        .push(Status::new("", [1, 1, 1], StatusKind::Custom));
+    orig.push(None);
+    a.data.spaces[si].statuses[1].name = "".into();
+    assert!(a.settle_status_names(si, &orig));
+    let names: Vec<String> = a.data.spaces[si]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert_eq!(names[1], "to do");
+    assert_eq!(names.last().unwrap(), "new status");
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len());
+}
+
+fn dead_server() -> super::files::Remote {
+    super::files::Remote::Server {
+        addr: "127.0.0.1:9".into(),
+        auth: wb_net::Auth {
+            device: "d".into(),
+            token: "t".into(),
+        },
+    }
+}
+
+#[test]
+fn waiting_uploads_are_kept_on_disk_and_carry_on_after_a_restart() {
+    let mut a = app();
+    a.add_media(false, Some(picture_file("later.png", 16, 16)), None);
+    let att = until_ready(&mut a, false).remove(0);
+    let sha = att.file.clone();
+    let remote = dead_server();
+    a.files.upload_soon(&att, &remote);
+    a.files.tick(None, &remote);
+    assert!(
+        a.files.dir().join(".uploads.json").is_file(),
+        "written down"
+    );
+    // the app quits; the next start reads the list and sends it again
+    let dir = a.files.dir().to_path_buf();
+    drop(a);
+    let mut f = super::files::Files::new(dir.clone());
+    assert!(f.is_waiting(&sha));
+    f.settle(&remote, |f| {
+        matches!(f.state(&sha), Some(super::files::Transfer::Failed(_)))
+            && f.upload_tries(&sha) == Some((1, true))
+    });
+    // meant for another server: it waits for that one
+    let other = super::files::Remote::Server {
+        addr: "127.0.0.1:10".into(),
+        auth: wb_net::Auth {
+            device: "d".into(),
+            token: "t".into(),
+        },
+    };
+    let mut g = super::files::Files::new(dir);
+    g.tick(None, &other);
+    assert!(g.is_waiting(&sha));
+    assert_eq!(g.state(&sha), None, "not sent to the wrong server");
+}
+
+#[test]
+fn sharing_brings_task_attachments_along_too() {
+    let mut a = app();
+    a.add_media(false, Some(picture_file("task.png", 16, 16)), None);
+    let att = until_ready(&mut a, false).remove(0);
+    a.chat_files.clear();
+    let tid = a.data.tasks[0].id;
+    a.data.tasks[0].attachments.push(att.clone());
+    // and one in a deleted message in the Trash
+    a.add_media(false, Some(picture_file("trash.png", 18, 18)), None);
+    let gone = until_ready(&mut a, false).remove(0);
+    a.chat_files.clear();
+    a.data.extra.trash.push(TrashItem {
+        id: 1,
+        kind: "message".into(),
+        title: "m".into(),
+        deleted: 1,
+        payload: serde_json::json!({"text": "gone", "attachments": [gone.clone()]}).to_string(),
+    });
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-task-share".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    super::together::save_token("127.0.0.1:9", "dev-task-share", "tok");
+    a.share_cached_files();
+    super::together::forget_token("127.0.0.1:9", "dev-task-share");
+    assert!(a.files.is_waiting(&att.file), "the task's picture goes up");
+    assert!(a.files.is_waiting(&gone.file), "and the one in the Trash");
+    let _ = tid;
+}
+
+#[test]
+fn a_task_attachment_waiting_for_a_sign_in_goes_up_once_there_is_one() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-task-wait".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    let tid = a.data.tasks[0].id;
+    a.add_task_file(tid, picture_file("plan.png", 20, 20));
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
+        a.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let att = a.task_files[0].1.att.clone().unwrap();
+    assert_eq!(
+        a.task_files[0].1.transfer(&a.files),
+        Some(super::files::Transfer::Failed(
+            super::files::NOT_SIGNED_IN.into()
+        ))
+    );
+    assert!(a.files.is_waiting(&att.file), "kept for later");
+    super::together::save_token("127.0.0.1:9", "dev-task-wait", "tok");
+    // signed in: it is sent (the dead server refuses, so it fails and is
+    // tried again later instead of waiting for a sign-in)
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        a.files_tick(None);
+        let t = a.task_files[0].1.transfer(&a.files);
+        if matches!(&t, Some(super::files::Transfer::Failed(e)) if e != super::files::NOT_SIGNED_IN)
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < end, "never sent: {:?}", t);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    super::together::forget_token("127.0.0.1:9", "dev-task-wait");
+    assert!(a.files.upload_tries(&att.file).is_some());
+}
+
+fn make_clip(name: &str) -> Option<std::path::PathBuf> {
+    let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())?;
+    let dir = temp_folder("clip");
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join(name);
+    let ok = std::process::Command::new(ffmpeg)
+        .args([
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=1280x720:rate=30",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "libx264",
+        ])
+        .arg(&clip)
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok);
+    Some(clip)
+}
+
+#[test]
+fn a_video_goes_with_a_small_still_and_others_show_that_first() {
+    let Some(clip) = make_clip("Trip.mp4") else {
+        eprintln!("skipped: ffmpeg isn't installed");
+        return;
+    };
+    let folder = temp_folder("still-share");
+    let mut a = app();
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    a.add_media(false, Some(clip), None);
+    let v = until_ready(&mut a, false).remove(0);
+    let still = v.thumb.clone().expect("a still is made");
+    let jpeg = std::fs::read(a.files.local(&still).unwrap()).unwrap();
+    assert_eq!(&jpeg[..2], &[0xff, 0xd8], "a JPEG");
+    assert!(jpeg.len() < 200_000, "small: {} bytes", jpeg.len());
+    assert!(folder.join("files").join(&still).is_file(), "shared too");
+    // it's saved with the message, and older files without it still load
+    let json = serde_json::to_value(&v).unwrap();
+    assert_eq!(json["thumb"], serde_json::json!(still));
+    let old: Attachment = serde_json::from_value(
+        serde_json::json!({"file": v.file, "name": "a.mp4", "kind": "Video"}),
+    )
+    .unwrap();
+    assert_eq!(old.thumb, None);
+    assert!(!serde_json::to_string(&old).unwrap().contains("thumb"));
+    assert_eq!(
+        super::files::shown(&old).file,
+        v.file,
+        "old ones show as before"
+    );
+    // another computer shows the still without fetching the video
+    let mut bf = super::files::Files::new(temp_folder("still-b"));
+    let remote = super::files::Remote::Folder(folder.clone());
+    let shown = super::files::shown(&v);
+    assert_eq!(shown.file, still);
+    bf.settle(&remote, |f| {
+        f.want(&shown, super::files::THUMB);
+        f.decoded(&still, super::files::THUMB)
+    });
+    let s = bf.texture(&still, super::files::THUMB);
+    let _ = s;
+    assert!(bf.local(&v.file).is_none(), "the video stays on the server");
+}
+
+#[test]
+fn a_video_and_its_still_both_have_to_be_up_before_the_message_goes() {
+    let mut a = app();
+    let v = Attachment {
+        file: "a".repeat(64),
+        name: "v.mp4".into(),
+        kind: MediaKind::Video,
+        thumb: Some("b".repeat(64)),
+        ..Default::default()
+    };
+    let parts = super::files::parts(&v);
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[1].kind, MediaKind::Image);
+    let p = super::files::Pending {
+        local: 1,
+        name: "v.mp4".into(),
+        att: Some(v.clone()),
+        error: None,
+    };
+    a.files.upload(&v, &super::files::Remote::None);
+    assert!(p.ready(&a.files));
+    // a picture never has a still, whatever the field says
+    let pic = Attachment {
+        kind: MediaKind::Image,
+        ..v
+    };
+    assert_eq!(super::files::parts(&pic).len(), 1);
+}
+
+fn old_file(p: &std::path::Path, days: u64) {
+    let f = std::fs::File::options().write(true).open(p).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 3600))
+        .unwrap();
+}
+
+#[test]
+fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size() {
+    use super::files::clean_cache;
+    use std::collections::HashSet;
+    let dir = temp_folder("clean-cache");
+    std::fs::create_dir_all(&dir).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    let put = |c: char, bytes: usize, days: u64| {
+        let p = dir.join(sha(c));
+        std::fs::write(&p, vec![0u8; bytes]).unwrap();
+        old_file(&p, days);
+        p
+    };
+    put('a', 100, 30); // nobody refers to it, old: goes
+    put('b', 100, 1); // nobody refers to it, new: stays (a box may send it)
+    put('c', 100, 30); // in the Trash of a workspace: stays
+    put('d', 100, 30); // waiting to go up: stays
+    put('e', 1000, 20); // a shared workspace's, least recently used: goes past the cap
+    put('f', 1000, 2); // a shared workspace's, used lately: stays
+    put('9', 1000, 40); // a workspace only on this computer: never goes
+    std::fs::write(dir.join(format!("{}.mov", sha('a'))), b"x").unwrap();
+    std::fs::write(dir.join(".uploads.json"), b"[]").unwrap();
+    let local: HashSet<String> = [sha('c'), sha('9')].into_iter().collect();
+    let shared: HashSet<String> = [sha('e'), sha('f')].into_iter().collect();
+    let keep: HashSet<String> = [sha('d')].into_iter().collect();
+    let removed = clean_cache(
+        &dir,
+        &[(false, local), (true, shared)],
+        &keep,
+        std::time::SystemTime::now(),
+        super::files::CACHE_GRACE,
+        2500,
+    );
+    let mut removed = removed;
+    removed.sort();
+    assert_eq!(removed, vec![sha('a'), sha('e')]);
+    for c in ['b', 'c', 'd', 'f', '9'] {
+        assert!(dir.join(sha(c)).is_file(), "{} stays", c);
+    }
+    assert!(
+        !dir.join(format!("{}.mov", sha('a'))).exists(),
+        "its link goes too"
+    );
+    assert!(dir.join(".uploads.json").is_file(), "the backlog stays");
+}
+
+#[test]
+fn the_shared_folder_drops_files_nobody_refers_to_once_they_are_a_month_old() {
+    use super::files::{clean_shared_folder, folder_refs};
+    let folder = temp_folder("clean-folder");
+    let files = folder.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    for (c, days) in [('a', 40), ('b', 40), ('c', 5), ('d', 40)] {
+        let p = files.join(sha(c));
+        std::fs::write(&p, b"x").unwrap();
+        old_file(&p, days);
+    }
+    // two members' copies: one refers to b (a message), the other to d (a task)
+    std::fs::write(
+        folder.join("one.workboard.json"),
+        serde_json::json!({"channels": [{"messages": [{"attachments": [{"file": sha('b'), "name": "b.png"}]}]}]}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        folder.join("two.workboard.json"),
+        serde_json::json!({"tasks": [{"attachments": [{"file": sha('d'), "name": "d.png"}]}]})
+            .to_string(),
+    )
+    .unwrap();
+    let refs = folder_refs(&folder);
+    let removed = clean_shared_folder(
+        &files,
+        &refs,
+        std::time::SystemTime::now(),
+        super::files::FOLDER_GRACE,
+    );
+    assert_eq!(removed, vec![sha('a')], "old and unused only");
+    assert!(files.join(sha('b')).is_file() && files.join(sha('c')).is_file());
+    assert!(files.join(sha('d')).is_file());
+    // a member's copy that can't be read (half synced): nothing is touched
+    std::fs::write(folder.join("three.workboard.json"), "{\"tasks\": [").unwrap();
+    let b = files.join(sha('b'));
+    std::fs::write(folder.join("one.workboard.json"), "{}").unwrap();
+    assert!(folder_refs(&folder).is_none());
+    assert!(clean_shared_folder(
+        &files,
+        &folder_refs(&folder),
+        std::time::SystemTime::now(),
+        super::files::FOLDER_GRACE
+    )
+    .is_empty());
+    assert!(b.is_file());
+}
+
+#[test]
+fn every_workspace_on_this_computer_counts_for_the_cache() {
+    let dir = temp_folder("clean-spaces");
+    std::fs::create_dir_all(&dir).unwrap();
+    let sha = |c: char| c.to_string().repeat(64);
+    std::fs::write(
+        dir.join("data.json"),
+        serde_json::json!({"extra": {"shared": null, "trash": [{"payload": serde_json::json!({"attachments": [{"file": sha('a'), "name": "x.png"}]}).to_string()}]}}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("team.json"),
+        serde_json::json!({"extra": {"shared": {"device": "d", "tag": 1}}, "tasks": [{"attachments": [{"file": sha('b'), "name": "y.mp4", "kind": "Video", "thumb": sha('c')}]}]}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("broken.json"),
+        format!("{{ \"file\": \"{}\"", sha('d')),
+    )
+    .unwrap();
+    let mut spaces = super::files::workspaces_on_disk(&dir);
+    spaces.sort_by_key(|(_, s)| s.iter().min().cloned());
+    let find = |c: char| {
+        spaces
+            .iter()
+            .find(|(_, s)| s.contains(&sha(c)))
+            .map(|(sh, _)| *sh)
+    };
+    assert_eq!(find('a'), Some(false), "the Trash counts");
+    assert_eq!(find('b'), Some(true));
+    assert_eq!(find('c'), Some(true), "a video's still counts");
+    assert_eq!(
+        find('d'),
+        Some(false),
+        "an unreadable file counts by its text"
+    );
+}
+
+/// A small Slack export: two people, #general with a thread and a file,
+/// and #random. `Mia` is a member here by email, `ghost` isn't.
+fn slack_export() -> std::path::PathBuf {
+    let root = temp_folder("slack").join("My Slack export");
+    std::fs::create_dir_all(root.join("general")).unwrap();
+    std::fs::create_dir_all(root.join("random")).unwrap();
+    let w = |p: &str, v: serde_json::Value| std::fs::write(root.join(p), v.to_string()).unwrap();
+    w(
+        "users.json",
+        serde_json::json!([
+            {"id": "U1", "name": "mia", "real_name": "Mia Park", "profile": {"email": "MIA@example.com", "display_name": "mia"}},
+            {"id": "U2", "name": "ghost", "real_name": "Casper Ghost", "profile": {"email": "casper@example.com"}}
+        ]),
+    );
+    w(
+        "channels.json",
+        serde_json::json!([
+            {"id": "C1", "name": "general", "members": ["U1", "U2"], "topic": {"value": "Everything"}},
+            {"id": "C2", "name": "random", "members": ["U1"]}
+        ]),
+    );
+    w(
+        "general/2023-11-14.json",
+        serde_json::json!([
+            {"type": "message", "subtype": "channel_join", "user": "U2", "text": "<@U2> has joined the channel", "ts": "1699999000.000100"},
+            {"type": "message", "user": "U1", "text": "Plan for <#C2|random> &amp; <https://example.com|the site>, cc <@U2>", "ts": "1700000000.000200", "thread_ts": "1700000000.000200"},
+            {"type": "message", "user": "U2", "text": "on it", "ts": "1700000100.000300", "thread_ts": "1700000000.000200"},
+            {"type": "message", "user": "U2", "text": "", "ts": "1700000200.000400", "files": [{"name": "spec.pdf", "permalink": "https://slack.example/spec"}]}
+        ]),
+    );
+    w(
+        "random/2023-11-15.json",
+        serde_json::json!([{"type": "message", "user": "U1", "text": "hello random", "ts": "1700086400.000000"}]),
+    );
+    root.parent().unwrap().to_path_buf()
+}
+
+#[test]
+fn slack_markup_becomes_plain_text() {
+    use super::slack::{plain_text, ts_secs};
+    let names: HashMap<String, String> = [("U1".to_string(), "Mia Park".to_string())].into();
+    assert_eq!(
+        plain_text(
+            "hi <@U1> see <#C9|dev> and <https://a.b|docs> or <https://c.d> &lt;3 <!here>",
+            &names
+        ),
+        "hi @Mia Park see #dev and docs (https://a.b) or https://c.d <3 @here"
+    );
+    assert_eq!(
+        plain_text("<mailto:x@y.z|x@y.z> <@U7>", &names),
+        "x@y.z @U7"
+    );
+    assert_eq!(ts_secs("1700000000.000200"), 1_700_000_000);
+}
+
+#[test]
+fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
+    let mut a = app();
+    let mia = a.data.new_id();
+    a.data.members.push(Member {
+        id: mia,
+        name: "Someone Else".into(),
+        color: [1, 2, 3],
+        email: "mia@example.com".into(),
+        role: "Member".into(),
+        invited: false,
+        status_text: String::new(),
+    });
+    let before = a.data.members.len();
+    let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
+    let plan = super::slack::plan(&a.data, users, channels);
+    assert_eq!(plan.matched.get("U1"), Some(&mia), "matched by email");
+    assert_eq!(plan.missing, vec!["U2".to_string()]);
+    assert_eq!(plan.message_count(), 4, "the join notice isn't a message");
+    let (chans, msgs) = a.import_slack(&plan);
+    assert_eq!((chans, msgs), (2, 4));
+    assert_eq!(a.data.members.len(), before + 1, "Casper is added");
+    let casper = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Casper Ghost")
+        .unwrap();
+    assert_eq!(casper.email, "casper@example.com");
+    let casper = casper.id;
+    let general = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general" && c.kind == ChannelKind::Channel)
+        .unwrap()
+        .clone();
+    let plan_msg = general
+        .messages
+        .iter()
+        .find(|m| m.ts == 1_700_000_000)
+        .expect("the original time");
+    assert_eq!(plan_msg.author, mia);
+    assert_eq!(
+        plan_msg.text,
+        "Plan for #random & the site (https://example.com), cc @Casper Ghost"
+    );
+    assert_eq!(plan_msg.replies.len(), 1, "the reply is in its thread");
+    assert_eq!(plan_msg.replies[0].author, casper);
+    assert_eq!(plan_msg.replies[0].ts, 1_700_000_100);
+    let file = general
+        .messages
+        .iter()
+        .find(|m| m.ts == 1_700_000_200)
+        .unwrap();
+    assert_eq!(
+        file.text, "[spec.pdf] https://slack.example/spec",
+        "files as links"
+    );
+    let random = a.data.channels.iter().find(|c| c.name == "random").unwrap();
+    assert_eq!(random.topic, "");
+    assert!(random.members.contains(&mia) && random.members.contains(&a.data.me));
+    assert_eq!(a.unread(random), 0, "old messages coming in aren't unread");
+    // the same export again adds nothing
+    let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
+    let again = super::slack::plan(&a.data, users, channels);
+    assert!(again.missing.is_empty(), "Casper is a member now");
+    assert_eq!(a.import_slack(&again), (0, 0));
+}
+
+#[test]
+fn people_not_added_from_slack_come_in_under_my_name() {
+    let mut a = app();
+    let (users, channels) = super::slack::read_export(&slack_export()).unwrap();
+    let mut plan = super::slack::plan(&a.data, users, channels);
+    plan.create_missing = false;
+    let before = a.data.members.len();
+    a.import_slack(&plan);
+    assert_eq!(a.data.members.len(), before);
+    let general = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let m = general
+        .messages
+        .iter()
+        .find(|m| m.ts == 1_700_000_000)
+        .unwrap();
+    assert_eq!(m.author, a.data.me);
+    assert!(m.text.starts_with("Mia Park: Plan for"), "{}", m.text);
+}
+
+#[test]
+fn a_slack_export_zip_opens_and_anything_else_says_why() {
+    let dir = slack_export();
+    let zip = temp_folder("slackzip").with_extension("zip");
+    let ok = std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k", "--keepParent"])
+        .arg(dir.join("My Slack export"))
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let mut a = app();
+    a.open_slack_export(&zip);
+    match &a.modal {
+        Some(super::menus::Modal::SlackImport(p)) => assert_eq!(p.channels.len(), 2),
+        _ => panic!("the import dialog opens"),
+    }
+    a.modal = None;
+    let junk = temp_folder("junk").with_extension("zip");
+    std::fs::write(&junk, b"not a zip").unwrap();
+    a.open_slack_export(&junk);
+    assert!(a.modal.is_none());
+    assert!(a.toast.as_ref().unwrap().0.contains(".zip"));
 }

@@ -4,6 +4,7 @@
 // description and attachments.
 
 use super::docs::{line_kinds, toggle_check_at, LineKind};
+use super::files::Transfer;
 use super::*;
 use crate::media;
 
@@ -212,10 +213,9 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
             ui.label(RichText::new(day).color(t.text2));
             ui.label(fmt_duration(e.end - e.start));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let r = ui.add(
-                    egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text3))
-                        .frame(false),
-                );
+                let r = ui.add(ghost(egui::Button::new(
+                    RichText::new("\u{2716}").size(10.0).color(t.text3),
+                )));
                 name_it(&r, &format!("Remove entry {}", i + 1));
                 if r.on_hover_text(tr("Remove this entry")).clicked() {
                     remove = Some(i);
@@ -338,18 +338,15 @@ impl App {
     ) {
         let me = self.data.me;
         let on = task.watchers.contains(&me);
-        let b = ui.add(
-            egui::Button::new(
-                RichText::new(tr(if on {
-                    "\u{1F441} Watching"
-                } else {
-                    "\u{1F441} Watch"
-                }))
-                .size(12.0)
-                .color(if on { t.text } else { t.text2 }),
-            )
-            .frame(false),
-        );
+        let b = ui.add(ghost(egui::Button::new(
+            RichText::new(tr(if on {
+                "\u{1F441} Watching"
+            } else {
+                "\u{1F441} Watch"
+            }))
+            .size(12.0)
+            .color(if on { t.text } else { t.text2 }),
+        )));
         name_it(&b, if on { "Stop watching" } else { "Watch task" });
         if b.on_hover_text(tr(if on {
             "Stop getting updates"
@@ -558,19 +555,27 @@ impl App {
                 if item.done {
                     txt = txt.strikethrough().color(t.text3);
                 }
-                let l = row.add(egui::Label::new(txt).sense(Sense::click()).truncate());
+                let l = row.add(Tint(
+                    egui::Label::new(txt)
+                        .sense(Sense::click())
+                        .selectable(false)
+                        .truncate(),
+                ));
                 if l.on_hover_text(tr("Click to rename")).clicked() {
                     editing = Some(i);
                 }
             }
             row.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let small = |s: &str| {
-                    egui::Button::new(RichText::new(s).size(11.0).color(t.text2)).frame(false)
+                    ghost(egui::Button::new(
+                        RichText::new(s).size(11.0).color(t.text2),
+                    ))
                 };
                 // the assignee shows always once set; the button only on hover
                 let pid = id.with(("ck_as", tid, i));
                 if item.assignee.is_some() || hover || ui.memory(|m| m.is_popup_open(pid)) {
                     let (ar, aresp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                    hover_bg(ui, &aresp, ar, 11.0);
                     name_it(&aresp, &format!("Assign item {}", label));
                     match item
                         .assignee
@@ -859,12 +864,13 @@ impl App {
                 name_it(&resp, &format!("{} {}", mode.title(), o.name));
                 let x = ui.put(
                     Rect::from_center_size(r.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0)),
-                    egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover {
-                        t.text2
-                    } else {
-                        Color32::TRANSPARENT
-                    }))
-                    .frame(false),
+                    ghost(egui::Button::new(
+                        RichText::new("\u{2716}").size(10.0).color(if hover {
+                            t.text2
+                        } else {
+                            Color32::TRANSPARENT
+                        }),
+                    )),
                 );
                 name_it(&x, &format!("Remove link {}", o.name));
                 if x.on_hover_text(tr("Remove")).clicked() {
@@ -1001,10 +1007,9 @@ impl App {
                 ui.label(RichText::new(task.attachments.len().to_string()).color(t.text3));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let b = ui.add(
-                    egui::Button::new(RichText::new(tr("\u{1F4CE} Attach")).color(t.text2))
-                        .frame(false),
-                );
+                let b = ui.add(ghost(egui::Button::new(
+                    RichText::new(tr("\u{1F4CE} Attach")).color(t.text2),
+                )));
                 name_it(&b, "Attach file");
                 if b.on_hover_text(tr("Attach pictures or videos (or drop them here)"))
                     .clicked()
@@ -1029,8 +1034,11 @@ impl App {
                         ui.allocate_exact_size(size + vec2(0.0, 18.0), Sense::click());
                     name_it(&resp, &format!("Attachment {}", a.name));
                     let pic = Rect::from_min_size(rect.min, size);
-                    self.files.want(a, files::THUMB);
-                    match self.files.texture(&a.file, files::THUMB) {
+                    // a video with a still shows the still (the video is
+                    // fetched when it's opened)
+                    let shown = files::shown(a);
+                    self.files.want(&shown, files::THUMB);
+                    match self.files.texture(&shown.file, files::THUMB) {
                         Some(tex) => {
                             let uv = files::cover_uv(tex.size_vec2(), size);
                             ui.painter().add(
@@ -1054,6 +1062,7 @@ impl App {
                             );
                         }
                     }
+                    hover_bg(ui, &resp, pic, 8.0);
                     ui.painter().with_clip_rect(rect).text(
                         pos2(rect.left(), pic.bottom() + 9.0),
                         Align2::LEFT_CENTER,
@@ -1101,25 +1110,53 @@ impl App {
                 self.toast = Some((trf!("{} is still downloading", a.name), now_ts()));
             }
         }
-        // files on their way
+        // files on their way: getting ready, going up, or why not (with
+        // Try again; the backlog also tries again by itself, waiting longer
+        // each time, and sends the ones waiting for a sign-in once there is one)
         let mut dismiss = None;
+        let mut retry = None;
         for (i, (ftid, p)) in self.task_files.iter().enumerate() {
             if *ftid != tid {
                 continue;
             }
-            ui.horizontal(|ui| match &p.error {
-                Some(e) => {
-                    ui.label(RichText::new(e).small().color(t.danger));
-                    let x = ui.add(
-                        egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text3))
-                            .frame(false),
+            let state = p.transfer(&self.files);
+            ui.horizontal(|ui| match &state {
+                Some(Transfer::Failed(e)) => {
+                    ui.label(
+                        RichText::new(format!("{}: {}", p.name, App::error_text(e)))
+                            .small()
+                            .color(if e == files::NOT_SIGNED_IN {
+                                t.text2
+                            } else {
+                                t.danger
+                            }),
                     );
+                    if p.error.is_none() && e != files::NOT_SIGNED_IN {
+                        let r = ui.add(ghost(egui::Button::new(
+                            RichText::new(tr("Try again")).small(),
+                        )));
+                        name_it(&r, &format!("Try again {}", p.name));
+                        if r.clicked() {
+                            retry = p.att.clone();
+                        }
+                    }
+                    let x = ui.add(ghost(egui::Button::new(
+                        RichText::new("\u{2716}").size(10.0).color(t.text3),
+                    )));
                     name_it(&x, &format!("Dismiss {}", p.name));
                     if x.clicked() {
                         dismiss = Some(i);
                     }
                 }
-                None => {
+                Some(Transfer::Up(f)) => {
+                    ui.add(egui::Spinner::new().size(12.0));
+                    ui.label(
+                        RichText::new(trf!("Uploading {} {}%", p.name, (f * 100.0) as u32))
+                            .small()
+                            .color(t.text2),
+                    );
+                }
+                _ => {
                     ui.add(egui::Spinner::new().size(12.0));
                     ui.label(
                         RichText::new(trf!("Adding {}...", p.name))
@@ -1129,8 +1166,21 @@ impl App {
                 }
             });
         }
+        if let Some(a) = retry {
+            let remote = self.media_remote();
+            for part in files::parts(&a) {
+                self.files.retry(&part.file);
+            }
+            self.files.upload(&a, &remote);
+            self.files.upload_soon(&a, &remote);
+        }
         if let Some(i) = dismiss {
-            self.task_files.remove(i);
+            let (_, p) = self.task_files.remove(i);
+            if let Some(a) = p.att {
+                if !self.file_in_use(&a.file) {
+                    self.files.forget(&a);
+                }
+            }
         }
     }
 }

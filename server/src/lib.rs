@@ -666,12 +666,90 @@ fn copy_for(canon: &Value, member: u64) -> Option<(Value, Vec<u64>)> {
     Some((out, hidden))
 }
 
+/// Whether `member` may delete a channel and change who else is in it: the
+/// app's rule (`may_manage_channel`). Whoever made it, an owner or admin, or
+/// for one made before makers were kept (creator 0) anyone in it.
+pub fn may_manage_channel(ch: &Value, member: u64, role: Role) -> bool {
+    let creator = ch.get("creator").and_then(|c| c.as_u64()).unwrap_or(0);
+    let in_it = ch
+        .get("members")
+        .and_then(|m| m.as_array())
+        .is_some_and(|a| a.iter().any(|m| m.as_u64() == Some(member)));
+    role.manages() || creator == member || (creator == 0 && in_it)
+}
+
+/// Before merging a copy from `member`, for the team's channels: who made
+/// one stays (an older app or the iPhone may drop the field); and unless
+/// they may manage it (`may_manage_channel`), they can't delete it (their
+/// tombstone for it is dropped) or add or remove anyone but themselves
+/// (its member list stays the team's, with only their own place changed).
+fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
+    let Some(team) = canon.get("channels").and_then(|c| c.as_array()) else {
+        return;
+    };
+    // (a push of only what changed may hold a delete without the channel)
+    let no_delete: Vec<u64> = team
+        .iter()
+        .filter(|t| !may_manage_channel(t, member, role))
+        .filter_map(|t| t.get("id").and_then(|i| i.as_u64()))
+        .collect();
+    if let Some(mine) = data.get_mut("channels").and_then(|c| c.as_array_mut()) {
+        for t in team {
+            let Some(id) = t.get("id").and_then(|i| i.as_u64()) else {
+                continue;
+            };
+            let manages = !no_delete.contains(&id);
+            let Some(c) = mine
+                .iter_mut()
+                .find(|c| c.get("id").and_then(|i| i.as_u64()) == Some(id))
+            else {
+                continue;
+            };
+            let Some(c) = c.as_object_mut() else { continue };
+            match t.get("creator") {
+                Some(k) if k.as_u64().is_some_and(|k| k != 0) => {
+                    c.insert("creator".into(), k.clone());
+                }
+                _ => {}
+            }
+            if manages {
+                continue;
+            }
+            let ids = |v: Option<&Value>| -> Vec<u64> {
+                v.and_then(|m| m.as_array())
+                    .map(|a| a.iter().filter_map(|m| m.as_u64()).collect())
+                    .unwrap_or_default()
+            };
+            let theirs = ids(c.get("members"));
+            let mut allowed: Vec<u64> = ids(t.get("members"))
+                .into_iter()
+                .filter(|m| *m != member)
+                .collect();
+            if theirs.contains(&member) {
+                allowed.push(member);
+            }
+            let (mut a, mut b) = (allowed.clone(), theirs);
+            a.sort_unstable();
+            b.sort_unstable();
+            if a != b {
+                c.insert("members".into(), json!(allowed));
+            }
+        }
+    }
+    drop_ids(
+        data.get_mut("extra").and_then(|e| e.get_mut("sync")),
+        &["tombs"],
+        &no_delete,
+    );
+}
+
 /// Before merging a copy from `member`: the items hidden from them stay as
 /// the team has them. Their version of one (say, a private channel with
 /// themselves added to its members) is swapped for the team's, and their
 /// stamps, tombstones, revivals and moves for anything in it are dropped,
 /// so they can't change, join or delete it.
-fn guard_push(canon: &Value, data: &mut Value, member: u64) {
+fn guard_push(canon: &Value, data: &mut Value, member: u64, role: Role) {
+    guard_channels(canon, data, member, role);
     let hidden = wb_sync::hidden_from(canon, member);
     if hidden.is_empty() {
         return;
@@ -834,6 +912,17 @@ impl Inner {
                 LOCK_MINUTES
             )
         })
+    }
+
+    /// Take back one wrong try counted for an email (it proved right).
+    fn unfail(&mut self, email: &str) {
+        let key = norm_email(email);
+        if let Some(e) = self.fails.get_mut(&key) {
+            e.0 = e.0.saturating_sub(1);
+            if e.0 == 0 {
+                self.fails.remove(&key);
+            }
+        }
     }
 
     fn failed(&mut self, email: &str) {
@@ -1078,18 +1167,22 @@ impl Hub {
         // a password-reset code from the email POST /auth/forgot sent
         if let Some(code) = given(&h.reset_code) {
             let email = given(&h.email).ok_or("Type the email you sign in with.")?;
-            if let Some(why) = self.inner.lock().unwrap().locked(email) {
-                return Err(why);
-            }
             let pw = h.new_password.as_deref().unwrap_or("");
-            if let Some(why) = password_problem(pw) {
-                return Err(why);
+            {
+                let mut g = self.inner.lock().unwrap();
+                if let Some(why) = g.locked(email) {
+                    return Err(why);
+                }
+                // a new password that won't do isn't a wrong try
+                if let Some(why) = password_problem(pw) {
+                    return Err(why);
+                }
+                // a wrong try until the code proves right (as signing in
+                // with a password), so many at once can't get past MAX_TRIES
+                g.failed(email);
             }
             let hashed = Account::new("", pw);
             let mut g = self.inner.lock().unwrap();
-            if let Some(why) = g.locked(email) {
-                return Err(why);
-            }
             let key = norm_email(email);
             let fresh = g.resets.get(&key).is_some_and(|(c, t)| {
                 same(&normalize_code(c), &normalize_code(code))
@@ -1097,13 +1190,14 @@ impl Hub {
             });
             let member = g.saved.account_member(email).filter(|_| fresh);
             let Some(member) = member else {
-                g.failed(email);
                 return Err(format!("That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.", RESET_MINUTES));
             };
             g.resets.remove(&key);
             g.fails.remove(&key);
             let kept = g.saved.accounts[&member].email.clone();
             g.saved.accounts.insert(member, hashed.with_email(&kept));
+            // a new password: codes made for them earlier no longer sign in
+            g.saved.invites.retain(|_, i| i.member != member);
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(code) = given(&h.invite) {
@@ -1289,11 +1383,14 @@ impl Hub {
                 if let Some(why) = g.locked(&a.email) {
                     return Err(why);
                 }
-                // a wrong try until the current password proves right
-                g.failed(&a.email);
             }
+            // a new email or password that won't do isn't a wrong try
             if let Some(why) = g.saved.account_problem(member, email, password) {
                 return Err(why);
+            }
+            if let Some(a) = &existing {
+                // a wrong try until the current password proves right
+                g.failed(&a.email);
             }
             existing
         };
@@ -1304,6 +1401,10 @@ impl Hub {
         }
         let fresh = Account::new(email, password);
         let mut g = self.inner.lock().unwrap();
+        // the current password was right: that try doesn't count
+        if let Some(a) = &existing {
+            g.unfail(&a.email);
+        }
         if g.saved.accounts.get(&member) != existing.as_ref() {
             return Err("Your account changed in the meantime. Try again.".into());
         }
@@ -1314,6 +1415,9 @@ impl Hub {
             g.fails.remove(&norm_email(&a.email));
         }
         g.saved.accounts.insert(member, fresh);
+        // a code made for them earlier no longer signs in as them: with a
+        // password they sign in with it (or Forgot password)
+        g.saved.invites.retain(|_, i| i.member != member);
         g.dirty = true;
         drop(g);
         let _ = self.access.send(());
@@ -1458,7 +1562,7 @@ impl Hub {
             _ => None,
         };
         if let Some(c) = &g.canon {
-            guard_push(c, &mut data, member);
+            guard_push(c, &mut data, member, g.saved.role_of(member));
         }
         let claimer = g.saved.devices.contains_key(device);
         let changed = match g.canon.as_mut() {
@@ -3077,7 +3181,7 @@ mod tests {
     }
 
     #[test]
-    fn files_nothing_names_go_after_30_days_but_not_while_a_backup_names_them() {
+    fn files_nothing_names_go_after_a_while_but_not_while_a_backup_names_them() {
         let home = std::env::temp_dir().join(format!("wb-gc-{:x}", wb_sync::random_u64()));
         let dir = home.join(FILES_DIR);
         std::fs::create_dir_all(&dir).unwrap();
@@ -3114,6 +3218,8 @@ mod tests {
         )
         .unwrap();
 
+        // a server that has been cleaning up already (none of these was named lately)
+        std::fs::write(dir.join(files::NAMED_FILE), "{}").unwrap();
         // no team copy: nothing goes
         assert!(collect_garbage(&home, None, now).is_empty());
         assert_eq!(
@@ -3132,17 +3238,220 @@ mod tests {
                 &n[..4]
             );
         }
-        // once the backup that named it is gone, it goes too
+        // once the backup that named it is gone, it goes too, FILE_KEEP_DAYS
+        // after it was last named
         std::fs::remove_file(home.join(BACKUP_DIR).join("daily-20261101.json")).unwrap();
-        assert_eq!(
-            collect_garbage(&home, Some(&canon), now),
-            vec![in_backup.clone()]
-        );
+        assert!(collect_garbage(&home, Some(&canon), now).is_empty());
+        let later = now + Duration::from_secs(FILE_KEEP_DAYS * 86_400);
+        let mut gone = collect_garbage(&home, Some(&canon), later);
+        gone.sort();
+        // (by then the recent upload nothing named is old enough too)
+        assert_eq!(gone, vec![in_backup.clone(), recent.clone()]);
+        assert!(dir.join(&in_canon).exists());
         // a backup that can't be read: nothing is deleted
         put(&orphan, old);
         std::fs::create_dir_all(home.join(BACKUP_DIR).join("odd.json")).unwrap();
-        assert!(collect_garbage(&home, Some(&canon), now).is_empty());
+        assert!(collect_garbage(&home, Some(&canon), later).is_empty());
         assert!(dir.join(&orphan).exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A message deleted to someone's Trash (which the server never sees)
+    /// keeps its file on the server for FILE_KEEP_DAYS after the team's copy
+    /// last named it, however old the file is; and a server's first clean
+    /// up deletes nothing it hasn't watched for that long.
+    #[test]
+    fn a_file_stays_a_while_after_its_message_is_deleted() {
+        let home = std::env::temp_dir().join(format!("wb-gc2-{:x}", wb_sync::random_u64()));
+        let dir = home.join(FILES_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = |c: char| std::iter::repeat(c).take(64).collect::<String>();
+        let now = std::time::SystemTime::now();
+        let day = Duration::from_secs(86_400);
+        let old = now - day * (FILE_KEEP_DAYS as u32 + 100);
+        let (pic, orphan) = (name('e'), name('f'));
+        for n in [&pic, &orphan] {
+            std::fs::write(dir.join(n), b"x").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(dir.join(n))
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        let with =
+            json!({"channels": [{"messages": [{"attachments": [{"file": pic}]}]}]}).to_string();
+        let without = json!({"channels": [{"messages": []}]}).to_string();
+        // the first clean up only starts watching
+        assert!(collect_garbage(&home, Some(&with), now).is_empty());
+        assert!(dir.join(files::NAMED_FILE).is_file());
+        // the message is deleted: the file stays while it was named lately
+        let soon = now + day * 3;
+        assert!(collect_garbage(&home, Some(&without), soon).is_empty());
+        assert!(dir.join(&pic).exists());
+        let mut late = collect_garbage(&home, Some(&without), now + day * FILE_KEEP_DAYS as u32);
+        late.sort();
+        assert_eq!(late, vec![pic.clone(), orphan.clone()]);
+        let record = std::fs::read_to_string(dir.join(files::NAMED_FILE)).unwrap();
+        assert!(!record.contains(&pic), "forgotten once gone: {}", record);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn only_a_wrong_current_password_counts_as_a_wrong_try() {
+        let home = std::env::temp_dir().join(format!("wb-setpw-{:x}", wb_sync::random_u64()));
+        let mut saved = Saved::default();
+        saved
+            .accounts
+            .insert(2, Account::new("bo@team.io", "bo-secret-22"));
+        saved
+            .accounts
+            .insert(3, Account::new("cy@team.io", "cy-secret-33"));
+        let hub = test_hub(
+            &home,
+            Some(json!({"members": [{"id": 2}, {"id": 3}]})),
+            saved,
+        );
+        let tries = |hub: &Hub| {
+            hub.inner
+                .lock()
+                .unwrap()
+                .fails
+                .get("bo@team.io")
+                .map(|f| f.0)
+        };
+        // too short, someone else's email: said, not counted
+        for _ in 0..MAX_TRIES + 2 {
+            assert!(hub
+                .set_password(2, "bo@team.io", "short", Some("bo-secret-22"))
+                .unwrap_err()
+                .contains("at least"));
+            assert!(hub
+                .set_password(2, "cy@team.io", "long-enough-1", Some("bo-secret-22"))
+                .is_err());
+        }
+        assert_eq!(tries(&hub), None);
+        // a wrong current password counts
+        assert!(hub
+            .set_password(2, "bo@team.io", "long-enough-1", Some("wrong"))
+            .unwrap_err()
+            .contains("current password"));
+        assert_eq!(tries(&hub), Some(1));
+        // the right one changes it and forgets the wrong tries
+        assert!(hub
+            .set_password(2, "bo@team.io", "long-enough-1", Some("bo-secret-22"))
+            .is_ok());
+        assert_eq!(tries(&hub), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn reset_codes_guessed_at_once_still_stop_at_the_limit() {
+        let home = std::env::temp_dir().join(format!("wb-reset-{:x}", wb_sync::random_u64()));
+        let mut saved = Saved::default();
+        saved
+            .accounts
+            .insert(2, Account::new("bo@team.io", "bo-secret-22"));
+        let hub = Arc::new(test_hub(
+            &home,
+            Some(json!({"members": [{"id": 2}]})),
+            saved,
+        ));
+        hub.inner
+            .lock()
+            .unwrap()
+            .resets
+            .insert("bo@team.io".into(), ("ABCD-EFGH-JKMN".into(), now_ms()));
+        let guess = |code: String, pw: &str| Hello {
+            email: Some("bo@team.io".into()),
+            reset_code: Some(code),
+            new_password: Some(pw.into()),
+            ..hello("d")
+        };
+        // a password that won't do isn't a wrong try
+        for _ in 0..MAX_TRIES + 2 {
+            assert!(hub
+                .sign_in(&guess("ZZZZ-ZZZZ-ZZZZ".into(), "short"))
+                .unwrap_err()
+                .contains("at least"));
+        }
+        assert!(hub.inner.lock().unwrap().fails.is_empty());
+        let guesses: Vec<_> = (0..20)
+            .map(|i| {
+                let hub = hub.clone();
+                let g = guess(format!("WXYZ-WXYZ-{:04}", i), "long-enough-1");
+                std::thread::spawn(move || hub.sign_in(&g).unwrap_err())
+            })
+            .collect();
+        let answers: Vec<String> = guesses.into_iter().map(|g| g.join().unwrap()).collect();
+        let checked = answers.iter().filter(|a| !a.contains("Too many")).count();
+        assert!(
+            checked <= MAX_TRIES as usize,
+            "{} guesses were checked",
+            checked
+        );
+        assert!(hub
+            .sign_in(&guess("ABCD-EFGH-JKMN".into(), "long-enough-1"))
+            .unwrap_err()
+            .contains("Too many"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn setting_a_password_ends_codes_made_for_that_person() {
+        let home = std::env::temp_dir().join(format!("wb-pwcode-{:x}", wb_sync::random_u64()));
+        let hub = test_hub(
+            &home,
+            Some(json!({"members": [{"id": 2}, {"id": 3}]})),
+            Saved::default(),
+        );
+        let (bo, cy) = {
+            let mut g = hub.inner.lock().unwrap();
+            (
+                g.saved.make_invite(2, Role::Member),
+                g.saved.make_invite(3, Role::Member),
+            )
+        };
+        // Bo signs in with an admin's code on one computer and sets a password
+        assert!(hub
+            .set_password(2, "bo@team.io", "bo-secret-22", None)
+            .is_ok());
+        {
+            let g = hub.inner.lock().unwrap();
+            assert!(
+                !g.saved.invites.contains_key(&bo),
+                "Bo's code no longer works"
+            );
+            assert!(g.saved.invites.contains_key(&cy), "Cy's still does");
+        }
+        assert!(hub
+            .sign_in(&Hello {
+                invite: Some(bo.clone()),
+                ..hello("other")
+            })
+            .unwrap_err()
+            .contains("invite code doesn't work"));
+        // the same after changing it, or a reset
+        let again = hub.inner.lock().unwrap().saved.make_invite(2, Role::Member);
+        assert!(hub
+            .set_password(2, "bo@team.io", "bo-secret-23", Some("bo-secret-22"))
+            .is_ok());
+        assert!(!hub.inner.lock().unwrap().saved.invites.contains_key(&again));
+        let third = {
+            let mut g = hub.inner.lock().unwrap();
+            g.resets
+                .insert("bo@team.io".into(), ("ABCD-EFGH-JKMN".into(), now_ms()));
+            g.saved.make_invite(2, Role::Member)
+        };
+        assert!(hub
+            .sign_in(&Hello {
+                email: Some("bo@team.io".into()),
+                reset_code: Some("ABCD-EFGH-JKMN".into()),
+                new_password: Some("bo-secret-24".into()),
+                ..hello("phone")
+            })
+            .is_ok());
+        assert!(!hub.inner.lock().unwrap().saved.invites.contains_key(&third));
         let _ = std::fs::remove_dir_all(&home);
     }
 }

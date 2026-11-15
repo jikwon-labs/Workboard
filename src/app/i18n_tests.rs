@@ -125,6 +125,7 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         ("board", ViewKind::Board),
         ("calendar", ViewKind::Calendar),
         ("gantt", ViewKind::Gantt),
+        ("timeline", ViewKind::Timeline),
         ("table", ViewKind::Table),
     ] {
         v.push((
@@ -425,6 +426,22 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
     v.push((
         "notepad".into(),
         Box::new(move |a: &mut App| a.notepad_open = true),
+    ));
+    v.push((
+        "filter groups and saved filters".into(),
+        Box::new(move |a: &mut App| {
+            a.notepad_open = false;
+            a.section = Section::Home;
+            a.loc = Location::Everything;
+            a.view = ViewKind::List;
+            a.filter.rows = vec![parity::FilterRow::default(), parity::FilterRow::default()];
+            a.filter.groups = vec![parity::FilterGroup {
+                join: parity::Join::Or,
+                rows: vec![parity::FilterRow::default(), parity::FilterRow::default()],
+            }];
+            a.save_filter("Mine");
+            a.filter_open = true;
+        }),
     ));
     // signing in: the first start, each sign-in tab, the account section
     use super::together::{Form, Mode};

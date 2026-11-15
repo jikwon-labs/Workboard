@@ -4,10 +4,75 @@
 // who is speaking, mute and leave. Without a server the Huddle button opens
 // a browser call as before (see together.rs). Video (stage 4): the Video
 // button sends the camera, and everyone's pictures show above the bar.
+// Share screen offers the displays and windows to share (after the Screen
+// Recording permission); a shared screen shows large, with its sharer's name,
+// for everyone else. How large each picture is drawn goes to the call, which
+// asks the server for the video layer that fits (wb_voice::quality).
 
 use super::*;
 use std::collections::HashMap;
-use wb_voice::{Audio, Call, Event as VoiceEvent, Join, Person, Picture, Video, ME};
+use wb_voice::{
+    screen_owner, Audio, Call, Event as VoiceEvent, Join, Person, Picture, ScreenTrouble, Share,
+    Source, SourceKind, Video, ME,
+};
+
+/// Where screens to share come from: macOS, or a made-up list in tests.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum ScreenEnv {
+    System,
+    Fake { allowed: bool, sources: Vec<Source> },
+}
+
+impl ScreenEnv {
+    fn allowed(&self) -> bool {
+        match self {
+            ScreenEnv::System => wb_voice::screen::allowed(),
+            ScreenEnv::Fake { allowed, .. } => *allowed,
+        }
+    }
+
+    /// Ask for the permission (macOS shows its request only the first time).
+    fn ask(&self) -> bool {
+        match self {
+            ScreenEnv::System => wb_voice::screen::ask(),
+            ScreenEnv::Fake { allowed, .. } => *allowed,
+        }
+    }
+
+    fn sources(&self) -> Result<Vec<Source>, ScreenTrouble> {
+        match self {
+            ScreenEnv::System => wb_voice::screen::sources(),
+            ScreenEnv::Fake { allowed: false, .. } => Err(ScreenTrouble::NotAllowed),
+            ScreenEnv::Fake { sources, .. } => Ok(sources.clone()),
+        }
+    }
+
+    fn open_settings(&self) {
+        if *self == ScreenEnv::System {
+            wb_voice::screen::open_settings();
+        }
+    }
+}
+
+fn test_screens() -> ScreenEnv {
+    ScreenEnv::Fake {
+        allowed: true,
+        sources: vec![
+            Source {
+                kind: SourceKind::Display,
+                id: 1,
+                name: "Test display".into(),
+                main: true,
+            },
+            Source {
+                kind: SourceKind::Window,
+                id: 7,
+                name: "Notes: Plan".into(),
+                main: false,
+            },
+        ],
+    }
+}
 
 /// The `call` field of a chat message announcing an in-app huddle.
 pub(super) const HUDDLE_PREFIX: &str = "workboard-huddle:";
@@ -41,6 +106,19 @@ pub struct HuddleRt {
     textures: HashMap<String, egui::TextureHandle>,
     /// The video shown large (clicked), if any.
     pub(super) focus: Option<String>,
+    /// The screen or window being shared from here.
+    pub(super) screen: Option<Share>,
+    /// The "Share your screen" chooser is open.
+    pub(super) share_menu: bool,
+    /// What the chooser offers (filled when it opens).
+    pub(super) screen_sources: Vec<Source>,
+    /// Why the chooser can't offer anything: no permission, or a message.
+    pub(super) screen_problem: Option<ScreenTrouble>,
+    pub(super) screen_env: ScreenEnv,
+    /// Pressed "Open System Settings" (for tests).
+    pub(super) opened_settings: bool,
+    /// How wide (physical pixels) each picture was drawn, as last told to the call.
+    pub(super) views: HashMap<String, f32>,
 }
 
 impl Default for HuddleRt {
@@ -71,7 +149,26 @@ impl Default for HuddleRt {
             pictures: HashMap::new(),
             textures: HashMap::new(),
             focus: None,
+            screen: None,
+            share_menu: false,
+            screen_sources: vec![],
+            screen_problem: None,
+            screen_env: if cfg!(test) {
+                test_screens()
+            } else {
+                ScreenEnv::System
+            },
+            opened_settings: false,
+            views: HashMap::new(),
         }
+    }
+}
+
+impl HuddleRt {
+    /// Someone's video (or screen) stopped.
+    pub(super) fn drop_picture(&mut self, id: &str) {
+        self.pictures.remove(id);
+        self.textures.remove(id);
     }
 }
 
@@ -149,12 +246,14 @@ impl App {
             return;
         }
         let (audio, video) = (self.huddle.audio, self.huddle.video);
+        let screen_env = self.huddle.screen_env.clone();
         self.huddle = HuddleRt {
             channel: Some(ch),
             waiting: true,
             asked: Some(std::time::Instant::now()),
             audio,
             video,
+            screen_env,
             ..Default::default()
         };
         self.access_request(wb_net::Msg::CallJoin { channel: ch });
@@ -162,11 +261,39 @@ impl App {
 
     pub(super) fn leave_huddle(&mut self) {
         let (audio, video) = (self.huddle.audio, self.huddle.video);
+        let screen_env = self.huddle.screen_env.clone();
         self.huddle = HuddleRt {
             audio,
             video,
+            screen_env,
             ..Default::default()
         };
+    }
+
+    /// Open the "Share your screen" chooser: ask for the Screen Recording
+    /// permission if needed, then list the displays and windows.
+    pub(super) fn open_share_menu(&mut self) {
+        self.huddle.share_menu = true;
+        self.huddle.screen_problem = None;
+        self.huddle.screen_sources.clear();
+        let env = self.huddle.screen_env.clone();
+        if !env.allowed() && !env.ask() {
+            self.huddle.screen_problem = Some(ScreenTrouble::NotAllowed);
+            return;
+        }
+        match env.sources() {
+            Ok(list) => self.huddle.screen_sources = list,
+            Err(e) => self.huddle.screen_problem = Some(e),
+        }
+    }
+
+    /// Share a screen or window (or stop with None).
+    pub(super) fn set_huddle_screen(&mut self, share: Option<Share>) {
+        self.huddle.screen = share;
+        self.huddle.share_menu = false;
+        if let Some(c) = &self.huddle.call {
+            c.share_screen(share);
+        }
     }
 
     pub(super) fn set_huddle_camera(&mut self, on: bool) {
@@ -254,6 +381,10 @@ impl App {
             if self.huddle.camera {
                 call.set_camera(true);
             }
+            if self.huddle.screen.is_some() {
+                call.share_screen(self.huddle.screen);
+            }
+            self.huddle.views.clear();
             self.huddle.call = Some(call);
         }
         let events = self
@@ -270,6 +401,27 @@ impl App {
                     // so far only the camera says this: turn it back off
                     self.set_huddle_camera(false);
                     self.toast = Some((why, now_ts()));
+                }
+                VoiceEvent::ScreenEnded(why) => {
+                    self.huddle.screen = None;
+                    match why {
+                        // stopped from macOS's own controls
+                        None => {}
+                        Some(ScreenTrouble::NotAllowed) => {
+                            self.huddle.share_menu = true;
+                            self.huddle.screen_problem = Some(ScreenTrouble::NotAllowed);
+                        }
+                        Some(ScreenTrouble::Gone) => {
+                            self.toast = Some((
+                                tr("The screen or window you shared is gone, so sharing stopped.")
+                                    .into(),
+                                now_ts(),
+                            ));
+                        }
+                        Some(ScreenTrouble::Failed(m)) => {
+                            self.toast = Some((trf!("Screen sharing stopped: {}", m), now_ts()));
+                        }
+                    }
                 }
                 VoiceEvent::Left(why) => {
                     if let Some(why) = why {
@@ -290,10 +442,7 @@ impl App {
                 Some(p) => {
                     self.huddle.pictures.insert(id, (p, true));
                 }
-                None => {
-                    self.huddle.pictures.remove(&id);
-                    self.huddle.textures.remove(&id);
-                }
+                None => self.huddle.drop_picture(&id),
             }
         }
         // the server connection went away or the workspace changed
@@ -309,9 +458,11 @@ impl App {
         }
     }
 
-    /// Everyone's video above the bar: others first, then you.
+    /// Everyone's video above the bar: shared screens large on top, then
+    /// cameras, others first, then you.
     fn huddle_videos(&mut self, ctx: &egui::Context, t: &Theme) {
         if self.huddle.pictures.is_empty() {
+            self.tell_view_sizes(HashMap::new());
             return;
         }
         for (id, (pic, fresh)) in self.huddle.pictures.iter_mut() {
@@ -336,47 +487,61 @@ impl App {
             }
         }
         // only people still in the call: a picture can outlive its sender by a frame
+        let in_call = |id: &str| self.huddle.people.iter().any(|p| p.identity == id);
         let mut ids: Vec<String> = self
             .huddle
             .textures
             .keys()
-            .filter(|id| *id == ME || self.huddle.people.iter().any(|p| &p.identity == *id))
+            .filter(|id| *id == ME || in_call(screen_owner(id).unwrap_or(id)))
             .cloned()
             .collect();
         if ids.is_empty() {
             self.huddle.focus = None;
+            self.tell_view_sizes(HashMap::new());
             return;
         }
         ids.sort_by_key(|id| (id == ME, id.clone()));
-        let names: Vec<(String, String)> = ids
+        let name_of = |id: &str| -> String {
+            if id == ME {
+                return "You".to_string();
+            }
+            self.huddle
+                .people
+                .iter()
+                .find(|p| p.identity == id)
+                .map(|p| self.huddle_name(p))
+                .unwrap_or_default()
+        };
+        let (screens, cameras): (Vec<(String, String)>, Vec<(String, String)>) = ids
             .iter()
-            .map(|id| {
-                let name = if id == ME {
-                    "You".to_string()
-                } else {
-                    self.huddle
-                        .people
-                        .iter()
-                        .find(|p| &p.identity == id)
-                        .map(|p| self.huddle_name(p))
-                        .unwrap_or_default()
-                };
-                (id.clone(), name)
-            })
-            .collect();
+            .map(|id| (id.clone(), name_of(screen_owner(id).unwrap_or(id))))
+            .partition(|(id, _)| screen_owner(id).is_some());
         // a clicked video shows large and the rest small; otherwise tiles get
-        // smaller when many people send video
-        if self.huddle.focus.as_ref().is_some_and(|f| !ids.contains(f)) {
+        // smaller when many people send video (and when a screen is shared)
+        if self
+            .huddle
+            .focus
+            .as_ref()
+            .is_some_and(|f| !cameras.iter().any(|(id, _)| id == f))
+        {
             self.huddle.focus = None;
         }
         let focus = self.huddle.focus.clone();
-        let normal = if ids.len() <= 2 {
+        let normal = if !screens.is_empty() {
+            140.0
+        } else if cameras.len() <= 2 {
             320.0
-        } else if ids.len() <= 4 {
+        } else if cameras.len() <= 4 {
             240.0
         } else {
             180.0
         };
+        // a shared screen as large as fits above the bar
+        let room = ctx.screen_rect();
+        let screen_w = (room.width() - 80.0).clamp(240.0, 960.0);
+        let screen_max_h = (room.height() - 210.0 - 200.0 - 60.0).max(140.0);
+        let ppp = ctx.pixels_per_point();
+        let mut drawn: HashMap<String, f32> = HashMap::new();
         let mut clicked: Option<String> = None;
         egui::Area::new(egui::Id::new("huddle_videos"))
             .order(egui::Order::Middle)
@@ -388,52 +553,83 @@ impl App {
                     .corner_radius(12)
                     .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for (id, name) in &names {
+                        ui.vertical_centered(|ui| {
+                            for (id, name) in &screens {
                                 let Some(tex) = self.huddle.textures.get(id) else {
                                     continue;
                                 };
-                                let big = focus.as_ref() == Some(id);
-                                let w = match &focus {
-                                    Some(_) if big => 560.0,
-                                    Some(_) => 140.0,
-                                    None => normal,
-                                };
                                 let size = tex.size_vec2();
-                                let h = w * size.y / size.x.max(1.0);
-                                ui.vertical(|ui| {
-                                    let r = ui.add(
-                                        egui::Image::new((tex.id(), vec2(w, h)))
-                                            .corner_radius(8)
-                                            .sense(Sense::click()),
-                                    );
-                                    r.widget_info(|| {
-                                        egui::WidgetInfo::labeled(
-                                            egui::WidgetType::Image,
-                                            true,
-                                            format!("Video of {}", name),
-                                        )
-                                    });
-                                    if r.on_hover_text(if big {
-                                        tr("Click to make smaller")
-                                    } else {
-                                        tr("Click to make larger")
-                                    })
-                                    .clicked()
-                                    {
-                                        clicked = Some(id.clone());
-                                    }
-                                    ui.label(
-                                        RichText::new(if id == ME {
-                                            tr("You")
-                                        } else {
-                                            name.as_str()
-                                        })
-                                        .small()
-                                        .color(t.text2),
-                                    );
+                                let aspect = size.y / size.x.max(1.0);
+                                let w = screen_w.min(screen_max_h / aspect.max(0.01));
+                                let r = ui.add(
+                                    egui::Image::new((tex.id(), vec2(w, w * aspect)))
+                                        .corner_radius(8),
+                                );
+                                r.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Image,
+                                        true,
+                                        format!("Screen of {}", name),
+                                    )
                                 });
+                                drawn.insert(id.clone(), w * ppp);
+                                ui.label(
+                                    RichText::new(trf!("{}'s screen", name))
+                                        .small()
+                                        .strong()
+                                        .color(t.text2),
+                                );
+                                ui.add_space(6.0);
                             }
+                            ui.horizontal(|ui| {
+                                for (id, name) in &cameras {
+                                    let Some(tex) = self.huddle.textures.get(id) else {
+                                        continue;
+                                    };
+                                    let big = focus.as_ref() == Some(id);
+                                    let w = match &focus {
+                                        Some(_) if big => 560.0,
+                                        Some(_) => 140.0,
+                                        None => normal,
+                                    };
+                                    let size = tex.size_vec2();
+                                    let h = w * size.y / size.x.max(1.0);
+                                    drawn.insert(id.clone(), w * ppp);
+                                    ui.vertical(|ui| {
+                                        let r = ui.add(
+                                            egui::Image::new((tex.id(), vec2(w, h)))
+                                                .corner_radius(8)
+                                                .sense(Sense::click()),
+                                        );
+                                        hover_bg(ui, &r, r.rect, 8.0);
+                                        r.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::WidgetType::Image,
+                                                true,
+                                                format!("Video of {}", name),
+                                            )
+                                        });
+                                        if r.on_hover_text(if big {
+                                            tr("Click to make smaller")
+                                        } else {
+                                            tr("Click to make larger")
+                                        })
+                                        .clicked()
+                                        {
+                                            clicked = Some(id.clone());
+                                        }
+                                        ui.label(
+                                            RichText::new(if id == ME {
+                                                tr("You")
+                                            } else {
+                                                name.as_str()
+                                            })
+                                            .small()
+                                            .color(t.text2),
+                                        );
+                                    });
+                                }
+                            });
                         });
                     });
             });
@@ -443,6 +639,176 @@ impl App {
             } else {
                 Some(id)
             };
+        }
+        drawn.remove(ME);
+        self.tell_view_sizes(drawn);
+    }
+
+    /// Tell the call how large each received picture is drawn (when that
+    /// changes), so it asks for the video layer that fits.
+    fn tell_view_sizes(&mut self, sizes: HashMap<String, f32>) {
+        if sizes == self.huddle.views {
+            return;
+        }
+        if let Some(c) = &self.huddle.call {
+            c.set_view_sizes(sizes.clone());
+        }
+        self.huddle.views = sizes;
+    }
+
+    /// The "Share your screen" chooser above the bar: the displays and
+    /// windows, or how to give the Screen Recording permission.
+    fn share_menu(&mut self, ctx: &egui::Context, t: &Theme) {
+        if !self.huddle.share_menu {
+            return;
+        }
+        let mut pick: Option<Share> = None;
+        let mut close = false;
+        let mut settings = false;
+        let mut again = false;
+        egui::Area::new(egui::Id::new("huddle_share_menu"))
+            .order(egui::Order::Foreground)
+            .anchor(Align2::CENTER_BOTTOM, [0.0, -200.0])
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(t.card)
+                    .stroke(Stroke::new(1.0, t.border))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::same(14))
+                    .shadow(egui::epaint::Shadow {
+                        offset: [0, 4],
+                        blur: 16,
+                        spread: 0,
+                        color: Color32::from_black_alpha(40),
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(380.0);
+                        ui.label(
+                            RichText::new(tr("Share your screen"))
+                                .strong()
+                                .color(t.text),
+                        );
+                        ui.add_space(6.0);
+                        match &self.huddle.screen_problem {
+                            Some(ScreenTrouble::NotAllowed) => {
+                                ui.label(
+                                    RichText::new(tr(
+                                        "Workboard needs the Screen Recording permission to share your screen.",
+                                    ))
+                                    .color(t.text),
+                                );
+                                ui.label(
+                                    RichText::new(tr(
+                                        "Turn on Workboard in System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen Workboard.",
+                                    ))
+                                    .small()
+                                    .color(t.text2),
+                                );
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button(tr("Open System Settings")).clicked() {
+                                        settings = true;
+                                    }
+                                    if ui.button(tr("Try again")).clicked() {
+                                        again = true;
+                                    }
+                                });
+                            }
+                            Some(other) => {
+                                let why = match other {
+                                    ScreenTrouble::Failed(m) => m.clone(),
+                                    _ => String::new(),
+                                };
+                                ui.label(
+                                    RichText::new(trf!("Couldn't list the screens to share: {}", why))
+                                        .color(t.text2),
+                                );
+                                if ui.button(tr("Try again")).clicked() {
+                                    again = true;
+                                }
+                            }
+                            None => {
+                                let (displays, windows): (Vec<&Source>, Vec<&Source>) = self
+                                    .huddle
+                                    .screen_sources
+                                    .iter()
+                                    .partition(|s| s.kind == SourceKind::Display);
+                                ui.label(RichText::new(tr("Screens")).small().color(t.text2));
+                                for d in displays {
+                                    let label = if d.main {
+                                        trf!("{} (main)", d.name)
+                                    } else {
+                                        d.name.clone()
+                                    };
+                                    let r = ui.add(
+                                        egui::Button::new(label)
+                                            .min_size(vec2(352.0, 26.0))
+                                            .corner_radius(6),
+                                    );
+                                    r.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            true,
+                                            format!("Share {}", d.name),
+                                        )
+                                    });
+                                    if r.clicked() {
+                                        pick = Some(d.share());
+                                    }
+                                }
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(tr("Windows")).small().color(t.text2));
+                                if windows.is_empty() {
+                                    ui.label(
+                                        RichText::new(tr("No windows to share."))
+                                            .small()
+                                            .color(t.text3),
+                                    );
+                                }
+                                egui::ScrollArea::vertical()
+                                    .max_height(220.0)
+                                    .show(ui, |ui| {
+                                        for w in windows {
+                                            let r = ui.add(
+                                                egui::Button::new(
+                                                    RichText::new(&w.name).small(),
+                                                )
+                                                .truncate()
+                                                .min_size(vec2(352.0, 24.0))
+                                                .corner_radius(6),
+                                            );
+                                            r.widget_info(|| {
+                                                egui::WidgetInfo::labeled(
+                                                    egui::WidgetType::Button,
+                                                    true,
+                                                    format!("Share {}", w.name),
+                                                )
+                                            });
+                                            if r.clicked() {
+                                                pick = Some(w.share());
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ui.add_space(6.0);
+                        if ui.button(tr("Cancel")).clicked() {
+                            close = true;
+                        }
+                    });
+            });
+        if settings {
+            self.huddle.opened_settings = true;
+            self.huddle.screen_env.open_settings();
+        }
+        if again {
+            self.open_share_menu();
+        }
+        if close {
+            self.huddle.share_menu = false;
+        }
+        if pick.is_some() {
+            self.set_huddle_screen(pick);
         }
     }
 
@@ -477,7 +843,9 @@ impl App {
         let mut leave = false;
         let mut mute: Option<bool> = None;
         let mut camera: Option<bool> = None;
+        let mut share_click = false;
         self.huddle_videos(ctx, &t);
+        self.share_menu(ctx, &t);
         egui::Area::new(egui::Id::new("huddle_bar"))
             .order(egui::Order::Middle)
             .anchor(Align2::CENTER_BOTTOM, [0.0, -132.0])
@@ -518,6 +886,13 @@ impl App {
                                     tr("Connecting\u{2026}").to_string()
                                 };
                                 ui.label(RichText::new(status).small().color(t.text2));
+                                if self.huddle.screen.is_some() {
+                                    ui.label(
+                                        RichText::new(tr("Sharing your screen"))
+                                            .small()
+                                            .color(green),
+                                    );
+                                }
                             });
                             ui.add_space(10.0);
                             for p in self.huddle.people.clone() {
@@ -616,15 +991,30 @@ impl App {
                             {
                                 camera = Some(!cam);
                             }
+                            let sharing = self.huddle.screen.is_some();
                             if ui
                                 .add(
+                                    egui::Button::new(if sharing {
+                                        tr("Stop sharing screen")
+                                    } else {
+                                        tr("Share screen")
+                                    })
+                                    .min_size(vec2(72.0, 30.0))
+                                    .corner_radius(7),
+                                )
+                                .clicked()
+                            {
+                                share_click = true;
+                            }
+                            if ui
+                                .add(Tint(
                                     egui::Button::new(
                                         RichText::new(tr("Leave")).color(Color32::WHITE),
                                     )
                                     .fill(t.danger)
                                     .min_size(vec2(64.0, 30.0))
                                     .corner_radius(7),
-                                )
+                                ))
                                 .clicked()
                             {
                                 leave = true;
@@ -650,6 +1040,15 @@ impl App {
         }
         if let Some(c) = camera {
             self.set_huddle_camera(c);
+        }
+        if share_click {
+            if self.huddle.screen.is_some() {
+                self.set_huddle_screen(None);
+            } else if self.huddle.share_menu {
+                self.huddle.share_menu = false;
+            } else {
+                self.open_share_menu();
+            }
         }
         if leave {
             self.leave_huddle();

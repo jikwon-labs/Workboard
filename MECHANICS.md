@@ -1,5 +1,10 @@
 # Mechanics sheet
 
+What was measured and read from the original app that Workboard's interface is
+modelled on, and the rules taken from it. The measurements are a record of
+Nov 13-14, 2026; lines starting "Rebuild" or "Built here" say what Workboard
+does today (checked Nov 16, 2026).
+
 ## Measured from the person's running ClickUp (Nov 13, 2026)
 The installed app was started with its debugging port, signed in, and its live
 page was photographed and measured (app/shots/original-*.png). These values win
@@ -33,8 +38,9 @@ over the cached-code values further down where they differ.
   "Empty" placeholders; "Add description"; Add subtask / Create checklist;
   right panel "Comments  Created <date>" with "Send the first comment".
 - Primary button colour rgb(32,32,32); body white; border rgb(232,232,232).
-- Not built (need ClickUp's online service): AI, AI Chats, Posts, Skills, Artifacts,
-  Meetings, Labs, Install, Upgrade.
+- Not built (need ClickUp's online service): AI, AI Chats, Skills, Artifacts, Labs,
+  Install, Upgrade. Posts and Meetings were built later as pages of their own
+  (src/app/more.rs).
 
 ## Full inventory of the person's ClickUp (opened and used, Nov 13, 2026)
 Every menu and page was opened in the running app (pictures: app/shots/orig-*.png).
@@ -73,9 +79,12 @@ Every menu and page was opened in the running app (pictures: app/shots/orig-*.pn
   Set a Goal. Timesheets: My timesheet, All timesheets, Approvals, Settings, week picker,
   Timesheet / Time entries, four start options. Teams: All Teams, All People, Org Chart,
   Analytics, My Teams, Create Team.
-- Online-only (need the server or an AI service; shown, explained when clicked): AI, AI Chats,
-  Skills, Artifacts, Super Agent, Clips, Talk to Text, AI Notetaker, SyncUp/huddles,
-  Import from Slack, Integrate, calendar connection in Planner/Meetings.
+- Online-only (need an AI or other online service; shown, explained when clicked): AI,
+  AI Chats, Skills, Artifacts, Super Agent, Clips, Talk to Text, AI Notetaker,
+  calendar connection in Planner/Meetings. Import from Slack was built later (it
+  reads a Slack export); Integrate was dropped.
+  SyncUp/huddles work in the app on a team server (voice and video through LiveKit)
+  and as a browser call link in a shared folder.
 
 ## Native main program (decompiled)
 `/Applications/ClickUp.app/Contents/MacOS/ClickUp` (arm64 Mach-O, 53 KB, stripped)
@@ -133,8 +142,8 @@ decompile, so "function addresses" are given as bundle chunk names instead.
 
 ## My Work sections (inbox chunk, common11-dc5fdf6036.js)
 - Tabs in order: Today, Overdue, Next, Done, Unscheduled (plus Delegated and
-  Reminders, not built). Rebuild shows Today, Overdue, Next, Unscheduled, then Done
-  (folded by default).
+  Reminders). Rebuild shows Today, Overdue, Next, Unscheduled, then Done
+  (folded by default). Delegated is not built; Reminders is its own page.
 
 ## Closed tasks
 - Built-in dashboard cards set `show_closed: false` (common34-e49fffd809.js).
@@ -154,8 +163,10 @@ decompile, so "function addresses" are given as bundle chunk names instead.
   icon in purple1000 and a small shadow (`--cu-elevation-2`).
 - Rail items in order (sidebar `moreMenuItems`, main3-b7eea52838.js): Spaces, Chat,
   Planner, AI, Teams, Docs, Dashboards, Whiteboards, Forms, Sheets, Clips, Goals,
-  Timesheets, AI Workflows, Solutions. Built here: Home, Planner, Teams, Docs,
-  Dashboards, Timesheets; the rest are listed under More as not in this version.
+  Timesheets, AI Workflows, Solutions. Built here: Home, Planner, Teams, Chat, Docs,
+  Dashboards, Whiteboards, Forms, Goals, Timesheets (any of them can be pinned to
+  the rail); AI and Clips open a page or note saying they need an online service;
+  Sheets, AI Workflows and Solutions are not built.
 - Content: one white card, radius 8, 1 px border, holding the Home sidebar and the page;
   task tray at its bottom: 37 px, 8 px padding, `--cu-background-main-dark` (grey100),
   border on top, items 128 px (second 180 px) wide, radius 5.
@@ -192,13 +203,16 @@ decompile, so "function addresses" are given as bundle chunk names instead.
 The whole interface runs in a 1440x900 window and receives real pointer
 moves, presses, releases, mouse-wheel scrolls, drags, right-clicks and typed
 text at the on-screen position of each control (found by its accessibility
-name). 23 such tests cover: sidebar navigation, Create > Task, inline
+name). The first 23 such tests (Nov 14) covered: sidebar navigation, Create > Task, inline
 + Add Task, status picker, opening a task and its timer/complete buttons,
 Invite, view tabs, channel messages, thread replies, hover reactions, Docs,
 Workspace and Profile menus with every settings dialog, search, back/forward,
 Whiteboard and Form templates, Inbox Later/Clear, Timesheets tabs, board card
 drag between columns, right-click Delete and Trash restore, Goals,
-Dashboards, Teams and every app in More.
+Dashboards, Teams and every app in More. By Nov 16 the file had 200 of them,
+adding the list view, task window fields, comments, chat actions and
+attachments, sign-in, huddles and screen sharing (notifications and the Korean interface have
+their own tests in notify_tests.rs and i18n_tests.rs).
 
 Bugs these found and fixed: Enter did not create a task in the Create Task
 window or the inline add row (focus was re-requested before the Enter check);

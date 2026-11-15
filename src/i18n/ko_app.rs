@@ -38,6 +38,10 @@ pub const T: &[(&str, &str)] = &[
     ("Save the tasks in this view as a CSV file", "이 보기의 작업을 CSV 파일로 저장합니다"),
     ("{} without dates", "날짜 없음 {}"),
     ("+ Add Task", "+ 작업 추가"),
+    // timeline
+    ("Lanes", "레인"),
+    ("Show the tasks that have no start or due date", "시작일과 마감일이 없는 작업을 보여 줍니다"),
+    ("No tasks with dates in this view yet", "이 보기에는 아직 날짜가 있는 작업이 없습니다"),
     // home
     ("Good morning", "좋은 아침이에요"),
     ("Good afternoon", "좋은 오후예요"),
@@ -125,6 +129,10 @@ pub const T: &[(&str, &str)] = &[
     ("Statuses - {}", "상태 - {}"),
     ("+ Add status", "+ 상태 추가"),
     ("Renamed statuses are renamed on their tasks too; tasks of a deleted status move to a status of the same kind.", "상태 이름을 바꾸면 그 상태의 작업에도 반영됩니다. 상태를 삭제하면 그 작업은 같은 종류의 상태로 옮겨집니다."),
+    (
+        "A status name that was empty or already used went back to its last name",
+        "비어 있거나 이미 쓰는 상태 이름은 마지막 이름으로 돌아갔습니다",
+    ),
     ("Create Task", "작업 만들기"),
     ("Choose list", "목록 선택"),
     ("\u{1F464} Assignee", "\u{1F464} 담당자"),
@@ -161,4 +169,5 @@ pub const T: &[(&str, &str)] = &[
     ("Monthly", "매월"),
     ("Yearly", "매년"),
     // timers
+    ("No Lists yet. Lists keep a Space's tasks together.", "아직 목록이 없습니다. 목록은 스페이스의 작업을 한데 모아 둡니다."),
 ];

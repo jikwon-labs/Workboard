@@ -5,11 +5,12 @@
 // (Saved::push) and, when a push from an app brings chat messages the team's
 // copy didn't have, notifies:
 //   - in a DM: every member of it except the author, for every message;
-//   - in a channel: members whose "@Name" is in the text, and for a thread
+//   - in a channel: members it @mentions (wb_sync::mentions), and for a thread
 //     reply also whoever started or wrote in that thread;
 // never the author (nor the member whose app sent the copy), never someone a
-// private channel is closed to, and never a device that is connected right
-// now (the app shows those itself). At most MAX_PER_DEVICE notifications go
+// private channel is closed to, never for messages that came back from
+// someone's Trash, and never a device that is connected right now (the app
+// shows those itself). At most MAX_PER_DEVICE notifications go
 // to one device per merge; the rest become one "N more new messages".
 //
 // Set up by an apns.json in the server folder (like mail.json):
@@ -47,6 +48,10 @@ pub const MAX_PER_DEVICE: usize = 3;
 /// Messages older than this (from a computer that was offline a long time)
 /// don't notify anyone.
 pub const MAX_AGE_SECS: i64 = 24 * 3600;
+/// A message in a conversation restored from Trash notifies only when it
+/// was written at most this long before the conversation came back (one
+/// sent from a computer that was offline meanwhile, say).
+pub const RESTORED_SLACK_SECS: i64 = 5 * 60;
 /// How long one JWT is used (Apple wants a new one at least every hour and at
 /// most every 20 minutes).
 pub const JWT_SECS: i64 = 50 * 60;
@@ -477,16 +482,32 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "Someone".into())
     };
-    let mentioned = |t: &str| -> Vec<u64> {
-        people
+    // the app's rule (wb_sync::mentions): the ids a message keeps, else its text
+    let named: Vec<(u64, &str)> = people.iter().map(|(i, n)| (*i, n.as_str())).collect();
+    let mentioned = |m: &Value| -> Vec<u64> {
+        let saved: Vec<u64> = arr(m.get("mentions"))
             .iter()
-            .filter(|(_, n)| !n.is_empty() && t.contains(&format!("@{}", n)))
-            .map(|(i, _)| *i)
-            .collect()
+            .filter_map(|x| x.as_u64())
+            .collect();
+        wb_sync::mentions::mentions_of(&saved, &text(m, "text"), &named)
+    };
+    // restored from someone's Trash (or a delete undone): not new, so no
+    // push again. An id the merge revived, or a message written well before
+    // its conversation came back.
+    let revived = |id: u64| {
+        canon
+            .pointer(&format!("/extra/sync/revived/{}", id))
+            .and_then(|r| r.as_i64())
     };
     let mut out = vec![];
     for ch in arr(canon.get("channels")) {
         let Some(cid) = num(ch, "id") else { continue };
+        let back_at = revived(cid).map(secs);
+        let restored = |m: &Value| {
+            let ts = secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
+            num(m, "id").is_some_and(|id| revived(id).is_some())
+                || back_at.is_some_and(|at| ts < at - RESTORED_SLACK_SECS)
+        };
         let direct = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct");
         let ch_members: Vec<u64> = arr(ch.get("members"))
             .iter()
@@ -522,18 +543,18 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
         for m in arr(ch.get("messages")) {
             let Some(mid) = num(m, "id") else { continue };
             let author = num(m, "author").unwrap_or(0);
-            if !before.contains(&mid) {
+            if !before.contains(&mid) && !restored(m) {
                 let to = if direct {
                     ch_members.clone()
                 } else {
-                    mentioned(&text(m, "text"))
+                    mentioned(m)
                 };
                 add(author, m, None, to);
             }
             let replies = arr(m.get("replies"));
             for r in replies {
                 let Some(rid) = num(r, "id") else { continue };
-                if before.contains(&rid) {
+                if before.contains(&rid) || restored(r) {
                     continue;
                 }
                 let ra = num(r, "author").unwrap_or(0);
@@ -541,7 +562,7 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
                     ch_members.clone()
                 } else {
                     // the thread's people: who started it and who wrote in it
-                    let mut to = mentioned(&text(r, "text"));
+                    let mut to = mentioned(r);
                     to.push(author);
                     to.extend(replies.iter().filter_map(|x| num(x, "author")));
                     to
@@ -809,5 +830,41 @@ mod tests {
                 .contains("team_id, topic missing"));
         }
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn mentions_follow_the_apps_rule_and_the_saved_ids() {
+        let c = json!({"members": [{"id": 1, "name": "Alex"}, {"id": 2, "name": "Alex Kim"}, {"id": 3, "name": "Bo"}, {"id": 4, "name": "지원"}, {"id": 5, "name": "Bob"}],
+        "channels": [{"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [
+            msg(5, 3, "@Alex Kim look"),
+            msg(6, 3, "@Bobby and mail@Alex"),
+            msg(7, 3, "@지원님 확인"),
+            // the ids saved with the message win over its text (two Bobs, say)
+            {"id": 8, "author": 3, "text": "@Bob hi", "ts": now(), "mentions": [5]}
+        ]}]});
+        let n = notes(&c, &HashSet::new(), &[], now());
+        assert_eq!(who(&n), vec![(2, 5), (4, 7), (5, 8)]);
+    }
+
+    #[test]
+    fn a_conversation_restored_from_trash_pushes_nothing_again() {
+        let t = now();
+        let mut root = msg(5, 2, "plan");
+        root["replies"] = json!([msg(6, 3, "ok")]);
+        let dm = |messages: Value| json!({"id": 301, "name": "", "kind": "Direct", "members": [1, 2, 3], "messages": messages});
+        // the DM and its messages came back (their ids revived)
+        let mut c = ws(json!([dm(json!([root.clone()]))]));
+        c["extra"] = json!({"sync": {"revived": {"301": t * 1000, "5": t * 1000, "6": t * 1000}}});
+        assert!(notes(&c, &HashSet::new(), &[], t).is_empty());
+        // only the conversation was marked: its older messages still don't push,
+        // one written just now does
+        let mut fresh = msg(7, 2, "back again");
+        fresh["ts"] = json!(t);
+        let mut old = msg(8, 2, "from this morning");
+        old["ts"] = json!(t - 3 * 3600);
+        let mut c = ws(json!([dm(json!([old, fresh]))]));
+        c["extra"] = json!({"sync": {"revived": {"301": t * 1000}}});
+        let n = notes(&c, &HashSet::new(), &[], t);
+        assert_eq!(who(&n), vec![(1, 7), (3, 7)]);
     }
 }

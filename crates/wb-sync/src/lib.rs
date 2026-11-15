@@ -20,6 +20,8 @@
 // too, so edits, deletes and reactions carry over; lines saved before they
 // had ids get one worked out from their contents (`activity_id`).
 
+pub mod mentions;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -1496,8 +1498,37 @@ pub fn read_json(p: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// The copy other people get: personal notes, reminders, items marked
-/// `personal` and this computer's fingerprints left out.
+/// Each person's own settings and reading state in `extra`, left out of the
+/// copy other people get: what they've read and closed in chat, starred and
+/// recent items, notification and sidebar settings, their timesheet rows and
+/// where their copy is shared. None of it is merged from other copies, and
+/// the app fills in its default when one is missing.
+const PERSONAL_EXTRA: &[&str] = &[
+    "chat_seen",
+    "closed_dm_seen",
+    "closed_dms",
+    "replies_seen",
+    "replies_read",
+    "starred",
+    "recent",
+    "notify",
+    "muted_until",
+    "pinned_tools",
+    "rail_items",
+    "hidden_nav",
+    "hidden_views",
+    "hidden_cards",
+    "accent",
+    "auto_theme",
+    "labs",
+    "shared",
+    "sheet_rows",
+    "sheet_week_rows",
+];
+
+/// The copy other people get: personal notes, reminders, settings and
+/// reading state (`PERSONAL_EXTRA`), items marked `personal` and this
+/// computer's fingerprints left out.
 pub fn shareable(data: &Value) -> Value {
     let mut v = data.clone();
     // items marked personal (bookmarks a person had before bookmarks were
@@ -1508,11 +1539,16 @@ pub fn shareable(data: &Value) -> Value {
         }
     }
     if let Some(e) = v.get_mut("extra").and_then(|e| e.as_object_mut()) {
+        for k in PERSONAL_EXTRA {
+            e.remove(*k);
+        }
         e.insert("notepad".into(), Value::String(String::new()));
         e.insert("reminders".into(), Value::Array(vec![]));
         e.insert("inbox_cleared".into(), Value::Array(vec![]));
         e.insert("inbox_later".into(), Value::Array(vec![]));
         e.insert("trash".into(), Value::Array(vec![]));
+        // filters saved under a name are each person's own and never merged
+        e.remove("saved_filters");
         if let Some(s) = e.get_mut("sync").and_then(|s| s.as_object_mut()) {
             s.insert("hashes".into(), Value::Object(Map::new()));
             s.insert("value_hashes".into(), Value::Object(Map::new()));
@@ -1538,8 +1574,8 @@ pub fn closed_to(ch: &Value, member: u64) -> bool {
 
 /// The top-level items of a team's copy that `member` doesn't get (and
 /// can't change): DMs and private channels they aren't in, other people's
-/// Personal spaces with the tasks and docs in them, and other people's
-/// private docs with their sub pages.
+/// Personal spaces with the tasks, docs, dashboards and forms in them, and
+/// other people's private docs (with their sub pages) and dashboards.
 pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
     let arr = |path: &str| {
         get_path(data, path)
@@ -1571,6 +1607,32 @@ pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
             .iter()
             .filter(|t| {
                 t.get("list_id")
+                    .and_then(|l| l.as_u64())
+                    .is_some_and(|l| lists.contains(&l))
+            })
+            .filter_map(id_of),
+    );
+    // other people's private dashboards (older ones without a maker are
+    // everyone's), and dashboards and forms in their Personal spaces
+    out.extend(
+        arr("extra.dashboards")
+            .iter()
+            .filter(|d| {
+                let owner = d.get("owner").and_then(|o| o.as_u64()).unwrap_or(0);
+                (d.get("private").and_then(|p| p.as_bool()) == Some(true)
+                    && owner != 0
+                    && owner != member)
+                    || d.get("space")
+                        .and_then(|s| s.as_u64())
+                        .is_some_and(|s| spaces.contains(&s))
+            })
+            .filter_map(id_of),
+    );
+    out.extend(
+        arr("extra.forms")
+            .iter()
+            .filter(|f| {
+                f.get("list_id")
                     .and_then(|l| l.as_u64())
                     .is_some_and(|l| lists.contains(&l))
             })
@@ -2402,6 +2464,26 @@ mod tests {
     }
 
     #[test]
+    fn saved_filters_stay_home_and_survive_a_merge() {
+        let saved = json!([{"id": 4, "name": "Urgent", "join": "Or",
+            "rows": [{"field": "Priority", "not": false, "values": ["1"]}]}]);
+        let mut mine = ws(json!([]), json!([]), &SyncMeta::default());
+        mine["extra"]["saved_filters"] = saved.clone();
+        // left out of the copy teammates and the server get
+        assert!(shareable(&mine)["extra"].get("saved_filters").is_none());
+        // a teammate's copy with their own saved filters doesn't replace mine
+        let mut theirs = ws(
+            json!([{"id": 7, "name": "T"}]),
+            json!([]),
+            &SyncMeta::default(),
+        );
+        theirs["extra"]["saved_filters"] = json!([{"id": 9, "name": "Theirs"}]);
+        merge(&mut mine, &[theirs]);
+        assert_eq!(mine["extra"]["saved_filters"], saved);
+        assert_eq!(mine["tasks"][0]["id"], 7);
+    }
+
+    #[test]
     fn a_field_set_back_to_its_default_stays_there() {
         // a task with a running timer (fields left out at their default)
         let (mut a, mut ma, mut b, mut mb) = pair(json!([]));
@@ -2867,5 +2949,67 @@ mod tests {
         // once the other side has it, nothing is left to send
         sum.absorb(&d);
         assert_eq!(delta(&sum, &shareable(&a)), None);
+    }
+
+    #[test]
+    fn private_dashboards_and_personal_forms_are_hidden() {
+        let d = json!({"workspace": "W", "members": [], "channels": [], "docs": [], "tasks": [],
+            "spaces": [{"id": 50, "name": "Personal", "private_owner": 1, "folders": [{"id": 53, "name": "F", "lists": [{"id": 54, "name": "In folder"}]}], "lists": [{"id": 51, "name": "Mine"}]},
+                       {"id": 60, "name": "Bo's", "private_owner": 2, "folders": [], "lists": [{"id": 61, "name": "Bo"}]},
+                       space(70, json!([]), json!([list(71)]))],
+            "extra": {"sync": {},
+                "dashboards": [{"id": 90, "name": "a", "owner": 1, "private": true},
+                               {"id": 91, "name": "b", "owner": 2, "private": true},
+                               {"id": 92, "name": "c", "owner": 0, "private": true},
+                               {"id": 93, "name": "d", "owner": 1},
+                               {"id": 94, "name": "e", "owner": 3, "space": 50},
+                               {"id": 95, "name": "f", "owner": 3, "space": 70}],
+                "forms": [{"id": 100, "name": "x", "list_id": 51},
+                          {"id": 101, "name": "y", "list_id": 54},
+                          {"id": 102, "name": "z", "list_id": 61},
+                          {"id": 103, "name": "w", "list_id": 71}]}});
+        let mut hidden = hidden_from(&d, 2);
+        hidden.sort();
+        assert_eq!(hidden, vec![50, 90, 94, 100, 101]);
+        // the owner of the Personal space and maker of the dashboard sees them
+        let mut theirs = hidden_from(&d, 1);
+        theirs.sort();
+        assert_eq!(theirs, vec![60, 91, 102]);
+        let mut out = d.clone();
+        hide(&mut out, &hidden);
+        let names: Vec<&str> = out["extra"]["dashboards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["b", "c", "d", "f"]);
+        assert_eq!(out["extra"]["forms"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn personal_settings_and_reading_state_stay_home() {
+        let mut m = SyncMeta::default();
+        m.hashes.insert(1, 2);
+        let d = json!({"workspace": "W", "me": 1, "tasks": [{"id": 7, "name": "T"}],
+            "extra": {"sync": m, "notepad": "secret note", "reminders": [{"id": 1}],
+                "chat_seen": {"10": {"floor": 5, "ids": [11]}}, "closed_dm_seen": {"20": {"floor": 1, "ids": []}},
+                "closed_dms": [[20, 5]], "starred": ["doc:1"], "recent": ["task:7"], "replies_seen": 9,
+                "replies_read": ["chat:1:2"], "notify": {"comments": false}, "muted_until": 99,
+                "shared": {"folder": "/Users/ann/Dropbox/team", "device": "d1", "tag": 1},
+                "sheet_rows": [[1, 7]], "accent": "pink", "labs": ["x"],
+                "dashboards": [{"id": 8, "name": "D"}], "workspace_color": [1, 2, 3]}});
+        let out = shareable(&d);
+        let e = out["extra"].as_object().unwrap();
+        for k in PERSONAL_EXTRA {
+            assert!(!e.contains_key(*k), "{} left out", k);
+        }
+        assert!(!out.to_string().contains("secret note"));
+        assert!(!out.to_string().contains("Dropbox"));
+        assert_eq!(out["extra"]["sync"]["hashes"], json!({}));
+        // what the team shares is all there
+        assert_eq!(out["extra"]["dashboards"][0]["name"], "D");
+        assert_eq!(out["extra"]["workspace_color"], json!([1, 2, 3]));
+        assert_eq!(out["tasks"], d["tasks"]);
     }
 }

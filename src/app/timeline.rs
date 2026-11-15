@@ -1,0 +1,445 @@
+// Timeline view: tasks as bars on a time axis, in swimlanes by assignee (or
+// status, priority or list). A task with several assignees shows in each of
+// their lanes. Bars in a lane share rows when their days don't overlap.
+// Tasks without dates wait in a tray above the axis. The axis, the zoom and
+// the bar dragging are the Gantt's (src/app/timebar.rs).
+//
+// Nothing here is saved in the workspace: the lane choice and zoom last for
+// the session, like the Gantt's zoom. The view's name only reaches data.json
+// through `hidden_views`, a list of plain strings older apps already accept.
+
+use super::timebar::{self, bar_range, DayScale};
+use super::*;
+
+/// The groupings the Timeline offers for its lanes.
+pub(super) const LANES: [GroupBy; 4] = [
+    GroupBy::Assignee,
+    GroupBy::Status,
+    GroupBy::Priority,
+    GroupBy::List,
+];
+
+pub(super) struct TimelineState {
+    pub by: GroupBy,
+    pub zoom: u8,
+    /// Scroll back to today on the next frame.
+    pub jump: bool,
+    /// The tray of tasks without dates is open.
+    pub tray: bool,
+}
+
+impl Default for TimelineState {
+    fn default() -> Self {
+        TimelineState {
+            by: GroupBy::Assignee,
+            zoom: 0,
+            jump: true,
+            tray: false,
+        }
+    }
+}
+
+/// One swimlane: its group and the bars in it.
+pub(super) struct Lane {
+    pub group: Group,
+    /// (task, first and last day, row in the lane)
+    pub bars: Vec<(u64, (NaiveDate, NaiveDate), usize)>,
+    /// Rows the lane needs (at least one, so an empty lane still shows).
+    pub rows: usize,
+}
+
+/// A row for each range so that ranges sharing a row don't overlap: each
+/// goes, in order of first day, into the first row free by then. Returns
+/// the row of each range (in the order given) and the number of rows.
+pub(super) fn pack_rows(ranges: &[(NaiveDate, NaiveDate)]) -> (Vec<usize>, usize) {
+    let mut order: Vec<usize> = (0..ranges.len()).collect();
+    order.sort_by_key(|&i| ranges[i]);
+    let mut row_end: Vec<NaiveDate> = vec![];
+    let mut rows = vec![0; ranges.len()];
+    for i in order {
+        let (s, e) = ranges[i];
+        let k = match row_end.iter().position(|&end| end < s) {
+            Some(k) => k,
+            None => {
+                row_end.push(e);
+                row_end.len() - 1
+            }
+        };
+        row_end[k] = e;
+        rows[i] = k;
+    }
+    (rows, row_end.len())
+}
+
+impl App {
+    /// The lanes for `tasks` grouped by `by`, holding the tasks that have
+    /// dates. By assignee there is always an Unassigned lane.
+    pub(super) fn timeline_lanes(&self, tasks: &[&Task], by: GroupBy) -> Vec<Lane> {
+        let dated: Vec<&Task> = tasks
+            .iter()
+            .copied()
+            .filter(|x| bar_range(x.start, x.due).is_some())
+            .collect();
+        let mut groups = self.groups_by(by, &dated, false);
+        if by == GroupBy::Assignee && !groups.iter().any(|g| g.key == "a:none") {
+            if let Some(g) = self
+                .groups_by(by, &[], true)
+                .into_iter()
+                .find(|g| g.key == "a:none")
+            {
+                groups.push(g);
+            }
+        }
+        groups
+            .into_iter()
+            .map(|group| {
+                let ranges: Vec<(u64, (NaiveDate, NaiveDate))> = group
+                    .tasks
+                    .iter()
+                    .filter_map(|id| dated.iter().find(|x| x.id == *id))
+                    .filter_map(|x| bar_range(x.start, x.due).map(|r| (x.id, r)))
+                    .collect();
+                let (rows, n) = pack_rows(&ranges.iter().map(|(_, r)| *r).collect::<Vec<_>>());
+                Lane {
+                    group,
+                    bars: ranges
+                        .into_iter()
+                        .zip(rows)
+                        .map(|((id, r), row)| (id, r, row))
+                        .collect(),
+                    rows: n.max(1),
+                }
+            })
+            .collect()
+    }
+
+    pub(super) fn timeline_view(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
+        let td = today();
+        let sc = DayScale::new(self.timeline.zoom, td);
+        let lanes = self.timeline_lanes(&tasks.iter().collect::<Vec<_>>(), self.timeline.by);
+        let undated: Vec<&Task> = tasks
+            .iter()
+            .filter(|x| bar_range(x.start, x.due).is_none())
+            .collect();
+        ui.horizontal(|ui| {
+            if timebar::zoom_buttons(ui, &mut self.timeline.zoom) {
+                self.timeline.jump = true;
+            }
+            ui.separator();
+            ui.label(RichText::new(tr("Lanes")).small().color(t.text3));
+            for by in LANES {
+                let r = ui.selectable_label(self.timeline.by == by, tr(by.label()));
+                name_it(&r, &format!("Lanes by {}", by.label()));
+                if r.clicked() {
+                    self.timeline.by = by;
+                }
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if !undated.is_empty() {
+                    let arrow = if self.timeline.tray {
+                        "\u{25BE}"
+                    } else {
+                        "\u{25B8}"
+                    };
+                    let r = ui
+                        .selectable_label(
+                            self.timeline.tray,
+                            format!("{} {}", arrow, trf!("{} without dates", undated.len())),
+                        )
+                        .on_hover_text(tr("Show the tasks that have no start or due date"));
+                    name_it(&r, "Tasks without dates");
+                    if r.clicked() {
+                        self.timeline.tray = !self.timeline.tray;
+                    }
+                }
+            });
+        });
+        if self.timeline.tray && !undated.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                for task in &undated {
+                    let st = self.data.status_of(task);
+                    let g = ui.painter().layout_no_wrap(
+                        task.name.clone(),
+                        FontId::proportional(12.5),
+                        t.text,
+                    );
+                    let (r, resp) =
+                        ui.allocate_exact_size(vec2(g.size().x + 34.0, 26.0), Sense::click());
+                    name_it(&resp, &format!("Undated {}", task.name));
+                    let fill = if resp.hovered() { t.hover } else { t.column_bg };
+                    ui.painter().rect_filled(r, 6.0, fill);
+                    ui.painter().rect_stroke(
+                        r,
+                        6.0,
+                        Stroke::new(1.0_f32, t.border),
+                        egui::StrokeKind::Inside,
+                    );
+                    paint_status_circle(
+                        ui.painter(),
+                        pos2(r.left() + 13.0, r.center().y),
+                        5.5,
+                        &st,
+                    );
+                    ui.painter().galley(
+                        pos2(r.left() + 24.0, r.center().y - g.size().y / 2.0),
+                        g,
+                        t.text,
+                    );
+                    let tid = task.id;
+                    resp.context_menu(|ui| self.task_menu(ui, tid));
+                    if resp.clicked() {
+                        self.actions.push(Action::Open(tid));
+                    }
+                }
+            });
+        }
+        ui.add_space(4.0);
+        let rh = 34.0;
+        let pad = 4.0;
+        let head = 44.0;
+        let label_w = 200.0;
+        let lane_h = |l: &Lane| l.rows as f32 * rh + pad * 2.0;
+        let body_h: f32 = lanes.iter().map(lane_h).sum();
+        // fill the view so the horizontal scrollbar sits at the bottom
+        let total_h = (head + body_h).max(ui.available_height() - 24.0);
+        egui::ScrollArea::vertical()
+            .id_salt("timeline_v")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    // lane names
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.set_width(label_w);
+                        let (hr, _) = ui.allocate_exact_size(vec2(label_w, head), Sense::hover());
+                        ui.painter().text(
+                            hr.left_center() + vec2(8.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            tr(self.timeline.by.label()),
+                            FontId::proportional(12.0),
+                            t.text3,
+                        );
+                        ui.painter().hline(
+                            hr.x_range(),
+                            hr.bottom(),
+                            Stroke::new(1.0_f32, t.border),
+                        );
+                        for lane in &lanes {
+                            let (r, resp) =
+                                ui.allocate_exact_size(vec2(label_w, lane_h(lane)), Sense::hover());
+                            name_it(&resp, &format!("Lane {}", lane.group.label));
+                            let cy = r.top() + pad + rh / 2.0;
+                            ui.painter().circle_filled(
+                                pos2(r.left() + 14.0, cy),
+                                5.0,
+                                lane.group.color,
+                            );
+                            let name = ui.painter().layout_no_wrap(
+                                lane.group.label.clone(),
+                                FontId::proportional(12.5),
+                                t.text,
+                            );
+                            let nw = name.size().x.min(label_w - 70.0);
+                            ui.painter().with_clip_rect(r.shrink(2.0)).galley(
+                                pos2(r.left() + 26.0, cy - name.size().y / 2.0),
+                                name,
+                                t.text,
+                            );
+                            ui.painter().text(
+                                pos2(r.left() + 34.0 + nw, cy),
+                                Align2::LEFT_CENTER,
+                                lane.bars.len().to_string(),
+                                FontId::proportional(11.5),
+                                t.text3,
+                            );
+                            ui.painter().hline(
+                                r.x_range(),
+                                r.bottom(),
+                                Stroke::new(1.0_f32, t.border),
+                            );
+                        }
+                        if lanes.is_empty() {
+                            ui.add_space(12.0);
+                            ui.label(
+                                RichText::new(tr("No tasks with dates in this view yet"))
+                                    .small()
+                                    .color(t.text3),
+                            );
+                        }
+                    });
+                    let vr = ui.available_rect_before_wrap();
+                    ui.painter().vline(
+                        vr.left(),
+                        vr.top()..=vr.top() + head + body_h,
+                        Stroke::new(1.0_f32, t.border),
+                    );
+                    let jump = std::mem::take(&mut self.timeline.jump);
+                    let mut sa = egui::ScrollArea::horizontal()
+                        .id_salt(("timeline_h", self.timeline.zoom))
+                        .auto_shrink([false, true]);
+                    if jump {
+                        sa = sa.horizontal_scroll_offset(sc.today_offset(td, vr.width()));
+                    }
+                    sa.show(ui, |ui| {
+                        let (area, _) =
+                            ui.allocate_exact_size(vec2(sc.width(), total_h), Sense::hover());
+                        let p = ui.painter().clone();
+                        timebar::paint_axis(&p, &t, area, head, &sc, td);
+                        let mut y = area.top() + head;
+                        for lane in &lanes {
+                            for (tid, range, row) in &lane.bars {
+                                let Some(task) = tasks.iter().find(|x| x.id == *tid) else {
+                                    continue;
+                                };
+                                let resp = self.date_bar(
+                                    ui,
+                                    &p,
+                                    &sc,
+                                    area.left(),
+                                    y + pad + rh * *row as f32,
+                                    rh,
+                                    task,
+                                    *range,
+                                    &lane.group.key,
+                                );
+                                let tid = *tid;
+                                resp.context_menu(|ui| self.task_menu(ui, tid));
+                            }
+                            y += lane_h(lane);
+                            p.hline(area.x_range(), y, Stroke::new(1.0_f32, t.border));
+                        }
+                    });
+                });
+            });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn d(n: i64) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 3, 2).unwrap() + Duration::days(n)
+    }
+
+    fn app() -> App {
+        App::build(None, Some(Data::seed()))
+    }
+
+    fn id_of(a: &App, name: &str) -> u64 {
+        a.data.tasks.iter().find(|t| t.name == name).unwrap().id
+    }
+
+    /// (lane key, task ids) for the current location's filtered tasks.
+    fn lanes_of(a: &App, by: GroupBy) -> Vec<(String, Vec<u64>)> {
+        let tasks = a.filtered();
+        a.timeline_lanes(&tasks, by)
+            .into_iter()
+            .map(|l| (l.group.key, l.bars.iter().map(|b| b.0).collect()))
+            .collect()
+    }
+
+    #[test]
+    fn bar_range_covers_start_to_due_or_one_day() {
+        assert_eq!(bar_range(Some(d(0)), Some(d(3))), Some((d(0), d(3))));
+        assert_eq!(bar_range(None, Some(d(3))), Some((d(3), d(3))));
+        assert_eq!(bar_range(Some(d(1)), None), Some((d(1), d(1))));
+        // a start after the due date still draws forwards
+        assert_eq!(bar_range(Some(d(5)), Some(d(2))), Some((d(2), d(5))));
+        assert_eq!(bar_range(None, None), None);
+    }
+
+    #[test]
+    fn pack_rows_shares_rows_only_without_overlap() {
+        assert_eq!(pack_rows(&[]), (vec![], 0));
+        // 0-2 and 3-4 fit one row; 1-5 overlaps both
+        let (rows, n) = pack_rows(&[(d(0), d(2)), (d(1), d(5)), (d(3), d(4))]);
+        assert_eq!(rows, vec![0, 1, 0]);
+        assert_eq!(n, 2);
+        // a bar ending on the day another starts shares that day: new row
+        let (rows, n) = pack_rows(&[(d(0), d(2)), (d(2), d(2))]);
+        assert_eq!((rows, n), (vec![0, 1], 2));
+        // the order given doesn't matter, rows follow first days
+        let (rows, n) = pack_rows(&[(d(6), d(7)), (d(0), d(1)), (d(3), d(4))]);
+        assert_eq!((rows, n), (vec![0, 0, 0], 1));
+    }
+
+    #[test]
+    fn lanes_by_assignee_repeat_shared_tasks_and_keep_unassigned() {
+        let a = app();
+        let lanes = lanes_of(&a, GroupBy::Assignee);
+        let keys: Vec<&str> = lanes.iter().map(|l| l.0.as_str()).collect();
+        // Website Redesign: Jordan only has a task without dates, so no lane
+        assert_eq!(keys, vec!["a:1", "a:2", "a:3", "a:none"]);
+        let design = id_of(&a, "Design new homepage layout");
+        assert!(lanes[0].1.contains(&design) && lanes[1].1.contains(&design));
+        let analytics = id_of(&a, "Set up analytics dashboard");
+        assert_eq!(lanes[3].1, vec![analytics]);
+        let undated = id_of(&a, "Collect feedback from beta users");
+        assert!(lanes.iter().all(|l| !l.1.contains(&undated)));
+    }
+
+    #[test]
+    fn unassigned_lane_shows_even_when_empty() {
+        let mut a = app();
+        for t in a.data.tasks.iter_mut() {
+            if t.assignees.is_empty() {
+                t.assignees.push(2);
+            }
+        }
+        let lanes = lanes_of(&a, GroupBy::Assignee);
+        let last = lanes.last().unwrap();
+        assert_eq!(last.0, "a:none");
+        assert!(last.1.is_empty());
+        let tasks = a.filtered();
+        let l = a.timeline_lanes(&tasks, GroupBy::Assignee);
+        assert_eq!(l.last().unwrap().rows, 1, "an empty lane keeps one row");
+    }
+
+    #[test]
+    fn lanes_by_status_priority_and_list() {
+        let mut a = app();
+        let keys =
+            |a: &App, by| -> Vec<String> { lanes_of(a, by).into_iter().map(|l| l.0).collect() };
+        assert_eq!(keys(&a, GroupBy::Status), vec!["s:to do", "s:in progress"]);
+        assert_eq!(
+            keys(&a, GroupBy::Priority),
+            vec!["p:1", "p:2", "p:3", "p:4"]
+        );
+        a.loc = Location::Everything;
+        let lists = keys(&a, GroupBy::List);
+        assert!(lists.len() >= 3, "{:?}", lists);
+        assert!(lists.iter().all(|k| k.starts_with("l:")));
+        // every dated task sits in exactly one list lane
+        let n: usize = lanes_of(&a, GroupBy::List).iter().map(|l| l.1.len()).sum();
+        let dated = a
+            .filtered()
+            .iter()
+            .filter(|t| bar_range(t.start, t.due).is_some())
+            .count();
+        assert_eq!(n, dated);
+    }
+
+    #[test]
+    fn overlapping_bars_in_a_lane_take_separate_rows() {
+        let a = app();
+        let tasks = a.filtered();
+        let lanes = a.timeline_lanes(&tasks, GroupBy::Assignee);
+        // Me: Design new homepage layout (this Monday to +2) and Fix
+        // navigation on mobile (-3 to -1) overlap on Mondays to Wednesdays
+        let me = &lanes[0];
+        let rows: HashSet<usize> = me.bars.iter().map(|b| b.2).collect();
+        assert_eq!(me.rows, rows.len());
+        for (i, x) in me.bars.iter().enumerate() {
+            for y in &me.bars[i + 1..] {
+                if x.2 == y.2 {
+                    assert!(x.1 .1 < y.1 .0 || y.1 .1 < x.1 .0, "no overlap in a row");
+                }
+            }
+        }
+    }
+}

@@ -3,7 +3,7 @@
 // menu, and deleting with an Undo.
 
 use super::*;
-use parity::FilterRow;
+use parity::{FilterGroup, FilterRow, Join};
 
 /// The view settings remembered for one location (List, Folder, Space...).
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -20,6 +20,10 @@ pub struct ViewPrefs {
     pub hidden_cols: Vec<String>,
     #[serde(default)]
     pub filter_rows: Vec<FilterRow>,
+    #[serde(default, skip_serializing_if = "Join::is_and")]
+    pub filter_join: Join,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_groups: Vec<FilterGroup>,
     #[serde(default)]
     pub archived: bool,
 }
@@ -65,6 +69,8 @@ impl App {
             subtasks_open: self.subtasks_open,
             hidden_cols: hidden,
             filter_rows: self.filter.rows.clone(),
+            filter_join: self.filter.join,
+            filter_groups: self.filter.groups.clone(),
             archived: self.filter.archived,
         }
     }
@@ -77,6 +83,8 @@ impl App {
         self.subtasks_open = p.subtasks_open;
         self.hidden_cols = p.hidden_cols.iter().cloned().collect();
         self.filter.rows = p.filter_rows.clone();
+        self.filter.join = p.filter_join;
+        self.filter.groups = p.filter_groups.clone();
         self.filter.archived = p.archived;
     }
 
@@ -371,7 +379,7 @@ impl App {
                 if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
-                let del = ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger));
+                let del = ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)));
                 name_it(&del, "Confirm delete");
                 if del.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     for id in self.selected.drain() {
@@ -416,14 +424,11 @@ impl App {
                                 .color(Color32::WHITE),
                             );
                             ui.add_space(8.0);
-                            let b = ui.add(
-                                egui::Button::new(
-                                    RichText::new(tr("Undo"))
-                                        .color(Color32::from_rgb(140, 170, 255))
-                                        .strong(),
-                                )
-                                .frame(false),
-                            );
+                            let b = ui.add(ghost(egui::Button::new(
+                                RichText::new(tr("Undo"))
+                                    .color(Color32::from_rgb(140, 170, 255))
+                                    .strong(),
+                            )));
                             name_it(&b, "Undo delete");
                             if b.clicked() {
                                 undo = true;

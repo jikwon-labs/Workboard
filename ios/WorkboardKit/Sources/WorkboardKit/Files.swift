@@ -81,6 +81,44 @@ public enum FileAPI {
         return sha
     }
 
+    /// The sha256 of a file, read a piece at a time (a video can be hundreds
+    /// of megabytes; it is never held in memory whole).
+    public static func sha256(file: URL, chunk: Int = 1 << 20) throws -> String {
+        let h = try FileHandle(forReadingFrom: file)
+        defer { try? h.close() }
+        var hasher = SHA256()
+        while let piece = try h.read(upToCount: chunk), !piece.isEmpty {
+            hasher.update(data: piece)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Store a file on the server straight from disk (videos); returns its
+    /// sha256. URLSession streams the body from the file.
+    public static func upload(server: String, auth: String?, file: URL, contentType: String, session: URLSession = .shared) async throws -> String {
+        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= maxBytes else { throw FileError.tooLarge }
+        let sha: String
+        do {
+            sha = try await Task.detached(priority: .userInitiated) { try sha256(file: file) }.value
+        } catch {
+            throw FileError.failed(error.localizedDescription)
+        }
+        guard let url = url(server: server, sha: sha) else { throw FileError.failed("that server address doesn't look right") }
+        var req = request(url, method: "PUT", auth: auth)
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 600
+        let (body, resp): (Data, URLResponse)
+        do {
+            (body, resp) = try await session.upload(for: req, fromFile: file)
+        } catch {
+            throw FileError.failed(error.localizedDescription)
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 || status == 201 else { throw Self.error(status: status, body: body) }
+        return sha
+    }
+
     /// Where a downloaded file is kept.
     public static func cached(_ sha: String, folder: URL = defaultCache) -> URL {
         folder.appendingPathComponent(sha)
@@ -118,13 +156,24 @@ public enum FileAPI {
         return dest
     }
 
-    /// An Attachment object as the Mac app writes it (src/model.rs).
-    public static func attachment(sha: String, name: String, isVideo: Bool, bytes: Int, w: Int, h: Int, secs: Double) -> JSON {
-        [
+    /// An Attachment object as the Mac app writes it (src/model.rs). A
+    /// video's `thumb` names its still (left out when there is none).
+    public static func attachment(sha: String, name: String, isVideo: Bool, bytes: Int, w: Int, h: Int, secs: Double, thumb: String? = nil) -> JSON {
+        var o: JSON = [
             "file": .string(sha), "name": .string(name), "kind": .string(isVideo ? "Video" : "Image"),
             "bytes": .int(Int64(bytes)), "w": .int(Int64(w)), "h": .int(Int64(h)), "secs": .double(secs),
         ]
+        if isVideo, let thumb, isFileName(thumb) { o["thumb"] = .string(thumb) }
+        return o
     }
+
+    /// A sha256 in hex, the only names files have on the server.
+    public static func isFileName(_ s: String) -> Bool {
+        s.count == 64 && s.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+    }
+
+    /// Longer side of the still sent along with a video (media::STILL).
+    public static let stillSide = 480
 }
 
 extension SyncClient {

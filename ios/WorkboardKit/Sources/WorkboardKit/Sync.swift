@@ -492,6 +492,16 @@ extension Sync {
         meta.valueHashes[mapPart(path, key)] = fnv(value.serialized().utf8)
     }
 
+    /// After opening a saved copy: a shared setting or shared map entry with
+    /// no fingerprint yet gets today's, without a stamp, so the next edit
+    /// doesn't take entries an older build kept (a map the team's copy
+    /// brought in) as set just now (wb_sync::fill_value_hashes).
+    public static func fillValueHashes(_ meta: inout SyncMeta, _ data: JSON) {
+        for (part, h) in valueHashes(data) where meta.valueHashes[part] == nil {
+            meta.valueHashes[part] = h
+        }
+    }
+
     /// Record what changed since the last save: new stamps for edited items,
     /// tombstones for removed ones, revivals for restored ones (wb_sync::stamp).
     /// `now` is in milliseconds. A new stamp is always later than the item's

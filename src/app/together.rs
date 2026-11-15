@@ -471,6 +471,10 @@ pub(super) fn fill_sync_baseline(data: &mut Data) {
         sync::carry_hashes(meta, &legacy_shape(&v), &v);
     }
     sync::fill_field_hashes(meta, &v);
+    // a shared setting or Slack match never fingerprinted (every save since
+    // shared maps came in fingerprints them all) is as it is now, so the
+    // next change doesn't take it as set then, as the iPhone does
+    sync::fill_value_hashes(meta, &v);
 }
 
 impl App {

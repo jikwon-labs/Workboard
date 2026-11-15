@@ -8690,3 +8690,29 @@ fn concurrent_slack_matches_go_through_a_server() {
     });
     assert_eq!(slack_next(&a, "UA"), Some(Assign::Member(sam)));
 }
+
+/// A shared workspace whose bookkeeping has no fingerprint for a Slack
+/// match it holds (saved by a version that didn't fingerprint the map):
+/// opening it records the match as it is, so the first change made
+/// afterwards isn't a new decision for it, and a teammate's later one
+/// still wins.
+#[test]
+fn an_unfingerprinted_slack_match_is_not_an_edit_after_opening() {
+    let dir = temp_folder("slack-baseline");
+    let folder = dir.to_str().unwrap().to_string();
+    let alex = 2;
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    a.data.extra.slack_map.insert("UA".into(), alex);
+    let sync = &mut a.data.extra.sync;
+    sync.value_hashes
+        .retain(|p, _| crate::sync::SHARED_VALUES.contains(&p.as_str()));
+    sync.values.insert("extra.slack_map/UA".into(), 100);
+    let mut a = App::build(None, Some(a.data.clone()));
+    a.data.workspace = "Renamed".into();
+    slack_push(&mut a);
+    let values = &a.data.extra.sync.values;
+    assert_eq!(values.get("extra.slack_map/UA"), Some(&100), "{:?}", values);
+    assert!(values.get("workspace").is_some_and(|s| *s > 100));
+    let _ = std::fs::remove_dir_all(&dir);
+}

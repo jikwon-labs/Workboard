@@ -290,6 +290,9 @@ public final class SyncClient {
                 meta.valueHashes = Sync.valueHashes(snap)
                 meta.v = max(meta.v, 1)
             }
+            // Slack matches (any shared map entry) an older build kept but
+            // never fingerprinted: as they are now, not set by the next edit
+            Sync.fillValueHashes(&meta, snap)
             // where everything sits now, so the next move is noticed
             if meta.parents.isEmpty { meta.parents = Sync.parentsOf(snap) }
             if meta != old { snap.set("extra.sync", meta.json) }

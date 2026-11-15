@@ -736,6 +736,20 @@ pub fn carry_map_entry(meta: &mut SyncMeta, path: &str, key: &str, value: &Value
         .insert(map_part(path, key), json_hash(value));
 }
 
+/// After opening a saved copy: a shared setting or shared map entry it has
+/// no fingerprint for gets today's, without a stamp. Every save since
+/// shared maps came in fingerprints every entry, so one missing here was
+/// saved by a version that didn't know the map (the iPhone keeps fields it
+/// doesn't know, a map the team's copy brought in included). Without this
+/// the next change would take each such entry as set just now and
+/// overwrite the team's newer decisions with it. An entry that turns up
+/// without a fingerprint after this was added since the copy was opened.
+pub fn fill_value_hashes(meta: &mut SyncMeta, data: &Value) {
+    for (part, h) in value_hashes(data) {
+        meta.value_hashes.entry(part).or_insert(h);
+    }
+}
+
 /// Only items inside a space (folders, lists) ever move; move times kept
 /// for anything else are left out. Copies merged with an older app's copy
 /// used to get one for every item.
@@ -4217,5 +4231,45 @@ mod tests {
         let mut y = old.clone();
         merge(&mut y, &[a.clone()]);
         assert_eq!(slack_map(&y), json!({"UA": 2}));
+    }
+
+    #[test]
+    fn map_entries_an_older_copy_kept_are_not_edits_after_opening() {
+        // an older app kept the map (from the team's copy) but fingerprinted
+        // the shared settings only; UA's last decision was at 100
+        let mut m = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &m);
+        save(&mut a, &mut m, 10);
+        a["extra"]["slack_map"] = json!({"UA": 2});
+        m.value_hashes
+            .retain(|p, _| SHARED_VALUES.contains(&p.as_str()));
+        m.values.insert("extra.slack_map/UA".into(), 100);
+        // without the baseline the next change takes UA as set now
+        let mut n = m.clone();
+        stamp(&a, &mut n, 1000);
+        assert_eq!(n.values.get("extra.slack_map/UA"), Some(&1000));
+        // opening the copy records it as it is
+        fill_value_hashes(&mut m, &a);
+        a["workspace"] = json!("W2");
+        save(&mut a, &mut m, 1000);
+        assert_eq!(m.values.get("extra.slack_map/UA"), Some(&100));
+        assert_eq!(m.values.get("workspace"), Some(&1000));
+        // so a teammate's later decision wins
+        let mut b = a.clone();
+        b["extra"]["slack_map"]["UA"] = json!(3);
+        let mut mb = meta_of(&b);
+        mb.values.insert("extra.slack_map/UA".into(), 200);
+        b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
+        merge(&mut a, &[b]);
+        assert_eq!(slack_map(&a), json!({"UA": 3}));
+        // an entry added after opening is still a decision, and a recorded
+        // fingerprint is never replaced
+        a["extra"]["slack_map"]["UB"] = json!(4);
+        let mut ma = meta_of(&a);
+        let kept = ma.value_hashes.clone();
+        fill_value_hashes(&mut ma, &json!({"workspace": "other"}));
+        assert_eq!(ma.value_hashes, kept);
+        save(&mut a, &mut ma, 2000);
+        assert_eq!(ma.values.get("extra.slack_map/UB"), Some(&2000));
     }
 }

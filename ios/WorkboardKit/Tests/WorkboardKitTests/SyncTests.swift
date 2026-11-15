@@ -1057,4 +1057,42 @@ final class FieldMergeTests: XCTestCase {
         Sync.merge(&y, [a])
         XCTAssertEqual(slackMap(y), ["UA": 2])
     }
+
+    func testMapEntriesAnOlderCopyKeptAreNotEditsAfterOpening() {
+        // an older app kept the map (from the team's copy) but fingerprinted
+        // the shared settings only; UA's last decision was at 100
+        var m = SyncMeta()
+        var a = ws([], [], m)
+        save(&a, &m, 10)
+        a.set("extra.slack_map", ["UA": 2])
+        m.valueHashes = m.valueHashes.filter { Sync.sharedValues.contains($0.key) }
+        m.values["extra.slack_map/UA"] = 100
+        // without the baseline the next change takes UA as set now
+        var n = m
+        Sync.stamp(a, &n, now: 1000)
+        XCTAssertEqual(n.values["extra.slack_map/UA"], 1000)
+        // opening the copy records it as it is
+        Sync.fillValueHashes(&m, a)
+        a.set("workspace", "W2")
+        save(&a, &m, 1000)
+        XCTAssertEqual(m.values["extra.slack_map/UA"], 100)
+        XCTAssertEqual(m.values["workspace"], 1000)
+        // so a teammate's later decision wins
+        var b = a
+        setSlack(&b, "UA", 3)
+        var mb = SyncMeta(of: b)
+        mb.values["extra.slack_map/UA"] = 200
+        b.set("extra.sync", mb.json)
+        Sync.merge(&a, [b])
+        XCTAssertEqual(slackMap(a), ["UA": 3])
+        // an entry added after opening is still a decision, and a recorded
+        // fingerprint is never replaced
+        setSlack(&a, "UB", 4)
+        var ma = SyncMeta(of: a)
+        let kept = ma.valueHashes
+        Sync.fillValueHashes(&ma, ["workspace": "other"])
+        XCTAssertEqual(ma.valueHashes, kept)
+        save(&a, &ma, 2000)
+        XCTAssertEqual(ma.values["extra.slack_map/UB"], 2000)
+    }
 }

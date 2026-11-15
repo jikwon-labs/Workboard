@@ -11,20 +11,36 @@ and egui; everything runs on your own computer.
 
 ## Working together
 
-Workspace menu > Work together: pick a folder that a sync app (iCloud Drive,
-Dropbox, Google Drive, OneDrive, Syncthing) shares with your teammates.
-Everyone points Workboard at the same folder; tasks, chat and docs merge
-within a few seconds. Or run a Workboard server for the team (for example on a Mac mini reached
-through Tailscale): `cargo run --release -p workboard-server`, then in Work
-together type the server's address under "Or connect to your team's server".
-Calls open in the browser (Jitsi Meet or your own
-meeting link) with a Join button posted in chat. The server also hands out
-app updates to the apps signed in to it (releasing: `docs/release/README.md`).
+Workspace menu > Work together offers two ways:
+
+- **A team server** (for example a Mac mini reached through Tailscale): type
+  its address under "Or connect to your team's server". The first person to
+  connect to an empty server becomes its owner; everyone else joins with a
+  one-time invite code from Work together > People. Tasks, chat and docs show
+  up for everyone within a second or two, and Huddle starts a voice and video
+  call inside the app. The server also keeps backups and hands out app
+  updates. Running it: `deploy/README.md`.
+- **A shared folder** that a sync app (iCloud Drive, Dropbox, Google Drive,
+  OneDrive, Syncthing) shares with your teammates, without a server. Tasks,
+  chat and docs merge within a few seconds; calls open in the browser (Jitsi
+  Meet or your own meeting link) with a Join button posted in chat.
+
 Archived docs are also saved as Markdown in the shared folder's `Docs archive`.
 
 ## Tests
 
-    cargo test
+    cargo test --workspace
 
-Logic tests plus click-through tests that drive the real interface with
-pointer, scroll, drag and keyboard events.
+Logic tests, click-through tests that drive the real interface with pointer,
+scroll, drag and keyboard events, and integration tests that run the real
+server (voice and video tests also start `livekit-server` when it is
+installed). More, including testing on another Mac: `docs/testing.md`.
+
+## Documents
+
+- `docs/server-design.md`: the team server's design, current state, what is
+  left, and how each stage was built
+- `deploy/README.md`: running the server on the Mac mini (auto start, power,
+  voice, admin commands, checking after a restart)
+- `docs/release/README.md`: building, notarizing and publishing app updates
+- `docs/testing.md`: automated tests, hands-on checks, testing on another Mac

@@ -9955,7 +9955,7 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
         "without the fields it would fit"
     );
     h.settle();
-    h.click("\u{25A5}  Columns");
+    h.click("Columns");
     let created = rect_of(&h, "Created by");
     let marks: Vec<Rect> = h
         .tree

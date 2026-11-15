@@ -238,6 +238,10 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         pinned = j["pinned"]?.bool ?? false
         call = j["call"]?.string
     }
+
+    /// Only my own messages, and not huddle or call cards (the Mac app
+    /// offers no Edit for a message with `call`).
+    public func isEditable(by me: UInt64?) -> Bool { me == author && call == nil }
 }
 
 public enum ChannelKind: String, Sendable { case channel = "Channel", direct = "Direct" }

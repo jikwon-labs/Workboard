@@ -21,6 +21,13 @@
 // Without `requireSignIn` every hello is welcomed without a member, and the
 // app lets the person pick who they are.
 //
+// Access requests like the real server (Hub::request): create_invite,
+// set_role, revoke and access_list for owners and admins, backup_list and
+// restore for the owner, with the same permission rules; after any change
+// everyone gets their own `access`. Member 1 is the owner unless
+// setRole(member:role:) says otherwise. Backups are added with
+// addBackup(name:snapshot:); a restore puts that snapshot back as is.
+//
 // Listens on 127.0.0.1 only unless told otherwise.
 
 import CryptoKit
@@ -61,6 +68,10 @@ public final class FakeServer: @unchecked Sendable {
     private var lastResetCode: [String: String] = [:]
     /// sha256 -> (contents, content type)
     private var files: [String: (data: Data, type: String)] = [:]
+    /// member -> role; members not listed are plain members, member 1 the owner
+    private var roles: [UInt64: Role] = [1: .owner]
+    /// newest first
+    private var backupFiles: [(name: String, snapshot: JSON)] = []
 
     struct Account {
         var email: String
@@ -75,7 +86,7 @@ public final class FakeServer: @unchecked Sendable {
     /// What /auth/forgot answers for "mail" (false: this server can't send email).
     public var canMail = true
     /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
-    /// /admin/revoke?member=N, /admin/say?channel=C&author=A&text=T,
+    /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T,
     /// /admin/reset-code?email=E, /admin/drop-account?member=N), so UI
     /// tests in the simulator can drive sign-in and incoming messages.
     public var adminHTTP = false
@@ -151,6 +162,31 @@ public final class FakeServer: @unchecked Sendable {
         }
     }
 
+    public func role(of member: UInt64) -> Role { queue.sync { roleOf(member) } }
+
+    public func setRole(member: UInt64, role: Role) {
+        queue.sync { roles[member] = role == .member ? nil : role }
+    }
+
+    /// A backup the owner can list and restore (newest first).
+    public func addBackup(name: String, snapshot: JSON) {
+        queue.sync { backupFiles.insert((name, snapshot), at: 0) }
+    }
+
+    /// The open invite code for a member, if any.
+    public func openInvite(member: UInt64) -> String? { queue.sync { inviteCode(of: member) } }
+
+    private func roleOf(_ member: UInt64) -> Role { roles[member] ?? .member }
+
+    private func inviteCode(of member: UInt64) -> String? {
+        invites.first { $0.value == member }.map { k, _ in
+            // codes are kept normalized; show them as XXXX-XXXX-XXXX
+            stride(from: 0, to: k.count, by: 4).map { i in
+                String(k[k.index(k.startIndex, offsetBy: i)..<k.index(k.startIndex, offsetBy: min(i + 4, k.count))])
+            }.joined(separator: "-")
+        }
+    }
+
     /// A one-time invite code for a member ("workboard-server invite").
     public func invite(member: UInt64) -> String {
         let code = makeCode()
@@ -185,7 +221,10 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     private func revokeOnQueue(_ member: UInt64) {
-        for (t, v) in tokens where v.member == member { tokens[t] = nil }
+        for (t, v) in tokens where v.member == member {
+            tokens[t] = nil
+            pushTokens[v.device] = nil
+        }
         for p in peers.values where p.member == member {
             refuse(p, "Your access to this server was removed.")
         }
@@ -287,6 +326,13 @@ public final class FakeServer: @unchecked Sendable {
             case "/admin/drop-account":
                 accounts[member] = nil
                 log("admin: dropped the account of member \(member)")
+                respond(p, 200, ["ok": true])
+            case "/admin/backup":
+                // a backup of the current snapshot, for the owner to restore
+                let name = comps?.queryItems?.first { $0.name == "name" }?.value ?? "hourly-20261116-03.json"
+                backupFiles.removeAll { $0.name == name }
+                backupFiles.insert((name, snapshot ?? [:]), at: 0)
+                log("admin: backup \(name)")
                 respond(p, 200, ["ok": true])
             case "/admin/revoke":
                 revokeOnQueue(member)
@@ -473,8 +519,11 @@ public final class FakeServer: @unchecked Sendable {
         case let .setPassword(email, password, old):
             setPassword(email: email, password: password, old: old, from: p)
         case let .pushToken(token, platform, env):
-            if let d = p.device { pushTokens[d] = token }
-            log("push token from \(p.device?.prefix(8) ?? "?") (\(platform), \(env))")
+            // an empty token stops notifications to this device (set_push_token)
+            if let d = p.device { pushTokens[d] = token.isEmpty ? nil : token }
+            log("push token from \(p.device?.prefix(8) ?? "?") (\(platform), \(env))\(token.isEmpty ? ": removed" : "")")
+        case .createInvite, .setRole, .revoke, .accessList, .backupList, .restore:
+            request(m, from: p)
         case let .callJoin(ch):
             callJoin(ch, from: p)
         case .ping:
@@ -540,9 +589,89 @@ public final class FakeServer: @unchecked Sendable {
         let tag = assignTag(device: h.device, wanted: h.tag)
         p.welcomed = true
         log("hello from \(h.device.prefix(8)) -> tag \(tag)" + (p.member.map { " as member \($0)" } ?? ""))
-        let role = p.member.map { $0 == 1 ? "owner" : "member" }
+        let role = p.member.map { roleOf($0).rawValue }
         send(.welcome(Welcome(tag: tag, snapshot: snapshot, rev: rev, member: p.member, role: role, token: newToken,
                               email: p.member.flatMap { accounts[$0]?.email })), to: p)
+    }
+
+    /// Hub::request: access and backup requests with the real server's rules.
+    private func request(_ m: ClientMessage, from p: Peer) {
+        func deny(_ why: String) { send(.error(code: ServerErrorCode.denied.rawValue, message: why), to: p) }
+        guard requireSignIn, let member = p.member else { return deny("This server has no sign-in.") }
+        let me = roleOf(member)
+        switch m {
+        case .backupList, .restore:
+            guard me == .owner else { return deny("Only the owner can see and restore backups.") }
+            if case let .restore(name) = m {
+                guard let b = backupFiles.first(where: { $0.name == name }) else { return deny("There's no backup called \(name).") }
+                backupFiles.insert(("before-restore-20261116-120000.json", snapshot ?? [:]), at: 0)
+                snapshot = b.snapshot
+                rev += 1
+                broadcast(.update(data: b.snapshot, rev: rev))
+                log("restored \(name)")
+                send(.restored(name: name), to: p)
+            } else {
+                send(.backups(backupFiles.map { Backup(name: $0.name, bytes: UInt64($0.snapshot.serialized().utf8.count)) }), to: p)
+            }
+            return
+        default:
+            break
+        }
+        guard me.manages else { return deny("Only the owner or an admin can do that.") }
+        switch m {
+        case .accessList:
+            break
+        case let .createInvite(who, role):
+            if role == .owner { return deny("There is one owner. Invite them as an admin instead.") }
+            guard WorkspaceView(snapshot ?? [:]).member(who) != nil else {
+                return deny("That person isn't in the workspace yet. Add them with Invite first.")
+            }
+            if roleOf(who) == .owner && me != .owner { return deny("Only the owner can make a code for the owner.") }
+            if me != .owner && !(roleOf(who) == .member && accounts[who] == nil) {
+                return deny("Only the owner can make a code for an admin or for someone who already has a password. They can sign in with their email and password, or use Forgot password.")
+            }
+            for (k, v) in invites where v == who { invites[k] = nil }
+            let code = makeCode()
+            invites[Self.normalize(code)] = who
+            let email = canMail ? memberEmail(who) : nil
+            log("invite for member \(who): \(code)" + (email.map { " (emailed to \($0))" } ?? ""))
+            send(.invite(member: who, code: code, emailed: email), to: p)
+            broadcastAccess()
+            return
+        case let .setRole(who, role):
+            if role == .owner || roleOf(who) == .owner { return deny("The owner's role can't be changed here.") }
+            roles[who] = role == .member ? nil : role
+        case let .revoke(who):
+            if roleOf(who) == .owner { return deny("The owner's access can't be removed.") }
+            for (k, v) in invites where v == who { invites[k] = nil }
+            accounts[who] = nil
+            roles[who] = nil
+            revokeOnQueue(who)
+        default:
+            return
+        }
+        send(accessFor(member), to: p)
+        broadcastAccess(except: p)
+    }
+
+    /// Hub::access_for: everyone's access as `member` may see it.
+    private func accessFor(_ member: UInt64) -> ServerMessage {
+        let viewer = roleOf(member)
+        guard viewer.manages else { return .access(people: [], role: viewer) }
+        var ids = WorkspaceView(snapshot ?? [:]).members.map(\.id)
+        for t in tokens.values where !ids.contains(t.member) { ids.append(t.member) }
+        let people = ids.map { m in
+            Person(member: m, role: roleOf(m), devices: Set(tokens.values.filter { $0.member == m }.map(\.device)).count,
+                   invite: inviteCode(of: m).flatMap { viewer == .owner || (roleOf(m) == .member && accounts[m] == nil) ? $0 : nil },
+                   account: accounts[m] != nil)
+        }
+        return .access(people: people, role: viewer)
+    }
+
+    private func broadcastAccess(except: Peer? = nil) {
+        for q in peers.values where q.welcomed && q !== except {
+            if let m = q.member { send(accessFor(m), to: q) }
+        }
     }
 
     private func addDevice(_ device: String, member: UInt64) -> String {

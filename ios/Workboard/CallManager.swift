@@ -3,6 +3,10 @@
 // as the Mac app) and joins the conversation's room. A server without LiveKit
 // turns that down; then the app makes the Mac app's link call instead: a
 // "Started a call" message with a Jitsi link, opened in Safari.
+//
+// A huddle is also reported to CallKit (CallKit.swift), so it shows in the
+// system call UI and on the lock screen; mute and leave go through CallKit
+// then, and work from either side.
 
 import LiveKit
 import SwiftUI
@@ -27,6 +31,13 @@ final class CallManager {
     var showCall = false
 
     var isActive: Bool { phase == .joining || phase == .inCall }
+
+    @ObservationIgnored private let callKit = CallKitController()
+    @ObservationIgnored private var watcher: RoomWatcher?
+
+    init() {
+        callKit.actions = self
+    }
 
     /// Start or join the huddle in a channel. `announce` posts the Mac
     /// app's "Started a huddle" card once in (not when joining from one).
@@ -61,33 +72,73 @@ final class CallManager {
             phase = .failed("The server didn't answer, so the huddle didn't start. Try again in a moment.")
             return nil
         }
+        let title = client.view.channels.first { $0.id == ch }.map { client.view.title(of: $0, me: client.me ?? 0) } ?? "Huddle"
+        let viaCallKit = await callKit.start(title: title, channel: ch, video: video)
         do {
             let r = Room()
             room = r
+            let w = RoomWatcher { [weak self, weak r] error in
+                guard let self, let r, r === self.room else { return }
+                self.dropped(error)
+            }
+            watcher = w
+            r.add(delegate: w)
             try await r.connect(url: grant.url, token: grant.token)
             phase = .inCall
+            callKit.reportConnected()
             if announce {
                 client.edit { d, me in Edits.postHuddle(&d, channel: ch, me: me, id: client.newId(), ts: nowTs()) }
             }
             try? await r.localParticipant.setMicrophone(enabled: micOn)
             if video { try? await r.localParticipant.setCamera(enabled: true) }
         } catch {
+            if viaCallKit { callKit.reportEnded(failed: true) }
             phase = .failed("Couldn't join the huddle. Is the call server running? (\(error.localizedDescription))")
         }
         return nil
     }
 
+    /// The mute button: through CallKit when the huddle is reported there,
+    /// so the system call UI shows the same.
     func toggleMic() async {
-        micOn.toggle()
-        if phase == .inCall { try? await room.localParticipant.setMicrophone(enabled: micOn) }
+        let on = !micOn
+        if callKit.isActive, await callKit.requestMic(on: on) { return }
+        await applyMic(on)
+    }
+
+    private func applyMic(_ on: Bool) async {
+        micOn = on
+        if phase == .inCall { try? await room.localParticipant.setMicrophone(enabled: on) }
     }
 
     func toggleCamera() async {
         cameraOn.toggle()
+        callKit.reportVideo(cameraOn)
         if phase == .inCall { try? await room.localParticipant.setCamera(enabled: cameraOn) }
     }
 
+    /// Leave: through CallKit when the huddle is reported there.
     func leave() async {
+        if callKit.isActive, await callKit.requestEnd() { return }
+        await hangUp()
+    }
+
+    /// The room went away without Leave (server gone, network lost).
+    private func dropped(_ error: LiveKitError?) {
+        guard phase == .inCall else { return }
+        callKit.reportEnded(failed: error != nil)
+        channel = nil
+        cameraOn = false
+        micOn = true
+        if error != nil {
+            phase = .failed("The huddle was cut off. Check the connection and join again.")
+        } else {
+            phase = .idle
+            showCall = false
+        }
+    }
+
+    private func hangUp() async {
         let r = room
         phase = .idle
         channel = nil
@@ -103,5 +154,23 @@ final class CallManager {
             channel = nil
             showCall = false
         }
+    }
+}
+
+extension CallManager: CallKitActions {
+    func callKitEnded() async { await hangUp() }
+    func callKitSetMic(on: Bool) async { await applyMic(on) }
+}
+
+/// Tells the manager when a room disconnects.
+final class RoomWatcher: RoomDelegate, @unchecked Sendable {
+    let onDisconnect: @MainActor (LiveKitError?) -> Void
+
+    init(onDisconnect: @escaping @MainActor (LiveKitError?) -> Void) {
+        self.onDisconnect = onDisconnect
+    }
+
+    func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
+        Task { @MainActor in self.onDisconnect(error) }
     }
 }

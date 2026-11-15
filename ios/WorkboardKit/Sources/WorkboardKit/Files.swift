@@ -81,6 +81,44 @@ public enum FileAPI {
         return sha
     }
 
+    /// The sha256 of a file, read a piece at a time (a video can be hundreds
+    /// of megabytes; it is never held in memory whole).
+    public static func sha256(file: URL, chunk: Int = 1 << 20) throws -> String {
+        let h = try FileHandle(forReadingFrom: file)
+        defer { try? h.close() }
+        var hasher = SHA256()
+        while let piece = try h.read(upToCount: chunk), !piece.isEmpty {
+            hasher.update(data: piece)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Store a file on the server straight from disk (videos); returns its
+    /// sha256. URLSession streams the body from the file.
+    public static func upload(server: String, auth: String?, file: URL, contentType: String, session: URLSession = .shared) async throws -> String {
+        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= maxBytes else { throw FileError.tooLarge }
+        let sha: String
+        do {
+            sha = try await Task.detached(priority: .userInitiated) { try sha256(file: file) }.value
+        } catch {
+            throw FileError.failed(error.localizedDescription)
+        }
+        guard let url = url(server: server, sha: sha) else { throw FileError.failed("that server address doesn't look right") }
+        var req = request(url, method: "PUT", auth: auth)
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 600
+        let (body, resp): (Data, URLResponse)
+        do {
+            (body, resp) = try await session.upload(for: req, fromFile: file)
+        } catch {
+            throw FileError.failed(error.localizedDescription)
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 || status == 201 else { throw Self.error(status: status, body: body) }
+        return sha
+    }
+
     /// Where a downloaded file is kept.
     public static func cached(_ sha: String, folder: URL = defaultCache) -> URL {
         folder.appendingPathComponent(sha)

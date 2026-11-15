@@ -279,6 +279,203 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(ran, ["Automation ran: assign to Sam Lee", "Automation ran: set priority to Urgent", "Automation ran: comment \"Please review\""])
     }
 
+    func task(_ d: JSON, _ id: UInt64) -> JSON { d["tasks"]!.array!.first { $0["id"]?.uint == id }! }
+
+    func testAssignAutomationLogsTheTargetAndReplacesWhenSingleAssignee() {
+        var d = SampleWorkspace.make()
+        d.set("extra.automations", [["id": 1, "enabled": true, "trigger_status": "review", "action": "assign", "value": "3", "list": nil]])
+        XCTAssertTrue(Edits.setStatus(&d, task: 202, to: "review", me: 1, ts: 600))
+        let line = task(d, 202)["activity"]!.array!.first { $0["text"] == "assigned to Sam Lee" }
+        XCTAssertEqual(line?["target"], 3, "the Inbox goes by the target, like about_line on the Mac")
+        XCTAssertEqual(line?["comment"], false)
+
+        // Apps > Multiple Assignees off: the rule's person replaces the others, nothing else logged
+        var single = SampleWorkspace.make()
+        single.set("extra.automations", [["id": 1, "enabled": true, "trigger_status": "review", "action": "assign", "value": "3", "list": nil]])
+        single.set("extra.apps", ["multiple_assignees": false])
+        XCTAssertTrue(Edits.setStatus(&single, task: 202, to: "review", me: 1, ts: 600))
+        let t = WorkspaceView(single).tasks.first { $0.id == 202 }!
+        XCTAssertEqual(t.assignees, [3])
+        XCTAssertFalse(t.activity.contains { $0.text.hasPrefix("assigned to") })
+        XCTAssertEqual(t.activity.last?.text, "Automation ran: assign to Sam Lee")
+    }
+
+    func testMoveAutomationTakesSubtasksAndFitsStatuses() {
+        var d = SampleWorkspace.make()
+        // a second space with its own statuses, and a subtask under 202
+        var spaces = d["spaces"]!.array!
+        spaces.append(["id": 500, "name": "Ops", "statuses": [["name": "open", "color": [1, 2, 3], "kind": "Open"], ["name": "review", "color": [1, 2, 3], "kind": "Custom"]],
+                       "folders": [], "lists": [["id": 501, "name": "Queue", "archived": false]], "archived": false])
+        d["spaces"] = .array(spaces)
+        Edits.addTask(&d, list: 111, name: "Sub", assignees: [], me: 1, id: 9100, ts: 10)
+        d.updateItem(at: "tasks", id: 9100) { $0["parent"] = 202; $0["status"] = "in progress" }
+        d.set("extra.automations", [["id": 1, "enabled": true, "trigger_status": "review", "action": "move", "value": "501", "list": nil]])
+        XCTAssertTrue(Edits.setStatus(&d, task: 202, to: "review", me: 1, ts: 600))
+        let t = task(d, 202), sub = task(d, 9100)
+        XCTAssertEqual(t["list_id"], 501)
+        XCTAssertEqual(t["status"], "review", "a status the new list has stays")
+        XCTAssertEqual(sub["list_id"], 501, "subtasks go along")
+        XCTAssertEqual(sub["status"], "open", "a status it doesn't have falls back to the first")
+        XCTAssertEqual(sub["parent"], 202)
+        let texts = t["activity"]!.array!.compactMap { $0["text"]?.string }
+        XCTAssertEqual(Array(texts.suffix(3)), ["changed status from TO DO to REVIEW", "Automation ran: move to Queue", "moved this task to Queue"])
+        XCTAssertFalse(sub["activity"]!.array!.contains { $0["text"]?.string?.hasPrefix("moved") == true }, "only the task itself logs the move")
+
+        // a rule naming a list that doesn't exist logs but moves nothing
+        var e = SampleWorkspace.make()
+        e.set("extra.automations", [["id": 1, "enabled": true, "trigger_status": "review", "action": "move", "value": "999", "list": nil]])
+        XCTAssertTrue(Edits.setStatus(&e, task: 202, to: "review", me: 1, ts: 600))
+        XCTAssertEqual(task(e, 202)["list_id"], 111)
+        XCTAssertEqual(task(e, 202)["activity"]!.array!.last?["text"], "Automation ran: move to List")
+    }
+
+    func testMovingASubtaskAloneMakesItATask() {
+        var d = SampleWorkspace.make()
+        Edits.addTask(&d, list: 111, name: "Sub", assignees: [], me: 1, id: 9100, ts: 10)
+        d.updateItem(at: "tasks", id: 9100) { $0["parent"] = 202 }
+        XCTAssertTrue(Edits.moveTasks(&d, ids: [9100], to: 120, me: 1, ts: 20))
+        XCTAssertEqual(task(d, 9100)["parent"], .null)
+        XCTAssertEqual(task(d, 9100)["list_id"], 120)
+        XCTAssertEqual(task(d, 202)["list_id"], 111)
+        XCTAssertFalse(Edits.moveTasks(&d, ids: [9100], to: 777, me: 1, ts: 21), "no such list")
+    }
+
+    func testMentionsFollowTheMacRule() {
+        let people: [(id: UInt64, name: String)] = [(1, "Alex"), (2, "Alex Kim"), (3, "지원"), (4, "Sam"), (5, "Sam")]
+        XCTAssertEqual(Mentions.ids(in: "@Alex Kim look", members: people), [2], "the longest name wins")
+        XCTAssertEqual(Mentions.ids(in: "@Alex look", members: people), [1])
+        XCTAssertEqual(Mentions.ids(in: "@Alexander hi", members: people), [], "a Latin name running on is not that name")
+        XCTAssertEqual(Mentions.ids(in: "@지원님 안녕", members: people), [3], "anything else may follow")
+        XCTAssertEqual(Mentions.ids(in: "mail me@Alex", members: people), [], "@ must start a word")
+        XCTAssertEqual(Mentions.ids(in: "hi\n@Alex, and @Alex again", members: people), [1])
+        XCTAssertEqual(Mentions.ids(in: "@Sam!", members: people), [4, 5], "two share the name: both")
+        XCTAssertEqual(Mentions.ids(in: "@Sam!", members: people, picked: [5]), [5], "unless one was picked")
+        XCTAssertEqual(Mentions.ids(in: "@Alex.", members: people), [1])
+        XCTAssertEqual(Mentions.ids(in: "@", members: people), [])
+    }
+
+    func testSendingAndEditingWorkOutMentions() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "@Alex Kim can you look?", me: 1, id: 9001, ts: 60))
+        func msg() -> JSON { d["channels"]![0]!["messages"]!.array!.first { $0["id"] == 9001 }! }
+        XCTAssertEqual(msg()["mentions"], [2])
+        XCTAssertTrue(Edits.editMessage(&d, channel: 301, message: 9001, text: "@Sam Lee can you look?", me: 1, ts: 61))
+        XCTAssertEqual(msg()["mentions"], [3], "the edit works them out again")
+        XCTAssertTrue(Edits.editMessage(&d, channel: 301, message: 9001, text: "never mind", me: 1, ts: 62))
+        XCTAssertNil(msg()["mentions"], "left out when nobody is mentioned, as the Mac writes it")
+        XCTAssertNil(d["channels"]![0]!["messages"]!.array!.first { $0["id"] == 313 }!["mentions"])
+        // replies and task comments too
+        XCTAssertTrue(Edits.sendReply(&d, channel: 301, to: 313, text: "@Jamie Park ok", me: 3, id: 9002, ts: 63))
+        XCTAssertEqual(d["channels"]![0]!["messages"]!.array!.first { $0["id"] == 313 }!["replies"]!.array!.last!["mentions"], [1])
+        XCTAssertTrue(Edits.editMessage(&d, channel: 301, message: 9002, text: "@Alex Kim ok", me: 3, ts: 64))
+        XCTAssertEqual(d["channels"]![0]!["messages"]!.array!.first { $0["id"] == 313 }!["replies"]!.array!.last!["mentions"], [2])
+        XCTAssertTrue(Edits.addComment(&d, task: 201, text: "@Sam Lee see this", me: 1, ts: 65))
+        XCTAssertEqual(task(d, 201)["activity"]!.array!.last!["mentions"], [3])
+    }
+
+    func testHuddleCardsCantBeEdited() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.postHuddle(&d, channel: 301, me: 1, id: 9001, ts: 60))
+        XCTAssertFalse(Edits.editMessage(&d, channel: 301, message: 9001, text: "Something else", me: 1, ts: 61))
+        XCTAssertTrue(Edits.postCall(&d, channel: 301, link: "https://meet.jit.si/x", me: 1, id: 9002, ts: 62))
+        XCTAssertFalse(Edits.editMessage(&d, channel: 301, message: 9002, text: "Something else", me: 1, ts: 63))
+        XCTAssertTrue(WorkspaceView(d).channels[0].messages.first { $0.id == 9001 }!.isEditable(by: 1) == false)
+        XCTAssertTrue(WorkspaceView(d).channels[0].messages.first { $0.id == 313 }!.isEditable(by: 3))
+        XCTAssertFalse(WorkspaceView(d).channels[0].messages.first { $0.id == 313 }!.isEditable(by: 1), "not mine")
+    }
+
+    func testNewChannelRecordsItsCreator() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.createChannel(&d, name: "Ops", isPrivate: false, me: 2, id: 9300, ts: 70))
+        XCTAssertEqual(d["channels"]!.array!.last!["creator"], 2)
+    }
+
+    func testDeletedTaskGoesToTrashAndComesBack() {
+        var d = SampleWorkspace.make()
+        Edits.addTask(&d, list: 111, name: "Sub", assignees: [], me: 1, id: 9100, ts: 10)
+        d.updateItem(at: "tasks", id: 9100) { $0["parent"] = 202 }
+        let before = d["tasks"]!.array!.filter { [202, 9100].contains($0["id"]!.uint!) }
+        let item = try! XCTUnwrap(Edits.trashTask(&d, task: 202, id: 7000, ts: 80))
+        XCTAssertEqual(item.kind, "Task")
+        XCTAssertEqual(item.title, "Check pricing page copy")
+        XCTAssertEqual(item.deleted, 80)
+        XCTAssertEqual(item.items, before, "the task and its subtask, as they were")
+        XCTAssertNil(d["tasks"]!.array!.first { $0["id"] == 202 })
+        XCTAssertNil(d["tasks"]!.array!.first { $0["id"] == 9100 })
+        XCTAssertNil(Edits.trashTask(&d, task: 202, id: 7001, ts: 81), "already gone")
+        // the Mac's TrashItem shape round trips
+        XCTAssertEqual(TrashItem(item.json), item)
+        XCTAssertEqual(Set(item.json.object!.keys), ["id", "kind", "title", "deleted", "payload"])
+
+        XCTAssertEqual(Edits.restore(&d, item, me: 1, ts: 90), .restored)
+        XCTAssertEqual(task(d, 202), before[0])
+        XCTAssertEqual(task(d, 9100), before[1])
+    }
+
+    func testRestoredTaskWhoseListIsGoneGoesToTheFirstList() {
+        var d = SampleWorkspace.make()
+        let item = try! XCTUnwrap(Edits.trashTask(&d, task: 203, id: 7000, ts: 80))
+        // the App list (112) goes; the first list is Website (111, in the Launch folder)
+        d.set("spaces", .array(d["spaces"]!.array!.map { s in
+            var s = s
+            s["folders"] = .array(s["folders"]!.array!.map { f in var f = f; f["lists"] = .array(f["lists"]!.array!.filter { $0["id"] != 112 }); return f })
+            return s
+        }))
+        XCTAssertEqual(Edits.restore(&d, item, me: 1, ts: 90), .movedTo("Website"))
+        XCTAssertEqual(task(d, 203)["list_id"], 111)
+        XCTAssertEqual(task(d, 203)["status"], "review", "the status exists there too")
+
+        var empty = SampleWorkspace.make()
+        let lost = try! XCTUnwrap(Edits.trashTask(&empty, task: 203, id: 7001, ts: 80))
+        empty["spaces"] = []
+        if case .nowhere = Edits.restore(&empty, lost, me: 1, ts: 90) {} else { XCTFail("nowhere to go") }
+        XCTAssertNil(empty["tasks"]!.array!.first { $0["id"] == 203 })
+    }
+
+    func testDeletedDocGoesToTrashWithSubPagesAndComesBack() {
+        var d = SampleWorkspace.make()
+        Edits.addDoc(&d, title: "Child", space: 100, me: 1, id: 9200, ts: 10)
+        d.updateItem(at: "docs", id: 9200) { $0["parent"] = 401 }
+        let item = try! XCTUnwrap(Edits.trashDoc(&d, doc: 401, id: 7000, ts: 80))
+        XCTAssertEqual(item.kind, "Doc")
+        XCTAssertEqual(item.title, "Launch plan")
+        XCTAssertEqual(item.items.compactMap { $0["id"]?.uint }, [401, 9200])
+        XCTAssertEqual(WorkspaceView(d).docs.map(\.id), [402])
+        XCTAssertEqual(Edits.restore(&d, item, me: 1, ts: 90), .restored)
+        XCTAssertEqual(Set(WorkspaceView(d).docs.map(\.id)), [401, 402, 9200])
+        XCTAssertEqual(d["docs"]!.array!.first { $0["id"] == 9200 }!["parent"], 401)
+
+        // restoring only a sub page whose parent is gone puts it at the top
+        var e = SampleWorkspace.make()
+        Edits.addDoc(&e, title: "Child", space: 100, me: 1, id: 9200, ts: 10)
+        e.updateItem(at: "docs", id: 9200) { $0["parent"] = 401 }
+        let child = try! XCTUnwrap(Edits.trashDoc(&e, doc: 9200, id: 7001, ts: 80))
+        XCTAssertTrue(Edits.deleteDoc(&e, doc: 401))
+        XCTAssertEqual(Edits.restore(&e, child, me: 1, ts: 90), .restored)
+        XCTAssertEqual(e["docs"]!.array!.first { $0["id"] == 9200 }!["parent"], .null)
+    }
+
+    func testRestoreRevivesForOthers() {
+        // delete stamps a tombstone; restoring records a revival that wins in a merge
+        var d = SampleWorkspace.make()
+        var meta = SyncMeta(of: d)
+        Sync.stamp(d, &meta, now: 1000)
+        d.set("extra.sync", meta.json)
+        let item = try! XCTUnwrap(Edits.trashTask(&d, task: 205, id: 7000, ts: 80))
+        meta = SyncMeta(of: d)
+        Sync.stamp(d, &meta, now: 2000)
+        d.set("extra.sync", meta.json)
+        XCTAssertNotNil(SyncMeta(of: d).tombs[205])
+        var other = d // a teammate's copy without the task
+        XCTAssertEqual(Edits.restore(&d, item, me: 1, ts: 90), .restored)
+        meta = SyncMeta(of: d)
+        Sync.stamp(d, &meta, now: 3000)
+        d.set("extra.sync", meta.json)
+        XCTAssertEqual(SyncMeta(of: d).revived[205], 3000)
+        Sync.merge(&other, [d])
+        XCTAssertNotNil(other["tasks"]!.array!.first { $0["id"] == 205 }, "the restored task comes back for others")
+    }
+
     func testAVideoNamesItsStillAndOldOnesHaveNone() {
         var d = SampleWorkspace.make()
         let still = String(repeating: "b", count: 64)

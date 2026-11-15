@@ -1121,7 +1121,7 @@ impl App {
                                 || (self.composer_mode == 1 && !self.post_title.trim().is_empty()));
                         let b = Tint(
                             egui::Button::new(RichText::new(label).color(if ready {
-                                Color32::WHITE
+                                t.on_primary
                             } else {
                                 t.text3
                             }))
@@ -1136,7 +1136,7 @@ impl App {
                                 ui.painter(),
                                 "send",
                                 sent.rect.center(),
-                                if ready { Color32::WHITE } else { t.text3 },
+                                if ready { t.on_primary } else { t.text3 },
                             );
                         }
                         if (sent.clicked() || enter) && ready {

@@ -10480,3 +10480,48 @@ fn radio_buttons_that_are_off_have_a_visible_ring() {
         );
     }
 }
+
+#[test]
+fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
+    let mut h = Ui1::new();
+    h.app.data.dark = true;
+    h.app.data.extra.accent = "black".into();
+    h.click("Rail More");
+    h.click("Goals");
+    h.settle();
+    let t = h.app.t();
+    let (r, text) = h.painted_text("Set a Goal")[0];
+    // the button's own fill under its label
+    fn fills(s: &egui::Shape, p: Pos2, out: &mut Vec<Color32>) {
+        match s {
+            egui::Shape::Rect(r) if r.rect.contains(p) && r.rect.width() < 300.0 => {
+                out.push(r.fill)
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| fills(s, p, out)),
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for c in &h.shapes {
+        fills(&c.shape, r.center(), &mut found);
+    }
+    assert!(
+        found.contains(&t.primary),
+        "the button is filled: {found:?}"
+    );
+    // a mid-grey fill with white text looked like a disabled button: the
+    // fill now stands out from the page and the label reads on it
+    assert!(
+        contrast(t.primary, t.bg) >= 3.0,
+        "the button stands out from the page"
+    );
+    assert!(
+        contrast(text, t.primary) >= 4.5,
+        "the label reads: {text:?}"
+    );
+    // the other colours keep white text on their own fill
+    h.app.data.extra.accent = "purple".into();
+    let t = h.app.t();
+    assert_eq!(t.on_primary, Color32::WHITE);
+    assert!(contrast(t.on_primary, t.primary) >= 4.5);
+}

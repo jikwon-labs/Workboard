@@ -1368,7 +1368,7 @@ impl App {
                     Align2::CENTER_CENTER,
                     tr("+  Create"),
                     FontId::proportional(14.0),
-                    Color32::WHITE,
+                    t.on_primary,
                 );
                 if self.force_menu.as_deref() == Some("create") {
                     let pid = ui.id().with("create_pop");
@@ -1474,7 +1474,7 @@ impl App {
                             ui.painter().galley(
                                 r.center() - g.size() / 2.0,
                                 g,
-                                if on { Color32::WHITE } else { t.text2 },
+                                if on { t.on_primary } else { t.text2 },
                             );
                             if resp.clicked() {
                                 self.side_filter = Some(if on { "" } else { key });
@@ -3423,9 +3423,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let b = Tint(
                             egui::Button::new(
-                                RichText::new(tr("Add Task"))
-                                    .color(Color32::WHITE)
-                                    .size(13.0),
+                                RichText::new(tr("Add Task")).color(t.on_primary).size(13.0),
                             )
                             .fill(t.primary)
                             .corner_radius(6)
@@ -3659,7 +3657,7 @@ impl App {
                         Align2::CENTER_CENTER,
                         "\u{2713}",
                         FontId::proportional(11.0),
-                        Color32::WHITE,
+                        t.on_primary,
                     );
                 }
                 if resp.clicked() {

@@ -210,7 +210,7 @@ impl App {
                         Align2::CENTER_CENTER,
                         tr("+  Create"),
                         FontId::proportional(14.0),
-                        Color32::WHITE,
+                        t.on_primary,
                     );
                     plus |= b.clicked();
                 } else {
@@ -1440,7 +1440,7 @@ impl App {
             ui.painter().circle_stroke(pr.min + vec2(80.0, 60.0), 14.0, Stroke::new(3.0, Color32::WHITE));
             ui.painter().text(pr.min + vec2(80.0, 60.0), Align2::CENTER_CENTER, "30%", FontId::proportional(8.0), Color32::WHITE);
             ui.add_space(30.0);
-            if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
+            if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(t.on_primary)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
                 let id = self.data.new_id();
                 self.data.extra.goals.push(Goal { id, name: tr("New goal").into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
                 self.goal_open = Some(id);

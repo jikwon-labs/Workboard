@@ -1219,7 +1219,7 @@ impl App {
             let r = ui.add_enabled(
                 ok,
                 Tint(
-                    egui::Button::new(RichText::new(tr("Use template")).color(Color32::WHITE))
+                    egui::Button::new(RichText::new(tr("Use template")).color(t.on_primary))
                         .fill(t.primary)
                         .corner_radius(7)
                         .min_size(vec2(110.0, 32.0)),
@@ -1326,7 +1326,7 @@ impl App {
         let b = ui.add_enabled(
             ok,
             Tint(
-                egui::Button::new(RichText::new(tr("Create template")).color(Color32::WHITE))
+                egui::Button::new(RichText::new(tr("Create template")).color(t.on_primary))
                     .fill(t.primary)
                     .corner_radius(7)
                     .min_size(vec2(0.0, 30.0)),

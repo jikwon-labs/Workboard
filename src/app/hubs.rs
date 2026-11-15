@@ -1612,7 +1612,12 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     for m in &members {
                         let mut on = tm.members.contains(&m.id);
-                        if check(ui, &mut on, &m.name).changed() {
+                        let label = if m.invited {
+                            trf!("{} (invited)", m.name)
+                        } else {
+                            m.name.clone()
+                        };
+                        if check(ui, &mut on, label).changed() {
                             if on {
                                 tm.members.push(m.id);
                             } else {

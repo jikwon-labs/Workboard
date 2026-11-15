@@ -6226,6 +6226,30 @@ fn trash_empty_asks_then_clears() {
 }
 
 #[test]
+fn invited_people_are_marked_in_channel_and_team_member_lists() {
+    let mut h = Ui1::new();
+    h.app
+        .invite_people(&["dana.reed@example.com".to_string()], "Member");
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    // in #general already, for when they join: marked as not here yet
+    h.app.modal = Some(Modal::ChannelSettings(general));
+    h.settle();
+    assert!(h.has("Dana Reed (invited)"));
+    h.key(egui::Key::Escape);
+    h.app.section = Section::Teams;
+    h.settle();
+    h.click_side("Create Team", true);
+    assert!(h.has("Dana Reed (invited)"));
+}
+
+#[test]
 fn team_color_and_my_teams() {
     let mut h = Ui1::new();
     h.app.section = Section::Teams;

@@ -2180,7 +2180,13 @@ impl App {
                         for m in &members {
                             let mut on = self.data.channels[ci].members.contains(&m.id);
                             let allowed = manager || m.id == me;
-                            let b = ui.add_enabled(allowed, Check::new(&mut on, &m.name));
+                            // in the channel once they join, like #general
+                            let label = if m.invited {
+                                crate::trf!("{} (invited)", m.name)
+                            } else {
+                                m.name.clone()
+                            };
+                            let b = ui.add_enabled(allowed, Check::new(&mut on, label));
                             let b = if allowed { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can change who else is in it.")) };
                             if b.changed() && allowed {
                                 let c = &mut self.data.channels[ci];

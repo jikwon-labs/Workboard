@@ -693,14 +693,49 @@ pub fn add_months(d: NaiveDate, n: i32) -> NaiveDate {
     NaiveDate::from_ymd_opt(total.div_euclid(12), total.rem_euclid(12) as u32 + 1, 1).unwrap()
 }
 
+/// The height a one-line text field, a framed button and a drop-down share,
+/// so they line up when they sit in one row. The theme's button padding
+/// gives buttons and drop-downs this height with 14 px text.
+pub const CONTROL_H: f32 = 28.0;
+
+/// A one-line text field as tall as a button, with room around the text.
+/// egui has no style setting for a text field's inner margin (every
+/// `TextEdit` starts at 4,2), so fields are made here.
+pub fn field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(text)
+        .margin(egui::Margin::symmetric(8, 5))
+        .min_size(vec2(0.0, CONTROL_H))
+        .vertical_align(egui::Align::Center)
+}
+
+/// A framed text box of several lines, with the same side margin as `field`
+/// so the hint does not sit in the corner.
+pub fn field_multi(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
+    egui::TextEdit::multiline(text).margin(egui::Margin::symmetric(8, 6))
+}
+
 /// Rounded primary button.
 pub fn primary_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
-    ui.add(Tint(
-        egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).strong())
-            .fill(t.primary)
+    ui.add(Tint(primary_btn(t, text)))
+}
+
+/// The primary button's look, for `ui.add_enabled` or a wider minimum:
+/// `ui.add_enabled(ok, Tint(primary_btn(t, text)))`.
+pub fn primary_btn(t: &Theme, text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).strong())
+        .fill(t.primary)
+        .corner_radius(6)
+        .min_size(vec2(0.0, CONTROL_H))
+}
+
+/// A framed button beside a primary one (Cancel, Clear status, Copy link):
+/// the same height and corners, the theme's outline instead of the fill.
+pub fn secondary_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    ui.add(
+        egui::Button::new(text)
             .corner_radius(6)
-            .min_size(vec2(0.0, 28.0)),
-    ))
+            .min_size(vec2(0.0, CONTROL_H)),
+    )
 }
 
 /// A small action button in a list row: room around the text, rounded like
@@ -762,6 +797,11 @@ pub fn put_over(ui: &mut egui::Ui, rect: egui::Rect, w: impl egui::Widget) -> Re
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
         egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
     ));
+    // the widget fills the cell: no 28 pt minimum, and a framed button's
+    // padding shrinks to fit a shorter cell instead of spilling out of it
+    let pad = ((rect.height() - 17.0) / 2.0).clamp(0.0, ui.spacing().button_padding.y);
+    child.spacing_mut().interact_size.y = 0.0;
+    child.spacing_mut().button_padding.y = pad;
     child.add(w)
 }
 
@@ -1050,6 +1090,116 @@ pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
     ui.painter()
         .circle_filled(pos2(x, r.center().y), 7.0, Color32::WHITE);
     resp
+}
+
+/// Where `theme::apply` leaves the accent colour for widgets that are not
+/// handed the theme (the check box).
+pub const ACCENT_ID: &str = "__wb_accent";
+
+/// A check box: a small square with slightly rounded corners, filled with
+/// the accent colour and a white tick when on, an outline that stands out
+/// from the page when off. egui's own check box takes the corner radius of
+/// every widget (6), which turns a 14 px box into a circle.
+pub struct Check<'a> {
+    checked: &'a mut bool,
+    text: egui::WidgetText,
+}
+
+impl<'a> Check<'a> {
+    pub fn new(checked: &'a mut bool, text: impl Into<egui::WidgetText>) -> Self {
+        Check {
+            checked,
+            text: text.into(),
+        }
+    }
+}
+
+/// `check(ui, &mut on, label)` in place of `ui.checkbox(&mut on, label)`.
+pub fn check(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetText>) -> Response {
+    ui.add(Check::new(checked, text))
+}
+
+impl egui::Widget for Check<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let Check { checked, text } = self;
+        const BOX: f32 = 15.0;
+        let gap = ui.spacing().icon_spacing + 2.0;
+        let galley = if text.is_empty() {
+            None
+        } else {
+            let wrap = ui.available_width() - BOX - gap;
+            Some(text.into_galley(ui, None, wrap, egui::TextStyle::Button))
+        };
+        // a fixed row height, not interact_size (28): a list of check boxes
+        // stays as compact as lines of text
+        let mut size = vec2(BOX, 20.0);
+        if let Some(g) = &galley {
+            size.x += gap + g.size().x;
+            size.y = size.y.max(g.size().y);
+        }
+        let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+        if resp.clicked() {
+            *checked = !*checked;
+            resp.mark_changed();
+        }
+        let on = *checked;
+        let label = galley
+            .as_ref()
+            .map_or(String::new(), |g| g.text().to_string());
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), on, &label)
+        });
+        if ui.is_rect_visible(rect) {
+            let dark = ui.visuals().dark_mode;
+            let accent: Color32 = ui
+                .ctx()
+                .data(|d| d.get_temp(egui::Id::new(ACCENT_ID)))
+                .unwrap_or(ui.visuals().selection.bg_fill);
+            let b = Rect::from_center_size(
+                pos2(rect.left() + BOX / 2.0, rect.center().y),
+                vec2(BOX, BOX),
+            );
+            let enabled = resp.enabled();
+            let fade = |c: Color32| if enabled { c } else { c.gamma_multiply(0.5) };
+            if on {
+                let fill = if resp.hovered() {
+                    accent.gamma_multiply(0.85).to_opaque()
+                } else {
+                    accent
+                };
+                ui.painter().rect_filled(b, 3.5, fade(fill));
+                let c = b.center();
+                ui.painter().add(egui::Shape::line(
+                    vec![
+                        c + vec2(-3.6, 0.2),
+                        c + vec2(-1.0, 2.8),
+                        c + vec2(3.8, -2.6),
+                    ],
+                    Stroke::new(1.8, fade(Color32::WHITE)),
+                ));
+            } else {
+                let line = match (dark, resp.hovered()) {
+                    (true, false) => Color32::from_gray(110),
+                    (true, true) => Color32::from_gray(150),
+                    (false, false) => Color32::from_gray(165),
+                    (false, true) => Color32::from_gray(120),
+                };
+                ui.painter().rect(
+                    b,
+                    3.5,
+                    ui.visuals().extreme_bg_color,
+                    Stroke::new(1.2, fade(line)),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if let Some(g) = galley {
+                let color = ui.style().interact(&resp).text_color();
+                let pos = pos2(b.right() + gap, rect.center().y - g.size().y / 2.0);
+                ui.painter().galley(pos, g, color);
+            }
+        }
+        resp
+    }
 }
 
 /// Names a text field by its hint so screen readers (and the click tests) can find it.

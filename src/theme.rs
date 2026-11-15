@@ -182,9 +182,21 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     // does the same for painted controls)
     v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(v);
+    let accent = t.primary;
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(crate::widgets::ACCENT_ID), accent));
     ctx.style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        s.spacing.button_padding = egui::vec2(8.0, 4.0);
+        // 5.5 above and below 14 px text (17 px tall) makes framed buttons
+        // and drop-downs 28 px, the height of a primary button and a text
+        // field (widgets::CONTROL_H), so a row of them lines up
+        s.spacing.button_padding = egui::vec2(8.0, 5.5);
+        // egui starts every horizontal row at this height and centres what
+        // comes first in it, and a drop-down builds a row of its own: at
+        // egui's 18 a label sat above the drop-down beside it and the
+        // drop-down sat lower than a field next to it
+        s.spacing.interact_size.y = crate::widgets::CONTROL_H;
+        // drop-down lists show as many rows as before the rows grew to 28
+        s.spacing.combo_height = 300.0;
         s.text_styles
             .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
         s.text_styles

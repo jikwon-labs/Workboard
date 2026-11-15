@@ -1492,7 +1492,7 @@ impl App {
     fn server_form(&mut self, ui: &mut Ui, t: &Theme, addr: &mut String, modes: &[Mode]) {
         ui.label(RichText::new(tr("Server")).color(t.text2));
         let r = ui.add(
-            egui::TextEdit::singleline(addr)
+            field(addr)
                 .hint_text(tr("macmini or 100.101.102.103"))
                 .desired_width(f32::INFINITY),
         );
@@ -1572,7 +1572,7 @@ impl App {
         let field = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
             ui.label(RichText::new(tr(label)).color(t.text2));
             let r = ui.add(
-                egui::TextEdit::singleline(text)
+                field(text)
                     .hint_text(tr(hint))
                     .password(secret)
                     .desired_width(f32::INFINITY),
@@ -1798,11 +1798,7 @@ impl App {
                     [130.0, 20.0],
                     egui::Label::new(RichText::new(tr(label)).color(t.text2)),
                 );
-                let r = ui.add(
-                    egui::TextEdit::singleline(text)
-                        .password(secret)
-                        .desired_width(260.0),
-                );
+                let r = ui.add(field(text).password(secret).desired_width(260.0));
                 let name = format!("{} entry", label);
                 r.widget_info(move || {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name)
@@ -1959,7 +1955,7 @@ impl App {
             1 => {
                 ui.label(RichText::new(tr("What should your team call you?")).color(t.text2));
                 let r = ui.add(
-                    egui::TextEdit::singleline(name)
+                    field(name)
                         .hint_text(tr("Your name"))
                         .desired_width(f32::INFINITY),
                 );
@@ -2174,7 +2170,7 @@ impl App {
             }
             ui.label(RichText::new(tr("Folder")).color(t.text2));
             ui.add(
-                egui::TextEdit::singleline(path)
+                field(path)
                     .hint_text(tr("Paste a folder path, or pick one above"))
                     .desired_width(f32::INFINITY),
             );
@@ -2255,12 +2251,12 @@ impl App {
         ui.separator();
         ui.label(RichText::new(tr("I'm new here")).color(t.text2));
         ui.add(
-            egui::TextEdit::singleline(name)
+            field(name)
                 .hint_text(tr("Your name"))
                 .desired_width(f32::INFINITY),
         );
         ui.add(
-            egui::TextEdit::singleline(email)
+            field(email)
                 .hint_text(tr("Email"))
                 .desired_width(f32::INFINITY),
         );
@@ -2319,7 +2315,7 @@ impl App {
                 .color(t.text3),
         );
         ui.add(
-            egui::TextEdit::singleline(link)
+            field(link)
                 .hint_text("https://...")
                 .desired_width(f32::INFINITY),
         );

@@ -154,6 +154,11 @@ impl App {
                     .take()
                     .or_else(|| self.settings_modal_for(label));
                 if let Some(m) = state.as_mut() {
+                    // this page scrolls already: a section that scrolls in its
+                    // own dialog draws its rows straight in here
+                    let nr = ui.ctx().cumulative_pass_nr();
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(egui::Id::new(IN_SETTINGS_PAGE), nr));
                     let done = self.modal_body(ui, &t, m);
                     if done {
                         // saved: start the section fresh
@@ -162,6 +167,14 @@ impl App {
                 }
                 self.settings_state = state;
             });
+    }
+
+    /// True while `modal_body` draws a section of this page (not a dialog).
+    pub(super) fn in_settings_page(ui: &Ui) -> bool {
+        let nr = ui.ctx().cumulative_pass_nr();
+        ui.ctx()
+            .data(|d| d.get_temp::<u64>(egui::Id::new(IN_SETTINGS_PAGE)))
+            == Some(nr)
     }
 
     /// The interface language: the system's, English or Korean.
@@ -338,3 +351,5 @@ impl App {
             });
     }
 }
+
+const IN_SETTINGS_PAGE: &str = "__wb_in_settings_page";

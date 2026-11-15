@@ -758,7 +758,7 @@ impl App {
                     self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                 }
                 if let Some(mut q) = self.channel_find.take() {
-                    ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("\u{1F50D} Find in channel")).desired_width(200.0));
+                    ui.add(field(&mut q).hint_text(tr("\u{1F50D} Find in channel")).desired_width(200.0));
                     self.channel_find = Some(q);
                 }
                 if self.channel_panel != 0 {

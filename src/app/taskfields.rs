@@ -234,7 +234,7 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
     let mut add = false;
     ui.horizontal(|ui| {
         let r = ui.add(
-            egui::TextEdit::singleline(&mut buf)
+            field(&mut buf)
                 .hint_text(tr("e.g. 1h 30m"))
                 .desired_width(90.0),
         );
@@ -275,7 +275,7 @@ impl App {
     /// typed.
     pub(super) fn tag_field(&mut self, ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) {
         let r = ui.add(
-            egui::TextEdit::singleline(&mut self.tag_text)
+            field(&mut self.tag_text)
                 .hint_text(tr("Add tag"))
                 .desired_width(100.0),
         );
@@ -535,13 +535,11 @@ impl App {
             );
             let item = &mut task.checklist[i];
             let label = item.text.clone();
-            let cb = row.checkbox(&mut item.done, "");
+            let cb = check(&mut row, &mut item.done, "");
             name_it(&cb, &format!("Done {}", label));
             if editing == Some(i) {
-                let te = row.add(
-                    egui::TextEdit::singleline(&mut item.text)
-                        .desired_width((r.width() - 190.0).max(80.0)),
-                );
+                let te =
+                    row.add(field(&mut item.text).desired_width((r.width() - 190.0).max(80.0)));
                 name_field(&te, "Checklist item name");
                 focus_once(&row, &te);
                 if te.lost_focus() {
@@ -864,13 +862,14 @@ impl App {
                 name_it(&resp, &format!("{} {}", mode.title(), o.name));
                 let x = ui.put(
                     Rect::from_center_size(r.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0)),
-                    ghost(egui::Button::new(
-                        RichText::new("\u{2716}").size(10.0).color(if hover {
+                    ghost(
+                        egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover {
                             t.text2
                         } else {
                             Color32::TRANSPARENT
-                        }),
-                    )),
+                        }))
+                        .small(),
+                    ),
                 );
                 name_it(&x, &format!("Remove link {}", o.name));
                 if x.on_hover_text(tr("Remove")).clicked() {
@@ -918,10 +917,9 @@ impl App {
         };
         ui.label(RichText::new(prompt).color(t.text2));
         let r = ui.add(
-            egui::TextEdit::singleline(query)
+            field(query)
                 .hint_text(tr("Search tasks..."))
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(10, 8)),
+                .desired_width(f32::INFINITY),
         );
         name_field(&r, "Search tasks");
         focus_once(ui, &r);
@@ -1086,7 +1084,8 @@ impl App {
                         } else {
                             Color32::TRANSPARENT
                         })
-                        .corner_radius(10),
+                        .corner_radius(10)
+                        .small(),
                     );
                     name_it(&x, &format!("Remove attachment {}", a.name));
                     if x.on_hover_text(tr("Remove")).clicked() {

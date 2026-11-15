@@ -235,7 +235,7 @@ impl App {
                                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
                                 });
                             let r = ui.add(
-                                egui::TextEdit::multiline(text)
+                                field_multi(text)
                                     .id(reply_id)
                                     .hint_text(tr("Reply..."))
                                     .desired_rows(2)
@@ -515,7 +515,7 @@ impl App {
                                 i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
                             });
                         let r = ui.add(
-                            egui::TextEdit::multiline(text)
+                            field_multi(text)
                                 .id(edit_box)
                                 .desired_rows(2)
                                 .desired_width(f32::INFINITY),

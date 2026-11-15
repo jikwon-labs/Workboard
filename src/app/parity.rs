@@ -472,10 +472,9 @@ impl App {
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Name")).color(t.text2));
         let r = ui.add(
-            egui::TextEdit::singleline(name)
+            field(name)
                 .hint_text(tr("e.g. Project, List of items, Campaign"))
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(10, 8)),
+                .desired_width(f32::INFINITY),
         );
         focus_once(ui, &r);
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -531,12 +530,7 @@ impl App {
                 if (ui
                     .add_enabled(
                         ok,
-                        Tint(
-                            egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE))
-                                .fill(t.primary)
-                                .corner_radius(7)
-                                .min_size(vec2(90.0, 32.0)),
-                        ),
+                        Tint(primary_btn(t, tr("Create")).min_size(vec2(90.0, CONTROL_H))),
                     )
                     .clicked()
                     || (enter && ok))
@@ -581,10 +575,9 @@ impl App {
                 Color32::WHITE,
             );
             let te = ui.add(
-                egui::TextEdit::singleline(name)
+                field(name)
                     .hint_text(tr("e.g. Marketing, Engineering, HR"))
-                    .desired_width(f32::INFINITY)
-                    .margin(egui::Margin::symmetric(10, 8)),
+                    .desired_width(f32::INFINITY),
             );
             focus_once(ui, &te);
             enter = te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -634,10 +627,9 @@ impl App {
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Name")).color(t.text2));
         let r = ui.add(
-            egui::TextEdit::singleline(name)
+            field(name)
                 .hint_text(tr("e.g. design-team"))
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(10, 8)),
+                .desired_width(f32::INFINITY),
         );
         name_field(&r, "Channel name");
         focus_once(ui, &r);
@@ -672,12 +664,7 @@ impl App {
                 let ok = !name.trim().is_empty();
                 let b = ui.add_enabled(
                     ok,
-                    Tint(
-                        egui::Button::new(RichText::new(tr("Create")).color(Color32::WHITE))
-                            .fill(t.primary)
-                            .corner_radius(7)
-                            .min_size(vec2(90.0, 32.0)),
-                    ),
+                    Tint(primary_btn(t, tr("Create")).min_size(vec2(90.0, CONTROL_H))),
                 );
                 if (b.clicked() || (enter && ok)) && ok {
                     self.create_channel(name, *private, *add_list);
@@ -1043,10 +1030,9 @@ impl App {
             .color(t.text2),
         );
         let r = ui.add(
-            egui::TextEdit::singleline(query)
+            field(query)
                 .hint_text(tr("Search Lists..."))
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(10, 8)),
+                .desired_width(f32::INFINITY),
         );
         focus_once(ui, &r);
         ui.add_space(4.0);
@@ -1967,7 +1953,7 @@ impl App {
         ui.label(RichText::new(tr("Description")).color(t.text2));
         let mut desc = item.description.clone();
         let r = ui.add(
-            egui::TextEdit::multiline(&mut desc)
+            field_multi(&mut desc)
                 .hint_text(tr("What is this List for?"))
                 .desired_rows(3)
                 .desired_width(f32::INFINITY),
@@ -2292,7 +2278,7 @@ impl App {
                     close = true;
                 }
                 ui.add_space(6.0);
-                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search for new or existing fields")).desired_width(f32::INFINITY));
+                let r = ui.add(field(&mut q).hint_text(tr("Search for new or existing fields")).desired_width(f32::INFINITY));
                 name_field(&r, "Search fields");
                 ui.add_space(6.0);
                 let ql = q.trim().to_lowercase();
@@ -2591,7 +2577,7 @@ impl App {
         for s in &self.data.extra.saved_filters {
             ui.horizontal(|ui| match &mut editing {
                 Some((id, text)) if *id == s.id => {
-                    let r = ui.add(egui::TextEdit::singleline(text).desired_width(260.0));
+                    let r = ui.add(field(text).desired_width(260.0));
                     name_field(&r, "Saved filter new name");
                     focus_once(ui, &r);
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -2659,7 +2645,7 @@ impl App {
         }
         ui.horizontal(|ui| {
             let r = ui.add(
-                egui::TextEdit::singleline(&mut name)
+                field(&mut name)
                     .hint_text(tr("Name this filter"))
                     .desired_width(260.0),
             );
@@ -2745,7 +2731,7 @@ impl App {
                             });
                         });
                         let r = ui.add(
-                            egui::TextEdit::singleline(&mut self.search)
+                            field(&mut self.search)
                                 .hint_text(tr("Task name or tag..."))
                                 .desired_width(f32::INFINITY),
                         );
@@ -2845,8 +2831,12 @@ impl App {
                             self.filter = f;
                         }
                         ui.separator();
-                        ui.checkbox(&mut self.filter.archived, tr("Show archived tasks only"));
-                        ui.checkbox(&mut self.me_mode, tr("Only my tasks"));
+                        check(
+                            ui,
+                            &mut self.filter.archived,
+                            tr("Show archived tasks only"),
+                        );
+                        check(ui, &mut self.me_mode, tr("Only my tasks"));
                         ui.separator();
                         self.saved_filters_ui(ui, &t);
                     });

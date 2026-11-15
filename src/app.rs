@@ -3393,7 +3393,7 @@ impl App {
                     ui.label(RichText::new(tr("Columns")).small().color(t.text3));
                     for (key, label, shown) in &choices {
                         let mut on = !self.hidden_cols.contains(key);
-                        let r = ui.checkbox(&mut on, shown.as_str());
+                        let r = check(ui, &mut on, shown.as_str());
                         name_it(&r, &format!("Column {}", label));
                         if r.changed() {
                             if on {
@@ -3484,7 +3484,10 @@ impl App {
                                     let r = put_over(
                                         ui,
                                         cell.shrink2(vec2(4.0, 5.0)),
+                                        // the cell is shorter than a 28 pt field
                                         egui::TextEdit::singleline(&mut text)
+                                            .margin(egui::Margin::symmetric(6, 3))
+                                            .vertical_align(egui::Align::Center)
                                             .hint_text(tr("Task name")),
                                     );
                                     name_field(&r, &format!("Name of {}", task.name));
@@ -4920,7 +4923,7 @@ impl App {
                                         match f.kind.as_str() {
                                             "checkbox" => {
                                                 let mut on = v == "true";
-                                                if ui.checkbox(&mut on, "").changed() {
+                                                if check(ui, &mut on, "").changed() {
                                                     *v = if on {
                                                         "true".into()
                                                     } else {
@@ -4981,7 +4984,7 @@ impl App {
                                             }
                                             "number" => {
                                                 let r = ui.add(
-                                                    egui::TextEdit::singleline(v)
+                                                    field(v)
                                                         .hint_text(tr("Empty"))
                                                         .desired_width(120.0),
                                                 );
@@ -4993,7 +4996,7 @@ impl App {
                                             }
                                             _ => {
                                                 ui.add(
-                                                    egui::TextEdit::singleline(v)
+                                                    field(v)
                                                         .hint_text(tr("Empty"))
                                                         .desired_width(field_w - 120.0),
                                                 );
@@ -5151,9 +5154,12 @@ impl App {
                                         pos2(r.right() - 162.0, r.center().y),
                                         vec2(22.0, 22.0),
                                     ),
-                                    ghost(egui::Button::new(
-                                        RichText::new("\u{2B11}").size(12.0).color(t.text2),
-                                    )),
+                                    ghost(
+                                        egui::Button::new(
+                                            RichText::new("\u{2B11}").size(12.0).color(t.text2),
+                                        )
+                                        .small(),
+                                    ),
                                 );
                                 name_it(&b, &format!("Make top-level {}", s.name));
                                 top = b.on_hover_text(tr("Make it a task of its own")).clicked();
@@ -5162,9 +5168,12 @@ impl App {
                                         pos2(r.right() - 186.0, r.center().y),
                                         vec2(22.0, 22.0),
                                     ),
-                                    ghost(egui::Button::new(
-                                        RichText::new("\u{2716}").size(10.0).color(t.text2),
-                                    )),
+                                    ghost(
+                                        egui::Button::new(
+                                            RichText::new("\u{2716}").size(10.0).color(t.text2),
+                                        )
+                                        .small(),
+                                    ),
                                 );
                                 name_it(&b, &format!("Delete subtask {}", s.name));
                                 del = b.on_hover_text(tr("Delete")).clicked();
@@ -5186,7 +5195,7 @@ impl App {
                         if sub_on {
                             ui.horizontal(|ui| {
                                 let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.sub_text)
+                                    field(&mut self.sub_text)
                                         .hint_text(tr("Task Name"))
                                         .desired_width(ui.available_width() - 70.0),
                                 );
@@ -5253,7 +5262,7 @@ impl App {
                         if ck_on {
                             ui.horizontal(|ui| {
                                 let r = ui.add(
-                                    egui::TextEdit::singleline(&mut self.check_text)
+                                    field(&mut self.check_text)
                                         .hint_text(tr("Checklist item"))
                                         .desired_width(ui.available_width() - 70.0),
                                 );
@@ -5316,7 +5325,7 @@ impl App {
                     let mut drop = false;
                     right_ui.horizontal(|ui| {
                         let r = ui.add(
-                            egui::TextEdit::singleline(q)
+                            field(q)
                                 .hint_text(tr("Search comments..."))
                                 .desired_width(ui.available_width() - 30.0),
                         );
@@ -5443,7 +5452,7 @@ impl App {
                     && right_ui
                         .input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
                 let cr = right_ui.add(
-                    egui::TextEdit::multiline(&mut self.comment_text)
+                    field_multi(&mut self.comment_text)
                         .id(comment_id)
                         .hint_text(if post {
                             tr("Write a post...")
@@ -5643,7 +5652,7 @@ impl App {
                 .resizable(false)
                 .anchor(Align2::CENTER_TOP, [0.0, 120.0])
                 .show(ctx, |ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(320.0));
+                    let r = ui.add(field(&mut name).desired_width(320.0));
                     r.request_focus();
                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         done = true;
@@ -5754,7 +5763,7 @@ impl App {
                                     }
                                 });
                             });
-                            let name_edit = ui.add(egui::TextEdit::singleline(&mut st.name).desired_width(160.0));
+                            let name_edit = ui.add(field(&mut st.name).desired_width(160.0));
                             if name_edit.changed() {
                                 changed = true;
                             }
@@ -5889,7 +5898,7 @@ impl App {
                     }
                     ui.add_space(4.0);
                     let dr = ui.add(
-                        egui::TextEdit::multiline(&mut qa.description)
+                        field_multi(&mut qa.description)
                             .hint_text(tr("Add description"))
                             .desired_rows(3)
                             .desired_width(f32::INFINITY),
@@ -5949,7 +5958,7 @@ impl App {
                         let r = ui.button(tr("\u{1F3F7} Tags"));
                         popup(ui, &r, egui::Id::new("qa_tags"), 220.0, |ui| {
                             let tag_r = ui.add(
-                                egui::TextEdit::singleline(&mut qa.tag_text)
+                                field(&mut qa.tag_text)
                                     .hint_text(tr("Search or add tags..."))
                                     .desired_width(f32::INFINITY),
                             );

@@ -633,7 +633,8 @@ impl App {
                 .collect();
             ui.add_space(6.0);
             ui.label(trf!("Not members here yet: {}", names.join(", ")));
-            ui.checkbox(
+            check(
+                ui,
                 &mut plan.create_missing,
                 tr("Add them as members (otherwise their messages come in under your name)"),
             );

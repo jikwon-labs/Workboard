@@ -597,7 +597,7 @@ impl App {
                 .layout(Layout::left_to_right(Align::Center)),
         );
         let resp = child.add(
-            egui::TextEdit::singleline(text)
+            field(text)
                 .desired_width(r.width())
                 .font(FontId::proportional(14.0)),
         );
@@ -630,7 +630,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(14.0 + 26.0 + 40.0);
             let r = ui.add(
-                egui::TextEdit::singleline(text)
+                field(text)
                     .hint_text(tr("Subtask name"))
                     .desired_width((w - 300.0).max(200.0)),
             );
@@ -678,7 +678,7 @@ pub(super) fn tag_menu(ui: &mut Ui, t: &Theme, all: &[String], tags: &mut Vec<St
     let id = ui.id().with("new_tag");
     let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     let r = ui.add(
-        egui::TextEdit::singleline(&mut text)
+        field(&mut text)
             .hint_text(tr("Search or add tags..."))
             .desired_width(f32::INFINITY),
     );

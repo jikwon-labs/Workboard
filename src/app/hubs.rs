@@ -667,7 +667,7 @@ impl App {
                                         .corner_radius(13),
                                     );
                                     popup(ui, &r, ui.id().with("docs_filters"), 200.0, |ui| {
-                                        ui.checkbox(&mut self.docs_mine, tr("Only Docs I created"));
+                                        check(ui, &mut self.docs_mine, tr("Only Docs I created"));
                                     });
                                     let sr = ui.add(
                                         egui::Button::new(trf!(
@@ -733,7 +733,7 @@ impl App {
                                     });
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let r = ui.add(
-                                            egui::TextEdit::singleline(&mut self.docs_search)
+                                            field(&mut self.docs_search)
                                                 .hint_text(tr("\u{1F50D} Search"))
                                                 .desired_width(160.0),
                                         );
@@ -1606,7 +1606,7 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     for m in &members {
                         let mut on = tm.members.contains(&m.id);
-                        if ui.checkbox(&mut on, &m.name).changed() {
+                        if check(ui, &mut on, &m.name).changed() {
                             if on {
                                 tm.members.push(m.id);
                             } else {
@@ -2105,7 +2105,7 @@ impl App {
                         .collect();
                     ui.menu_button(tr("+ Add task"), |ui| {
                         egui::ScrollArea::vertical()
-                            .max_height(300.0)
+                            .max_height(420.0)
                             .show(ui, |ui| {
                                 for (id, n) in &tasks {
                                     if ui.button(n).clicked() {
@@ -2284,11 +2284,7 @@ impl App {
                                 )
                                 .color(t.text2),
                             );
-                            let st = ui.add(
-                                egui::TextEdit::singleline(start)
-                                    .hint_text("09:00")
-                                    .desired_width(54.0),
-                            );
+                            let st = ui.add(field(start).hint_text("09:00").desired_width(54.0));
                             name_it(&st, "Entry start");
                             let hr = ui.add(
                                 egui::DragValue::new(hours)

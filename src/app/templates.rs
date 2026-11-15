@@ -798,10 +798,9 @@ impl App {
         );
         ui.add_space(8.0);
         let r = ui.add(
-            egui::TextEdit::singleline(&mut c.query)
+            field(&mut c.query)
                 .hint_text(tr("Search templates"))
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(10, 6)),
+                .desired_width(f32::INFINITY),
         );
         name_field(&r, "Search templates");
         ui.add_space(6.0);
@@ -839,7 +838,8 @@ impl App {
                     || e.about.to_lowercase().contains(&q)
             })
             .collect();
-        let h = (ui.ctx().screen_rect().height() - 330.0).clamp(230.0, 470.0);
+        // tall enough that "Use template" shows without scrolling in a 900 pt window
+        let h = (ui.ctx().screen_rect().height() - 300.0).clamp(230.0, 560.0);
         let left_w = 250.0;
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(vec2(left_w, h), Layout::top_down(Align::Min), |ui| {
@@ -997,7 +997,7 @@ impl App {
             let mut cancel = false;
             ui.horizontal(|ui| {
                 let r = ui.add(
-                    egui::TextEdit::singleline(name)
+                    field(name)
                         .hint_text(tr("Template name"))
                         .desired_width(220.0),
                 );
@@ -1087,11 +1087,7 @@ impl App {
             })
             .color(t.text2),
         );
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut c.name)
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(8, 6)),
-        );
+        let r = ui.add(field(&mut c.name).desired_width(f32::INFINITY));
         name_field(&r, "Template item name");
         ui.add_space(6.0);
         ui.label(
@@ -1216,7 +1212,8 @@ impl App {
             }
         }
         if kind == KIND_LIST && !c.new_space {
-            let r = ui.checkbox(
+            let r = check(
+                ui,
                 &mut c.add_statuses,
                 tr("Add the template's statuses to this Space"),
             );
@@ -1299,27 +1296,24 @@ impl App {
         );
         ui.add_space(6.0);
         let r = ui.add(
-            egui::TextEdit::singleline(&mut c.new_name)
+            field(&mut c.new_name)
                 .hint_text(tr("Template name, e.g. Bug report"))
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(8, 6)),
+                .desired_width(f32::INFINITY),
         );
         name_field(&r, "Template name, e.g. Bug report");
         focus_once(ui, &r);
         let r = ui.add(
-            egui::TextEdit::multiline(&mut c.new_desc)
+            field_multi(&mut c.new_desc)
                 .hint_text(tr("Description (optional)"))
                 .desired_rows(2)
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(8, 6)),
+                .desired_width(f32::INFINITY),
         );
         name_field(&r, "Description (optional)");
         let r = ui.add(
-            egui::TextEdit::multiline(&mut c.new_checklist)
+            field_multi(&mut c.new_checklist)
                 .hint_text(tr("Checklist, one item per line (optional)"))
                 .desired_rows(3)
-                .desired_width(f32::INFINITY)
-                .margin(egui::Margin::symmetric(8, 6)),
+                .desired_width(f32::INFINITY),
         );
         name_field(&r, "Checklist, one item per line (optional)");
         ui.horizontal(|ui| {

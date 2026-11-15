@@ -819,7 +819,7 @@ impl App {
         let t = self.t();
         ui.set_width(400.0);
         let r = ui.add(
-            egui::TextEdit::singleline(&mut self.create_text)
+            field(&mut self.create_text)
                 .hint_text(tr("Describe anything to create"))
                 .desired_width(f32::INFINITY),
         );
@@ -1246,10 +1246,9 @@ impl App {
             Modal::Invite { emails, role } => {
                 ui.label(RichText::new(tr("Email")).color(t.text2));
                 let r = ui.add(
-                    egui::TextEdit::singleline(emails)
+                    field(emails)
                         .hint_text(tr("Enter email, comma or space separated"))
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(10, 8)),
+                        .desired_width(f32::INFINITY),
                 );
                 r.request_focus();
                 ui.add_space(8.0);
@@ -1300,7 +1299,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let valid: Vec<String> = emails.split(|c: char| c == ',' || c.is_whitespace()).map(|s| s.trim().to_string()).filter(|s| s.contains('@') && s.contains('.')).collect();
-                        let send = ui.add_enabled(!valid.is_empty(), Tint(egui::Button::new(RichText::new(tr("Send free invite")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 32.0))));
+                        let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send free invite"))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
                             let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
@@ -1316,7 +1315,7 @@ impl App {
             }
             Modal::WorkspaceSettings { name } => {
                 ui.label(tr("Workspace name"));
-                ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                ui.add(field(name).desired_width(f32::INFINITY));
                 ui.add_space(6.0);
                 ui.label(tr("Workspace color"));
                 ui.horizontal_wrapped(|ui| {
@@ -1363,7 +1362,7 @@ impl App {
             Modal::NewWorkspace { name } => {
                 ui.label(tr("Name your Workspace"));
                 let r = ui.add(
-                    egui::TextEdit::singleline(name)
+                    field(name)
                         .hint_text(tr("e.g. Acme Inc."))
                         .desired_width(f32::INFINITY),
                 );
@@ -1403,9 +1402,9 @@ impl App {
             }
             Modal::Profile { name, email } => {
                 ui.label(tr("Full name"));
-                ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                ui.add(field(name).desired_width(f32::INFINITY));
                 ui.label(tr("Email"));
-                ui.add(egui::TextEdit::singleline(email).desired_width(f32::INFINITY));
+                ui.add(field(email).desired_width(f32::INFINITY));
                 ui.label(tr("Avatar color"));
                 let me = self.data.me;
                 ui.horizontal_wrapped(|ui| {
@@ -1438,11 +1437,12 @@ impl App {
                 }
             }
             Modal::SetStatus { text } => {
-                ui.add(
-                    egui::TextEdit::singleline(text)
+                let r = ui.add(
+                    field(text)
                         .hint_text(tr("What's your status?"))
                         .desired_width(f32::INFINITY),
                 );
+                name_field(&r, "Status text");
                 ui.horizontal_wrapped(|ui| {
                     for s in [
                         tr("\u{1F4C5} In a meeting"),
@@ -1592,7 +1592,7 @@ impl App {
                     ("confetti", "Celebrate when a task is completed"),
                 ] {
                     let mut on = self.data.extra.labs.iter().any(|l| l == id);
-                    if ui.checkbox(&mut on, tr(label)).changed() {
+                    if check(ui, &mut on, tr(label)).changed() {
                         if on {
                             self.data.extra.labs.push(id.to_string());
                         } else {
@@ -1603,48 +1603,54 @@ impl App {
                 }
             }
             Modal::Notifications => {
-                let max_h = (ui.ctx().screen_rect().height() - 200.0).max(240.0);
+                // in Settings the page scrolls; in the dialog the list does.
+                // (A list scrolling inside the scrolling page cut off its last button.)
+                let max_h = if App::in_settings_page(ui) {
+                    f32::INFINITY
+                } else {
+                    (ui.ctx().screen_rect().height() - 200.0).max(240.0)
+                };
                 egui::ScrollArea::vertical().id_salt("notify_settings").max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
                     let persist = self.persist;
                     let manages = self.data.member(self.data.me).is_some_and(|m| m.role == "Owner" || m.role == "Admin");
                     let n = &mut self.data.extra.notify;
                     let mut ch = false;
                     ui.label(RichText::new(tr("Show in your Inbox when...")).strong());
-                    ch |= ui.checkbox(&mut n.comments, tr("Someone comments on my tasks")).changed();
-                    ch |= ui.checkbox(&mut n.mentions, tr("Someone @mentions me")).changed();
-                    ch |= ui.checkbox(&mut n.assigned, tr("A task is assigned to me")).changed();
-                    ch |= ui.checkbox(&mut n.reminders, tr("A reminder is due")).changed();
-                    ch |= ui.checkbox(&mut n.chat, tr("New chat messages (unread counts)")).changed();
+                    ch |= check(ui, &mut n.comments, tr("Someone comments on my tasks")).changed();
+                    ch |= check(ui, &mut n.mentions, tr("Someone @mentions me")).changed();
+                    ch |= check(ui, &mut n.assigned, tr("A task is assigned to me")).changed();
+                    ch |= check(ui, &mut n.reminders, tr("A reminder is due")).changed();
+                    ch |= check(ui, &mut n.chat, tr("New chat messages (unread counts)")).changed();
                     ui.add_space(12.0);
                     ui.label(RichText::new(tr("Desktop notifications")).strong());
-                    ch |= ui.checkbox(&mut n.desktop, tr("Show banners when Workboard isn't in front")).changed();
-                    ch |= ui.checkbox(&mut n.sound, tr("Play a sound")).changed();
-                    ch |= ui.checkbox(&mut n.dock_badge, tr("Show a count on the Dock icon")).changed();
+                    ch |= check(ui, &mut n.desktop, tr("Show banners when Workboard isn't in front")).changed();
+                    ch |= check(ui, &mut n.sound, tr("Play a sound")).changed();
+                    ch |= check(ui, &mut n.dock_badge, tr("Show a count on the Dock icon")).changed();
                     ui.add_space(6.0);
                     ui.label(RichText::new(tr("Mentions, assignments, comments and reminders follow the Inbox choices above. Also tell me about:")).small().color(t.text2));
-                    ch |= ui.checkbox(&mut n.direct, tr("Direct messages")).changed();
-                    ch |= ui.checkbox(&mut n.replies, tr("Replies in threads I'm in")).changed();
-                    ch |= ui.checkbox(&mut n.huddles, tr("Huddles and calls")).changed();
-                    ch |= ui.checkbox(&mut n.reactions, tr("Reactions to my messages")).changed();
-                    ch |= ui.checkbox(&mut n.task_changes, tr("Changes to my tasks (status, due date, priority)")).changed();
+                    ch |= check(ui, &mut n.direct, tr("Direct messages")).changed();
+                    ch |= check(ui, &mut n.replies, tr("Replies in threads I'm in")).changed();
+                    ch |= check(ui, &mut n.huddles, tr("Huddles and calls")).changed();
+                    ch |= check(ui, &mut n.reactions, tr("Reactions to my messages")).changed();
+                    ch |= check(ui, &mut n.task_changes, tr("Changes to my tasks (status, due date, priority)")).changed();
                     ui.horizontal(|ui| {
-                        ch |= ui.checkbox(&mut n.due, tr("My tasks due today, each day at")).changed();
-                        let te = ui.add_enabled(n.due, egui::TextEdit::singleline(&mut n.due_time).hint_text("09:00").desired_width(54.0));
+                        ch |= check(ui, &mut n.due, tr("My tasks due today, each day at")).changed();
+                        let te = ui.add_enabled(n.due, field(&mut n.due_time).hint_text("09:00").desired_width(54.0));
                         name_it(&te, "Due notice time");
                         ch |= te.changed();
                     });
                     ui.horizontal(|ui| {
-                        ch |= ui.checkbox(&mut n.meetings, tr("Meetings, this many minutes before:")).changed();
+                        ch |= check(ui, &mut n.meetings, tr("Meetings, this many minutes before:")).changed();
                         let dv = ui.add_enabled(n.meetings, egui::DragValue::new(&mut n.meeting_minutes).range(1..=120));
                         name_it(&dv, "Minutes before a meeting");
                         ch |= dv.changed();
                     });
-                    ch |= ui.checkbox(&mut n.goals, tr("My goals due tomorrow or today")).changed();
+                    ch |= check(ui, &mut n.goals, tr("My goals due tomorrow or today")).changed();
                     if manages {
-                        ch |= ui.checkbox(&mut n.team, tr("Someone joins the workspace")).changed();
+                        ch |= check(ui, &mut n.team, tr("Someone joins the workspace")).changed();
                     }
-                    ch |= ui.checkbox(&mut n.forms, tr("Answers to my forms")).changed();
-                    ch |= ui.checkbox(&mut n.connection, tr("The team server connection drops and comes back")).changed();
+                    ch |= check(ui, &mut n.forms, tr("Answers to my forms")).changed();
+                    ch |= check(ui, &mut n.connection, tr("The team server connection drops and comes back")).changed();
                     ui.add_space(12.0);
                     ui.label(RichText::new(tr("Channel messages")).strong());
                     for (mode, label) in [("all", "Every new message"), ("mentions", "Only @mentions and my threads"), ("nothing", "Nothing")] {
@@ -1674,20 +1680,12 @@ impl App {
                 ui.add_space(6.0);
                 let a = &mut self.data.extra.apps;
                 let mut ch = false;
-                ch |= ui.checkbox(&mut a.priorities, tr("Priorities")).changed();
-                ch |= ui.checkbox(&mut a.tags, tr("Tags")).changed();
-                ch |= ui
-                    .checkbox(&mut a.time_tracking, tr("Time Tracking"))
-                    .changed();
-                ch |= ui
-                    .checkbox(&mut a.time_estimates, tr("Time Estimates"))
-                    .changed();
-                ch |= ui
-                    .checkbox(&mut a.custom_fields, tr("Custom Fields"))
-                    .changed();
-                ch |= ui
-                    .checkbox(&mut a.multiple_assignees, tr("Multiple Assignees"))
-                    .changed();
+                ch |= check(ui, &mut a.priorities, tr("Priorities")).changed();
+                ch |= check(ui, &mut a.tags, tr("Tags")).changed();
+                ch |= check(ui, &mut a.time_tracking, tr("Time Tracking")).changed();
+                ch |= check(ui, &mut a.time_estimates, tr("Time Estimates")).changed();
+                ch |= check(ui, &mut a.custom_fields, tr("Custom Fields")).changed();
+                ch |= check(ui, &mut a.multiple_assignees, tr("Multiple Assignees")).changed();
                 if ch {
                     self.dirty = true;
                 }
@@ -1744,13 +1742,13 @@ impl App {
                     .map(|k| k.1)
                     .unwrap_or("Text");
                 ui.horizontal(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(name)
+                    let r = ui.add(
+                        field(name)
                             .hint_text(tr("Field name, e.g. Budget"))
-                            .desired_width(240.0)
-                            .margin(egui::Margin::symmetric(8, 6)),
+                            .desired_width(240.0),
                     );
-                    egui::ComboBox::from_id_salt("cf_kind")
+                    name_field(&r, "Field name");
+                    let k = egui::ComboBox::from_id_salt("cf_kind")
                         .selected_text(tr(kind_label))
                         .width(150.0)
                         .show_ui(ui, |ui| {
@@ -1758,17 +1756,18 @@ impl App {
                                 ui.selectable_value(kind, k.to_string(), tr(l))
                                     .on_hover_text(tr(d));
                             }
-                        });
+                        })
+                        .response;
+                    name_it(&k, "Field type");
                 });
                 if let Some(d) = KINDS.iter().find(|k| k.0 == kind.as_str()).map(|k| k.2) {
                     ui.label(RichText::new(tr(d)).small().color(t.text3));
                 }
                 if kind == "dropdown" {
                     ui.add(
-                        egui::TextEdit::singleline(opts)
+                        field(opts)
                             .hint_text(tr("Options, comma separated: Low, Medium, High"))
-                            .desired_width(f32::INFINITY)
-                            .margin(egui::Margin::symmetric(8, 6)),
+                            .desired_width(f32::INFINITY),
                     );
                 }
                 if primary_button(ui, t, tr("Add field")).clicked() && !name.trim().is_empty() {
@@ -1803,7 +1802,7 @@ impl App {
                 for (i, a) in rules.iter().enumerate() {
                     ui.horizontal(|ui| {
                         let mut en = a.enabled;
-                        if ui.checkbox(&mut en, "").changed() {
+                        if check(ui, &mut en, "").changed() {
                             self.data.extra.automations[i].enabled = en;
                             self.dirty = true;
                         }
@@ -1950,7 +1949,7 @@ impl App {
                         }
                         _ => {
                             ui.add(
-                                egui::TextEdit::singleline(value)
+                                field(value)
                                     .hint_text(tr("Comment text"))
                                     .desired_width(200.0),
                             );
@@ -2019,7 +2018,7 @@ impl App {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(crate::trf!("Rename \"{}\" to", from));
-                        ui.add(egui::TextEdit::singleline(to).desired_width(140.0));
+                        ui.add(field(to).desired_width(140.0));
                         if primary_button(ui, t, tr("Save")).clicked() && !to.trim().is_empty() {
                             let nt = to.trim().to_lowercase();
                             for task in &mut self.data.tasks {
@@ -2042,7 +2041,7 @@ impl App {
             Modal::Import { path, result } => {
                 ui.label(tr("Import tasks from a CSV file (columns: name, status, priority, due date YYYY-MM-DD, assignee name). They go into the current list."));
                 ui.add(
-                    egui::TextEdit::singleline(path)
+                    field(path)
                         .hint_text(tr("/Users/you/Downloads/tasks.csv"))
                         .desired_width(f32::INFINITY),
                 );
@@ -2071,20 +2070,14 @@ impl App {
                 if is_channel {
                     ui.label(tr("Name"));
                     if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut self.data.channels[ci].name)
-                                .desired_width(f32::INFINITY),
-                        )
+                        .add(field(&mut self.data.channels[ci].name).desired_width(f32::INFINITY))
                         .changed()
                     {
                         self.dirty = true;
                     }
                     ui.label(tr("Topic"));
                     if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut self.data.channels[ci].topic)
-                                .desired_width(f32::INFINITY),
-                        )
+                        .add(field(&mut self.data.channels[ci].topic).desired_width(f32::INFINITY))
                         .changed()
                     {
                         self.dirty = true;
@@ -2099,7 +2092,7 @@ impl App {
                         for m in &members {
                             let mut on = self.data.channels[ci].members.contains(&m.id);
                             let allowed = manager || m.id == me;
-                            let b = ui.add_enabled(allowed, egui::Checkbox::new(&mut on, &m.name));
+                            let b = ui.add_enabled(allowed, Check::new(&mut on, &m.name));
                             let b = if allowed { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can change who else is in it.")) };
                             if b.changed() && allowed {
                                 let c = &mut self.data.channels[ci];
@@ -2205,7 +2198,7 @@ impl App {
                 ui.separator();
                 ui.label(tr("Invite by email"));
                 ui.add(
-                    egui::TextEdit::singleline(emails)
+                    field(emails)
                         .hint_text(tr("name@company.com"))
                         .desired_width(f32::INFINITY),
                 );
@@ -2239,7 +2232,7 @@ impl App {
                     "Timesheets",
                 ] {
                     let mut on = self.data.extra.rail_items.iter().any(|r| r == label);
-                    if ui.checkbox(&mut on, tr(label)).changed() {
+                    if check(ui, &mut on, tr(label)).changed() {
                         if on {
                             self.data.extra.rail_items.push(label.to_string());
                         } else {
@@ -2266,7 +2259,7 @@ impl App {
                     "Direct Messages",
                 ] {
                     let mut on = !self.data.extra.hidden_nav.iter().any(|r| r == label);
-                    if ui.checkbox(&mut on, tr(label)).changed() {
+                    if check(ui, &mut on, tr(label)).changed() {
                         if on {
                             self.data.extra.hidden_nav.retain(|r| r != label);
                         } else {
@@ -2336,7 +2329,7 @@ impl App {
             }
             Modal::Reminder { text, date, time } => {
                 let r = ui.add(
-                    egui::TextEdit::singleline(text)
+                    field(text)
                         .hint_text(tr("Remind me to..."))
                         .desired_width(f32::INFINITY),
                 );
@@ -2349,11 +2342,8 @@ impl App {
                     popup(ui, &r, ui.id().with("rem_date"), 380.0, |ui| {
                         date_menu(ui, t, ui.id().with("rem_cal"), date)
                     });
-                    ui.add(
-                        egui::TextEdit::singleline(time)
-                            .hint_text("09:00")
-                            .desired_width(60.0),
-                    );
+                    let r = ui.add(field(time).hint_text("09:00").desired_width(60.0));
+                    name_field(&r, "Reminder time");
                 });
                 if primary_button(ui, t, tr("Create Reminder")).clicked() && !text.trim().is_empty()
                 {
@@ -2471,12 +2461,12 @@ impl App {
             }
             Modal::Bookmark { title, url } => {
                 ui.add(
-                    egui::TextEdit::singleline(title)
+                    field(title)
                         .hint_text(tr("Name"))
                         .desired_width(f32::INFINITY),
                 );
                 ui.add(
-                    egui::TextEdit::singleline(url)
+                    field(url)
                         .hint_text(tr("https://..."))
                         .desired_width(f32::INFINITY),
                 );
@@ -2529,7 +2519,7 @@ impl App {
                 close = self.confirm_remove_body(ui, t, kind, *id, name)
             }
             Modal::NewDashboard { name } => {
-                ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                ui.add(field(name).desired_width(f32::INFINITY));
                 let spaces: Vec<(u64, String)> = self
                     .data
                     .spaces
@@ -3110,7 +3100,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("To:")).color(t.text2));
                     let r = ui.add(
-                        egui::TextEdit::singleline(&mut q)
+                        field(&mut q)
                             .hint_text(tr("People or Channels"))
                             .desired_width(f32::INFINITY),
                     );
@@ -3326,7 +3316,7 @@ impl App {
                 if !list {
                     if ui
                         .add(
-                            egui::TextEdit::multiline(&mut self.data.extra.notepad)
+                            field_multi(&mut self.data.extra.notepad)
                                 .hint_text(tr("Write anything. Only you can see this."))
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(18),
@@ -3353,7 +3343,7 @@ impl App {
                         ui.horizontal(|ui| {
                             if let Some(done) = check {
                                 let mut on = done;
-                                let cb = ui.checkbox(&mut on, "");
+                                let cb = crate::widgets::check(ui, &mut on, "");
                                 name_it(&cb, &format!("Check {}", text));
                                 if cb.changed() {
                                     toggle = Some(i);

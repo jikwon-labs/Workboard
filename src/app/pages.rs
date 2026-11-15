@@ -849,9 +849,7 @@ impl App {
                                     if let Some((_, text)) =
                                         self.sweep.card_rename.as_mut().filter(|r| r.0 == ci)
                                     {
-                                        let r = ui.add(
-                                            egui::TextEdit::singleline(text).desired_width(200.0),
-                                        );
+                                        let r = ui.add(field(text).desired_width(200.0));
                                         name_it(&r, "Card name");
                                         if r.lost_focus() {
                                             change = Some((ci, 3));

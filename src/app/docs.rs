@@ -955,7 +955,7 @@ impl App {
                             LineKind::Check(done) => {
                                 ui.add_space(indent_of(line) as f32 * 8.0);
                                 let mut on = done;
-                                if ui.checkbox(&mut on, "").clicked() {
+                                if check(ui, &mut on, "").clicked() {
                                     toggle = Some(start);
                                 }
                                 ui.add_space(4.0);
@@ -985,7 +985,7 @@ impl App {
                                 {
                                     if let Some(r) = rest.strip_prefix(mark) {
                                         let mut on = on;
-                                        if ui.checkbox(&mut on, "").clicked() {
+                                        if check(ui, &mut on, "").clicked() {
                                             old_toggle = Some(ln);
                                         }
                                         ui.add_space(4.0);
@@ -1684,7 +1684,7 @@ impl App {
         if rename {
             let mut title = d.title.clone();
             let r = ui.add(
-                egui::TextEdit::singleline(&mut title)
+                field(&mut title)
                     .hint_text(tr("Doc name"))
                     .desired_width(190.0),
             );
@@ -1914,11 +1914,7 @@ impl App {
             popup(ui, &r, ui.id().with(("doc_tag_add", id)), 200.0, |ui| {
                 let nid = egui::Id::new(("doc_tag_new", id));
                 let mut s: String = ui.data(|m| m.get_temp(nid)).unwrap_or_default();
-                let te = ui.add(
-                    egui::TextEdit::singleline(&mut s)
-                        .hint_text(tr("New tag"))
-                        .desired_width(180.0),
-                );
+                let te = ui.add(field(&mut s).hint_text(tr("New tag")).desired_width(180.0));
                 name_field(&te, "New tag");
                 focus_once(ui, &te);
                 if te.lost_focus()

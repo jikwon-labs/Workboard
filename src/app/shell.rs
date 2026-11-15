@@ -1748,7 +1748,7 @@ impl App {
                 }
                 if let Some(mut q) = self.side_search.take() {
                     let r = ui.add(
-                        egui::TextEdit::singleline(&mut q)
+                        field(&mut q)
                             .hint_text(tr("Search the sidebar"))
                             .desired_width(f32::INFINITY),
                     );
@@ -2320,7 +2320,7 @@ impl App {
                                 ui.horizontal(|ui| {
                                     ui.add_space(8.0);
                                     let r = ui.add(
-                                        egui::TextEdit::singleline(&mut name)
+                                        field(&mut name)
                                             .id(egui::Id::new("new_channel_input"))
                                             .hint_text(tr("channel-name"))
                                             .desired_width(170.0),
@@ -3413,7 +3413,7 @@ impl App {
                         for v in ViewKind::ALL {
                             let mut on =
                                 !self.data.extra.hidden_views.iter().any(|h| h == v.label());
-                            if ui.checkbox(&mut on, tr(v.label())).changed() {
+                            if check(ui, &mut on, tr(v.label())).changed() {
                                 if on {
                                     self.data.extra.hidden_views.retain(|h| h != v.label());
                                 } else {
@@ -3615,7 +3615,7 @@ impl App {
                         }
                         if self.show_search {
                             let r = ui.add(
-                                egui::TextEdit::singleline(&mut self.search)
+                                field(&mut self.search)
                                     .hint_text(tr("Search tasks..."))
                                     .desired_width(if compact { 110.0 } else { 180.0 }),
                             );
@@ -3858,11 +3858,7 @@ impl App {
                     let mut text: String = ui
                         .data(|d| d.get_temp::<String>(tid))
                         .unwrap_or_else(|| v.clone());
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut text)
-                            .hint_text(tr("Empty"))
-                            .desired_width(180.0),
-                    );
+                    let r = ui.add(field(&mut text).hint_text(tr("Empty")).desired_width(180.0));
                     name_field(&r, &format!("Edit {}", f.name));
                     focus_once(ui, &r);
                     let ok =
@@ -4171,7 +4167,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.add_space(36.0);
                 let r = ui.add(
-                    egui::TextEdit::singleline(&mut text)
+                    field(&mut text)
                         .hint_text(tr("Task Name"))
                         .desired_width((w - 240.0).max(200.0)),
                 );
@@ -4822,7 +4818,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width(w - 18.0);
                 let r = ui.add(
-                    egui::TextEdit::singleline(&mut text)
+                    field(&mut text)
                         .hint_text(tr("Task Name"))
                         .desired_width(f32::INFINITY),
                 );

@@ -6738,6 +6738,16 @@ fn click_notification_settings_turn_kinds_off_and_set_channels() {
     assert!(h.app.data.extra.notify.direct);
     h.click("Direct messages");
     assert!(!h.app.data.extra.notify.direct);
+    // rows past the dialog's scroll area are laid out but clipped: bring
+    // this one up before clicking it
+    let over = h.find("Direct messages").unwrap();
+    h.frame(vec![egui::Event::PointerMoved(over)]);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -120.0),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
     h.click("Reactions to my messages");
     assert!(h.app.data.extra.notify.reactions);
     // the dialog scrolls: wheel down over it to reach the channel choices
@@ -8093,4 +8103,107 @@ fn a_space_shared_to_view_or_comment_reads_only() {
     h.app.sync_rt.role = Some(wb_net::Role::Admin);
     h.settle();
     assert!(!h.has("Can comment"));
+}
+
+// ---------------------------------------------------------------- control sizes
+
+/// A text field, the buttons and drop-downs beside it are one height, and
+/// sit on one line (the fields used to be 20 pt next to 28 pt buttons).
+#[test]
+fn fields_buttons_and_drop_downs_in_a_dialog_are_one_height() {
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::SetStatus {
+        text: String::new(),
+    });
+    h.settle();
+    // a text field reports the box its text sits in: add the field's
+    // 5 pt top and bottom margin for its frame
+    let framed = |r: Rect| r.expand2(vec2(0.0, 5.0));
+    let field = framed(h.rect("Status text"));
+    let save = h.rect("Save");
+    let clear = h.rect("Clear status");
+    assert!(
+        field.height() >= save.height() - 0.5,
+        "status field {} vs Save {}",
+        field.height(),
+        save.height()
+    );
+    assert!(
+        (save.height() - clear.height()).abs() < 0.5,
+        "Save and Clear status"
+    );
+
+    h.app.modal = Some(Modal::Reminder {
+        text: String::new(),
+        date: Some(today()),
+        time: "09:00".into(),
+    });
+    h.settle();
+    let day = h.rect("Today");
+    let time = framed(h.rect("Reminder time"));
+    assert!(
+        (day.height() - time.height()).abs() < 0.5,
+        "Today and the time"
+    );
+    assert!((day.center().y - time.center().y).abs() < 0.5);
+
+    h.app.modal = Some(Modal::CustomFields {
+        name: String::new(),
+        kind: "text".into(),
+        opts: String::new(),
+    });
+    h.settle();
+    let name = framed(h.rect("Field name"));
+    let kind = h.rect("Field type");
+    assert!(
+        (name.height() - kind.height()).abs() < 0.5,
+        "field and drop-down"
+    );
+    assert!(
+        (name.top() - kind.top()).abs() < 0.5,
+        "the drop-down sits on the field's line: {} vs {}",
+        name.top(),
+        kind.top()
+    );
+}
+
+/// Check boxes are small squares, filled when on, outlined when off (egui's
+/// own took the widgets' 6 pt corners and came out as circles).
+#[test]
+fn check_boxes_are_squares_that_fill_when_ticked() {
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::CustomizeNav);
+    h.settle();
+    fn boxes(s: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+        match s {
+            egui::Shape::Rect(r)
+                if (r.rect.width() - 15.0).abs() < 0.1 && (r.rect.height() - 15.0).abs() < 0.1 =>
+            {
+                out.push(r.clone())
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| boxes(s, out)),
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for c in &h.shapes {
+        boxes(&c.shape, &mut found);
+    }
+    assert!(found.len() >= 4, "a box per app: {}", found.len());
+    for b in &found {
+        assert!(b.corner_radius.nw <= 4, "square corners, not a circle");
+    }
+    let filled = found
+        .iter()
+        .filter(|b| {
+            b.fill != h.app.t().bg && b.fill != Color32::TRANSPARENT && b.stroke.width == 0.0
+        })
+        .count();
+    let outlined = found.iter().filter(|b| b.stroke.width > 0.0).count();
+    assert!(
+        filled > 0 && outlined > 0,
+        "ticked boxes filled ({}), the others outlined ({})",
+        filled,
+        outlined
+    );
 }

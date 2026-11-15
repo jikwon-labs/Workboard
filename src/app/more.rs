@@ -1155,7 +1155,7 @@ impl App {
                         }
                     }
                     ui.label(tr("at"));
-                    ch |= ui.add(egui::TextEdit::singleline(&mut m.time).desired_width(60.0)).changed();
+                    ch |= ui.add(field(&mut m.time).desired_width(60.0)).changed();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)))).clicked() {
                             delete = true;
@@ -1167,7 +1167,7 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     for mem in &members {
                         let mut on = m.attendees.contains(&mem.id);
-                        if ui.checkbox(&mut on, &mem.name).changed() {
+                        if check(ui, &mut on, &mem.name).changed() {
                             if on {
                                 m.attendees.push(mem.id);
                             } else {
@@ -1179,10 +1179,10 @@ impl App {
                 });
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Agenda")).color(t.text2));
-                ch |= ui.add(egui::TextEdit::multiline(&mut m.agenda).hint_text(tr("What will you discuss?")).desired_rows(4).desired_width(f32::INFINITY)).changed();
+                ch |= ui.add(field_multi(&mut m.agenda).hint_text(tr("What will you discuss?")).desired_rows(4).desired_width(f32::INFINITY)).changed();
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Notes")).color(t.text2));
-                ch |= ui.add(egui::TextEdit::multiline(&mut m.notes).hint_text(tr("Write notes. Lines starting with [ ] become action items.")).desired_rows(10).desired_width(f32::INFINITY)).changed();
+                ch |= ui.add(field_multi(&mut m.notes).hint_text(tr("Write notes. Lines starting with [ ] become action items.")).desired_rows(10).desired_width(f32::INFINITY)).changed();
                 let actions: Vec<String> = m.notes.lines().filter_map(|l| l.trim().strip_prefix("[ ]").map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect();
                 if !actions.is_empty() && ui.button(trf!("Create {} tasks from action items", actions.len())).clicked() {
                     make_tasks = actions;
@@ -1413,9 +1413,7 @@ impl App {
                 let mut ch = false;
                 ui.horizontal(|ui| {
                     ui.label(tr("Name"));
-                    ch |= ui
-                        .add(egui::TextEdit::singleline(&mut g.name).desired_width(260.0))
-                        .changed();
+                    ch |= ui.add(field(&mut g.name).desired_width(260.0)).changed();
                     let mut d = g.due;
                     let r = ui.button(
                         g.due
@@ -1471,9 +1469,7 @@ impl App {
                 let mut remove = None;
                 for (i, tg) in g.targets.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        ch |= ui
-                            .add(egui::TextEdit::singleline(&mut tg.name).desired_width(180.0))
-                            .changed();
+                        ch |= ui.add(field(&mut tg.name).desired_width(180.0)).changed();
                         match &mut tg.kind {
                             TargetKind::Number {
                                 start,
@@ -1488,15 +1484,11 @@ impl App {
                                 ui.label(tr("from"));
                                 ch |= ui.add(egui::DragValue::new(start).speed(1.0)).changed();
                                 ch |= ui
-                                    .add(
-                                        egui::TextEdit::singleline(unit)
-                                            .hint_text(tr("unit"))
-                                            .desired_width(50.0),
-                                    )
+                                    .add(field(unit).hint_text(tr("unit")).desired_width(50.0))
                                     .changed();
                             }
                             TargetKind::TrueFalse { done } => {
-                                ch |= ui.checkbox(done, tr("Done")).changed();
+                                ch |= check(ui, done, tr("Done")).changed();
                             }
                             TargetKind::Tasks { ids } => {
                                 let n = ids.iter().filter(|id| closed.contains(id)).count();
@@ -1511,7 +1503,7 @@ impl App {
                                         .show(ui, |ui| {
                                             for (id, name) in &tasks {
                                                 let mut on = ids.contains(id);
-                                                if ui.checkbox(&mut on, name).changed() {
+                                                if check(ui, &mut on, name).changed() {
                                                     if on {
                                                         ids.push(*id);
                                                     } else {
@@ -1615,7 +1607,7 @@ impl App {
                 let f = &mut self.data.extra.forms[fi];
                 let mut ch = false;
                 ch |= ui.add(egui::TextEdit::singleline(&mut f.name).font(FontId::proportional(24.0)).frame(false).desired_width(f32::INFINITY)).changed();
-                ch |= ui.add(egui::TextEdit::multiline(&mut f.description).desired_rows(2).desired_width(f32::INFINITY)).changed();
+                ch |= ui.add(field_multi(&mut f.description).desired_rows(2).desired_width(f32::INFINITY)).changed();
                 ui.horizontal(|ui| {
                     ui.label(tr("Answers create tasks in"));
                     let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone()).unwrap_or_else(|| tr("choose a list").into());
@@ -1632,13 +1624,13 @@ impl App {
                 let count = f.fields.len();
                 for (i, fld) in f.fields.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        ch |= ui.add(egui::TextEdit::singleline(&mut fld.label).desired_width(220.0)).changed();
+                        ch |= ui.add(field(&mut fld.label).desired_width(220.0)).changed();
                         egui::ComboBox::from_id_salt(("map", i)).selected_text(tr(form_kind_label(&fld.map))).show_ui(ui, |ui| {
                             for (k, n) in FORM_KINDS {
                                 ch |= ui.selectable_value(&mut fld.map, k.to_string(), tr(n)).changed();
                             }
                         });
-                        let rq = ui.checkbox(&mut fld.required, tr("Required"));
+                        let rq = check(ui, &mut fld.required, tr("Required"));
                         name_it(&rq, &format!("Required {}", i + 1));
                         ch |= rq.changed();
                         let up = ui.add_enabled(i > 0, ghost(egui::Button::new("\u{2191}")));
@@ -1661,7 +1653,7 @@ impl App {
                             ui.label(RichText::new(tr("Choices")).small().color(t.text2));
                             // empty pieces are kept while typing so "a, " can grow into "a, b"
                             let mut text = fld.options.join(", ");
-                            let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(tr("Red, Green, Blue")).desired_width(300.0));
+                            let r = ui.add(field(&mut text).hint_text(tr("Red, Green, Blue")).desired_width(300.0));
                             name_it(&r, &format!("Choices {}", i + 1));
                             if r.changed() {
                                 fld.options = text.split(',').map(|x| x.trim().to_string()).collect();
@@ -1737,14 +1729,14 @@ impl App {
                             }
                             "checkbox" => {
                                 let mut on = v == "Yes";
-                                let cb = ui.checkbox(&mut on, tr("Yes"));
+                                let cb = check(ui, &mut on, tr("Yes"));
                                 name_it(&cb, &format!("Answer {}", i + 1));
                                 if cb.changed() {
                                     *v = if on { "Yes".into() } else { String::new() };
                                 }
                             }
                             "description" | "text" => {
-                                let r = ui.add(egui::TextEdit::multiline(v).desired_rows(3).desired_width(f32::INFINITY));
+                                let r = ui.add(field_multi(v).desired_rows(3).desired_width(f32::INFINITY));
                                 name_it(&r, &format!("Answer {}", i + 1));
                             }
                             k => {
@@ -1753,7 +1745,7 @@ impl App {
                                     "email" => "name@example.com",
                                     _ => "",
                                 };
-                                let r = ui.add(egui::TextEdit::singleline(v).hint_text(hint).desired_width(f32::INFINITY));
+                                let r = ui.add(field(v).hint_text(hint).desired_width(f32::INFINITY));
                                 name_it(&r, &format!("Answer {}", i + 1));
                             }
                         }
@@ -2144,7 +2136,8 @@ impl App {
                                 xr,
                                 ghost(egui::Button::new(
                                     RichText::new("\u{2716}").size(9.0).color(t.text3),
-                                )),
+                                )
+                                .small()),
                             )
                             .on_hover_text(tr("Delete note"));
                         name_it(&x, &format!("Delete note {}", i));
@@ -2326,7 +2319,7 @@ impl App {
                 let mut save = false;
                 let mut cancel = false;
                 ui.horizontal(|ui| {
-                    let te = ui.add(egui::TextEdit::singleline(text).desired_width(220.0));
+                    let te = ui.add(field(text).desired_width(220.0));
                     name_it(&te, "Reminder text");
                     let b = ui.button(
                         date.map(fmt_date)
@@ -2335,11 +2328,7 @@ impl App {
                     popup(ui, &b, ui.id().with(("rem_edit_date", id)), 380.0, |ui| {
                         date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date)
                     });
-                    ui.add(
-                        egui::TextEdit::singleline(time)
-                            .hint_text("09:00")
-                            .desired_width(54.0),
-                    );
+                    ui.add(field(time).hint_text("09:00").desired_width(54.0));
                     save = ui.button(tr("Save")).clicked()
                         || (te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                     cancel = ui.button(tr("Cancel")).clicked();
@@ -2362,7 +2351,7 @@ impl App {
             }
             ui.horizontal(|ui| {
                 let mut done = r.done;
-                let cb = ui.checkbox(&mut done, "");
+                let cb = check(ui, &mut done, "");
                 name_it(&cb, &format!("Done {}", r.text));
                 if cb.changed() {
                     if let Some(x) = self.data.extra.reminders.iter_mut().find(|x| x.id == r.id) {
@@ -2501,7 +2490,7 @@ impl App {
                     ui.label(RichText::new(tr("Cards")).small().color(t.text3));
                     for c in OV_CARDS {
                         let mut on = !self.data.extra.hidden_cards.iter().any(|x| x == c);
-                        let cb = ui.checkbox(&mut on, tr(c));
+                        let cb = check(ui, &mut on, tr(c));
                         name_it(&cb, &format!("Card {}", c));
                         if cb.changed() {
                             if on {
@@ -2982,7 +2971,7 @@ impl App {
             return;
         };
         let r = ui.add(
-            egui::TextEdit::singleline(text)
+            field(text)
                 .hint_text(tr("Task name"))
                 .desired_width(w - 8.0),
         );
@@ -3404,7 +3393,7 @@ impl App {
                 });
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let r = ui.add(
-                    egui::TextEdit::singleline(&mut q)
+                    field(&mut q)
                         .hint_text(tr("Search, or paste a link to a task, list or space..."))
                         .font(FontId::proportional(16.0))
                         .desired_width(f32::INFINITY),

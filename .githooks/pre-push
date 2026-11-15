@@ -1,0 +1,23 @@
+#!/bin/sh
+# Claude Code sessions push to main only a fast-forward commit that
+# `scripts/wt verify` (cargo test --workspace) passed. `scripts/wt ship` does
+# all of it. Pushes made by people (no CLAUDECODE) are not affected.
+[ -n "$CLAUDECODE" ] || exit 0
+marker="$(git rev-parse --path-format=absolute --git-dir)/wb-verified"
+verified=$(cat "$marker" 2>/dev/null)
+while read -r lref lsha rref rsha; do
+  [ "$rref" = refs/heads/main ] || continue
+  case $lsha in *[!0]*) ;; *) echo "pre-push: deleting main is not allowed" >&2; exit 1 ;; esac
+  case $rsha in
+    *[!0]*)
+      if ! git merge-base --is-ancestor "$rsha" "$lsha" 2>/dev/null; then
+        echo "pre-push: not a fast-forward of main. Run scripts/wt ship (it fetches and rebases)." >&2
+        exit 1
+      fi ;;
+  esac
+  if [ "$verified" != "$lsha" ]; then
+    echo "pre-push: $lsha has not passed cargo test --workspace. Run scripts/wt ship (or scripts/wt verify)." >&2
+    exit 1
+  fi
+done
+exit 0

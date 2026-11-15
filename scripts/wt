@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Worktree workflow for this repo (see CLAUDE.md): every change is made in its
+# own worktree under .claude/worktrees/, committed, tested, rebased onto
+# origin/main and pushed straight to main.
+#
+#   scripts/wt new <name>      new worktree + branch <name> off origin/main,
+#                              with a copy-on-write copy of the main checkout's
+#                              build cache; prints the worktree path last
+#   scripts/wt verify          cargo test --workspace on the committed HEAD and
+#                              record it as verified (the pre-push hook checks)
+#   scripts/wt ship            fetch, rebase onto origin/main, verify again if
+#                              HEAD changed, push HEAD to main
+#   scripts/wt rm <name> [--force]
+#                              remove a worktree and its branch; refuses
+#                              uncommitted work or commits not on main
+#   scripts/wt ls              every worktree: branch, uncommitted files,
+#                              commits ahead of / behind origin/main
+#   scripts/wt hook-create     WorktreeCreate hook for Claude Code (JSON on
+#                              stdin); same as `new`
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+main_root=$(dirname "$common_dir")
+wt_root="$main_root/.claude/worktrees"
+
+die() { echo "wt: $*" >&2; exit 1; }
+say() { echo "wt: $*" >&2; }
+git_dir() { git rev-parse --path-format=absolute --git-dir; }
+in_linked() { [ "$(git_dir)" != "$common_dir" ]; }
+marker() { echo "$(git_dir)/wb-verified"; }
+dir_for() { echo "$wt_root/${1//\//-}"; }
+
+# Clone target/debug from the main checkout (APFS clonefile: no extra disk
+# until a file changes). Crates from crates.io stay fresh, so only the
+# workspace crates build again: about 15 s instead of a full cold build.
+# incremental/ is per path and would not be reused.
+warm_cache() {
+  local src="$main_root/target/debug" dst="$1/target/debug" e
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  shopt -s dotglob nullglob
+  for e in "$src"/*; do
+    [ "$(basename "$e")" = incremental ] && continue
+    cp -cR "$e" "$dst/" 2>/dev/null || cp -R "$e" "$dst/"
+  done
+  shopt -u dotglob nullglob
+  for e in .rustc_info.json CACHEDIR.TAG; do
+    [ -f "$main_root/target/$e" ] && cp "$main_root/target/$e" "$1/target/"
+  done
+  return 0
+}
+
+cmd_new() {
+  local name=${1:-} dir
+  [ -n "$name" ] || die "usage: scripts/wt new <name>"
+  case $name in *[!A-Za-z0-9._/-]*|-*|*..*) die "name may use letters, digits, . _ - /";; esac
+  dir=$(dir_for "$name")
+  [ -e "$dir" ] && die "$dir already exists"
+  git -C "$main_root" show-ref -q --verify "refs/heads/$name" && die "branch $name already exists"
+  git -C "$main_root" fetch -q origin main || say "fetch failed; using the cached origin/main"
+  git -C "$main_root" worktree add -q -b "$name" "$dir" origin/main >&2
+  say "copying the build cache (about a minute)"
+  warm_cache "$dir"
+  say "ready: $dir (branch $name, from origin/main $(git -C "$dir" rev-parse --short HEAD))"
+  echo "$dir"
+}
+
+cmd_hook_create() {
+  local name
+  name=$(jq -r '.name // empty')
+  [ -n "$name" ] || die "no name in the hook input"
+  cmd_new "$name"
+}
+
+cmd_verify() {
+  local head
+  [ -z "$(git status --porcelain)" ] || die "commit first: verify tests the committed HEAD"
+  head=$(git rev-parse HEAD)
+  say "cargo test --workspace on $(git rev-parse --short HEAD)"
+  cargo test --workspace
+  echo "$head" > "$(marker)"
+  say "verified $(git rev-parse --short HEAD)"
+}
+
+cmd_ship() {
+  in_linked || die "run this inside a worktree, not the main checkout"
+  [ -z "$(git status --porcelain)" ] || die "uncommitted changes; commit them first"
+  git fetch -q origin main
+  if ! git merge-base --is-ancestor origin/main HEAD; then
+    say "rebasing onto origin/main $(git rev-parse --short origin/main)"
+    git rebase -q origin/main \
+      || die "rebase stopped on a conflict: resolve it, git rebase --continue, then scripts/wt ship again"
+  fi
+  [ "$(git rev-list --count origin/main..HEAD)" -gt 0 ] || die "nothing to push: HEAD is already on origin/main"
+  [ "$(cat "$(marker)" 2>/dev/null)" = "$(git rev-parse HEAD)" ] || cmd_verify
+  git push origin HEAD:main
+  say "pushed to main. Clean up from the main checkout: scripts/wt rm $(git symbolic-ref --short -q HEAD || echo '<name>')"
+}
+
+cmd_rm() {
+  local name=${1:-} force=${2:-} dir branch
+  [ -n "$name" ] || die "usage: scripts/wt rm <name> [--force]"
+  dir=$(dir_for "$name")
+  [ -d "$dir" ] || die "no worktree at $dir"
+  case "$PWD/" in "$dir"/*) die "leave the worktree first (run from the main checkout)";; esac
+  branch=$(git -C "$dir" symbolic-ref --short -q HEAD || true)
+  if [ "$force" != --force ]; then
+    [ -z "$(git -C "$dir" status --porcelain)" ] || die "$dir has uncommitted changes (--force discards them)"
+    git -C "$main_root" fetch -q origin main || true
+    if [ -n "$branch" ] && ! git -C "$main_root" merge-base --is-ancestor "$branch" origin/main; then
+      die "$branch has commits that are not on origin/main (--force drops them)"
+    fi
+  fi
+  say "removing $dir"
+  git -C "$main_root" worktree remove --force "$dir"
+  [ -z "$branch" ] || git -C "$main_root" branch -q -D "$branch"
+  say "removed $name"
+}
+
+cmd_ls() {
+  local d b dirty ahead behind
+  git -C "$main_root" fetch -q origin main 2>/dev/null || true
+  printf '%-28s %-24s %6s %6s %7s\n' WORKTREE BRANCH DIRTY AHEAD BEHIND
+  git -C "$main_root" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r d; do
+    [ "$d" = "$main_root" ] && continue
+    b=$(git -C "$d" symbolic-ref --short -q HEAD || echo '(detached)')
+    dirty=$(git -C "$d" status --porcelain | wc -l | tr -d ' ')
+    ahead=$(git -C "$d" rev-list --count origin/main..HEAD)
+    behind=$(git -C "$d" rev-list --count HEAD..origin/main)
+    printf '%-28s %-24s %6s %6s %7s\n' "${d#"$wt_root"/}" "$b" "$dirty" "$ahead" "$behind"
+  done
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+  new) cmd_new "$@" ;;
+  hook-create) cmd_hook_create ;;
+  verify) cmd_verify ;;
+  ship) cmd_ship ;;
+  rm) cmd_rm "$@" ;;
+  ls) cmd_ls ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

@@ -2272,6 +2272,13 @@ impl App {
                     "Share \"{}\" with people in your workspace.",
                     name
                 ));
+                if !self.data.members.iter().any(|m| m.id != self.data.me) {
+                    ui.label(
+                        RichText::new(tr("Only you are in this Workspace so far. Invite people by email below to work on it together."))
+                            .small()
+                            .color(t.text3),
+                    );
+                }
                 ui.add_space(4.0);
                 for m in self.data.members.clone() {
                     ui.horizontal(|ui| {

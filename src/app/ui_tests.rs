@@ -1380,6 +1380,25 @@ fn calls_say_why_there_is_no_huddle_when_the_server_is_down_and_when_nobody_else
 }
 
 #[test]
+fn share_says_when_nobody_else_is_in_the_workspace_yet() {
+    let note = "Only you are in this Workspace so far. Invite people by email below to work on it together.";
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::Share {
+        emails: String::new(),
+    });
+    h.settle();
+    assert!(!h.has(note), "a team has people to share with");
+    let mut solo = Ui1::new();
+    let me = solo.app.data.me;
+    solo.app.data.members.retain(|m| m.id == me);
+    solo.app.modal = Some(Modal::Share {
+        emails: String::new(),
+    });
+    solo.settle();
+    assert!(solo.has(note));
+}
+
+#[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();
     let ch = h.app.data.channels[0].id;

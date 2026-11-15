@@ -1170,8 +1170,13 @@ impl App {
             .show(ctx, |ui| {
                 let r = ui.allocate_rect(screen, Sense::click());
                 crate::widgets::no_pointer(&r);
-                ui.painter()
-                    .rect_filled(screen, 0.0, Color32::from_black_alpha(90));
+                // the dark theme needs its stronger overlay to set the dialog apart
+                let dim = if t.dark {
+                    t.overlay
+                } else {
+                    Color32::from_black_alpha(90)
+                };
+                ui.painter().rect_filled(screen, 0.0, dim);
                 if r.clicked() {
                     close = true;
                 }
@@ -1534,6 +1539,14 @@ impl App {
                         hover_bg(ui, &resp, r, 8.0);
                         ui.painter()
                             .circle_filled(r.center_top() + vec2(0.0, 16.0), 13.0, rgb(c));
+                        // "black" is the dark background's own colour: outline it
+                        if t.dark {
+                            ui.painter().circle_stroke(
+                                r.center_top() + vec2(0.0, 16.0),
+                                13.0,
+                                Stroke::new(1.0, t.text3),
+                            );
+                        }
                         if sel {
                             ui.painter().circle_stroke(
                                 r.center_top() + vec2(0.0, 16.0),

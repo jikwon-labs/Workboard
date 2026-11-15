@@ -469,3 +469,44 @@ fn dark_mode_tag_chips_are_readable() {
     let want = crate::widgets::chip_text_on_dark(tag_color(&tag));
     assert!(painted.iter().all(|p| p.1 == want), "{:?}", painted);
 }
+
+impl Ui1 {
+    /// Every shape painted in the last frame, nested ones included.
+    fn all_shapes(&self) -> Vec<egui::Shape> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                s => out.push(s.clone()),
+            }
+        }
+        let mut out = vec![];
+        for s in &self.shapes {
+            walk(&s.shape, &mut out);
+        }
+        out
+    }
+}
+
+#[test]
+fn dark_mode_dialogs_and_theme_swatches_stand_out() {
+    let dark = crate::theme::theme(true);
+    let mut h = Ui1::new();
+    h.app.data.dark = true;
+    h.app.data.extra.auto_theme = false;
+    h.app.modal = Some(Modal::Themes);
+    h.settle();
+    let shapes = h.all_shapes();
+    // the dialog's backdrop is the theme's overlay
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), h.size);
+    assert!(shapes.iter().any(|s| matches!(s,
+        egui::Shape::Rect(r) if r.rect == screen && r.fill == dark.overlay)));
+    // every theme colour swatch, "black" too, has an outline
+    let rings = shapes
+        .iter()
+        .filter(|s| {
+            matches!(s,
+            egui::Shape::Circle(c) if c.radius == 13.0 && c.stroke.color == dark.text3)
+        })
+        .count();
+    assert_eq!(rings, crate::theme::ACCENTS.len());
+}

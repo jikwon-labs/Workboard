@@ -824,7 +824,8 @@ fn search_shows_recent_items_and_finds_docs() {
     h.settle();
     assert!(h.has("Recent"));
     h.click("Docs");
-    h.click("\u{1F4C4}  Project brief");
+    // (results are named by their title; the doc glyph is drawn beside it)
+    h.click_side("Project brief", true);
     assert_eq!(h.app.section, Section::Docs);
 }
 
@@ -3150,3 +3151,291 @@ fn sidebar_lists_reorder_by_drag() {
     assert!(h.app.data.spaces[0].lists.is_empty());
 }
 
+// ---------------------------------------------------------------- apps sweep (home, planner, reminders, apps, search)
+
+fn cmd_key(h: &mut Ui1, key: egui::Key) {
+    let cmd = egui::Modifiers { command: true, mac_cmd: true, ..Default::default() };
+    h.frame(vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: cmd }]);
+    h.frame(vec![egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: cmd }]);
+    h.settle();
+}
+
+#[test]
+fn home_my_work_row_ticks_done() {
+    let mut h = Ui1::new();
+    h.app.actions.push(Action::Go(Location::Home));
+    h.settle();
+    h.click("Complete Renew passport");
+    let t = h.app.data.tasks.iter().find(|t| t.name == "Renew passport").unwrap();
+    assert!(h.app.data.is_closed(t));
+    // the Done section starts folded
+    h.app.home_collapsed.remove("Done");
+    h.settle();
+    h.click("Reopen Renew passport");
+    let t = h.app.data.tasks.iter().find(|t| t.name == "Renew passport").unwrap();
+    assert!(!h.app.data.is_closed(t));
+}
+
+#[test]
+fn planner_day_adds_a_task_for_me() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Planner;
+    h.settle();
+    let day = h.app.planner_week + Duration::days(3);
+    h.click(&format!("Add task on {}", day.format("%a %-d")));
+    h.type_text("Planned from the day");
+    h.key(egui::Key::Enter);
+    let t = h.app.data.tasks.iter().find(|t| t.name == "Planned from the day").expect("task added");
+    assert_eq!(t.due, Some(day));
+    assert_eq!(t.assignees, vec![h.app.data.me]);
+}
+
+#[test]
+fn reminders_snooze_edit_delete_and_show_done() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    h.app.data.extra.reminders.push(Reminder { id: 501, text: "Call the bank".into(), due_ts: now_ts() + 600, done: false, owner: me });
+    h.app.data.extra.reminders.push(Reminder { id: 502, text: "Old one".into(), due_ts: now_ts() - 600, done: true, owner: me });
+    h.click("Inbox");
+    h.click("Snooze Call the bank");
+    h.click("Tomorrow 9 AM");
+    let r = h.app.data.extra.reminders.iter().find(|r| r.id == 501).unwrap();
+    assert!(r.due_ts > now_ts() + 3600);
+    h.click("Edit Call the bank");
+    h.click("Reminder text");
+    h.type_text(" back");
+    h.click("Save");
+    assert!(h.app.data.extra.reminders.iter().any(|r| r.text == "Call the bank back"));
+    assert!(!h.has("Old one"));
+    h.click("Show done reminders");
+    assert!(h.has("Old one"));
+    h.click("Done Old one");
+    assert!(!h.app.data.extra.reminders.iter().find(|r| r.id == 502).unwrap().done, "a done reminder can be ticked back");
+    h.click("Delete Call the bank back");
+    assert!(!h.app.data.extra.reminders.iter().any(|r| r.id == 501));
+}
+
+#[test]
+fn inbox_later_item_goes_back_to_primary() {
+    let mut h = Ui1::new();
+    let tid = h.app.data.tasks[1].id;
+    let ts = now_ts() - 30;
+    h.app.data.tasks[1].activity.push(Activity { ts, author: 2, text: "Over to you".into(), comment: true, post: false, ..Default::default() });
+    let key = format!("{}:{}:2", tid, ts);
+    h.app.data.extra.inbox_later.push(key.clone());
+    h.click("Inbox");
+    h.click("Inbox Later");
+    let p = h.find("Write copy for landing page").expect("the item is in Later");
+    h.hover(p);
+    h.click("Primary");
+    assert!(!h.app.data.extra.inbox_later.contains(&key));
+}
+
+#[test]
+fn replies_show_chat_replies_and_mark_one_read() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let c = h.app.data.channels.iter_mut().find(|c| c.name == "general").unwrap();
+    let mut m = c.messages[0].clone();
+    m.id = 9001;
+    m.author = me;
+    m.text = "Who has the keys?".into();
+    let mut r = m.clone();
+    r.id = 9002;
+    r.author = 3;
+    r.text = "I do".into();
+    r.ts = now_ts();
+    r.replies = vec![];
+    m.replies = vec![r];
+    c.messages.push(m);
+    h.app.data.extra.replies_seen = now_ts() - 100;
+    h.click("Replies");
+    assert!(h.has("Reply in #general"));
+    h.click("Mark read I do");
+    assert!(h.app.data.extra.replies_read.contains(&"msg:9002".to_string()));
+    assert!(!h.has("Reply in #general"));
+}
+
+#[test]
+fn whiteboard_notes_delete_undo_and_clear_asks() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    let wb = h.app.data.extra.whiteboards.iter_mut().find(|w| w.id == wid).unwrap();
+    wb.notes.push(Sticky { pos: [40.0, 40.0], text: "One".into(), color: [0xf8, 0xae, 0x00] });
+    wb.strokes.push(WbStroke { color: [0, 0, 0], width: 2.0, points: vec![[1.0, 1.0], [5.0, 5.0]] });
+    h.settle();
+    h.click("Note colour 1");
+    h.settle();
+    let board = |h: &Ui1| h.app.data.extra.whiteboards.iter().find(|w| w.id == wid).cloned().unwrap();
+    h.key(egui::Key::Escape);
+    h.click("Delete note 1");
+    assert!(board(&h).notes.is_empty());
+    h.click("Undo");
+    assert_eq!(board(&h).notes.len(), 1, "undo brings the note back");
+    h.click("Clear");
+    assert_eq!(board(&h).strokes.len(), 1, "Clear asks first");
+    h.click("Yes");
+    let b = board(&h);
+    assert!(b.strokes.is_empty() && b.notes.is_empty(), "{:?} {:?} {:?}", b.strokes.len(), b.notes.len(), h.app.sweep.confirm);
+    h.click("Delete");
+    h.click("Yes");
+    assert!(h.app.data.extra.whiteboards.iter().all(|w| w.id != wid));
+    assert!(h.app.data.extra.trash.iter().any(|x| x.kind == "Whiteboard"));
+}
+
+#[test]
+fn form_questions_reorder_require_and_block_bad_submit() {
+    let mut h = Ui1::new();
+    h.app.new_form();
+    h.settle();
+    let fid = h.app.form_open.unwrap();
+    let form = |h: &Ui1| h.app.data.extra.forms.iter().find(|f| f.id == fid).cloned().unwrap();
+    h.click("Move question 2 up");
+    assert_eq!(form(&h).fields[0].label, "Details");
+    h.click("Required 1");
+    assert!(form(&h).fields[0].required);
+    h.app.form_mode_fill = true;
+    h.settle();
+    let n = h.app.data.tasks.len();
+    h.click("Submit");
+    assert_eq!(h.app.data.tasks.len(), n, "a required question stops the submit");
+    assert!(h.app.sweep.form_error.as_deref().unwrap_or("").contains("Details"));
+    h.click("Answer 1");
+    h.type_text("Needs a desk");
+    h.click("Submit");
+    assert_eq!(h.app.data.tasks.len(), n + 1);
+    // answers don't follow you to another form
+    h.app.form_fill.insert(0, "left over".into());
+    h.app.new_form();
+    h.settle();
+    assert!(!h.app.form_fill.values().any(|v| v == "left over"));
+}
+
+#[test]
+fn dashboard_cards_move_rename_remove_and_add() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Team board");
+    h.settle();
+    let did = h.app.dash_open.unwrap();
+    let cards = |h: &Ui1| h.app.data.extra.dashboards.iter().find(|d| d.id == did).unwrap().cards.clone();
+    h.click("Remove card Tasks by priority");
+    assert!(!cards(&h).unwrap().iter().any(|c| c.kind == "priority"));
+    h.click("Move card up Workload by assignee");
+    assert_eq!(cards(&h).unwrap()[1].kind, "workload");
+    h.click("Rename card Task totals");
+    h.type_text(" now");
+    h.key(egui::Key::Enter);
+    assert_eq!(cards(&h).unwrap()[0].title, "Task totals now");
+    h.click("+ Add card");
+    h.click("Add card Tasks by priority");
+    assert_eq!(cards(&h).unwrap().last().unwrap().kind, "priority");
+    // the dashboard can be renamed and starred
+    h.click("Star");
+    assert!(h.app.data.extra.starred.contains(&format!("dash:{}", did)));
+}
+
+#[test]
+fn hub_workspace_overview_opens_the_same_dashboard() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Other");
+    h.app.dash_open = None;
+    h.settle();
+    h.click("\u{1F4CA}  Workspace overview");
+    let first = h.app.dash_open;
+    h.app.dash_open = None;
+    h.settle();
+    h.click("\u{1F4CA}  Workspace overview");
+    assert_eq!(h.app.dash_open, first);
+    assert_eq!(h.app.data.extra.dashboards.iter().filter(|d| d.name == "Workspace overview").count(), 1);
+}
+
+#[test]
+fn search_link_arrows_and_enter() {
+    let mut h = Ui1::new();
+    let tid = h.app.data.tasks.iter().find(|t| t.name == "Newsletter draft").unwrap().id;
+    h.app.palette = Some(format!("workboard://task/{}", tid));
+    h.settle();
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.open_task, Some(tid));
+    h.app.open_task = None;
+    // arrows move the highlight; Enter opens the highlighted result
+    h.app.palette = Some("Projects".into());
+    h.settle();
+    h.key(egui::Key::ArrowDown);
+    let rows = h.app.search_rows("Projects", 0);
+    assert_eq!(h.app.sweep.search_sel, 1);
+    h.key(egui::Key::Enter);
+    assert!(h.app.palette.is_none());
+    assert_eq!(h.app.sweep.search_recent.first().map(String::as_str), Some("Projects"));
+    if let super::more::Hit::Go(l) = rows[1].4 {
+        assert_eq!(h.app.loc, l);
+    }
+}
+
+#[test]
+fn cmd_brackets_and_comma_shortcuts() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    cmd_key(&mut h, egui::Key::OpenBracket);
+    assert_eq!(h.app.loc, start, "Cmd+[ goes back");
+    cmd_key(&mut h, egui::Key::CloseBracket);
+    assert_eq!(h.app.loc, Location::Inbox, "Cmd+] goes forward");
+    cmd_key(&mut h, egui::Key::Comma);
+    assert_eq!(h.app.section, Section::Settings);
+}
+
+#[test]
+fn trash_empty_asks_then_clears() {
+    let mut h = Ui1::new();
+    let lid = h.app.data.spaces[1].lists[0].id;
+    h.app.do_delete(Target::List(lid));
+    h.app.modal = Some(Modal::Trash);
+    h.settle();
+    h.click("Empty trash");
+    assert!(!h.app.data.extra.trash.is_empty());
+    h.click("Yes");
+    assert!(h.app.data.extra.trash.is_empty());
+}
+
+#[test]
+fn team_color_and_my_teams() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Teams;
+    h.settle();
+    h.click_side("Create Team", true);
+    let id = h.app.team_open.unwrap();
+    h.click("Team color 3");
+    assert_eq!(h.app.data.extra.teams.iter().find(|t| t.id == id).unwrap().color, STATUS_PALETTE[3]);
+    h.app.data.extra.teams.push(Team { id: 7, name: "Not mine".into(), members: vec![2], color: [1, 1, 1] });
+    h.click("My Teams");
+    assert_eq!(h.app.hub_filter, 4);
+    assert!(h.has("Team 1") && !h.has("Not mine"));
+}
+
+#[test]
+fn timesheet_entry_edits_and_week_picker() {
+    let mut h = Ui1::new();
+    let td = today();
+    let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+    let start = td.and_hms_opt(10, 0, 0).unwrap().and_local_timezone(chrono::Local).single().unwrap().timestamp();
+    let i = h.app.data.tasks.iter().position(|t| t.name == "Renew passport").unwrap();
+    h.app.data.tasks[i].time_entries = vec![TimeEntry { start, end: start + 1800, user: Some(1) }];
+    h.app.section = Section::Timesheets;
+    h.app.sheet_week = ws;
+    h.app.sheet_entries = true;
+    h.settle();
+    h.click("Edit entry Renew passport");
+    h.app.sweep.entry_edit.as_mut().unwrap().3 = 2.0;
+    h.click("Save");
+    let e = &h.app.data.tasks[i].time_entries[0];
+    assert_eq!(e.end - e.start, 7200);
+    h.app.sheet_entries = false;
+    h.settle();
+    h.click("Pick a week");
+    assert!(h.has("Today") || h.has("Tomorrow"), "the week picker opens a calendar");
+}

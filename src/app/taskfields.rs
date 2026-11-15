@@ -161,7 +161,7 @@ pub(super) fn estimate_field(ui: &mut Ui, id: egui::Id, est: &mut Option<u32>) {
 
 /// The time entries popup under Track time: the entries (newest first)
 /// with a remove button, and a row to add time by hand.
-pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) {
+pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task, me: u64) {
     ui.label(RichText::new("Time entries").small().color(t.text3));
     if task.time_entries.is_empty() {
         ui.label(RichText::new("No time tracked yet").color(t.text3));
@@ -209,7 +209,7 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
     if add {
         if let Some(min) = parse_estimate(&buf).filter(|m| *m > 0) {
             let end = now_ts() - if yesterday { 86400 } else { 0 };
-            task.time_entries.push(TimeEntry { start: end - min as i64 * 60, end });
+            task.time_entries.push(TimeEntry { start: end - min as i64 * 60, end, user: Some(me) });
             buf.clear();
         }
     }

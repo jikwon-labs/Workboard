@@ -684,7 +684,11 @@ fn an_online_only_tool_says_workboard_has_no_such_service() {
     match &h.app.modal {
         Some(Modal::Unavailable { title, body }) => {
             assert_eq!(title, "Talk to Text");
-            assert!(body.starts_with("Talk to Text needs an online service"), "{}", body);
+            assert!(
+                body.starts_with("Talk to Text needs an online service"),
+                "{}",
+                body
+            );
             assert!(body.contains("Workboard doesn't have"), "{}", body);
             assert!(!body.contains("server"), "{}", body);
         }

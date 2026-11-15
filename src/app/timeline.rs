@@ -1,6 +1,7 @@
 // Timeline view: tasks as bars on a time axis, in swimlanes by assignee (or
 // status, priority or list). A task with several assignees shows in each of
-// their lanes. Bars in a lane share rows when their days don't overlap.
+// their lanes. Bars in a lane share rows when they don't overlap on screen,
+// counting a name written beside a narrow bar.
 // Tasks without dates wait in a tray above the axis. The axis, the zoom and
 // the bar dragging are the Gantt's (src/app/timebar.rs).
 //
@@ -75,6 +76,17 @@ impl App {
     /// The lanes for `tasks` grouped by `by`, holding the tasks that have
     /// dates. By assignee there is always an Unassigned lane.
     pub(super) fn timeline_lanes(&self, tasks: &[&Task], by: GroupBy) -> Vec<Lane> {
+        self.timeline_lanes_with(tasks, by, |_, r| r.1)
+    }
+
+    /// `timeline_lanes`, packing rows by the last day each bar takes up on
+    /// screen (`reach`), so a name drawn beside a bar keeps its row clear.
+    pub(super) fn timeline_lanes_with(
+        &self,
+        tasks: &[&Task],
+        by: GroupBy,
+        reach: impl Fn(&Task, (NaiveDate, NaiveDate)) -> NaiveDate,
+    ) -> Vec<Lane> {
         let dated: Vec<&Task> = tasks
             .iter()
             .copied()
@@ -93,13 +105,18 @@ impl App {
         groups
             .into_iter()
             .map(|group| {
+                let mut taken = vec![];
                 let ranges: Vec<(u64, (NaiveDate, NaiveDate))> = group
                     .tasks
                     .iter()
                     .filter_map(|id| dated.iter().find(|x| x.id == *id))
-                    .filter_map(|x| bar_range(x.start, x.due).map(|r| (x.id, r)))
+                    .filter_map(|x| {
+                        let r = bar_range(x.start, x.due)?;
+                        taken.push((r.0, reach(x, r).max(r.1)));
+                        Some((x.id, r))
+                    })
                     .collect();
-                let (rows, n) = pack_rows(&ranges.iter().map(|(_, r)| *r).collect::<Vec<_>>());
+                let (rows, n) = pack_rows(&taken);
                 Lane {
                     group,
                     bars: ranges
@@ -118,7 +135,19 @@ impl App {
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let td = today();
         let sc = DayScale::new(self.timeline.zoom, td);
-        let lanes = self.timeline_lanes(&tasks.iter().collect::<Vec<_>>(), self.timeline.by);
+        let font = FontId::proportional(timebar::BAR_NAME_SIZE);
+        let lanes = self.timeline_lanes_with(
+            &tasks.iter().collect::<Vec<_>>(),
+            self.timeline.by,
+            |x, r| {
+                let w = ui.fonts(|f| {
+                    f.layout_no_wrap(x.name.clone(), font.clone(), Color32::WHITE)
+                        .size()
+                        .x
+                });
+                sc.reach(r, w)
+            },
+        );
         let undated: Vec<&Task> = tasks
             .iter()
             .filter(|x| bar_range(x.start, x.due).is_none())
@@ -366,6 +395,55 @@ mod tests {
         // the order given doesn't matter, rows follow first days
         let (rows, n) = pack_rows(&[(d(6), d(7)), (d(0), d(1)), (d(3), d(4))]);
         assert_eq!((rows, n), (vec![0, 0, 0], 1));
+    }
+
+    #[test]
+    fn a_name_beside_a_narrow_bar_counts_as_taken() {
+        // Day scale: 30 points a day
+        let sc = DayScale::new(0, d(0));
+        // a three-day bar (88 points) holds its name: it reaches its due date
+        assert_eq!(sc.reach((d(0), d(2)), 300.0), d(2));
+        // a one-day bar writes a 100-point name to its right: 5 + 100 + 6
+        // points cover 4 more day columns
+        assert_eq!(sc.reach((d(0), d(0)), 100.0), d(4));
+        // at the Month scale (4 points a day) the same name covers 28 days
+        let sc = DayScale::new(2, d(0));
+        assert_eq!(sc.reach((d(0), d(0)), 100.0), d(28));
+    }
+
+    #[test]
+    fn bars_next_to_each_other_split_rows_when_a_name_would_overlap() {
+        let mut a = app();
+        let ids: Vec<u64> = a.filtered().iter().map(|t| t.id).take(2).collect();
+        for (n, id) in ids.iter().enumerate() {
+            let t = a.data.tasks.iter_mut().find(|t| t.id == *id).unwrap();
+            t.assignees.clear();
+            t.start = None;
+            t.due = Some(d(n as i64));
+        }
+        let tasks = a.filtered();
+        let unassigned = |lanes: Vec<Lane>| lanes.into_iter().last().unwrap();
+        // by dates alone the two one-day bars share a row
+        let lane = unassigned(a.timeline_lanes(&tasks, GroupBy::Assignee));
+        let rows: Vec<usize> = lane
+            .bars
+            .iter()
+            .filter(|b| ids.contains(&b.0))
+            .map(|b| b.2)
+            .collect();
+        assert_eq!(rows[0], rows[1]);
+        // with the first bar's name written beside it, they don't
+        let sc = DayScale::new(0, d(0));
+        let lane =
+            unassigned(a.timeline_lanes_with(&tasks, GroupBy::Assignee, |_, r| sc.reach(r, 100.0)));
+        let rows: Vec<usize> = lane
+            .bars
+            .iter()
+            .filter(|b| ids.contains(&b.0))
+            .map(|b| b.2)
+            .collect();
+        assert_ne!(rows[0], rows[1]);
+        assert_eq!(lane.rows, lane.bars.iter().map(|b| b.2).max().unwrap() + 1);
     }
 
     #[test]

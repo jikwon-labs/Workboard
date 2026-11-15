@@ -5114,6 +5114,40 @@ fn timeline_bar_opens_and_drags_dates() {
 }
 
 #[test]
+fn timeline_keeps_a_name_beside_a_bar_off_the_next_bar() {
+    let mut h = Ui1::new();
+    // two one-day tasks on neighbouring days in the Unassigned lane: the
+    // first bar is too narrow for its name, which is written to its right
+    let a = task_named(&h, "Write copy for landing page").id;
+    let b = task_named(&h, "Set up analytics dashboard").id;
+    let today = today();
+    for (n, id) in [a, b].into_iter().enumerate() {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.assignees.clear();
+        t.start = None;
+        t.due = Some(today + Duration::days(n as i64));
+    }
+    h.click("View Timeline");
+    let first = rect_of(&h, "Bar Write copy for landing page");
+    let second = rect_of(&h, "Bar Set up analytics dashboard");
+    assert!(first.width() < 60.0, "one day wide: {}", first.width());
+    assert!(
+        second.left() - first.right() < 60.0,
+        "the bars sit on neighbouring days"
+    );
+    assert!(
+        (first.center().y - second.center().y).abs() > 20.0,
+        "the second bar gets its own row: {:?} {:?}",
+        first,
+        second
+    );
+    let lane = rect_of(&h, "Lane UNASSIGNED");
+    for r in [first, second] {
+        assert!(r.center().y > lane.top() && r.center().y < lane.bottom());
+    }
+}
+
+#[test]
 fn timeline_tray_lists_tasks_without_dates() {
     let mut h = Ui1::new();
     h.click("View Timeline");

@@ -51,7 +51,31 @@ impl DayScale {
     pub fn today_offset(&self, today: NaiveDate, view_w: f32) -> f32 {
         (self.x_of(0.0, today) - view_w * 0.3).max(0.0)
     }
+
+    /// Width of the bar drawn for the days `s..=e`.
+    pub fn bar_w(&self, (s, e): (NaiveDate, NaiveDate)) -> f32 {
+        (self.cw * ((e - s).num_days() + 1) as f32 - 2.0).max(8.0)
+    }
+
+    /// The last day a bar for `range` takes up on screen. A bar too narrow
+    /// for its name writes the name to its right (`name_w` points wide), so
+    /// it reaches past its due date by the days the name and a gap cover.
+    pub fn reach(&self, range: (NaiveDate, NaiveDate), name_w: f32) -> NaiveDate {
+        if self.bar_w(range) > NAME_INSIDE_W {
+            return range.1;
+        }
+        // the name starts 5 points past the bar's day column; keep 6 clear
+        let past = ((5.0 + name_w + 6.0) / self.cw).ceil() as i64;
+        range.1 + Duration::days(past)
+    }
 }
+
+/// Bars wider than this show the task name inside; narrower ones write it
+/// to the right of the bar.
+pub(super) const NAME_INSIDE_W: f32 = 60.0;
+
+/// Font size of the task name on a bar.
+pub(super) const BAR_NAME_SIZE: f32 = 11.5;
 
 /// The days a task's bar covers: start to due, or a single day when only one
 /// of them is set. None when it has no dates.
@@ -260,12 +284,12 @@ impl App {
                 );
             }
         }
-        if r.width() > 60.0 {
+        if r.width() > NAME_INSIDE_W {
             p.with_clip_rect(r).text(
                 r.left_center() + vec2(6.0, 0.0),
                 Align2::LEFT_CENTER,
                 &task.name,
-                FontId::proportional(11.5),
+                FontId::proportional(BAR_NAME_SIZE),
                 Color32::WHITE,
             );
         } else {
@@ -273,7 +297,7 @@ impl App {
                 r.right_center() + vec2(6.0, 0.0),
                 Align2::LEFT_CENTER,
                 &task.name,
-                FontId::proportional(11.5),
+                FontId::proportional(BAR_NAME_SIZE),
                 t.text2,
             );
         }

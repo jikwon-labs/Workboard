@@ -27,14 +27,20 @@ fn list_panel_frame(t: &Theme) -> egui::Frame {
 /// Space Overview cards that Customize can turn off.
 pub const OV_CARDS: [&str; 5] = ["Recent", "Docs", "Bookmarks", "Folders", "Lists"];
 
-/// What the whiteboard's Undo takes back, newest last.
+/// What the whiteboard's Undo takes back, newest last. Only my own actions
+/// are kept here, by the id of the stroke or note, so a teammate's stroke
+/// or note merged in meanwhile is never the one taken back.
 pub enum WbUndo {
-    Stroke,
-    Note,
+    /// I drew this stroke.
+    Stroke(u64),
+    /// I added this note.
+    Note(u64),
+    /// I deleted this note; it sat at this place in the list.
     NoteGone(usize, Sticky),
+    /// I erased this stroke; it sat at this place in the list.
     StrokeGone(usize, WbStroke),
-    /// A note was dragged away from this spot.
-    NoteMoved(usize, [f32; 2]),
+    /// I dragged this note away from this spot.
+    NoteMoved(u64, [f32; 2]),
 }
 
 /// How a whiteboard is shown: board coordinates (where strokes and notes
@@ -96,6 +102,8 @@ pub struct SweepUi {
     /// Whiteboard pen width (0 = the standard 2.5).
     pub wb_width: f32,
     pub wb_undo: Vec<(u64, WbUndo)>,
+    /// The pen stroke being drawn: (whiteboard, stroke id).
+    pub wb_drawing: Option<(u64, u64)>,
     /// Each whiteboard's pan and zoom on screen (not saved).
     pub wb_view: HashMap<u64, WbView>,
     /// The form `form_fill` holds answers for.
@@ -2020,6 +2028,9 @@ impl App {
                         y += step;
                     }
                 }
+                // strokes and notes put in without an id (an older copy)
+                // get theirs before anything goes by id
+                self.data.fix_board_ids();
                 let wb = &mut self.data.extra.whiteboards[wi];
                 for s in &wb.strokes {
                     let pts: Vec<egui::Pos2> =
@@ -2034,6 +2045,10 @@ impl App {
                 let mut drop_note = None;
                 let mut recolor = None;
                 for (i, n) in wb.notes.iter_mut().enumerate() {
+                    // every widget of a note takes its id from the note, so
+                    // notes skipped off screen don't hand their ids (and the
+                    // typing focus) to another note
+                    let key = if n.id != 0 { n.id } else { (1 << 63) | i as u64 };
                     let r = Rect::from_min_size(view.to_screen(origin, n.pos), vec2(160.0, 120.0) * z);
                     // notes off the visible part of the board are not drawn
                     if !r.intersects(rect) {
@@ -2047,12 +2062,17 @@ impl App {
                     p.rect_filled(r, 4.0 * z, rgb(n.color).gamma_multiply(0.35).to_opaque());
                     let inner =
                         Rect::from_min_max(r.min + vec2(8.0, 18.0) * z, r.max - vec2(8.0, 8.0) * z);
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("wb_note", wid, key))
+                            .max_rect(inner),
+                    );
                     child.set_clip_rect(inner.intersect(rect));
                     if z >= 0.45
                         && child
                             .add(
                                 egui::TextEdit::multiline(&mut n.text)
+                                    .id(egui::Id::new(("wb_note_text", wid, key)))
                                     .frame(false)
                                     .font(FontId::proportional(13.0 * z))
                                     .desired_width(144.0 * z)
@@ -2073,9 +2093,9 @@ impl App {
                         );
                     }
                     if self.wb_tool == 2 && !space {
-                        let h = ui.interact(r.intersect(rect), ui.id().with(("note", i)), Sense::drag());
+                        let h = ui.interact(r.intersect(rect), ui.id().with(("note", wid, key)), Sense::drag());
                         if h.drag_started() {
-                            move_from = Some((i, n.pos));
+                            move_from = Some((n.id, n.pos));
                         }
                         if h.dragged() {
                             drag_note = Some((i, h.drag_delta() / z));
@@ -2086,7 +2106,7 @@ impl App {
                         Rect::from_center_size(r.left_top() + vec2(12.0, 10.0) * z, vec2(14.0, 14.0));
                     if rect.contains_rect(dot) {
                         let dr =
-                            ui.interact(dot, ui.id().with(("note_color", wid, i)), Sense::click());
+                            ui.interact(dot, ui.id().with(("note_color", wid, key)), Sense::click());
                         name_it(&dr, &format!("Note colour {}", i + 1));
                         p.circle_filled(dot.center(), 5.0, rgb(n.color));
                         hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
@@ -2098,7 +2118,7 @@ impl App {
                         popup(
                             ui,
                             &dr,
-                            ui.id().with(("note_color_pop", wid, i)),
+                            ui.id().with(("note_color_pop", wid, key)),
                             150.0,
                             |ui| {
                                 ui.horizontal_wrapped(|ui| {
@@ -2131,15 +2151,19 @@ impl App {
                     let xr =
                         Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0) * z, vec2(16.0, 16.0));
                     if rect.contains_rect(xr) {
-                        let x = ui
-                            .put(
-                                xr,
-                                ghost(egui::Button::new(
-                                    RichText::new("\u{2716}").size(9.0).color(t.text3),
-                                )
-                                .small()),
-                            )
-                            .on_hover_text(tr("Delete note"));
+                        let x = ui.interact(xr, ui.id().with(("note_x", wid, key)), Sense::click());
+                        hover_bg(ui, &x, xr, 4.0);
+                        p.text(
+                            xr.center(),
+                            Align2::CENTER_CENTER,
+                            "\u{2716}",
+                            FontId::proportional(9.0),
+                            if x.hovered() { t.text } else { t.text3 },
+                        );
+                        if x.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        let x = x.on_hover_text(tr("Delete note"));
                         name_it(&x, &format!("Delete note {}", i));
                         if x.clicked() {
                             drop_note = Some(i);
@@ -2156,8 +2180,8 @@ impl App {
                     self.sweep.wb_undo.push((wid, WbUndo::NoteGone(i, n)));
                     self.dirty = true;
                 }
-                if let Some((i, at)) = move_from {
-                    self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(i, at)));
+                if let Some((id, at)) = move_from {
+                    self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(id, at)));
                 }
                 if let Some((i, d)) = drag_note {
                     wb.notes[i].pos[0] += d.x;
@@ -2182,26 +2206,43 @@ impl App {
                                     .map(|o| view.to_board(origin, o));
                                 let mut points: Vec<[f32; 2]> = start.into_iter().collect();
                                 points.push([local.x, local.y]);
-                                wb.strokes.push(WbStroke {
-                                    id: 0,
+                                // a real id from the first point on: a merge
+                                // while the button is still down must see a
+                                // board whose every item has one (see
+                                // wb_sync::is_id_array)
+                                let id = self.data.new_id();
+                                self.data.extra.whiteboards[wi].strokes.push(WbStroke {
+                                    id,
                                     color: self.wb_color,
                                     width: self.sweep.wb_width,
                                     points,
                                 });
-                                self.sweep.wb_undo.push((wid, WbUndo::Stroke));
+                                self.sweep.wb_drawing = Some((wid, id));
+                                self.sweep.wb_undo.push((wid, WbUndo::Stroke(id)));
+                                self.dirty = true;
                             } else if resp.dragged() {
-                                if let Some(s) = wb.strokes.last_mut() {
+                                // the stroke being drawn, wherever a merge put
+                                // it (a teammate's strokes can come after it)
+                                let drawing = self.sweep.wb_drawing.filter(|d| d.0 == wid);
+                                if let Some(s) = drawing.and_then(|(_, sid)| {
+                                    self.data.extra.whiteboards[wi]
+                                        .strokes
+                                        .iter_mut()
+                                        .find(|s| s.id == sid)
+                                }) {
                                     s.points.push([local.x, local.y]);
                                 }
                             }
                             if resp.drag_stopped() {
+                                self.sweep.wb_drawing = None;
                                 self.dirty = true;
                             }
                         }
                         1 => {
                             if resp.clicked() {
-                                wb.notes.push(Sticky {
-                                    id: 0,
+                                let id = self.data.new_id();
+                                self.data.extra.whiteboards[wi].notes.push(Sticky {
+                                    id,
                                     pos: [local.x - 80.0, local.y - 60.0],
                                     text: String::new(),
                                     color: if self.wb_color == [32, 32, 32] {
@@ -2210,7 +2251,7 @@ impl App {
                                         self.wb_color
                                     },
                                 });
-                                self.sweep.wb_undo.push((wid, WbUndo::Note));
+                                self.sweep.wb_undo.push((wid, WbUndo::Note(id)));
                                 self.dirty = true;
                             }
                         }
@@ -2223,6 +2264,7 @@ impl App {
                                             < s.width + 6.0 / z
                                     })
                                 };
+                                let wb = &mut self.data.extra.whiteboards[wi];
                                 while let Some(i) = wb.strokes.iter().position(hit) {
                                     let s = wb.strokes.remove(i);
                                     self.sweep.wb_undo.push((wid, WbUndo::StrokeGone(i, s)));
@@ -2253,22 +2295,48 @@ impl App {
         let Some(wb) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) else {
             return;
         };
-        match op {
-            WbUndo::Stroke => {
-                wb.strokes.pop();
-            }
-            WbUndo::Note => {
-                wb.notes.pop();
-            }
-            WbUndo::NoteGone(i, n) => wb.notes.insert(i.min(wb.notes.len()), n),
-            WbUndo::StrokeGone(i, s) => wb.strokes.insert(i.min(wb.strokes.len()), s),
-            WbUndo::NoteMoved(i, at) => {
-                if let Some(n) = wb.notes.get_mut(i) {
-                    n.pos = at;
+        // by id: a stroke or note a teammate took away meanwhile is left
+        // alone (nothing happens), and theirs are never touched
+        let done = match op {
+            WbUndo::Stroke(id) => match wb.strokes.iter().position(|s| s.id == id) {
+                Some(i) => {
+                    wb.strokes.remove(i);
+                    true
                 }
+                None => false,
+            },
+            WbUndo::Note(id) => match wb.notes.iter().position(|n| n.id == id) {
+                Some(i) => {
+                    wb.notes.remove(i);
+                    true
+                }
+                None => false,
+            },
+            WbUndo::NoteGone(i, n) => {
+                let back = !wb.notes.iter().any(|x| x.id == n.id);
+                if back {
+                    wb.notes.insert(i.min(wb.notes.len()), n);
+                }
+                back
             }
+            WbUndo::StrokeGone(i, s) => {
+                let back = !wb.strokes.iter().any(|x| x.id == s.id);
+                if back {
+                    wb.strokes.insert(i.min(wb.strokes.len()), s);
+                }
+                back
+            }
+            WbUndo::NoteMoved(id, at) => match wb.notes.iter_mut().find(|n| n.id == id) {
+                Some(n) => {
+                    n.pos = at;
+                    true
+                }
+                None => false,
+            },
+        };
+        if done {
+            self.dirty = true;
         }
-        self.dirty = true;
     }
 
     // ---------------------------------------------------------------- reminders

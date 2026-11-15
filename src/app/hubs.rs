@@ -1312,12 +1312,14 @@ impl App {
                         "Root Cause Analysis" => vec![("Problem", [680.0, 160.0]), ("People", [60.0, 40.0]), ("Process", [300.0, 40.0]), ("Tools", [60.0, 300.0]), ("Environment", [300.0, 300.0])],
                         _ => vec![],
                     };
+                    // each note gets its id now, like any new item
+                    let ids: Vec<u64> = notes.iter().map(|_| self.data.new_id()).collect();
                     if let Some(w) = self.wb_open.and_then(|id| self.data.extra.whiteboards.iter_mut().find(|w| w.id == id)) {
                         if name != "Start from scratch" {
                             w.name = name.clone();
                         }
-                        for (i, (txt, pos)) in notes.into_iter().enumerate() {
-                            w.notes.push(Sticky { id: 0, pos, text: txt.to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
+                        for (i, ((txt, pos), id)) in notes.into_iter().zip(ids).enumerate() {
+                            w.notes.push(Sticky { id, pos, text: txt.to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
                         }
                     }
                 }

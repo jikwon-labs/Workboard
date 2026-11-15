@@ -75,6 +75,7 @@ pub const T: &[(&str, &str)] = &[
     ("Link copied", "링크를 복사했습니다"),
     ("Start timer", "타이머 시작"),
     ("Stop timer", "타이머 중지"),
+    ("Stop (started by an older app)", "중지 (이전 버전 앱에서 시작됨)"),
     ("Delete task", "작업 삭제"),
     ("\u{25CE}  Status", "\u{25CE}  상태"),
     ("\u{2714} Done", "\u{2714} 완료"),
@@ -124,8 +125,6 @@ pub const T: &[(&str, &str)] = &[
     ("Statuses - {}", "상태 - {}"),
     ("+ Add status", "+ 상태 추가"),
     ("Renamed statuses are renamed on their tasks too; tasks of a deleted status move to a status of the same kind.", "상태 이름을 바꾸면 그 상태의 작업에도 반영됩니다. 상태를 삭제하면 그 작업은 같은 종류의 상태로 옮겨집니다."),
-    ("you", "나"),
-    ("Add person", "사람 추가"),
     ("Create Task", "작업 만들기"),
     ("Choose list", "목록 선택"),
     ("\u{1F464} Assignee", "\u{1F464} 담당자"),
@@ -162,5 +161,4 @@ pub const T: &[(&str, &str)] = &[
     ("Monthly", "매월"),
     ("Yearly", "매년"),
     // timers
-    ("{} is tracking time on this task", "{} 님이 이 작업의 시간을 기록하고 있습니다"),
 ];

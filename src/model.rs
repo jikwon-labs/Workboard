@@ -221,6 +221,13 @@ pub struct TimeEntry {
     pub member: u64,
 }
 
+/// A timer someone runs on a task (see `Task::timers`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct RunningTimer {
+    pub member: u64,
+    pub start: i64,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Task {
     pub id: u64,
@@ -242,6 +249,10 @@ pub struct Task {
     /// was recorded (see `Data::is_my_timer`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer_by: Option<u64>,
+    /// Timers more people run on the task at once, one per person, besides
+    /// the one in `timer_started` (which older apps still read).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timers: Vec<RunningTimer>,
     pub estimate_min: Option<u32>,
     pub created: i64,
     pub updated: i64,
@@ -303,7 +314,14 @@ impl Task {
         if let Some(st) = self.timer_started {
             s += now - st;
         }
+        s += self.timers.iter().map(|r| now - r.start).sum::<i64>();
         s
+    }
+
+    /// Every running timer: who started it (None for an old timer that
+    /// didn't record it) and when.
+    pub fn running_timers(&self) -> Vec<(Option<u64>, i64)> {
+        self.timer_started.map(|st| (self.timer_by, st)).into_iter().chain(self.timers.iter().map(|r| (Some(r.member), r.start))).collect()
     }
 
     /// Who a time entry belongs to: its owner, or for an entry from before
@@ -772,6 +790,10 @@ pub struct Extra {
     /// [member, task] pairs.
     #[serde(default)]
     pub sheet_rows: Vec<[u64; 2]>,
+    /// Rows added to one week's timesheet: [member, task, week] (the week's
+    /// first day in days from the common era).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sheet_week_rows: Vec<[u64; 3]>,
 }
 
 impl Default for Extra {
@@ -814,6 +836,7 @@ impl Default for Extra {
             welcome: false,
             closed_dms: vec![],
             sheet_rows: vec![],
+            sheet_week_rows: vec![],
         }
     }
 }
@@ -1221,11 +1244,78 @@ impl Data {
     /// recorded who started it counts as mine only when I'm alone in the
     /// workspace, so it is never stopped behind a teammate's back.
     pub fn is_my_timer(&self, t: &Task) -> bool {
-        t.timer_started.is_some()
-            && match t.timer_by {
-                Some(m) => m == self.me,
+        self.my_timer_start(t).is_some()
+    }
+
+    /// When my timer on the task started, if one runs.
+    pub fn my_timer_start(&self, t: &Task) -> Option<i64> {
+        let legacy = t.timer_started.filter(|_| match t.timer_by {
+            Some(m) => m == self.me,
+            None => self.solo(),
+        });
+        legacy.or_else(|| t.timers.iter().find(|r| r.member == self.me).map(|r| r.start))
+    }
+
+    /// A timer from an older app that didn't record who started it, in a
+    /// workspace with more people: nobody's to stop, so it is offered to
+    /// stop by hand.
+    pub fn ownerless_timer(&self, t: &Task) -> bool {
+        t.timer_started.is_some() && t.timer_by.is_none() && !self.solo()
+    }
+
+    /// Starts my timer on a task (other people's timers keep running).
+    pub fn start_my_timer(&mut self, task_id: u64, now: i64) {
+        let me = self.me;
+        let Some(t) = self.tasks.iter_mut().find(|t| t.id == task_id) else { return };
+        if t.timer_started.is_none() {
+            t.timer_started = Some(now);
+            t.timer_by = Some(me);
+        } else if !t.timers.iter().any(|r| r.member == me) {
+            t.timers.push(RunningTimer { member: me, start: now });
+        }
+    }
+
+    /// Stops my timer on one task, keeping the time as my entry.
+    pub fn stop_my_timer(&mut self, task_id: u64, now: i64) {
+        let me = self.me;
+        let Some(i) = self.tasks.iter().position(|t| t.id == task_id) else { return };
+        let legacy_mine = self.tasks[i].timer_started.is_some()
+            && match self.tasks[i].timer_by {
+                Some(m) => m == me,
                 None => self.solo(),
+            };
+        let t = &mut self.tasks[i];
+        if legacy_mine {
+            if let Some(st) = t.timer_started.take() {
+                t.time_entries.push(TimeEntry { start: st, end: now, member: me });
             }
+            t.timer_by = None;
+            // the next person's timer moves into the field older apps read
+            if !t.timers.is_empty() {
+                let r = t.timers.remove(0);
+                t.timer_started = Some(r.start);
+                t.timer_by = Some(r.member);
+            }
+        } else if let Some(k) = t.timers.iter().position(|r| r.member == me) {
+            let r = t.timers.remove(k);
+            t.time_entries.push(TimeEntry { start: r.start, end: now, member: me });
+        }
+    }
+
+    /// Stops a timer an older app started without an owner, keeping the
+    /// time without an owner too.
+    pub fn stop_ownerless_timer(&mut self, task_id: u64, now: i64) {
+        let Some(t) = self.tasks.iter_mut().find(|t| t.id == task_id) else { return };
+        if t.timer_by.is_none() {
+            if let Some(st) = t.timer_started.take() {
+                t.time_entries.push(TimeEntry { start: st, end: now, member: 0 });
+            }
+            if !t.timers.is_empty() {
+                let r = t.timers.remove(0);
+                t.timer_started = Some(r.start);
+                t.timer_by = Some(r.member);
+            }
+        }
     }
 
     /// A time entry counts as mine (old entries: see `Task::entry_owner`;
@@ -1239,14 +1329,9 @@ impl Data {
 
     /// Stops every timer of mine, keeping the time as my entries.
     pub fn stop_my_timers(&mut self, now: i64) {
-        let me = self.me;
-        let mine: Vec<usize> = (0..self.tasks.len()).filter(|i| self.is_my_timer(&self.tasks[*i])).collect();
-        for i in mine {
-            let t = &mut self.tasks[i];
-            if let Some(st) = t.timer_started.take() {
-                t.time_entries.push(TimeEntry { start: st, end: now, member: me });
-            }
-            t.timer_by = None;
+        let mine: Vec<u64> = self.tasks.iter().filter(|t| self.is_my_timer(t)).map(|t| t.id).collect();
+        for id in mine {
+            self.stop_my_timer(id, now);
         }
     }
 
@@ -1499,6 +1584,7 @@ impl Data {
                 time_entries: vec![],
                 timer_started: None,
                 timer_by: None,
+                timers: vec![],
                 estimate_min: None,
                 created: now - 86400 * 3 + i as i64,
                 updated: now,
@@ -1536,6 +1622,7 @@ impl Data {
                 time_entries: vec![],
                 timer_started: None,
                 timer_by: None,
+                timers: vec![],
                 estimate_min: None,
                 created: now,
                 updated: now,

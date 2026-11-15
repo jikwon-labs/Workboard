@@ -1813,7 +1813,14 @@ impl App {
                         self.section = Section::Ai;
                     }
                     if hb(ui, "\u{2699}  Automate").clicked() {
-                        self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None });
+                        // new rules run where I am, as from the sidebar menus
+                        // (a folder's rules run in its space)
+                        let scope = match self.loc {
+                            Location::List(_) | Location::Space(_) => Some(self.loc),
+                            Location::Folder(f) => self.data.spaces.iter().find(|s| s.folders.iter().any(|x| x.id == f)).map(|s| Location::Space(s.id)),
+                            _ => None,
+                        };
+                        self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope });
                     }
                     if hb(ui, "\u{260E}").on_hover_text(tr("Start a huddle")).clicked() {
                         self.open_call_dialog();
@@ -2199,7 +2206,9 @@ impl App {
         for task in rows {
             self.task_row(ui, task, 0);
             if self.subtasks_open || self.expanded_tasks.contains(&task.id) {
-                let subs: Vec<Task> = self.subtasks(task.id).into_iter().cloned().collect();
+                // a subtask that is a row of its own here (my subtasks on My
+                // Tasks) isn't shown a second time under its parent
+                let subs: Vec<Task> = self.subtasks(task.id).into_iter().filter(|s| !tasks.iter().any(|x| x.id == s.id)).cloned().collect();
                 for s in &subs {
                     self.task_row(ui, s, 1);
                 }
@@ -2742,7 +2751,7 @@ impl App {
                 } else {
                     paint_outline_flag(&p, b.center(), icon_col);
                 }
-                let nsub = self.data.tasks.iter().filter(|s| s.parent == Some(task.id)).count();
+                let nsub = self.subtasks(task.id).len();
                 if nsub > 0 {
                     p.text(pos2(b.right() + 8.0, r.center().y), Align2::LEFT_CENTER, format!("\u{2934} {}", nsub), FontId::proportional(12.0), t.text3);
                 }

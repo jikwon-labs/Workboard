@@ -12,7 +12,10 @@ pub const T: &[(&str, &str)] = &[
     ("Guest", "게스트"),
     ("Invited", "초대됨"),
     ("Active (member)", "활성"),
-    ("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.", "초대한 사람은 공유 서버에 연결되면 접근할 수 있습니다. 그전까지는 이 컴퓨터에서 로그아웃 \u{2192} 사람 전환으로 사용할 수 있습니다."),
+    ("Invited people can join once you share this workspace (Work together). Until then they can use this computer through Switch person in the profile menu.", "이 워크스페이스를 공유하면(함께 작업하기) 초대한 사람이 참가할 수 있습니다. 그전까지는 프로필 메뉴의 사람 전환으로 이 컴퓨터에서 쓸 수 있습니다."),
+    ("Invited people sign in with the invite code the server emails them. Owners and admins also find the codes in Work together > People while connected.", "초대한 사람은 서버가 이메일로 보내는 초대 코드로 로그인합니다. 소유자와 관리자는 연결되어 있을 때 함께 작업하기 > 사람에서도 코드를 볼 수 있습니다."),
+    ("Invited people join from the shared folder: on their computer they open Work together, paste the folder's path, choose Join this workspace and pick their name.", "초대한 사람은 공유 폴더로 참가합니다. 자기 컴퓨터에서 함께 작업하기를 열고 폴더 경로를 붙여 넣은 뒤 이 워크스페이스에 참가를 누르고 자기 이름을 고르면 됩니다."),
+    ("Changing roles and removing people need the team's server. They come back once it's connected.", "역할 변경과 사람 제거는 팀 서버가 있어야 합니다. 서버에 연결되면 다시 나타납니다."),
     // inbox
     ("Primary", "주요"),
     ("Other", "기타"),

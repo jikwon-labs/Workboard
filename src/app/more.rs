@@ -260,6 +260,11 @@ impl App {
                     });
                 });
                 ui.label(RichText::new(trf!("Manage who can access {}", self.data.workspace)).color(t.text2));
+                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                if server && self.sync_rt.role.is_none() {
+                    // the server says who may manage people, once it's reached
+                    ui.label(RichText::new(tr("Changing roles and removing people need the team's server. They come back once it's connected.")).small().color(super::together::WARN));
+                }
                 ui.add_space(12.0);
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
@@ -271,7 +276,6 @@ impl App {
                 let me = self.data.me;
                 // on a team server only its owner and admins manage people, and
                 // the server keeps the roles; alone or in a shared folder it's local
-                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
                 let manages = !server || self.sync_rt.role.is_some_and(|r| r.manages());
                 let mut remove = None;
                 for m in &members {
@@ -320,8 +324,16 @@ impl App {
                 if let Some((id, name)) = remove {
                     self.modal = Some(Modal::ConfirmRemove { kind: "person", id, name });
                 }
-                ui.add_space(12.0);
-                ui.label(RichText::new(tr("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.")).small().color(t.text3));
+                // how invited people get in, for where this workspace is kept
+                if members.iter().any(|m| m.invited) {
+                    let how = match &self.data.extra.shared {
+                        None => tr("Invited people can join once you share this workspace (Work together). Until then they can use this computer through Switch person in the profile menu."),
+                        Some(c) if c.server.is_some() => tr("Invited people sign in with the invite code the server emails them. Owners and admins also find the codes in Work together > People while connected."),
+                        Some(_) => tr("Invited people join from the shared folder: on their computer they open Work together, paste the folder's path, choose Join this workspace and pick their name."),
+                    };
+                    ui.add_space(12.0);
+                    ui.label(RichText::new(how).small().color(t.text3));
+                }
             });
         });
     }

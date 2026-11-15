@@ -1166,6 +1166,43 @@ fn work_together_on_a_server_that_is_down_leads_with_working_offline_and_can_cha
 }
 
 #[test]
+fn people_says_why_roles_are_missing_offline_and_how_invited_people_join() {
+    let mut h = Ui1::new();
+    h.app.section = Section::People;
+    h.settle();
+    // nobody invited: no note about invited people
+    let invited_note = |h: &Ui1| h.tree.iter().any(|(n, _)| n.starts_with("Invited people "));
+    assert!(!invited_note(&h));
+    h.app
+        .invite_people(&["dana@example.com".to_string()], "Member");
+    h.settle();
+    assert!(h.has("Invited people can join once you share this workspace (Work together). Until then they can use this computer through Switch person in the profile menu."));
+    assert!(h.has("Remove") && !h.has("Changing roles and removing people need the team's server. They come back once it's connected."));
+    // on a server that can't be reached yet: the owner's controls are gone, and it says why
+    server_down(&mut h);
+    h.app.section = Section::People;
+    h.settle();
+    assert!(!h.has("Remove"));
+    assert!(h.has("Changing roles and removing people need the team's server. They come back once it's connected."));
+    assert!(h.has("Invited people sign in with the invite code the server emails them. Owners and admins also find the codes in Work together > People while connected."));
+    // signed in as the owner: the controls are back, the note goes
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.settle();
+    assert!(h.has("Remove"));
+    assert!(!h.has("Changing roles and removing people need the team's server. They come back once it's connected."));
+    // a shared folder: invited people join from the folder
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: "/tmp/wb-none".into(),
+        device: "dev-f".into(),
+        tag: 1,
+        server: None,
+    });
+    h.settle();
+    assert!(h.has("Invited people join from the shared folder: on their computer they open Work together, paste the folder's path, choose Join this workspace and pick their name."));
+}
+
+#[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();
     let ch = h.app.data.channels[0].id;

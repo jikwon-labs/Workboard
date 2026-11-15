@@ -3770,28 +3770,25 @@ impl App {
                                 FontId::proportional(12.5),
                                 t.text3,
                             );
-                            let tg = ui.painter().layout_no_wrap(
-                                title.clone(),
+                            // the title keeps all but 200 for the grey place after
+                            // it; both are shortened with an ellipsis
+                            let title_r = paint_fit(
+                                ui,
+                                pos2(rr.left() + 28.0, rr.center().y),
+                                Align2::LEFT_CENTER,
+                                title,
                                 FontId::proportional(14.0),
                                 t.text,
+                                w - 200.0,
                             );
-                            let tw = tg.size().x.min(w - 200.0);
-                            ui.painter()
-                                .with_clip_rect(Rect::from_min_max(
-                                    rr.min,
-                                    pos2(rr.left() + 28.0 + tw, rr.bottom()),
-                                ))
-                                .galley(
-                                    pos2(rr.left() + 28.0, rr.center().y - tg.size().y / 2.0),
-                                    tg,
-                                    t.text,
-                                );
-                            ui.painter().with_clip_rect(rr).text(
-                                pos2(rr.left() + 40.0 + tw, rr.center().y),
+                            paint_fit(
+                                ui,
+                                pos2(title_r.right() + 12.0, rr.center().y),
                                 Align2::LEFT_CENTER,
                                 place,
                                 FontId::proportional(12.0),
                                 t.text3,
+                                rr.right() - 8.0 - (title_r.right() + 12.0),
                             );
                             if resp.clicked() {
                                 chosen = Some(hit.clone());

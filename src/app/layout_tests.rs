@@ -746,3 +746,44 @@ fn table_fits_its_columns_and_shortens_names_and_tags() {
         "the tags that don't fit are counted"
     );
 }
+
+#[test]
+fn search_shortens_a_long_path_before_its_kind() {
+    let mut h = Ui1::new();
+    heavy(&mut h);
+    h.app.palette = Some("very long list".into());
+    h.settle();
+    let path = format!("Team Space / {}", LONG_LIST);
+    assert!(h.has(&path), "the long list is found");
+    let row = h.rect(&path);
+    let texts = h.texts_in(row);
+    assert!(
+        texts
+            .iter()
+            .any(|(t, _)| t.ends_with('\u{2026}')
+                && path.starts_with(t.trim_end_matches('\u{2026}'))),
+        "the path is shortened with an ellipsis: {:?}",
+        texts
+    );
+    let over = overlapping(&texts);
+    assert!(over.is_empty(), "{:?}", over);
+    let cut = h.cut_texts(row);
+    assert!(cut.is_empty(), "{:?}", cut);
+    // a gap between the path and the grey kind after it
+    let title = texts
+        .iter()
+        .find(|(t, _)| t.ends_with('\u{2026}'))
+        .unwrap()
+        .1;
+    let kind = texts
+        .iter()
+        .find(|(t, _)| t == tr("List"))
+        .expect("the kind")
+        .1;
+    assert!(
+        kind.left() - title.right() >= 8.0,
+        "{:?} then {:?}",
+        title,
+        kind
+    );
+}

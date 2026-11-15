@@ -65,6 +65,18 @@ fn docs_page_does_not_offer_the_task_csv_importer() {
 }
 
 #[test]
+fn dashboard_status_card_shows_zeros_with_no_space() {
+    let mut h = with(no_space(), 1440.0, 1400.0);
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Board");
+    h.settle();
+    let texts = h.texts();
+    for st in ["TO DO", "IN PROGRESS", "COMPLETE"] {
+        assert!(texts.iter().any(|x| x == st), "{} row: {:?}", st, texts);
+    }
+}
+
+#[test]
 fn open_tasks_per_person_agree_on_dashboard_and_teams() {
     let mut h = Ui1::sized(1440.0, 1400.0);
     // a subtask assigned to someone counts as their work on both pages

@@ -1026,6 +1026,10 @@ impl App {
                             .iter()
                             .filter(|x| self.data.status_of(x).name == st.name)
                             .count()
+                // no space yet: the statuses a new space starts with, all at 0
+                if sts.is_empty() {
+                    sts = default_statuses();
+                }
                     })
                     .collect();
                 let max = counts.iter().copied().max().unwrap_or(1) as f32;

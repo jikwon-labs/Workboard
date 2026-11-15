@@ -766,21 +766,10 @@ impl Files {
             .map(|(s, _)| s.clone())
             .collect();
         for sha in shas {
-            // gone from the cache: nothing to send any more
-            if self.local(&sha).is_none() {
-                self.background.remove(&sha);
-                self.backlog_dirty = true;
-                continue;
-            }
             match remote {
                 Remote::Folder(f) => {
                     let folder = f.join("files");
-                    if folder.join(&sha).is_file() {
-                        self.background.remove(&sha);
-                        self.backlog_dirty = true;
-                        continue;
-                    }
-                    let Some(b) = self.background.get_mut(&sha) else {
+                    let Some(b) = self.background.get(&sha) else {
                         continue;
                     };
                     // copied a moment ago: look again a little later
@@ -791,6 +780,17 @@ impl Files {
                             }
                             continue;
                         }
+                    }
+                    // there now, or gone from the cache (nothing to copy)
+                    if folder.join(&sha).is_file() || self.local(&sha).is_none() {
+                        self.background.remove(&sha);
+                        self.backlog_dirty = true;
+                        continue;
+                    }
+                    let Some(b) = self.background.get_mut(&sha) else {
+                        continue;
+                    };
+                    if b.fetch.next.is_some() {
                         b.fetch.tries += 1;
                     }
                     b.fetch.next = Some(
@@ -809,6 +809,12 @@ impl Files {
                     }
                     let state = self.state(&sha);
                     if matches!(state, Some(Transfer::Up(_))) {
+                        continue;
+                    }
+                    // gone from the cache (cleaned up): nothing to send
+                    if state.is_none() && self.local(&sha).is_none() {
+                        self.background.remove(&sha);
+                        self.backlog_dirty = true;
                         continue;
                     }
                     let Some(b) = self.background.get_mut(&sha) else {

@@ -23,6 +23,8 @@
   - 서버 다시 켜기: `launchctl kickstart -k gui/$(id -u)/com.jikwon-labs.workboard-server` → 로그에 `iPhone notifications on (APNs, topic ...)` 이 보이면 된다. `off: ...` 면 뒤에 적힌 이유(빠진 항목, 키 파일 못 읽음)를 고친다.
   - 확인: iPhone 에서 알림을 허용하고 앱을 백그라운드로 보낸 뒤 1~2분 기다린다(서버가 연결이 끊긴 걸 알아챌 때까지). 다른 사람이 DM 을 보내면 배너가 떠야 한다. 안 뜨면 로그의 `couldn't send a notification ...` 줄을 본다.
 
+- [ ] **서버 다시 설치(스페이스 공유와 권한)**: `cd ~/Documents/workboard && git pull && deploy/install-launchd.sh`. 고른 사람에게만 공유된 스페이스를 서버가 숨기고, 권한 없는 변경을 되돌리는 코드가 들어갔다(`docs/server-design.md` "스페이스 공유와 권한"). 위 재설치들과 같이 해도 된다
+
 ## 끝난 일
 
 (아직 없음)

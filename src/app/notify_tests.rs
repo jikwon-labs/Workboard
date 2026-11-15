@@ -694,3 +694,31 @@ fn comments_on_a_task_i_duplicated_notify_like_the_inbox_shows_them() {
     a.notify_scan();
     assert_eq!(kinds(&a), vec![Kind::Comment]);
 }
+
+
+#[test]
+fn the_dock_count_follows_the_sidebar_seen_rule() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    a.mark_read(dm);
+    let base = a.dock_count();
+    post(&mut a, dm, 2, "read already");
+    a.mark_read(dm);
+    assert_eq!(a.dock_count(), base);
+    // a message whose author's clock is behind arrives after I read: it is
+    // older than last_read but not seen, so it counts (as in the sidebar)
+    let id = a.data.new_id();
+    let late = msg(id, 2, "late", now_ts() - 3600);
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == dm)
+        .unwrap()
+        .messages
+        .push(late);
+    let c = a.data.channels.iter().find(|c| c.id == dm).unwrap().clone();
+    assert_eq!(a.unread(&c), 1);
+    assert_eq!(a.dock_count(), base + 1);
+    a.mark_read(dm);
+    assert_eq!(a.dock_count(), base);
+}

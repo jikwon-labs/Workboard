@@ -7164,6 +7164,151 @@ fn an_admin_sees_code_buttons_only_for_members_without_a_password() {
 }
 
 #[test]
+fn a_reply_notice_from_a_duplicate_dm_copy_opens_its_thread() {
+    let mut h = Ui1::new();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .clone();
+    // the shown copy has a message; a second copy (made on another
+    // computer at the same time) holds a thread with a reply
+    let first = h.app.data.new_id();
+    let mut primary = dm.clone();
+    primary.messages.push(
+        serde_json::from_value(
+            serde_json::json!({"id": first, "author": 1, "text": "hello", "ts": now_ts() - 100}),
+        )
+        .unwrap(),
+    );
+    let pid = primary.id;
+    *h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == pid)
+        .unwrap() = primary;
+    let dup_id = h.app.data.new_id();
+    let parent = h.app.data.new_id();
+    let reply = h.app.data.new_id();
+    let mut dup = dm.clone();
+    dup.id = dup_id;
+    dup.messages = vec![serde_json::from_value(serde_json::json!({
+        "id": parent, "author": 2, "text": "question in the other copy", "ts": now_ts() - 50,
+        "replies": [{"id": reply, "author": 2, "text": "the answer", "ts": now_ts() - 10}]
+    }))
+    .unwrap()];
+    h.app.data.channels.push(dup);
+    h.app.open_target(&format!("chat:{}:{}", dup_id, parent));
+    h.settle();
+    assert_eq!(h.app.chat_open, Some(pid), "the shown copy opens");
+    assert_eq!(
+        h.app.thread_open,
+        Some(parent),
+        "with the thread still open"
+    );
+    assert!(h.has("Thread"), "the thread panel is on screen");
+}
+
+#[test]
+fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-ui-task-fail".into(),
+        tag: 1,
+        server: Some("127.0.0.1:9".into()),
+    });
+    super::together::save_token("127.0.0.1:9", "dev-ui-task-fail", "tok");
+    let id = open_design_task(&mut h);
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("refused.png", 40, 30)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    // the server can't be reached: not "Adding..." for ever, but why, and
+    // a way to try again
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has("Try again refused.png") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(h.has("Try again refused.png"));
+    assert!(h.app.task(id).unwrap().attachments.is_empty());
+    let sha = h.app.task_files[0].1.att.clone().unwrap().file;
+    assert!(h.app.files.is_waiting(&sha), "also tried again by itself");
+    h.click("Try again refused.png");
+    assert_eq!(h.app.task_files.len(), 1);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has("Dismiss refused.png") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.click("Dismiss refused.png");
+    super::together::forget_token("127.0.0.1:9", "dev-ui-task-fail");
+    assert!(h.app.task_files.is_empty());
+    assert!(
+        !h.app.files.is_waiting(&sha),
+        "and no longer waits to go up"
+    );
+}
+
+#[test]
+fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
+    let mut h = Ui1::new();
+    h.app
+        .apply_chat(vec![super::chat::ChatAction::NewChannel("fresh".into())]);
+    h.app.section = Section::Chat;
+    h.settle();
+    assert!(!h.has("\u{2699}  Integrate"), "no button that does nothing");
+    // a Slack export zip, "chosen" in the file picker
+    let root = std::env::temp_dir().join(format!("wb-ui-slack-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"alex","real_name":"Alex Kim","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    super::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
+    h.click("\u{2728}  Import from Slack");
+    assert!(matches!(h.app.modal, Some(Modal::SlackImport(_))));
+    h.click("Import");
+    let design = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "design")
+        .expect("the channel came in");
+    assert_eq!(design.messages[0].text, "first sketch");
+    assert_eq!(design.messages[0].ts, 1_704_189_600);
+    h.click("OK");
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
 fn home_lists_card_says_when_there_are_no_lists_and_offers_one() {
     let mut h = Ui1::new();
     // a workspace without Spaces or Lists, as a first start has

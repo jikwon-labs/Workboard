@@ -95,7 +95,10 @@ pub struct Pasted {
 }
 
 #[cfg(target_os = "macos")]
-pub use mac::{pasteboard, pick_files, probe, thumbnail, Player};
+pub use mac::{pasteboard, pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
+
+/// Longer side of the still sent along with a video.
+pub const STILL: u32 = 480;
 
 #[cfg(not(target_os = "macos"))]
 mod other {
@@ -106,8 +109,14 @@ mod other {
     pub fn thumbnail(_: &Path, _: MediaKind, _: u32) -> Option<Rgba> {
         None
     }
+    pub fn video_still_jpeg(_: &Path, _: u32) -> Option<Vec<u8>> {
+        None
+    }
     pub fn pick_files() -> Vec<PathBuf> {
         vec![]
+    }
+    pub fn pick_zip(_: &str) -> Option<PathBuf> {
+        None
     }
     pub fn pasteboard() -> Pasted {
         Pasted::default()
@@ -142,7 +151,7 @@ mod other {
     }
 }
 #[cfg(not(target_os = "macos"))]
-pub use other::{pasteboard, pick_files, probe, thumbnail, Player};
+pub use other::{pasteboard, pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -254,6 +263,15 @@ mod mac {
         static kCGImagePropertyPixelWidth: CFRef;
         static kCGImagePropertyPixelHeight: CFRef;
         static kCGImagePropertyOrientation: CFRef;
+        fn CGImageDestinationCreateWithData(
+            data: CFRef,
+            kind: CFRef,
+            count: usize,
+            options: CFRef,
+        ) -> CFRef;
+        fn CGImageDestinationAddImage(dest: CFRef, img: CFRef, props: CFRef);
+        fn CGImageDestinationFinalize(dest: CFRef) -> bool;
+        static kCGImageDestinationLossyCompressionQuality: CFRef;
     }
     #[link(name = "AVFoundation", kind = "framework")]
     extern "C" {
@@ -477,6 +495,83 @@ mod mac {
                     out
                 }
             }
+        })
+    }
+
+    /// A still from early in a video as a JPEG no larger than `max` on its
+    /// longer side: sent with the video so others can show it without
+    /// fetching the whole file.
+    pub fn video_still_jpeg(path: &Path, max: u32) -> Option<Vec<u8>> {
+        autoreleasepool(|| unsafe {
+            let asset: *mut Object = msg_send![class!(AVURLAsset), URLAssetWithURL: file_url(path) options: null_mut::<Object>()];
+            if asset.is_null() {
+                return None;
+            }
+            let gen: *mut Object =
+                msg_send![class!(AVAssetImageGenerator), assetImageGeneratorWithAsset: asset];
+            let _: () = msg_send![gen, setAppliesPreferredTrackTransform: YES];
+            let _: () = msg_send![gen, setMaximumSize: CGSize { w: max as f64, h: max as f64 }];
+            let dur: CMTime = msg_send![asset, duration];
+            // a little way in: the very first frame is often black
+            let at = (dur.to_secs().unwrap_or(0.0) / 10.0).min(1.0);
+            let mut err: *mut Object = null_mut();
+            let img: CFRef = msg_send![gen, copyCGImageAtTime: CMTime::secs(at) actualTime: null_mut::<CMTime>() error: &mut err];
+            if img.is_null() {
+                return None;
+            }
+            let data: *mut Object = msg_send![class!(NSMutableData), data];
+            let dest = CGImageDestinationCreateWithData(
+                data as CFRef,
+                ns("public.jpeg") as CFRef,
+                1,
+                null(),
+            );
+            if dest.is_null() {
+                CFRelease(img);
+                return None;
+            }
+            let q: *mut Object = msg_send![class!(NSNumber), numberWithDouble: 0.75f64];
+            let props = dict(&[(kCGImageDestinationLossyCompressionQuality, q)]);
+            CGImageDestinationAddImage(dest, img, props as CFRef);
+            let ok = CGImageDestinationFinalize(dest);
+            CFRelease(dest);
+            CFRelease(img);
+            if !ok {
+                return None;
+            }
+            let len: usize = msg_send![data, length];
+            let bytes: *const u8 = msg_send![data, bytes];
+            if bytes.is_null() || len == 0 {
+                return None;
+            }
+            Some(std::slice::from_raw_parts(bytes, len).to_vec())
+        })
+    }
+
+    /// The system file picker for one .zip file (a Slack export). Blocks
+    /// until the person chooses or cancels. Main thread only.
+    pub fn pick_zip(message: &str) -> Option<PathBuf> {
+        autoreleasepool(|| unsafe {
+            let panel: *mut Object = msg_send![class!(NSOpenPanel), openPanel];
+            let _: () = msg_send![panel, setAllowsMultipleSelection: NO];
+            let _: () = msg_send![panel, setCanChooseDirectories: NO];
+            let _: () = msg_send![panel, setCanChooseFiles: YES];
+            let _: () = msg_send![panel, setMessage: ns(message)];
+            let t: *mut Object = msg_send![class!(UTType), typeWithFilenameExtension: ns("zip")];
+            if !t.is_null() {
+                let _: () = msg_send![panel, setAllowedContentTypes: array(&[t])];
+            }
+            let r: isize = msg_send![panel, runModal];
+            if r != 1 {
+                return None;
+            }
+            let urls: *mut Object = msg_send![panel, URLs];
+            let n: usize = msg_send![urls, count];
+            if n == 0 {
+                return None;
+            }
+            let u: *mut Object = msg_send![urls, objectAtIndex: 0usize];
+            from_ns(msg_send![u, path]).map(PathBuf::from)
         })
     }
 

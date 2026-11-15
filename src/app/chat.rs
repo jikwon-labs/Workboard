@@ -213,7 +213,7 @@ impl App {
             .sum()
     }
 
-    fn unread_here(&self, c: &Channel) -> usize {
+    pub(super) fn unread_here(&self, c: &Channel) -> usize {
         let seen = self.data.extra.chat_seen.get(&c.id);
         c.messages
             .iter()
@@ -534,7 +534,16 @@ impl App {
         let primary = self.dm_primary(&channel);
         if primary != cid {
             self.chat_open = Some(primary);
-            self.thread_open = None;
+            // a thread opened in that copy (from a notification or the
+            // Inbox) stays open: the shown copy has its messages too
+            let keep = self.thread_open.is_some_and(|tid| {
+                self.conversation(&channel)
+                    .iter()
+                    .any(|d| d.messages.iter().any(|m| m.id == tid))
+            });
+            if !keep {
+                self.thread_open = None;
+            }
             return;
         }
         // with the messages of its duplicates, in time order
@@ -673,9 +682,6 @@ impl App {
                         if hb(ui, "\u{1F4DD}  Ask").clicked() {
                             self.section = Section::Ai;
                         }
-                        if hb(ui, "\u{2699}  Integrate").clicked() {
-                            self.modal = Some(super::menus::unavailable("Integrations"));
-                        }
                         if hb(ui, "\u{260E}").on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
                         }
@@ -803,7 +809,7 @@ impl App {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
                                 if ui.add(egui::Button::new(tr("\u{2728}  Import from Slack")).min_size(vec2(cw, 32.0))).clicked() {
-                                    self.modal = Some(super::menus::unavailable("Import from Slack"));
+                                    self.start_slack_import();
                                 }
                                 ui.add_space(8.0);
                                 ui.separator();

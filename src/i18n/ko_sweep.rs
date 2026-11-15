@@ -120,6 +120,8 @@ pub const T: &[(&str, &str)] = &[
     ),
     ("{} is still downloading", "{}을(를) 아직 내려받는 중입니다"),
     ("Adding {}...", "{} 추가하는 중..."),
+    ("Uploading {} {}%", "{} 올리는 중 {}%"),
+    ("Try again", "다시 시도"),
     // comments
     ("Resolve", "해결"),
     ("Resolved", "해결됨"),

@@ -278,5 +278,22 @@ final class EditTests: XCTestCase {
         let ran = t.activity.filter { $0.text.hasPrefix("Automation ran: ") }.map(\.text)
         XCTAssertEqual(ran, ["Automation ran: assign to Sam Lee", "Automation ran: set priority to Urgent", "Automation ran: comment \"Please review\""])
     }
-}
 
+    func testAVideoNamesItsStillAndOldOnesHaveNone() {
+        var d = SampleWorkspace.make()
+        let still = String(repeating: "b", count: 64)
+        let v = FileAPI.attachment(sha: String(repeating: "a", count: 64), name: "Video-1.mov", isVideo: true, bytes: 99, w: 1920, h: 1080, secs: 3, thumb: still)
+        XCTAssertEqual(v["thumb"], .string(still))
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "", attachments: [v], me: 1, id: 9410, ts: 9))
+        let m = WorkspaceView(d).channels.first { $0.id == 301 }!.messages.last!
+        XCTAssertEqual(m.attachments.first?.thumb, still)
+        // a picture never names one; a video from before stills has none
+        let p = FileAPI.attachment(sha: String(repeating: "c", count: 64), name: "a.jpg", isVideo: false, bytes: 1, w: 1, h: 1, secs: 0, thumb: still)
+        XCTAssertNil(p["thumb"])
+        let old = FileAPI.attachment(sha: String(repeating: "d", count: 64), name: "b.mov", isVideo: true, bytes: 1, w: 1, h: 1, secs: 1)
+        XCTAssertNil(old["thumb"], "left out, as the Mac app does")
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "", attachments: [old, ["file": .string(String(repeating: "e", count: 64)), "name": "c.mov", "kind": "Video", "thumb": "not-a-hash"]], me: 1, id: 9411, ts: 10))
+        let m2 = WorkspaceView(d).channels.first { $0.id == 301 }!.messages.last!
+        XCTAssertEqual(m2.attachments.map(\.thumb), [nil, nil])
+    }
+}

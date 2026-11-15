@@ -509,6 +509,11 @@ pub struct Attachment {
     /// Length of a video in seconds; 0 for a picture.
     #[serde(default)]
     pub secs: f32,
+    /// A video's still (a small JPEG, its own file by sha256 like `file`),
+    /// so others can show the video without fetching all of it. None for
+    /// pictures and for videos sent before stills were made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]

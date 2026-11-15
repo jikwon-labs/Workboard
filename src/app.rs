@@ -31,6 +31,7 @@ mod pages;
 mod parity;
 mod settings;
 mod shell;
+mod slack;
 mod taskfields;
 #[cfg(test)]
 mod tests;

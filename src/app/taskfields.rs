@@ -4,6 +4,7 @@
 // description and attachments.
 
 use super::docs::{line_kinds, toggle_check_at, LineKind};
+use super::files::Transfer;
 use super::*;
 use crate::media;
 
@@ -1033,8 +1034,11 @@ impl App {
                         ui.allocate_exact_size(size + vec2(0.0, 18.0), Sense::click());
                     name_it(&resp, &format!("Attachment {}", a.name));
                     let pic = Rect::from_min_size(rect.min, size);
-                    self.files.want(a, files::THUMB);
-                    match self.files.texture(&a.file, files::THUMB) {
+                    // a video with a still shows the still (the video is
+                    // fetched when it's opened)
+                    let shown = files::shown(a);
+                    self.files.want(&shown, files::THUMB);
+                    match self.files.texture(&shown.file, files::THUMB) {
                         Some(tex) => {
                             let uv = files::cover_uv(tex.size_vec2(), size);
                             ui.painter().add(
@@ -1106,15 +1110,36 @@ impl App {
                 self.toast = Some((trf!("{} is still downloading", a.name), now_ts()));
             }
         }
-        // files on their way
+        // files on their way: getting ready, going up, or why not (with
+        // Try again; the backlog also tries again by itself, waiting longer
+        // each time, and sends the ones waiting for a sign-in once there is one)
         let mut dismiss = None;
+        let mut retry = None;
         for (i, (ftid, p)) in self.task_files.iter().enumerate() {
             if *ftid != tid {
                 continue;
             }
-            ui.horizontal(|ui| match &p.error {
-                Some(e) => {
-                    ui.label(RichText::new(e).small().color(t.danger));
+            let state = p.transfer(&self.files);
+            ui.horizontal(|ui| match &state {
+                Some(Transfer::Failed(e)) => {
+                    ui.label(
+                        RichText::new(format!("{}: {}", p.name, App::error_text(e)))
+                            .small()
+                            .color(if e == files::NOT_SIGNED_IN {
+                                t.text2
+                            } else {
+                                t.danger
+                            }),
+                    );
+                    if p.error.is_none() && e != files::NOT_SIGNED_IN {
+                        let r = ui.add(
+                            ghost(egui::Button::new(RichText::new(tr("Try again")).small())),
+                        );
+                        name_it(&r, &format!("Try again {}", p.name));
+                        if r.clicked() {
+                            retry = p.att.clone();
+                        }
+                    }
                     let x = ui.add(ghost(egui::Button::new(
                         RichText::new("\u{2716}").size(10.0).color(t.text3),
                     )));
@@ -1123,7 +1148,15 @@ impl App {
                         dismiss = Some(i);
                     }
                 }
-                None => {
+                Some(Transfer::Up(f)) => {
+                    ui.add(egui::Spinner::new().size(12.0));
+                    ui.label(
+                        RichText::new(trf!("Uploading {} {}%", p.name, (f * 100.0) as u32))
+                            .small()
+                            .color(t.text2),
+                    );
+                }
+                _ => {
                     ui.add(egui::Spinner::new().size(12.0));
                     ui.label(
                         RichText::new(trf!("Adding {}...", p.name))
@@ -1133,8 +1166,21 @@ impl App {
                 }
             });
         }
+        if let Some(a) = retry {
+            let remote = self.media_remote();
+            for part in files::parts(&a) {
+                self.files.retry(&part.file);
+            }
+            self.files.upload(&a, &remote);
+            self.files.upload_soon(&a, &remote);
+        }
         if let Some(i) = dismiss {
-            self.task_files.remove(i);
+            let (_, p) = self.task_files.remove(i);
+            if let Some(a) = p.att {
+                if !self.file_in_use(&a.file) {
+                    self.files.forget(&a);
+                }
+            }
         }
     }
 }

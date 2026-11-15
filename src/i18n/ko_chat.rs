@@ -17,7 +17,6 @@ pub const T: &[(&str, &str)] = &[
     ("Last reply {}", "마지막 답장 {}"),
     // header
     ("\u{1F4DD}  Ask", "\u{1F4DD}  질문하기"),
-    ("\u{2699}  Integrate", "\u{2699}  연동"),
     ("Start a SyncUp", "SyncUp 시작"),
     ("+  View", "+  보기"),
     // side panel
@@ -95,4 +94,16 @@ pub const T: &[(&str, &str)] = &[
     ("Turned into tasks", "작업으로 만든 메시지"),
     ("Click to try again", "클릭해서 다시 시도"),
     ("This computer isn't signed in to the team server yet. The file goes up once it is.", "이 컴퓨터는 아직 팀 서버에 로그인하지 않았습니다. 로그인하면 파일이 올라갑니다."),
+    // Import from Slack (slack.rs)
+    ("Choose the Slack export (.zip)", "Slack 내보내기 파일(.zip)을 고르세요"),
+    ("Couldn't read the Slack export: {}", "Slack 내보내기 파일을 읽지 못했습니다: {}"),
+    ("This isn't a Slack export: channels.json is missing.", "Slack 내보내기 파일이 아닙니다: channels.json 이 없습니다."),
+    ("This Slack export has no channels.", "이 Slack 내보내기 파일에는 채널이 없습니다."),
+    ("That file couldn't be opened as a .zip.", "그 파일을 .zip 으로 열 수 없습니다."),
+    ("{} channels and {} messages in this export.", "이 내보내기 파일에 채널 {}개, 메시지 {}개가 있습니다."),
+    ("{} people are already members here (matched by email or name).", "{}명은 이미 여기 멤버입니다(이메일이나 이름으로 찾음)."),
+    ("Not members here yet: {}", "아직 여기 멤버가 아닌 사람: {}"),
+    ("Add them as members (otherwise their messages come in under your name)", "멤버로 추가하기 (추가하지 않으면 그 사람의 메시지는 내 이름으로 들어옵니다)"),
+    ("Messages keep their dates and thread replies stay in their threads. Files come in as links to Slack.", "메시지는 원래 날짜를 그대로 갖고, 스레드 답글은 스레드 안에 들어갑니다. 파일은 Slack 링크로 들어옵니다."),
+    ("Imported {} messages into {} channels.", "메시지 {}개를 채널 {}개로 가져왔습니다."),
 ];

@@ -141,4 +141,17 @@ pub const T: &[(&str, &str)] = &[
     ("End", "종료"),
     ("No color", "색상 없음"),
     ("+ New List", "+ 새 목록"),
+    // delete confirmations, whiteboards, meetings, forms
+    ("Delete note", "메모 삭제"),
+    ("Delete the dashboard \"{}\"? This can't be undone.", "대시보드 \"{}\"을(를) 삭제할까요? 되돌릴 수 없습니다."),
+    ("Delete the form \"{}\"? This can't be undone.", "양식 \"{}\"을(를) 삭제할까요? 되돌릴 수 없습니다."),
+    ("Delete the goal \"{}\"? This can't be undone.", "목표 \"{}\"을(를) 삭제할까요? 되돌릴 수 없습니다."),
+    ("Delete the meeting \"{}\"? This can't be undone.", "회의 \"{}\"을(를) 삭제할까요? 되돌릴 수 없습니다."),
+    ("Delete the team \"{}\"? This can't be undone.", "팀 \"{}\"을(를) 삭제할까요? 되돌릴 수 없습니다."),
+    ("Delete the whiteboard \"{}\"? This can't be undone.", "화이트보드 \"{}\"을(를) 삭제할까요? 되돌릴 수 없습니다."),
+    ("Remove {} from the Workspace? Their tasks and conversations stay, without them.", "{} 님을 워크스페이스에서 제거할까요? 작업과 대화는 그대로 남고, 이 사람만 빠집니다."),
+    ("Make a List first: action items become tasks in a List", "먼저 목록을 만드세요. 실행 항목은 목록 안의 작업이 됩니다"),
+    ("Tasks created from the meeting notes in {}", "회의록에서 {}에 작업을 만들었습니다"),
+    ("This form has no List for its answers. Choose one under Edit.", "이 양식에는 답변을 넣을 목록이 없습니다. 편집에서 목록을 고르세요."),
+    ("\"{}\" isn't a date. Write it as YYYY-MM-DD.", "\"{}\"은(는) 날짜가 아닙니다. YYYY-MM-DD 형식으로 적어 주세요."),
 ];

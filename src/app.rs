@@ -311,7 +311,6 @@ pub struct App {
     temp_app: Option<Section>,
     team_open: Option<u64>,
     sheet_entries: bool,
-    sheet_rows: Vec<u64>,
     composer_mode: u8,
     post_sort_old: bool,
     my_tasks_open: bool,
@@ -425,7 +424,7 @@ impl App {
         let open_task = if args.iter().any(|a| a == "--open-task") { data.tasks.first().map(|t| t.id) } else { None };
         let start_modal = match arg("--modal").as_deref() {
             Some("invite") => Some(Modal::Invite { emails: String::new(), role: "Member".into() }),
-            Some("automations") => Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() }),
+            Some("automations") => Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None }),
             Some("fields") => Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() }),
             Some("themes") => Some(Modal::Themes),
             Some("together") => Some(Modal::Together { path: String::new(), addr: String::new(), code: String::new(), result: String::new() }),
@@ -534,7 +533,6 @@ impl App {
             temp_app: None,
             team_open: None,
             sheet_entries: false,
-            sheet_rows: vec![],
             composer_mode: 0,
             post_sort_old: false,
             my_tasks_open: true,
@@ -875,8 +873,10 @@ impl App {
                             self.toast = Some((trf!("\u{1F389} Nice! \"{}\" is complete", new.name), now_ts()));
                         }
                     }
+                    let mut move_to = None;
                     if old.status != new.status {
-                        let rules: Vec<Automation> = self.data.extra.automations.iter().filter(|a| a.enabled && a.trigger_status == new.status).cloned().collect();
+                        let space = self.data.space_of_list(new.list_id).map(|s| s.id);
+                        let rules: Vec<Automation> = self.data.extra.automations.iter().filter(|a| a.enabled && a.trigger_status == new.status && a.list.is_none_or(|l| l == new.list_id || Some(l) == space)).cloned().collect();
                         for a in rules {
                             match a.action.as_str() {
                                 "assign" => {
@@ -894,7 +894,8 @@ impl App {
                                 "move" => {
                                     if let Ok(l) = a.value.parse::<u64>() {
                                         if self.data.space_of_list(l).is_some() {
-                                            new.list_id = l;
+                                            // moved below, with subtasks and statuses, as Move does
+                                            move_to = Some(l);
                                         }
                                     }
                                 }
@@ -905,8 +906,12 @@ impl App {
                     }
                     self.roll_recurring(&old, &mut new);
                     new.updated = now_ts();
+                    let nid = new.id;
                     self.data.tasks[idx] = new;
                     self.dirty = true;
+                    if let Some(l) = move_to {
+                        self.move_tasks(&[nid], l);
+                    }
                 }
             }
             Action::Add { list, name, status, priority, assignees, due, parent, open } => {
@@ -931,6 +936,7 @@ impl App {
                     activity: vec![Activity { ts: now, author: me, text: "created this task".into(), comment: false, ..Default::default() }],
                     time_entries: vec![],
                     timer_started: None,
+                    timer_by: None,
                     estimate_min: None,
                     created: now,
                     updated: now,
@@ -1073,15 +1079,35 @@ impl App {
             Action::AskDelete(tg) => self.confirm_delete = Some(tg),
             Action::ToggleTimer(id) => {
                 let now = now_ts();
-                let running = self.task(id).and_then(|t| t.timer_started).is_some();
-                for t in &mut self.data.tasks {
-                    if let Some(st) = t.timer_started.take() {
-                        t.time_entries.push(TimeEntry { start: st, end: now });
+                let me = self.data.me;
+                let Some(task) = self.task(id) else { return };
+                let running = task.timer_started.is_some();
+                let mine = self.data.is_my_timer(task);
+                match (running, mine, task.timer_by) {
+                    // a teammate's timer: theirs to stop
+                    (true, false, Some(by)) => {
+                        let who = self.data.member(by).map(|m| m.name.clone()).unwrap_or_default();
+                        self.toast = Some((trf!("{} is tracking time on this task", who), now));
+                        return;
                     }
-                }
-                if !running {
-                    if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                        t.timer_started = Some(now);
+                    // an old timer nobody owns: stopping it by hand keeps the
+                    // time without an owner
+                    (true, false, None) => {
+                        if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                            if let Some(st) = t.timer_started.take() {
+                                t.time_entries.push(TimeEntry { start: st, end: now, member: 0 });
+                            }
+                        }
+                    }
+                    _ => {
+                        // only my own timers stop; teammates' keep running
+                        self.data.stop_my_timers(now);
+                        if !running {
+                            if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                                t.timer_started = Some(now);
+                                t.timer_by = Some(me);
+                            }
+                        }
                     }
                 }
                 self.dirty = true;
@@ -3417,11 +3443,8 @@ impl eframe::App for App {
         if self.persist {
             // stop a running timer cleanly so tracked time is kept
             let now = now_ts();
-            for t in &mut self.data.tasks {
-                if let Some(st) = t.timer_started.take() {
-                    t.time_entries.push(TimeEntry { start: st, end: now });
-                }
-            }
+            // only mine: a teammate's timer keeps running
+            self.data.stop_my_timers(now);
             if self.ws_file == "data.json" {
                 self.data.save();
             } else {

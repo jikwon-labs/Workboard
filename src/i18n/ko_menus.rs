@@ -298,4 +298,8 @@ pub const T: &[(&str, &str)] = &[
     ("Hides it from your sidebar until a new message arrives. Nothing is deleted.", "새 메시지가 올 때까지 사이드바에서 숨깁니다. 아무것도 삭제되지 않습니다."),
     ("Only members of this channel can delete it.", "이 채널의 멤버만 삭제할 수 있습니다."),
     ("Delete #{} for everyone? Its messages are removed for the whole team.", "모든 사람에게서 #{} 채널을 삭제할까요? 메시지가 팀 전체에서 삭제됩니다."),
+    // automation scope
+    ("Runs in the whole Workspace", "워크스페이스 전체에서 실행됩니다"),
+    ("Runs in {}", "{}에서 실행됩니다"),
+    ("in {}", "{}에서"),
 ];

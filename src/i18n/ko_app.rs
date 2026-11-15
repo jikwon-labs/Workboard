@@ -161,4 +161,6 @@ pub const T: &[(&str, &str)] = &[
     ("Weekly", "매주"),
     ("Monthly", "매월"),
     ("Yearly", "매년"),
+    // timers
+    ("{} is tracking time on this task", "{} 님이 이 작업의 시간을 기록하고 있습니다"),
 ];

@@ -44,6 +44,10 @@ impl App {
                 ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
                 let members = self.data.members.clone();
                 let me = self.data.me;
+                // on a team server only its owner and admins manage people, and
+                // the server keeps the roles; alone or in a shared folder it's local
+                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                let manages = !server || self.sync_rt.role.is_some_and(|r| r.manages());
                 let mut remove = None;
                 for m in &members {
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
@@ -58,16 +62,21 @@ impl App {
                     let role_rect = Rect::from_min_size(pos2(r.left() + w * 0.6, r.center().y - 13.0), vec2(w * 0.15, 26.0));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
                     let mut role = if m.role.is_empty() { "Member".to_string() } else { m.role.clone() };
-                    if m.role == "Owner" {
-                        child.label(tr("Owner"));
+                    if m.role == "Owner" || !manages || (server && m.id == me) {
+                        child.label(super::menus::role_text(&role));
                     } else {
-                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(tr(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
-                            for (n, _) in ROLES.iter().take(3) {
-                                ui.selectable_value(&mut role, n.to_string(), tr(n));
+                        // Guest isn't offered: nothing limits what a guest can see yet
+                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
+                            for (n, _) in ROLES.iter().take(2) {
+                                ui.selectable_value(&mut role, n.to_string(), super::menus::role_text(n));
                             }
                         });
                         if role != m.role && !(m.role.is_empty() && role == "Member") {
-                            if let Some(mm) = self.data.members.iter_mut().find(|x| x.id == m.id) {
+                            if server {
+                                // the server changes the role and everyone's copy follows
+                                let r = if role == "Admin" { wb_net::Role::Admin } else { wb_net::Role::Member };
+                                self.access_request(wb_net::Msg::SetRole { member: m.id, role: r });
+                            } else if let Some(mm) = self.data.members.iter_mut().find(|x| x.id == m.id) {
                                 mm.role = role;
                                 self.dirty = true;
                             }
@@ -75,22 +84,15 @@ impl App {
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, tr(st), FontId::proportional(13.0), col);
-                    if m.id != me && m.role != "Owner" {
+                    if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         if put_over(ui, br, egui::Button::new(RichText::new(tr("Remove")).color(t.danger)).frame(false)).clicked() {
-                            remove = Some(m.id);
+                            remove = Some((m.id, m.name.clone()));
                         }
                     }
                 }
-                if let Some(id) = remove {
-                    self.data.members.retain(|m| m.id != id);
-                    for task in &mut self.data.tasks {
-                        task.assignees.retain(|a| *a != id);
-                    }
-                    for c in &mut self.data.channels {
-                        c.members.retain(|a| *a != id);
-                    }
-                    self.dirty = true;
+                if let Some((id, name)) = remove {
+                    self.modal = Some(Modal::ConfirmRemove { kind: "person", id, name });
                 }
                 ui.add_space(12.0);
                 ui.label(RichText::new(tr("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.")).small().color(t.text3));
@@ -570,18 +572,24 @@ impl App {
                 }
             }
             if !make_tasks.is_empty() {
-                if let Some(list) = self.data.first_list() {
-                    let who = self.data.extra.meetings[idx].attendees.clone();
+                // the List in view, else the first one that isn't archived
+                let list = self.default_list().filter(|l| !self.data.list_archived(*l)).or_else(|| {
+                    self.data.spaces.iter().filter(|s| !s.archived && s.private_owner.is_none_or(|o| o == self.data.me)).flat_map(|s| s.folders.iter().flat_map(|f| f.lists.iter()).chain(s.lists.iter())).find(|l| !l.archived).map(|l| l.id)
+                });
+                if let Some(list) = list {
+                    // assigned to the attendees ticked above (none ticked: nobody)
+                    let who: Vec<u64> = self.data.extra.meetings[idx].attendees.iter().copied().filter(|a| self.data.member(*a).is_some()).collect();
                     for n in make_tasks {
-                        self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.iter().take(1).copied().collect(), due: None, parent: None, open: false });
+                        self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.clone(), due: None, parent: None, open: false });
                     }
-                    self.toast = Some((tr("Tasks created from the meeting notes").into(), now_ts()));
+                    self.toast = Some((trf!("Tasks created from the meeting notes in {}", self.data.list_name(list)), now_ts()));
+                } else {
+                    self.toast = Some((tr("Make a List first: action items become tasks in a List").into(), now_ts()));
                 }
             }
             if delete {
-                self.data.extra.meetings.remove(idx);
-                self.meeting_open = None;
-                self.dirty = true;
+                let m = &self.data.extra.meetings[idx];
+                self.modal = Some(Modal::ConfirmRemove { kind: "meeting", id: m.id, name: m.title.clone() });
             }
         });
     }
@@ -611,10 +619,12 @@ impl App {
                     }
                 }
                 TargetKind::Tasks { ids } => {
-                    if ids.is_empty() {
+                    // tasks deleted since they were picked don't count either way
+                    let live: Vec<&Task> = ids.iter().filter_map(|id| self.task(*id)).collect();
+                    if live.is_empty() {
                         0.0
                     } else {
-                        ids.iter().filter(|id| self.task(**id).map(|x| self.data.is_closed(x)).unwrap_or(false)).count() as f32 / ids.len() as f32
+                        live.iter().filter(|x| self.data.is_closed(x)).count() as f32 / live.len() as f32
                     }
                 }
             })
@@ -679,6 +689,7 @@ impl App {
         let Some(gi) = self.data.extra.goals.iter().position(|g| g.id == gid) else { return };
         let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|x| x.parent.is_none()).map(|x| (x.id, x.name.clone())).collect();
         let closed: Vec<u64> = self.data.tasks.iter().filter(|x| self.data.is_closed(x)).map(|x| x.id).collect();
+        let exists: HashSet<u64> = self.data.tasks.iter().map(|x| x.id).collect();
         let mut delete = false;
         egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 0, top: 6, bottom: 6 }).show(ui, |ui| {
             let g = &mut self.data.extra.goals[gi];
@@ -715,7 +726,7 @@ impl App {
                         }
                         TargetKind::Tasks { ids } => {
                             let n = ids.iter().filter(|id| closed.contains(id)).count();
-                            ui.label(trf!("{}/{} tasks done", n, ids.len()));
+                            ui.label(trf!("{}/{} tasks done", n, ids.iter().filter(|id| exists.contains(id)).count()));
                             ui.menu_button(tr("Pick tasks"), |ui| {
                                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                                     for (id, name) in &tasks {
@@ -762,9 +773,8 @@ impl App {
             }
         });
         if delete {
-            self.data.extra.goals.remove(gi);
-            self.goal_open = None;
-            self.dirty = true;
+            let g = &self.data.extra.goals[gi];
+            self.modal = Some(Modal::ConfirmRemove { kind: "goal", id: g.id, name: g.name.clone() });
         }
     }
 
@@ -778,9 +788,17 @@ impl App {
                 return;
             };
             let lists: Vec<(u64, String)> = self.data.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).map(move |l| (l.id, format!("{} / {}", s.name, l.name)))).collect();
+            // answers typed into one form don't carry over to another
+            let fid = self.data.extra.forms[fi].id;
+            let for_id = egui::Id::new("form_fill_for");
+            if ui.data(|d| d.get_temp::<u64>(for_id)) != Some(fid) {
+                self.form_fill.clear();
+                ui.data_mut(|d| d.insert_temp(for_id, fid));
+            }
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.form_mode_fill, false, tr("\u{1F4DD} Edit"));
                 ui.selectable_value(&mut self.form_mode_fill, true, tr("\u{1F441} Fill out"));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.star_toggle(ui, format!("form:{}", fid)));
             });
             ui.separator();
             if !self.form_mode_fill {
@@ -837,9 +855,8 @@ impl App {
                     self.dirty = true;
                 }
                 if delete {
-                    self.data.extra.forms.remove(fi);
-                    self.form_open = None;
-                    self.dirty = true;
+                    let f = &self.data.extra.forms[fi];
+                    self.modal = Some(Modal::ConfirmRemove { kind: "form", id: f.id, name: f.name.clone() });
                 }
             } else {
                 let f = self.data.extra.forms[fi].clone();
@@ -872,6 +889,7 @@ impl App {
                         ui.add_space(6.0);
                     }
                     if primary_button(ui, &t, tr("Submit")).clicked() {
+                        let mut bad_date = None;
                         let mut name = String::new();
                         let mut desc = String::new();
                         let mut priority = 0u8;
@@ -882,7 +900,12 @@ impl App {
                                 "name" => name = v,
                                 "description" => desc.push_str(&v),
                                 "priority" => priority = PRIORITIES.iter().position(|p| p.label == v).unwrap_or(0) as u8,
-                                "due" => due = NaiveDate::parse_from_str(v.trim(), "%Y-%m-%d").ok(),
+                                "due" => {
+                                    due = NaiveDate::parse_from_str(v.trim(), "%Y-%m-%d").ok();
+                                    if due.is_none() && !v.trim().is_empty() {
+                                        bad_date = Some(fld.label.clone());
+                                    }
+                                }
                                 _ => {
                                     if !v.is_empty() {
                                         desc.push_str(&format!("\n{}: {}", fld.label, v));
@@ -893,11 +916,17 @@ impl App {
                         if name.trim().is_empty() {
                             name = format!("{} submission", f.name);
                         }
-                        if self.data.space_of_list(f.list_id).is_some() {
+                        if let Some(label) = bad_date {
+                            self.toast = Some((trf!("\"{}\" isn't a date. Write it as YYYY-MM-DD.", label), now_ts()));
+                        } else if self.data.space_of_list(f.list_id).is_some() {
                             self.actions.push(Action::Add { list: f.list_id, name, status: None, priority, assignees: vec![], due, parent: None, open: false });
                             self.pending_description = Some(desc.trim().to_string());
                             self.form_fill.clear();
                             self.toast = Some((trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)), now_ts()));
+                        } else {
+                            // the List was never chosen or has been deleted
+                            self.toast = Some((tr("This form has no List for its answers. Choose one under Edit.").into(), now_ts()));
+                            self.form_mode_fill = false;
                         }
                     }
                 });
@@ -961,6 +990,8 @@ impl App {
                 if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
                     delete = true;
                 }
+                let wid = self.data.extra.whiteboards[wi].id;
+                self.star_toggle(ui, format!("wb:{}", wid));
             });
             let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
             let p = ui.painter_at(rect);
@@ -983,6 +1014,7 @@ impl App {
                 p.add(egui::Shape::line(pts, Stroke::new(s.width, rgb(s.color))));
             }
             let mut drag_note = None;
+            let mut drop_note = None;
             for (i, n) in wb.notes.iter_mut().enumerate() {
                 let r = Rect::from_min_size(origin + vec2(n.pos[0], n.pos[1]), vec2(160.0, 120.0));
                 p.rect_filled(r.translate(vec2(2.0, 3.0)), 4.0, Color32::from_black_alpha(25));
@@ -997,6 +1029,17 @@ impl App {
                         drag_note = Some((i, h.drag_delta()));
                     }
                 }
+                // a small x on the corner deletes just this note
+                let xr = Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0), vec2(16.0, 16.0));
+                let x = ui.put(xr, egui::Button::new(RichText::new("\u{2716}").size(9.0).color(t.text3)).frame(false)).on_hover_text(tr("Delete note"));
+                name_it(&x, &format!("Delete note {}", i));
+                if x.clicked() {
+                    drop_note = Some(i);
+                }
+            }
+            if let Some(i) = drop_note {
+                wb.notes.remove(i);
+                self.dirty = true;
             }
             if let Some((i, d)) = drag_note {
                 wb.notes[i].pos[0] += d.x;
@@ -1028,9 +1071,8 @@ impl App {
                 }
             }
             if delete {
-                self.data.extra.whiteboards.remove(wi);
-                self.wb_open = None;
-                self.dirty = true;
+                let w = &self.data.extra.whiteboards[wi];
+                self.modal = Some(Modal::ConfirmRemove { kind: "whiteboard", id: w.id, name: w.name.clone() });
             }
         });
     }
@@ -1168,7 +1210,8 @@ impl App {
                 let space = self.current_space();
                 if card_on(self, "Docs") {
                 self.ov_card(ui, cw, "Docs", |s, ui| {
-                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
+                    let me = s.data.me;
+                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none() && (!d.private || d.owner == me)).map(|d| (d.id, d.title.clone())).collect();
                     if docs.is_empty() {
                         ui.label(RichText::new(tr("There are no Docs in this location yet.")).color(s.t().text2));
                     }
@@ -1393,5 +1436,109 @@ impl App {
                 add(self, ui);
             });
         });
+    }
+}
+
+impl App {
+    /// The "Delete this?" dialog for `Modal::ConfirmRemove`; true closes it.
+    pub(super) fn confirm_remove_body(&mut self, ui: &mut Ui, t: &Theme, kind: &str, id: u64, name: &str) -> bool {
+        let mut close = false;
+        let text = match kind {
+            "dashboard" => trf!("Delete the dashboard \"{}\"? This can't be undone.", name),
+            "whiteboard" => trf!("Delete the whiteboard \"{}\"? This can't be undone.", name),
+            "form" => trf!("Delete the form \"{}\"? This can't be undone.", name),
+            "goal" => trf!("Delete the goal \"{}\"? This can't be undone.", name),
+            "meeting" => trf!("Delete the meeting \"{}\"? This can't be undone.", name),
+            "team" => trf!("Delete the team \"{}\"? This can't be undone.", name),
+            _ => trf!("Remove {} from the Workspace? Their tasks and conversations stay, without them.", name),
+        };
+        ui.label(text);
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let label = if kind == "person" { tr("Remove") } else { tr("Delete") };
+            if ui.add(egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(t.danger)).clicked() {
+                self.remove_item(kind, id);
+                close = true;
+            }
+            if ui.button(tr("Cancel")).clicked() {
+                close = true;
+            }
+        });
+        close
+    }
+
+    /// Deletes a dashboard, whiteboard, form, goal, meeting or team, or
+    /// removes a person, once confirmed.
+    pub(super) fn remove_item(&mut self, kind: &str, id: u64) {
+        let x = &mut self.data.extra;
+        match kind {
+            "dashboard" => {
+                x.dashboards.retain(|d| d.id != id);
+                x.starred.retain(|s| s != &format!("dash:{}", id));
+                if self.dash_open == Some(id) {
+                    self.dash_open = None;
+                }
+            }
+            "whiteboard" => {
+                x.whiteboards.retain(|w| w.id != id);
+                x.starred.retain(|s| s != &format!("wb:{}", id));
+                if self.wb_open == Some(id) {
+                    self.wb_open = None;
+                }
+            }
+            "form" => {
+                x.forms.retain(|f| f.id != id);
+                x.starred.retain(|s| s != &format!("form:{}", id));
+                if self.form_open == Some(id) {
+                    self.form_open = None;
+                }
+            }
+            "goal" => {
+                x.goals.retain(|g| g.id != id);
+                if self.goal_open == Some(id) {
+                    self.goal_open = None;
+                }
+            }
+            "meeting" => {
+                x.meetings.retain(|m| m.id != id);
+                if self.meeting_open == Some(id) {
+                    self.meeting_open = None;
+                }
+            }
+            "team" => {
+                x.teams.retain(|tm| tm.id != id);
+                if self.team_open == Some(id) {
+                    self.team_open = None;
+                    self.hub_filter = 0;
+                }
+            }
+            "person" => {
+                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                if server {
+                    // their computers are signed out by the server; without it,
+                    // nothing changes here either
+                    if self.sync_rt.net_status != Some(wb_net::Status::Connected) {
+                        self.access_request(wb_net::Msg::Revoke { member: id });
+                        return;
+                    }
+                    self.access_request(wb_net::Msg::Revoke { member: id });
+                }
+                self.data.members.retain(|m| m.id != id);
+                for task in &mut self.data.tasks {
+                    task.assignees.retain(|a| *a != id);
+                }
+                for c in &mut self.data.channels {
+                    c.members.retain(|a| *a != id);
+                }
+                for tm in &mut self.data.extra.teams {
+                    tm.members.retain(|a| *a != id);
+                }
+                for m in &mut self.data.extra.meetings {
+                    m.attendees.retain(|a| *a != id);
+                }
+            }
+            _ => return,
+        }
+        self.dirty = true;
     }
 }

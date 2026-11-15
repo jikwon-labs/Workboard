@@ -202,4 +202,7 @@ pub const T: &[(&str, &str)] = &[
     ("Add time", "시간 추가"),
     (" min", "분"),
     ("Open (tasks)", "진행 중"),
+    // timesheets and dashboards
+    ("Unknown", "알 수 없음"),
+    ("Time tracked this week by person", "이번 주 사람별 기록 시간"),
 ];

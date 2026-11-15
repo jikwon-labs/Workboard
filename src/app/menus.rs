@@ -22,7 +22,8 @@ pub enum Modal {
     Notifications,
     ClickApps,
     CustomFields { name: String, kind: String, opts: String },
-    Automations { status: String, action: String, value: String },
+    /// `scope`: the List or Space it was opened from (new rules run only there).
+    Automations { status: String, action: String, value: String, scope: Option<Location> },
     TagManager { from: String, to: String },
     Templates { name: String, desc: String, checklist: String, priority: u8 },
     Import { path: String, result: String },
@@ -52,6 +53,9 @@ pub enum Modal {
     MoveList { list: u64 },
     NewChannel { name: String, private: bool, add_list: bool },
     ListInfo { list: u64 },
+    /// "Delete this?" for things with no Trash: dashboard, whiteboard, form,
+    /// goal, meeting, team or person (see `remove_item`).
+    ConfirmRemove { kind: &'static str, id: u64, name: String },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -171,7 +175,7 @@ impl App {
                     "Apps" => Modal::ClickApps,
                     "Templates" => Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 },
                     "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
-                    "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() },
+                    "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None },
                     _ => Modal::TagManager { from: String::new(), to: String::new() },
                 });
                 close_popup(ui);
@@ -413,7 +417,7 @@ impl App {
     pub(super) fn new_whiteboard(&mut self) {
         let id = self.data.new_id();
         let n = self.data.extra.whiteboards.len() + 1;
-        self.data.extra.whiteboards.push(Whiteboard { id, name: format!("Whiteboard {}", n), strokes: vec![], notes: vec![] });
+        self.data.extra.whiteboards.push(Whiteboard { id, name: format!("Whiteboard {}", n), strokes: vec![], notes: vec![], owner: self.data.me });
         self.wb_open = Some(id);
         self.section = Section::Whiteboards;
         self.dirty = true;
@@ -428,6 +432,7 @@ impl App {
             list_id: list,
             description: "Fill out this form to create a task.".into(),
             fields: vec![FormField { label: "Title".into(), map: "name".into() }, FormField { label: "Details".into(), map: "description".into() }],
+            owner: self.data.me,
         });
         self.form_open = Some(id);
         self.section = Section::Forms;
@@ -652,6 +657,7 @@ impl App {
             Modal::MoveList { .. } => tr("Move List").into(),
             Modal::NewChannel { .. } => tr("Create Channel").into(),
             Modal::ListInfo { .. } => tr("List Info").into(),
+            Modal::ConfirmRemove { kind, .. } => if *kind == "person" { tr("Remove") } else { tr("Delete") }.into(),
         };
         // dim backdrop
         let screen = ctx.screen_rect();
@@ -725,7 +731,8 @@ impl App {
                     ui.painter().text(r.center(), Align2::CENTER_CENTER, "\u{1F464}", FontId::proportional(14.0), t.text2);
                     ui.vertical(|ui| {
                         egui::ComboBox::from_id_salt("invite_role").selected_text(role_text(role)).show_ui(ui, |ui| {
-                            for (name, _) in ROLES.iter().take(3) {
+                            // no Guest: nothing limits what a guest can see yet
+                            for (name, _) in ROLES.iter().take(2) {
                                 ui.selectable_value(role, name.to_string(), role_text(name));
                             }
                         });
@@ -1043,7 +1050,7 @@ impl App {
                     self.dirty = true;
                 }
             }
-            Modal::Automations { status, action, value } => {
+            Modal::Automations { status, action, value, scope } => {
                 let mut remove = None;
                 let rules = self.data.extra.automations.clone();
                 for (i, a) in rules.iter().enumerate() {
@@ -1054,6 +1061,9 @@ impl App {
                             self.dirty = true;
                         }
                         ui.label(crate::trf!("When status changes to {}, {}", crate::i18n::status_text(&a.trigger_status).to_uppercase(), self.action_text(a)));
+                        if let Some(l) = a.list {
+                            ui.label(RichText::new(crate::trf!("in {}", self.scope_name(l))).color(t.text3));
+                        }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
                                 remove = Some(i);
@@ -1070,6 +1080,15 @@ impl App {
                 }
                 ui.separator();
                 ui.label(RichText::new(tr("New automation")).strong());
+                // opened from a List or Space menu: the new rule runs only there
+                let scope_id = match *scope {
+                    Some(Location::List(id)) | Some(Location::Space(id)) => Some(id),
+                    _ => None,
+                };
+                ui.label(RichText::new(match scope_id {
+                    Some(id) => crate::trf!("Runs in {}", self.scope_name(id)),
+                    None => tr("Runs in the whole Workspace").to_string(),
+                }).small().color(t.text2));
                 let mut names: Vec<String> = vec![];
                 for s in &self.data.spaces {
                     for st in &s.statuses {
@@ -1135,7 +1154,7 @@ impl App {
                 });
                 if primary_button(ui, t, tr("Add automation")).clicked() && !value.trim().is_empty() {
                     let id = self.data.new_id();
-                    self.data.extra.automations.push(Automation { id, enabled: true, trigger_status: status.clone(), action: action.clone(), value: value.trim().to_string(), list: None });
+                    self.data.extra.automations.push(Automation { id, enabled: true, trigger_status: status.clone(), action: action.clone(), value: value.trim().to_string(), list: scope_id });
                     value.clear();
                     self.dirty = true;
                 }
@@ -1433,7 +1452,7 @@ impl App {
                     }
                 });
                 let now = now_ts();
-                let running = self.data.tasks.iter().find(|x| x.timer_started.is_some()).map(|x| (x.id, x.name.clone(), x.tracked_secs(now)));
+                let running = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)).map(|x| (x.id, x.name.clone(), x.tracked_secs(now)));
                 if let Some((_, n, secs)) = &running {
                     ui.label(crate::trf!("Running: {} \u{2022} {}", n, fmt_duration(*secs)));
                     ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
@@ -1534,6 +1553,7 @@ impl App {
                     }
                 }
             }
+            Modal::ConfirmRemove { kind, id, name } => close = self.confirm_remove_body(ui, t, kind, *id, name),
             Modal::NewDashboard { name } => {
                 ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
                 let spaces: Vec<(u64, String)> = self.data.spaces.iter().map(|s| (s.id, s.name.clone())).collect();
@@ -1541,7 +1561,7 @@ impl App {
                 let _ = spaces;
                 if primary_button(ui, t, tr("Create Dashboard")).clicked() && !name.trim().is_empty() {
                     let id = self.data.new_id();
-                    self.data.extra.dashboards.push(Dashboard { id, name: name.trim().to_string(), space: None });
+                    self.data.extra.dashboards.push(Dashboard { id, name: name.trim().to_string(), space: None, owner: self.data.me, kind: String::new() });
                     self.dash_open = Some(id);
                     self.section = Section::Dashboards;
                     self.dirty = true;
@@ -1586,6 +1606,14 @@ impl App {
             self.dirty = true;
         }
         added
+    }
+
+    /// The List or Space an automation runs in, by id.
+    fn scope_name(&self, id: u64) -> String {
+        match self.data.spaces.iter().find(|s| s.id == id) {
+            Some(s) => s.name.clone(),
+            None => self.data.list_name(id),
+        }
     }
 
     pub(super) fn describe_action(&self, a: &Automation) -> String {

@@ -1121,7 +1121,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.dash_open = None;
@@ -1266,7 +1266,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.wb_open = None;
@@ -1339,7 +1339,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, false);
+        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.form_open = None;

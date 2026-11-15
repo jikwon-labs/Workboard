@@ -4724,13 +4724,16 @@ impl App {
                             .and_then(|l| self.data.space_of_list(l))
                             .map(|s| s.id)
                         {
-                            if ui
-                                .add(ghost(egui::Button::new(
-                                    RichText::new(tr("+  Add group")).color(t.text2).size(14.0),
-                                )))
-                                .on_hover_text(tr("Edit statuses"))
-                                .clicked()
-                            {
+                            // level with the columns' heading row, not their top edge
+                            let add = ui
+                                .vertical(|ui| {
+                                    ui.add_space(14.0);
+                                    ui.add(ghost(egui::Button::new(
+                                        RichText::new(tr("+  Add group")).color(t.text2).size(14.0),
+                                    )))
+                                })
+                                .inner;
+                            if add.on_hover_text(tr("Edit statuses")).clicked() {
                                 self.actions.push(Action::EditStatuses(sid));
                             }
                         }

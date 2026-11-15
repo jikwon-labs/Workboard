@@ -1747,6 +1747,8 @@ impl App {
             ui.add_space(4.0);
         }
         let field = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
+            // a gap above each name, so a name groups with its own field
+            ui.add_space(4.0);
             ui.label(RichText::new(tr(label)).color(t.text2));
             let r = ui.add(
                 field(text)

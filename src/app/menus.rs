@@ -1649,7 +1649,8 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     for (name, c) in theme::ACCENTS {
                         let sel = self.data.extra.accent == name;
-                        let (r, resp) = ui.allocate_exact_size(vec2(64.0, 52.0), Sense::click());
+                        // ten swatches fit one row of the 640 pt settings page
+                        let (r, resp) = ui.allocate_exact_size(vec2(56.0, 52.0), Sense::click());
                         hover_bg(ui, &resp, r, 8.0);
                         ui.painter()
                             .circle_filled(r.center_top() + vec2(0.0, 16.0), 13.0, rgb(c));
@@ -1691,9 +1692,9 @@ impl App {
                     .show(ui, |ui| {
                         for (k, d) in [
                             ("\u{2318}J  /  \u{2318}K", "Search"),
-                            ("\u{2318}N  /  \u{2325}T", "Create task"),
+                            // one row per action (Create task was listed twice)
+                            ("\u{2318}N  /  \u{2325}T  /  T", "Create task"),
                             ("\u{2318}G", "New message"),
-                            ("T", "Create task"),
                             ("R", "Create reminder"),
                             ("N  /  P", "Open or close the notepad"),
                             ("\u{2318}\\", "Show or hide the sidebar"),
@@ -1710,7 +1711,9 @@ impl App {
                             ("Esc", "Close a window or menu"),
                             ("Right-click", "Rename, delete, favorite, more"),
                         ] {
-                            ui.label(RichText::new(tr(k)).monospace());
+                            // the system font: in the monospace font the Shift
+                            // arrow came from a fallback and was drawn tiny
+                            ui.label(RichText::new(tr(k)).strong());
                             ui.label(tr(d));
                             ui.end_row();
                         }
@@ -2235,6 +2238,8 @@ impl App {
                     {
                         self.dirty = true;
                     }
+                    // a gap before each name, so it reads with the field below it
+                    ui.add_space(6.0);
                     ui.label(tr("Topic"));
                     if ui
                         .add(field(&mut self.data.channels[ci].topic).desired_width(f32::INFINITY))
@@ -3527,7 +3532,10 @@ impl App {
             .id(egui::Id::new("Notepad"))
             .open(&mut open)
             .default_size([360.0, 420.0])
-            .default_pos([ctx.screen_rect().right() - 400.0, 80.0])
+            // below the page header and toolbar it used to cover; no collapse
+            // arrow (egui's own, larger than the app's arrows); it closes with x
+            .default_pos([ctx.screen_rect().right() - 400.0, 170.0])
+            .collapsible(false)
             .show(ctx, |ui| {
                 // Write: the plain text; List: each line with its checkbox and a
                 // button that turns it into a task ("- [ ] " lines are checklist items)

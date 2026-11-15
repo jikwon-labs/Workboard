@@ -236,14 +236,15 @@ impl App {
             .collect();
         ui.horizontal(|ui| {
             ui.label(RichText::new(trf!("{} Spaces", spaces.len())).color(t.text2));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, &t, tr("+ New Space")).clicked() {
-                    self.modal = Some(Modal::NewSpace {
-                        name: String::new(),
-                        color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
-                    });
-                }
-            });
+            // beside the count, near the table (at the page's right edge it
+            // was far from the narrow table it adds to)
+            ui.add_space(12.0);
+            if primary_button(ui, &t, tr("+ New Space")).clicked() {
+                self.modal = Some(Modal::NewSpace {
+                    name: String::new(),
+                    color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
+                });
+            }
         });
         ui.add_space(8.0);
         if spaces.is_empty() {

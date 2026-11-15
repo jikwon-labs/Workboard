@@ -6709,3 +6709,163 @@ fn closing_the_status_editor_puts_back_an_empty_or_taken_name() {
         .any(|s| s.name == "in progress"));
     assert_eq!(h.app.task(tid).unwrap().status, "in progress");
 }
+
+// ---- whiteboard pan and zoom (r3-work)
+
+fn drag_with(h: &mut Ui1, from: Pos2, to: Pos2, button: egui::PointerButton) {
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![egui::Event::PointerButton {
+        pos: from,
+        button,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    for i in 1..=12 {
+        h.frame(vec![egui::Event::PointerMoved(
+            from + (to - from) * (i as f32 / 12.0),
+        )]);
+    }
+    h.frame(vec![egui::Event::PointerButton {
+        pos: to,
+        button,
+        pressed: false,
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+}
+
+#[test]
+fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    let board = |h: &Ui1| {
+        h.app
+            .data
+            .extra
+            .whiteboards
+            .iter()
+            .find(|w| w.id == wid)
+            .cloned()
+            .unwrap()
+    };
+    // a note far beyond the window, like a big template's
+    h.app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap()
+        .notes
+        .push(Sticky {
+            pos: [2400.0, 1600.0],
+            text: "Far".into(),
+            color: [0xf8, 0xae, 0x00],
+        });
+    h.settle();
+    assert!(!h.has("Delete note 0"), "the far note is off screen");
+    let canvas = rect_of(&h, "Whiteboard canvas");
+    let view = |h: &Ui1| h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    // two-finger scroll moves the view until the note shows
+    h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
+    for _ in 0..40 {
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(-7.0, -5.0) * 10.0,
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+        if h.has("Delete note 0") {
+            break;
+        }
+    }
+    assert!(h.has("Delete note 0"), "scrolling reaches the far note");
+    assert!(view(&h).pan.x < -1000.0);
+    // Reset view comes back
+    h.click("Reset view");
+    assert_eq!(view(&h), super::more::WbView::default());
+    assert!(!h.has("Delete note 0"));
+    // the buttons zoom around the canvas centre
+    h.click("Zoom in");
+    assert!((view(&h).zoom - 1.25).abs() < 1e-3);
+    h.click("Zoom out");
+    assert!((view(&h).zoom - 1.0).abs() < 1e-3);
+    // Cmd+scroll zooms at the pointer
+    let at = canvas.center() + vec2(100.0, 50.0);
+    h.frame(vec![egui::Event::PointerMoved(at)]);
+    let before = view(&h).to_board(canvas.min, at);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, 5.0),
+        modifiers: egui::Modifiers::COMMAND,
+    }]);
+    h.settle();
+    let v = view(&h);
+    assert!(v.zoom > 1.0, "zoomed in: {}", v.zoom);
+    let after = v.to_board(canvas.min, at);
+    assert!((before[0] - after[0]).abs() < 0.5 && (before[1] - after[1]).abs() < 0.5);
+    // a pen stroke is stored in board coordinates
+    h.app.wb_tool = 0;
+    let from = canvas.center();
+    let to = from + vec2(80.0, 40.0);
+    drag_by(&mut h, from, to);
+    let s = board(&h).strokes.last().cloned().expect("a stroke");
+    let want = v.to_board(canvas.min, from);
+    assert!((s.points[0][0] - want[0]).abs() < 2.0 && (s.points[0][1] - want[1]).abs() < 2.0);
+    // the middle button pans and doesn't draw
+    let n = board(&h).strokes.len();
+    let pan = view(&h).pan;
+    drag_with(
+        &mut h,
+        from,
+        from + vec2(60.0, 30.0),
+        egui::PointerButton::Middle,
+    );
+    assert_eq!(board(&h).strokes.len(), n);
+    assert!((view(&h).pan - pan - vec2(60.0, 30.0)).length() < 2.0);
+    // Space + drag pans too
+    let pan = view(&h).pan;
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    }]);
+    drag_with(
+        &mut h,
+        from,
+        from - vec2(50.0, 20.0),
+        egui::PointerButton::Primary,
+    );
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: false,
+        repeat: false,
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    assert_eq!(board(&h).strokes.len(), n, "Space + drag doesn't draw");
+    assert!((view(&h).pan - pan + vec2(50.0, 20.0)).length() < 2.0);
+}
+
+#[test]
+fn whiteboard_view_keeps_the_anchor_point_when_zooming() {
+    use super::more::WbView;
+    let o = pos2(100.0, 50.0);
+    let mut v = WbView::default();
+    let anchor = pos2(400.0, 300.0);
+    let b = v.to_board(o, anchor);
+    v.zoom_at(o, anchor, 2.0);
+    assert_eq!(v.zoom, 2.0);
+    let b2 = v.to_board(o, anchor);
+    assert!((b[0] - b2[0]).abs() < 1e-3 && (b[1] - b2[1]).abs() < 1e-3);
+    v.zoom_at(o, anchor, 100.0);
+    assert_eq!(v.zoom, WbView::MAX_ZOOM);
+    let p = v.to_screen(o, [10.0, 20.0]);
+    let back = v.to_board(o, p);
+    assert!((back[0] - 10.0).abs() < 1e-3 && (back[1] - 20.0).abs() < 1e-3);
+}

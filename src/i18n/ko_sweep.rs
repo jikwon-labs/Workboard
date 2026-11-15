@@ -209,6 +209,11 @@ pub const T: &[(&str, &str)] = &[
     ("width ", "굵기 "),
     ("\u{232B} Eraser", "\u{232B} 지우개"),
     ("Clear the whole board?", "보드 전체를 지울까요?"),
+    ("Reset view", "보기 초기화"),
+    (
+        "Back to 100% at the board's top left corner. Drag with Space or the middle button, or scroll, to move around; pinch or \u{2318}+scroll to zoom.",
+        "100% 크기로 보드 왼쪽 위로 돌아갑니다. Space를 누른 채 끌거나 가운데 버튼으로 끌거나 스크롤해서 이동하고, 핀치하거나 \u{2318}+스크롤로 확대·축소합니다.",
+    ),
     // dashboards
     ("Task totals", "작업 합계"),
     ("Shared", "공유됨"),

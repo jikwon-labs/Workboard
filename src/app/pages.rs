@@ -815,11 +815,6 @@ impl App {
             .filter(|x| in_view(x))
             .cloned()
             .collect();
-        let top: Vec<Task> = scope
-            .iter()
-            .filter(|x| x.parent.is_none())
-            .cloned()
-            .collect();
         // time tracked stays counted after its task is archived (Timesheets
         // shows it too), so the time cards take archived tasks as well
         let tracked: Vec<Task> = self
@@ -900,12 +895,13 @@ impl App {
                                     });
                                 });
                                 ui.add_space(6.0);
-                                let tops: Vec<&Task> = top.iter().collect();
+                                // subtasks count like any task, as on the Teams page
+                                let tasks: Vec<&Task> = scope.iter().collect();
                                 if let Some(id) = self.dash_card_body(
                                     ui,
                                     &cards[ci].kind,
                                     cw - 34.0,
-                                    &tops,
+                                    &tasks,
                                     &tracked,
                                 ) {
                                     open = Some(id);
@@ -961,34 +957,34 @@ impl App {
         self.dirty = true;
     }
 
-    /// One card's contents; returns a task clicked in it. `top` are the top
-    /// level tasks in view, `scope` every task with tracked time, archived
-    /// ones included.
+    /// One card's contents; returns a task clicked in it. `tasks` are the
+    /// tasks in view, subtasks included; `scope` every task with tracked
+    /// time, archived ones included.
     fn dash_card_body(
         &self,
         ui: &mut Ui,
         kind: &str,
         w: f32,
-        top: &[&Task],
+        tasks: &[&Task],
         scope: &[Task],
     ) -> Option<u64> {
         let t = self.t();
         let td = today();
         let now = now_ts();
-        let overdue: Vec<&&Task> = top
+        let overdue: Vec<&&Task> = tasks
             .iter()
             .filter(|x| !self.data.is_closed(x) && x.is_overdue())
             .collect();
         match kind {
             "stats" => {
-                let open = top.iter().filter(|x| !self.data.is_closed(x)).count();
+                let open = tasks.iter().filter(|x| !self.data.is_closed(x)).count();
                 ui.horizontal(|ui| {
                     let tw = (w - 36.0) / 4.0;
                     for (label, v, c) in [
-                        ("Total tasks", top.len(), t.text),
+                        ("Total tasks", tasks.len(), t.text),
                         ("Open", open, rgb([0x5f, 0x55, 0xee])),
                         ("Overdue", overdue.len(), t.danger),
-                        ("Completed", top.len() - open, rgb([0x00, 0x88, 0x44])),
+                        ("Completed", tasks.len() - open, rgb([0x00, 0x88, 0x44])),
                     ] {
                         egui::Frame::new()
                             .fill(t.bg)
@@ -1026,7 +1022,8 @@ impl App {
                 let counts: Vec<usize> = sts
                     .iter()
                     .map(|st| {
-                        top.iter()
+                        tasks
+                            .iter()
                             .filter(|x| self.data.status_of(x).name == st.name)
                             .count()
                     })
@@ -1047,7 +1044,8 @@ impl App {
             "priority" => {
                 let counts: Vec<usize> = (0..5u8)
                     .map(|p| {
-                        top.iter()
+                        tasks
+                            .iter()
                             .filter(|x| x.priority == p && !self.data.is_closed(x))
                             .count()
                     })
@@ -1073,7 +1071,8 @@ impl App {
                     .map(|m| {
                         (
                             m.name.clone(),
-                            top.iter()
+                            tasks
+                                .iter()
                                 .filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x))
                                 .count(),
                             rgb(m.color),

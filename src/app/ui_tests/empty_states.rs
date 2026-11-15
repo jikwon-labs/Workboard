@@ -63,3 +63,60 @@ fn docs_page_does_not_offer_the_task_csv_importer() {
     assert!(h.has("New Doc"));
     assert!(!h.has("\u{2B07}  Import"), "Import read tasks into a List");
 }
+
+#[test]
+fn open_tasks_per_person_agree_on_dashboard_and_teams() {
+    let mut h = Ui1::sized(1440.0, 1400.0);
+    // a subtask assigned to someone counts as their work on both pages
+    let who = h.app.data.members[1].id;
+    let parent = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.parent.is_none() && h.app.data.task_live(t))
+        .unwrap()
+        .clone();
+    h.app.apply(Action::Add {
+        list: parent.list_id,
+        name: "Check the numbers".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![who],
+        due: None,
+        parent: Some(parent.id),
+        open: false,
+    });
+    let d = &h.app.data;
+    let mut expected: Vec<usize> = d
+        .members
+        .iter()
+        .map(|m| {
+            d.tasks
+                .iter()
+                .filter(|x| x.assignees.contains(&m.id) && !d.is_closed(x) && d.task_live(x))
+                .count()
+        })
+        .collect();
+    expected.sort();
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Board");
+    h.settle();
+    let mut dash: Vec<usize> = h
+        .texts()
+        .iter()
+        .filter_map(|x| x.strip_suffix(" open")?.parse().ok())
+        .collect();
+    dash.sort();
+    assert_eq!(dash, expected, "dashboard workload");
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 3;
+    h.settle();
+    let mut teams: Vec<usize> = h
+        .texts()
+        .iter()
+        .filter_map(|x| x.split_once(" open  \u{2022}")?.0.parse().ok())
+        .collect();
+    teams.sort();
+    assert_eq!(teams, expected, "Teams > Analytics");
+}

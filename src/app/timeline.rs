@@ -74,7 +74,9 @@ pub(super) fn pack_rows(ranges: &[(NaiveDate, NaiveDate)]) -> (Vec<usize>, usize
 
 impl App {
     /// The lanes for `tasks` grouped by `by`, holding the tasks that have
-    /// dates. By assignee there is always an Unassigned lane.
+    /// dates. By assignee there is always an Unassigned lane. Rows here
+    /// follow dates alone; the view packs them with `timeline_lanes_with`.
+    #[cfg(test)]
     pub(super) fn timeline_lanes(&self, tasks: &[&Task], by: GroupBy) -> Vec<Lane> {
         self.timeline_lanes_with(tasks, by, |_, r| r.1)
     }

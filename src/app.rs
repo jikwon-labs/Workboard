@@ -3954,6 +3954,7 @@ impl App {
                                         ui.label(RichText::new(tr("Lists")).size(16.0).strong());
                                         ui.add_space(6.0);
                                         let spaces = self.data.spaces.clone();
+                                        let mut shown = 0;
                                         for s in &spaces {
                                             if s.archived
                                                 || s.private_owner
@@ -3973,6 +3974,7 @@ impl App {
                                                 .filter(|l| !l.archived)
                                                 .collect();
                                             for l in lists {
+                                                shown += 1;
                                                 let total = self
                                                     .data
                                                     .tasks
@@ -4043,6 +4045,36 @@ impl App {
                                                 if resp.clicked() {
                                                     self.actions
                                                         .push(Action::Go(Location::List(l.id)));
+                                                }
+                                            }
+                                        }
+                                        // nothing to list yet: say so and offer the next step
+                                        if shown == 0 {
+                                            ui.label(
+                                                RichText::new(tr(
+                                                    "No Lists yet. Lists keep a Space's tasks together.",
+                                                ))
+                                                .color(t.text2),
+                                            );
+                                            ui.add_space(8.0);
+                                            let has_space = !self.open_spaces().is_empty();
+                                            let label =
+                                                if has_space { "+ New List" } else { "+ New Space" };
+                                            let b = ui.add(
+                                                egui::Button::new(tr(label))
+                                                    .stroke(Stroke::new(1.0, t.border))
+                                                    .corner_radius(7),
+                                            );
+                                            name_it(&b, "Home new list");
+                                            if b.clicked() {
+                                                if has_space {
+                                                    self.open_new_list(None, None);
+                                                } else {
+                                                    self.modal = Some(Modal::NewSpace {
+                                                        name: String::new(),
+                                                        color: STATUS_PALETTE
+                                                            [1 + (self.data.spaces.len() * 3) % 13],
+                                                    });
                                                 }
                                             }
                                         }

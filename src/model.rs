@@ -255,6 +255,9 @@ pub struct Doc {
     pub body: String,
     pub created: i64,
     pub updated: i64,
+    /// Labels shown in the Docs list's Tags column and used by its filter.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1278,6 +1281,7 @@ impl Data {
             body: "Goals\n- Launch the new website\n- Grow the newsletter\n\nNotes\nKeep the design light and simple.".into(),
             created: now2 - 86400,
             updated: now2 - 3600,
+            tags: vec![],
         });
         // chat
         let mut msg = |d: &mut Data, author: u64, text: &str, ago: i64| Message {

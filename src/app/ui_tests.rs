@@ -2083,3 +2083,267 @@ fn composer_mention_and_emoji_pickers() {
     h.click_side("Jordan Park", true);
     assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
+
+// ---------------------------------------------------------------- docs slice (A1-A16)
+
+impl Ui1 {
+    fn key_mods(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+        self.frame(vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
+        self.frame(vec![egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }]);
+        self.settle();
+    }
+
+    /// A fresh doc open in Edit with the cursor in its body.
+    fn new_doc_focused(&mut self) -> u64 {
+        self.app.new_doc(None);
+        self.settle();
+        let id = self.app.doc_open.unwrap();
+        self.ctx.memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+        self.settle();
+        id
+    }
+
+    fn doc_body(&self, id: u64) -> String {
+        self.app.data.docs.iter().find(|d| d.id == id).unwrap().body.clone()
+    }
+
+    fn open_docs_list(&mut self) {
+        self.app.section = Section::Docs;
+        self.app.doc_open = None;
+        self.app.hub_filter = 0;
+        self.settle();
+    }
+}
+
+#[test]
+fn docs_pages_panel_menu_duplicates_reorders_moves_and_deletes() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let root = h.app.doc_open.unwrap();
+    let a = h.app.add_page(root);
+    let b = h.app.add_page(root);
+    h.app.doc_open = Some(root);
+    h.settle();
+    // duplicate "Page 1": a copy sits under the same parent
+    h.right_click("Page Page 1", 40.0);
+    h.click("Duplicate");
+    let copy = h.app.data.docs.iter().find(|d| d.title == "Page 1 (copy)").expect("a copy is made");
+    assert_eq!(copy.parent, Some(root));
+    // move "Page 2" up past the copy and "Page 1"
+    let order = |h: &Ui1| h.app.data.docs.iter().filter(|d| d.parent == Some(root)).map(|d| d.id).collect::<Vec<_>>();
+    let before = order(&h);
+    h.right_click("Page Page 2", 40.0);
+    h.click("Move up");
+    let after = order(&h);
+    assert_ne!(before, after);
+    assert_eq!(after.iter().position(|x| *x == b).unwrap() + 1, before.iter().position(|x| *x == b).unwrap());
+    // move "Page 2" under "Page 1"
+    h.right_click("Page Page 2", 40.0);
+    let mt = h.rect("Move to");
+    h.hover(mt.center());
+    h.click_side("Page 1", true);
+    assert_eq!(h.app.data.docs.iter().find(|d| d.id == b).unwrap().parent, Some(a));
+    // deleting "Page 1" takes its sub page with it, as one Trash item
+    let trash = h.app.data.extra.trash.len();
+    h.right_click("Page Page 1", 40.0);
+    h.click("Delete");
+    assert!(!h.app.data.docs.iter().any(|d| d.id == a || d.id == b));
+    assert_eq!(h.app.data.extra.trash.len(), trash + 1);
+}
+
+#[test]
+fn docs_delete_keeps_sub_pages_and_restore_brings_them_back() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let root = h.app.doc_open.unwrap();
+    let a = h.app.add_page(root);
+    let aa = h.app.add_page(a);
+    h.app.doc_open = Some(root);
+    h.settle();
+    h.click("Delete");
+    assert!(!h.app.data.docs.iter().any(|d| [root, a, aa].contains(&d.id)), "the whole doc is gone");
+    let item = h.app.data.extra.trash.last().unwrap();
+    assert_eq!(item.kind, "Doc");
+    let i = h.app.data.extra.trash.len() - 1;
+    h.app.restore_trash(i);
+    let parent = |h: &Ui1, id: u64| h.app.data.docs.iter().find(|d| d.id == id).map(|d| d.parent);
+    assert_eq!(parent(&h, root), Some(None));
+    assert_eq!(parent(&h, a), Some(Some(root)), "sub pages come back under their doc");
+    assert_eq!(parent(&h, aa), Some(Some(a)));
+    // an old single-page Trash item still restores
+    let old = Doc { id: 999_001, space: None, owner: 1, private: false, archived: false, meeting_note: false, parent: Some(424242), title: "Old".into(), body: String::new(), created: 0, updated: 0, tags: vec![] };
+    h.app.data.extra.trash.push(TrashItem { id: 999_002, kind: "Doc".into(), title: "Old".into(), deleted: 0, payload: serde_json::to_string(&old).unwrap() });
+    let i = h.app.data.extra.trash.len() - 1;
+    h.app.restore_trash(i);
+    assert_eq!(parent(&h, 999_001), Some(None), "a page whose parent is gone becomes a doc");
+}
+
+#[test]
+fn docs_header_copy_link_duplicate_move_and_meeting_note() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let id = h.app.doc_open.unwrap();
+    h.app.add_page(id);
+    h.app.doc_open = Some(id);
+    h.settle();
+    // move to another Space from the location
+    h.click("Doc location");
+    h.click("Side Projects");
+    let side = h.app.data.spaces.iter().find(|s| s.name == "Side Projects").unwrap().id;
+    assert!(h.app.data.docs.iter().filter(|d| d.id == id || d.parent == Some(id)).all(|d| d.space == Some(side)), "all pages move");
+    // mark as a meeting note by hand
+    h.click("Doc options");
+    h.click("Mark as Meeting Note");
+    assert!(h.app.data.docs.iter().find(|d| d.id == id).unwrap().meeting_note);
+    h.click("Copy link");
+    assert_eq!(h.app.toast.as_ref().map(|t| t.0.as_str()), Some("Link copied"));
+    let n = h.app.data.docs.len();
+    h.click("Duplicate");
+    assert_eq!(h.app.data.docs.len(), n + 2, "the copy has its sub page too");
+    let copy = h.app.doc_open.unwrap();
+    assert_ne!(copy, id);
+    assert!(h.app.data.docs.iter().any(|d| d.parent == Some(copy)));
+}
+
+#[test]
+fn docs_list_right_click_search_and_tags() {
+    let mut h = Ui1::new();
+    h.app.search = "keep".into();
+    h.open_docs_list();
+    h.app.search.clear();
+    h.settle();
+    // the Docs search box is its own, not the task list's filter
+    h.click("Search Docs");
+    h.type_text("zzz");
+    assert_eq!(h.app.docs_search, "zzz");
+    assert!(h.app.search.is_empty());
+    assert!(!h.has("Doc Project brief"));
+    h.app.docs_search.clear();
+    h.settle();
+    // right click: favorite, meeting note, rename
+    h.right_click("Doc Project brief", 60.0);
+    h.click("Add to Favorites");
+    let id = h.app.data.docs.iter().find(|d| d.title == "Project brief").unwrap().id;
+    assert!(h.app.data.extra.starred.contains(&format!("doc:{}", id)));
+    h.right_click("Doc Project brief", 60.0);
+    h.click("Mark as Meeting Note");
+    assert!(h.app.data.docs.iter().find(|d| d.id == id).unwrap().meeting_note);
+    h.right_click("Doc Project brief", 60.0);
+    h.click("Rename doc");
+    // the field starts with the whole name selected
+    h.type_text("Project brief v2");
+    assert_eq!(h.app.data.docs.iter().find(|d| d.id == id).unwrap().title, "Project brief v2");
+    h.key(egui::Key::Escape);
+    // tags: add one from the doc, then filter the list by it
+    h.app.doc_open = Some(id);
+    h.settle();
+    h.click("Add tag");
+    h.type_text("spec");
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.data.docs.iter().find(|d| d.id == id).unwrap().tags, vec!["spec".to_string()]);
+    h.open_docs_list();
+    h.click("Docs tag filter");
+    h.click("spec");
+    assert_eq!(h.app.docs_tag.as_deref(), Some("spec"));
+    assert!(h.has("Doc Project brief v2"));
+    h.app.docs_tag = Some("other".into());
+    h.settle();
+    assert!(!h.has("Doc Project brief v2"), "a doc without the tag is filtered out");
+}
+
+#[test]
+fn docs_archived_leave_sidebar_and_sidebar_rows_have_a_menu() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Home;
+    h.settle();
+    assert!(h.has("Project brief"));
+    h.right_click("Project brief", 60.0);
+    assert!(h.has("Mark as Meeting Note"), "the sidebar doc row has the doc menu");
+    h.key(egui::Key::Escape);
+    for d in h.app.data.docs.iter_mut().filter(|d| d.title == "Project brief") {
+        d.archived = true;
+    }
+    h.settle();
+    assert!(!h.has("Project brief"), "an archived doc leaves the sidebar");
+}
+
+#[test]
+fn docs_editor_keys_bold_enter_tab_and_slash_filter() {
+    let mut h = Ui1::new();
+    let cmd = egui::Modifiers { command: true, mac_cmd: true, ..Default::default() };
+    let id = h.new_doc_focused();
+    // Cmd+B wraps (here: inserts) bold markers
+    h.key_mods(egui::Key::B, cmd);
+    h.type_text("x");
+    assert_eq!(h.doc_body(id), "**x**");
+
+    let id = h.new_doc_focused();
+    h.type_text("- a");
+    h.key(egui::Key::Enter);
+    assert_eq!(h.doc_body(id), "- a\n- ", "Enter carries the bullet on");
+    h.type_text("b");
+    h.key(egui::Key::Tab);
+    assert_eq!(h.doc_body(id), "- a\n  - b", "Tab nests the item");
+    h.key(egui::Key::Enter);
+    h.key(egui::Key::Enter);
+    assert_eq!(h.doc_body(id), "- a\n  - b\n", "Enter on an empty item ends the list");
+
+    // "/" then a filter word and the arrow keys
+    let id = h.new_doc_focused();
+    h.type_text("/");
+    h.type_text("head");
+    assert!(h.has("Heading 3") && !h.has("Quote"), "the menu is filtered");
+    h.key(egui::Key::ArrowDown);
+    h.key(egui::Key::Enter);
+    assert_eq!(h.doc_body(id), "## ");
+}
+
+#[test]
+fn docs_view_mode_lists_links_and_contents() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let id = h.app.doc_open.unwrap();
+    h.app.data.docs.iter_mut().find(|d| d.id == id).unwrap().body = "# One\n* star item\n3. third\n- [X] done\n## Two\nsee [site](https://example.com)".into();
+    h.app.doc_preview = true;
+    h.settle();
+    assert!(h.has("  \u{2022}  "), "a * bullet is drawn");
+    assert!(h.has("  3.  "), "a numbered item keeps its number");
+    assert!(h.has("site"), "the link text shows, not the Markdown");
+    assert!(!h.has("[site](https://example.com)"));
+    assert!(h.has("Contents One") && h.has("Contents Two"), "headings are listed in On this page");
+    h.click("Contents Two");
+    // the meeting notes template uses real checklist items
+    h.open_docs_list();
+    h.click("Template Meeting Notes");
+    let d = h.app.data.docs.iter().find(|d| Some(d.id) == h.app.doc_open).unwrap();
+    assert!(d.meeting_note && d.body.ends_with("Action items\n- [ ] "), "{:?}", d.body);
+    assert!(super::docs::line_kinds(&d.body).iter().any(|k| matches!(k.0, super::docs::LineKind::Check(false))));
+}
+
+#[test]
+fn docs_editor_text_helpers() {
+    use super::docs::{apply_link, continue_list, doc_headings, indent_line, inline_spans, line_kinds, LineKind, Span};
+    let mut s = "1. a\n".to_string();
+    assert_eq!(continue_list(&mut s, 5), Some(8));
+    assert_eq!(s, "1. a\n2. ");
+    let mut s = "  - [x] a\n".to_string();
+    continue_list(&mut s, 10);
+    assert_eq!(s, "  - [x] a\n  - [ ] ");
+    let mut s = "plain\n".to_string();
+    assert_eq!(continue_list(&mut s, 6), None);
+    let mut s = "a\n  b".to_string();
+    assert_eq!(indent_line(&mut s, 3, false), 2);
+    assert_eq!(s, "a\nb");
+    let mut s = "see it".to_string();
+    let c = apply_link(&mut s, 4, 6);
+    assert_eq!(s, "see [it](https://)");
+    assert_eq!(c, 17);
+    let kinds: Vec<LineKind> = line_kinds("  - a\n    1. b\n  - [ ] c").into_iter().map(|k| k.0).collect();
+    assert_eq!(kinds, vec![LineKind::Bullet, LineKind::Numbered, LineKind::Check(false)]);
+    let runs = inline_spans("a `c` ~~s~~ [t](u) https://x.y.");
+    let kinds: Vec<Span> = runs.iter().filter(|r| r.0 != Span::Marker && r.0 != Span::Text).map(|r| r.0).collect();
+    assert_eq!(kinds, vec![Span::Code, Span::Strike, Span::Link, Span::Url]);
+    assert_eq!(runs.iter().map(|r| r.1).collect::<String>(), "a `c` ~~s~~ [t](u) https://x.y.", "runs cover the line");
+    assert_eq!(runs.iter().find(|r| r.0 == Span::Url).unwrap().1, "https://x.y");
+    assert_eq!(doc_headings("# A\ntext\n### B"), vec![(1, "A".to_string(), 0), (3, "B".to_string(), 2)]);
+}

@@ -252,10 +252,11 @@ impl App {
                     ui.horizontal(|ui| {
                         for (color, glyph, name, sub, body) in [
                             ([0xe1, 0x6b, 0x16], "\u{1F4CB}", "Project Overview", "Summarize goals, scope, and milestones", "Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- "),
-                            ([0xf8, 0xae, 0x00], "\u{1F4DD}", "Meeting Notes", "Capture an agenda, notes, and action items", "Agenda\n- \n\nNotes\n- \n\nAction items\n[ ] "),
+                            ([0xf8, 0xae, 0x00], "\u{1F4DD}", "Meeting Notes", "Capture an agenda, notes, and action items", "Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] "),
                             ([0x44, 0x66, 0xff], "\u{1F4D3}", "Wiki", "Organize information in one place", "Overview\n\nHow we work\n\nLinks\n"),
                         ] {
                             let (r, resp) = ui.allocate_exact_size(vec2(cw, 70.0), Sense::click());
+                            name_it(&resp, &format!("Template {}", name));
                             ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
                             ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                             let c = r.left_center() + vec2(32.0, 0.0);
@@ -288,9 +289,31 @@ impl App {
                                 }
                             }
                         });
-                        ui.label(RichText::new("|  Tags:").color(t.text2));
+                        let tag_label = match &self.docs_tag {
+                            Some(g) => format!("Tags: {}", g),
+                            None => "Tags".to_string(),
+                        };
+                        let tr = ui.add(egui::Button::new(tag_label).corner_radius(13));
+                        name_it(&tr, "Docs tag filter");
+                        let all_tags = self.doc_tags();
+                        popup(ui, &tr, ui.id().with("docs_tags"), 180.0, |ui| {
+                            if all_tags.is_empty() {
+                                ui.label(RichText::new("No tags yet. Add tags under a Doc's title.").color(t.text3));
+                            }
+                            if ui.selectable_label(self.docs_tag.is_none(), "Any tag").clicked() {
+                                self.docs_tag = None;
+                                close_popup(ui);
+                            }
+                            for g in all_tags {
+                                if ui.selectable_label(self.docs_tag.as_ref() == Some(&g), RichText::new(&g).color(tag_color(&g))).clicked() {
+                                    self.docs_tag = Some(g);
+                                    close_popup(ui);
+                                }
+                            }
+                        });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("\u{1F50D} Search").desired_width(160.0));
+                            let r = ui.add(egui::TextEdit::singleline(&mut self.docs_search).hint_text("\u{1F50D} Search").desired_width(160.0));
+                            name_field(&r, "Search Docs");
                         });
                     });
                     ui.add_space(8.0);
@@ -301,7 +324,8 @@ impl App {
                         ui.painter().text(pos2(hr.left() + w * x + 30.0, hr.center().y), Align2::LEFT_CENTER, h, FontId::proportional(13.0), t.text2);
                     }
                     ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-                    let q = self.search.to_lowercase();
+                    let q = self.docs_search.to_lowercase();
+                    let tag = self.docs_tag.clone();
                     let filter = self.hub_filter;
                     let mine_only = self.docs_mine;
                     let sort = self.docs_sort;
@@ -320,6 +344,7 @@ impl App {
                         .filter(|d| d.parent.is_none())
                         .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                         .filter(|d| !mine_only || d.owner == me)
+                        .filter(|d| tag.as_ref().is_none_or(|g| d.tags.contains(g)))
                         .cloned()
                         .collect();
                     match sort {
@@ -348,14 +373,31 @@ impl App {
                         } else {
                             ui.painter().text(pos2(r.left() + w * cols[1] + 30.0, r.center().y), Align2::LEFT_CENTER, "Workspace", FontId::proportional(14.0), t.text2);
                         }
-                        ui.painter().text(pos2(r.left() + w * cols[2] + 30.0, r.center().y), Align2::LEFT_CENTER, "\u{2013}", FontId::proportional(14.0), t.text3);
+                        if d.tags.is_empty() {
+                            ui.painter().text(pos2(r.left() + w * cols[2] + 30.0, r.center().y), Align2::LEFT_CENTER, "\u{2013}", FontId::proportional(14.0), t.text3);
+                        } else {
+                            // tag chips, clipped to the column
+                            let col = Rect::from_min_max(pos2(r.left() + w * cols[2] + 30.0, r.top()), pos2(r.left() + w * cols[3] + 24.0, r.bottom()));
+                            let p = ui.painter().with_clip_rect(col);
+                            let mut x = col.left();
+                            for g in &d.tags {
+                                let c = tag_color(g);
+                                let gal = p.layout_no_wrap(g.clone(), FontId::proportional(11.0), c);
+                                let cr = Rect::from_min_size(pos2(x, r.center().y - 9.0), vec2(gal.size().x + 12.0, 18.0));
+                                p.rect_filled(cr, 4.0, c.gamma_multiply(0.16));
+                                p.galley(cr.center() - gal.size() / 2.0, gal, c);
+                                x = cr.right() + 4.0;
+                            }
+                        }
                         ui.painter().text(pos2(r.left() + w * cols[3] + 30.0, r.center().y), Align2::LEFT_CENTER, fmt_ago(d.updated), FontId::proportional(14.0), t.text2);
                         if let Some(m) = self.data.member(d.owner).or_else(|| self.data.member(me)) {
                             paint_avatar(ui.painter(), pos2(r.left() + w * cols[4] + 42.0, r.center().y), 11.0, m, t.bg);
                         }
+                        name_it(&resp, &format!("Doc {}", d.title));
                         if resp.clicked() {
                             self.doc_open = Some(d.id);
                         }
+                        resp.context_menu(|ui| self.doc_menu(ui, d.id, true));
                     }
                 });
             });
@@ -378,8 +420,28 @@ impl App {
                     self.doc_open = None;
                 }
                 let loc = self.data.docs[idx].space.and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid)).map(|s| s.name.clone()).unwrap_or_else(|| "Workspace".into());
-                ui.label(RichText::new(format!("/  {}", loc)).color(t.text3));
+                // the location moves the doc to another Space
+                let lr = ui.add(egui::Button::new(RichText::new(format!("/  {}  \u{25BE}", loc)).color(t.text3)).frame(false)).on_hover_text("Move to another Space");
+                name_it(&lr, "Doc location");
+                let cur_space = self.data.docs[idx].space;
+                let mut spaces: Vec<(Option<u64>, String)> = vec![(None, "Workspace (no Space)".into())];
+                spaces.extend(self.open_spaces().iter().map(|s| (Some(s.id), s.name.clone())));
+                popup(ui, &lr, ui.id().with(("doc_move", id)), 200.0, |ui| {
+                    ui.label(RichText::new("Move to").small().color(t.text3));
+                    for (sid, name) in spaces {
+                        if ui.selectable_label(cur_space == sid, name).clicked() {
+                            self.move_doc_to_space(id, sid);
+                            close_popup(ui);
+                        }
+                    }
+                });
+                if self.data.docs[idx].meeting_note {
+                    ui.label(RichText::new("\u{1F4DD} Meeting Note").small().color(t.text3));
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let mr = ui.add(egui::Button::new("\u{22EF}").frame(false).min_size(vec2(24.0, 24.0))).on_hover_text("More");
+                    name_it(&mr, "Doc options");
+                    click_menu(&mr, |ui| self.doc_menu(ui, id, false));
                     if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
                         delete = true;
                     }
@@ -393,6 +455,17 @@ impl App {
                             None => ("Couldn't save the file".into(), now_ts()),
                         });
                     }
+                    if ui.add(egui::Button::new("Duplicate").frame(false)).on_hover_text("Copy this doc and its pages").clicked() {
+                        if let Some(n) = self.duplicate_doc(id) {
+                            self.doc_open = Some(n);
+                            self.toast = Some(("Doc duplicated".into(), now_ts()));
+                        }
+                    }
+                    if ui.add(egui::Button::new("Copy link").frame(false)).clicked() {
+                        ui.ctx().copy_text(format!("workboard://doc/{}", id));
+                        self.toast = Some(("Link copied".into(), now_ts()));
+                    }
+                    let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else { return };
                     let d = &mut self.data.docs[idx];
                     if ui.add(egui::Button::new(if d.private { "\u{1F512} Private" } else { "\u{1F465} Shared" }).frame(false)).on_hover_text("Who can see this Doc").clicked() {
                         d.private = !d.private;
@@ -407,24 +480,24 @@ impl App {
                         }
                         self.dirty = true;
                     }
-                    ui.label(RichText::new(format!("Last updated {}", fmt_ago(self.data.docs[idx].updated))).small().color(t.text3));
+                    if let Some(d) = self.data.docs.iter().find(|d| d.id == id) {
+                        ui.label(RichText::new(format!("Last updated {}", fmt_ago(d.updated))).small().color(t.text3));
+                    }
                 });
             });
         });
         let r = ui.available_rect_before_wrap();
         ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
-        self.doc_body(ui, idx);
         if delete {
-            let d = self.data.docs[idx].clone();
-            let tid = self.data.new_id();
-            self.data.extra.trash.push(TrashItem { id: tid, kind: "Doc".into(), title: d.title.clone(), deleted: now_ts(), payload: serde_json::to_string(&d).unwrap_or_default() });
-            self.data.docs.remove(idx);
-            for x in self.data.docs.iter_mut().filter(|x| x.parent == Some(d.id)) {
-                x.parent = d.parent;
-            }
-            self.doc_open = d.parent;
-            self.dirty = true;
+            // the page and its sub pages go to Trash together
+            self.trash_doc(id);
+            return;
         }
+        // the header may have opened a copy or deleted this doc
+        let Some(idx) = self.doc_open.and_then(|o| self.data.docs.iter().position(|d| d.id == o)) else {
+            return;
+        };
+        self.doc_body(ui, idx);
     }
 
     // ---------------------------------------------------------------- dashboards

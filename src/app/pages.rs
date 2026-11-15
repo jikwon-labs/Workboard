@@ -355,7 +355,7 @@ impl App {
                         if primary_button(ui, &t, "+ Doc").clicked() {
                             let id = self.data.new_id();
                             let now = now_ts();
-                            self.data.docs.insert(0, Doc { id, space: None, owner: self.data.me, private: false, archived: false, meeting_note: false, parent: None, title: "Untitled".into(), body: String::new(), created: now, updated: now });
+                            self.data.docs.insert(0, Doc { id, space: None, owner: self.data.me, private: false, archived: false, meeting_note: false, parent: None, title: "Untitled".into(), body: String::new(), created: now, updated: now, tags: vec![] });
                             self.doc_open = Some(id);
                             self.dirty = true;
                         }

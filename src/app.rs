@@ -365,6 +365,9 @@ pub struct App {
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
+    /// The Docs hub's own search box and tag filter (not the task list's).
+    docs_search: String,
+    docs_tag: Option<String>,
 }
 
 impl App {
@@ -558,6 +561,8 @@ impl App {
             doc_preview: false,
             settings_tab: 0,
             settings_state: None,
+            docs_search: String::new(),
+            docs_tag: None,
         }
     }
 

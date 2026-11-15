@@ -388,7 +388,7 @@ impl App {
     pub(super) fn new_doc(&mut self, space: Option<u64>) {
         let id = self.data.new_id();
         let now = now_ts();
-        self.data.docs.insert(0, Doc { id, space, owner: self.data.me, private: false, archived: false, meeting_note: false, parent: None, title: "Untitled".into(), body: String::new(), created: now, updated: now });
+        self.data.docs.insert(0, Doc { id, space, owner: self.data.me, private: false, archived: false, meeting_note: false, parent: None, title: "Untitled".into(), body: String::new(), created: now, updated: now, tags: vec![] });
         self.doc_open = Some(id);
         self.section = Section::Docs;
         self.dirty = true;
@@ -1595,9 +1595,9 @@ impl App {
                 }
             }
             "Doc" => {
-                if let Ok(d) = serde_json::from_str::<Doc>(&item.payload) {
-                    self.data.docs.push(d);
-                }
+                // a doc with its sub pages (older items hold a single page)
+                let pages = serde_json::from_str::<Vec<Doc>>(&item.payload).or_else(|_| serde_json::from_str::<Doc>(&item.payload).map(|d| vec![d])).unwrap_or_default();
+                self.restore_doc_pages(pages);
             }
             "List" => {
                 if let Ok((sid, l, tasks)) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(&item.payload) {

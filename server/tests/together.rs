@@ -118,6 +118,8 @@ struct App {
     email: Option<String>,
     /// (member, emailed to, mail error) for each invite answer
     mailed: Vec<(u64, Option<String>, Option<String>)>,
+    /// every copy (whole or delta) the server sent after the welcome
+    updates: Vec<Value>,
 }
 
 impl App {
@@ -178,6 +180,7 @@ impl App {
             restored: vec![],
             email: None,
             mailed: vec![],
+            updates: vec![],
         }
     }
 
@@ -291,6 +294,7 @@ impl App {
                     self.push();
                 }
                 Event::Update { data, hidden, .. } => {
+                    self.updates.push(data.clone());
                     self.take_in(data);
                     wb_sync::hide(&mut self.data, &hidden);
                 }
@@ -2679,6 +2683,288 @@ fn an_app_too_old_to_know_every_field_gets_changes_but_cannot_send_them() {
     std::thread::sleep(Duration::from_millis(300));
     old.pump();
     assert_eq!(old.denied.len(), 1, "{:?}", old.denied);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------------------------ deltas
+
+/// Every item id in a copy (whole or delta), nested ones too.
+fn all_ids(v: &Value) -> Vec<u64> {
+    wb_sync::fingerprints(v).into_keys().collect()
+}
+
+#[test]
+fn after_the_first_copy_only_what_changed_travels() {
+    let home = temp_home("deltas");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    b.updates.clear();
+    a.change(|d| d["tasks"][0]["name"] = json!("Plan (A)"));
+    b.wait("A's rename at B", |d| d["tasks"][0]["name"] == "Plan (A)");
+    let last = b.updates.last().unwrap();
+    assert_eq!(
+        all_ids(last),
+        vec![100],
+        "only the renamed task came: {}",
+        last
+    );
+    assert!(last.get("members").is_none() && last.get("channels").is_none());
+    // a message: the channel comes with only the new message in it
+    b.change(say("from B", 3001));
+    a.wait("B's message at A", |d| {
+        texts(d).contains(&"from B".to_string())
+    });
+    let last = a.updates.last().unwrap();
+    let mut ids = all_ids(last);
+    ids.sort();
+    assert_eq!(ids, vec![10, 3001], "{}", last);
+    // edits at once from both still merge field by field, through deltas
+    a.change(|d| d["tasks"][1]["name"] = json!("Ship (A)"));
+    b.change(|d| d["tasks"][1]["status"] = json!("done"));
+    for app in [&mut a, &mut b] {
+        app.wait("both edits", |d| {
+            d["tasks"][1]["name"] == "Ship (A)" && d["tasks"][1]["status"] == "done"
+        });
+    }
+    // and a delete
+    a.change(|d| {
+        d["tasks"].as_array_mut().unwrap().remove(0);
+    });
+    b.wait("the delete at B", |d| task_names(d) == ["Ship (A)"]);
+    assert!(b.meta().tombs.contains_key(&100));
+    // an app asking for whole copies (like one from before deltas) gets them
+    let code = a.invite(3, Role::Member);
+    let mut old = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            invite: Some(code),
+            full_copies: true,
+            ..Default::default()
+        },
+    );
+    old.wait("the old app's copy", |d| task_names(d) == ["Ship (A)"]);
+    a.change(|d| d["tasks"][0]["name"] = json!("Ship!"));
+    old.wait("the rename at the old app", |d| task_names(d) == ["Ship!"]);
+    assert!(
+        old.updates.last().unwrap()["members"]
+            .as_array()
+            .is_some_and(|m| m.len() == 3),
+        "the whole copy"
+    );
+    old.change(|d| d["tasks"][0]["status"] = json!("closed"));
+    a.wait("the old app's change", |d| {
+        d["tasks"][0]["status"] == "closed"
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn an_app_that_was_away_catches_up_on_every_change() {
+    let home = temp_home("deltas-away");
+    let server = Server::start(&home, 0);
+    let (mut a, b) = two_apps(server.port);
+    let (token, device, kept) = (b.token.clone(), b.device.clone(), b.data.clone());
+    drop(b);
+    // three revisions while B is away
+    a.change(|d| d["tasks"][0]["name"] = json!("one"));
+    a.change(say("two", 2002));
+    a.change(|d| {
+        d["tasks"].as_array_mut().unwrap().remove(1);
+    });
+    let mut b = App::start(
+        server.port,
+        kept,
+        SignIn {
+            token,
+            device,
+            ..Default::default()
+        },
+    );
+    b.wait("everything at B after reconnecting", |d| {
+        task_names(d) == ["one"] && texts(d).contains(&"two".to_string())
+    });
+    // and B's copy from before doesn't bring the deleted task back
+    b.change(|d| d["tasks"][0]["status"] = json!("done"));
+    a.wait("B's change", |d| d["tasks"][0]["status"] == "done");
+    assert_eq!(task_names(&a.data), ["one"]);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A bare connection that speaks the protocol by hand.
+struct Raw(tungstenite::WebSocket<std::net::TcpStream>);
+
+impl Raw {
+    fn connect(port: u16, hello: Value) -> Raw {
+        let stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let (ws, _) = tungstenite::client::client_with_config(
+            format!("ws://127.0.0.1:{}/ws", port).as_str(),
+            stream,
+            Some(
+                tungstenite::protocol::WebSocketConfig::default()
+                    .max_message_size(Some(wb_net::MAX_MESSAGE)),
+            ),
+        )
+        .unwrap();
+        let mut r = Raw(ws);
+        r.send(hello);
+        r
+    }
+
+    fn send(&mut self, v: Value) {
+        self.0
+            .send(tungstenite::Message::text(v.to_string()))
+            .unwrap();
+    }
+
+    /// The next message of `kind` (others are skipped).
+    fn next(&mut self, kind: &str) -> Value {
+        loop {
+            let m = self.0.read().expect("a message from the server");
+            if let tungstenite::Message::Text(t) = m {
+                let v: Value = serde_json::from_str(t.as_str()).unwrap();
+                if v["type"] == kind {
+                    return v;
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_missed_revision_brings_the_whole_copy_and_partial_pushes_merge() {
+    let home = temp_home("deltas-raw");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let mut raw = Raw::connect(
+        server.port,
+        json!({"type": "hello", "device": b.device, "token": b.token, "sync": wb_sync::META_V, "deltas": true}),
+    );
+    let w = raw.next("welcome");
+    assert_eq!(w["deltas"], true, "the server takes deltas");
+    let rev = w["rev"].as_u64().unwrap();
+    a.change(|d| d["tasks"][0]["name"] = json!("r1"));
+    let d1 = raw.next("delta");
+    assert_eq!(d1["base"].as_u64().unwrap(), rev);
+    assert_eq!(all_ids(&d1["data"]), vec![100]);
+    a.change(|d| d["tasks"][0]["name"] = json!("r2"));
+    let d2 = raw.next("delta");
+    assert_eq!(
+        d2["base"], d1["rev"],
+        "each delta follows the last revision"
+    );
+    // pretend d2 was lost: the next one doesn't follow what we have, so we
+    // ask for everything
+    a.change(|d| d["tasks"][0]["name"] = json!("r3"));
+    let d3 = raw.next("delta");
+    assert!(d3["base"].as_u64().unwrap() > d1["rev"].as_u64().unwrap());
+    raw.send(json!({"type": "resync"}));
+    let whole = raw.next("update");
+    assert_eq!(whole["rev"], d3["rev"]);
+    assert_eq!(task_names(&whole["data"]), ["r3", "Ship"]);
+    // a push of only what changed merges without taking anything else away
+    let mut part = json!({"tasks": [whole["data"]["tasks"][1].clone()], "extra": {"sync": {"v": wb_sync::META_V}}});
+    part["tasks"][0]["name"] = json!("Ship (partial)");
+    let t = whole["data"]["extra"]["sync"]["stamps"]["101"]
+        .as_i64()
+        .unwrap();
+    part["extra"]["sync"]["stamps"] = json!({"101": t + 1});
+    raw.send(json!({"type": "push", "data": part}));
+    a.wait("the partial push at A", |d| {
+        task_names(d) == ["r3", "Ship (partial)"]
+    });
+    b.wait("and at B", |d| task_names(d) == ["r3", "Ship (partial)"]);
+    assert_eq!(texts(&a.data), ["hi"], "nothing else went away");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn hidden_items_never_leak_through_deltas() {
+    let home = temp_home("deltas-hidden");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let code = a.invite(3, Role::Member);
+    let mut cy = App::join(server.port, &code);
+    cy.wait("Cy's copy", |_| true);
+    cy.updates.clear();
+    // a private channel of Ann and Bo, and a task in Ann's Personal space
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "plans", "kind": "Channel", "private": true, "topic": "", "members": [1, 2], "messages": [{"id": 21, "author": 1, "text": "secret plan", "ts": 5}], "last_read": 0}));
+        d["spaces"] = json!([{"id": 50, "name": "Personal", "private_owner": 1, "folders": [], "lists": [{"id": 51, "name": "Mine"}]}]);
+        d["tasks"].as_array_mut().unwrap().push(json!({"id": 52, "list_id": 51, "name": "secret task", "activity": []}));
+    });
+    b.wait("the channel at Bo", |d| channel(d, 20).is_some());
+    a.change(|d| {
+        let ch = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 20)
+            .unwrap();
+        ch["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 22, "author": 1, "text": "more secret", "ts": 6}));
+        d["tasks"][2]["name"] = json!("secret task renamed");
+    });
+    b.wait("the new message at Bo", |d| {
+        channel(d, 20).is_some_and(|c| c["messages"].as_array().unwrap().len() == 2)
+    });
+    // something Cy may see, so Cy surely got the revisions before it
+    a.change(say("for everyone", 2003));
+    cy.wait("the message for everyone", |d| {
+        texts(d).contains(&"for everyone".to_string())
+    });
+    assert!(cy.updates.len() >= 3);
+    for u in &cy.updates {
+        let text = u.to_string();
+        assert!(
+            !text.contains("secret")
+                && !all_ids(u)
+                    .iter()
+                    .any(|i| [20, 21, 22, 50, 51, 52].contains(i)),
+            "nothing hidden reached Cy: {}",
+            text
+        );
+        let stamps = &u["extra"]["sync"]["stamps"];
+        assert!(stamps.get("20").is_none() && stamps.get("52").is_none());
+    }
+    // added to the channel, Cy gets it whole, with what was said before
+    a.change(|d| {
+        let ch = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 20)
+            .unwrap();
+        ch["members"] = json!([1, 2, 3]);
+    });
+    cy.wait("the channel with its history at Cy", |d| {
+        channel(d, 20).is_some_and(|c| c["messages"].as_array().unwrap().len() == 2)
+    });
+    // taken out again, it leaves Cy's copy (without being deleted for others)
+    a.change(|d| {
+        let ch = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 20)
+            .unwrap();
+        ch["members"] = json!([1, 2]);
+    });
+    cy.wait("the channel gone at Cy", |d| channel(d, 20).is_none());
+    a.change(say("still here", 2004));
+    b.wait("Bo still has the channel", |d| {
+        channel(d, 20).is_some() && texts(d).contains(&"still here".to_string())
+    });
+    assert!(!b.meta().tombs.contains_key(&20));
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

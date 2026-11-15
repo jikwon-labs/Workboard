@@ -108,7 +108,8 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 - 편집은 연결 여부와 상관없이 된다. 막히는 경우는 로그인 화면이 떠 있는 동안(`needsSignIn`)뿐이다.
 - 편집할 때마다 stamp 를 찍고, 새로 찍은 stamp·tombstone 을 "기다리는 변경"으로 기록해 저장한다. 서버에서 온 정본에 그 stamp(또는 더 새것)가 보이면 지운다. 상단 바에 "Offline · 2 changes waiting" 처럼 나온다.
 - 다시 연결되면 `welcome` 의 정본을 먼저 merge 한 뒤 사본 전체를 push 한다. 그래서 합치기를 안 하는 가짜 서버에서도 두 기기의 오프라인 편집이 모두 남는다(테스트 `testOfflineEditsFromTwoDevicesBothSurvive`). 실제 서버는 merge 를 하므로 더 안전하다.
-- 같은 항목을 둘이 오프라인으로 고치면 stamp 가 늦은 쪽이 이긴다(맥 앱과 같은 규칙). 메시지·댓글은 각각 남는다.
+- 같은 항목을 둘이 오프라인으로 고쳐도 서로 다른 필드면 둘 다 남고, 같은 필드는 나중 변경이 이긴다(필드별 변경 시각 `SyncMeta.fields`, 맥 앱과 같은 규칙). 메시지, 댓글, 반응, 타이머는 각각 남는다.
+- 서버가 `deltas` 를 말하면 welcome 뒤로는 바뀐 부분만 올리고(`Sync.delta`, `SyncSummary`) `delta` 메시지로 받는다. `rev` 를 놓치면 `resync` 로 전체를 다시 받는다.
 
 ## 로그인 (실제 서버 프로토콜)
 

@@ -819,6 +819,9 @@ struct Inner {
     resets: std::collections::HashMap<String, (String, i64)>,
     /// email (normalized) -> (wrong tries in a row, time of the last one)
     fails: std::collections::HashMap<String, (u32, i64)>,
+    /// what the team's copy held at the last broadcast, to send apps only
+    /// what changed since (`wb_sync::delta`)
+    summary: Option<wb_sync::Summary>,
 }
 
 impl Inner {
@@ -898,10 +901,12 @@ struct Canon {
     rev: u64,
     /// the whole copy as an update message, for people nothing is hidden from
     json: String,
+    /// what changed since the last revision (None: send the whole copy)
+    delta: Option<Value>,
 }
 
 impl Canon {
-    fn new(data: &Value, rev: u64) -> Canon {
+    fn new(data: &Value, rev: u64, delta: Option<Value>) -> Canon {
         Canon {
             json: Msg::Update {
                 data: data.clone(),
@@ -911,19 +916,49 @@ impl Canon {
             .to_json(),
             data: data.clone(),
             rev,
+            delta,
         }
     }
 
-    fn update_for(&self, member: u64) -> String {
+    /// The whole copy `member` gets, and what is hidden from them.
+    fn update_for(&self, member: u64) -> (String, Vec<u64>) {
         match copy_for(&self.data, member) {
-            Some((data, hidden)) => Msg::Update {
-                data,
-                rev: self.rev,
+            Some((data, hidden)) => (
+                Msg::Update {
+                    data,
+                    rev: self.rev,
+                    hidden: hidden.clone(),
+                }
+                .to_json(),
                 hidden,
+            ),
+            None => (self.json.clone(), vec![]),
+        }
+    }
+
+    /// What changed for `member`, who could not see `was_hidden` before:
+    /// the change without what they may not see, and whole the items they
+    /// may see again. None when this revision goes whole.
+    fn delta_for(&self, member: u64, was_hidden: &[u64]) -> Option<(String, Vec<u64>)> {
+        let mut d = self.delta.clone()?;
+        let hidden = wb_sync::hidden_from(&self.data, member);
+        wb_sync::hide(&mut d, &hidden);
+        let back: Vec<u64> = was_hidden
+            .iter()
+            .filter(|i| !hidden.contains(i))
+            .copied()
+            .collect();
+        wb_sync::include_whole(&mut d, &self.data, &back);
+        Some((
+            Msg::Delta {
+                data: d,
+                rev: self.rev,
+                base: self.rev - 1,
+                hidden: hidden.clone(),
             }
             .to_json(),
-            None => self.json.clone(),
-        }
+            hidden,
+        ))
     }
 }
 
@@ -1012,11 +1047,23 @@ impl Hub {
         }
     }
 
-    fn broadcast_canon(&self, g: &mut Inner) {
+    /// Tell every connection the team's copy changed: apps that take deltas
+    /// get what changed since the last revision, unless `whole` (a restore,
+    /// after which apps send their whole copy back).
+    fn broadcast_canon(&self, g: &mut Inner, whole: bool) {
         g.saved.rev += 1;
         g.dirty = true;
         if let Some(c) = &g.canon {
-            let _ = self.updates.send(Arc::new(Canon::new(c, g.saved.rev)));
+            let delta = match &g.summary {
+                Some(s) if !whole => {
+                    Some(wb_sync::delta(s, c).unwrap_or_else(|| serde_json::json!({})))
+                }
+                _ => None,
+            };
+            g.summary = Some(wb_sync::Summary::of(c));
+            let _ = self
+                .updates
+                .send(Arc::new(Canon::new(c, g.saved.rev, delta)));
         }
     }
 
@@ -1354,7 +1401,14 @@ impl Hub {
         }
     }
 
-    fn welcome(&self, tag: u16, member: u64, role: Role, token: Option<String>) -> String {
+    /// The welcome message, and what is hidden from `member`.
+    fn welcome(
+        &self,
+        tag: u16,
+        member: u64,
+        role: Role,
+        token: Option<String>,
+    ) -> (String, Vec<u64>) {
         let g = self.inner.lock().unwrap();
         let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
         let (snapshot, hidden) = match g
@@ -1365,17 +1419,21 @@ impl Hub {
             Some((s, h)) => (Some(s), h),
             None => (None, vec![]),
         };
-        Msg::Welcome {
-            tag,
-            snapshot,
-            rev: g.saved.rev,
-            member,
-            role,
-            token,
-            email,
+        (
+            Msg::Welcome {
+                tag,
+                snapshot,
+                rev: g.saved.rev,
+                member,
+                role,
+                token,
+                email,
+                hidden: hidden.clone(),
+                deltas: true,
+            }
+            .to_json(),
             hidden,
-        }
-        .to_json()
+        )
     }
 
     /// Merge the copy `member` sent from `device` into the team's copy; tell
@@ -1436,7 +1494,7 @@ impl Hub {
                 let notes = push::notes(canon, before, &[member], now_ms() / 1000);
                 self.notify(&g.saved, notes);
             }
-            self.broadcast_canon(&mut g);
+            self.broadcast_canon(&mut g, false);
             // someone added or removed people: owners and admins see the new list
             if member_ids(g.canon.as_ref()) != members_before {
                 drop(g);
@@ -1504,16 +1562,20 @@ impl Hub {
         }
     }
 
-    fn latest(&self, member: u64) -> Option<String> {
+    /// The whole team's copy `member` gets, and what is hidden from them.
+    fn latest(&self, member: u64) -> Option<(String, Vec<u64>)> {
         let g = self.inner.lock().unwrap();
         g.canon.as_ref().map(|c| {
             let (data, hidden) = copy_for(c, member).unwrap_or_else(|| (c.clone(), vec![]));
-            Msg::Update {
-                data,
-                rev: g.saved.rev,
+            (
+                Msg::Update {
+                    data,
+                    rev: g.saved.rev,
+                    hidden: hidden.clone(),
+                }
+                .to_json(),
                 hidden,
-            }
-            .to_json()
+            )
         })
     }
 
@@ -1594,7 +1656,7 @@ impl Hub {
                 g.dirty = true;
                 let relabeled = g.canon.as_mut().is_some_and(|c| label_role(c, who, role));
                 if relabeled {
-                    self.broadcast_canon(&mut g);
+                    self.broadcast_canon(&mut g, false);
                 }
                 None
             }
@@ -1629,7 +1691,7 @@ impl Hub {
                     .as_mut()
                     .is_some_and(|c| label_role(c, who, Role::Member))
                 {
-                    self.broadcast_canon(&mut g);
+                    self.broadcast_canon(&mut g, false);
                 }
                 None
             }
@@ -1768,7 +1830,7 @@ impl Hub {
                 }
                 None => g.canon = Some(data),
             }
-            self.broadcast_canon(&mut g);
+            self.broadcast_canon(&mut g, true);
         }
         Ok(())
     }
@@ -2096,6 +2158,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
         reset_code,
         app,
         sync,
+        deltas,
     }) = Msg::parse(t.as_str())
     else {
         let _ = send(&mut socket, &Msg::error("Say hello first.", None).to_json()).await;
@@ -2149,7 +2212,8 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     let mut updates = hub.updates.subscribe();
     let mut kicks = hub.kicks.subscribe();
     let mut access = hub.access.subscribe();
-    if !send(&mut socket, &hub.welcome(tag, member, role, token)).await {
+    let (welcome, mut was_hidden) = hub.welcome(tag, member, role, token);
+    if !send(&mut socket, &welcome).await {
         return;
     }
     if role.manages() && !send(&mut socket, &hub.access_for(member).to_json()).await {
@@ -2179,6 +2243,11 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                         None
                     }
                     Some(Msg::Ping) => Some(Msg::Pong.to_json()),
+                    // it missed a revision: the whole copy again
+                    Some(Msg::Resync) => hub.latest(member).map(|(t, h)| {
+                        was_hidden = h;
+                        t
+                    }),
                     Some(Msg::PushToken { token, platform, env }) => {
                         hub.set_push_token(&device, &token, &platform, &env);
                         None
@@ -2214,12 +2283,16 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                 }
             }
             u = updates.recv() => {
-                let text = match u {
-                    Ok(c) => c.update_for(member),
+                let (text, hidden) = match u {
+                    Ok(c) => match deltas.then(|| c.delta_for(member, &was_hidden)).flatten() {
+                        Some(d) => d,
+                        None => c.update_for(member),
+                    },
                     // fell behind: the newest copy says it all
                     Err(broadcast::error::RecvError::Lagged(_)) => match hub.latest(member) { Some(t) => t, None => continue },
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
+                was_hidden = hidden;
                 if !send(&mut socket, &text).await {
                     break;
                 }
@@ -2308,6 +2381,7 @@ pub async fn serve_with(
             dirty: false,
             resets: Default::default(),
             fails: Default::default(),
+            summary: None,
         }),
         updates: broadcast::channel(64).0,
         kicks: broadcast::channel(16).0,
@@ -2676,6 +2750,7 @@ mod tests {
                 dirty: false,
                 resets: Default::default(),
                 fails: Default::default(),
+                summary: None,
             }),
             updates: broadcast::channel(64).0,
             kicks: broadcast::channel(16).0,
@@ -2704,6 +2779,7 @@ mod tests {
             dirty: false,
             resets: Default::default(),
             fails: Default::default(),
+            summary: None,
         };
         let now = now_ms();
         // old tries no longer count and go

@@ -1,7 +1,9 @@
 // A test-only stand-in for workboard-server (server/src/lib.rs). It speaks
 // the same messages (wb_net::Msg, see Protocol.swift) but does not merge: it
 // keeps the last pushed copy as the snapshot and sends it straight back to
-// everyone as an `update`. Real merging is the server's job.
+// everyone as an `update`. Real merging is the server's job. With `deltas`
+// it behaves like the real server does with apps that take deltas: it
+// merges pushes (whole or partial) with Sync.merge and sends `delta`s.
 //
 // Like the real axum server, WebSocket and plain HTTP share one port:
 //   GET  /health       -> {"ok":true,"rev":N,"workspace":bool}
@@ -72,6 +74,16 @@ public final class FakeServer: @unchecked Sendable {
     public var onPush: (JSON) -> Void = { _ in }
     public let requireSignIn: Bool
     public let livekit: LiveKitConfig?
+    /// Merge pushes and send deltas to apps that take them.
+    public var deltas = false
+    /// What the snapshot held at the last broadcast (deltas mode).
+    private var summary: SyncSummary?
+    private var loseNextDelta = false
+    private var resyncCount = 0
+    /// Tests: the next delta goes to nobody, as if it were lost.
+    public func dropNextDelta() { queue.sync { loseNextDelta = true } }
+    /// Tests: how many resync requests came in.
+    public var resyncs: Int { queue.sync { resyncCount } }
     /// What /auth/forgot answers for "mail" (false: this server can't send email).
     public var canMail = true
     /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
@@ -89,6 +101,7 @@ public final class FakeServer: @unchecked Sendable {
         var token: String?
         var welcomed = false
         var fragments = Data()
+        var deltas = false
         init(_ c: NWConnection) { conn = c }
     }
 
@@ -147,6 +160,7 @@ public final class FakeServer: @unchecked Sendable {
         queue.async {
             self.snapshot = s
             self.rev += 1
+            if self.deltas { self.summary = SyncSummary(of: s) }
             self.broadcast(.update(data: s, rev: self.rev))
         }
     }
@@ -465,11 +479,28 @@ public final class FakeServer: @unchecked Sendable {
         case .hello:
             break
         case let .push(s):
+            onPush(s)
+            if deltas, var snap = snapshot {
+                Sync.merge(&snap, [s])
+                snapshot = snap
+                rev += 1
+                log("push from \(p.device?.prefix(8) ?? "?") merged -> rev \(rev)")
+                let part = summary.flatMap { Sync.delta(since: $0, snap) } ?? [:]
+                summary = SyncSummary(of: snap)
+                let lost = loseNextDelta
+                loseNextDelta = false
+                for q in peers.values where q.welcomed && !(lost && q.deltas) {
+                    send(q.deltas ? .delta(data: part, rev: rev, base: rev - 1) : .update(data: snap, rev: rev), to: q)
+                }
+                return
+            }
             snapshot = s
             rev += 1
             log("push from \(p.device?.prefix(8) ?? "?") -> rev \(rev)")
-            onPush(s)
             broadcast(.update(data: s, rev: rev))
+        case .resync:
+            resyncCount += 1
+            if let snap = snapshot { send(.update(data: snap, rev: rev), to: p) }
         case let .setPassword(email, password, old):
             setPassword(email: email, password: password, old: old, from: p)
         case let .pushToken(token, platform, env):
@@ -539,10 +570,14 @@ public final class FakeServer: @unchecked Sendable {
         }
         let tag = assignTag(device: h.device, wanted: h.tag)
         p.welcomed = true
+        p.deltas = deltas && h.deltas
+        if deltas, summary == nil, let snap = snapshot { summary = SyncSummary(of: snap) }
         log("hello from \(h.device.prefix(8)) -> tag \(tag)" + (p.member.map { " as member \($0)" } ?? ""))
         let role = p.member.map { $0 == 1 ? "owner" : "member" }
-        send(.welcome(Welcome(tag: tag, snapshot: snapshot, rev: rev, member: p.member, role: role, token: newToken,
-                              email: p.member.flatMap { accounts[$0]?.email })), to: p)
+        var w = Welcome(tag: tag, snapshot: snapshot, rev: rev, member: p.member, role: role, token: newToken,
+                        email: p.member.flatMap { accounts[$0]?.email })
+        w.deltas = deltas
+        send(.welcome(w), to: p)
     }
 
     private func addDevice(_ device: String, member: UInt64) -> String {

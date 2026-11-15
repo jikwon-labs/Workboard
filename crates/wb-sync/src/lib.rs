@@ -1235,6 +1235,245 @@ pub fn older_app<'a>(copy: &'a Value, mine: &str) -> Option<&'a str> {
     }
 }
 
+/// What one side of a server connection knows the other has of the shared
+/// workspace: each item's fingerprint and bookkeeping, deletes, restores
+/// and shared settings. `delta` sends only what differs from it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Summary {
+    hashes: BTreeMap<u64, u64>,
+    stamps: BTreeMap<u64, i64>,
+    fields: BTreeMap<u64, BTreeMap<String, i64>>,
+    moved: BTreeMap<u64, i64>,
+    tombs: BTreeMap<u64, i64>,
+    revived: BTreeMap<u64, i64>,
+    values: BTreeMap<String, i64>,
+    value_hashes: BTreeMap<String, u64>,
+}
+
+impl Summary {
+    /// Everything in a whole copy.
+    pub fn of(data: &Value) -> Summary {
+        let m = meta_of(data);
+        Summary {
+            hashes: fingerprints(data),
+            stamps: m.stamps,
+            fields: m.fields,
+            moved: m.moved,
+            tombs: m.tombs,
+            revived: m.revived,
+            values: m.values,
+            value_hashes: value_hashes(data),
+        }
+    }
+
+    /// The other side has this copy (a whole one or a `delta`) too now.
+    pub fn absorb(&mut self, part: &Value) {
+        let m = meta_of(part);
+        for (id, h) in fingerprints(part) {
+            self.hashes.insert(id, h);
+            let set = |map: &mut BTreeMap<u64, i64>, from: &BTreeMap<u64, i64>| match from.get(&id)
+            {
+                Some(t) => {
+                    map.insert(id, *t);
+                }
+                None => {
+                    map.remove(&id);
+                }
+            };
+            set(&mut self.stamps, &m.stamps);
+            set(&mut self.moved, &m.moved);
+            match m.fields.get(&id) {
+                Some(e) => {
+                    self.fields.insert(id, e.clone());
+                }
+                None => {
+                    self.fields.remove(&id);
+                }
+            }
+        }
+        for (k, v) in &m.tombs {
+            let e = self.tombs.entry(*k).or_insert(*v);
+            *e = (*e).max(*v);
+        }
+        for (k, v) in &m.revived {
+            let e = self.revived.entry(*k).or_insert(*v);
+            *e = (*e).max(*v);
+        }
+        for (path, h) in value_hashes(part) {
+            if get_path(part, &path).is_some() {
+                self.value_hashes.insert(path.clone(), h);
+                if let Some(t) = m.values.get(&path) {
+                    self.values.insert(path, *t);
+                }
+            }
+        }
+    }
+}
+
+/// The part of `data` (a whole copy) that differs from what `since` says
+/// the other side has: the items that changed, each inside the items it
+/// sits in (with their own fields but only the changed items inside them),
+/// with their bookkeeping, plus new deletes and restores and changed
+/// shared settings. Merging it is the same as merging the whole copy,
+/// since a missing item is never taken as deleted. None when nothing
+/// changed.
+pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
+    let cur = fingerprints(data);
+    let meta = meta_of(data);
+    let changed: std::collections::HashSet<u64> = cur
+        .iter()
+        .filter(|(id, h)| {
+            since.hashes.get(id) != Some(h)
+                || since.stamps.get(id) != meta.stamps.get(id)
+                || since.fields.get(id) != meta.fields.get(id)
+                || since.moved.get(id) != meta.moved.get(id)
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    let newer = |a: &BTreeMap<u64, i64>, b: &BTreeMap<u64, i64>| -> BTreeMap<u64, i64> {
+        a.iter()
+            .filter(|(k, v)| b.get(k).is_none_or(|o| o < v))
+            .map(|(k, v)| (*k, *v))
+            .collect()
+    };
+    let tombs = newer(&meta.tombs, &since.tombs);
+    let revived = newer(&meta.revived, &since.revived);
+    let vh = value_hashes(data);
+    let values: Vec<&str> = SHARED_VALUES
+        .iter()
+        .copied()
+        .filter(|p| {
+            since.value_hashes.get(*p) != vh.get(*p) || since.values.get(*p) != meta.values.get(*p)
+        })
+        .collect();
+    if changed.is_empty() && tombs.is_empty() && revived.is_empty() && values.is_empty() {
+        return None;
+    }
+    // the changed items with the items they sit in
+    fn prune(
+        arr: &[Value],
+        changed: &std::collections::HashSet<u64>,
+        kept: &mut Vec<u64>,
+    ) -> Vec<Value> {
+        let mut out = vec![];
+        for item in arr {
+            let (Some(id), Some(obj)) = (id_of(item), item.as_object()) else {
+                continue;
+            };
+            let mut o = Map::new();
+            let mut inner = false;
+            for (k, v) in obj {
+                if is_id_array(v) {
+                    let sub = prune(v.as_array().unwrap(), changed, kept);
+                    if !sub.is_empty() {
+                        inner = true;
+                        o.insert(k.clone(), Value::Array(sub));
+                    }
+                } else {
+                    o.insert(k.clone(), v.clone());
+                }
+            }
+            if inner || changed.contains(&id) {
+                kept.push(id);
+                out.push(Value::Object(o));
+            }
+        }
+        out
+    }
+    let mut out = serde_json::json!({});
+    let mut kept = vec![];
+    for path in SHARED {
+        if let Some(a) = get_path(data, path).and_then(|v| v.as_array()) {
+            let sub = prune(a, &changed, &mut kept);
+            if !sub.is_empty() {
+                set_path(&mut out, path, Value::Array(sub));
+            }
+        }
+    }
+    for p in &values {
+        if let Some(v) = get_path(data, p) {
+            set_path(&mut out, p, v.clone());
+        }
+    }
+    let pick = |m: &BTreeMap<u64, i64>| -> BTreeMap<u64, i64> {
+        kept.iter()
+            .filter_map(|id| m.get(id).map(|t| (*id, *t)))
+            .collect()
+    };
+    let part = SyncMeta {
+        stamps: pick(&meta.stamps),
+        moved: pick(&meta.moved),
+        fields: kept
+            .iter()
+            .filter_map(|id| meta.fields.get(id).map(|e| (*id, e.clone())))
+            .collect(),
+        tombs,
+        revived,
+        values: values
+            .iter()
+            .filter_map(|p| meta.values.get(*p).map(|t| (p.to_string(), *t)))
+            .collect(),
+        v: meta.v,
+        ..Default::default()
+    };
+    set_path(
+        &mut out,
+        "extra.sync",
+        serde_json::to_value(&part).unwrap_or_default(),
+    );
+    Some(out)
+}
+
+/// Put the top-level items `ids` of `data` into `part` (a `delta`) whole,
+/// with their bookkeeping: for someone who may see them again after they
+/// were hidden from them.
+pub fn include_whole(part: &mut Value, data: &Value, ids: &[u64]) {
+    if ids.is_empty() {
+        return;
+    }
+    let meta = meta_of(data);
+    let mut pm = meta_of(part);
+    let mut added = vec![];
+    for path in SHARED {
+        let Some(a) = get_path(data, path).and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for item in a
+            .iter()
+            .filter(|x| id_of(x).is_some_and(|i| ids.contains(&i)))
+        {
+            if get_path(part, path).is_none_or(|v| !v.is_array()) {
+                set_path(part, path, Value::Array(vec![]));
+            }
+            let arr = get_path_mut(part, path)
+                .and_then(|v| v.as_array_mut())
+                .unwrap();
+            arr.retain(|x| id_of(x) != id_of(item));
+            arr.push(item.clone());
+            added.push(item.clone());
+        }
+    }
+    let mut inner = BTreeMap::new();
+    walk(&Value::Array(added), None, false, &mut inner);
+    for id in inner.keys() {
+        if let Some(t) = meta.stamps.get(id) {
+            pm.stamps.insert(*id, *t);
+        }
+        if let Some(t) = meta.moved.get(id) {
+            pm.moved.insert(*id, *t);
+        }
+        if let Some(e) = meta.fields.get(id) {
+            pm.fields.insert(*id, e.clone());
+        }
+    }
+    pm.v = meta.v;
+    set_path(
+        part,
+        "extra.sync",
+        serde_json::to_value(&pm).unwrap_or_default(),
+    );
+}
+
 /// The other people's files in a shared folder, with their change times.
 pub fn other_files(folder: &Path, device: &str) -> Vec<(PathBuf, std::time::SystemTime)> {
     let mine = format!("{}{}", device, FILE_SUFFIX);
@@ -2573,5 +2812,60 @@ mod tests {
         let back = read_json(&dir.join(format!("d1{}", FILE_SUFFIX))).unwrap();
         assert_eq!(app_version_of(&back), Some("0.1.7"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Strip what a merge result doesn't need for comparing.
+    fn items(v: &Value) -> Value {
+        let mut v = v.clone();
+        v["extra"].as_object_mut().map(|e| e.remove("sync"));
+        v
+    }
+
+    #[test]
+    fn a_delta_holds_only_what_changed_and_merges_like_the_whole_copy() {
+        let mut m = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "one"}, {"id": 2, "name": "two"}]),
+            chat(json!([])),
+            &m,
+        );
+        a["spaces"] = json!([
+            space(100, json!([]), json!([list(101)])),
+            space(200, json!([]), json!([]))
+        ]);
+        save(&mut a, &mut m, 10);
+        let other = a.clone();
+        let mut sum = Summary::of(&shareable(&a));
+        assert_eq!(delta(&sum, &shareable(&a)), None, "nothing changed");
+        // a new message, a renamed task, a deleted task, a moved list, a setting
+        a["channels"][0]["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 12, "author": 1, "text": "new", "ts": 6}));
+        a["tasks"] = json!([{"id": 1, "name": "one!"}]);
+        a["spaces"] = json!([
+            space(100, json!([]), json!([])),
+            space(200, json!([]), json!([list(101)]))
+        ]);
+        a["workspace"] = json!("Renamed");
+        save(&mut a, &mut m, 20);
+        let d = delta(&sum, &shareable(&a)).unwrap();
+        assert_eq!(d["tasks"], json!([{"id": 1, "name": "one!"}]));
+        let msgs = d["channels"][0]["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1, "only the new message: {}", d["channels"]);
+        assert_eq!(msgs[0]["text"], "new");
+        assert_eq!(d["workspace"], "Renamed");
+        assert!(d["extra"]["sync"]["tombs"].get("2").is_some());
+        assert!(d.get("members").is_none() && d.get("docs").is_none());
+        // merging the delta is the same as merging the whole copy
+        let (mut x, mut y) = (other.clone(), other.clone());
+        merge(&mut x, &[d.clone()]);
+        merge(&mut y, &[shareable(&a)]);
+        assert_eq!(items(&x), items(&y));
+        assert_eq!(places(&x), vec![(200, 101)]);
+        assert_eq!(meta_of(&x).stamps, meta_of(&y).stamps);
+        // once the other side has it, nothing is left to send
+        sum.absorb(&d);
+        assert_eq!(delta(&sum, &shareable(&a)), None);
     }
 }

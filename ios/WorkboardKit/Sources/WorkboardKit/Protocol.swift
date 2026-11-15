@@ -8,9 +8,14 @@
 //                                the server takes no pushes from apps with
 //                                sync below wb_net::OLDEST_SYNC or none)
 //   server -> app  welcome      {tag, snapshot|null, rev, member, role, token?, email?}
-//   app -> server  push         {data}
+//   app -> server  push         {data}   (whole, or only what changed: Sync.delta)
 //   server -> all  update       {data, rev, hidden?}   (hidden also in welcome: ids
 //                                this person may not see; dropped without tombstones)
+//   server -> app  delta        {data, rev, base, hidden?}   (what changed since
+//                                revision base; only to apps whose hello said
+//                                deltas, from servers whose welcome says deltas)
+//   app -> server  resync       {}   (a revision went missing: send the whole
+//                                copy again as update)
 //   app -> server  set_password {email, password, old_password?}
 //   server -> app  account      {email}
 //   app -> server  push_token   {token, platform: "ios", env}   (ignored by servers that don't know it)
@@ -46,6 +51,8 @@ public struct Hello: Equatable, Sendable {
     /// This app's version, and the sync format it writes (Sync.metaV).
     public var app: String?
     public var sync: UInt64?
+    /// This app takes `delta` messages.
+    public var deltas = false
 
     public init(device: String, tag: UInt64? = nil, token: String? = nil, invite: String? = nil, claim: UInt64? = nil,
                 email: String? = nil, password: String? = nil, newPassword: String? = nil, resetCode: String? = nil,
@@ -70,6 +77,7 @@ public enum ClientMessage: Equatable, Sendable {
     case setPassword(email: String, password: String, oldPassword: String?)
     case pushToken(token: String, platform: String, env: String)
     case callJoin(channel: UInt64)
+    case resync
     case ping
     case pong
 
@@ -88,6 +96,7 @@ public enum ClientMessage: Equatable, Sendable {
             put("reset_code", h.resetCode)
             put("app", h.app)
             if let v = h.sync { o["sync"] = .id(v) }
+            if h.deltas { o["deltas"] = true }
             return .object(o)
         case let .push(data):
             return ["type": "push", "data": data]
@@ -99,6 +108,7 @@ public enum ClientMessage: Equatable, Sendable {
             return ["type": "push_token", "token": .string(token), "platform": .string(platform), "env": .string(env)]
         case let .callJoin(channel):
             return ["type": "call_join", "channel": .id(channel)]
+        case .resync: return ["type": "resync"]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         }
@@ -111,10 +121,12 @@ public enum ClientMessage: Equatable, Sendable {
         switch type {
         case "hello":
             guard let device = j["device"]?.string else { return nil }
-            self = .hello(Hello(device: device, tag: j["tag"]?.uint, token: j["token"]?.string, invite: j["invite"]?.string,
-                                claim: j["claim"]?.uint, email: j["email"]?.string, password: j["password"]?.string,
-                                newPassword: j["new_password"]?.string, resetCode: j["reset_code"]?.string,
-                                app: j["app"]?.string, sync: j["sync"]?.uint))
+            var h = Hello(device: device, tag: j["tag"]?.uint, token: j["token"]?.string, invite: j["invite"]?.string,
+                          claim: j["claim"]?.uint, email: j["email"]?.string, password: j["password"]?.string,
+                          newPassword: j["new_password"]?.string, resetCode: j["reset_code"]?.string,
+                          app: j["app"]?.string, sync: j["sync"]?.uint)
+            h.deltas = j["deltas"]?.bool ?? false
+            self = .hello(h)
         case "push":
             guard let s = j["data"], s.object != nil else { return nil }
             self = .push(data: s)
@@ -126,6 +138,7 @@ public enum ClientMessage: Equatable, Sendable {
         case "call_join":
             guard let ch = j["channel"]?.uint else { return nil }
             self = .callJoin(channel: ch)
+        case "resync": self = .resync
         case "ping": self = .ping
         case "pong": self = .pong
         default: return nil
@@ -156,6 +169,8 @@ public struct Welcome: Equatable, Sendable {
     public var email: String?
     /// Items the server hides from this person (newer servers; see Sync.hide).
     public var hidden: [UInt64]
+    /// The server sends deltas and takes pushes of only what changed.
+    public var deltas = false
 
     public init(tag: UInt64, snapshot: JSON?, rev: Int64, member: UInt64? = nil, role: String? = nil, token: String? = nil, email: String? = nil, hidden: [UInt64] = []) {
         self.hidden = hidden
@@ -172,6 +187,8 @@ public struct Welcome: Equatable, Sendable {
 public enum ServerMessage: Equatable, Sendable {
     case welcome(Welcome)
     case update(data: JSON, rev: Int64, hidden: [UInt64] = [])
+    /// What changed from revision `base` to `rev`.
+    case delta(data: JSON, rev: Int64, base: Int64, hidden: [UInt64] = [])
     case account(email: String)
     case callToken(channel: UInt64, url: String, token: String)
     case ping
@@ -189,9 +206,14 @@ public enum ServerMessage: Equatable, Sendable {
             if let t = w.token { o["token"] = .string(t) }
             if let e = w.email { o["email"] = .string(e) }
             if !w.hidden.isEmpty { o["hidden"] = .array(w.hidden.map(JSON.id)) }
+            if w.deltas { o["deltas"] = true }
             return .object(o)
         case let .update(data, rev, hidden):
             var o: [String: JSON] = ["type": "update", "data": data, "rev": .int(rev)]
+            if !hidden.isEmpty { o["hidden"] = .array(hidden.map(JSON.id)) }
+            return .object(o)
+        case let .delta(data, rev, base, hidden):
+            var o: [String: JSON] = ["type": "delta", "data": data, "rev": .int(rev), "base": .int(base)]
             if !hidden.isEmpty { o["hidden"] = .array(hidden.map(JSON.id)) }
             return .object(o)
         case let .account(email):
@@ -219,14 +241,22 @@ public enum ServerMessage: Equatable, Sendable {
         switch type {
         case "welcome":
             let snap = j["snapshot"]
-            self = .welcome(Welcome(tag: j["tag"]?.uint ?? 0, snapshot: snap?.object != nil ? snap : nil, rev: j["rev"]?.int ?? 0,
-                                    member: j["member"]?.uint, role: j["role"]?.string, token: j["token"]?.string, email: j["email"]?.string,
-                                    hidden: (j["hidden"]?.array ?? []).compactMap(\.uint)))
+            var w = Welcome(tag: j["tag"]?.uint ?? 0, snapshot: snap?.object != nil ? snap : nil, rev: j["rev"]?.int ?? 0,
+                            member: j["member"]?.uint, role: j["role"]?.string, token: j["token"]?.string, email: j["email"]?.string,
+                            hidden: (j["hidden"]?.array ?? []).compactMap(\.uint))
+            w.deltas = j["deltas"]?.bool ?? false
+            self = .welcome(w)
         case "update":
             if let s = j["data"], s.object != nil {
                 self = .update(data: s, rev: j["rev"]?.int ?? 0, hidden: (j["hidden"]?.array ?? []).compactMap(\.uint))
             } else {
                 self = .unknown("update without data")
+            }
+        case "delta":
+            if let s = j["data"], s.object != nil {
+                self = .delta(data: s, rev: j["rev"]?.int ?? 0, base: j["base"]?.int ?? 0, hidden: (j["hidden"]?.array ?? []).compactMap(\.uint))
+            } else {
+                self = .unknown("delta without data")
             }
         case "account":
             self = .account(email: j["email"]?.string ?? "")

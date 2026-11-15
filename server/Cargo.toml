@@ -25,3 +25,7 @@ sha1 = "0.10"
 base64 = "0.22"
 # Apple push notifications: the ES256 JWT for APNs (see src/push.rs)
 ring = "0.17"
+
+[dev-dependencies]
+# a bare connection for protocol tests (the same version wb-net uses)
+tungstenite = "0.30"

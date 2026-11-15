@@ -192,6 +192,10 @@ public final class SyncClient {
     @ObservationIgnored private var pendingSignIn: SignInRequest?
     /// What the hello on the current connection carried.
     @ObservationIgnored private var helloUsedToken = false
+    /// What the server has of this copy, when it takes deltas (wb-net's
+    /// session does the same): pushes send only what differs.
+    @ObservationIgnored private var summary: SyncSummary?
+    @ObservationIgnored private var serverDeltas = false
     /// call_join requests waiting for the server's answer, by channel.
     @ObservationIgnored private var pendingCalls: [UInt64: [CheckedContinuation<CallGrant, Error>]] = [:]
     /// How long to wait for a call_token.
@@ -399,6 +403,7 @@ public final class SyncClient {
         // the server takes changes only from apps that know every field
         h.app = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "ios"
         h.sync = UInt64(Sync.metaV)
+        h.deltas = true
         if let attempt = pendingSignIn {
             attempt.fill(&h)
             helloUsedToken = false
@@ -478,14 +483,25 @@ public final class SyncClient {
             }
             storage.save(settings)
             self.rev = w.rev
+            serverDeltas = w.deltas
+            summary = w.deltas ? w.snapshot.map { SyncSummary(of: $0) } : nil
             if let snapshot = w.snapshot { take(snapshot, announce: false, hidden: w.hidden) }
             state = .connected
             if let t = settings.pushToken { send(.pushToken(token: t, platform: "ios", env: settings.pushEnv), on: ws) }
-            // after (re)connecting the whole copy goes up, as the server design says
+            // after (re)connecting our copy goes up (only what the server
+            // doesn't have, when it takes deltas)
             if data != nil { pushNow() }
         case let .update(snapshot, rev, hidden):
             self.rev = rev
+            if serverDeltas { summary = SyncSummary(of: snapshot) }
             take(snapshot, announce: true, hidden: hidden)
+        case let .delta(part, rev, base, hidden):
+            // a revision went missing (or there's no copy to merge into yet):
+            // ask for the whole copy; this part still merges meanwhile
+            if base > self.rev || data == nil { send(.resync, on: ws) }
+            summary?.absorb(part)
+            self.rev = max(self.rev, rev)
+            if data != nil { take(part, announce: true, hidden: hidden) }
         case let .account(email):
             settings.accountEmail = email
             storage.save(settings)
@@ -763,7 +779,18 @@ public final class SyncClient {
 
     private func pushNow() {
         guard let ws = socket, state.isConnected, let d = data else { return }
-        send(.push(data: Sync.outgoing(d)), on: ws)
+        let out = Sync.outgoing(d)
+        var push: JSON? = out
+        if var s = summary {
+            // only what the server doesn't have yet (nothing: no push)
+            push = Sync.delta(since: s, out)
+            if let p = push { s.absorb(p) }
+            summary = s
+        } else if serverDeltas {
+            summary = SyncSummary(of: out)
+        }
+        guard let p = push else { return }
+        send(.push(data: p), on: ws)
         pushesSent += 1
     }
 

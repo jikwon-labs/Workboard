@@ -5465,6 +5465,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tungstenite 0.30.0",
+ "wb-sync",
 ]
 
 [[package]]
@@ -6085,6 +6086,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
+ "tungstenite 0.30.0",
  "wb-net",
  "wb-sync",
 ]

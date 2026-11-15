@@ -6,11 +6,20 @@
 // invite code, an email and password, a password-reset code, or a claim on
 // an empty server), the server answers `welcome` with the team's copy (and a
 // new token when it issued one), then the app
-// sends `push` with its whole shared copy whenever it changes and the server
+// sends `push` with its shared copy whenever it changes and the server
 // sends `update` to everyone when the team's copy changed. Both sides answer
 // `ping` with `pong`. Owners and admins also send the access requests
 // (`create_invite`, `set_role`, `revoke`, `access_list`). Anyone signed in
 // may send `set_password` to set up or change their account.
+//
+// Deltas: when both sides say `deltas` (in hello and welcome), only what
+// changed travels after the first whole copy. The app pushes the part of
+// its copy that differs from what the server has (`wb_sync::delta`; merging
+// it is the same as merging the whole copy, since a missing item never
+// counts as deleted), and the server sends `delta` messages with the part
+// of the team's copy that changed since the revision `base`. An app that
+// missed a revision asks for the whole copy again (`resync`). Apps and
+// servers from before deltas keep sending and getting whole copies.
 //
 // Accounts: an email and a password that sign a person in on any computer
 // or phone. Someone joining with an invite code chooses the password then;
@@ -260,6 +269,9 @@ pub enum Msg {
         /// than `OLDEST_SYNC` (they still get the team's copy).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sync: Option<u32>,
+        /// The app takes `delta` messages.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        deltas: bool,
     },
     Welcome {
         /// The id tag this device must use; the server keeps them unique.
@@ -282,10 +294,16 @@ pub enum Msg {
         /// Older apps ignore it.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         hidden: Vec<u64>,
+        /// The server sends `delta` messages to apps that take them, and
+        /// takes pushes of only what changed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        deltas: bool,
     },
+    /// The app's shared copy, whole or only what changed (`wb_sync::delta`).
     Push {
         data: Value,
     },
+    /// The team's whole copy.
     Update {
         data: Value,
         rev: u64,
@@ -293,6 +311,17 @@ pub enum Msg {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         hidden: Vec<u64>,
     },
+    /// What changed in the team's copy from revision `base` to `rev`, for
+    /// apps that said `deltas`. `hidden` is the whole list, as in `Welcome`.
+    Delta {
+        data: Value,
+        rev: u64,
+        base: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hidden: Vec<u64>,
+    },
+    /// The app missed a revision: send the whole copy again (as `update`).
+    Resync,
     Ping,
     Pong,
     /// iPhone: this device's Apple push token (hex), so the server can notify
@@ -572,6 +601,8 @@ pub struct SignIn {
     /// The app's version and sync format, sent in hello.
     pub app: Option<String>,
     pub sync: Option<u32>,
+    /// Ask for whole copies every time, like apps from before deltas (tests).
+    pub full_copies: bool,
 }
 
 enum Cmd {
@@ -798,11 +829,16 @@ fn session(
         reset_code: sign_in.reset_code.clone(),
         app: sign_in.app.clone(),
         sync: sign_in.sync,
+        deltas: !sign_in.full_copies,
     };
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
     }
     let mut welcomed = false;
+    // what the server has of our copy, when it takes deltas (else None)
+    let mut summary: Option<wb_sync::Summary> = None;
+    let mut deltas = false;
+    let mut rev: u64 = 0;
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
     loop {
@@ -819,8 +855,20 @@ fn session(
             // the copy first, so a conversation made a moment ago is on the
             // server before a call_join for it
             if let Some(v) = pending.take() {
-                if let Err(e) = send(ws, &Msg::Push { data: v }) {
-                    return End::Lost(e);
+                let push = match summary.as_mut() {
+                    // only what the server doesn't have yet (nothing: no push)
+                    Some(s) => wb_sync::delta(s, &v).inspect(|d| s.absorb(d)),
+                    None => {
+                        if deltas {
+                            summary = Some(wb_sync::Summary::of(&v));
+                        }
+                        Some(v)
+                    }
+                };
+                if let Some(data) = push {
+                    if let Err(e) = send(ws, &Msg::Push { data }) {
+                        return End::Lost(e);
+                    }
                 }
             }
             while !queued.is_empty() {
@@ -856,13 +904,21 @@ fn session(
                     Some(Msg::Welcome {
                         tag,
                         snapshot,
-                        rev,
+                        rev: r,
                         member,
                         role,
                         token,
                         email,
                         hidden,
+                        deltas: server_deltas,
                     }) => {
+                        deltas = server_deltas && !sign_in.full_copies;
+                        rev = r;
+                        summary = if deltas {
+                            snapshot.as_ref().map(wb_sync::Summary::of)
+                        } else {
+                            None
+                        };
                         // sign in the same way next time: with the token, not the password
                         sign_in.tag = Some(tag);
                         if let Some(t) = &token {
@@ -880,7 +936,7 @@ fn session(
                             emit(Event::Welcome {
                                 tag,
                                 snapshot,
-                                rev,
+                                rev: r,
                                 member,
                                 role,
                                 token,
@@ -889,8 +945,45 @@ fn session(
                             })
                         })
                     }
-                    Some(Msg::Update { data, rev, hidden }) => {
-                        emit(Event::Update { data, rev, hidden })
+                    Some(Msg::Update {
+                        data,
+                        rev: r,
+                        hidden,
+                    }) => {
+                        if deltas {
+                            summary = Some(wb_sync::Summary::of(&data));
+                        }
+                        rev = r;
+                        emit(Event::Update {
+                            data,
+                            rev: r,
+                            hidden,
+                        })
+                    }
+                    Some(Msg::Delta {
+                        data,
+                        rev: r,
+                        base,
+                        hidden,
+                    }) => {
+                        // a revision went missing: ask for the whole copy
+                        // (this part still merges fine meanwhile)
+                        let asked = if base > rev {
+                            send(ws, &Msg::Resync).map_err(End::Lost)
+                        } else {
+                            Ok(())
+                        };
+                        if let Some(s) = summary.as_mut() {
+                            s.absorb(&data);
+                        }
+                        rev = rev.max(r);
+                        asked.and_then(|_| {
+                            emit(Event::Update {
+                                data,
+                                rev: r,
+                                hidden,
+                            })
+                        })
                     }
                     Some(Msg::Invite {
                         member,
@@ -1002,6 +1095,7 @@ mod tests {
             reset_code: None,
             app: None,
             sync: None,
+            deltas: false,
         };
         assert_eq!(
             hello(Some(3)).to_json(),

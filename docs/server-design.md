@@ -29,7 +29,7 @@
 4. **owner 등록과 팀원 초대.** 실제 서버에 처음 연결 → People 에서 초대 코드 → 팀원은 Tailscale 초대도 받아야 한다. 순서: `deploy/README.md`.
 
 **알려진 한계(급하지 않음)**
-5. 동기화할 때마다 작업공간 전체를 주고받는다. 작은 팀에는 충분하고, 커지면 변경분 전송으로 바꾼다.
+5. ~~동기화할 때마다 작업공간 전체를 주고받는다.~~ 해결: 처음 전체 사본(welcome) 뒤로는 바뀐 항목만 오간다(아래 "변경분(delta)"). 예전 앱이나 예전 서버와는 전체 사본으로 주고받는다.
 6. 영상 화질은 고정(640px, 15fps)이다. 네트워크에 맞춘 화질 조절과 화면 공유는 없다.
 7. `third_party/nokhwa-bindings-macos` 는 한 줄 고친 사본이다(2026-11-15 확인: crates.io 최신이 아직 0.2.4 라 계속 필요). nokhwa 를 올릴 때 아직 필요한지 확인한다. 앱 실행 파일은 통화 라이브러리 때문에 약 37MB 다.
 8. 정전 뒤에는 FileVault 화면에서 누군가 암호를 한 번 넣어야 서버가 뜬다(FileVault 를 켜 두기로 했다). 계획된 재시작은 `sudo fdesetup authrestart`.
@@ -69,10 +69,12 @@
 
 | 방향 | 메시지 | 내용 |
 |---|---|---|
-| 앱 → 서버 | `hello` | `device`, `tag`, 그리고 다음 중 하나: `token`(평소) / `invite`(초대 코드, `new_password`·`email` 을 같이 보내면 계정도 만든다) / `email`+`password`(계정 로그인) / `reset_code`+`email`+`new_password`(비밀번호 재설정) / `claim`(빈 서버 첫 등록, `email`+`new_password` 로 owner 계정) |
-| 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token`, 계정이 있으면 `email`, 이 사람이 못 보는 항목의 id `hidden`(있을 때만) |
+| 앱 → 서버 | `hello` | `device`, `tag`, 그리고 다음 중 하나: `token`(평소) / `invite`(초대 코드, `new_password`·`email` 을 같이 보내면 계정도 만든다) / `email`+`password`(계정 로그인) / `reset_code`+`email`+`new_password`(비밀번호 재설정) / `claim`(빈 서버 첫 등록, `email`+`new_password` 로 owner 계정). 그리고 앱 버전 `app`, 동기화 형식 `sync`(`wb_sync::META_V`), 변경분을 받으면 `deltas: true` |
+| 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token`, 계정이 있으면 `email`, 이 사람이 못 보는 항목의 id `hidden`(있을 때만), 변경분을 주고받는 서버면 `deltas: true` |
 | 앱 → 서버 | `set_password` | `email`, `password`, 계정이 이미 있으면 `old_password`. 서버가 `account{email}` 로 답한다 |
-| 앱 → 서버 | `push` | 앱의 공유 사본 전체 |
+| 앱 → 서버 | `push` | 앱의 공유 사본. 전체이거나, 서버가 `deltas` 를 말했으면 서버가 아직 모르는 부분만(`wb_sync::delta`) |
+| 서버 → 앱 | `delta` | `deltas` 를 말한 앱에게 `update` 대신: 직전 `rev`(`base`)에서 바뀐 부분과 새 `rev`, 전체 `hidden` 목록 |
+| 앱 → 서버 | `resync` | `rev` 를 하나 놓쳤을 때(`base` 가 내 `rev` 보다 크다): 서버가 전체 `update` 로 답한다 |
 | 서버 → 모두 | `update` | 합친 정본과 `rev`, `hidden`. 정본은 사람마다 걸러서 보낸다: 내가 멤버가 아닌 DM·비공개 채널, 남의 Personal 스페이스(와 그 작업), 남의 비공개 문서는 빠진다(`wb_sync::hidden_from`). 앱은 `hidden` 의 항목을 툼스톤 없이 자기 사본에서 뺀다(`wb_sync::hide`). 그래서 다른 사람에게서 지워지지 않고, 다시 볼 수 있게 되면 돌아온다. 예전 앱은 이 필드를 무시한다 |
 | 앱 → 서버 | `create_invite` / `set_role` / `revoke` / `access_list` | owner·admin 만 |
 | 서버 → 앱 | `invite` / `access` | 만든 코드(메일로 보냈으면 `emailed`, 실패했으면 `mail_error`), 사람별 역할·컴퓨터 수·열린 코드·계정 여부(`account`) |
@@ -80,6 +82,12 @@
 | 앱 → 서버 | `call_join` | 대화 id → 서버가 `call_token`(LiveKit 주소와 JWT)으로 답한다 |
 | 서버 → 앱 | `error` | `code: "auth"` 면 앱이 다시 연결을 멈춘다, `"denied"` 는 요청만 거절 |
 | 양쪽 | `ping` / `pong` | 30초마다 |
+
+**필드 단위 합치기.** 같은 항목을 둘이 동시에 고쳐도 서로 다른 필드면 둘 다 남는다. 항목마다 필드별 변경 시각(`SyncMeta.fields`, 저장할 때 필드별 지문으로 알아낸다)을 두고, 같은 필드는 나중 변경이 이긴다. 반응은 (이모지, 사람)마다, 실행 중인 타이머는 사람마다 합쳐서 동시에 눌러도 둘 다 남고, 지운 반응이나 멈춘 타이머는 돌아오지 않는다. 화이트보드 획과 메모는 id 를 가진다(전에 그린 것은 모양에서 모든 기기가 같은 id 를 계산한다). 필드별 시각이 없는 예전 사본은 모든 필드를 항목의 시각으로 본다. iPhone(`Sync.swift`)도 똑같이 합친다.
+
+**변경분(delta).** 서버는 마지막으로 알린 정본의 요약(`wb_sync::Summary`: 항목별 지문과 변경 기록)을 기억하고, 정본이 바뀌면 그 뒤로 바뀐 항목만 담은 부분 사본을 만든다. 바뀐 항목은 자기가 들어 있는 항목 안에 들어가고(바깥 항목은 자기 필드만, 안쪽은 바뀐 것만), 새 툼스톤, 되살림, 바뀐 공유 설정이 붙는다. 없는 항목은 지운 것으로 보지 않으므로 이것을 합치는 것은 전체 사본을 합치는 것과 같다. 사람마다 못 보는 항목은 빼고 보내며, 다시 볼 수 있게 된 항목(비공개 채널에 초대됨 등)은 통째로 넣는다. 앱(`wb_net` 세션, iOS `SyncClient`)도 서버가 가진 것의 요약을 두고 다른 부분만 `push` 한다. welcome 의 정본이 첫 요약이고, 받은 변경분과 보낸 push 로 갱신한다. 백업 복원은 전체 `update` 로 알려서 앱이 요약을 새로 잡고, 복원 뒤에 서버에 없는 자기 항목을 다시 올리게 한다.
+
+**버전이 섞일 때.** 서버는 `sync` 가 `wb_net::OLDEST_SYNC` 보다 낮거나 없는 앱(0.1.6 이전)의 push 를 합치지 않는다. 그런 앱은 모르는 필드를 지운 사본으로 이길 수 있기 때문이다. 연결은 그대로 두고 정본은 계속 보내며, 처음 push 때 한 번 `error{code: "denied"}` 로 업데이트하라고 알린다(예전 앱도 이 코드는 알림으로 보여 준다). 공유 폴더 방식에서는 각 앱이 자기 파일에 버전(`app`)을 적고, 더 예전 앱의 파일이 있으면 새 앱이 한 번 알린다.
 
 **파일 (Mac mini, `~/Library/Application Support/WorkboardServer/`)**
 

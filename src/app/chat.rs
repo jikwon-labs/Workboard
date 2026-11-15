@@ -642,13 +642,11 @@ impl App {
         let dragging = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
 
         // ---- conversation (header with tabs, side panel, messages, composer)
-        let ws_name = self.data.workspace.clone();
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 0 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_height(30.0);
                     let title = match channel.kind {
-                        ChannelKind::Channel if channel.name == "general" => ws_name.clone(),
                         ChannelKind::Channel if channel.private => format!("\u{1F512} {}", channel.name),
                         ChannelKind::Channel => format!("# {}", channel.name),
                         ChannelKind::Direct => self.channel_label(&channel),
@@ -723,7 +721,7 @@ impl App {
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(230.0).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in Channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned Messages", 1), ("\u{1F516}", "Saved", 4), ("\u{2611}", "Turned into tasks", 3), ("\u{2699}", "Settings", 12)];
+                    let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned messages", 1), ("\u{1F516}", "Saved", 4), ("\u{2611}", "Turned into tasks", 3), ("\u{2699}", "Settings", 12)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -797,7 +795,7 @@ impl App {
                         let w = ui.available_width();
                         let cw = 400.0f32.min(w - 40.0);
                         let pad = ((w - cw) / 2.0).max(0.0);
-                        let name = if channel.kind == ChannelKind::Channel { format!("#{}", if channel.name == "general" { tr("General").to_string() } else { channel.name.clone() }) } else { self.channel_label(&channel) };
+                        let name = if channel.kind == ChannelKind::Channel { format!("#{}", channel.name) } else { self.channel_label(&channel) };
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
                             ui.vertical(|ui| {
@@ -863,7 +861,7 @@ impl App {
             });
             egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 10 }).show(ui, |ui| {
                 let target = match channel.kind {
-                    ChannelKind::Channel => if channel.name == "general" { tr("General").to_string() } else { channel.name.clone() },
+                    ChannelKind::Channel => channel.name.clone(),
                     ChannelKind::Direct => self.channel_label(&channel),
                 };
                 if let Some((text, title, files)) = self.channel_composer(ui, &target) {

@@ -151,6 +151,37 @@ pub struct Member {
     pub status_text: String,
 }
 
+/// The people a text @mentions. At each "@" that starts a word the longest
+/// matching name wins, so "@Alex Kim" is Alex Kim and not Alex. A Latin name
+/// running on into more letters or digits ("@Alexander") is not that name;
+/// anything else may follow it, so "@지원님" still mentions 지원. When several
+/// people share the name, the ones in `picked` (chosen from the mention list)
+/// are meant, else all of them.
+pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64> {
+    let mut out: Vec<u64> = vec![];
+    for (i, _) in text.match_indices('@') {
+        if i > 0 && !text[..i].ends_with(char::is_whitespace) {
+            continue;
+        }
+        let rest = &text[i + 1..];
+        let fits = |name: &str| {
+            !name.is_empty()
+                && rest.starts_with(name)
+                && !(name.chars().last().is_some_and(|c| c.is_ascii_alphanumeric())
+                    && rest[name.len()..].chars().next().is_some_and(|c| c.is_ascii_alphanumeric()))
+        };
+        let Some(best) = members.iter().filter(|m| fits(&m.name)).map(|m| m.name.len()).max() else { continue };
+        let named: Vec<u64> = members.iter().filter(|m| m.name.len() == best && fits(&m.name)).map(|m| m.id).collect();
+        let chosen: Vec<u64> = named.iter().copied().filter(|id| picked.contains(id)).collect();
+        for id in if chosen.is_empty() { named } else { chosen } {
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+    }
+    out
+}
+
 impl Member {
     pub fn initials(&self) -> String {
         let mut s: String = self
@@ -205,6 +236,16 @@ pub struct Activity {
     pub assignee: Option<u64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub resolved: bool,
+    /// The person a history line is about ("assigned to ..."), so the Inbox
+    /// finds them by id even after a rename or when two share a name. Lines
+    /// from before this was kept have none and are matched by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<u64>,
+    /// Who a comment @mentions, worked out when it was written (see
+    /// `mentioned_ids`). Empty for comments from before this was kept; those
+    /// are matched by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<u64>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -398,6 +439,10 @@ pub struct Message {
     /// When its author last changed the text (shown as "(edited)").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited: Option<i64>,
+    /// Who the message @mentions, worked out when it was written (see
+    /// `mentioned_ids`). Empty for messages from before this was kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<u64>,
 }
 
 pub use crate::media::MediaKind;
@@ -1293,6 +1338,11 @@ impl Data {
         self.members.iter().find(|m| m.id == id)
     }
 
+    /// Who a text @mentions (see `mentioned_ids`).
+    pub fn mentions_in(&self, text: &str) -> Vec<u64> {
+        mentioned_ids(text, &self.members, &[])
+    }
+
     pub fn space_of_list(&self, list_id: u64) -> Option<&Space> {
         self.spaces.iter().find(|s| {
             s.lists.iter().any(|l| l.id == list_id)
@@ -1742,6 +1792,7 @@ impl Data {
             id: d.new_id(),
             author,
             text: text.into(),
+            mentions: vec![],
             ts: now2 - ago,
             reactions: vec![],
             replies: vec![],

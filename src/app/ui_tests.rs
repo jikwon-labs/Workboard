@@ -656,7 +656,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     let my_name = h.app.data.member(me).unwrap().name.clone();
     // a huddle message in chat has a Join button
     let id = h.app.data.new_id();
-    h.app.data.channels[0].messages.push(Message { edited: None, attachments: vec![], id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
+    h.app.data.channels[0].messages.push(Message { edited: None, mentions: vec![], attachments: vec![], id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
     h.app.section = Section::Chat;
     h.app.chat_open = Some(ch);
     h.settle();
@@ -1297,6 +1297,7 @@ fn task_window_comment_post_tabs_tools_and_search() {
     let t = h.app.task(id).unwrap().clone();
     let c = t.activity.iter().rev().find(|a| a.comment).unwrap();
     assert_eq!(c.text, "@Alex Kim please check\u{1F44D}");
+    assert_eq!(c.mentions, vec![2], "the mention keeps Alex Kim's id");
     assert!(!c.post);
     // Post tab
     h.click("Post");
@@ -3938,4 +3939,28 @@ fn sidebar_leaves_out_other_peoples_private_docs() {
     h.app.data.docs.iter_mut().find(|d| d.title == "Project brief").unwrap().owner = me;
     h.settle();
     assert!(h.has("Project brief"));
+}
+
+
+#[test]
+fn mention_picked_from_the_list_keeps_that_person_when_names_are_shared() {
+    let mut h = Ui1::new();
+    h.app.data.members.push(Member { id: 9, name: "Alex Kim".into(), color: [1, 2, 3], ..Default::default() });
+    h.click_left("Task Write copy for landing page", 120.0);
+    let id = h.app.open_task.unwrap();
+    h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap().activity.retain(|a| !a.comment);
+    h.settle();
+    h.click("@  Mention a teammate");
+    // the second "Alex Kim" in the list (the one just added) is the lower row
+    // (the list's rows are 200 points wide)
+    let rows: Vec<Pos2> = h.tree.iter().filter(|(n, r)| n == "Alex Kim" && r.width() == 200.0).map(|(_, r)| r.center()).collect();
+    assert!(rows.len() >= 2, "both people are in the list: {:?}", rows);
+    let lowest = rows.iter().copied().fold(rows[0], |a, b| if b.y > a.y { b } else { a });
+    h.click_at(lowest);
+    assert_eq!(h.app.comment_text, "@Alex Kim ");
+    h.type_text("this one");
+    h.click("Send Comment");
+    let c = h.app.task(id).unwrap().activity.iter().rev().find(|a| a.comment).unwrap().clone();
+    assert_eq!(c.text, "@Alex Kim this one");
+    assert_eq!(c.mentions, vec![9], "only the person picked, not both Alex Kims");
 }

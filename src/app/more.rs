@@ -454,7 +454,7 @@ impl App {
                             if ui.add(b).on_hover_text(if self.post_channel == 0 { tr("Select a channel first") } else { "" }).clicked() && ready {
                                 let id = self.data.new_id();
                                 let me = self.data.me;
-                                let m = Message { edited: None, attachments: vec![], id, author: me, text: self.post_body.trim().to_string(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(self.post_title.trim().to_string()), post_type: self.post_type.clone(), pinned: false, call: None };
+                                let m = Message { edited: None, mentions: self.data.mentions_in(self.post_body.trim()), attachments: vec![], id, author: me, text: self.post_body.trim().to_string(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(self.post_title.trim().to_string()), post_type: self.post_type.clone(), pinned: false, call: None };
                                 if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == self.post_channel) {
                                     c.messages.push(m);
                                     c.last_read = now_ts();

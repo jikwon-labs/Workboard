@@ -256,7 +256,8 @@ impl App {
                 Act::Reply(id) => replying = (id != 0).then(|| (id, String::new())),
                 Act::SendReply { parent, text } => {
                     let id = self.data.new_id();
-                    task.activity.push(Activity { ts: now_ts(), author: me, text, comment: true, id, parent: Some(parent), ..Default::default() });
+                    let mentions = self.data.mentions_in(&text);
+                    task.activity.push(Activity { ts: now_ts(), author: me, text, comment: true, id, parent: Some(parent), mentions, ..Default::default() });
                     replying = None;
                 }
                 Act::Edit(id) => {
@@ -265,6 +266,7 @@ impl App {
                 Act::SaveEdit { id, text } => {
                     if let Some(i) = find(task, id) {
                         if task.activity[i].text != text {
+                            task.activity[i].mentions = crate::model::mentioned_ids(&text, &self.data.members, &task.activity[i].mentions);
                             task.activity[i].text = text;
                             task.activity[i].edited = Some(now_ts());
                         }

@@ -2078,7 +2078,7 @@ fn a_login_name_starting_with_a_non_ascii_letter() {
 }
 
 fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
-    Message { id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
+    Message { mentions: vec![], id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
 }
 
 #[test]
@@ -2396,7 +2396,7 @@ fn back_skips_deleted_pages_and_new_workspace_forgets_history() {
 }
 
 fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
-    Message { id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
+    Message { mentions: vec![], id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
 }
 
 #[test]
@@ -3084,4 +3084,169 @@ fn comments_on_a_task_i_duplicated_go_to_primary() {
     t.activity.push(Activity { ts: now_ts() + 5, author: other, text: "looks good".into(), comment: true, ..Default::default() });
     let row = a.inbox_items().into_iter().find(|i| i.src == super::nav::InboxSrc::Task(copy) && i.text == "looks good").unwrap();
     assert_eq!(row.tab, 0);
+}
+
+
+/// Runs `f` as another member, then switches back.
+fn as_member<R>(a: &mut App, who: u64, f: impl FnOnce(&mut App) -> R) -> R {
+    let me = a.data.me;
+    a.data.me = who;
+    let r = f(a);
+    a.data.me = me;
+    r
+}
+
+/// The tasks with an "assigned" row in Primary for the person using the app.
+fn assigned_in_primary(a: &App) -> Vec<u64> {
+    a.inbox_items()
+        .into_iter()
+        .filter(|i| i.assigned && i.tab == 0)
+        .filter_map(|i| match i.src {
+            nav::InboxSrc::Task(t) => Some(t),
+            _ => None,
+        })
+        .collect()
+}
+
+fn mentioned_in_primary(a: &App) -> Vec<String> {
+    a.inbox_items().into_iter().filter(|i| i.mention && i.tab == 0).map(|i| i.text).collect()
+}
+
+fn quiet_app() -> App {
+    let mut a = app();
+    a.data.tasks.clear();
+    for c in &mut a.data.channels {
+        c.messages.clear();
+    }
+    a
+}
+
+#[test]
+fn tasks_made_or_copied_with_me_on_them_reach_my_inbox() {
+    let mut a = quiet_app();
+    let list = list_ids(&a)[0];
+    // Alex Kim (2) makes a task with me (1) on it, and copies another one
+    let made = as_member(&mut a, 2, |a| {
+        a.apply(Action::Add { list, name: "Made for you".into(), status: None, priority: 0, assignees: vec![1, 2], due: None, parent: None, open: false });
+        a.data.tasks.iter().find(|t| t.name == "Made for you").unwrap().id
+    });
+    let copy = as_member(&mut a, 2, |a| a.duplicate_task(made).unwrap());
+    let rows = assigned_in_primary(&a);
+    assert!(rows.contains(&made), "a task made with me on it: {:?}", rows);
+    assert!(rows.contains(&copy), "a copy of a task with me on it: {:?}", rows);
+    // the maker putting themselves on it says nothing to them
+    as_member(&mut a, 2, |a| assert!(assigned_in_primary(a).is_empty()));
+    // a task I make for myself is not news to me
+    a.apply(Action::Add { list, name: "Mine".into(), status: None, priority: 0, assignees: vec![1], due: None, parent: None, open: false });
+    assert_eq!(assigned_in_primary(&a).len(), 2);
+}
+
+#[test]
+fn automation_assignments_reach_the_inbox() {
+    let mut a = quiet_app();
+    let list = list_ids(&a)[0];
+    a.data.extra.automations.push(Automation { id: 1, enabled: true, trigger_status: "complete".into(), action: "assign".into(), value: "1".into(), list: None });
+    let id = add_task(&mut a, list, "Finish me");
+    a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().activity.iter_mut().for_each(|x| x.author = 2);
+    as_member(&mut a, 2, |a| {
+        let mut t = a.task(id).unwrap().clone();
+        t.status = "complete".into();
+        a.apply(Action::Replace(t));
+    });
+    assert!(a.task(id).unwrap().assignees.contains(&1));
+    assert_eq!(assigned_in_primary(&a), vec![id]);
+    // the automation's own line stays as it was
+    assert!(a.task(id).unwrap().activity.iter().any(|x| x.text.starts_with("Automation ran: ")));
+}
+
+#[test]
+fn a_mention_of_alex_kim_is_not_a_mention_of_alex() {
+    let mut a = quiet_app();
+    a.data.members.push(Member { id: 5, name: "Alex".into(), ..Default::default() });
+    let cid = a.data.channels.iter().find(|c| c.kind == ChannelKind::Channel).unwrap().id;
+    // sent from the app, and one from a file written before ids were kept
+    as_member(&mut a, 3, |a| a.apply_chat(vec![ChatAction::Send { ch: cid, text: "@Alex Kim new one".into(), parent: None, files: vec![] }]));
+    a.data.channels.iter_mut().find(|c| c.id == cid).unwrap().messages.push(chat_msg(960, 3, "@Alex Kim old one", now_ts() - 5));
+    let list = list_ids(&a)[0];
+    let tid = add_task(&mut a, list, "Talk");
+    a.data.tasks.iter_mut().find(|t| t.id == tid).unwrap().activity.push(Activity { ts: now_ts() - 4, author: 3, text: "@Alex Kim on a task".into(), comment: true, ..Default::default() });
+    as_member(&mut a, 5, |a| assert!(mentioned_in_primary(a).is_empty(), "Alex: {:?}", mentioned_in_primary(a)));
+    as_member(&mut a, 2, |a| {
+        let mut got = mentioned_in_primary(a);
+        got.sort();
+        assert_eq!(got, vec!["@Alex Kim new one", "@Alex Kim old one", "@Alex Kim on a task"]);
+    });
+    // "@Alex" alone still reaches Alex, and a Korean ending may follow a name
+    as_member(&mut a, 3, |a| a.apply_chat(vec![ChatAction::Send { ch: cid, text: "@Alex, and @Alex님".into(), parent: None, files: vec![] }]));
+    as_member(&mut a, 5, |a| assert_eq!(mentioned_in_primary(a), vec!["@Alex, and @Alex님"]));
+    as_member(&mut a, 2, |a| assert_eq!(mentioned_in_primary(a).len(), 3));
+}
+
+#[test]
+fn same_names_and_renames_do_not_mix_people_up() {
+    let mut a = quiet_app();
+    a.data.members.push(Member { id: 6, name: "Sam Lee".into(), ..Default::default() });
+    let list = list_ids(&a)[0];
+    let tid = add_task(&mut a, list, "Shared name");
+    // Alex Kim puts the second Sam Lee (6) on the task
+    as_member(&mut a, 2, |a| {
+        let mut t = a.task(tid).unwrap().clone();
+        t.assignees.push(6);
+        a.apply(Action::Replace(t));
+    });
+    as_member(&mut a, 6, |a| assert_eq!(assigned_in_primary(a), vec![tid]));
+    as_member(&mut a, 3, |a| assert!(assigned_in_primary(a).is_empty(), "the other Sam Lee"));
+    // Jordan Park (4) is assigned and mentioned, then renamed
+    let cid = a.data.channels.iter().find(|c| c.kind == ChannelKind::Channel).unwrap().id;
+    let tid2 = add_task(&mut a, list, "For Jordan");
+    as_member(&mut a, 2, |a| {
+        let mut t = a.task(tid2).unwrap().clone();
+        t.assignees.push(4);
+        a.apply(Action::Replace(t));
+        a.apply_chat(vec![ChatAction::Send { ch: cid, text: "@Jordan Park please look".into(), parent: None, files: vec![] }]);
+    });
+    a.data.members.iter_mut().find(|m| m.id == 4).unwrap().name = "Jordan P".into();
+    as_member(&mut a, 4, |a| {
+        assert_eq!(assigned_in_primary(a), vec![tid2]);
+        assert_eq!(mentioned_in_primary(a), vec!["@Jordan Park please look"]);
+    });
+}
+
+#[test]
+fn mentioned_ids_take_the_longest_name_and_honour_picks() {
+    let m = |id: u64, name: &str| Member { id, name: name.into(), ..Default::default() };
+    let people = vec![m(1, "Alex"), m(2, "Alex Kim"), m(3, "지원"), m(4, "Sam"), m(5, "Sam")];
+    assert_eq!(mentioned_ids("@Alex Kim hi", &people, &[]), vec![2]);
+    assert_eq!(mentioned_ids("@Alex hi", &people, &[]), vec![1]);
+    assert!(mentioned_ids("@Alexander hi", &people, &[]).is_empty(), "a longer word is someone else");
+    assert!(mentioned_ids("mail@Alex", &people, &[]).is_empty(), "@ inside a word");
+    assert_eq!(mentioned_ids("@지원님 확인 부탁", &people, &[]), vec![3]);
+    assert_eq!(mentioned_ids("@Sam", &people, &[]), vec![4, 5], "a shared name with no pick");
+    assert_eq!(mentioned_ids("@Sam", &people, &[5]), vec![5], "the picked one");
+    assert_eq!(mentioned_ids("@Alex and @Alex Kim and @Alex", &people, &[]), vec![1, 2]);
+}
+
+#[test]
+fn files_from_before_ids_were_kept_still_load_and_new_fields_stay_out_when_empty() {
+    // an activity line and a chat message as an older app writes them
+    let act: Activity = serde_json::from_str(r#"{"ts":5,"author":2,"text":"assigned to Me","comment":false}"#).unwrap();
+    assert_eq!((act.target, act.mentions.is_empty()), (None, true));
+    let msg: Message = serde_json::from_str(r#"{"id":9,"author":2,"text":"@Me hi","ts":5}"#).unwrap();
+    assert!(msg.mentions.is_empty());
+    // empty ones are not written, so files only change where ids are known
+    let out = serde_json::to_value(&act).unwrap();
+    assert!(out.get("target").is_none() && out.get("mentions").is_none());
+    assert!(serde_json::to_value(&msg).unwrap().get("mentions").is_none());
+    // and they round-trip when set
+    let a2 = Activity { target: Some(4), mentions: vec![2, 3], ..act.clone() };
+    let back: Activity = serde_json::from_value(serde_json::to_value(&a2).unwrap()).unwrap();
+    assert_eq!((back.target, back.mentions), (Some(4), vec![2, 3]));
+    // a whole workspace saved by an older app reads, and its inbox still works by name
+    let mut old = serde_json::to_value(Data::seed()).unwrap();
+    let t0 = &mut old["tasks"][0];
+    t0["assignees"] = serde_json::json!([]);
+    t0["activity"] = serde_json::json!([{"ts": 5, "author": 2, "text": "assigned to Me", "comment": false}]);
+    let d: Data = serde_json::from_value(old).unwrap();
+    let a = App::build(None, Some(d));
+    assert!(a.inbox_items().iter().any(|i| i.assigned && i.text == "assigned to Me"));
 }

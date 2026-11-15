@@ -127,19 +127,15 @@ pub(super) struct InboxItem {
 }
 
 impl App {
-    /// "@Name" of the person using the app ("" when unknown).
-    fn my_mention(&self) -> String {
-        self.data.member(self.data.me).map(|m| format!("@{}", m.name)).unwrap_or_default()
-    }
-
     /// The Inbox rows (all four tabs). Primary holds what the notification
     /// settings ask for: comments on tasks I'm assigned to or created,
     /// @mentions of me (task comments and chat), tasks assigned to me and
     /// chat replies in threads I'm in. My own actions are left out.
+    /// Mentions and assignments are matched by member id; entries written
+    /// before ids were kept are matched by name.
     pub(super) fn inbox_items(&self) -> Vec<InboxItem> {
         let me = self.data.me;
         let n = &self.data.extra.notify;
-        let my_at = self.my_mention();
         let my_name = self.data.member(me).map(|m| m.name.clone()).unwrap_or_default();
         let cleared = &self.data.extra.inbox_cleared;
         let later = &self.data.extra.inbox_later;
@@ -154,7 +150,8 @@ impl App {
                 1
             }
         };
-        let mentions = |text: &str| !my_at.is_empty() && super::chat::mentions(text, &my_at[1..]);
+        let members = &self.data.members;
+        let mentions = |text: &str, ids: &[u64]| if ids.is_empty() { crate::model::mentioned_ids(text, members, &[]).contains(&me) } else { ids.contains(&me) };
         let mut out = vec![];
         for task in &self.data.tasks {
             // a task I made (or made as a copy of another) is mine like one I'm assigned to
@@ -163,8 +160,12 @@ impl App {
                 if a.author == me {
                     continue;
                 }
-                let mention = a.comment && mentions(&a.text);
-                let assigned = !a.comment && !my_name.is_empty() && a.text == format!("assigned to {}", my_name);
+                let mention = a.comment && mentions(&a.text, &a.mentions);
+                let assigned = !a.comment
+                    && match a.target {
+                        Some(who) => who == me && a.text.starts_with("assigned to "),
+                        None => !my_name.is_empty() && a.text == format!("assigned to {}", my_name),
+                    };
                 let primary = (a.comment && n.comments && mine) || (mention && n.mentions) || (assigned && n.assigned);
                 let key = format!("{}:{}:{}", task.id, a.ts, a.author);
                 let tab = tab_of(&key, primary);
@@ -178,7 +179,7 @@ impl App {
             }
             let title = if c.kind == ChannelKind::Channel { format!("#{}", c.name) } else { self.data.member(c.members.iter().copied().find(|m| *m != me).unwrap_or(me)).map(|m| m.name.clone()).unwrap_or_default() };
             for m in &c.messages {
-                if m.author != me && mentions(&m.text) {
+                if m.author != me && mentions(&m.text, &m.mentions) {
                     let key = format!("chat:{}:{}", c.id, m.id);
                     let tab = tab_of(&key, n.mentions);
                     out.push(InboxItem { key, ts: m.ts, author: m.author, title: title.clone(), text: m.text.clone(), src: InboxSrc::Chat { ch: c.id, msg: m.id, thread: None }, comment: true, mention: true, assigned: false, reply: false, tab });
@@ -187,7 +188,7 @@ impl App {
                     if r.author == me {
                         continue;
                     }
-                    let mention = mentions(&r.text);
+                    let mention = mentions(&r.text, &r.mentions);
                     // a reply counts once I started the thread or wrote in it before
                     let reply = m.author == me || m.replies[..i].iter().any(|x| x.author == me);
                     if !(mention || reply) {

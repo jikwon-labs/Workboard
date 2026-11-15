@@ -871,7 +871,7 @@ impl App {
         let id = self.data.new_id();
         let me = self.data.me;
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-            c.messages.push(Message { edited: None, attachments: vec![], id, author: me, text: "Started a call".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(link.clone()) });
+            c.messages.push(Message { edited: None, mentions: vec![], attachments: vec![], id, author: me, text: "Started a call".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(link.clone()) });
             c.last_read = now_ts();
         }
         self.section = Section::Chat;

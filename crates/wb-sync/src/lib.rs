@@ -1816,8 +1816,9 @@ pub fn read_json(p: &Path) -> Option<Value> {
 
 /// Each person's own settings and reading state in `extra`, left out of the
 /// copy other people get: what they've read and closed in chat, starred and
-/// recent items, notification and sidebar settings, their timesheet rows and
-/// where their copy is shared. None of it is merged from other copies, and
+/// recent items, notification and sidebar settings, their timesheet rows,
+/// the Slack people they import under their own name and where their copy
+/// is shared. None of it is merged from other copies, and
 /// the app fills in its default when one is missing.
 const PERSONAL_EXTRA: &[&str] = &[
     "chat_seen",
@@ -1840,6 +1841,7 @@ const PERSONAL_EXTRA: &[&str] = &[
     "shared",
     "sheet_rows",
     "sheet_week_rows",
+    "slack_under_me",
 ];
 
 /// The copy other people get: personal notes, reminders, settings and
@@ -3407,7 +3409,7 @@ mod tests {
                 "closed_dms": [[20, 5]], "starred": ["doc:1"], "recent": ["task:7"], "replies_seen": 9,
                 "replies_read": ["chat:1:2"], "notify": {"comments": false}, "muted_until": 99,
                 "shared": {"folder": "/Users/ann/Dropbox/team", "device": "d1", "tag": 1},
-                "sheet_rows": [[1, 7]], "accent": "pink", "labs": ["x"],
+                "sheet_rows": [[1, 7]], "accent": "pink", "labs": ["x"], "slack_under_me": ["U1"],
                 "dashboards": [{"id": 8, "name": "D"}], "workspace_color": [1, 2, 3]}});
         let out = shareable(&d);
         let e = out["extra"].as_object().unwrap();

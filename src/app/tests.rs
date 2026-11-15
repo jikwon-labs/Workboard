@@ -7950,8 +7950,8 @@ fn slack_member_choices_differ_for_members_of_one_name() {
 /// The member a Slack person was pointed at last is the one the next
 /// import starts from: choosing another member moves the remembered Slack id
 /// (it isn't left on both, where the first would win), and "under my name"
-/// is remembered as my choice even when the person matches a member by
-/// email.
+/// is remembered as my own choice even when the person matches a member by
+/// email, without taking them off the member the team matched them to.
 #[test]
 fn a_changed_slack_match_sticks_on_the_next_import() {
     use super::slack::Assign;
@@ -7974,7 +7974,7 @@ fn a_changed_slack_match_sticks_on_the_next_import() {
         ),
     ];
     let slack_of = |a: &App, m: u64| a.data.member(m).unwrap().slack.clone();
-    let mine = |a: &App| a.data.member(a.data.me).unwrap().slack_mine.clone();
+    let mine = |a: &App| a.data.extra.slack_under_me.clone();
     let fresh = |a: &App| {
         let (users, channels) = slack_from(&export);
         super::slack::plan(&a.data, users, channels)
@@ -8002,12 +8002,13 @@ fn a_changed_slack_match_sticks_on_the_next_import() {
         .iter()
         .all(|m| m.id == sam || !m.slack.contains(&"UA".to_string())));
 
-    // under my name: no member keeps them, and the next import (which
+    // under my name: Sam keeps the shared match, and my next import (which
     // could match Alex by email) starts from my name
     let mut plan = fresh(&a);
     plan.assign.insert("UA".into(), Assign::Me);
     a.import_slack(&plan);
-    assert!(a.data.members.iter().all(|m| m.slack.is_empty()));
+    assert_eq!(slack_of(&a, sam), ["UA"], "the team's match stays");
+    assert!(slack_of(&a, alex).is_empty());
     assert_eq!(mine(&a), ["UA"]);
     let plan = fresh(&a);
     assert_eq!(plan.assign.get("UA"), Some(&Assign::Me));
@@ -8015,28 +8016,306 @@ fn a_changed_slack_match_sticks_on_the_next_import() {
     a.import_slack(&plan);
     assert_eq!(fresh(&a).assign.get("UA"), Some(&Assign::Me), "still mine");
 
-    // a teammate's computer: my choice is mine, they match by email as usual
-    let mut b = App::build(None, Some(a.data.clone()));
-    b.data.me = sam;
-    assert_eq!(fresh(&b).matched("UA"), Some(alex));
+    // a teammate's computer (the copy they get): my choice is mine, they
+    // still go to Sam as the team decided
+    let mut b = App::build(None, Some(teammate_copy(&a.data, sam)));
+    assert!(b.data.extra.slack_under_me.is_empty());
+    assert_eq!(fresh(&b).matched("UA"), Some(sam));
+    b.data.me = 4;
+    assert_eq!(fresh(&b).matched("UA"), Some(sam));
 
-    // pointed back at Alex: my choice goes
+    // pointed back at Alex: my choice goes and the match moves to Alex
     let mut plan = fresh(&a);
     plan.assign.insert("UA".into(), Assign::Member(alex));
     a.import_slack(&plan);
     assert!(mine(&a).is_empty());
     assert_eq!(slack_of(&a, alex), ["UA"]);
+    assert!(slack_of(&a, sam).is_empty());
     assert_eq!(fresh(&a).matched("UA"), Some(alex));
 
-    // as a new member: nothing new comes in so nobody is made, and Alex lets go
+    // as a new member: nothing new comes in so nobody is made, and with
+    // nobody to move them to, Alex keeps the match
     let mut plan = fresh(&a);
     plan.assign.insert("UA".into(), Assign::New);
     let members = a.data.members.len();
     a.import_slack(&plan);
     assert_eq!(a.data.members.len(), members);
+    assert_eq!(slack_of(&a, alex), ["UA"]);
+    assert!(mine(&a).is_empty());
+    assert!(a.data.members.iter().all(|m| m.slack_mine.is_empty()));
+}
+
+/// The copy of a workspace a teammate gets (`shareable`), opened as them.
+fn teammate_copy(d: &Data, me: u64) -> Data {
+    let v = crate::sync::shareable(&serde_json::to_value(d).unwrap());
+    let mut t: Data = serde_json::from_value(v).unwrap();
+    t.me = me;
+    t
+}
+
+/// A Slack export with the person UA (Alex's email address) and, in the
+/// channel #moves, a message "msg N" by `user` for each (N, user).
+fn slack_moves(
+    msgs: &[(u32, &str)],
+) -> (
+    Vec<super::slack::SlackUser>,
+    Vec<super::slack::SlackChannel>,
+) {
+    use serde_json::json;
+    let day: Vec<serde_json::Value> = msgs
+        .iter()
+        .map(|(n, u)| {
+            json!({"type": "message", "user": u, "text": format!("msg {}", n),
+                   "ts": format!("{}.000100", 1704100000 + n)})
+        })
+        .collect();
+    slack_from(&[
+        (
+            "users.json",
+            json!([{"id": "UA", "name": "al", "real_name": "Al", "profile": {"email": "alex@example.com"}}]),
+        ),
+        (
+            "channels.json",
+            json!([{"id": "C1", "name": "moves", "members": ["UA"]}]),
+        ),
+        ("moves/2024-01-01.json", json!(day)),
+    ])
+}
+
+/// Who message "msg N" came in as, and its text.
+fn slack_msg(a: &App, n: u32) -> (u64, String) {
+    let tail = format!("msg {}", n);
+    a.data
+        .channels
+        .iter()
+        .flat_map(|c| c.messages.iter())
+        .find(|m| m.text.ends_with(&tail))
+        .map(|m| (m.author, m.text.clone()))
+        .unwrap_or_else(|| panic!("no {}", tail))
+}
+
+/// "Import under my name" is my own choice: a teammate's import, which
+/// points the same Slack person somewhere else, doesn't erase it on my
+/// computer, and the copy they get doesn't carry it.
+#[test]
+fn my_slack_under_my_name_choice_survives_a_teammates_import() {
+    use super::slack::{plan, Assign};
+    let mut a = app();
+    let (alex, sam, jordan) = (2, 3, 4);
+    let msgs = vec![(1, "UA")];
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&a.data, u, c);
+    assert_eq!(p.matched("UA"), Some(alex), "by email");
+    p.assign.insert("UA".into(), Assign::Me);
+    a.import_slack(&p);
+    assert_eq!(a.data.extra.slack_under_me, ["UA"]);
+    assert_eq!(slack_msg(&a, 1), (a.data.me, "Al: msg 1".into()));
+
+    // Sam's computer: nothing of my choice; they point UA at Jordan
+    let mut b = App::build(None, Some(teammate_copy(&a.data, sam)));
+    assert!(b.data.extra.slack_under_me.is_empty());
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&b.data, u, c);
+    assert_eq!(p.assign.get("UA"), Some(&Assign::Member(alex)));
+    p.assign.insert("UA".into(), Assign::Member(jordan));
+    b.import_slack(&p);
+    assert_eq!(b.data.member(jordan).unwrap().slack, ["UA"]);
+
+    // their members come over to my computer (sync): my choice is still mine
+    a.data.members = b.data.members.clone();
+    assert_eq!(a.data.extra.slack_under_me, ["UA"]);
+    let (u, c) = slack_moves(&msgs);
+    assert_eq!(plan(&a.data, u, c).assign.get("UA"), Some(&Assign::Me));
+    // and theirs is Jordan
+    let (u, c) = slack_moves(&msgs);
+    assert_eq!(plan(&b.data, u, c).matched("UA"), Some(jordan));
+}
+
+/// Taking a Slack person under my name leaves the team's match alone: the
+/// member they were matched to keeps them, so a teammate's import still
+/// brings their messages in as that member.
+#[test]
+fn slack_under_my_name_keeps_the_teams_match() {
+    use super::slack::{plan, Assign};
+    let mut a = app();
+    let (sam, jordan) = (3, 4);
+    let mut msgs = vec![(1, "UA")];
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UA".into(), Assign::Member(sam));
+    a.import_slack(&p);
+    assert_eq!(slack_msg(&a, 1).0, sam);
+    assert_eq!(a.data.member(sam).unwrap().slack, ["UA"]);
+
+    // I take their new message under my name
+    msgs.push((2, "UA"));
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&a.data, u, c);
+    assert_eq!(p.matched("UA"), Some(sam));
+    p.assign.insert("UA".into(), Assign::Me);
+    a.import_slack(&p);
+    assert_eq!(slack_msg(&a, 2), (a.data.me, "Al: msg 2".into()));
+    assert_eq!(a.data.member(sam).unwrap().slack, ["UA"], "Sam keeps them");
+    assert_eq!(a.data.extra.slack_under_me, ["UA"]);
+
+    // Jordan's import of the next message: as Sam, as the team decided
+    msgs.push((3, "UA"));
+    let mut b = App::build(None, Some(teammate_copy(&a.data, jordan)));
+    let (u, c) = slack_moves(&msgs);
+    let p = plan(&b.data, u, c);
+    assert_eq!(p.matched("UA"), Some(sam));
+    b.import_slack(&p);
+    assert_eq!(slack_msg(&b, 3).0, sam);
+    assert_eq!(b.data.member(sam).unwrap().slack, ["UA"]);
+    // and mine still starts from my name
+    let (u, c) = slack_moves(&msgs);
+    assert_eq!(plan(&a.data, u, c).assign.get("UA"), Some(&Assign::Me));
+}
+
+/// An author an export's users.json leaves out (a deleted account, a partial
+/// export) still goes to the member an earlier import matched them to, and
+/// bringing them in some other way with nobody made for them doesn't take
+/// that match away.
+#[test]
+fn a_slack_author_missing_from_users_keeps_their_match() {
+    use super::slack::{plan, Assign};
+    let mut a = app();
+    let sam = 3;
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == sam)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    let mut msgs = vec![(1, "UX")];
+    let (u, c) = slack_moves(&msgs);
+    assert!(!u.iter().any(|u| u.id == "UX"));
+    let p = plan(&a.data, u, c);
+    assert_eq!(p.matched("UX"), Some(sam));
+    a.import_slack(&p);
+    assert_eq!(slack_msg(&a, 1).0, sam);
+    assert_eq!(a.data.member(sam).unwrap().slack, ["UX"]);
+
+    // as a new member: nothing to make one from, so their message comes in
+    // under my name and Sam keeps the match
+    msgs.push((2, "UX"));
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UX".into(), Assign::New);
+    let members = a.data.members.len();
+    a.import_slack(&p);
+    assert_eq!(a.data.members.len(), members);
+    assert_eq!(slack_msg(&a, 2).0, a.data.me);
+    assert_eq!(a.data.member(sam).unwrap().slack, ["UX"]);
+    assert!(a.data.extra.slack_under_me.is_empty());
+
+    // without the earlier match: a new member by default, none made, and
+    // no match for them appears anywhere
+    let mut c2 = app();
+    let (u, c) = slack_moves(&[(1, "UX")]);
+    let p = plan(&c2.data, u, c);
+    assert_eq!(p.assign.get("UX"), Some(&Assign::New));
+    c2.import_slack(&p);
+    assert!(c2
+        .data
+        .members
+        .iter()
+        .all(|m| !m.slack.contains(&"UX".to_string())));
+}
+
+/// Pointing a Slack person from one member at another moves the team's
+/// match for everyone: a teammate's import follows it, and theirs moves it
+/// for me in turn.
+#[test]
+fn a_reassigned_slack_person_sticks_for_everyone() {
+    use super::slack::{plan, Assign};
+    let mut a = app();
+    let (alex, sam, jordan) = (2, 3, 4);
+    let mut msgs = vec![(1, "UA")];
+    let (u, c) = slack_moves(&msgs);
+    a.import_slack(&plan(&a.data, u, c));
+    assert_eq!(a.data.member(alex).unwrap().slack, ["UA"]);
+    msgs.push((2, "UA"));
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UA".into(), Assign::Member(sam));
+    a.import_slack(&p);
+    assert!(a.data.member(alex).unwrap().slack.is_empty());
+    assert_eq!(a.data.member(sam).unwrap().slack, ["UA"]);
+
+    // Jordan's computer: Sam, not Alex by email
+    msgs.push((3, "UA"));
+    let mut b = App::build(None, Some(teammate_copy(&a.data, jordan)));
+    let (u, c) = slack_moves(&msgs);
+    let p = plan(&b.data, u, c);
+    assert_eq!(p.matched("UA"), Some(sam));
+    b.import_slack(&p);
+    assert_eq!(slack_msg(&b, 3).0, sam);
+
+    // Jordan points them at himself; that comes back to me
+    msgs.push((4, "UA"));
+    let (u, c) = slack_moves(&msgs);
+    let mut p = plan(&b.data, u, c);
+    p.assign.insert("UA".into(), Assign::Member(jordan));
+    b.import_slack(&p);
+    a.data.members = b.data.members.clone();
+    let (u, c) = slack_moves(&msgs);
+    assert_eq!(plan(&a.data, u, c).matched("UA"), Some(jordan));
     assert!(a
         .data
         .members
         .iter()
-        .all(|m| m.slack.is_empty() && m.slack_mine.is_empty()));
+        .all(|m| m.id == jordan || m.slack.is_empty()));
+}
+
+/// "Under my name" kept on my shared member by an earlier version moves to
+/// my own data (left out of the copy teammates get) when the file is read;
+/// a teammate's list stays for their computer to move.
+#[test]
+fn slack_under_my_name_moves_off_the_shared_member() {
+    use super::slack::{plan, Assign};
+    let mut d = Data::seed();
+    let me = d.me;
+    let mut v = serde_json::to_value(&d).unwrap();
+    for m in v["members"].as_array_mut().unwrap() {
+        match m["id"].as_u64() {
+            Some(1) => m["slack_mine"] = serde_json::json!(["UA"]),
+            Some(3) => m["slack_mine"] = serde_json::json!(["US"]),
+            _ => {}
+        }
+    }
+    d = serde_json::from_value(v).unwrap();
+    assert_eq!(me, 1);
+    // read even before it moves
+    assert_eq!(d.slack_under_me(), ["UA"]);
+    assert!(d.keep_slack_under_me_personal());
+    assert!(!d.keep_slack_under_me_personal(), "only once");
+    assert_eq!(d.extra.slack_under_me, ["UA"]);
+    assert_eq!(d.slack_under_me(), ["UA"]);
+    assert!(d.member(me).unwrap().slack_mine.is_empty());
+    assert_eq!(d.member(3).unwrap().slack_mine, ["US"]);
+    let saved = serde_json::to_value(&d).unwrap();
+    assert_eq!(saved["extra"]["slack_under_me"], serde_json::json!(["UA"]));
+    let shared = crate::sync::shareable(&saved);
+    assert!(shared["extra"].get("slack_under_me").is_none());
+    assert!(!shared.to_string().contains("\"UA\""), "{}", shared);
+    // nothing left over on a file that never had any
+    let mut e = Data::seed().extra;
+    e.slack_under_me.clear();
+    assert!(!serde_json::to_string(&e)
+        .unwrap()
+        .contains("slack_under_me"));
+
+    // still on my member when an import starts (a copy from an earlier
+    // version came in): the import moves it, then my choice changes
+    let mut a = app();
+    a.data.members[0].slack_mine = vec!["UA".into()];
+    let (u, c) = slack_moves(&[(1, "UA")]);
+    let mut p = plan(&a.data, u, c);
+    assert_eq!(p.assign.get("UA"), Some(&Assign::Me));
+    p.assign.insert("UA".into(), Assign::Member(2));
+    a.import_slack(&p);
+    assert!(a.data.extra.slack_under_me.is_empty());
+    assert!(a.data.members.iter().all(|m| m.slack_mine.is_empty()));
+    assert_eq!(a.data.member(2).unwrap().slack, ["UA"]);
 }

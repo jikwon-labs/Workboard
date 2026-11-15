@@ -201,9 +201,10 @@ pub struct Member {
     /// member takes it off this one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack: Vec<String>,
-    /// The Slack user ids whose messages this member chose to bring in
-    /// under their own name ("Import under my name"), so their next import
-    /// keeps that choice instead of matching them to someone again.
+    /// Only read, from files of an earlier version that kept "Import under
+    /// my name" here, on the shared member: my own member's list moves to
+    /// my personal `Extra::slack_under_me` (`Data::keep_slack_under_me_personal`)
+    /// and nothing writes it any more.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slack_mine: Vec<String>,
 }
@@ -1331,6 +1332,12 @@ pub struct Extra {
     /// first day in days from the common era).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sheet_week_rows: Vec<[u64; 3]>,
+    /// The Slack user ids I chose to bring in under my name ("Import under
+    /// my name"): my next import starts from that for them. My own choice,
+    /// left out of the copy teammates get, so it never changes their
+    /// matching (`Member::slack`) and their imports never change it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slack_under_me: Vec<String>,
 }
 
 impl Default for Extra {
@@ -1378,6 +1385,7 @@ impl Default for Extra {
             chat_seen: Default::default(),
             sheet_rows: vec![],
             sheet_week_rows: vec![],
+            slack_under_me: vec![],
         }
     }
 }
@@ -1502,6 +1510,7 @@ impl Data {
         match d.as_mut() {
             Some(d) => {
                 d.keep_old_bookmarks_personal();
+                d.keep_slack_under_me_personal();
             }
             None => Self::keep_unreadable(file, &s),
         }
@@ -1520,6 +1529,43 @@ impl Data {
         }
         self.extra.bookmarks_shared = true;
         true
+    }
+
+    /// A file from the version that kept "Import under my name" on my
+    /// shared member (`Member::slack_mine`): the choices move to my personal
+    /// `Extra::slack_under_me` and leave the member. Only my own member's;
+    /// a teammate's are theirs to move on their computer. True when that
+    /// happened.
+    pub fn keep_slack_under_me_personal(&mut self) -> bool {
+        let me = self.me;
+        let Some(m) = self.members.iter_mut().find(|m| m.id == me) else {
+            return false;
+        };
+        if m.slack_mine.is_empty() {
+            return false;
+        }
+        for sid in std::mem::take(&mut m.slack_mine) {
+            if !self.extra.slack_under_me.contains(&sid) {
+                self.extra.slack_under_me.push(sid);
+            }
+        }
+        true
+    }
+
+    /// The Slack people I bring in under my name: my personal choices, and
+    /// any still on my member from an earlier version.
+    pub fn slack_under_me(&self) -> Vec<String> {
+        let mut out = self.extra.slack_under_me.clone();
+        for sid in self
+            .member(self.me)
+            .map(|m| &m.slack_mine[..])
+            .unwrap_or(&[])
+        {
+            if !out.contains(sid) {
+                out.push(sid.clone());
+            }
+        }
+        out
     }
 
     /// A saved workspace that couldn't be read is copied aside before
@@ -1632,6 +1678,7 @@ impl Data {
         if let Ok(s) = std::fs::read_to_string(Self::path()) {
             if let Ok(mut d) = serde_json::from_str::<Data>(&s) {
                 d.keep_old_bookmarks_personal();
+                d.keep_slack_under_me_personal();
                 // move the earlier default colours to the measured ones
                 for sp in &mut d.spaces {
                     for st in &mut sp.statuses {

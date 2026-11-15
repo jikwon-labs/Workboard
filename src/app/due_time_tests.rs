@@ -277,3 +277,49 @@ fn a_removed_time_stays_removed_when_copies_merge() {
     assert_eq!(mine["tasks"][0]["name"], "Renamed");
     assert_eq!(mine["tasks"][0]["due_time"], "14:30");
 }
+
+#[test]
+fn a_task_due_at_a_time_is_announced_then() {
+    let mut a = app();
+    a.notify_scan();
+    a.notify_rt.sent.clear();
+    a.data.extra.notify.due = true;
+    let d = today();
+    let mut t = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.parent.is_none())
+        .unwrap()
+        .clone();
+    t.assignees = vec![a.data.me];
+    t.due = Some(d);
+    t.set_due_time(Some(hm(10, 0)));
+    let id = t.id;
+    let name = t.name.clone();
+    a.apply(Action::Replace(t));
+    let ts = |h: u32, m: u32| {
+        at(d, h, m)
+            .and_local_timezone(chrono::Local)
+            .earliest()
+            .unwrap()
+            .timestamp()
+    };
+    let due_at = |a: &App| {
+        a.notify_rt
+            .sent
+            .iter()
+            .filter(|n| n.key.starts_with("due-at:"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    a.notify_clock(ts(9, 55));
+    assert!(due_at(&a).is_empty(), "not before its time");
+    a.notify_clock(ts(10, 1));
+    let sent = due_at(&a);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].title, format!("{} is due now", name));
+    assert_eq!(sent[0].target, format!("task:{}", id));
+    a.notify_clock(ts(10, 20));
+    assert_eq!(due_at(&a).len(), 1, "once");
+}

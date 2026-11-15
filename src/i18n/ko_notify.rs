@@ -19,6 +19,7 @@ pub const T: &[(&str, &str)] = &[
     ("{} starts in {} minutes", "{} 시작까지 {}분"),
     ("{} starts in 1 minute", "{} 시작까지 1분"),
     ("{} tasks are due today", "오늘 마감인 작업 {}개"),
+    ("{} is due now", "{} 마감 시간입니다"),
     ("{}% done", "{}% 완료"),
     ("1 task is due today", "오늘 마감인 작업 1개"),
     ("Goal due today: {}", "오늘 마감인 목표: {}"),

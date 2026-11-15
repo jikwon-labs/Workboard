@@ -160,4 +160,6 @@ pub const T: &[(&str, &str)] = &[
     ("{}m {}s", "{}분 {}초"),
     ("{}s", "{}초"),
     ("{} tasks", "작업 {}개"),
+    // the name a new workspace starts with
+    ("My Workspace", "내 워크스페이스"),
 ];

@@ -1709,7 +1709,7 @@ impl App {
                 }
                 ui.horizontal(|ui| {
                     if ui.button(tr("+ Add question")).clicked() {
-                        f.fields.push(FormField { label: "Question".into(), map: "text".into(), ..Default::default() });
+                        f.fields.push(FormField { label: tr("Question").into(), map: "text".into(), ..Default::default() });
                         ch = true;
                     }
                     if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)))).clicked() {

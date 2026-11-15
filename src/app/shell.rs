@@ -2551,13 +2551,13 @@ impl App {
         let lid = self.data.new_id();
         self.data.spaces.push(Space {
             id: sid,
-            name: "Personal".into(),
+            name: tr("Personal").into(),
             color: [100, 100, 100],
             statuses: default_statuses(),
             folders: vec![],
             lists: vec![ListItem {
                 id: lid,
-                name: "Personal List".into(),
+                name: tr("Personal List").into(),
                 ..Default::default()
             }],
             expanded: true,

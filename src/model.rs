@@ -1682,7 +1682,7 @@ impl Data {
             role: "Owner".into(),
             ..Default::default()
         };
-        let mut d = Self::blank("My Workspace", owner);
+        let mut d = Self::blank(crate::i18n::tr("My Workspace"), owner);
         d.extra.welcome = true;
         d
     }

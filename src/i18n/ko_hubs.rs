@@ -242,4 +242,6 @@ pub const T: &[(&str, &str)] = &[
     ("Duplicated 1 task", "작업 1개를 복제했습니다"),
     ("1 overdue task", "마감 지난 작업 1개"),
     ("\u{1F4C1} {}  (1 list)", "\u{1F4C1} {}  (목록 1개)"),
+    // the name a new team gets
+    ("Team {}", "팀 {}"),
 ];

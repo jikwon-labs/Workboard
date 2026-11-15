@@ -1499,7 +1499,7 @@ impl App {
         let n = self.data.extra.teams.len();
         self.data.extra.teams.push(Team {
             id,
-            name: format!("Team {}", n + 1),
+            name: crate::trf!("Team {}", n + 1),
             members: vec![self.data.me],
             color: STATUS_PALETTE[1 + (n * 3) % 13],
         });

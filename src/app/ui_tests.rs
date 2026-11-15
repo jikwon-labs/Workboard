@@ -8707,7 +8707,7 @@ fn things_the_app_names_are_named_in_korean() {
     assert_eq!(f.fields[0].label, "제목");
     assert!(d.teams.last().unwrap().name.starts_with("팀 "));
     assert_eq!(fresh.workspace, "내 워크스페이스");
-    assert_eq!(fresh.spaces[0].name, "팀 스페이스");
+    assert_eq!(fresh.spaces[0].name, "기본 스페이스");
     assert_eq!(fresh.spaces[0].lists[0].name, "목록");
     // and in English, as before
     h.app.new_whiteboard();

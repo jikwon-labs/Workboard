@@ -32,6 +32,17 @@ pub const SHARED_VALUES: &[&str] = &["workspace", "extra.workspace_color", "extr
 /// Fields that are each person's own even inside shared items.
 const LOCAL_KEYS: &[&str] = &["last_read", "saved", "expanded"];
 
+/// Fields the app leaves out of the file when they are at their default and
+/// that can go back to it (a stopped timer, an unresolved comment, the last
+/// watcher removed). When the newest copy of an item comes from an app that
+/// knows them (`SyncMeta.v` 2 and later) and lacks one, it is at its default
+/// there and is not filled back in from an older copy. Any other missing
+/// field is kept from the other copies, so an app that doesn't know a field
+/// can't erase it. A new field like these goes here with a `META_V` bump.
+const DEFAULT_WHEN_MISSING: &[&str] = &[
+    "archived", "assignee", "reactions", "resolved", "timer_by", "timers", "milestone", "watchers", "waiting_on", "linked", "tags", "private", "required", "options", "cards", "mentions",
+];
+
 /// Lists that only ever grow; every side's entries are kept.
 const APPEND_KEYS: &[&str] = &["activity"];
 
@@ -323,11 +334,8 @@ struct Ctx<'a> {
     /// id -> when it moved there (0: not known)
     home_moved: HashMap<u64, i64>,
     out_moved: BTreeMap<u64, i64>,
-    /// source -> whether that copy leaves fields at their default out of
-    /// the file (apps that keep move times, `SyncMeta.v` 2 and later). When
-    /// such a copy wins and lacks a field, the field is at its default there
-    /// (a stopped timer, an unpinned message) and is not filled back in from
-    /// an older copy.
+    /// source -> whether that copy knows the `DEFAULT_WHEN_MISSING` fields
+    /// (`SyncMeta.v` 2 and later).
     omits_defaults: Vec<bool>,
 }
 
@@ -458,7 +466,7 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
                 local.unwrap()[&k].clone()
             } else if let Some(v) = wobj.get(&k) {
                 v.clone()
-            } else if cx.omits_defaults.get(best.0).copied().unwrap_or(false) {
+            } else if DEFAULT_WHEN_MISSING.contains(&k.as_str()) && cx.omits_defaults.get(best.0).copied().unwrap_or(false) {
                 // the newest copy has it at its default (see `omits_defaults`)
                 continue;
             } else {
@@ -1204,5 +1212,15 @@ mod tests {
         merge(&mut c, &[old]);
         assert_eq!(c["tasks"][0]["name"], "T renamed");
         assert_eq!(c["tasks"][0]["watchers"], json!([4]), "an older app's copy doesn't drop what it can't know");
+        // and a field outside DEFAULT_WHEN_MISSING is kept even from a new copy
+        let mut newer = b.clone();
+        let mut mn = mb.clone();
+        newer["tasks"] = json!([{"id": 7, "name": "T again"}]);
+        mn.stamps.insert(7, 50);
+        newer["extra"]["sync"] = serde_json::to_value(&mn).unwrap();
+        let mut d = b.clone();
+        d["tasks"] = json!([{"id": 7, "name": "T", "attachments": [{"file": "x"}]}]);
+        merge(&mut d, &[newer]);
+        assert_eq!(d["tasks"][0]["attachments"], json!([{"file": "x"}]));
     }
 }

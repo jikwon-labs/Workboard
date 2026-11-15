@@ -211,6 +211,13 @@ extension Sync {
 
     private typealias Cand = (src: Int, value: JSON)
 
+    /// wb_sync DEFAULT_WHEN_MISSING: fields the Mac leaves out at their
+    /// default that can go back to it; any other missing field is kept from
+    /// the other copies so an app that doesn't know it can't erase it.
+    static let defaultWhenMissing: Set<String> = [
+        "archived", "assignee", "reactions", "resolved", "timer_by", "timers", "milestone", "watchers", "waiting_on", "linked", "tags", "private", "required", "options", "cards", "mentions",
+    ]
+
     private final class Ctx {
         let stamps: [[UInt64: Int64]]
         let tombs: [UInt64: Int64]
@@ -313,7 +320,7 @@ extension Sync {
                     value = lv
                 } else if let v = wobj[k] {
                     value = v
-                } else if cx.omitsDefaults.indices.contains(best.src) && cx.omitsDefaults[best.src] {
+                } else if defaultWhenMissing.contains(k) && cx.omitsDefaults.indices.contains(best.src) && cx.omitsDefaults[best.src] {
                     // the newest copy has it at its default (see omitsDefaults)
                     continue
                 } else {

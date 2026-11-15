@@ -216,8 +216,9 @@ pub struct TimeEntry {
     pub start: i64,
     pub end: i64,
     /// Whose time this is; 0 for entries from before entries had an owner
-    /// (see `Task::entry_owner`).
-    #[serde(default)]
+    /// (see `Task::entry_owner`). Left out of the file when 0, so entries
+    /// read the same to wb-sync as before the field existed.
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub member: u64,
 }
 
@@ -529,8 +530,9 @@ pub struct Form {
     pub list_id: u64,
     pub description: String,
     pub fields: Vec<FormField>,
-    /// Who made it; 0 for forms from before this was recorded.
-    #[serde(default)]
+    /// Who made it; 0 for forms from before this was recorded (left out of
+    /// the file then, like the other fields added later).
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub owner: u64,
 }
 
@@ -555,7 +557,7 @@ pub struct Whiteboard {
     pub strokes: Vec<WbStroke>,
     pub notes: Vec<Sticky>,
     /// Who made it; 0 for whiteboards from before this was recorded.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub owner: u64,
 }
 
@@ -590,6 +592,10 @@ pub struct ListTrash {
     pub list: ListItem,
     #[serde(default)]
     pub tasks: Vec<Task>,
+    /// The statuses of the space it was in, so its tasks keep theirs (or the
+    /// nearest one) when it comes back into another space. Empty in older entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statuses: Vec<Status>,
 }
 
 impl ListTrash {
@@ -598,8 +604,28 @@ impl ListTrash {
             return Some(t);
         }
         let (space, list, tasks) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(payload).ok()?;
-        Some(ListTrash { space, folder: None, list, tasks })
+        Some(ListTrash { space, folder: None, list, tasks, statuses: vec![] })
     }
+}
+
+/// What a deleted space keeps in Trash (kind "Space"): the space itself with
+/// its name, colour, icon, statuses and folders, its lists taken out. Each
+/// list went to Trash on its own; `lists` are those entries' ids, restored
+/// with the space while they are still there.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpaceTrash {
+    pub space: Space,
+    #[serde(default)]
+    pub lists: Vec<u64>,
+}
+
+/// What a deleted folder keeps in Trash (kind "Folder"), like `SpaceTrash`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FolderTrash {
+    pub space: u64,
+    pub folder: Folder,
+    #[serde(default)]
+    pub lists: Vec<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -649,10 +675,10 @@ pub struct Dashboard {
     pub name: String,
     pub space: Option<u64>,
     /// Who made it; 0 for dashboards from before this was recorded.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub owner: u64,
     /// Which cards it shows: "simple", "time", "project", or "" for all of them.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub private: bool,

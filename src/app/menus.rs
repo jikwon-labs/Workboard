@@ -1746,6 +1746,10 @@ impl App {
                         for t in tasks.iter_mut().filter(|t| t.list_id == l) {
                             t.list_id = to;
                         }
+                        if let Some(si) = self.data.spaces.iter().position(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).any(|x| x.id == to)) {
+                            let moved: Vec<&mut Task> = tasks.iter_mut().filter(|t| t.list_id == to).collect();
+                            self.fit_statuses(moved, &[], si);
+                        }
                         note = Some(crate::trf!("Its list is gone, so it went to {}", self.data.list_name(to)));
                     }
                     self.data.tasks.extend(tasks);
@@ -1765,22 +1769,63 @@ impl App {
                     let folder = lt.folder.and_then(|f| self.data.spaces.iter().position(|s| s.folders.iter().any(|x| x.id == f)).map(|si| (si, f)));
                     let space = self.data.spaces.iter().position(|s| s.id == lt.space);
                     let name = lt.list.name.clone();
+                    let into;
                     if let Some((si, fid)) = folder {
                         if let Some(f) = self.data.spaces[si].folders.iter_mut().find(|x| x.id == fid) {
                             f.lists.push(lt.list);
                         }
-                    } else if let Some(si) = space.or(if self.data.spaces.is_empty() { None } else { Some(0) }) {
+                        into = si;
+                    } else if let Some(si) = space.or_else(|| self.restore_space()) {
                         let home = self.data.spaces[si].name.clone();
                         self.data.spaces[si].lists.push(lt.list);
                         if lt.folder.is_some() || space.is_none() {
                             self.toast = Some((crate::trf!("\"{}\" was restored to {} because its old place is gone", name, home), now_ts()));
                         }
+                        into = si;
                     } else {
                         self.data.extra.trash.insert(i.min(self.data.extra.trash.len()), item);
                         self.toast = Some((tr("There is no space to restore it into. Make a space first.").into(), now_ts()));
                         return;
                     }
-                    self.data.tasks.extend(lt.tasks);
+                    let mut tasks = lt.tasks;
+                    if self.data.spaces[into].id != lt.space {
+                        self.fit_statuses(tasks.iter_mut().collect(), &lt.statuses, into);
+                    }
+                    self.data.tasks.extend(tasks);
+                }
+            }
+            "Space" => {
+                if let Ok(st) = serde_json::from_str::<SpaceTrash>(&item.payload) {
+                    if !self.data.spaces.iter().any(|s| s.id == st.space.id) {
+                        self.data.spaces.push(st.space);
+                    }
+                    // its lists, while they are still in Trash
+                    for tid in st.lists {
+                        if let Some(j) = self.data.extra.trash.iter().position(|x| x.id == tid) {
+                            self.restore_trash(j);
+                        }
+                    }
+                }
+            }
+            "Folder" => {
+                if let Ok(ft) = serde_json::from_str::<FolderTrash>(&item.payload) {
+                    let space = self.data.spaces.iter().position(|s| s.id == ft.space);
+                    let Some(si) = space.or_else(|| self.restore_space()) else {
+                        self.data.extra.trash.insert(i.min(self.data.extra.trash.len()), item);
+                        self.toast = Some((tr("There is no space to restore it into. Make a space first.").into(), now_ts()));
+                        return;
+                    };
+                    if !self.data.spaces.iter().any(|s| s.folders.iter().any(|f| f.id == ft.folder.id)) {
+                        if space.is_none() {
+                            self.toast = Some((crate::trf!("\"{}\" was restored to {} because its old place is gone", ft.folder.name, self.data.spaces[si].name), now_ts()));
+                        }
+                        self.data.spaces[si].folders.push(ft.folder);
+                    }
+                    for tid in ft.lists {
+                        if let Some(j) = self.data.extra.trash.iter().position(|x| x.id == tid) {
+                            self.restore_trash(j);
+                        }
+                    }
                 }
             }
             "Whiteboard" => {
@@ -1811,6 +1856,36 @@ impl App {
             _ => {}
         }
         self.dirty = true;
+    }
+
+    /// Where something restored from Trash goes when its own space is gone:
+    /// the first team space in use, else my own Personal space, else any
+    /// space that isn't someone else's.
+    fn restore_space(&self) -> Option<usize> {
+        let me = self.data.me;
+        let sp = &self.data.spaces;
+        sp.iter()
+            .position(|s| !s.archived && s.private_owner.is_none())
+            .or_else(|| sp.iter().position(|s| !s.archived && s.private_owner == Some(me)))
+            .or_else(|| sp.iter().position(|s| s.private_owner.is_none_or(|o| o == me)))
+    }
+
+    /// Tasks coming back into another space (space `si`) take its status of
+    /// the same name, else of the same kind (`from` holds the statuses they
+    /// had), else its first one; each change is noted in the task's history.
+    fn fit_statuses(&mut self, tasks: Vec<&mut Task>, from: &[Status], si: usize) {
+        let Some(sp) = self.data.spaces.get(si) else { return };
+        let Some(first) = sp.statuses.first() else { return };
+        let me = self.data.me;
+        for t in tasks {
+            if sp.statuses.iter().any(|s| s.name == t.status) {
+                continue;
+            }
+            let kind = from.iter().find(|s| s.name == t.status).map(|s| s.kind);
+            let to = kind.and_then(|k| sp.statuses.iter().find(|s| s.kind == k)).unwrap_or(first);
+            let old = std::mem::replace(&mut t.status, to.name.clone());
+            Self::log(t, me, format!("changed status from {} to {}", old.to_uppercase(), to.name.to_uppercase()));
+        }
     }
 
     /// "New message" picker (sidebar + New message, Create > Message, Cmd+G).

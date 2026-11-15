@@ -270,6 +270,31 @@ pub(super) fn call_link() -> String {
     format!("https://meet.jit.si/Workboard-{:016x}", sync::random_u64())
 }
 
+/// A workspace as the app wrote it before fields left at their default were
+/// left out of the file (time entries' `member`, forms', whiteboards' and
+/// dashboards' `owner`, dashboards' `kind`), for `sync::carry_hashes`.
+pub(super) fn legacy_shape(v: &serde_json::Value) -> serde_json::Value {
+    let mut v = v.clone();
+    let fill = |items: Option<&mut serde_json::Value>, keys: &[(&str, serde_json::Value)]| {
+        for it in items.and_then(|a| a.as_array_mut()).into_iter().flatten() {
+            if let Some(o) = it.as_object_mut() {
+                for (k, d) in keys {
+                    o.entry(k.to_string()).or_insert_with(|| d.clone());
+                }
+            }
+        }
+    };
+    for t in v.get_mut("tasks").and_then(|a| a.as_array_mut()).into_iter().flatten() {
+        fill(t.get_mut("time_entries"), &[("member", 0.into())]);
+    }
+    if let Some(e) = v.get_mut("extra") {
+        fill(e.get_mut("forms"), &[("owner", 0.into())]);
+        fill(e.get_mut("whiteboards"), &[("owner", 0.into())]);
+        fill(e.get_mut("dashboards"), &[("owner", 0.into()), ("kind", "".into())]);
+    }
+    v
+}
+
 impl App {
     fn data_value(&self) -> serde_json::Value {
         serde_json::to_value(&self.data).unwrap_or_default()
@@ -280,11 +305,25 @@ impl App {
         if self.data.extra.shared.is_none() {
             return;
         }
+        self.stamp_now();
+        self.sync_rt.pending = true;
+    }
+
+    /// Record what changed since the last save in the change bookkeeping.
+    /// True when anything did.
+    fn stamp_now(&mut self) -> bool {
         let v = self.data_value();
         let mut meta = std::mem::take(&mut self.data.extra.sync);
+        let before = meta.clone();
+        if meta.v == 1 {
+            // fingerprints from before fields left at their default were
+            // left out of the file: the new shape alone isn't an edit
+            sync::carry_hashes(&mut meta, &legacy_shape(&v), &v);
+        }
         sync::stamp(&v, &mut meta, chrono::Utc::now().timestamp_millis());
+        let changed = meta != before;
         self.data.extra.sync = meta;
-        self.sync_rt.pending = true;
+        changed
     }
 
     pub(super) fn write_shared(&mut self) {
@@ -325,21 +364,43 @@ impl App {
         let files = sync::other_files(Path::new(&cfg.folder), &cfg.device);
         self.sync_rt.seen = files.clone();
         let others: Vec<serde_json::Value> = files.iter().filter_map(|(p, _)| sync::read_json(p)).collect();
-        self.merge_in(&others)
+        self.merge_in(&others, &[])
     }
 
-    /// Merge the team's copies into ours. Returns true when something new arrived.
-    fn merge_in(&mut self, others: &[serde_json::Value]) -> bool {
+    /// Merge the team's copies into ours. On a server, `hidden` (with what
+    /// our own copy shows we may not see) is taken out of our copy without
+    /// deleting it. Returns true when something new arrived.
+    pub(super) fn merge_in(&mut self, others: &[serde_json::Value], hidden: &[u64]) -> bool {
         if others.is_empty() {
             return false;
+        }
+        // changes not recorded yet (made just before quitting, say) are
+        // recorded first, or the merge would take them as already known
+        if self.data.extra.shared.is_some() && !self.data.extra.sync.hashes.is_empty() && self.stamp_now() {
+            self.sync_rt.pending = true;
         }
         let me = self.data.me;
         let count_new = |d: &Data| d.channels.iter().flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
         let before = count_new(&self.data);
+        let seen: Vec<u64> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (!c.private || c.members.contains(&me))).map(|c| c.id).collect();
         let mut v = self.data_value();
-        let changed = sync::merge(&mut v, others);
+        let mut changed = sync::merge(&mut v, others);
+        let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+        let gone = if on_server {
+            let mut ids = hidden.to_vec();
+            ids.extend(sync::hidden_from(&v, me));
+            sync::hide(&mut v, &ids)
+        } else {
+            vec![]
+        };
+        changed |= !gone.is_empty();
         match serde_json::from_value::<Data>(v) {
-            Ok(d) => self.data = d,
+            Ok(d) => {
+                self.data = d;
+                // fingerprints of what the app writes, which can differ a
+                // little from what came in (fields an older app left out)
+                self.data.extra.sync.hashes = sync::fingerprints(&self.data_value());
+            }
             Err(e) => {
                 // most likely saved by a newer version of the app
                 if !self.sync_rt.told_unreadable {
@@ -350,6 +411,9 @@ impl App {
                 return false;
             }
         }
+        for ch in gone.iter().filter(|c| c.get("id").and_then(|i| i.as_u64()).is_some_and(|i| seen.contains(&i))) {
+            self.left_channel(ch);
+        }
         if changed {
             let n = count_new(&self.data).saturating_sub(before);
             if n > 0 {
@@ -359,6 +423,36 @@ impl App {
             self.sync_rt.pending = true;
         }
         changed
+    }
+
+    /// A channel I could see was taken out of my copy because I'm no longer
+    /// in it: say so, and keep what I wrote there in the last few minutes in
+    /// my Notepad, since it may not have reached the team before I left.
+    fn left_channel(&mut self, ch: &serde_json::Value) {
+        let me = self.data.me;
+        let name = ch.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
+        let since = now_ts() - 10 * 60;
+        let mut mine: Vec<String> = vec![];
+        for m in ch.get("messages").and_then(|m| m.as_array()).into_iter().flatten() {
+            for x in std::iter::once(m).chain(m.get("replies").and_then(|r| r.as_array()).into_iter().flatten()) {
+                let author = x.get("author").and_then(|a| a.as_u64());
+                let ts = x.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+                let text = x.get("text").and_then(|t| t.as_str()).unwrap_or_default();
+                if author == Some(me) && ts >= since && !text.trim().is_empty() {
+                    mine.push(text.to_string());
+                }
+            }
+        }
+        if mine.is_empty() {
+            self.toast = Some((trf!("You're no longer in #{}, so it was taken off your list.", name), now_ts()));
+            return;
+        }
+        let notepad = &mut self.data.extra.notepad;
+        if !notepad.is_empty() && !notepad.ends_with('\n') {
+            notepad.push('\n');
+        }
+        notepad.push_str(&format!("{}\n{}\n", trf!("Written in #{} before you were taken out of it:", name), mine.join("\n")));
+        self.toast = Some((trf!("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", name), now_ts()));
     }
 
     /// The server connection: start it when needed and take in what arrived.
@@ -392,7 +486,7 @@ impl App {
         for e in events {
             match e {
                 NetEvent::Status(s) => self.sync_rt.net_status = Some(s),
-                NetEvent::Welcome { tag, snapshot, member, role, token, email, .. } => {
+                NetEvent::Welcome { tag, snapshot, member, role, token, email, hidden, .. } => {
                     if let Some(t) = token {
                         let (addr, device) = match (&self.sync_rt.joining, &self.data.extra.shared) {
                             (Some(j), _) => (j.addr.clone(), j.device.clone()),
@@ -412,9 +506,9 @@ impl App {
                     if let Some(addr) = server {
                         crate::updater::set_server(&addr);
                     }
-                    changed |= self.net_welcome(tag, snapshot, member);
+                    changed |= self.net_welcome(tag, snapshot, member, &hidden);
                 }
-                NetEvent::Update { data, .. } => changed |= self.merge_in(&[data]),
+                NetEvent::Update { data, hidden, .. } => changed |= self.merge_in(&[data], &hidden),
                 NetEvent::Invite { member, code, emailed, mail_error } => {
                     if let Some(p) = self.sync_rt.people.iter_mut().find(|p| p.member == member) {
                         p.invite = Some(code);
@@ -456,7 +550,7 @@ impl App {
     }
 
     /// The server answered: finish joining, or catch up after a reconnect.
-    fn net_welcome(&mut self, tag: u16, snapshot: Option<serde_json::Value>, member: u64) -> bool {
+    fn net_welcome(&mut self, tag: u16, snapshot: Option<serde_json::Value>, member: u64, hidden: &[u64]) -> bool {
         if let Some(j) = self.sync_rt.joining.take() {
             let cfg = SharedCfg { folder: String::new(), device: j.device, tag, server: Some(j.addr) };
             match snapshot {
@@ -507,7 +601,7 @@ impl App {
             self.save_local();
         }
         let changed = match snapshot {
-            Some(s) => self.merge_in(&[s]),
+            Some(s) => self.merge_in(&[s], hidden),
             None => false,
         };
         // after (re)connecting our whole copy goes up, with anything made offline
@@ -750,7 +844,7 @@ impl App {
         }
         self.data.me = id;
         for c in &mut self.data.channels {
-            if c.kind == ChannelKind::Channel && !c.members.contains(&id) {
+            if c.kind == ChannelKind::Channel && !c.private && !c.members.contains(&id) {
                 c.members.push(id);
             }
         }

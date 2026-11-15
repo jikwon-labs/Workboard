@@ -455,24 +455,6 @@ fn copy_shape_ok(v: &Value) -> bool {
     v.is_object() && fine(extra) && fine(sync) && fine(sync.and_then(|s| s.get("stamps")))
 }
 
-/// A DM or a private channel with a member list that doesn't include
-/// `member`: they don't get it and can't change it.
-fn closed_to(ch: &Value, member: u64) -> bool {
-    let restricted = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct") || ch.get("private").and_then(|p| p.as_bool()) == Some(true);
-    let members: Vec<u64> = ch.get("members").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.as_u64()).collect()).unwrap_or_default();
-    restricted && !members.is_empty() && !members.contains(&member)
-}
-
-/// The conversations in the team's copy closed to `member`, each with the
-/// ids of everything in it (the channel, its messages and replies).
-fn closed_channels(canon: &Value, member: u64) -> Vec<(&Value, Vec<u64>)> {
-    canon
-        .get("channels")
-        .and_then(|c| c.as_array())
-        .map(|a| a.iter().filter(|ch| ch.get("id").and_then(|i| i.as_u64()).is_some() && closed_to(ch, member)).map(|ch| (ch, wb_sync::fingerprints(&json!({ "channels": [ch] })).into_keys().collect())).collect())
-        .unwrap_or_default()
-}
-
 fn drop_ids(meta: Option<&mut Value>, keys: &[&str], ids: &[u64]) {
     let Some(meta) = meta else { return };
     for k in keys {
@@ -484,38 +466,54 @@ fn drop_ids(meta: Option<&mut Value>, keys: &[&str], ids: &[u64]) {
     }
 }
 
-/// What `member` gets of the team's copy: DMs and private channels they
-/// aren't in left out (with their change stamps). None when nothing is
-/// left out. Tombstones stay, so deletes still reach everyone; an app never
-/// treats a conversation missing here as deleted (only a tombstone deletes).
-fn copy_for(canon: &Value, member: u64) -> Option<Value> {
-    let closed = closed_channels(canon, member);
-    if closed.is_empty() {
+/// What `member` gets of the team's copy, and the ids of the items left out
+/// of it: DMs and private channels they aren't in, other people's Personal
+/// spaces (with their tasks) and private docs (see `wb_sync::hidden_from`),
+/// with their change stamps. None when nothing is left out. Tombstones stay,
+/// so deletes still reach everyone; an app never treats an item missing here
+/// as deleted (only a tombstone deletes), and the ids tell it to take its
+/// own copy of them away without deleting them (`wb_sync::hide`).
+fn copy_for(canon: &Value, member: u64) -> Option<(Value, Vec<u64>)> {
+    let hidden = wb_sync::hidden_from(canon, member);
+    if hidden.is_empty() {
         return None;
     }
-    let hide: Vec<u64> = closed.iter().filter_map(|(ch, _)| ch.get("id")?.as_u64()).collect();
-    let inner: Vec<u64> = closed.iter().flat_map(|(_, ids)| ids.iter().copied()).collect();
     let mut out = canon.clone();
-    if let Some(a) = out.get_mut("channels").and_then(|c| c.as_array_mut()) {
-        a.retain(|ch| !ch.get("id").and_then(|i| i.as_u64()).is_some_and(|i| hide.contains(&i)));
-    }
-    drop_ids(out.get_mut("extra").and_then(|e| e.get_mut("sync")), &["stamps"], &inner);
-    Some(out)
+    wb_sync::hide(&mut out, &hidden);
+    Some((out, hidden))
 }
 
-/// Before merging a copy from `member`: the conversations closed to them
-/// stay as the team has them. Their version of one (say, with themselves
-/// added to its members) is swapped for the team's, and their stamps,
-/// tombstones and revivals for anything in it are dropped, so they can't
-/// change, join or delete it.
+/// Before merging a copy from `member`: the items hidden from them stay as
+/// the team has them. Their version of one (say, a private channel with
+/// themselves added to its members) is swapped for the team's, and their
+/// stamps, tombstones, revivals and moves for anything in it are dropped,
+/// so they can't change, join or delete it.
 fn guard_push(canon: &Value, data: &mut Value, member: u64) {
-    for (ch, ids) in closed_channels(canon, member) {
-        let id = ch.get("id").and_then(|i| i.as_u64());
-        if let Some(theirs) = data.get_mut("channels").and_then(|c| c.as_array_mut()).and_then(|a| a.iter_mut().find(|c| c.get("id").and_then(|i| i.as_u64()) == id)) {
-            *theirs = ch.clone();
-        }
-        drop_ids(data.get_mut("extra").and_then(|e| e.get_mut("sync")), &["stamps", "tombs", "revived"], &ids);
+    let hidden = wb_sync::hidden_from(canon, member);
+    if hidden.is_empty() {
+        return;
     }
+    let items: Vec<Value> = wb_sync::SHARED
+        .iter()
+        .filter_map(|path| path.split('.').try_fold(canon, |v, part| v.get(part)).and_then(|a| a.as_array()))
+        .flatten()
+        .filter(|x| x.get("id").and_then(|i| i.as_u64()).is_some_and(|i| hidden.contains(&i)))
+        .cloned()
+        .collect();
+    let ids: Vec<u64> = wb_sync::fingerprints(&json!({ "channels": items })).into_keys().collect();
+    for item in &items {
+        let id = item.get("id").and_then(|i| i.as_u64());
+        for path in wb_sync::SHARED {
+            let mut arr = Some(&mut *data);
+            for part in path.split('.') {
+                arr = arr.and_then(|v| v.get_mut(part));
+            }
+            if let Some(x) = arr.and_then(|a| a.as_array_mut()).and_then(|a| a.iter_mut().find(|c| c.get("id").and_then(|i| i.as_u64()) == id)) {
+                *x = item.clone();
+            }
+        }
+    }
+    drop_ids(data.get_mut("extra").and_then(|e| e.get_mut("sync")), &["stamps", "tombs", "revived", "moved"], &ids);
 }
 
 fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
@@ -640,12 +638,12 @@ struct Canon {
 
 impl Canon {
     fn new(data: &Value, rev: u64) -> Canon {
-        Canon { json: Msg::Update { data: data.clone(), rev }.to_json(), data: data.clone(), rev }
+        Canon { json: Msg::Update { data: data.clone(), rev, hidden: vec![] }.to_json(), data: data.clone(), rev }
     }
 
     fn update_for(&self, member: u64) -> String {
         match copy_for(&self.data, member) {
-            Some(data) => Msg::Update { data, rev: self.rev }.to_json(),
+            Some((data, hidden)) => Msg::Update { data, rev: self.rev, hidden }.to_json(),
             None => self.json.clone(),
         }
     }
@@ -914,8 +912,11 @@ impl Hub {
     fn welcome(&self, tag: u16, member: u64, role: Role, token: Option<String>) -> String {
         let g = self.inner.lock().unwrap();
         let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
-        let snapshot = g.canon.as_ref().map(|c| copy_for(c, member).unwrap_or_else(|| c.clone()));
-        Msg::Welcome { tag, snapshot, rev: g.saved.rev, member, role, token, email }.to_json()
+        let (snapshot, hidden) = match g.canon.as_ref().map(|c| copy_for(c, member).unwrap_or_else(|| (c.clone(), vec![]))) {
+            Some((s, h)) => (Some(s), h),
+            None => (None, vec![]),
+        };
+        Msg::Welcome { tag, snapshot, rev: g.saved.rev, member, role, token, email, hidden }.to_json()
     }
 
     /// Merge the copy `member` sent from `device` into the team's copy; tell
@@ -966,7 +967,10 @@ impl Hub {
 
     fn latest(&self, member: u64) -> Option<String> {
         let g = self.inner.lock().unwrap();
-        g.canon.as_ref().map(|c| Msg::Update { data: copy_for(c, member).unwrap_or_else(|| c.clone()), rev: g.saved.rev }.to_json())
+        g.canon.as_ref().map(|c| {
+            let (data, hidden) = copy_for(c, member).unwrap_or_else(|| (c.clone(), vec![]));
+            Msg::Update { data, rev: g.saved.rev, hidden }.to_json()
+        })
     }
 
     fn access_for(&self, member: u64) -> Msg {

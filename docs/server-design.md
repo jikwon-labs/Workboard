@@ -70,10 +70,10 @@
 | 방향 | 메시지 | 내용 |
 |---|---|---|
 | 앱 → 서버 | `hello` | `device`, `tag`, 그리고 다음 중 하나: `token`(평소) / `invite`(초대 코드, `new_password`·`email` 을 같이 보내면 계정도 만든다) / `email`+`password`(계정 로그인) / `reset_code`+`email`+`new_password`(비밀번호 재설정) / `claim`(빈 서버 첫 등록, `email`+`new_password` 로 owner 계정) |
-| 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token`, 계정이 있으면 `email` |
+| 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token`, 계정이 있으면 `email`, 이 사람이 못 보는 항목의 id `hidden`(있을 때만) |
 | 앱 → 서버 | `set_password` | `email`, `password`, 계정이 이미 있으면 `old_password`. 서버가 `account{email}` 로 답한다 |
 | 앱 → 서버 | `push` | 앱의 공유 사본 전체 |
-| 서버 → 모두 | `update` | 합친 정본과 `rev` |
+| 서버 → 모두 | `update` | 합친 정본과 `rev`, `hidden`. 정본은 사람마다 걸러서 보낸다: 내가 멤버가 아닌 DM·비공개 채널, 남의 Personal 스페이스(와 그 작업), 남의 비공개 문서는 빠진다(`wb_sync::hidden_from`). 앱은 `hidden` 의 항목을 툼스톤 없이 자기 사본에서 뺀다(`wb_sync::hide`). 그래서 다른 사람에게서 지워지지 않고, 다시 볼 수 있게 되면 돌아온다. 예전 앱은 이 필드를 무시한다 |
 | 앱 → 서버 | `create_invite` / `set_role` / `revoke` / `access_list` | owner·admin 만 |
 | 서버 → 앱 | `invite` / `access` | 만든 코드(메일로 보냈으면 `emailed`, 실패했으면 `mail_error`), 사람별 역할·컴퓨터 수·열린 코드·계정 여부(`account`) |
 | 앱 → 서버 | `backup_list` / `restore` | owner 만. 서버가 `backups`(목록) / `restored` 로 답한다 |

@@ -1445,9 +1445,22 @@ impl App {
                 if let Some(l) = self.data.lists_in(Location::Space(id)) {
                     lists = l;
                 }
-                // the lists inside go to Trash one by one, like deleting a list
+                // the lists inside go to Trash one by one, like deleting a
+                // list, and the space itself after them, so it can come back
+                let mut entries = vec![];
                 for &l in &lists {
                     self.trash_list(l);
+                    entries.extend(self.last_trash_id());
+                }
+                if let Some(mut space) = self.data.spaces.iter().find(|s| s.id == id).cloned() {
+                    space.lists.clear();
+                    for f in &mut space.folders {
+                        f.lists.clear();
+                    }
+                    let title = space.name.clone();
+                    let payload = serde_json::to_string(&SpaceTrash { space, lists: entries }).unwrap_or_default();
+                    let tid = self.data.new_id();
+                    self.data.extra.trash.push(TrashItem { id: tid, kind: "Space".into(), title, deleted: now_ts(), payload });
                 }
                 self.data.spaces.retain(|s| s.id != id);
             }
@@ -1455,8 +1468,18 @@ impl App {
                 if let Some(l) = self.data.lists_in(Location::Folder(id)) {
                     lists = l;
                 }
+                let mut entries = vec![];
                 for &l in &lists {
                     self.trash_list(l);
+                    entries.extend(self.last_trash_id());
+                }
+                let found = self.data.spaces.iter().find_map(|s| s.folders.iter().find(|f| f.id == id).map(|f| (s.id, f.clone())));
+                if let Some((space, mut folder)) = found {
+                    folder.lists.clear();
+                    let title = folder.name.clone();
+                    let payload = serde_json::to_string(&FolderTrash { space, folder, lists: entries }).unwrap_or_default();
+                    let tid = self.data.new_id();
+                    self.data.extra.trash.push(TrashItem { id: tid, kind: "Folder".into(), title, deleted: now_ts(), payload });
                 }
                 for s in &mut self.data.spaces {
                     s.folders.retain(|f| f.id != id);
@@ -1552,9 +1575,15 @@ impl App {
         let Some(list) = self.data.list_item(id).cloned() else { return };
         let tasks: Vec<Task> = self.data.tasks.iter().filter(|t| t.list_id == id).cloned().collect();
         let title = list.name.clone();
-        let payload = serde_json::to_string(&ListTrash { space, folder, list, tasks }).unwrap_or_default();
+        let statuses = sp.statuses.clone();
+        let payload = serde_json::to_string(&ListTrash { space, folder, list, tasks, statuses }).unwrap_or_default();
         let tid = self.data.new_id();
         self.data.extra.trash.push(TrashItem { id: tid, kind: "List".into(), title, deleted: now_ts(), payload });
+    }
+
+    /// The id of the Trash entry made last (by `trash_list`).
+    fn last_trash_id(&self) -> Option<u64> {
+        self.data.extra.trash.last().map(|x| x.id)
     }
 
     // ---------------------------------------------------------------- top bar
@@ -3974,15 +4003,29 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if self.persist {
-            // stop a running timer cleanly so tracked time is kept
-            let now = now_ts();
-            // only mine: a teammate's timer keeps running
-            self.data.stop_my_timers(now);
+            self.finish_before_quit();
             if self.ws_file == "data.json" {
                 self.data.save();
             } else {
                 self.data.save_file(&self.ws_file);
             }
+        }
+    }
+}
+
+impl App {
+    /// Quitting: stop my running timer cleanly so tracked time is kept (only
+    /// mine: a teammate's timer keeps running), and let the team have it and
+    /// anything else not sent yet. The change is recorded now, so the next
+    /// start can't take it as already known; a shared folder gets our copy
+    /// right away (it may still be waiting out WRITE_SECS), a server gets it
+    /// if the connection is up and else after the next start's welcome.
+    fn finish_before_quit(&mut self) {
+        self.data.stop_my_timers(now_ts());
+        self.data.fix_activity_ids();
+        if self.data.extra.shared.is_some() {
+            self.sync_note_change();
+            self.write_shared();
         }
     }
 }

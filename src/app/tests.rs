@@ -2511,3 +2511,189 @@ fn mentions_in_private_channels_i_am_not_in_stay_out() {
     a.data.channels.iter_mut().find(|c| c.private).unwrap().members.push(1);
     assert_eq!(a.inbox_badge(), 1);
 }
+
+#[test]
+fn quitting_sends_my_stopped_timer_to_the_team() {
+    let dir = temp_folder("quit");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.join_shared(&folder).unwrap();
+    b.become_member(None, "Bora", "");
+    let tid = a.data.tasks[0].id;
+    let entries = a.data.tasks[0].time_entries.len();
+    a.data.tasks[0].timer_started = Some(now_ts() - 60);
+    a.data.tasks[0].timer_by = Some(a.data.me);
+    a.sync_note_change();
+    a.write_shared();
+    b.sync_pull();
+    assert!(b.task(tid).unwrap().timer_started.is_some());
+    // quitting right away, before the next frame would have written it
+    a.finish_before_quit();
+    assert!(a.task(tid).unwrap().timer_started.is_none());
+    b.sync_pull();
+    let t = b.task(tid).unwrap();
+    assert!(t.timer_started.is_none(), "the stopped timer reached the team");
+    assert_eq!(t.time_entries.len(), entries + 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_change_not_recorded_before_a_merge_still_reaches_the_team() {
+    let dir = temp_folder("unrecorded");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.join_shared(&folder).unwrap();
+    b.become_member(None, "Bora", "");
+    b.sync_note_change();
+    b.write_shared();
+    // A changes a task, and the team's copy is merged in before that change was recorded
+    let tid = a.data.tasks[0].id;
+    a.data.tasks[0].name = "Renamed just before".into();
+    a.sync_pull();
+    a.sync_note_change();
+    a.write_shared();
+    b.sync_pull();
+    assert_eq!(b.task(tid).unwrap().name, "Renamed just before");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn joining_a_folder_does_not_add_you_to_private_channels() {
+    let mut a = app();
+    let private = a.data.channels.iter().find(|c| c.kind == ChannelKind::Channel && c.name != "general").unwrap().id;
+    a.data.channels.iter_mut().find(|c| c.id == private).unwrap().private = true;
+    a.become_member(None, "New", "");
+    let me = a.data.me;
+    let ch = |id: u64| a.data.channels.iter().find(|c| c.id == id).unwrap();
+    assert!(!ch(private).members.contains(&me));
+    assert!(a.data.channels.iter().find(|c| c.name == "general").unwrap().members.contains(&me));
+    assert!(a.data.channels.iter().filter(|c| c.kind == ChannelKind::Direct).all(|c| !c.members.contains(&me)));
+}
+
+#[test]
+fn fields_added_later_read_the_same_to_sync_when_left_unset() {
+    let fp = |extra: serde_json::Value| crate::sync::fingerprints(&serde_json::json!({ "extra": extra }));
+    let dash = Dashboard { id: 1, name: "D".into(), ..Default::default() };
+    let form = Form { id: 2, name: "F".into(), list_id: 3, description: String::new(), fields: vec![], owner: 0 };
+    let wb = Whiteboard { id: 4, name: "W".into(), strokes: vec![], notes: vec![], owner: 0 };
+    let new = fp(serde_json::json!({"dashboards": [dash], "forms": [form], "whiteboards": [wb]}));
+    // as an app from before these fields wrote them
+    let old = fp(serde_json::json!({"dashboards": [{"id": 1, "name": "D", "space": null}], "forms": [{"id": 2, "name": "F", "list_id": 3, "description": "", "fields": []}], "whiteboards": [{"id": 4, "name": "W", "strokes": [], "notes": []}]}));
+    assert_eq!(new, old);
+    let e = serde_json::to_value(TimeEntry { start: 1, end: 2, member: 0 }).unwrap();
+    assert_eq!(e, serde_json::json!({"start": 1, "end": 2}));
+
+    // fingerprints saved while these fields were always written don't make
+    // everything look edited after updating
+    let dir = temp_folder("shape");
+    let mut a = app();
+    a.data.extra.dashboards.push(Dashboard { id: 7001, name: "Old".into(), ..Default::default() });
+    a.data.tasks[0].time_entries.push(TimeEntry { start: 1, end: 2, member: 0 });
+    a.share_here(dir.to_str().unwrap()).unwrap();
+    let v = serde_json::to_value(&a.data).unwrap();
+    a.data.extra.sync.hashes = crate::sync::fingerprints(&together::legacy_shape(&v));
+    a.data.extra.sync.v = 1;
+    let stamps = a.data.extra.sync.stamps.clone();
+    a.sync_note_change();
+    assert_eq!(a.data.extra.sync.stamps, stamps, "nothing counts as edited");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_deleted_space_or_folder_comes_back_whole() {
+    let mut a = app();
+    // a space with its own look and statuses
+    let si = 1;
+    let sid = a.data.spaces[si].id;
+    let ideas = a.data.spaces[si].lists[0].id;
+    a.data.spaces[si].color = [9, 8, 7];
+    a.data.spaces[si].icon = "*".into();
+    a.data.spaces[si].statuses = vec![Status::new("idea", [1, 1, 1], StatusKind::Open), Status::new("shipped", [2, 2, 2], StatusKind::Closed)];
+    let n = add_task(&mut a, ideas, "Big idea");
+    a.data.tasks.iter_mut().find(|t| t.id == n).unwrap().status = "shipped".into();
+    a.do_delete(Target::Space(sid));
+    assert!(!a.data.spaces.iter().any(|s| s.id == sid));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "Space").expect("the space is in Trash");
+    a.restore_trash(i);
+    let sp = a.data.spaces.iter().find(|s| s.id == sid).expect("the space is back");
+    assert_eq!((sp.color, sp.icon.as_str(), sp.statuses.len()), ([9, 8, 7], "*", 2));
+    assert!(sp.lists.iter().any(|l| l.id == ideas), "with its list");
+    assert_eq!(a.task(n).unwrap().status, "shipped");
+    assert!(!a.data.extra.trash.iter().any(|x| x.kind == "List" && x.title == "Ideas"));
+
+    // a folder: one list restored on its own first goes to the space; the
+    // folder then comes back with the other one in it
+    let fid = a.data.spaces[0].folders[0].id;
+    let (web, mkt) = (a.data.spaces[0].folders[0].lists[0].id, a.data.spaces[0].folders[0].lists[1].id);
+    a.do_delete(Target::Folder(fid));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List" && x.title == "Website Redesign").unwrap();
+    a.restore_trash(i);
+    assert!(a.data.spaces[0].lists.iter().any(|l| l.id == web));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "Folder").expect("the folder is in Trash");
+    a.restore_trash(i);
+    let f = a.data.spaces[0].folders.iter().find(|f| f.id == fid).expect("the folder is back");
+    assert_eq!(f.lists.iter().map(|l| l.id).collect::<Vec<_>>(), vec![mkt]);
+}
+
+#[test]
+fn a_list_restored_into_another_space_takes_that_spaces_statuses() {
+    let mut a = app();
+    let sid = a.data.spaces[1].id;
+    let ideas = a.data.spaces[1].lists[0].id;
+    a.data.spaces[1].statuses = vec![Status::new("idea", [1, 1, 1], StatusKind::Open), Status::new("doing", [2, 2, 2], StatusKind::Custom), Status::new("shipped", [3, 3, 3], StatusKind::Closed), Status::new("to do", [4, 4, 4], StatusKind::Custom)];
+    let mut ids = vec![];
+    for (name, status) in [("one", "idea"), ("two", "doing"), ("three", "shipped"), ("four", "to do")] {
+        let t = add_task(&mut a, ideas, name);
+        a.data.tasks.iter_mut().find(|x| x.id == t).unwrap().status = status.into();
+        ids.push(t);
+    }
+    a.do_delete(Target::List(ideas));
+    a.data.spaces.retain(|s| s.id != sid);
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List").unwrap();
+    a.restore_trash(i);
+    assert!(a.data.spaces[0].lists.iter().any(|l| l.id == ideas), "into the team space");
+    let st: Vec<String> = ids.iter().map(|t| a.task(*t).unwrap().status.clone()).collect();
+    assert_eq!(st, vec!["to do", "in progress", "complete", "to do"], "same kind, else the same name");
+    assert!(a.task(ids[1]).unwrap().activity.iter().any(|x| x.text.contains("changed status from DOING to IN PROGRESS")));
+}
+
+#[test]
+fn a_restored_list_skips_archived_and_other_peoples_spaces() {
+    let mut a = app();
+    let ideas = a.data.spaces[1].lists[0].id;
+    let sid = a.data.spaces[1].id;
+    a.do_delete(Target::List(ideas));
+    a.data.spaces.retain(|s| s.id != sid);
+    a.data.spaces[0].archived = true;
+    a.data.spaces.insert(0, Space { id: 7100, name: "Alex's".into(), private_owner: Some(2), statuses: default_statuses(), ..Default::default() });
+    a.data.spaces.push(Space { id: 7200, name: "Fresh".into(), statuses: default_statuses(), ..Default::default() });
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List").unwrap();
+    a.restore_trash(i);
+    assert!(a.data.spaces.iter().find(|s| s.id == 7200).unwrap().lists.iter().any(|l| l.id == ideas));
+}
+
+#[test]
+fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "d".into(), tag: 1, server: Some("127.0.0.1:1".into()) });
+    let me = a.data.me;
+    let ch = a.data.channels.iter().find(|c| c.kind == ChannelKind::Channel && c.name != "general").unwrap().id;
+    // a DM between two other people, kept from an older version
+    a.data.channels.push(Channel { id: 7300, kind: ChannelKind::Direct, members: vec![2, 3], ..Default::default() });
+    a.sync_note_change();
+    // I write in the channel just as I'm taken out of it
+    a.data.channels.iter_mut().find(|c| c.id == ch).unwrap().messages.push(Message { id: 7301, author: me, text: "my last words".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None });
+    let mut team = serde_json::to_value(&a.data).unwrap();
+    crate::sync::hide(&mut team, &[ch, 7300]);
+    a.merge_in(&[team], &[ch]);
+    assert!(!a.data.channels.iter().any(|c| c.id == ch || c.id == 7300));
+    assert!(a.data.extra.notepad.contains("my last words"), "what I wrote is kept: {:?}", a.data.extra.notepad);
+    assert!(a.toast.is_some());
+    a.sync_note_change();
+    let m = &a.data.extra.sync;
+    assert!(!m.tombs.contains_key(&ch) && !m.tombs.contains_key(&7300) && !m.tombs.contains_key(&7301), "nothing deleted for the team");
+}

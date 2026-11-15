@@ -201,7 +201,7 @@ impl App {
         for e in self.client.events() {
             match e {
                 Event::Status(s) => self.status = Some(s),
-                Event::Welcome { snapshot, member, role, token, email, .. } => {
+                Event::Welcome { snapshot, member, role, token, email, hidden, .. } => {
                     self.member = Some(member);
                     self.email = email;
                     self.role = Some(role);
@@ -211,10 +211,17 @@ impl App {
                     if let Some(s) = snapshot {
                         self.take_in(s);
                     }
+                    // what this person may no longer see leaves their copy (without deleting it)
+                    if !self.data.is_null() {
+                        wb_sync::hide(&mut self.data, &hidden);
+                    }
                     // after (re)connecting the whole copy goes up
                     self.push();
                 }
-                Event::Update { data, .. } => self.take_in(data),
+                Event::Update { data, hidden, .. } => {
+                    self.take_in(data);
+                    wb_sync::hide(&mut self.data, &hidden);
+                }
                 Event::Invite { member, code, emailed, mail_error } => {
                     self.invites.push((member, code));
                     self.mailed.push((member, emailed, mail_error));
@@ -1330,6 +1337,103 @@ fn a_refused_call_says_which_conversation() {
     let (channel, why) = got.expect("a call refusal");
     assert_eq!(channel, 10);
     assert!(why.contains("aren't set up"), "{}", why);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+fn chan_mut(d: &mut Value, id: u64) -> &mut Value {
+    d["channels"].as_array_mut().unwrap().iter_mut().find(|c| c["id"] == id).unwrap()
+}
+
+/// Bo (2) is taken out of a private channel, and another channel is made
+/// private without him: both leave his copy, nothing counts as deleted, and
+/// what he sends afterwards deletes nothing for the others.
+#[test]
+fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
+    let home = temp_home("removed");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 30, "name": "plans", "kind": "Channel", "private": true, "topic": "", "members": [1, 2, 3], "messages": [{"id": 31, "author": 1, "text": "plans for all three", "ts": now()}], "last_read": 0}));
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 40, "name": "open", "kind": "Channel", "topic": "", "members": [1, 3], "messages": [{"id": 41, "author": 3, "text": "open talk", "ts": now()}], "last_read": 0}));
+    });
+    b.wait("B gets both channels", |d| channel(d, 30).is_some() && channel(d, 40).is_some());
+
+    a.change(|d| chan_mut(d, 30)["members"] = json!([1, 3]));
+    a.change(|d| chan_mut(d, 40)["private"] = json!(true));
+    a.change(say("marker 1", 2301));
+    b.wait("marker 1 at B", |d| texts(d).contains(&"marker 1".to_string()));
+    assert!(channel(&b.data, 30).is_none() && channel(&b.data, 40).is_none(), "both left B's copy: {}", b.data["channels"]);
+    let m = b.meta();
+    for id in [30, 31, 40, 41] {
+        assert!(!m.tombs.contains_key(&id) && !m.stamps.contains_key(&id) && !m.hashes.contains_key(&id), "no bookkeeping for {} at B", id);
+    }
+    // B keeps working; nothing of it deletes the channels for the others
+    b.change(say("marker 2", 3301));
+    assert!(!b.meta().tombs.contains_key(&30) && !b.meta().tombs.contains_key(&40));
+    a.wait("marker 2 at A", |d| texts(d).contains(&"marker 2".to_string()));
+    assert!(channel(&a.data, 30).is_some_and(|c| c["messages"][0]["text"] == "plans for all three"));
+    assert!(channel(&a.data, 40).is_some_and(|c| c["messages"][0]["text"] == "open talk"));
+    // and taken back in, B gets it again
+    a.change(|d| chan_mut(d, 30)["members"] = json!([1, 2, 3]));
+    b.wait("B back in plans", |d| channel(d, 30).is_some_and(|c| c["messages"][0]["text"] == "plans for all three"));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Ann's Personal space (with its list and task) and her private doc never
+/// reach Bo, and nothing Bo sends changes or deletes them; a copy of them
+/// Bo still has from an older version leaves his copy.
+#[test]
+fn personal_spaces_and_private_docs_stay_with_their_owner() {
+    let home = temp_home("personal");
+    let server = Server::start(&home, 0);
+    let mut ws = workspace();
+    ws["spaces"] = json!([
+        {"id": 50, "name": "Personal", "color": [1, 2, 3], "statuses": [], "folders": [], "lists": [{"id": 51, "name": "Ann's list"}], "private_owner": 1},
+        {"id": 60, "name": "Team", "color": [1, 2, 3], "statuses": [], "folders": [], "lists": [{"id": 61, "name": "Team list"}]}
+    ]);
+    ws["tasks"].as_array_mut().unwrap().push(json!({"id": 52, "list_id": 51, "name": "Ann's own task", "activity": []}));
+    ws["docs"] = json!([
+        {"id": 80, "owner": 1, "private": true, "title": "Diary", "body": "dear diary", "created": 0, "updated": 0},
+        {"id": 81, "owner": 1, "private": true, "parent": 80, "title": "Diary page", "body": "more", "created": 0, "updated": 0},
+        {"id": 82, "owner": 1, "private": false, "title": "Handbook", "body": "for all", "created": 0, "updated": 0}
+    ]);
+    let mut a = App::connect(server.port, Some(ws));
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(server.port, &code);
+    b.wait("B gets the team's copy", |d| d["docs"].as_array().is_some_and(|x| !x.is_empty()));
+    let text = b.data.to_string();
+    assert!(!text.contains("Ann's list") && !text.contains("Ann's own task") && !text.contains("dear diary") && !text.contains("Diary page"), "B gets none of it: {}", text);
+    assert!(text.contains("Handbook") && text.contains("Team list"));
+
+    // B sends a copy that renames all of them, then one that deletes them
+    b.change(|d| {
+        d["spaces"].as_array_mut().unwrap().push(json!({"id": 50, "name": "Taken", "color": [1, 2, 3], "statuses": [], "folders": [], "lists": [{"id": 51, "name": "Taken list"}], "private_owner": 2}));
+        d["tasks"].as_array_mut().unwrap().push(json!({"id": 52, "list_id": 51, "name": "Taken task", "activity": []}));
+        d["docs"].as_array_mut().unwrap().push(json!({"id": 80, "owner": 2, "private": false, "title": "Read it", "body": "", "created": 0, "updated": 0}));
+    });
+    b.change(|d| {
+        d["spaces"].as_array_mut().unwrap().retain(|s| s["id"] != 50);
+        d["tasks"].as_array_mut().unwrap().retain(|t| t["id"] != 52);
+        d["docs"].as_array_mut().unwrap().retain(|x| x["id"] != 80);
+    });
+    assert!(b.meta().tombs.contains_key(&50) && b.meta().tombs.contains_key(&52));
+    b.change(say("marker 1", 3401));
+    a.wait("marker 1 at A", |d| texts(d).contains(&"marker 1".to_string()));
+    let sp = a.data["spaces"].as_array().unwrap().iter().find(|s| s["id"] == 50).expect("Ann's space is still there");
+    assert_eq!((sp["name"].as_str(), sp["private_owner"].as_u64()), (Some("Personal"), Some(1)));
+    assert!(task_names(&a.data).contains(&"Ann's own task".to_string()));
+    let diary = a.data["docs"].as_array().unwrap().iter().find(|x| x["id"] == 80).expect("the diary is still there");
+    assert_eq!(diary["body"], "dear diary");
+
+    // an older app's copy of them leaves B's copy with the next update
+    b.data["spaces"].as_array_mut().unwrap().push(json!({"id": 50, "name": "Personal", "color": [1, 2, 3], "statuses": [], "folders": [], "lists": [{"id": 51, "name": "Ann's list"}], "private_owner": 1}));
+    a.change(say("marker 2", 2401));
+    b.wait("marker 2 at B", |d| texts(d).contains(&"marker 2".to_string()));
+    assert!(!b.data["spaces"].as_array().unwrap().iter().any(|s| s["id"] == 50));
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

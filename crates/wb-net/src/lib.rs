@@ -237,6 +237,12 @@ pub enum Msg {
         /// This person's account email, when they have set up an account.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         email: Option<String>,
+        /// Items of the team's copy this person doesn't get (a private
+        /// channel they left, someone's Personal space): the app takes its
+        /// own copy of them away without deleting them (`wb_sync::hide`).
+        /// Older apps ignore it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hidden: Vec<u64>,
     },
     Push {
         data: Value,
@@ -244,6 +250,9 @@ pub enum Msg {
     Update {
         data: Value,
         rev: u64,
+        /// As in `Welcome`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hidden: Vec<u64>,
     },
     Ping,
     Pong,
@@ -402,8 +411,8 @@ pub enum Status {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Status(Status),
-    Welcome { tag: u16, snapshot: Option<Value>, rev: u64, member: u64, role: Role, token: Option<String>, email: Option<String> },
-    Update { data: Value, rev: u64 },
+    Welcome { tag: u16, snapshot: Option<Value>, rev: u64, member: u64, role: Role, token: Option<String>, email: Option<String>, hidden: Vec<u64> },
+    Update { data: Value, rev: u64, hidden: Vec<u64> },
     Invite { member: u64, code: String, emailed: Option<String>, mail_error: Option<String> },
     /// The account is set up or its password changed.
     Account(String),
@@ -653,7 +662,7 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
                 match Msg::parse(t.as_str()) {
-                    Some(Msg::Welcome { tag, snapshot, rev, member, role, token, email }) => {
+                    Some(Msg::Welcome { tag, snapshot, rev, member, role, token, email, hidden }) => {
                         // sign in the same way next time: with the token, not the password
                         sign_in.tag = Some(tag);
                         if let Some(t) = &token {
@@ -667,9 +676,9 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
                         sign_in.reset_code = None;
                         welcomed = true;
                         *tries = 0;
-                        emit(Event::Status(Status::Connected)).and_then(|_| emit(Event::Welcome { tag, snapshot, rev, member, role, token, email }))
+                        emit(Event::Status(Status::Connected)).and_then(|_| emit(Event::Welcome { tag, snapshot, rev, member, role, token, email, hidden }))
                     }
-                    Some(Msg::Update { data, rev }) => emit(Event::Update { data, rev }),
+                    Some(Msg::Update { data, rev, hidden }) => emit(Event::Update { data, rev, hidden }),
                     Some(Msg::Invite { member, code, emailed, mail_error }) => emit(Event::Invite { member, code, emailed, mail_error }),
                     Some(Msg::Account { email }) => emit(Event::Account(email)),
                     Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),

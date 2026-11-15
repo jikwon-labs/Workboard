@@ -149,4 +149,7 @@ pub const T: &[(&str, &str)] = &[
     ("You can send up to {} pictures or videos in one message.", "메시지 하나에 사진이나 동영상을 {}개까지 보낼 수 있습니다."),
     ("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard.", "팀의 변경 사항을 읽지 못했습니다. 누군가 더 새 버전의 앱을 쓰고 있을 수 있으니 Workboard를 업데이트하세요."),
     ("A saved workspace couldn't be read, so a copy was kept as {}.", "저장된 워크스페이스를 읽지 못해 사본을 {}(으)로 보관했습니다."),
+    ("You're no longer in #{}, so it was taken off your list.", "더 이상 #{}의 멤버가 아니어서 목록에서 뺐습니다."),
+    ("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", "더 이상 #{}의 멤버가 아닙니다. 최근 몇 분 동안 그곳에 쓴 내용은 메모장에 옮겨 두었습니다."),
+    ("Written in #{} before you were taken out of it:", "#{}에서 빠지기 전에 쓴 내용:"),
 ];

@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 /// Collections that belong to the whole team (everything else stays personal).
 pub const SHARED: &[&str] = &[
-    "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams",
+    "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams", "extra.bookmarks",
 ];
 
 /// Single settings that belong to the whole team (not lists of items): the
@@ -68,8 +68,19 @@ pub struct SyncMeta {
     /// id -> fingerprint of its own fields when last saved (this computer only).
     pub hashes: BTreeMap<u64, u64>,
     /// How `hashes` were made: 0 = before an item's place (the item it sits
-    /// in) counted as one of its fields, 1 = since.
+    /// in) counted as one of its fields, 1 = since; 2 = also `moved` is kept,
+    /// and fields left at their default are left out of the file (see the
+    /// app's `legacy_shape`).
     pub v: u32,
+    /// id -> when it last moved into another item (a list into another space
+    /// or folder). Where an item sits follows this, not `stamps`, so someone
+    /// renaming a list they never saw move doesn't move it back. Only copies
+    /// with `v` 2 or later keep it; for older ones `stamps` decides.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub moved: BTreeMap<u64, i64>,
+    /// id -> the item it sat in when last saved (this computer only).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub parents: BTreeMap<u64, u64>,
     /// Shared setting (see `SHARED_VALUES`) -> when it last changed.
     pub values: BTreeMap<String, i64>,
     /// Shared setting -> fingerprint when last saved (this computer only).
@@ -178,6 +189,49 @@ pub fn fingerprints(data: &Value) -> BTreeMap<u64, u64> {
     fingerprints_with(data, true)
 }
 
+/// id -> the item it sits in, for every shared item inside another one.
+fn parents_of(data: &Value) -> BTreeMap<u64, u64> {
+    fn go(v: &Value, parent: Option<u64>, out: &mut BTreeMap<u64, u64>) {
+        for item in v.as_array().into_iter().flatten() {
+            if let (Some(id), Some(obj)) = (id_of(item), item.as_object()) {
+                if let Some(p) = parent {
+                    out.insert(id, p);
+                }
+                for (_, child) in obj {
+                    if is_id_array(child) {
+                        go(child, Some(id), out);
+                    }
+                }
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for path in SHARED {
+        if let Some(v) = get_path(data, path) {
+            go(v, None, &mut out);
+        }
+    }
+    out
+}
+
+/// The `SyncMeta::v` this version writes.
+pub const META_V: u32 = 2;
+
+/// After the app changed how items are written (`legacy` is the workspace as
+/// the old way wrote it, `current` the new way): fingerprints that still
+/// match the old way are carried over, so the change in shape alone doesn't
+/// count as an edit.
+pub fn carry_hashes(meta: &mut SyncMeta, legacy: &Value, current: &Value) {
+    let cur = fingerprints(current);
+    for (id, old) in fingerprints(legacy) {
+        if meta.hashes.get(&id) == Some(&old) {
+            if let Some(h) = cur.get(&id) {
+                meta.hashes.insert(id, *h);
+            }
+        }
+    }
+}
+
 fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
     SHARED_VALUES.iter().map(|p| (p.to_string(), fnv(serde_json::to_string(get_path(data, p).unwrap_or(&Value::Null)).unwrap_or_default().as_bytes()))).collect()
 }
@@ -200,6 +254,16 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
         }
         meta.v = 1;
     }
+    // places: an item now in another item than when last saved moved there
+    let places = parents_of(data);
+    for (id, p) in &places {
+        if meta.parents.get(id).is_some_and(|old| old != p) {
+            let next = meta.moved.get(id).map_or(now, |s| now.max(s + 1));
+            meta.moved.insert(*id, next);
+        }
+    }
+    meta.parents = places;
+    meta.v = META_V;
     for (id, h) in &cur {
         let next = meta.stamps.get(id).map_or(now, |s| now.max(s + 1));
         match meta.hashes.get(id) {
@@ -230,6 +294,7 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
             }
             meta.tombs.insert(*id, t);
             meta.stamps.remove(id);
+            meta.moved.remove(id);
         }
     }
     meta.hashes = cur;
@@ -255,6 +320,9 @@ struct Ctx<'a> {
     cands: HashMap<u64, Vec<(usize, &'a Value)>>,
     /// id -> the item it sits in, in the newest copy (None at the top).
     home: HashMap<u64, Option<u64>>,
+    /// id -> when it moved there (0: not known)
+    home_moved: HashMap<u64, i64>,
+    out_moved: BTreeMap<u64, i64>,
 }
 
 /// Every item with an id in one source, with the item it sits in.
@@ -272,24 +340,36 @@ fn collect<'a>(src: usize, arr: &'a [Value], parent: Option<u64>, out: &mut Cand
 }
 
 impl<'a> Ctx<'a> {
-    fn new(stamps: Vec<&'a BTreeMap<u64, i64>>, tombs: BTreeMap<u64, i64>, revived: BTreeMap<u64, i64>, all: Cands<'a>) -> Self {
+    fn new(stamps: Vec<&'a BTreeMap<u64, i64>>, moved: Vec<Option<&'a BTreeMap<u64, i64>>>, tombs: BTreeMap<u64, i64>, revived: BTreeMap<u64, i64>, all: Cands<'a>) -> Self {
         let mut cands = HashMap::new();
         let mut home = HashMap::new();
+        let mut home_moved = HashMap::new();
+        // the copy that moved it last decides where the item is (copies that
+        // don't keep move times count their item's last change as one), then
+        // the newest copy; on a tie this computer's
+        let key = |src: usize, id: u64| {
+            let s = stamps[src].get(&id).copied().unwrap_or(0);
+            let m = match moved[src] {
+                Some(m) => m.get(&id).copied().unwrap_or(0),
+                None => s,
+            };
+            (m, s)
+        };
         for (id, list) in all {
-            // the newest copy decides where the item is; on a tie this computer's
             let mut best = list[0];
-            let mut best_stamp = stamps[best.0].get(&id).copied().unwrap_or(0);
+            let mut best_key = key(best.0, id);
             for c in &list[1..] {
-                let s = stamps[c.0].get(&id).copied().unwrap_or(0);
-                if s > best_stamp {
+                let k = key(c.0, id);
+                if k > best_key {
                     best = *c;
-                    best_stamp = s;
+                    best_key = k;
                 }
             }
             home.insert(id, best.1);
+            home_moved.insert(id, best_key.0);
             cands.insert(id, list.into_iter().map(|(s, _, v)| (s, v)).collect());
         }
-        Ctx { stamps, tombs, revived, out: BTreeMap::new(), cands, home }
+        Ctx { stamps, tombs, revived, out: BTreeMap::new(), cands, home, home_moved, out_moved: BTreeMap::new() }
     }
 
     fn alive(&self, id: u64) -> bool {
@@ -335,6 +415,9 @@ fn merge_arr<'a>(cx: &mut Ctx<'a>, sources: &[(usize, &'a Vec<Value>)], parent: 
             }
         }
         cx.out.insert(id, best_stamp);
+        if let Some(m) = cx.home_moved.get(&id).filter(|m| **m > 0) {
+            cx.out_moved.insert(id, *m);
+        }
         let Some(wobj) = best.1.as_object() else { continue };
         let local = list.iter().find(|c| c.0 == 0).and_then(|c| c.1.as_object());
         let mut keys: Vec<String> = wobj.keys().cloned().collect();
@@ -418,9 +501,13 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     let empty = vec![];
     let merged: Vec<(String, Value)>;
     let out_stamps;
+    let out_moved;
     {
         let mut stamps: Vec<&BTreeMap<u64, i64>> = vec![&lmeta.stamps];
         stamps.extend(metas.iter().map(|m| &m.stamps));
+        let keeps = |m: &SyncMeta| m.v >= 2;
+        let mut moved: Vec<Option<&BTreeMap<u64, i64>>> = vec![keeps(&lmeta).then_some(&lmeta.moved)];
+        moved.extend(metas.iter().map(|m| keeps(m).then_some(&m.moved)));
         let mut all: Vec<Vec<(usize, &Vec<Value>)>> = vec![];
         let mut cands = HashMap::new();
         for path in SHARED {
@@ -435,13 +522,14 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
             }
             all.push(sources);
         }
-        let mut cx = Ctx::new(stamps, tombs.clone(), revived.clone(), cands);
+        let mut cx = Ctx::new(stamps, moved, tombs.clone(), revived.clone(), cands);
         let mut res = vec![];
         for (path, sources) in SHARED.iter().zip(&all) {
             res.push((path.to_string(), Value::Array(merge_arr(&mut cx, sources, None))));
         }
         merged = res;
         out_stamps = cx.out;
+        out_moved = cx.out_moved;
     }
     for (path, v) in merged {
         set_path(local, &path, v);
@@ -469,9 +557,11 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     lmeta.tombs = tombs;
     lmeta.revived = revived;
     lmeta.stamps = out_stamps;
+    lmeta.moved = out_moved;
     lmeta.hashes = fingerprints(local);
+    lmeta.parents = parents_of(local);
     lmeta.value_hashes = value_hashes(local);
-    lmeta.v = 1;
+    lmeta.v = META_V;
     set_path(local, "extra.sync", serde_json::to_value(&lmeta).unwrap_or_default());
     // compare without the bookkeeping, which always moves a little
     let strip = |v: &Value| {
@@ -519,9 +609,103 @@ pub fn shareable(data: &Value) -> Value {
         if let Some(s) = e.get_mut("sync").and_then(|s| s.as_object_mut()) {
             s.insert("hashes".into(), Value::Object(Map::new()));
             s.insert("value_hashes".into(), Value::Object(Map::new()));
+            s.remove("parents");
         }
     }
     v
+}
+
+/// A DM or a private channel with a member list that doesn't include
+/// `member`: they don't get it and can't change it.
+pub fn closed_to(ch: &Value, member: u64) -> bool {
+    let restricted = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct") || ch.get("private").and_then(|p| p.as_bool()) == Some(true);
+    let members: Vec<u64> = ch.get("members").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.as_u64()).collect()).unwrap_or_default();
+    restricted && !members.is_empty() && !members.contains(&member)
+}
+
+/// The top-level items of a team's copy that `member` doesn't get (and
+/// can't change): DMs and private channels they aren't in, other people's
+/// Personal spaces with the tasks and docs in them, and other people's
+/// private docs with their sub pages.
+pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
+    let arr = |path: &str| get_path(data, path).and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]);
+    let mut out: Vec<u64> = arr("channels").iter().filter(|c| closed_to(c, member)).filter_map(id_of).collect();
+    let mut spaces = vec![];
+    let mut lists = std::collections::HashSet::new();
+    for s in arr("spaces") {
+        let owner = s.get("private_owner").and_then(|o| o.as_u64());
+        if owner.is_none_or(|o| o == member) {
+            continue;
+        }
+        let Some(id) = id_of(s) else { continue };
+        spaces.push(id);
+        let mut inner = BTreeMap::new();
+        walk(&Value::Array(vec![s.clone()]), None, false, &mut inner);
+        lists.extend(inner.into_keys());
+    }
+    out.extend(&spaces);
+    out.extend(arr("tasks").iter().filter(|t| t.get("list_id").and_then(|l| l.as_u64()).is_some_and(|l| lists.contains(&l))).filter_map(id_of));
+    let docs = arr("docs");
+    let mut hid: std::collections::HashSet<u64> = docs
+        .iter()
+        .filter(|d| {
+            let owner = d.get("owner").and_then(|o| o.as_u64()).unwrap_or(0);
+            let private = d.get("private").and_then(|p| p.as_bool()) == Some(true) && owner != 0 && owner != member;
+            private || d.get("space").and_then(|s| s.as_u64()).is_some_and(|s| spaces.contains(&s))
+        })
+        .filter_map(id_of)
+        .collect();
+    // sub pages of a hidden page
+    loop {
+        let more: Vec<u64> = docs.iter().filter(|d| d.get("parent").and_then(|p| p.as_u64()).is_some_and(|p| hid.contains(&p))).filter_map(id_of).filter(|i| !hid.contains(i)).collect();
+        if more.is_empty() {
+            break;
+        }
+        hid.extend(more);
+    }
+    out.extend(docs.iter().filter_map(id_of).filter(|i| hid.contains(i)));
+    out
+}
+
+/// Take the top-level items `ids` out of a copy without deleting them: no
+/// tombstone, and their change stamps and this computer's fingerprints for
+/// them (and everything inside them) go too, so the next save doesn't count
+/// them as deleted. What someone may no longer see leaves their copy this
+/// way and comes back if they may see it again. Returns what was taken out.
+pub fn hide(data: &mut Value, ids: &[u64]) -> Vec<Value> {
+    if ids.is_empty() {
+        return vec![];
+    }
+    let mut gone = vec![];
+    for path in SHARED {
+        let Some(a) = get_path_mut(data, path).and_then(|v| v.as_array_mut()) else { continue };
+        let (out, keep): (Vec<Value>, Vec<Value>) = std::mem::take(a).into_iter().partition(|x| id_of(x).is_some_and(|i| ids.contains(&i)));
+        *a = keep;
+        gone.extend(out);
+    }
+    if gone.is_empty() {
+        return gone;
+    }
+    let mut inner = BTreeMap::new();
+    walk(&Value::Array(gone.clone()), None, false, &mut inner);
+    if let Some(sync) = get_path_mut(data, "extra.sync").and_then(|s| s.as_object_mut()) {
+        for key in ["stamps", "hashes", "moved", "parents"] {
+            if let Some(m) = sync.get_mut(key).and_then(|m| m.as_object_mut()) {
+                for id in inner.keys() {
+                    m.remove(&id.to_string());
+                }
+            }
+        }
+    }
+    gone
+}
+
+fn get_path_mut<'a>(v: &'a mut Value, path: &str) -> Option<&'a mut Value> {
+    let mut cur = v;
+    for part in path.split('.') {
+        cur = cur.get_mut(part)?;
+    }
+    Some(cur)
 }
 
 /// Write this computer's copy (personal notes and reminders left out).
@@ -846,7 +1030,7 @@ mod tests {
         let mut m = SyncMeta { hashes: fingerprints_with(&d, false), stamps: [(100, 10), (101, 10)].into(), ..Default::default() };
         stamp(&d, &mut m, 99);
         assert_eq!(m.stamps[&101], 10);
-        assert_eq!(m.v, 1);
+        assert_eq!(m.v, META_V);
     }
 
     #[test]
@@ -906,5 +1090,76 @@ mod tests {
         assert_eq!(v["next_id"], 77);
         assert_eq!(v["dark"], false);
         assert_eq!(v["extra"]["accent"], "blue");
+    }
+
+    #[test]
+    fn renaming_a_list_you_never_saw_move_keeps_the_move() {
+        let (mut a, mut ma, mut b, mut mb) = pair(json!([space(100, json!([]), json!([list(101)])), space(200, json!([]), json!([]))]));
+        // A moves the list; later B, not knowing, renames it where B has it
+        change(&mut a, &mut ma, json!([space(100, json!([]), json!([])), space(200, json!([]), json!([list(101)]))]), 30);
+        let mut renamed = list(101);
+        renamed["name"] = json!("Renamed by B");
+        change(&mut b, &mut mb, json!([space(100, json!([]), json!([renamed])), space(200, json!([]), json!([]))]), 40);
+        let (a0, b0) = (a.clone(), b.clone());
+        merge(&mut a, &[b0]);
+        merge(&mut b, &[a0]);
+        for v in [&a, &b] {
+            assert_eq!(places(v), vec![(200, 101)], "the move stays");
+            assert_eq!(v["spaces"][1]["lists"][0]["name"], "Renamed by B", "and so does the rename");
+        }
+        // a copy from an app that doesn't keep move times still moves it by its stamp
+        let (mut a, _, mut old, mut mo) = pair(json!([space(100, json!([]), json!([list(101)])), space(200, json!([]), json!([]))]));
+        change(&mut old, &mut mo, json!([space(100, json!([]), json!([])), space(200, json!([]), json!([list(101)]))]), 30);
+        old["extra"]["sync"]["v"] = json!(1);
+        old["extra"]["sync"].as_object_mut().unwrap().remove("moved");
+        merge(&mut a, &[old]);
+        assert_eq!(places(&a), vec![(200, 101)]);
+    }
+
+    #[test]
+    fn hidden_items_leave_a_copy_without_a_tombstone() {
+        let mut m = SyncMeta::default();
+        let chans = json!([
+            {"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [{"id": 11, "text": "hi", "ts": 1}]},
+            {"id": 20, "name": "", "kind": "Direct", "members": [1, 3], "messages": [{"id": 21, "text": "secret", "ts": 1}]},
+            {"id": 30, "name": "plans", "kind": "Channel", "private": true, "members": [1, 3], "messages": []},
+            {"id": 40, "name": "open", "kind": "Channel", "private": true, "members": [1, 2], "messages": []}
+        ]);
+        let mut d = json!({"workspace": "W", "members": [], "me": 2, "next_id": 1, "favorites": [], "channels": chans,
+            "spaces": [{"id": 50, "name": "Personal", "private_owner": 1, "folders": [], "lists": [{"id": 51, "name": "Mine"}]}, {"id": 60, "name": "Bo's", "private_owner": 2, "folders": [], "lists": [{"id": 61, "name": "Bo"}]}, space(70, json!([]), json!([list(71)]))],
+            "tasks": [{"id": 52, "list_id": 51, "name": "secret task"}, {"id": 62, "list_id": 61, "name": "own"}, {"id": 72, "list_id": 71, "name": "team"}],
+            "docs": [{"id": 80, "owner": 1, "private": true}, {"id": 81, "owner": 1, "private": false, "parent": 80}, {"id": 82, "owner": 2, "private": true}, {"id": 83, "owner": 0, "private": true}, {"id": 84, "owner": 3, "private": false}, {"id": 85, "owner": 3, "space": 50}],
+            "extra": {"sync": {}}});
+        let mut hidden = hidden_from(&d, 2);
+        hidden.sort();
+        assert_eq!(hidden, vec![20, 30, 50, 52, 80, 81, 85]);
+        stamp(&d.clone(), &mut m, 10);
+        d["extra"]["sync"] = serde_json::to_value(&m).unwrap();
+        let gone = hide(&mut d, &hidden);
+        assert_eq!(gone.len(), 7);
+        let mut m = meta_of(&d);
+        for id in [20, 21, 30, 50, 51, 52, 80, 81, 85] {
+            assert!(!m.stamps.contains_key(&id) && !m.hashes.contains_key(&id), "no bookkeeping left for {}", id);
+        }
+        stamp(&d.clone(), &mut m, 20);
+        assert!(m.tombs.is_empty(), "nothing counts as deleted: {:?}", m.tombs);
+        assert!(d.to_string().contains("\"open\"") && !d.to_string().contains("secret"));
+        // when they come back from the team's copy, they are simply there again
+        let mut team = json!({"workspace": "W", "spaces": [], "tasks": [], "members": [], "docs": [], "channels": [{"id": 30, "name": "plans", "kind": "Channel", "private": true, "members": [1, 2, 3], "messages": []}], "extra": {"sync": {"stamps": {"30": 5}, "v": 2}}});
+        d["extra"]["sync"] = serde_json::to_value(&m).unwrap();
+        merge(&mut d, &[team.take()]);
+        assert!(d["channels"].as_array().unwrap().iter().any(|c| c["id"] == 30));
+    }
+
+    #[test]
+    fn bookmarks_are_shared() {
+        let (mut a, mut ma, mut b, _) = pair(json!([]));
+        a["extra"]["bookmarks"] = json!([{"id": 5, "title": "Docs", "url": "https://example.com"}]);
+        stamp(&a.clone(), &mut ma, 20);
+        a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+        merge(&mut b, &[a.clone()]);
+        assert_eq!(b["extra"]["bookmarks"][0]["title"], "Docs");
+        let joined = with_team_things(&json!({"extra": {"bookmarks": []}}), &a);
+        assert_eq!(joined["extra"]["bookmarks"][0]["id"], 5);
     }
 }

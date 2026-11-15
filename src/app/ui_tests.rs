@@ -8685,3 +8685,63 @@ fn switching_the_status_editor_to_another_space_or_quitting_finishes_the_edits()
         "no two statuses share a name"
     );
 }
+
+// ---- the Columns panel's "no room" counts custom field columns (r4-ui)
+
+#[test]
+fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
+    let mut h = Ui1::new();
+    h.app.data.extra.apps.custom_fields = true;
+    let name = "Write copy for landing page";
+    let list = task_named(&h, name).list_id;
+    h.app.apply(Action::Go(Location::List(list)));
+    h.app.view = ViewKind::List;
+    h.app.hidden_cols.remove("Created by");
+    h.settle();
+    let w = h.app.list_width;
+    assert!(w > 0.0);
+    let row = Rect::from_min_size(pos2(0.0, 0.0), vec2(w, 30.0));
+    let prio = h.app.data.extra.apps.priorities;
+    // as many field columns as it takes to push "Created by" out
+    let mut n = 0;
+    while h
+        .app
+        .list_cols(row)
+        .extra
+        .iter()
+        .any(|c| c.0 == "Created by")
+    {
+        n += 1;
+        h.app.data.extra.fields.push(CustomField {
+            id: 9100 + n,
+            name: format!("F{}", n),
+            kind: "text".into(),
+            options: vec![],
+        });
+        assert!(n < 10);
+    }
+    assert!(
+        super::shell::col_layout(row, &h.app.hidden_cols, prio)
+            .extra
+            .iter()
+            .any(|c| c.0 == "Created by"),
+        "without the fields it would fit"
+    );
+    h.settle();
+    h.click("\u{25A5}  Columns");
+    let created = rect_of(&h, "Created by");
+    let marks: Vec<Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "no room")
+        .map(|(_, r)| *r)
+        .collect();
+    assert!(
+        marks
+            .iter()
+            .any(|r| (r.center().y - created.center().y).abs() < 6.0),
+        "\"no room\" beside Created by: {:?} {:?}",
+        created,
+        marks
+    );
+}

@@ -8,6 +8,8 @@
 # The --install form adds a one-time LaunchAgent that removes itself after it
 # has run, so the check happens without anyone at the keyboard.
 set -uo pipefail
+# launchd starts us with a bare PATH; docker lives in ~/.docker/bin
+export PATH="$HOME/.docker/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
 LABEL="com.jikwon-labs.boot-check"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -74,8 +76,17 @@ limit() {
   if command -v docker >/dev/null 2>&1; then
     echo "docker: $(limit 20 docker ps --format '{{.Names}}={{.Status}}' 2>/dev/null | tr '\n' ' ' || echo 'not running')"
   fi
-  echo "ngrok tunnel: $(curl -s -m 5 http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"[^"]*"' | head -1 || echo none)"
-  echo "camera: $(limit 15 system_profiler SPCameraDataType 2>/dev/null | grep -E '^\s{4}\S.*:$' | sed 's/^ *//' | tr '\n' ' ' || echo 'no answer')"
+  # the tunnel can take a little while to connect after a restart
+  tunnel=""
+  for _ in $(seq 1 12); do
+    tunnel="$(curl -s -m 5 http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"[^"]*"' | head -1)"
+    [ -n "$tunnel" ] && break
+    sleep 5
+  done
+  echo "ngrok tunnel: ${tunnel:-none after 60s}"
+  # cameras the way the app sees them (system_profiler can hang for minutes)
+  cams="$(limit 20 swift -e 'import AVFoundation; print(AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera], mediaType: .video, position: .unspecified).devices.map { $0.localizedName }.joined(separator: ", "))' 2>/dev/null)"
+  echo "camera: ${cams:-none connected}"
   echo
 } >> "$LOG" 2>&1
 

@@ -353,6 +353,14 @@ impl Msg {
     fn waits_for_connection(&self) -> bool {
         matches!(self, Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. } | Msg::CallJoin { .. })
     }
+
+    /// A request that does the same thing when the server gets it twice.
+    /// The others (a restore, a new invite code that replaces the last one,
+    /// a password change) aren't sent again by themselves after a send
+    /// failed, since the first one may have reached the server anyway.
+    fn safe_to_resend(&self) -> bool {
+        self.waits_for_connection() && !matches!(self, Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::Restore { .. })
+    }
 }
 
 /// Turn what a person typed ("macmini", "100.1.2.3", "host:9000",
@@ -525,6 +533,10 @@ fn connect(addr: &str) -> Result<WebSocket<TcpStream>, String> {
     Err(last)
 }
 
+/// Said when the connection broke while sending a request that isn't sent
+/// twice by itself (see Msg::safe_to_resend).
+pub const UNSURE_SEND: &str = "The connection broke while sending that, so it may not have reached the server. Check whether it happened, then try again.";
+
 /// Requests kept while not connected; older ones beyond this are dropped.
 const MAX_QUEUED: usize = 32;
 
@@ -535,6 +547,17 @@ fn queue(queued: &mut Vec<Msg>, m: Msg) {
         if queued.len() > MAX_QUEUED {
             queued.remove(0);
         }
+    }
+}
+
+/// Sending `m` failed, though it may have reached the server anyway: try it
+/// again after reconnecting when doing it twice doesn't matter, else say so.
+fn send_failed(m: Msg, queued: &mut Vec<Msg>) -> Option<Event> {
+    if m.safe_to_resend() {
+        queued.insert(0, m);
+        None
+    } else {
+        m.waits_for_connection().then(|| Event::Denied(UNSURE_SEND.into()))
     }
 }
 
@@ -640,9 +663,8 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
             while !queued.is_empty() {
                 let m = queued.remove(0);
                 if let Err(e) = send(ws, &m) {
-                    // it may not have gone: try it again after reconnecting
-                    if m.waits_for_connection() {
-                        queued.insert(0, m);
+                    if let Some(ev) = send_failed(m, queued) {
+                        line.emit(ev);
                     }
                     return End::Lost(e);
                 }
@@ -789,5 +811,21 @@ mod tests {
         }
         assert_eq!(q.len(), MAX_QUEUED);
         assert_eq!(q[0], Msg::AccessList, "the oldest went first");
+    }
+
+    #[test]
+    fn a_failed_send_is_repeated_only_when_twice_does_no_harm() {
+        let mut q = vec![Msg::AccessList];
+        for m in [Msg::Revoke { member: 3 }, Msg::SetRole { member: 3, role: Role::Admin }, Msg::CallJoin { channel: 1 }, Msg::BackupList] {
+            assert_eq!(send_failed(m.clone(), &mut q), None);
+            assert_eq!(q[0], m, "goes again first thing after reconnecting");
+        }
+        let before = q.len();
+        for m in [Msg::Restore { name: "daily-20261115.json".into() }, Msg::CreateInvite { member: 3, role: Role::Member }, Msg::SetPassword { email: "a@b.c".into(), password: "x".into(), old_password: None }] {
+            assert_eq!(send_failed(m, &mut q), Some(Event::Denied(UNSURE_SEND.into())));
+        }
+        assert_eq!(q.len(), before, "not sent again by itself");
+        assert_eq!(send_failed(Msg::Ping, &mut q), None);
+        assert_eq!(q.len(), before);
     }
 }

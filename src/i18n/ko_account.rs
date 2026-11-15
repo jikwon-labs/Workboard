@@ -74,4 +74,6 @@ pub const T: &[(&str, &str)] = &[
     // invite dialog on a server
     ("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.", "이 워크스페이스는 서버에 있습니다. 서버에 메일이 설정되어 있으면 각 사람에게 초대 코드가 메일로 갑니다. 아니면 함께 작업하기 > 사람에서 코드를 전달하세요."),
     ("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", "{}명을 초대했습니다. 초대 코드를 보내는 중입니다 (함께 작업하기 > 사람에서도 볼 수 있습니다)."),
+    // wb_net::UNSURE_SEND, shown when a request may or may not have gone
+    ("The connection broke while sending that, so it may not have reached the server. Check whether it happened, then try again.", "보내는 중에 연결이 끊겨 서버에 닿았는지 알 수 없습니다. 반영됐는지 확인한 뒤 필요하면 다시 시도하세요."),
 ];

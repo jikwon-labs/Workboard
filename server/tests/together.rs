@@ -1437,3 +1437,29 @@ fn personal_spaces_and_private_docs_stay_with_their_owner() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+
+#[test]
+fn a_server_whose_workspace_file_went_missing_is_not_up_for_grabs() {
+    let home = temp_home("lostfile");
+    let options = || workboard_server::Options { claim_wait: Duration::from_millis(100), ..Default::default() };
+    let server = Server::start_with(&home, 0, options());
+    let port = server.port;
+    let (_a, _b) = two_apps(port);
+    let until = Instant::now() + Duration::from_secs(5);
+    while !home.join(workboard_server::WORKSPACE_FILE).is_file() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    server.stop();
+    std::fs::remove_file(home.join(workboard_server::WORKSPACE_FILE)).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    // server.json is still there: long past claim_wait, a stranger still can't claim it
+    let server = Server::start_with(&home, port, options());
+    let mut x = App::start(port, workspace(), SignIn { claim: Some(1), ..Default::default() });
+    assert!(refused_with(&mut x, "claim refused").contains("restore"));
+    let saved = workboard_server::load_saved(&home).unwrap();
+    assert_eq!(saved.role_of(1), Role::Owner, "the owner and their computers are kept");
+    assert_eq!(saved.devices.len(), 2);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

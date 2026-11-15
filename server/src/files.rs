@@ -8,8 +8,9 @@
 // Every request needs `Authorization: Bearer <device>:<token>`, the same
 // device token an app signs in with. Files sit in the server folder under
 // files/, next to <sha256>.type holding the content type given on upload.
-// They are not part of backups (those copy workspace.json only), and nothing
-// deletes them yet.
+// They are not part of backups (those copy workspace.json only). Once a day
+// collect_garbage deletes files that have sat unchanged for FILE_KEEP_DAYS and
+// that neither the team's copy nor any kept backup names anymore.
 
 use super::*;
 use axum::body::Body;
@@ -22,6 +23,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 pub const FILES_DIR: &str = "files";
 /// The largest file an app may put here.
 pub const MAX_FILE: u64 = 500 << 20;
+/// A file nothing names anymore is deleted only after this long unchanged.
+pub const FILE_KEEP_DAYS: u64 = 30;
 
 /// A file name the files route accepts: 64 lowercase hex digits.
 pub fn file_name_ok(name: &str) -> bool {
@@ -60,6 +63,9 @@ pub(crate) async fn put_file(UrlPath(name): UrlPath<String>, State(hub): State<A
     let dir = hub.home.join(FILES_DIR);
     let dest = dir.join(&name);
     if tokio::fs::metadata(&dest).await.is_ok() {
+        // a message is about to name it again: it's new for collect_garbage
+        let d = dest.clone();
+        let _ = tokio::task::spawn_blocking(move || std::fs::File::options().write(true).open(&d).and_then(|f| f.set_modified(std::time::SystemTime::now()))).await;
         return status(StatusCode::OK, "already here");
     }
     let declared = req.headers().get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
@@ -172,4 +178,66 @@ pub(crate) async fn get_file(UrlPath(name): UrlPath<String>, State(hub): State<A
     }
     let stream = tokio_util::io::ReaderStream::with_capacity(f.take(count), 256 << 10);
     res.body(Body::from_stream(stream)).unwrap()
+}
+
+/// Every file name (64 hex digits in quotes) a JSON text mentions.
+fn named_files(text: &str, into: &mut std::collections::HashSet<String>) {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i + 66 <= b.len() {
+        if b[i] == b'"' && b[i + 65] == b'"' {
+            if let Some(name) = text.get(i + 1..i + 65).filter(|n| file_name_ok(n)) {
+                into.insert(name.to_string());
+                i += 66;
+                continue;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Delete the files in files/ that nothing needs anymore: unchanged for
+/// FILE_KEEP_DAYS, and named neither in `canon_json` (the team's copy) nor
+/// in any file in backups/ (a restore may bring their messages back).
+/// Nothing is deleted without a team copy, or when a backup can't be read.
+/// Leftover partial uploads that old go too. Returns the names deleted.
+pub fn collect_garbage(home: &Path, canon_json: Option<&str>, now: std::time::SystemTime) -> Vec<String> {
+    let Some(canon) = canon_json else { return vec![] };
+    let mut named = std::collections::HashSet::new();
+    named_files(canon, &mut named);
+    if let Ok(rd) = std::fs::read_dir(home.join(BACKUP_DIR)) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "json") {
+                match std::fs::read_to_string(&p) {
+                    Ok(t) => named_files(&t, &mut named),
+                    Err(err) => {
+                        eprintln!("not cleaning up files: couldn't read {}: {}", p.display(), err);
+                        return vec![];
+                    }
+                }
+            }
+        }
+    }
+    let keep = Duration::from_secs(FILE_KEEP_DAYS * 86_400);
+    let old = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|age| age >= keep);
+    let dir = home.join(FILES_DIR);
+    let mut gone = vec![];
+    for e in std::fs::read_dir(&dir).map(|rd| rd.flatten().collect::<Vec<_>>()).unwrap_or_default() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let path = e.path();
+        if name.starts_with(".tmp-") {
+            if old(&path) {
+                let _ = std::fs::remove_file(&path);
+            }
+            continue;
+        }
+        // checked last thing before deleting: an upload of the same file
+        // a moment ago made it new again
+        if file_name_ok(&name) && !named.contains(&name) && old(&path) && std::fs::remove_file(&path).is_ok() {
+            let _ = std::fs::remove_file(dir.join(format!("{}.type", name)));
+            gone.push(name);
+        }
+    }
+    gone
 }

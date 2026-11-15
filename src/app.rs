@@ -154,6 +154,8 @@ pub enum Action {
     StartRename(Target),
     AskDelete(Target),
     ToggleTimer(u64),
+    /// Stops a timer an older app started without recording who.
+    StopOldTimer(u64),
     ToggleFavorite(Location),
     EditStatuses(u64),
     SetSpaceColor(u64, [u8; 3]),
@@ -314,8 +316,6 @@ pub struct App {
     rename: Option<(Target, String)>,
     confirm_delete: Option<Target>,
     edit_statuses: Option<u64>,
-    people_open: bool,
-    new_person: String,
     palette: Option<String>,
     quick_add: Option<QuickAdd>,
     comment_text: String,
@@ -565,8 +565,6 @@ impl App {
             rename: None,
             confirm_delete: None,
             edit_statuses: None,
-            people_open: false,
-            new_person: String::new(),
             palette: None,
             quick_add: None,
             comment_text: String::new(),
@@ -995,6 +993,10 @@ impl App {
             // Overdue), or it would leave the page as soon as it's made
             let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
             if personal && !assignees.contains(&self.data.me) {
+                // with Multiple Assignees off a task has one: me
+                if !self.data.extra.apps.multiple_assignees {
+                    assignees.clear();
+                }
                 assignees.push(self.data.me);
             }
             let due = if self.loc == Location::TodayOverdue { g.due.filter(|d| *d <= today()).or(Some(today())) } else { g.due };
@@ -1142,7 +1144,9 @@ impl App {
                             match a.action.as_str() {
                                 "assign" => {
                                     if let Ok(uid) = a.value.parse::<u64>() {
-                                        if !new.assignees.contains(&uid) {
+                                        if !self.data.extra.apps.multiple_assignees {
+                                            new.assignees = vec![uid];
+                                        } else if !new.assignees.contains(&uid) {
                                             new.assignees.push(uid);
                                         }
                                     }
@@ -1198,6 +1202,7 @@ impl App {
                     time_entries: vec![],
                     timer_started: None,
                     timer_by: None,
+                    timers: vec![],
                     estimate_min: None,
                     created: now,
                     updated: now,
@@ -1348,37 +1353,19 @@ impl App {
             Action::AskDelete(tg) => self.confirm_delete = Some(tg),
             Action::ToggleTimer(id) => {
                 let now = now_ts();
-                let me = self.data.me;
                 let Some(task) = self.task(id) else { return };
-                let running = task.timer_started.is_some();
-                let mine = self.data.is_my_timer(task);
-                match (running, mine, task.timer_by) {
-                    // a teammate's timer: theirs to stop
-                    (true, false, Some(by)) => {
-                        let who = self.data.member(by).map(|m| m.name.clone()).unwrap_or_default();
-                        self.toast = Some((trf!("{} is tracking time on this task", who), now));
-                        return;
-                    }
-                    // an old timer nobody owns: stopping it by hand keeps the
-                    // time without an owner
-                    (true, false, None) => {
-                        if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                            if let Some(st) = t.timer_started.take() {
-                                t.time_entries.push(TimeEntry { start: st, end: now, member: 0 });
-                            }
-                        }
-                    }
-                    _ => {
-                        // only my own timers stop; teammates' keep running
-                        self.data.stop_my_timers(now);
-                        if !running {
-                            if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                                t.timer_started = Some(now);
-                                t.timer_by = Some(me);
-                            }
-                        }
-                    }
+                // one timer per person per task: teammates' timers keep running
+                if self.data.is_my_timer(task) {
+                    self.data.stop_my_timer(id, now);
+                } else {
+                    // I track one task at a time
+                    self.data.stop_my_timers(now);
+                    self.data.start_my_timer(id, now);
                 }
+                self.dirty = true;
+            }
+            Action::StopOldTimer(id) => {
+                self.data.stop_ownerless_timer(id, now_ts());
                 self.dirty = true;
             }
             Action::ToggleFavorite(l) => {
@@ -1537,14 +1524,25 @@ impl App {
             }
         }
         for (old, new) in &map {
-            let elsewhere = self.data.spaces.iter().any(|s| s.id != sid && s.statuses.iter().any(|x| x.name == *old));
-            if !elsewhere {
-                for a in self.data.extra.automations.iter_mut().filter(|a| a.trigger_status == *old) {
-                    a.trigger_status = new.clone();
-                }
-            }
+            self.retarget_automations(sid, &lists, old, new);
         }
         self.dirty = true;
+    }
+
+    /// Points automations on status `old` of space `sid` to `new`: those
+    /// that run in the space or one of its lists always, workspace-wide ones
+    /// only when no other space has a status called `old`.
+    fn retarget_automations(&mut self, sid: u64, lists: &[u64], old: &str, new: &str) {
+        let elsewhere = self.data.spaces.iter().any(|s| s.id != sid && s.statuses.iter().any(|x| x.name == old));
+        for a in self.data.extra.automations.iter_mut().filter(|a| a.trigger_status == old) {
+            let here = match a.list {
+                Some(l) => l == sid || lists.contains(&l),
+                None => !elsewhere,
+            };
+            if here {
+                a.trigger_status = new.to_string();
+            }
+        }
     }
 
     /// Moves the tasks of a status deleted in the status editor to a status of
@@ -1563,6 +1561,8 @@ impl App {
             t.status = to.clone();
             Self::log(t, me, format!("changed status from {} to {}", old.to_uppercase(), shown.to_uppercase()));
         }
+        // automations on the deleted status follow its tasks
+        self.retarget_automations(sid, &lists, old, &to);
         self.dirty = true;
     }
 
@@ -2903,7 +2903,7 @@ impl App {
                                     self.toast = Some((tr("Link copied").into(), now_ts()));
                                     close_popup(ui);
                                 }
-                                if ui.button(if task.timer_started.is_some() { tr("Stop timer") } else { tr("Start timer") }).clicked() {
+                                if ui.button(if self.data.is_my_timer(&task) { tr("Stop timer") } else { tr("Start timer") }).clicked() {
                                     self.actions.push(Action::ToggleTimer(tid));
                                     close_popup(ui);
                                 }
@@ -3042,7 +3042,7 @@ impl App {
                         } else {
                         ui.label(RichText::new(tr("\u{23F1}  Track time")).color(t.text2));
                         ui.horizontal(|ui| {
-                            let running = task.timer_started.is_some();
+                            let running = self.data.is_my_timer(&task);
                             let (txt, fill) = if running { ("\u{23F9}", t.danger) } else { ("\u{25B6}", t.primary) };
                             if ui.add(egui::Button::new(RichText::new(txt).color(Color32::WHITE)).fill(fill).corner_radius(12).min_size(vec2(24.0, 24.0))).on_hover_text(if running { tr("Stop timer") } else { tr("Start timer") }).clicked() {
                                 self.actions.push(Action::ToggleTimer(tid));
@@ -3052,7 +3052,12 @@ impl App {
                             name_it(&te, "Time entries");
                             let te = te.on_hover_text(tr("Time entries, add time by hand"));
                             popup(ui, &te, win_id.with("entries"), 260.0, |ui| taskfields::time_entries_menu(ui, &t, win_id.with("entries_m"), &mut task, self.data.me));
-                            if running {
+                            // a timer an older app started without an owner
+                            // would otherwise run forever in a shared workspace
+                            if self.data.ownerless_timer(&task) && ui.button(tr("Stop (started by an older app)")).clicked() {
+                                self.actions.push(Action::StopOldTimer(tid));
+                            }
+                            if task.timer_started.is_some() || !task.timers.is_empty() {
                                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
                             }
                         });
@@ -3602,7 +3607,9 @@ impl App {
                 if let Some((old, kind)) = removed {
                     self.move_off_status(si, &old, kind, &orig);
                 }
-                if commit || !open {
+                // pass renames on as they are typed, so closing the app
+                // mid-edit can't leave tasks on a name that no longer exists
+                if changed || commit || !open {
                     self.commit_status_renames(si, &mut orig);
                 }
                 ctx.data_mut(|d| {
@@ -3618,49 +3625,6 @@ impl App {
             }
             if !open {
                 self.edit_statuses = None;
-            }
-        }
-        // people
-        if self.people_open {
-            let mut open = true;
-            egui::Window::new(tr("People")).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
-                let mut remove = None;
-                let me = self.data.me;
-                for (i, m) in self.data.members.iter_mut().enumerate() {
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
-                        paint_avatar(ui.painter(), r.center(), 11.0, m, t.card);
-                        if ui.add(egui::TextEdit::singleline(&mut m.name).desired_width(180.0)).changed() {
-                            self.dirty = true;
-                        }
-                        if m.id == me {
-                            ui.label(RichText::new(tr("you")).small().color(t.text3));
-                        } else if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
-                            remove = Some(i);
-                        }
-                    });
-                }
-                if let Some(i) = remove {
-                    let id = self.data.members[i].id;
-                    self.data.members.remove(i);
-                    for task in &mut self.data.tasks {
-                        task.assignees.retain(|a| *a != id);
-                    }
-                    self.dirty = true;
-                }
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.new_person).hint_text(tr("Name")).desired_width(180.0));
-                    if ui.button(tr("Add person")).clicked() && !self.new_person.trim().is_empty() {
-                        let id = self.data.new_id();
-                        let color = STATUS_PALETTE[1 + (id as usize % 13)];
-                        self.data.members.push(Member { id, name: self.new_person.trim().to_string(), color, role: "Member".into(), ..Default::default() });
-                        self.new_person.clear();
-                        self.dirty = true;
-                    }
-                });
-            });
-            if !open {
-                self.people_open = false;
             }
         }
         // quick add (+ Create > Task)

@@ -248,7 +248,8 @@ impl App {
                     ui.label(RichText::new(tr("Teams")).size(20.0).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button(tr("\u{1F464} Manage people")).clicked() {
-                            self.people_open = true;
+                            // the People settings page: server roles, removal with a question
+                            self.open_settings("People");
                         }
                     });
                 });
@@ -661,7 +662,8 @@ impl App {
                             *per.entry(o).or_default() += e.end - e.start;
                         }
                     }
-                    if let (Some(st), Some(by)) = (task.timer_started, task.timer_by.or(if solo { Some(me) } else { None })) {
+                    for (by, st) in task.running_timers() {
+                        let Some(by) = by.or(if solo { Some(me) } else { None }) else { continue };
                         if (0..7).contains(&(ts_date(st) - ws).num_days()) {
                             *per.entry(by).or_default() += now - st;
                         }
@@ -683,7 +685,7 @@ impl App {
                             per_day[i as usize] += e.end - e.start;
                         }
                     }
-                    if let Some(st) = task.timer_started {
+                    for (_, st) in task.running_timers() {
                         let i = (ts_date(st) - ws).num_days();
                         if (0..7).contains(&i) {
                             per_day[i as usize] += now - st;
@@ -757,7 +759,7 @@ impl App {
                             any = true;
                         }
                     }
-                    if let Some(st) = task.timer_started {
+                    for (_, st) in task.running_timers() {
                         let i = (ts_date(st) - ws).num_days();
                         if (0..7).contains(&i) {
                             per[i as usize] += now - st;

@@ -2217,14 +2217,16 @@ fn my_timer_leaves_a_teammates_running() {
     a.apply(Action::ToggleTimer(ids[1]));
     assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started), "Alex's timer keeps running");
     assert_eq!(a.task(ids[1]).unwrap().timer_by, Some(1));
-    // clicking Alex's timer doesn't stop it
+    // on the task Alex is timing I run my own timer beside his (and, timing
+    // one task at a time, mine on the other task stops)
     a.apply(Action::ToggleTimer(ids[0]));
-    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started));
-    assert!(a.task(ids[1]).unwrap().timer_started.is_some());
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started), "Alex's timer keeps running");
+    assert!(a.data.is_my_timer(a.task(ids[0]).unwrap()));
+    assert!(a.task(ids[1]).unwrap().timer_started.is_none());
     // closing the app (on_exit) stops mine and keeps Alex's
     a.data.stop_my_timers(now_ts());
-    assert!(a.task(ids[1]).unwrap().timer_started.is_none());
-    assert_eq!(a.task(ids[1]).unwrap().time_entries.last().unwrap().member, 1, "the stopped time is mine");
+    assert!(a.task(ids[0]).unwrap().timers.is_empty());
+    assert_eq!(a.task(ids[0]).unwrap().time_entries.last().unwrap().member, 1, "the stopped time is mine");
     assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started));
     // an old timer without an owner is never stopped behind anyone's back
     if let Some(t) = a.data.tasks.iter_mut().find(|t| t.id == ids[0]) {
@@ -2877,4 +2879,112 @@ fn file_errors_are_shown_in_the_interface_language() {
     assert_eq!(net, "서버에 연결하지 못했습니다: refused");
     assert_eq!(plain, "서버에 이 파일이 없습니다.");
     assert_eq!(App::error_text("Couldn't put a.png in the shared folder: full"), "Couldn't put a.png in the shared folder: full");
+}
+
+
+#[test]
+fn timesheet_typing_or_dragging_keeps_one_entry_per_day() {
+    let mut a = app();
+    let id = a.data.tasks[1].id;
+    let day = today();
+    a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().time_entries.clear();
+    // a drag sends many small steps
+    for k in 1..=20 {
+        a.set_day_time(id, day, 0.05 * k as f64);
+    }
+    let t = a.task(id).unwrap();
+    assert_eq!(t.time_entries.len(), 1, "one entry grows instead of twenty");
+    assert_eq!(t.time_entries[0].end - t.time_entries[0].start, 3600);
+}
+
+#[test]
+fn timesheet_rows_belong_to_a_week_and_old_rows_to_every_week() {
+    let mut a = app();
+    let me = a.data.me;
+    let ids: Vec<u64> = a.data.tasks.iter().take(2).map(|t| t.id).collect();
+    let ws = today() - Duration::days(today().weekday().num_days_from_sunday() as i64);
+    a.data.extra.sheet_rows = vec![[me, ids[0]]];
+    a.add_sheet_rows(ws, vec![ids[1]]);
+    assert_eq!(a.my_sheet_rows(ws), vec![ids[0], ids[1]]);
+    assert_eq!(a.my_sheet_rows(ws + Duration::days(7)), vec![ids[0]], "an old row shows in every week");
+    a.drop_sheet_row(ws + Duration::days(7), ids[0]);
+    assert_eq!(a.my_sheet_rows(ws), vec![ids[1]], "removing an old row takes it off every week");
+    // saved files without week rows stay the same
+    let mut e = a.data.extra.clone();
+    e.sheet_week_rows.clear();
+    assert!(!serde_json::to_string(&e).unwrap().contains("sheet_week_rows"));
+}
+
+#[test]
+fn each_person_runs_a_timer_on_the_same_task() {
+    let mut a = app();
+    let id = a.data.tasks[0].id;
+    let started = now_ts() - 600;
+    let t = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    t.timer_started = Some(started);
+    t.timer_by = Some(2);
+    assert!(!serde_json::to_string(&a.data.tasks[0]).unwrap().contains("\"timers\""), "no new field when one timer runs");
+    a.apply(Action::ToggleTimer(id));
+    let t = a.task(id).unwrap();
+    assert!(a.data.is_my_timer(t));
+    assert_eq!((t.timer_started, t.timer_by), (Some(started), Some(2)), "Alex's timer stays where older apps read it");
+    assert!(t.tracked_secs(now_ts()) >= 600);
+    // Alex stops his: mine moves into the field older apps read
+    a.data.me = 2;
+    a.apply(Action::ToggleTimer(id));
+    let t = a.task(id).unwrap();
+    assert_eq!(t.timer_by, Some(1));
+    assert!(t.timers.is_empty());
+    assert!(t.time_entries.iter().any(|e| e.member == 2 && e.start == started));
+    a.data.me = 1;
+    assert!(a.data.is_my_timer(a.task(id).unwrap()));
+    a.apply(Action::ToggleTimer(id));
+    assert!(a.task(id).unwrap().timer_started.is_none());
+}
+
+#[test]
+fn status_renames_and_deletes_carry_automations_of_that_space() {
+    let mut a = app();
+    let si = 0;
+    let sid = a.data.spaces[si].id;
+    let list = list_ids(&a)[0];
+    let other = a.data.spaces.iter().find(|s| s.id != sid && s.statuses.iter().any(|x| x.name == "in progress")).map(|s| s.id).expect("another space shares the name");
+    let rule = |id, list| Automation { id, enabled: true, trigger_status: "in progress".into(), action: "priority".into(), value: "1".into(), list };
+    a.data.extra.automations = vec![rule(1, Some(list)), rule(2, Some(sid)), rule(3, None), rule(4, Some(other))];
+    let mut orig: Vec<Option<String>> = a.data.spaces[si].statuses.iter().map(|s| Some(s.name.clone())).collect();
+    let i = a.data.spaces[si].statuses.iter().position(|s| s.name == "in progress").unwrap();
+    a.data.spaces[si].statuses[i].name = "doing".into();
+    a.commit_status_renames(si, &mut orig);
+    let trig: Vec<String> = a.data.extra.automations.iter().map(|x| x.trigger_status.clone()).collect();
+    assert_eq!(trig, ["doing", "doing", "in progress", "in progress"], "this space's rules follow; workspace-wide and other spaces' stay");
+    let st = a.data.spaces[si].statuses.remove(i);
+    let old = orig.remove(i).unwrap();
+    a.move_off_status(si, &old, st.kind, &orig);
+    let to = a.data.extra.automations[0].trigger_status.clone();
+    assert_ne!(to, "doing", "a deleted status's rules move with its tasks");
+    assert!(a.data.spaces[si].statuses.iter().any(|s| s.name == to));
+    assert_eq!(a.data.extra.automations[3].trigger_status, "in progress");
+}
+
+#[test]
+fn single_assignee_setting_replaces_instead_of_adding() {
+    let mut a = app();
+    a.data.extra.apps.multiple_assignees = false;
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "One person");
+    let mut t = a.task(id).unwrap().clone();
+    t.assignees = vec![3];
+    a.apply(Action::Replace(t));
+    a.data.extra.automations.push(Automation { id: 9, enabled: true, trigger_status: "in progress".into(), action: "assign".into(), value: "2".into(), list: None });
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "in progress".into();
+    a.apply(Action::Replace(t));
+    assert_eq!(a.task(id).unwrap().assignees, vec![2]);
+    // My Tasks grouped by assignee: adding in Alex's group makes it mine only
+    a.loc = Location::MyTasks;
+    let g = Group { key: "a:2".into(), label: String::new(), color: Color32::WHITE, status: None, priority: None, assignee: Some(2), due: None, tasks: vec![] };
+    a.add_from_group(&g, "From Alex's group".into(), false);
+    a.apply_actions();
+    let t = a.data.tasks.iter().find(|t| t.name == "From Alex's group").unwrap();
+    assert_eq!(t.assignees, vec![a.data.me]);
 }

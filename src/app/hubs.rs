@@ -1,7 +1,7 @@
 // App "hubs" as the person's ClickUp shows them: each app (Docs, Dashboards,
 // Whiteboards, Forms, Teams) has its own sidebar (All / My / Shared / Private,
 // Favorites) and a template gallery; Goals has a start page; Timesheets has
-// tabs (My timesheet, All timesheets, Approvals) and editable hours.
+// tabs (My timesheet, All timesheets) and editable hours.
 
 use super::*;
 
@@ -1002,8 +1002,9 @@ impl App {
                 ui.set_height(40.0);
                 ui.label(RichText::new(tr("\u{23F1}  Timesheets")).size(15.5));
                 ui.separator();
-                for (i, label) in ["My timesheet", "All timesheets", "Approvals"].iter().enumerate() {
-                    let sel = self.hub_filter.min(2) == i as u8;
+                // no Approvals tab: submitting a week for approval isn't built
+                for (i, label) in ["My timesheet", "All timesheets"].iter().enumerate() {
+                    let sel = self.hub_filter.min(1) == i as u8;
                     let g = ui.painter().layout_no_wrap(tr(label).to_string(), FontId::proportional(15.0), if sel { t.text } else { t.text3 });
                     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 16.0, 40.0), Sense::click());
                     name_it(&resp, label);
@@ -1046,19 +1047,10 @@ impl App {
                     }
                 });
                 ui.add_space(14.0);
-                match self.hub_filter {
+                match self.hub_filter.min(1) {
                     1 => self.all_timesheets(ui, ws),
-                    2 => {
-                        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(30)).show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.vertical_centered(|ui| {
-                                ui.label(RichText::new(tr("No timesheets waiting for approval")).size(16.0));
-                                ui.label(RichText::new(tr("When people submit their week, it shows here for you to approve.")).color(t.text2));
-                            });
-                        });
-                    }
                     _ => {
-                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows().is_empty() || self.sheet_force;
+                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows(ws).is_empty() || self.sheet_force;
                         if !has_any {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
@@ -1083,13 +1075,13 @@ impl App {
                                             match label {
                                                 "All assigned tasks" => {
                                                     let rows = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).map(|x| x.id).collect();
-                                                    self.set_my_sheet_rows(rows);
+                                                    self.add_sheet_rows(ws, rows);
                                                 }
                                                 "Last week's tasks" => {
                                                     let lw = ws - Duration::days(7);
                                                     let rows: Vec<u64> = self.data.tasks.iter().filter(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - lw).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) })).map(|x| x.id).collect();
                                                     let none = rows.is_empty();
-                                                    self.set_my_sheet_rows(rows);
+                                                    self.add_sheet_rows(ws, rows);
                                                     if none {
                                                         self.toast = Some((tr("No time was tracked last week").into(), now_ts()));
                                                     }
@@ -1121,7 +1113,7 @@ impl App {
     fn timesheet_grid(&mut self, ui: &mut Ui, ws: NaiveDate) {
         let t = self.t();
         let now = now_ts();
-        let mut ids: Vec<u64> = self.my_sheet_rows();
+        let mut ids: Vec<u64> = self.my_sheet_rows(ws);
         for x in &self.data.tasks {
             let any = x.time_entries.iter().any(|e| {
                 let i = (ts_day(e.start) - ws).num_days();
@@ -1157,7 +1149,7 @@ impl App {
                         per[i as usize] += e.end - e.start;
                     }
                 }
-                if let Some(st) = self.data.tasks[ti].timer_started.filter(|_| self.data.is_my_timer(&self.data.tasks[ti])) {
+                if let Some(st) = self.data.my_timer_start(&self.data.tasks[ti]) {
                     let i = (ts_day(st) - ws).num_days();
                     if (0..7).contains(&i) {
                         per[i as usize] += now - st;
@@ -1183,10 +1175,13 @@ impl App {
                     for i in 0..7 {
                         totals[i] += per[i];
                         sum += per[i];
-                        let mut hours = per[i] as f64 / 3600.0;
-                        let r = ui.add_sized([col - 8.0, 26.0], egui::DragValue::new(&mut hours).range(0.0..=24.0).speed(0.05).max_decimals(2).suffix(tr("h")));
+                        let before = per[i] as f64 / 3600.0;
+                        let mut hours = before;
+                        // never clamp what is already there: a day over 24h
+                        // (entries from elsewhere) would be cut just by drawing
+                        let r = ui.add_sized([col - 8.0, 26.0], egui::DragValue::new(&mut hours).range(0.0..=24.0).clamp_existing_to_range(false).speed(0.05).max_decimals(2).suffix(tr("h")));
                         ui.add_space(8.0);
-                        if r.changed() {
+                        if r.changed() && hours != before {
                             let tid = self.data.tasks[ti].id;
                             self.set_day_time(tid, ws + Duration::days(i as i64), hours);
                         }
@@ -1196,9 +1191,7 @@ impl App {
                 });
             }
             if let Some(id) = drop_row {
-                let mut rows = self.my_sheet_rows();
-                rows.retain(|x| *x != id);
-                self.set_my_sheet_rows(rows);
+                self.drop_sheet_row(ws, id);
                 if let Some(ti) = self.data.tasks.iter().position(|x| x.id == id) {
                     let task = &self.data.tasks[ti];
                     let keep: Vec<bool> = task.time_entries.iter().map(|e| !((0..7).contains(&(ts_day(e.start) - ws).num_days()) && self.data.is_my_entry(task, e))).collect();
@@ -1226,9 +1219,7 @@ impl App {
                     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         for (id, n) in &tasks {
                             if ui.button(n).clicked() {
-                                let mut rows = self.my_sheet_rows();
-                                rows.push(*id);
-                                self.set_my_sheet_rows(rows);
+                                self.add_sheet_rows(ws, vec![*id]);
                                 ui.close_menu();
                             }
                         }
@@ -1238,20 +1229,41 @@ impl App {
         });
     }
 
-    /// The tasks I added to my timesheet with "+ Add task" (kept per person).
-    pub(super) fn my_sheet_rows(&self) -> Vec<u64> {
+    /// The tasks I added to the timesheet of the week starting `ws` with
+    /// "+ Add task" (kept per person). Rows added before rows had a week
+    /// show in every week until removed.
+    pub(super) fn my_sheet_rows(&self, ws: NaiveDate) -> Vec<u64> {
         let me = self.data.me;
-        self.data.extra.sheet_rows.iter().filter(|r| r[0] == me && self.task(r[1]).is_some_and(|x| self.data.task_live(x))).map(|r| r[1]).collect()
-    }
-
-    fn set_my_sheet_rows(&mut self, ids: Vec<u64>) {
-        let me = self.data.me;
-        self.data.extra.sheet_rows.retain(|r| r[0] != me);
-        for id in ids {
-            if !self.data.extra.sheet_rows.contains(&[me, id]) {
-                self.data.extra.sheet_rows.push([me, id]);
+        let wk = sheet_week_key(ws);
+        let mut ids: Vec<u64> = self.data.extra.sheet_rows.iter().filter(|r| r[0] == me).map(|r| r[1]).collect();
+        for r in &self.data.extra.sheet_week_rows {
+            if r[0] == me && r[2] == wk && !ids.contains(&r[1]) {
+                ids.push(r[1]);
             }
         }
+        ids.retain(|id| self.task(*id).is_some_and(|x| self.data.task_live(x)));
+        ids
+    }
+
+    /// Adds rows to my timesheet for the week starting `ws` only.
+    pub(super) fn add_sheet_rows(&mut self, ws: NaiveDate, ids: Vec<u64>) {
+        let me = self.data.me;
+        let wk = sheet_week_key(ws);
+        for id in ids {
+            if !self.data.extra.sheet_week_rows.contains(&[me, id, wk]) {
+                self.data.extra.sheet_week_rows.push([me, id, wk]);
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Takes a row off my timesheet for that week (an old row without a
+    /// week goes from every week).
+    pub(super) fn drop_sheet_row(&mut self, ws: NaiveDate, id: u64) {
+        let me = self.data.me;
+        let wk = sheet_week_key(ws);
+        self.data.extra.sheet_rows.retain(|r| *r != [me, id]);
+        self.data.extra.sheet_week_rows.retain(|r| *r != [me, id, wk]);
         self.dirty = true;
     }
 
@@ -1263,14 +1275,20 @@ impl App {
         let me = self.data.me;
         let Some(ti) = self.data.tasks.iter().position(|x| x.id == task_id) else { return };
         let task = &self.data.tasks[ti];
-        let running = task.timer_started.filter(|st| self.data.is_my_timer(task) && ts_day(*st) == day).map(|st| now - st).unwrap_or(0);
+        let running = self.data.my_timer_start(task).filter(|st| ts_day(*st) == day).map(|st| now - st).unwrap_or(0);
         let mine: Vec<usize> = task.time_entries.iter().enumerate().filter(|(_, e)| ts_day(e.start) == day && self.data.is_my_entry(task, e)).map(|(k, _)| k).collect();
         let have: i64 = mine.iter().map(|k| task.time_entries[*k].end - task.time_entries[*k].start).sum();
         let want = ((hours * 3600.0).round() as i64 - running).max(0);
         let task = &mut self.data.tasks[ti];
         if want > have {
             let start = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or(now);
-            task.time_entries.push(TimeEntry { start, end: start + (want - have), member: me });
+            // one entry typed in the grid per day: grow it instead of adding
+            // a new one on every step of a drag
+            if let Some(e) = task.time_entries.iter_mut().rev().find(|e| e.start == start && e.member == me) {
+                e.end += want - have;
+            } else {
+                task.time_entries.push(TimeEntry { start, end: start + (want - have), member: me });
+            }
         } else if want < have {
             // take it off my latest entries first
             let mut cut = have - want;
@@ -1423,4 +1441,9 @@ impl App {
 
 pub(super) fn ts_day(ts: i64) -> NaiveDate {
     chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today)
+}
+
+/// How a week is stored with a timesheet row: its first day, counted in days.
+fn sheet_week_key(ws: NaiveDate) -> u64 {
+    ws.num_days_from_ce().max(0) as u64
 }

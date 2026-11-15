@@ -3769,3 +3769,134 @@ fn add_channel_doesnt_open_someone_elses_private_channel() {
     assert_ne!(open, secret);
     assert!(h.app.data.channels.iter().find(|c| c.id == open).is_some_and(|c| c.name == "marketing" && !c.private));
 }
+
+
+#[test]
+fn timesheet_drawing_a_long_day_keeps_its_entries() {
+    let mut h = Ui1::new();
+    let td = today();
+    let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+    let start = td.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(chrono::Local).single().unwrap().timestamp();
+    let i = h.app.data.tasks.iter().position(|t| t.name == "Renew passport").unwrap();
+    // 30 hours on one day (e.g. typed on another computer): more than a cell's 24h
+    let long = vec![TimeEntry { start, end: start + 30 * 3600, member: 1 }];
+    h.app.data.tasks[i].time_entries = long.clone();
+    h.app.section = Section::Timesheets;
+    h.app.hub_filter = 0;
+    h.app.sheet_week = ws;
+    h.app.sheet_entries = false;
+    h.app.dirty = false;
+    h.settle();
+    assert!(h.has("Remove row Renew passport"), "the grid is drawn");
+    let e = &h.app.data.tasks[i].time_entries;
+    assert_eq!((e.len(), e[0].start, e[0].end), (1, long[0].start, long[0].end), "drawing the grid changed nothing");
+    assert!(!h.app.dirty);
+    // no Approvals tab: approving weeks isn't built
+    assert!(h.has("All timesheets") && !h.has("Approvals"));
+}
+
+#[test]
+fn timesheet_rows_added_by_hand_stay_in_their_week() {
+    let mut h = Ui1::new();
+    let td = today();
+    let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+    for t in &mut h.app.data.tasks {
+        t.time_entries.clear();
+    }
+    h.app.section = Section::Timesheets;
+    h.app.hub_filter = 0;
+    h.app.sheet_week = ws;
+    h.app.sheet_entries = false;
+    h.app.sheet_force = true;
+    h.settle();
+    h.click("+ Add task");
+    h.click("Renew passport");
+    assert!(h.has("Remove row Renew passport"));
+    h.click(">");
+    assert_eq!(h.app.sheet_week, ws + Duration::days(7));
+    assert!(!h.has("Remove row Renew passport"), "not in the next week");
+    h.click("<");
+    assert!(h.has("Remove row Renew passport"));
+    h.click("Remove row Renew passport");
+    assert!(!h.has("Remove row Renew passport"), "the x takes it off");
+}
+
+#[test]
+fn ownerless_old_timer_can_be_stopped_from_the_task() {
+    let mut h = Ui1::new();
+    let id = h.task_id("Write copy for landing page");
+    let started = now_ts() - 600;
+    let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    t.timer_started = Some(started);
+    t.timer_by = None;
+    h.app.apply(Action::Open(id));
+    h.settle();
+    // it isn't mine, so my play button starts my own timer beside it
+    h.click("\u{25B6}");
+    let t = task_named(&h, "Write copy for landing page");
+    assert_eq!(t.timer_started, Some(started));
+    assert!(h.app.data.is_my_timer(t));
+    h.click("Stop (started by an older app)");
+    let t = task_named(&h, "Write copy for landing page");
+    assert!(t.time_entries.iter().any(|e| e.start == started && e.member == 0), "its time is kept");
+    assert!(h.app.data.is_my_timer(t), "my timer keeps running");
+    assert!(!h.has("Stop (started by an older app)"));
+}
+
+#[test]
+fn my_subtask_shows_once_on_my_tasks() {
+    let mut h = Ui1::new();
+    let list = h.app.data.first_list().unwrap();
+    let me = h.app.data.me;
+    h.app.apply(Action::Add { list, name: "Parent of mine".into(), status: None, priority: 0, assignees: vec![me], due: None, parent: None, open: false });
+    let parent = h.task_id("Parent of mine");
+    h.app.apply(Action::Add { list, name: "Sub of mine".into(), status: None, priority: 0, assignees: vec![me], due: None, parent: Some(parent), open: false });
+    h.app.loc = Location::MyTasks;
+    h.app.subtasks_open = true;
+    h.settle();
+    h.scroll_into_view("Task Sub of mine");
+    assert_eq!(h.tree.iter().filter(|(n, _)| n == "Task Sub of mine").count(), 1);
+}
+
+#[test]
+fn whiteboard_undo_puts_a_moved_note_back() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    let wb = h.app.data.extra.whiteboards.iter_mut().find(|w| w.id == wid).unwrap();
+    wb.notes.push(Sticky { pos: [60.0, 60.0], text: "One".into(), color: [0xf8, 0xae, 0x00] });
+    h.app.wb_tool = 2;
+    h.settle();
+    // press near the note's bottom edge and drag it
+    let x = rect_of(&h, "Delete note 0");
+    let a = pos2(x.center().x - 60.0, x.center().y + 100.0);
+    h.frame(vec![egui::Event::PointerMoved(a)]);
+    h.frame(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+    for k in 1..=10 {
+        h.frame(vec![egui::Event::PointerMoved(a + vec2(10.0 * k as f32, 8.0 * k as f32))]);
+    }
+    h.frame(vec![egui::Event::PointerButton { pos: a + vec2(100.0, 80.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+    h.settle();
+    let pos = |h: &Ui1| h.app.data.extra.whiteboards.iter().find(|w| w.id == wid).unwrap().notes[0].pos;
+    assert_ne!(pos(&h), [60.0, 60.0], "the note moved");
+    h.click("Undo");
+    assert_eq!(pos(&h), [60.0, 60.0], "undo puts it back");
+}
+
+#[test]
+fn header_automate_opens_for_the_current_list_and_manage_people_opens_settings() {
+    let mut h = Ui1::new();
+    let lid = h.app.data.first_list().unwrap();
+    h.app.loc = Location::List(lid);
+    h.settle();
+    h.click("Automate");
+    assert!(matches!(h.app.modal, Some(Modal::Automations { scope: Some(Location::List(l)), .. }) if l == lid), "new rules run in this list");
+    h.app.modal = None;
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 3;
+    h.settle();
+    h.click("\u{1F464} Manage people");
+    assert_eq!(h.app.section, Section::Settings);
+    assert_eq!(super::settings::SETTINGS[h.app.settings_tab as usize].1, "People");
+}

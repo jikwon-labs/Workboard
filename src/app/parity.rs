@@ -440,6 +440,7 @@ impl App {
             t.updated = now;
             t.timer_started = None;
             t.timer_by = None;
+            t.timers.clear();
             t.time_entries.clear();
             t.activity = vec![Activity { ts: now, author: app.data.me, text: format!("duplicated this task from {}", src.name), comment: false, ..Default::default() }];
             t.order = src.order;
@@ -775,7 +776,7 @@ impl App {
             self.reminder_about = (Some(task.id), None);
             close_any(ui);
         }
-        if ui.button(if task.timer_started.is_some() { tr("Stop timer") } else { tr("Start timer") }).clicked() {
+        if ui.button(if self.data.is_my_timer(&task) { tr("Stop timer") } else { tr("Start timer") }).clicked() {
             self.actions.push(Action::ToggleTimer(tid));
             close_any(ui);
         }

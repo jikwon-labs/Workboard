@@ -25,6 +25,8 @@ pub enum WbUndo {
     Note,
     NoteGone(usize, Sticky),
     StrokeGone(usize, WbStroke),
+    /// A note was dragged away from this spot.
+    NoteMoved(usize, [f32; 2]),
 }
 
 /// Screen state of the app pages (not saved).
@@ -1233,6 +1235,7 @@ impl App {
                 p.add(egui::Shape::line(pts, Stroke::new(s.width, rgb(s.color))));
             }
             let mut drag_note = None;
+            let mut move_from = None;
             let mut drop_note = None;
             let mut recolor = None;
             for (i, n) in wb.notes.iter_mut().enumerate() {
@@ -1245,6 +1248,9 @@ impl App {
                 }
                 if self.wb_tool == 2 {
                     let h = ui.interact(r, ui.id().with(("note", i)), Sense::drag());
+                    if h.drag_started() {
+                        move_from = Some((i, n.pos));
+                    }
                     if h.dragged() {
                         drag_note = Some((i, h.drag_delta()));
                     }
@@ -1287,6 +1293,9 @@ impl App {
                 let n = wb.notes.remove(i);
                 self.sweep.wb_undo.push((wid, WbUndo::NoteGone(i, n)));
                 self.dirty = true;
+            }
+            if let Some((i, at)) = move_from {
+                self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(i, at)));
             }
             if let Some((i, d)) = drag_note {
                 wb.notes[i].pos[0] += d.x;
@@ -1337,7 +1346,7 @@ impl App {
         });
     }
 
-    /// Takes back the last pen stroke, note, note removal or erasing on a board.
+    /// Takes back the last pen stroke, note, note removal, note move or erasing on a board.
     pub(super) fn wb_undo(&mut self, wid: u64) {
         let Some(k) = self.sweep.wb_undo.iter().rposition(|u| u.0 == wid) else { return };
         let (_, op) = self.sweep.wb_undo.remove(k);
@@ -1351,6 +1360,11 @@ impl App {
             }
             WbUndo::NoteGone(i, n) => wb.notes.insert(i.min(wb.notes.len()), n),
             WbUndo::StrokeGone(i, s) => wb.strokes.insert(i.min(wb.strokes.len()), s),
+            WbUndo::NoteMoved(i, at) => {
+                if let Some(n) = wb.notes.get_mut(i) {
+                    n.pos = at;
+                }
+            }
         }
         self.dirty = true;
     }

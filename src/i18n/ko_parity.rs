@@ -125,4 +125,6 @@ pub const T: &[(&str, &str)] = &[
     ("Move", "이동"),
     ("Duplicated {} tasks", "작업 {}개를 복제했습니다"),
     ("Needs a Space to put the List in. Make one from + Create > Space.", "목록을 넣을 스페이스가 필요합니다. + 만들기 > 스페이스에서 만드세요."),
+    ("There is no other List to move to yet. Make one first.", "아직 옮길 다른 목록이 없습니다. 먼저 목록을 만드세요."),
+    ("There is no other Space or Folder to move it to yet. Make one first.", "아직 옮길 다른 스페이스나 폴더가 없습니다. 먼저 만드세요."),
 ];

@@ -487,7 +487,11 @@ impl App {
                 (
                     s.id,
                     s.name.clone(),
-                    s.folders.iter().map(|f| (f.id, f.name.clone())).collect(),
+                    s.folders
+                        .iter()
+                        .filter(|f| !f.archived)
+                        .map(|f| (f.id, f.name.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -1000,7 +1004,8 @@ impl App {
         Some(nid)
     }
 
-    /// Every list as (id, "Space / Folder / List"), personal space included.
+    /// Every list as (id, "Space / Folder / List"), personal space included;
+    /// archived ones left out (tasks moved there would drop out of sight).
     pub(super) fn all_list_paths(&self) -> Vec<(u64, String)> {
         let mut out = vec![];
         for s in &self.data.spaces {
@@ -1016,6 +1021,7 @@ impl App {
                 }
             }
         }
+        out.retain(|(l, _)| !self.data.list_archived(*l));
         out
     }
 
@@ -1048,10 +1054,21 @@ impl App {
         focus_once(ui, &r);
         ui.add_space(4.0);
         let q = query.to_lowercase();
+        let paths = self.all_list_paths();
+        // only where the tasks already are: say there is nowhere else yet
+        if paths
+            .iter()
+            .all(|(l, _)| !here.is_empty() && here.iter().all(|h| h == l))
+        {
+            ui.label(
+                RichText::new(tr("There is no other List to move to yet. Make one first."))
+                    .color(t.text3),
+            );
+        }
         egui::ScrollArea::vertical()
             .max_height(300.0)
             .show(ui, |ui| {
-                for (lid, path) in self.all_list_paths() {
+                for (lid, path) in paths {
                     if !q.is_empty() && !path.to_lowercase().contains(&q) {
                         continue;
                     }
@@ -1079,7 +1096,11 @@ impl App {
                 (
                     s.id,
                     s.name.clone(),
-                    s.folders.iter().map(|f| (f.id, f.name.clone())).collect(),
+                    s.folders
+                        .iter()
+                        .filter(|f| !f.archived)
+                        .map(|f| (f.id, f.name.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -1094,6 +1115,19 @@ impl App {
                 .map(|f| f.id);
             (sp, f)
         };
+        // only where the List already is: say there is nowhere else yet
+        let elsewhere = spaces.iter().any(|(sid, _, folders)| {
+            !(*sid == cur_space && cur_folder.is_none())
+                || folders.iter().any(|(fid, _)| cur_folder != Some(*fid))
+        });
+        if !elsewhere {
+            ui.label(
+                RichText::new(tr(
+                    "There is no other Space or Folder to move it to yet. Make one first.",
+                ))
+                .color(t.text3),
+            );
+        }
         egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {

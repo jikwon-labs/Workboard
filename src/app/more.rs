@@ -1587,7 +1587,13 @@ impl App {
                 ui.label(RichText::new(tr("Create a form to collect requests; each answer becomes a task.")).color(t.text2));
                 return;
             };
-            let lists: Vec<(u64, String)> = self.data.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).map(move |l| (l.id, format!("{} / {}", s.name, l.name)))).collect();
+            // Lists answers can go to (not archived); an archived one already
+            // picked stays, marked, so the form says where answers go now
+            let mut lists: Vec<(u64, String)> = self.all_list_paths();
+            let picked = self.data.extra.forms[fi].list_id;
+            if self.data.list_archived(picked) && self.data.space_of_list(picked).is_some() {
+                lists.push((picked, trf!("{} (archived)", self.data.list_name(picked))));
+            }
             let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.name.clone())).collect();
             // answers typed into one form don't carry over to another
             let fid = self.data.extra.forms[fi].id;

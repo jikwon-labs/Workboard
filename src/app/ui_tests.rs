@@ -8544,3 +8544,78 @@ fn time_on_archived_tasks_counts_on_the_dashboard_and_is_marked_in_timesheets() 
     h.settle();
     assert!(!h.painted_text(&format!("{} (archived)", name)).is_empty());
 }
+
+#[test]
+fn move_dialogs_leave_out_archived_lists_and_say_when_there_is_nowhere_else() {
+    let mut h = archived_workspace();
+    let ideas = list_id(&h, "Ideas");
+    let web = list_id(&h, "Website Redesign");
+    h.app.data.list_item_mut(ideas).unwrap().archived = false;
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == web)
+        .unwrap()
+        .id;
+    h.app.modal = Some(Modal::MoveTasks {
+        ids: vec![tid],
+        query: String::new(),
+    });
+    h.settle();
+    assert!(h.has("Side Projects / Ideas"));
+    assert!(
+        !h.has("Team Space / Projects / Marketing"),
+        "archived: not a place to move to"
+    );
+    // a task already in the only List there is: nowhere else to go, and it says so
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == ideas)
+        .unwrap()
+        .id;
+    h.app.modal = Some(Modal::MoveTasks {
+        ids: vec![tid],
+        query: String::new(),
+    });
+    h.settle();
+    assert!(h.has("There is no other List to move to yet. Make one first."));
+    // Move List with one Space and no Folder: the same
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    h.app.data.spaces.retain(|s| s.id == sid);
+    h.app.data.spaces[0].folders.clear();
+    let l = h.app.data.spaces[0].lists[0].id;
+    h.app.modal = Some(Modal::MoveList { list: l });
+    h.settle();
+    assert!(h.has("There is no other Space or Folder to move it to yet. Make one first."));
+    // with somewhere else to go, no such line
+    let mut h = Ui1::new();
+    let l = list_id(&h, "Ideas");
+    h.app.modal = Some(Modal::MoveList { list: l });
+    h.settle();
+    assert!(!h.has("There is no other Space or Folder to move it to yet. Make one first."));
+}
+
+#[test]
+fn form_list_picker_marks_an_archived_list_already_picked() {
+    let mut h = Ui1::new();
+    let web = list_id(&h, "Website Redesign");
+    h.app.new_form();
+    let fid = h.app.form_open.unwrap();
+    h.app
+        .data
+        .extra
+        .forms
+        .iter_mut()
+        .find(|f| f.id == fid)
+        .unwrap()
+        .list_id = web;
+    h.app.data.list_item_mut(web).unwrap().archived = true;
+    h.settle();
+    assert!(!h.painted_text("Website Redesign (archived)").is_empty());
+}

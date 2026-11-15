@@ -4,6 +4,7 @@
 pub const T: &[(&str, &str)] = &[
     // nav: workboard:// links, Inbox rows, reminders coming due
     ("This link can't be opened in this Workspace", "이 워크스페이스에서 열 수 없는 링크입니다"),
+    ("This link points to something archived or private", "보관되었거나 비공개인 항목을 가리키는 링크입니다"),
     ("Open link: {}", "링크 열기: {}"),
     ("{} replied: {}", "{}님의 답글: {}"),
     ("{} mentioned you: {}", "{}님이 나를 멘션함: {}"),

@@ -3708,3 +3708,41 @@ fn search_leaves_out_other_peoples_personal_space_and_archived_lists() {
     assert!(h.has("Team Space / Projects / Marketing"));
     assert!(!h.has("Someone Private") && !h.has("Someone Private / Their Secret List") && !h.has("Team Space / Old Archived List"));
 }
+
+#[test]
+fn a_link_from_macos_opens_in_the_frame_it_arrives() {
+    let mut h = Ui1::new();
+    let id = h.app.data.tasks.iter().find(|t| h.app.task_visible(t)).map(|t| t.id).unwrap();
+    assert_eq!(h.app.open_task, None);
+    // macOS hands the link over between frames (no click or key follows)
+    crate::links::arrived(format!("workboard://task/{}", id));
+    h.frame(vec![]);
+    assert_eq!(h.app.open_task, Some(id), "the link opened without waiting for more input");
+    assert!(h.ctx.has_requested_repaint(), "the app draws again to show it");
+}
+
+#[test]
+fn sidebar_leaves_out_other_peoples_private_docs() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.docs.iter().find(|d| d.title == "Project brief").and_then(|d| d.space).unwrap();
+    for s in &mut h.app.data.spaces {
+        s.expanded = s.id == sid;
+    }
+    h.settle();
+    assert!(h.has("Project brief"), "the space's doc is in the sidebar");
+    let me = h.app.data.me;
+    let d = h.app.data.docs.iter_mut().find(|d| d.title == "Project brief").unwrap();
+    d.private = true;
+    d.owner = me + 100;
+    h.settle();
+    assert!(!h.has("Project brief"), "someone else's Private doc stays out of the space tree");
+    // and out of the sidebar search
+    h.app.side_search = Some("brief".into());
+    h.settle();
+    assert!(!h.has("Project brief"));
+    // my own Private doc stays
+    h.app.side_search = None;
+    h.app.data.docs.iter_mut().find(|d| d.title == "Project brief").unwrap().owner = me;
+    h.settle();
+    assert!(h.has("Project brief"));
+}

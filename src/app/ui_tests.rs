@@ -8591,3 +8591,97 @@ fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
     assert_eq!(text(&h, 7001), "Mid");
     assert_eq!(text(&h, 7000), "Top");
 }
+
+// ---- the status editor finishes its edits however it goes away (r4-ui)
+
+#[test]
+fn switching_the_status_editor_to_another_space_or_quitting_finishes_the_edits() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    let other = h.app.data.spaces[1].id;
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let other_list = h.app.data.lists_in(Location::Space(other)).unwrap()[0];
+    let in_list = |h: &Ui1, l: u64| {
+        h.app
+            .data
+            .tasks
+            .iter()
+            .filter(|t| t.list_id == l)
+            .map(|t| t.id)
+            .collect::<Vec<_>>()
+    };
+    let (a, b) = (in_list(&h, list)[0], in_list(&h, list)[1]);
+    let c = in_list(&h, other_list)[0];
+    for (t, st) in [(a, "in progress"), (b, "to do"), (c, "in progress")] {
+        h.app
+            .data
+            .tasks
+            .iter_mut()
+            .find(|x| x.id == t)
+            .unwrap()
+            .status = st.into();
+    }
+    h.app.data.extra.automations = vec![Automation {
+        id: 1,
+        enabled: true,
+        trigger_status: "to do".into(),
+        action: "priority".into(),
+        value: "1".into(),
+        list: Some(list),
+    }];
+    let status_ok = |h: &Ui1, si: usize, t: u64| {
+        let st = h.app.task(t).unwrap().status.clone();
+        h.app.data.spaces[si].statuses.iter().any(|s| s.name == st)
+    };
+    // in the first space: "to do" renamed, "in progress" emptied
+    h.app.apply(Action::EditStatuses(sid));
+    h.settle();
+    h.click("to do");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("backlog");
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.settle();
+    assert!(!status_ok(&h, 0, a), "mid-edit the name is empty");
+    // the other space's "Edit statuses" while the editor is open
+    h.app.toast = None;
+    h.app.apply(Action::EditStatuses(other));
+    h.settle();
+    assert_eq!(h.app.edit_statuses, Some(other));
+    assert!(status_ok(&h, 0, a), "the emptied name went back");
+    assert!(status_ok(&h, 0, b));
+    assert_eq!(h.app.task(b).unwrap().status, "backlog");
+    assert_eq!(
+        h.app.data.extra.automations[0].trigger_status, "backlog",
+        "the rename reached the automation"
+    );
+    assert!(h.app.toast.is_some());
+    // quitting with a name taken in the other space's editor
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("complete");
+    h.settle();
+    assert!(
+        !status_ok(&h, 1, c),
+        "mid-edit the task waits on a name no status has"
+    );
+    h.app.finish_before_quit();
+    assert!(h.app.edit_statuses.is_none());
+    let names: Vec<String> = h.app.data.spaces[1]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert!(
+        names.contains(&"in progress".to_string()),
+        "the taken name went back: {:?}",
+        names
+    );
+    assert!(status_ok(&h, 1, c));
+    assert_eq!(
+        names.iter().filter(|n| *n == "complete").count(),
+        1,
+        "no two statuses share a name"
+    );
+}

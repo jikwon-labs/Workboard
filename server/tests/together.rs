@@ -3577,3 +3577,46 @@ fn a_slack_import_of_the_last_day_sends_no_iphone_pushes() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
+    // format 3 notes a whole time entry list or custom field map as one
+    // field, so its copy could undo a teammate's entry
+    assert_eq!(wb_net::OLDEST_SYNC, 4);
+    assert_eq!(wb_sync::META_V, wb_net::OLDEST_SYNC);
+    let home = temp_home("sync-3");
+    let server = Server::start(&home, 0);
+    let (mut a, b) = two_apps(server.port);
+    let token = b.token.clone();
+    let device = b.device.clone();
+    drop(b);
+    let mut old = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            app: Some("0.1.9".into()),
+            sync: Some(3),
+            ..Default::default()
+        },
+    );
+    old.wait("the round-3 app still gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    old.change(|d| d["tasks"][0]["name"] = json!("Plan (round 3)"));
+    old.until("the round-3 app is told to update", |o| {
+        o.denied.iter().any(|d| d == wb_net::UPDATE_NEEDED)
+    });
+    a.change(|d| d["tasks"][1]["name"] = json!("Ship (A)"));
+    old.wait("A's change at the round-3 app", |d| {
+        d["tasks"][1]["name"] == "Ship (A)"
+    });
+    a.wait("A's copy", |d| d["tasks"][1]["name"] == "Ship (A)");
+    assert_eq!(
+        a.data["tasks"][0]["name"], "Plan",
+        "the round-3 app's change was not taken"
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

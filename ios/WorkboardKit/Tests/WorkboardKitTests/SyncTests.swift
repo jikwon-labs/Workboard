@@ -348,9 +348,9 @@ final class RustPortTests2: XCTestCase {
     }
 
     func testHelloSaysTheAppVersionAndSyncFormat() {
-        let h = Hello(device: "d1", app: "1.0", sync: 3)
+        let h = Hello(device: "d1", app: "1.0", sync: UInt64(Sync.metaV))
         let text = ClientMessage.hello(h).text
-        XCTAssertTrue(text.contains(#""app":"1.0""#) && text.contains(#""sync":3"#), text)
+        XCTAssertTrue(text.contains(#""app":"1.0""#) && text.contains(#""sync":4"#), text)
         XCTAssertEqual(ClientMessage(text: text), .hello(h))
     }
 
@@ -883,5 +883,35 @@ final class FieldMergeTests: XCTestCase {
         XCTAssertEqual(a.at("channels")?[0]?["messages"]?[0]?["reactions"], b.at("channels")?[0]?["messages"]?[0]?["reactions"])
         XCTAssertEqual(Sync.fingerprints(a), Sync.fingerprints(b))
         XCTAssertEqual(a.at("channels")?[0]?["messages"]?[0]?["reactions"], [["emoji": "❤️", "users": [3]], ["emoji": "👍", "users": [1, 2]]])
+    }
+
+    func testAFormat3CopyBecomesFormat4WithoutCountingAsAnEdit() {
+        let t: JSON = [["id": 1, "name": "t", "time_entries": [["start": 1, "end": 5, "member": 2]], "custom": ["7": "x"]]]
+        // saved by a round-3 app: one fingerprint for each whole field
+        var old = SyncMeta()
+        let v = ws(t, [], old)
+        Sync.stamp(v, &old, now: 10)
+        var h = old.fieldHashes[1]!.filter { Sync.partField($0.key) != "time_entries" && Sync.partField($0.key) != "custom" }
+        h["time_entries"] = Sync.partHash([["start": 1, "end": 5, "member": 2]])
+        h["custom"] = Sync.partHash(["7": "x"])
+        old.fieldHashes[1] = h
+        old.v = 3
+        // and by a round-4 app, which split them already but wrote 3
+        var split = SyncMeta()
+        Sync.stamp(v, &split, now: 10)
+        split.v = 3
+        for var m in [old, split] {
+            let before = (m.stamps, m.fields)
+            Sync.stamp(v, &m, now: 20)
+            XCTAssertEqual(m.v, Sync.metaV)
+            XCTAssertEqual(Sync.metaV, 4, "the same as wb_sync::META_V")
+            XCTAssertEqual(m.stamps, before.0, "the new format alone is no change")
+            XCTAssertEqual(m.fields, before.1)
+            let parts = m.fieldHashes[1]!
+            XCTAssertNotNil(parts["time_entries/2/1"], "\(parts)")
+            XCTAssertNotNil(parts["custom/7"])
+            XCTAssertNil(parts["time_entries"])
+            XCTAssertNil(parts["custom"])
+        }
     }
 }

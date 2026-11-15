@@ -221,8 +221,10 @@ impl Backup {
 
 /// The oldest sync format (`wb_sync::META_V`) whose changes the server
 /// takes. Older apps would erase fields they don't know when their copy
-/// wins (see `UPDATE_NEEDED`).
-pub const OLDEST_SYNC: u32 = 3;
+/// wins, or (format 3 and before) note a whole time entry list or custom
+/// field map as one field, so a change of theirs would undo a teammate's
+/// entry or value in it (see `UPDATE_NEEDED`).
+pub const OLDEST_SYNC: u32 = 4;
 
 /// Said to an app older than `OLDEST_SYNC` when it sends changes. It goes
 /// with `CODE_DENIED`, which every app shows and stays connected for.

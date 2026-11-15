@@ -30,8 +30,12 @@ public enum Sync {
     ]
     /// The SyncMeta.v this version writes (META_V): 1 = an item's place
     /// counts in its fingerprint, 2 = `moved` is kept and fields at their
-    /// default may be left out, 3 = field stamps are kept.
-    public static let metaV: UInt32 = 3
+    /// default may be left out, 3 = field stamps are kept, 4 = time entries
+    /// and custom field values each have field stamps of their own
+    /// ("time_entries/<member>/<start>", "custom/<field id>"). Sent in the
+    /// hello as `sync`; the server takes no changes below
+    /// wb_net::OLDEST_SYNC (4).
+    public static let metaV: UInt32 = 4
     /// Single settings that belong to the whole team (SHARED_VALUES).
     public static let sharedValues: [String] = ["workspace", "extra.workspace_color", "extra.apps"]
     /// Fields that are each person's own even inside shared items (LOCAL_KEYS).

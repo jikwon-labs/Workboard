@@ -12,6 +12,8 @@
 //   -wbOpenURL URL       open a link at launch, as if tapped (workboard://join?...)
 //   -wbNoPasswordAutoFill YES  no saved or strong passwords offered in the
 //                        sign-in fields (UI tests type passwords themselves)
+//   -wbAskTimeout 2      seconds to wait for the server's answer to an access
+//                        or backup request (15 by default)
 //
 // Links: workboard://join?server=HOST[:PORT]&code=XXXX-XXXX-XXXX&email=...
 // (the URL scheme is registered in Config/Info.plist) opens the invite form.
@@ -40,6 +42,7 @@ struct WorkboardApp: App {
         let c = SyncClient(storage: storage, tokens: tokens)
         if let me = args.string(forKey: "wbMe"), let id = UInt64(me) { c.setMe(id) }
         if let server = args.string(forKey: "wbServer") { c.setServer(server) }
+        if args.double(forKey: "wbAskTimeout") > 0 { c.askTimeout = args.double(forKey: "wbAskTimeout") }
         _client = State(initialValue: c)
         let nav = Nav(tab: args.string(forKey: "wbTab"), open: args.string(forKey: "wbOpen"))
         if let u = args.string(forKey: "wbOpenURL") { nav.openedLink = InviteLink.parse(u) }

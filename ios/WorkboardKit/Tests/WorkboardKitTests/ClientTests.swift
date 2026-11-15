@@ -1230,21 +1230,30 @@ final class Round4ClientTests: XCTestCase {
 
         c.asks = [.setRole(member: 3, role: .admin), .accessList]
         XCTAssertEqual(c.adminPending, 2)
-        // someone else's change: an access list nobody here asked for yet
+        // the oldest request wants a list: the next list answers it, whatever
+        // it shows (another admin's change can already be in it)
         c.receiveForTests(.access(people: before, role: .owner))
-        XCTAssertEqual(c.adminPending, 2, "not what the role change asked for")
-        XCTAssertEqual(c.people, before, "the list is taken all the same")
+        XCTAssertEqual(c.asks, [.accessList])
+        XCTAssertEqual(c.people, before, "the list is taken")
         // refusals of pushed changes aren't answers
         c.receiveForTests(.error(code: "denied", message: FakeServer.putBackMessage, putBack: true))
         c.receiveForTests(.error(code: "denied", message: SyncClient.updateNeeded))
-        XCTAssertEqual(c.adminPending, 2)
+        XCTAssertEqual(c.asks, [.accessList])
         XCTAssertNil(c.adminError)
         XCTAssertEqual(c.notice, SyncClient.updateNeeded)
         c.receiveForTests(.access(people: after, role: .owner))
-        XCTAssertEqual(c.asks, [.accessList])
-        // a plain member's list is never the answer to an owner's request
-        c.receiveForTests(.access(people: [], role: .member))
-        XCTAssertEqual(c.asks, [.accessList])
+        XCTAssertEqual(c.adminPending, 0)
+        // lists sent unasked after someone's change, with nothing waiting
+        c.receiveForTests(.access(people: after, role: .owner))
+        XCTAssertEqual(c.adminPending, 0)
+        XCTAssertEqual(c.people, after)
+        // answers come in order: a list can't answer a request waiting
+        // behind one that wants something else
+        c.asks = [.backups, .revoke(member: 3)]
+        c.receiveForTests(.access(people: after, role: .owner))
+        XCTAssertEqual(c.asks, [.backups, .revoke(member: 3)])
+        c.receiveForTests(.backups([]))
+        XCTAssertEqual(c.asks, [.revoke(member: 3)])
         c.receiveForTests(.access(people: after, role: .owner))
         XCTAssertEqual(c.adminPending, 0)
 
@@ -1402,5 +1411,178 @@ final class OfflineServerTests: XCTestCase {
         server.goOnline()
         await until("sent and shown back") { c.state.isConnected && c.waitingCount == 0 }
         XCTAssertTrue(server.current!.serialized().contains("Written on the train"))
+    }
+}
+
+@MainActor
+final class Round5ClientTests: XCTestCase {
+    var dirs: [URL] = []
+
+    override func tearDown() async throws {
+        for d in dirs { try? FileManager.default.removeItem(at: d) }
+    }
+
+    func storage() -> Storage {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
+        dirs.append(d)
+        return Storage(folder: d)
+    }
+
+    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
+        let end = Date().addingTimeInterval(timeout)
+        while !cond() {
+            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    func device(_ url: String) -> SyncClient {
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
+        c.pushDelay = 0.05
+        c.maxRetryDelay = 0.3
+        c.setServer(url)
+        return c
+    }
+
+    func signedIn(_ server: FakeServer, _ url: String, member: UInt64) async -> SyncClient {
+        let c = device(url)
+        await until("sign-in screen") { c.needsSignIn }
+        c.signIn(.invite(code: server.invite(member: member), email: nil, newPassword: nil))
+        await until("signed in as \(member)") { c.canEdit && c.state.isConnected && c.me == member }
+        return c
+    }
+
+    /// Messages a Mac brought in from a Slack export are old history: no
+    /// notification and no unread count, like the Mac (src/app/notify.rs).
+    func testImportedMessagesDontNotifyOrCountAsUnread() {
+        let now: Int64 = 1_800_000_000
+        func msg(_ id: UInt64, imported: String? = nil, replies: [JSON] = []) -> JSON {
+            var m: JSON = ["id": .id(id), "author": 2, "text": .string("m\(id)"), "ts": .int(now - 10), "replies": .array(replies)]
+            if let imported { m["imported"] = .string(imported) }
+            return m
+        }
+        let before: JSON = ["channels": [["id": 1, "messages": []]], "extra": ["sync": SyncMeta().json]]
+        let after: JSON = [
+            "channels": [["id": 1, "last_read": .int(now - 100), "messages": [
+                msg(10, imported: "slack:C1:1800000000.000100", replies: [msg(11, imported: "slack:C1:1800000000.000200"), msg(12)]),
+                msg(13),
+                msg(14, imported: "slack:C1:1800000000.000300"),
+                ["id": 15, "author": 2, "text": "null field", "ts": .int(now - 5), "imported": .null],
+            ]]],
+            "extra": ["sync": SyncMeta().json],
+        ]
+        let fresh = SyncClient.newMessages(before: before, after: after, me: 1, now: now)
+        XCTAssertEqual(fresh.map(\.id), [12, 13, 15], "a new reply under imported history still notifies; imported ones don't")
+        let ch = WorkspaceView(after).channels[0]
+        XCTAssertEqual(ch.unread(me: 1), 2, "imported history isn't unread")
+        XCTAssertEqual(ch.messages.map(\.imported), [true, false, true, false])
+        XCTAssertEqual(ch.messages[0].replies.map(\.imported), [true, false])
+    }
+
+    /// An imported message arriving from the server doesn't notify, and the
+    /// field stays as it came through this iPhone's own changes.
+    func testImportedMessageFromTheServerStaysQuietAndKeepsItsField() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
+        defer { server.stop() }
+        let c = device(url)
+        c.setMe(1)
+        var heard: [IncomingMessage] = []
+        c.onIncoming = { heard += $0 }
+        await until("connected") { c.state.isConnected && c.data != nil }
+
+        var snap = server.current!
+        let key = "slack:C024BE91L:\(nowTs()).000100"
+        _ = snap.updateItem(at: "channels", id: 301) { ch in
+            var msgs = ch["messages"]?.array ?? []
+            msgs.append(["id": .id(990_001), "author": 2, "text": "From Slack", "ts": .int(nowTs()), "pinned": false,
+                         "reactions": [], "replies": [], "attachments": [], "imported": .string(key)])
+            msgs.append(["id": .id(990_002), "author": 2, "text": "Written now", "ts": .int(nowTs()), "pinned": false,
+                         "reactions": [], "replies": [], "attachments": []])
+            ch["messages"] = .array(msgs)
+        }
+        server.replace(snap)
+        await until("the new message heard") { heard.contains { $0.text == "Written now" } }
+        XCTAssertFalse(heard.contains { $0.text == "From Slack" })
+
+        // a reaction from here goes back with the import mark untouched
+        XCTAssertTrue(c.edit { d, me in _ = Edits.toggleReaction(&d, channel: 301, message: 990_001, emoji: "👍", me: me) })
+        await until("pushed") { c.waitingCount == 0 && server.current!.serialized().contains("👍") }
+        let m = server.current!["channels"]?.array?.first { $0["id"]?.uint == 301 }?["messages"]?.array?.first { $0["id"]?.uint == 990_001 }
+        XCTAssertEqual(m?["imported"], .string(key))
+        XCTAssertTrue(c.view.channels.first { $0.id == 301 }?.messages.first { $0.id == 990_001 }?.imported ?? false)
+    }
+
+    /// Two admins change the same person at once: the answer the server
+    /// works out after the change shows the other admin's role. It still
+    /// answers the request, so a later refusal lands on its own request.
+    func testRoleChangeRacingAnotherAdminStillSettles() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
+        defer { server.stop() }
+        let owner = await signedIn(server, url, member: 1)
+        owner.requestAccessList()
+        await until("listed") { owner.people != nil && owner.adminPending == 0 }
+
+        // the owner makes Sam an admin; another admin makes Sam a member
+        // again just before the answer is worked out
+        server.meddleBeforeNextAnswer(member: 3, role: .member)
+        owner.setRole(member: 3, role: .admin)
+        await until("answered") { owner.adminPending == 0 }
+        XCTAssertEqual(owner.people?.first { $0.member == 3 }?.role, .member, "the other admin's change came last")
+        XCTAssertNil(owner.adminUnconfirmed)
+
+        // a refusal afterwards is its own request's, nothing left over takes it
+        owner.revoke(member: 1)
+        await until("refused") { owner.adminError != nil }
+        XCTAssertEqual(owner.adminError, "The owner's access can't be removed.")
+        XCTAssertEqual(owner.adminPending, 0)
+        XCTAssertNil(owner.notice)
+
+        // and the next role change goes through as usual
+        owner.setRole(member: 2, role: .admin)
+        await until("Alex is an admin") { owner.adminPending == 0 && owner.people?.first { $0.member == 2 }?.role == .admin }
+        XCTAssertNil(owner.adminUnconfirmed)
+    }
+
+    /// A request whose answer never comes is given up on after a while,
+    /// with a gentle note, so it can't take a later request's refusal.
+    func testUnansweredRequestIsDroppedWithANote() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
+        defer { server.stop() }
+        let owner = await signedIn(server, url, member: 1)
+        owner.askTimeout = 0.4
+        owner.requestAccessList()
+        await until("listed") { owner.people != nil && owner.adminPending == 0 }
+
+        server.dropNextAnswer()
+        owner.setRole(member: 3, role: .admin)
+        XCTAssertEqual(owner.adminPending, 1)
+        await until("given up", timeout: 3) { owner.adminPending == 0 }
+        XCTAssertEqual(owner.adminUnconfirmed, SyncClient.unconfirmedNote)
+        XCTAssertNil(owner.adminError)
+
+        // a later refusal is its own request's
+        owner.revoke(member: 1)
+        XCTAssertNil(owner.adminUnconfirmed, "a new request starts afresh")
+        await until("refused") { owner.adminError != nil }
+        XCTAssertEqual(owner.adminError, "The owner's access can't be removed.")
+        XCTAssertEqual(owner.adminPending, 0)
+
+        // invites and restores may take longer (email, a whole workspace)
+        owner.asks = [.invite(member: 2), .setRole(member: 3, role: .admin)]
+        owner.expireAsks(now: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(owner.asks, [.invite(member: 2)])
+        owner.expireAsks(now: Date().addingTimeInterval(2))
+        XCTAssertEqual(owner.adminPending, 0)
+
+        // a password change that gets no answer stops spinning
+        owner.asks = [.password]
+        owner.accountRequest = .sending
+        owner.clearAdminMessages()
+        owner.expireAsks(now: Date().addingTimeInterval(1))
+        XCTAssertEqual(owner.accountRequest, .failed(SyncClient.passwordUnconfirmed))
+        XCTAssertNil(owner.adminUnconfirmed, "not an admin request")
     }
 }

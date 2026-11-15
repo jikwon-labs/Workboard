@@ -41,6 +41,7 @@ struct PeopleView: View {
                         .accessibilityIdentifier("adminError")
                 }
             }
+            AdminUnconfirmedNote()
         }
         .navigationTitle("People")
         .onAppear {
@@ -194,6 +195,7 @@ struct BackupsView: View {
                         .accessibilityIdentifier("adminError")
                 }
             }
+            AdminUnconfirmedNote()
         }
         .navigationTitle("Backups")
         .onAppear {
@@ -275,4 +277,20 @@ struct TrashView: View {
 
 extension String {
     var nilIfBlank: String? { trimmingCharacters(in: .whitespaces).isEmpty ? nil : self }
+}
+
+/// Said when the server didn't answer an access or backup request in time:
+/// not an error, the change may well have been made.
+struct AdminUnconfirmedNote: View {
+    @Environment(SyncClient.self) private var client
+
+    var body: some View {
+        if let n = client.adminUnconfirmed {
+            Section {
+                Label(n, systemImage: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("adminUnconfirmed")
+            }
+        }
+    }
 }

@@ -179,7 +179,7 @@ public final class SyncClient {
     public var signingIn: Bool { pendingSignIn != nil }
     /// A request the server turned down (error code "denied"), shown briefly.
     public private(set) var notice: String?
-    public private(set) var accountRequest: AccountRequest = .idle
+    public internal(set) var accountRequest: AccountRequest = .idle
     /// Bumped every time a snapshot from the server is merged in.
     public private(set) var updatesReceived = 0
     /// Bumped every time a copy is pushed.
@@ -194,16 +194,26 @@ public final class SyncClient {
     public internal(set) var backups: [Backup]?
     /// The newest invite code made here, with where it was emailed.
     public internal(set) var lastInvite: InviteResult?
-    /// Requests whose answers are on their way, oldest first. The server
-    /// answers each request on a connection in the order they were sent,
-    /// so a refusal belongs to the oldest one (see `settle`).
-    public internal(set) var asks: [PendingAsk] = []
+    /// Requests whose answers are on their way, oldest first, with when
+    /// they were sent. The server answers each request on a connection in
+    /// the order they were sent, so a refusal belongs to the oldest one
+    /// (see `settle`); one that waits longer than `askTimeout` is dropped.
+    var asked: [WaitingAsk] = []
+    /// The requests in `asked` (tests set it to start from a known list).
+    public internal(set) var asks: [PendingAsk] {
+        get { asked.map(\.ask) }
+        set { asked = newValue.map { WaitingAsk(ask: $0, sent: Date()) } }
+    }
+    /// Seconds to wait for an answer (longer for invites and restores).
+    @ObservationIgnored public var askTimeout: TimeInterval = 15
     /// Access or backup requests on their way.
-    public var adminPending: Int { asks.filter(\.isAdmin).count }
+    public var adminPending: Int { asked.filter(\.ask.isAdmin).count }
     /// The last access or backup request the server turned down.
     public internal(set) var adminError: String?
     /// Said after a restore ("Restored the team's workspace to ...").
     public internal(set) var adminNotice: String?
+    /// Said when an access or backup request got no answer in time.
+    public internal(set) var adminUnconfirmed: String?
 
     public var me: UInt64? { settings.me }
     /// Changes made here that the server has not shown back yet.
@@ -519,7 +529,7 @@ public final class SyncClient {
         if settings.accountEmail != nil, (oldPassword ?? "").isEmpty { return "Type your current password." }
         guard state.isConnected, let ws = socket else { return "Connect to the server first." }
         accountRequest = .sending
-        asks.append(.password)
+        wait(for: .password)
         send(.setPassword(email: e, password: password, oldPassword: oldPassword), on: ws)
         return nil
     }
@@ -602,7 +612,7 @@ public final class SyncClient {
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         // answers to what was asked on that connection won't come
-        asks = []
+        asked = []
     }
 
     func send(_ m: ClientMessage, on ws: URLSessionWebSocketTask) {
@@ -740,11 +750,11 @@ public final class SyncClient {
             let m = message.isEmpty ? "The server turned that down." : message
             // the answer to the oldest request still waiting; with none
             // waiting it's a refusal of its own, shown briefly
-            guard !asks.isEmpty else {
+            guard !asked.isEmpty else {
                 notice = m
                 return
             }
-            if asks.removeFirst() == .password {
+            if asked.removeFirst().ask == .password {
                 accountRequest = .failed(m)
             } else {
                 adminError = m
@@ -831,7 +841,8 @@ public final class SyncClient {
     /// Messages and replies by others that are in `after` but not in
     /// `before`, written within `notifyWindowSecs` of `now` (seconds), and
     /// not brought back from Trash: the server's push rule (push::notes),
-    /// with a shorter age limit.
+    /// with a shorter age limit. Messages a Mac brought in from a Slack
+    /// export (`imported`) are old history, not news (src/app/notify.rs).
     nonisolated static func newMessages(before: JSON, after: JSON, me: UInt64?, now: Int64) -> [IncomingMessage] {
         func ids(_ d: JSON) -> Set<UInt64> {
             var s = Set<UInt64>()
@@ -852,6 +863,7 @@ public final class SyncClient {
             let ch = c["id"]?.uint ?? 0
             let backAt = revived[ch].map(secs)
             func news(_ m: JSON) -> Bool {
+                if MessageView.isImported(m) { return false }
                 let ts = secs(m["ts"]?.int ?? 0)
                 if let id = m["id"]?.uint, revived[id] != nil { return false }
                 if let at = backAt, ts < at - restoredSlackSecs { return false }

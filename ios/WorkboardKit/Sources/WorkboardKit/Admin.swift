@@ -24,8 +24,11 @@ public struct InviteResult: Equatable, Sendable {
 
 /// A request sent to the server whose answer hasn't come yet. The server
 /// answers the requests on one connection one by one, in order, but it also
-/// sends access lists nobody asked for (after anyone's change) and refusals
-/// of pushed changes, so each answer is matched to what it can answer.
+/// sends access lists nobody asked for (after anyone's change, the asker's
+/// own included) and refusals of pushed changes, so each answer is matched
+/// to the kind of request it can answer, never to what it shows: an answer
+/// is worked out after the change, so another admin's change to the same
+/// person can already be in it.
 public enum PendingAsk: Equatable, Sendable {
     case password
     case accessList
@@ -37,19 +40,32 @@ public enum PendingAsk: Equatable, Sendable {
 
     public var isAdmin: Bool { self != .password }
 
-    /// Whether `m` is this request's answer. An access list answers a
-    /// role change only when it shows that role, and a removal only when it
-    /// shows the person without access; a plain member's request is turned
-    /// down, so the empty list a member gets is never its answer.
+    /// Asks the server answers with an access list (Hub::request answers
+    /// set_role and revoke with access_for).
+    var wantsAccess: Bool {
+        switch self {
+        case .accessList, .setRole, .revoke: return true
+        default: return false
+        }
+    }
+
+    /// How long to wait for the answer before giving up on it: making a
+    /// code may email it and a restore puts a whole workspace back, so
+    /// those get longer.
+    func patience(_ base: TimeInterval) -> TimeInterval {
+        switch self {
+        case .invite, .restore: return base * 4
+        default: return base
+        }
+    }
+
+    /// Whether `m` is of the kind that answers this request. Invites and
+    /// restores say which one they answer (only the asker gets them).
     func answered(by m: ServerMessage) -> Bool {
         switch (self, m) {
         case (.password, .account): return true
         case let (.invite(who), .invite(member, _, _, _)): return who == member
-        case let (.accessList, .access(_, role)): return role.manages
-        case let (.setRole(who, r), .access(people, role)):
-            return role.manages && (people.first { $0.member == who }.map { $0.role == r } ?? true)
-        case let (.revoke(who), .access(people, role)):
-            return role.manages && (people.first { $0.member == who }.map { $0.devices == 0 && !$0.account && $0.invite == nil } ?? true)
+        case (.accessList, .access), (.setRole, .access), (.revoke, .access): return true
         case (.backups, .backups): return true
         case let (.restore(name), .restored(n)): return name == n
         default: return false
@@ -63,6 +79,12 @@ public enum PendingAsk: Equatable, Sendable {
         default: return false
         }
     }
+}
+
+/// A request on its way, with when it was sent.
+struct WaitingAsk: Equatable, Sendable {
+    var ask: PendingAsk
+    var sent: Date
 }
 
 /// What someone with `role` may do to `person` (the server's rules).
@@ -129,25 +151,59 @@ extension SyncClient {
     public func clearAdminMessages() {
         adminError = nil
         adminNotice = nil
+        adminUnconfirmed = nil
     }
+
+    /// Said when the server didn't answer a request in time.
+    nonisolated static let unconfirmedNote = "The server didn't confirm that in time. What you see here is the latest it sent; check again in a moment."
+    nonisolated static let passwordUnconfirmed = "The server didn't answer in time. Check your connection and try again."
 
     private func adminSend(_ m: ClientMessage, _ ask: PendingAsk) {
         adminError = nil
+        adminUnconfirmed = nil
         guard state.isConnected, let ws = socket else {
             adminError = "Connect to the server first."
             return
         }
-        asks.append(ask)
+        wait(for: ask)
         send(m, on: ws)
     }
 
-    /// Take the request `m` answers off the waiting list. Only the oldest
-    /// can be answered (answers come in order), except that an answer
-    /// only ever sent to the asker shows the ones before it were answered
-    /// too (by access lists that didn't look like their answers).
+    /// Put `ask` on the waiting list and give up on it if no answer comes
+    /// in time, so a lost answer can't take a later request's refusal.
+    func wait(for ask: PendingAsk) {
+        asked.append(WaitingAsk(ask: ask, sent: Date()))
+        let wait = ask.patience(askTimeout)
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64((wait + 0.05) * 1_000_000_000))
+            self?.expireAsks()
+        }
+    }
+
+    /// Drop the requests that waited too long, with a gentle note: the
+    /// change may well have been made, but the answer never came.
+    func expireAsks(now: Date = Date()) {
+        let late = asked.filter { now.timeIntervalSince($0.sent) >= $0.ask.patience(askTimeout) }
+        guard !late.isEmpty else { return }
+        asked.removeAll { late.contains($0) }
+        if late.contains(where: { $0.ask == .password }), accountRequest == .sending {
+            accountRequest = .failed(Self.passwordUnconfirmed)
+        }
+        if late.contains(where: \.ask.isAdmin) { adminUnconfirmed = Self.unconfirmedNote }
+    }
+
+    /// Take the request `m` answers off the waiting list. Answers come in
+    /// order, so an access list answers the oldest request only when that
+    /// one asked for one (otherwise it was sent unasked after someone's
+    /// change); what the list shows doesn't matter. An answer only ever
+    /// sent to the asker also shows the ones before it were answered.
     func settle(_ m: ServerMessage) {
-        guard let i = asks.firstIndex(where: { $0.answered(by: m) }) else { return }
-        if i == 0 || PendingAsk.onlyAnswers(m) { asks.removeFirst(i + 1) }
+        if PendingAsk.onlyAnswers(m) {
+            guard let i = asked.firstIndex(where: { $0.ask.answered(by: m) }) else { return }
+            asked.removeFirst(i + 1)
+        } else if let first = asked.first, first.ask.wantsAccess, first.ask.answered(by: m) {
+            asked.removeFirst()
+        }
     }
 
     /// The server's answers (and the access lists it sends unasked after
@@ -187,8 +243,9 @@ extension SyncClient {
         people = nil
         backups = nil
         lastInvite = nil
-        asks.removeAll { $0.isAdmin }
+        asked.removeAll { $0.ask.isAdmin }
         adminError = nil
         adminNotice = nil
+        adminUnconfirmed = nil
     }
 }

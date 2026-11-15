@@ -249,8 +249,16 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     public let attachments: [AttachmentView]
     /// When its author last changed the text.
     public let edited: Int64?
+    /// Brought in from a Slack export by a Mac (`imported` holds where it
+    /// came from): old history, so it doesn't notify or count as unread.
+    public let imported: Bool
+
+    /// Message::imported: set once by the import and never cleared; the
+    /// field itself stays in the JSON as it came.
+    static func isImported(_ j: JSON) -> Bool { j["imported"]?.string != nil }
 
     init(_ j: JSON) {
+        imported = Self.isImported(j)
         attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }
@@ -293,9 +301,10 @@ public struct ChannelView: Identifiable, Hashable, Sendable {
         lastRead = j["last_read"]?.int ?? 0
     }
 
-    /// Messages from others newer than this person's read position.
+    /// Messages from others newer than this person's read position
+    /// (imported history isn't new to anyone).
     public func unread(me: UInt64) -> Int {
-        messages.filter { $0.author != me && $0.ts > lastRead }.count
+        messages.filter { $0.author != me && !$0.imported && $0.ts > lastRead }.count
     }
 }
 

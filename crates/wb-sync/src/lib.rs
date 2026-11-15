@@ -170,16 +170,34 @@ pub fn random_u64() -> u64 {
     h.finish()
 }
 
+/// An item's id. 0 is no id: apps leave an id out of the file until one is
+/// given (a stroke just drawn), and one written as 0 means the same.
 fn id_of(v: &Value) -> Option<u64> {
-    v.get("id")?.as_u64()
+    v.get("id")?.as_u64().filter(|i| *i != 0)
 }
 
-/// A non-empty array whose entries are all objects with an id.
+/// A non-empty array of objects of which at least one has an id: its
+/// entries with ids are items, merged one by one. Entries without one (a
+/// stroke drawn before it got its id) don't make the others any less items;
+/// they stay as they are (`loose_entries`), part of the item the array sits
+/// in.
 fn is_id_array(v: &Value) -> bool {
     match v.as_array() {
-        Some(a) => !a.is_empty() && a.iter().all(|x| x.is_object() && id_of(x).is_some()),
+        Some(a) => {
+            !a.is_empty() && a.iter().all(|x| x.is_object()) && a.iter().any(|x| id_of(x).is_some())
+        }
         None => false,
     }
+}
+
+/// The entries without an id in an array of items (see `is_id_array`).
+fn loose_entries(v: &Value) -> Vec<Value> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|x| id_of(x).is_none())
+        .cloned()
+        .collect()
 }
 
 fn get_path<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
@@ -209,7 +227,15 @@ fn own_hash(obj: &Map<String, Value>) -> u64 {
         if LOCAL_KEYS.contains(&k.as_str()) {
             continue;
         }
-        if v.as_array().map(|a| a.is_empty()).unwrap_or(false) || is_id_array(v) {
+        if v.as_array().map(|a| a.is_empty()).unwrap_or(false) {
+            continue;
+        }
+        if is_id_array(v) {
+            // entries without an id are the item's own
+            let loose = loose_entries(v);
+            if !loose.is_empty() {
+                own.insert(k.clone(), Value::Array(loose));
+            }
             continue;
         }
         own.insert(k.clone(), v.clone());
@@ -226,6 +252,28 @@ const TIMER_KEYS: &[&str] = &["timer_started", "timer_by", "timers"];
 
 fn is_empty_arr(v: &Value) -> bool {
     v.as_array().is_some_and(|a| a.is_empty())
+}
+
+/// The parts of a `time_entries` field: one per entry, named by whose it is
+/// and when it started ("time_entries/<member>/<start>", with "/<n>" for
+/// the n-th repeat), so two people stopping their timers at once both keep
+/// their entry and a deleted one stays deleted. None when it isn't a list
+/// of entries.
+fn entry_parts(v: &Value) -> Option<Vec<(String, Value)>> {
+    let mut out = vec![];
+    let mut seen: HashMap<(u64, i64), usize> = HashMap::new();
+    for e in v.as_array()? {
+        let start = e.as_object()?.get("start")?.as_i64()?;
+        let member = e.get("member").and_then(|m| m.as_u64()).unwrap_or(0);
+        let n = seen.entry((member, start)).or_insert(0);
+        let name = match *n {
+            0 => format!("time_entries/{}/{}", member, start),
+            k => format!("time_entries/{}/{}/{}", member, start, k),
+        };
+        *n += 1;
+        out.push((name, e.clone()));
+    }
+    Some(out)
 }
 
 /// The (emoji, member) pairs of a `reactions` field, in order. None when it
@@ -273,8 +321,11 @@ fn timer_list(obj: &Map<String, Value>) -> Vec<(u64, i64, bool)> {
 
 /// The parts of an item's own fields with their values (see
 /// `SyncMeta::fields`): every field except personal ones, ever-growing
-/// ones and the items inside it, with reactions and running timers split
-/// into one part per element. An empty list counts as no field.
+/// ones and the items inside it, with reactions (per emoji and person),
+/// time entries (per person and start), custom field values (per field)
+/// and running timers (per person) split into one part per element, so
+/// each merges on its own. An empty list counts as no field. For a list of items, its
+/// entries without an id are a part named after the field.
 fn parts_of(obj: &Map<String, Value>) -> Vec<(String, Value)> {
     let mut out = vec![];
     for (k, v) in obj {
@@ -283,14 +334,34 @@ fn parts_of(obj: &Map<String, Value>) -> Vec<(String, Value)> {
             || APPEND_KEYS.contains(&k)
             || TIMER_KEYS.contains(&k)
             || is_empty_arr(v)
-            || is_id_array(v)
         {
+            continue;
+        }
+        if is_id_array(v) {
+            let loose = loose_entries(v);
+            if !loose.is_empty() {
+                out.push((k.to_string(), Value::Array(loose)));
+            }
             continue;
         }
         if k == "reactions" {
             if let Some(pairs) = reaction_pairs(v) {
                 for (e, u) in pairs {
                     out.push((format!("reactions/{}/{}", e, u), Value::Bool(true)));
+                }
+                continue;
+            }
+        }
+        if k == "time_entries" {
+            if let Some(parts) = entry_parts(v) {
+                out.extend(parts);
+                continue;
+            }
+        }
+        if k == "custom" {
+            if let Some(o) = v.as_object() {
+                for (key, x) in o {
+                    out.push((format!("custom/{}", key), x.clone()));
                 }
                 continue;
             }
@@ -440,6 +511,35 @@ pub fn carry_hashes(meta: &mut SyncMeta, legacy: &Value, current: &Value) {
     }
 }
 
+/// For a copy saved before field fingerprints were kept (`SyncMeta::v`
+/// below 3): the fingerprints of each field of every item that hasn't
+/// changed since the last save, so the next change to one of them is noted
+/// field by field (a field emptied, like the last attachment removed,
+/// then stays empty) instead of as a change to the whole item. Items
+/// changed since stay as they were. True when anything was filled in.
+pub fn fill_field_hashes(meta: &mut SyncMeta, data: &Value) -> bool {
+    if meta.hashes.is_empty() {
+        return false;
+    }
+    let cur = fingerprints(data);
+    // fingerprints from before an item's place counted (see `stamp`)
+    let flat = (meta.v < 1).then(|| fingerprints_with(data, false));
+    let mut filled = false;
+    for (id, parts) in part_hashes(data) {
+        if meta.field_hashes.contains_key(&id) {
+            continue;
+        }
+        let Some(old) = meta.hashes.get(&id) else {
+            continue;
+        };
+        if cur.get(&id) == Some(old) || flat.as_ref().is_some_and(|f| f.get(&id) == Some(old)) {
+            meta.field_hashes.insert(id, parts);
+            filled = true;
+        }
+    }
+    filled
+}
+
 /// An item's own fields changed at `next` (it last changed at `before`):
 /// note which ones in its field stamps. Without fingerprints of its fields
 /// from the last save there's no telling which, so all of them did.
@@ -475,6 +575,52 @@ fn note_fields(
         e.insert(p, next);
     }
     tidy_fields(e, |p| now_parts.contains_key(p), base, next);
+}
+
+/// Fields split into parts since field stamps began (all but reactions):
+/// fingerprints from before have one part for the whole field.
+const SPLIT_LATER: &[&str] = &["time_entries", "custom"];
+
+/// Fingerprints saved before time entries and custom field values were
+/// split into parts have one for the whole field: when it still matches,
+/// it is swapped for today's parts, so the new way of splitting alone
+/// doesn't count as a change to every element.
+fn upgrade_split_hashes(
+    meta: &mut SyncMeta,
+    data: &Value,
+    parts: &BTreeMap<u64, BTreeMap<String, u32>>,
+) {
+    if !meta
+        .field_hashes
+        .values()
+        .any(|e| SPLIT_LATER.iter().any(|k| e.contains_key(*k)))
+    {
+        return;
+    }
+    let field_hashes = &mut meta.field_hashes;
+    visit(data, &mut |id, _, obj| {
+        let Some(old) = field_hashes.get_mut(&id) else {
+            return;
+        };
+        let now = parts.get(&id);
+        for k in SPLIT_LATER {
+            let Some(h) = old.get(*k).copied() else {
+                continue;
+            };
+            // a value that doesn't split is still one part
+            if now.is_some_and(|p| p.contains_key(*k)) {
+                continue;
+            }
+            if obj.get(*k).is_some_and(|v| part_hash(v) == h) {
+                old.remove(*k);
+                for (p, ph) in now.into_iter().flatten() {
+                    if part_field(p) == *k && p.len() > k.len() {
+                        old.insert(p.clone(), *ph);
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Leave out what an entry of field stamps doesn't need: fields that are
@@ -577,6 +723,7 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     shrink_moved(&mut meta.moved, data);
     meta.v = META_V;
     let parts = part_hashes(data);
+    upgrade_split_hashes(meta, data, &parts);
     for (id, h) in &cur {
         let next = meta.stamps.get(id).map_or(now, |s| now.max(s + 1));
         match meta.hashes.get(id) {
@@ -760,13 +907,33 @@ fn read_part(
     present: bool,
     in_vec: &std::collections::HashSet<u64>,
 ) -> Option<i64> {
-    if let Some(t) = sd.listed.and_then(|e| e.get(part)) {
-        return Some(*t);
+    if let Some(e) = sd.listed {
+        if let Some(t) = e.get(part) {
+            return Some(*t);
+        }
+        // a stamp for a whole field from before it was split stands for
+        // each of its elements
+        if let Some((f, _)) = part.split_once('/') {
+            if let Some(t) = e.get(f) {
+                return Some(*t);
+            }
+        }
     }
     let counts = present
         || match part.split_once('/') {
             Some(("reactions", _)) => {
                 sd.omits || sd.obj.get("reactions").is_some_and(|v| !is_empty_arr(v))
+            }
+            Some(("time_entries", _)) => {
+                sd.omits || sd.obj.get("time_entries").is_some_and(|v| !is_empty_arr(v))
+            }
+            Some(("custom", _)) => {
+                sd.omits
+                    || sd
+                        .obj
+                        .get("custom")
+                        .and_then(|v| v.as_object())
+                        .is_some_and(|o| !o.is_empty())
             }
             Some(("timers", m)) => {
                 let m: u64 = m.parse().unwrap_or(0);
@@ -780,18 +947,25 @@ fn read_part(
     counts.then_some(sd.base)
 }
 
+/// What `merge_fields` decided: the fields, the field names it decided
+/// (ones it left out stay out), and for lists of items the entries without
+/// an id that go after the merged items.
+type Merged = (
+    Map<String, Value>,
+    std::collections::HashSet<String>,
+    HashMap<String, Value>,
+);
+
 /// Merge the own fields of one item's copies part by part (see
 /// `SyncMeta::fields`): for each part the copy that set it last wins.
 /// `stamp` is the item's merged stamp, `newest` the newest copy's fields.
-/// Returns the fields and the field names it decided (ones it left out
-/// stay out).
 fn merge_fields<'a>(
     cx: &mut Ctx<'a>,
     id: u64,
     list: &[(usize, &'a Value)],
     stamp: i64,
     newest: &Map<String, Value>,
-) -> (Map<String, Value>, std::collections::HashSet<String>) {
+) -> Merged {
     use std::collections::HashSet;
     // fields holding items in any copy merge as items
     let child: HashSet<&str> = list
@@ -811,9 +985,10 @@ fn merge_fields<'a>(
             let listed = cx.fields[c.0].get(&id);
             Some(Side {
                 obj,
+                // a list of items keeps only its entries without an id here
                 parts: parts_of(obj)
                     .into_iter()
-                    .filter(|(p, _)| !child.contains(part_field(p)))
+                    .filter(|(p, _)| !child.contains(part_field(p)) || child.contains(p.as_str()))
                     .collect(),
                 base: listed.and_then(|e| e.get("")).copied().unwrap_or(s),
                 listed,
@@ -837,7 +1012,12 @@ fn merge_fields<'a>(
             }
         }
         for p in sd.listed.into_iter().flat_map(|e| e.keys()) {
-            if !p.is_empty() && !child.contains(part_field(p)) && seen.insert(p.as_str()) {
+            // (a whole split field's stamp is read for each of its elements)
+            if !p.is_empty()
+                && (!child.contains(part_field(p)) || child.contains(p.as_str()))
+                && !SPLIT_LATER.contains(&p.as_str())
+                && seen.insert(p.as_str())
+            {
                 order.push(p);
             }
         }
@@ -852,6 +1032,9 @@ fn merge_fields<'a>(
     let mut decided: HashSet<String> = HashSet::new();
     let mut reactions: Vec<(String, u64)> = vec![];
     let mut timers: Vec<(u64, i64)> = vec![];
+    let mut entries: Vec<(&str, Value)> = vec![];
+    let mut custom = Map::new();
+    let mut loose = HashMap::new();
     for p in order {
         let mut win: Option<(i64, &Side, Option<&Value>)> = None;
         for sd in &sides {
@@ -867,6 +1050,13 @@ fn merge_fields<'a>(
         if any_entry && (val.is_none() || t != base_out) {
             entry.insert(p.to_string(), t);
         }
+        if child.contains(p) {
+            // the entries without an id of a list of items
+            if let Some(v) = val {
+                loose.insert(p.to_string(), v.clone());
+            }
+            continue;
+        }
         match p.split_once('/') {
             Some(("reactions", rest)) => {
                 decided.insert("reactions".into());
@@ -874,6 +1064,18 @@ fn merge_fields<'a>(
                     if let Ok(u) = u.parse() {
                         reactions.push((e.to_string(), u));
                     }
+                }
+            }
+            Some(("time_entries", _)) => {
+                decided.insert("time_entries".into());
+                if let Some(v) = val {
+                    entries.push((p, v.clone()));
+                }
+            }
+            Some(("custom", key)) => {
+                decided.insert("custom".into());
+                if let Some(v) = val {
+                    custom.insert(key.to_string(), v.clone());
                 }
             }
             Some(("timers", _)) => {
@@ -904,6 +1106,9 @@ fn merge_fields<'a>(
         }
     }
     if decided.contains("reactions") {
+        // the same order on every device, whatever order the copies had
+        // them in: by emoji, then by person
+        reactions.sort();
         let mut out: Vec<(String, Vec<u64>)> = vec![];
         for (e, u) in reactions {
             match out.iter_mut().find(|(x, _)| *x == e) {
@@ -947,13 +1152,34 @@ fn merge_fields<'a>(
             obj.insert("timers".into(), Value::Array(rest));
         }
     }
+    if decided.contains("time_entries") {
+        // the same order everywhere: by start, then whose
+        let key = |v: &Value| {
+            (
+                v.get("start").and_then(|s| s.as_i64()).unwrap_or(0),
+                v.get("member").and_then(|m| m.as_u64()).unwrap_or(0),
+            )
+        };
+        entries.sort_by(|(p, a), (q, b)| key(a).cmp(&key(b)).then_with(|| p.cmp(q)));
+        if !entries.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("time_entries")) {
+            obj.insert(
+                "time_entries".into(),
+                Value::Array(entries.into_iter().map(|(_, v)| v).collect()),
+            );
+        }
+    }
+    if decided.contains("custom")
+        && (!custom.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("custom")))
+    {
+        obj.insert("custom".into(), Value::Object(custom));
+    }
     if any_entry {
         if base_out != stamp {
             entry.insert(String::new(), base_out);
         }
         cx.out_fields.insert(id, entry);
     }
-    (obj, decided)
+    (obj, decided, loose)
 }
 
 /// Merge one array of items. `parent` is the item it sits in (None at the
@@ -1015,7 +1241,7 @@ fn merge_arr<'a>(
             }
         }
         // own fields first, field by field (see `merge_fields`)
-        let (mut obj, decided) = merge_fields(cx, id, list, best_stamp, wobj);
+        let (mut obj, decided, loose) = merge_fields(cx, id, list, best_stamp, wobj);
         for k in keys {
             if decided.contains(k.as_str()) || obj.contains_key(&k) {
                 continue;
@@ -1029,7 +1255,12 @@ fn merge_arr<'a>(
                     .iter()
                     .filter_map(|(s, v)| v.as_array().map(|a| (*s, a)))
                     .collect();
-                Value::Array(merge_arr(cx, &subs, Some(id)))
+                let mut items = merge_arr(cx, &subs, Some(id));
+                // entries without an id stay as they are, after the items
+                if let Some(Value::Array(rest)) = loose.get(&k) {
+                    items.extend(rest.iter().cloned());
+                }
+                Value::Array(items)
             } else if APPEND_KEYS.contains(&k.as_str()) {
                 let mut all: Vec<Value> = vec![];
                 for (_, v) in &vals {
@@ -1144,10 +1375,10 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         let mut cx = Ctx::new(stamps, fields, moved, tombs.clone(), revived.clone(), cands);
         let mut res = vec![];
         for (path, sources) in SHARED.iter().zip(&all) {
-            res.push((
-                path.to_string(),
-                Value::Array(merge_arr(&mut cx, sources, None)),
-            ));
+            let mut items = merge_arr(&mut cx, sources, None);
+            // this computer's entries without an id stay as they are
+            items.extend(sources[0].1.iter().filter(|x| id_of(x).is_none()).cloned());
+            res.push((path.to_string(), Value::Array(items)));
         }
         merged = res;
         out_stamps = cx.out;
@@ -1366,9 +1597,11 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
             let mut inner = false;
             for (k, v) in obj {
                 if is_id_array(v) {
-                    let sub = prune(v.as_array().unwrap(), changed, kept);
+                    let mut sub = prune(v.as_array().unwrap(), changed, kept);
+                    inner |= !sub.is_empty();
+                    // entries without an id are the item's own
+                    sub.extend(loose_entries(v));
                     if !sub.is_empty() {
-                        inner = true;
                         o.insert(k.clone(), Value::Array(sub));
                     }
                 } else {
@@ -1426,12 +1659,76 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
     Some(out)
 }
 
-/// Put the top-level items `ids` of `data` into `part` (a `delta`) whole,
-/// with their bookkeeping: for someone who may see them again after they
-/// were hidden from them.
+/// Put the items `ids` of `data` into `part` (a `delta`) whole, with
+/// everything inside them and their bookkeeping, each inside the items it
+/// sits in: for someone who may see them again after they were hidden from
+/// them. An inner item can be one of them too: a folder moved out of a
+/// space closed to them into one they see comes with the lists in it,
+/// which didn't change and so aren't in the delta otherwise.
 pub fn include_whole(part: &mut Value, data: &Value, ids: &[u64]) {
+    use std::collections::HashSet;
     if ids.is_empty() {
         return;
+    }
+    let want: HashSet<u64> = ids.iter().copied().collect();
+    let holds = |v: &Value| {
+        let mut inner = BTreeMap::new();
+        walk(v, None, false, &mut inner);
+        inner.keys().any(|i| want.contains(i))
+    };
+    // an item's own fields, without the items inside it (as `delta` has it)
+    fn shell(item: &Value) -> Value {
+        let mut o = Map::new();
+        for (k, v) in item.as_object().into_iter().flatten() {
+            if is_id_array(v) {
+                let loose = loose_entries(v);
+                if !loose.is_empty() {
+                    o.insert(k.clone(), Value::Array(loose));
+                }
+            } else {
+                o.insert(k.clone(), v.clone());
+            }
+        }
+        Value::Object(o)
+    }
+    fn put(
+        into: &mut Vec<Value>,
+        arr: &[Value],
+        want: &HashSet<u64>,
+        holds: &dyn Fn(&Value) -> bool,
+        added: &mut Vec<u64>,
+    ) {
+        for item in arr {
+            let (Some(id), Some(obj)) = (id_of(item), item.as_object()) else {
+                continue;
+            };
+            if want.contains(&id) {
+                into.retain(|x| id_of(x) != Some(id));
+                into.push(item.clone());
+                added.extend(ids_within(item));
+                continue;
+            }
+            for (k, v) in obj {
+                if !is_id_array(v) || !holds(v) {
+                    continue;
+                }
+                let at = match into.iter().position(|x| id_of(x) == Some(id)) {
+                    Some(i) => i,
+                    None => {
+                        into.push(shell(item));
+                        into.len() - 1
+                    }
+                };
+                added.push(id);
+                let host = &mut into[at];
+                if !host.get(k).is_some_and(|x| x.is_array()) {
+                    host[k.as_str()] = Value::Array(loose_entries(v));
+                }
+                if let (Some(dst), Some(src)) = (host[k.as_str()].as_array_mut(), v.as_array()) {
+                    put(dst, src, want, holds, added);
+                }
+            }
+        }
     }
     let meta = meta_of(data);
     let mut pm = meta_of(part);
@@ -1440,24 +1737,17 @@ pub fn include_whole(part: &mut Value, data: &Value, ids: &[u64]) {
         let Some(a) = get_path(data, path).and_then(|v| v.as_array()) else {
             continue;
         };
-        for item in a
-            .iter()
-            .filter(|x| id_of(x).is_some_and(|i| ids.contains(&i)))
-        {
-            if get_path(part, path).is_none_or(|v| !v.is_array()) {
-                set_path(part, path, Value::Array(vec![]));
-            }
-            let arr = get_path_mut(part, path)
-                .and_then(|v| v.as_array_mut())
-                .unwrap();
-            arr.retain(|x| id_of(x) != id_of(item));
-            arr.push(item.clone());
-            added.push(item.clone());
+        if !holds(&Value::Array(a.clone())) {
+            continue;
+        }
+        if get_path(part, path).is_none_or(|v| !v.is_array()) {
+            set_path(part, path, Value::Array(vec![]));
+        }
+        if let Some(into) = get_path_mut(part, path).and_then(|v| v.as_array_mut()) {
+            put(into, a, &want, &holds, &mut added);
         }
     }
-    let mut inner = BTreeMap::new();
-    walk(&Value::Array(added), None, false, &mut inner);
-    for id in inner.keys() {
+    for id in &added {
         if let Some(t) = meta.stamps.get(id) {
             pm.stamps.insert(*id, *t);
         }
@@ -1474,6 +1764,24 @@ pub fn include_whole(part: &mut Value, data: &Value, ids: &[u64]) {
         "extra.sync",
         serde_json::to_value(&pm).unwrap_or_default(),
     );
+}
+
+/// Every id in the top-level items `ids` of `data`: theirs and those of
+/// everything inside them.
+pub fn ids_inside(data: &Value, ids: &[u64]) -> Vec<u64> {
+    let ids: std::collections::HashSet<u64> = ids.iter().copied().collect();
+    let mut out = BTreeMap::new();
+    for path in SHARED {
+        for item in get_path(data, path)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter(|x| id_of(x).is_some_and(|i| ids.contains(&i)))
+        {
+            walk(&Value::Array(vec![item.clone()]), None, false, &mut out);
+        }
+    }
+    out.into_keys().collect()
 }
 
 /// The other people's files in a shared folder, with their change times.
@@ -1650,10 +1958,14 @@ pub fn ids_within(item: &Value) -> Vec<u64> {
 pub fn own_fields(item: &Value) -> Map<String, Value> {
     let mut own = Map::new();
     for (k, v) in item.as_object().into_iter().flatten() {
-        if LOCAL_KEYS.contains(&k.as_str())
-            || v.as_array().is_some_and(|a| a.is_empty())
-            || is_id_array(v)
-        {
+        if LOCAL_KEYS.contains(&k.as_str()) || v.as_array().is_some_and(|a| a.is_empty()) {
+            continue;
+        }
+        if is_id_array(v) {
+            let loose = loose_entries(v);
+            if !loose.is_empty() {
+                own.insert(k.clone(), Value::Array(loose));
+            }
             continue;
         }
         own.insert(k.clone(), v.clone());
@@ -3157,5 +3469,333 @@ mod tests {
         assert_eq!(ids_within(&d["spaces"][0]), vec![70, 71, 73, 74]);
         let own = own_fields(&d["spaces"][0]);
         assert!(own.contains_key("sharing") && !own.contains_key("lists"));
+    }
+
+    #[test]
+    fn a_stroke_without_an_id_leaves_the_known_strokes_alone() {
+        let stroke = |id: u64, x: f64| {
+            let mut s = json!({"color": [0, 0, 0], "width": 2.0, "points": [[x, 1.0]]});
+            if id != 0 {
+                s["id"] = json!(id);
+            }
+            s
+        };
+        let mut m = SyncMeta::default();
+        let mut a = ws(json!([]), json!([]), &m);
+        a["extra"]["whiteboards"] = json!([{"id": 50, "name": "B", "strokes": [stroke(51, 1.0), stroke(52, 2.0)], "notes": []}]);
+        stamp(&a.clone(), &mut m, 10);
+        // a stroke just drawn, before it gets its id (left out, or written as 0)
+        for fresh in [
+            stroke(0, 3.0),
+            json!({"id": 0, "color": [0, 0, 0], "width": 2.0, "points": [[4.0, 1.0]]}),
+        ] {
+            let mut m2 = m.clone();
+            let mut b = a.clone();
+            b["extra"]["whiteboards"][0]["strokes"]
+                .as_array_mut()
+                .unwrap()
+                .push(fresh.clone());
+            stamp(&b.clone(), &mut m2, 20);
+            assert!(m2.tombs.is_empty(), "nothing deleted: {:?}", m2.tombs);
+            assert!(m2.stamps.contains_key(&51) && m2.stamps.contains_key(&52));
+            assert!(m2.stamps[&50] > m.stamps[&50], "the board changed");
+        }
+    }
+
+    #[test]
+    fn entries_without_an_id_stay_beside_the_items_they_sit_with() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "things": [{"id": 5, "name": "five"}, {"id": 6, "name": "six"}]}]),
+            json!([]),
+            &ma,
+        );
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        // A adds an entry without an id; B renames item 6
+        a["tasks"][0]["things"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "loose"}));
+        save(&mut a, &mut ma, 20);
+        assert!(ma.tombs.is_empty());
+        b["tasks"][0]["things"][1]["name"] = json!("six by B");
+        b["tasks"][0]["name"] = json!("renamed by B");
+        save(&mut b, &mut mb, 30);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(
+                v["tasks"][0]["things"],
+                json!([{"id": 5, "name": "five"}, {"id": 6, "name": "six by B"}, {"name": "loose"}]),
+                "{}",
+                v["tasks"][0]
+            );
+            assert_eq!(v["tasks"][0]["name"], "renamed by B");
+        }
+        // a delta carries the entry without an id along with its item
+        let mut since = Summary::of(&b);
+        let mut mb = meta_of(&b);
+        mb.field_hashes = part_hashes(&b);
+        b["tasks"][0]["name"] = json!("again");
+        save(&mut b, &mut mb, 40);
+        let d = delta(&since, &b).unwrap();
+        assert_eq!(d["tasks"][0]["things"], json!([{"name": "loose"}]));
+        since.absorb(&d);
+        assert!(delta(&since, &b).is_none());
+    }
+
+    fn entries_of(v: &Value) -> Vec<(u64, i64, i64)> {
+        v["tasks"][0]["time_entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["member"].as_u64().unwrap_or(0),
+                    e["start"].as_i64().unwrap(),
+                    e["end"].as_i64().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn two_people_stopping_their_timers_at_once_both_keep_their_time() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "time_entries": [{"start": 1, "end": 5}]}]),
+            json!([]),
+            &ma,
+        );
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        a["tasks"][0]["time_entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"start": 100, "end": 200, "member": 1}));
+        save(&mut a, &mut ma, 20);
+        b["tasks"][0]["time_entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"start": 90, "end": 201, "member": 2}));
+        save(&mut b, &mut mb, 21);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(
+                entries_of(v),
+                vec![(0, 1, 5), (2, 90, 201), (1, 100, 200)],
+                "{}",
+                v["tasks"][0]
+            );
+        }
+        assert_eq!(a["tasks"], b["tasks"]);
+        // A deletes the old entry and fixes B's end while B renames the task
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        ma.field_hashes = part_hashes(&a);
+        mb.field_hashes = part_hashes(&b);
+        a["tasks"][0]["time_entries"] = json!([{"start": 90, "end": 150, "member": 2}, {"start": 100, "end": 200, "member": 1}]);
+        save(&mut a, &mut ma, 30);
+        b["tasks"][0]["name"] = json!("renamed");
+        save(&mut b, &mut mb, 40);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(v["tasks"][0]["name"], "renamed");
+            assert_eq!(
+                entries_of(v),
+                vec![(2, 90, 150), (1, 100, 200)],
+                "the deleted entry stays deleted: {}",
+                v["tasks"][0]
+            );
+        }
+        // the last one deleted: an empty list, not the old entries back
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        ma.field_hashes = part_hashes(&a);
+        mb.field_hashes = part_hashes(&b);
+        a["tasks"][0]["time_entries"] = json!([]);
+        save(&mut a, &mut ma, 50);
+        b["tasks"][0]["name"] = json!("again");
+        save(&mut b, &mut mb, 60);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(
+                v["tasks"][0]["time_entries"],
+                json!([]),
+                "{}",
+                v["tasks"][0]
+            );
+        }
+    }
+
+    #[test]
+    fn a_whole_field_stamp_from_an_older_app_counts_for_each_entry() {
+        // an app from before entries were split stamped "time_entries" whole
+        let mut ma = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "time_entries": [{"start": 1, "end": 5}], "custom": {"7": "x"}}]),
+            json!([]),
+            &ma,
+        );
+        save(&mut a, &mut ma, 10);
+        let mut old = a.clone();
+        old["tasks"][0]["time_entries"] = json!([{"start": 1, "end": 9}]);
+        old["tasks"][0]["custom"] = json!({"7": "y"});
+        old["extra"]["sync"] = json!({"v": 3, "stamps": {"1": 30}, "fields": {"1": {"": 10, "time_entries": 30, "custom": 30}}});
+        // A edits something else in between
+        a["tasks"][0]["name"] = json!("A");
+        save(&mut a, &mut ma, 20);
+        merge(&mut a, &[old]);
+        assert_eq!(entries_of(&a), vec![(0, 1, 9)]);
+        assert_eq!(a["tasks"][0]["custom"], json!({"7": "y"}));
+        assert_eq!(a["tasks"][0]["name"], "A");
+        // fingerprints kept from before: the new split alone is no change
+        let mut m = SyncMeta::default();
+        let t = json!([{"id": 1, "name": "t", "time_entries": [{"start": 1, "end": 5}], "custom": {"7": "x"}}]);
+        let v = ws(t, json!([]), &m);
+        stamp(&v, &mut m, 10);
+        let h = &mut m.field_hashes.get_mut(&1).unwrap();
+        h.retain(|p, _| part_field(p) != "time_entries" && part_field(p) != "custom");
+        h.insert(
+            "time_entries".into(),
+            part_hash(&json!([{"start": 1, "end": 5}])),
+        );
+        h.insert("custom".into(), part_hash(&json!({"7": "x"})));
+        let mut v2 = v.clone();
+        v2["tasks"][0]["name"] = json!("renamed");
+        stamp(&v2, &mut m, 20);
+        let e = &m.fields[&1];
+        assert!(
+            e.keys().all(|p| p == "name" || p.is_empty()),
+            "only the name changed: {:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn different_custom_fields_changed_at_once_both_stay() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(
+            json!([{"id": 1, "name": "t", "custom": {"7": "x", "8": "y"}}]),
+            json!([]),
+            &ma,
+        );
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        a["tasks"][0]["custom"]["7"] = json!("x by A");
+        save(&mut a, &mut ma, 20);
+        b["tasks"][0]["custom"]["9"] = json!("z by B");
+        save(&mut b, &mut mb, 30);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(
+                v["tasks"][0]["custom"],
+                json!({"7": "x by A", "8": "y", "9": "z by B"})
+            );
+        }
+        // one taken away while the other side changes another
+        let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+        ma.field_hashes = part_hashes(&a);
+        mb.field_hashes = part_hashes(&b);
+        a["tasks"][0]["custom"].as_object_mut().unwrap().remove("8");
+        save(&mut a, &mut ma, 40);
+        b["tasks"][0]["custom"]["9"] = json!("z again");
+        save(&mut b, &mut mb, 50);
+        swap(&mut a, &mut b);
+        for v in [&a, &b] {
+            assert_eq!(
+                v["tasks"][0]["custom"],
+                json!({"7": "x by A", "9": "z again"})
+            );
+        }
+    }
+
+    #[test]
+    fn reactions_end_up_in_the_same_order_everywhere() {
+        let mut ma = SyncMeta::default();
+        let mut a = ws(json!([]), chat(json!([])), &ma);
+        save(&mut a, &mut ma, 10);
+        let (mut b, mut mb) = (a.clone(), ma.clone());
+        a["channels"] =
+            chat(json!([{"emoji": "👍", "users": [2, 1]}, {"emoji": "❤️", "users": [3]}]));
+        save(&mut a, &mut ma, 20);
+        b["channels"] =
+            chat(json!([{"emoji": "❤️", "users": [3]}, {"emoji": "👍", "users": [1, 2]}]));
+        save(&mut b, &mut mb, 20);
+        swap(&mut a, &mut b);
+        assert_eq!(
+            a["channels"][0]["messages"][0]["reactions"],
+            b["channels"][0]["messages"][0]["reactions"]
+        );
+        assert_eq!(fingerprints(&a), fingerprints(&b));
+        assert_eq!(
+            a["channels"][0]["messages"][0]["reactions"],
+            json!([{"emoji": "❤️", "users": [3]}, {"emoji": "👍", "users": [1, 2]}])
+        );
+    }
+
+    #[test]
+    fn field_fingerprints_filled_for_an_older_file_make_an_emptied_field_stick() {
+        // a copy saved before field fingerprints were kept
+        let base = json!([{"id": 1, "name": "t", "attachments": [{"file": "x"}]}]);
+        let mut m = SyncMeta::default();
+        let v0 = ws(base.clone(), json!([]), &m);
+        stamp(&v0, &mut m, 10);
+        m.field_hashes.clear();
+        m.fields.clear();
+        m.v = 2;
+        let team = {
+            let mut t = v0.clone();
+            t["extra"]["sync"] = serde_json::to_value(&m).unwrap();
+            t
+        };
+        for fill in [false, true] {
+            let mut mine = m.clone();
+            let mut v = ws(base.clone(), json!([]), &mine);
+            if fill {
+                assert!(fill_field_hashes(&mut mine, &v));
+                assert!(mine.field_hashes.contains_key(&1));
+            }
+            // the last attachment removed before the first sync
+            v["tasks"][0].as_object_mut().unwrap().remove("attachments");
+            stamp(&v.clone(), &mut mine, 20);
+            v["extra"]["sync"] = serde_json::to_value(&mine).unwrap();
+            merge(&mut v, &[team.clone()]);
+            assert_eq!(
+                v["tasks"][0].get("attachments").is_none(),
+                fill,
+                "filled: {} {}",
+                fill,
+                v["tasks"][0]
+            );
+        }
+        // an item changed since the last save is left alone
+        let mut mine = m.clone();
+        let mut v = ws(base, json!([]), &mine);
+        v["tasks"][0]["name"] = json!("changed");
+        assert!(!fill_field_hashes(&mut mine, &v));
+    }
+
+    #[test]
+    fn a_folder_brought_back_whole_comes_with_its_lists() {
+        let mut m = SyncMeta::default();
+        let mut d = json!({"workspace": "W", "members": [], "channels": [], "tasks": [], "docs": [],
+            "spaces": [space(80, json!([folder(73, json!([list(74)]))]), json!([list(81)]))], "extra": {}});
+        stamp(&d.clone(), &mut m, 10);
+        d["extra"]["sync"] = serde_json::to_value(&m).unwrap();
+        // a delta holding the space and the folder without its list
+        let mut part = json!({"spaces": [{"id": 80, "name": "s", "folders": [{"id": 73, "name": "f"}]}], "extra": {"sync": {}}});
+        include_whole(&mut part, &d, &[73, 74]);
+        assert_eq!(part["spaces"][0]["folders"][0]["lists"][0]["id"], 74);
+        assert_eq!(part["spaces"][0]["folders"].as_array().unwrap().len(), 1);
+        let pm = meta_of(&part);
+        assert!(pm.stamps.contains_key(&73) && pm.stamps.contains_key(&74));
+        // not in the delta at all: it comes inside its space, without the rest
+        let mut part = json!({"extra": {"sync": {}}});
+        include_whole(&mut part, &d, &[74]);
+        assert_eq!(
+            part["spaces"][0]["folders"][0]["lists"],
+            json!([d["spaces"][0]["folders"][0]["lists"][0]])
+        );
+        assert!(part["spaces"][0].get("lists").is_none());
+        assert_eq!(ids_inside(&d, &[80]), vec![73, 74, 80, 81]);
     }
 }

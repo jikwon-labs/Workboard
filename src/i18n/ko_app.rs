@@ -37,7 +37,6 @@ pub const T: &[(&str, &str)] = &[
     ("Export CSV", "CSV 내보내기"),
     ("Save the tasks in this view as a CSV file", "이 보기의 작업을 CSV 파일로 저장합니다"),
     ("{} without dates", "날짜 없음 {}"),
-    ("+ Add Task", "+ 작업 추가"),
     // timeline
     ("Lanes", "레인"),
     ("Show the tasks that have no start or due date", "시작일과 마감일이 없는 작업을 보여 줍니다"),

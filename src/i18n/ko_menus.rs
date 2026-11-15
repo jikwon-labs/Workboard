@@ -89,7 +89,7 @@ pub const T: &[(&str, &str)] = &[
     ("Import from Slack", "Slack에서 가져오기"),
     ("AI Team Center", "AI 팀 센터"),
     ("AI Personal Center", "AI 개인 센터"),
-    ("{} needs an online service for AI, video or voice processing, which Workboard doesn't have. Everything else in the app works, on your own or with your team.", "{}에는 AI, 영상 또는 음성을 처리하는 온라인 서비스가 필요한데, Workboard 에는 그런 서비스가 없습니다. 그 밖의 기능은 혼자 쓸 때도, 팀과 함께 쓸 때도 모두 작동합니다."),
+    ("{} needs an online service for AI, video or voice processing, which Workboard doesn't have. Everything else in the app works, on your own or with your team.", "{}에는 AI, 영상 또는 음성을 처리하는 온라인 서비스가 필요한데, Workboard에는 그런 서비스가 없습니다. 그 밖의 기능은 혼자 쓸 때도, 팀과 함께 쓸 때도 모두 작동합니다."),
     // invite
     ("Email", "이메일"),
     ("Enter email, comma or space separated", "이메일 입력 (쉼표나 공백으로 구분)"),
@@ -271,7 +271,7 @@ pub const T: &[(&str, &str)] = &[
     // trash, switch person, dashboard
     ("Trash is empty.", "휴지통이 비어 있습니다."),
     ("Delete forever", "영구 삭제"),
-    ("Who's using the app? Everyone on this computer shares the same Workspace.", "누가 앱을 쓰고 있나요? 이 컴퓨터의 모든 사람이 같은 워크스페이스를 씁니다."),
+    ("Who's using the app? Everyone on this computer shares the same workspace.", "누가 앱을 쓰고 있나요? 이 컴퓨터의 모든 사람이 같은 워크스페이스를 씁니다."),
     ("{} (current)", "{} (현재)"),
     ("{} (invited)", "{} (초대됨)"),
     ("Shows the whole Workspace; pick a Space later from the Dashboards page.", "워크스페이스 전체를 보여 줍니다. 스페이스는 나중에 대시보드 페이지에서 고를 수 있습니다."),

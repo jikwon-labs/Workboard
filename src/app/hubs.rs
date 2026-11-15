@@ -1295,7 +1295,7 @@ impl App {
                         }
                     });
                 }
-                let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans, brainstorm feature\nconcepts, or help remote co-workers work better together!"), &[
+                let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans and brainstorm feature\nconcepts, on your own or with your team."), &[
                     ([0xb6, 0x60, 0xe0], "\u{1F465}", "Organizational Chart", "Visualize your team structure", false),
                     ([0x0f, 0x9d, 0x9f], "\u{2630}", "Action Plan", "Turn goals into actionable steps", false),
                     ([0x10, 0x90, 0xe0], "\u{27A4}", "Customer Journey Map", "Optimize every customer touchpoint", false),

@@ -2523,8 +2523,17 @@ impl App {
             }
             Modal::SwitchUser => {
                 ui.label(tr(
-                    "Who's using the app? Everyone on this computer shares the same Workspace.",
+                    "Who's using the app? Everyone on this computer shares the same workspace.",
                 ));
+                if self.data.solo() {
+                    // alone there's no one to switch to yet: say where people come from
+                    ui.label(
+                        RichText::new(tr(
+                            "Only you are in this workspace. People you invite show up here.",
+                        ))
+                        .color(t.text3),
+                    );
+                }
                 ui.add_space(4.0);
                 for m in self.data.members.clone() {
                     let ring = t.card;

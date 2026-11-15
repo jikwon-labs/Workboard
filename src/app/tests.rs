@@ -5008,9 +5008,27 @@ fn only_a_channels_maker_or_an_admin_may_delete_it() {
     assert!(a.may_manage_channel(&c));
     let mut theirs = c.clone();
     theirs.creator = 2;
+    // alone or in a shared folder, the role in People decides
+    let me = a.data.me;
+    assert!(a.may_manage_channel(&theirs), "the owner may");
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Admin".into();
+    assert!(a.may_manage_channel(&theirs), "an admin may");
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Member".into();
     assert!(
         !a.may_manage_channel(&theirs),
         "a member who didn't make it"
+    );
+    // on a server, the server's role decides (People can't be trusted there)
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    a.data.members.iter_mut().find(|m| m.id == me).unwrap().role = "Owner".into();
+    assert!(
+        !a.may_manage_channel(&theirs),
+        "a role in People alone isn't enough"
     );
     a.sync_rt.role = Some(wb_net::Role::Admin);
     assert!(a.may_manage_channel(&theirs), "the server's admins may");
@@ -5029,14 +5047,19 @@ fn only_a_channels_maker_or_an_admin_may_delete_it() {
 
 #[test]
 fn a_mention_needs_the_whole_name() {
-    use super::chat::mentions;
-    assert!(mentions("hi @Bob", "Bob"));
-    assert!(mentions("@Bob, look", "Bob"));
-    assert!(mentions("(cc @Bob)", "Bob"));
-    assert!(!mentions("hi @Bobby", "Bob"));
-    assert!(!mentions("hi @Bob", "Bo"), "@Bo is not the start of @Bob");
-    assert!(mentions("hi @Alex Kim!", "Alex Kim"));
-    assert!(!mentions("hi @Bob", ""));
+    let a = app();
+    let ids = |t: &str| crate::model::mentioned_ids(t, &a.data.members, &[]);
+    let alex = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    assert_eq!(ids("hi @Alex Kim!"), vec![alex]);
+    assert_eq!(ids("(cc @Alex Kim)"), vec![alex]);
+    assert!(ids("hi @Alex Kimberly").is_empty());
+    assert!(ids("mail@Alex Kim").is_empty());
 }
 
 #[test]
@@ -5812,4 +5835,183 @@ fn files_from_before_ids_were_kept_still_load_and_new_fields_stay_out_when_empty
         .inbox_items()
         .iter()
         .any(|i| i.assigned && i.text == "assigned to Me"));
+}
+
+#[test]
+fn search_leaves_out_other_peoples_private_dashboards_and_personal_forms() {
+    use super::more::Hit;
+    let mut a = app();
+    let me = a.data.me;
+    let lists = list_ids(&a);
+    let hits =
+        |a: &App, q: &str| -> Vec<Hit> { a.search_rows(q, 6).into_iter().map(|r| r.4).collect() };
+    a.new_dashboard("Salary plans");
+    let did = a.dash_open.unwrap();
+    fn dash(a: &mut App, did: u64) -> &mut Dashboard {
+        a.data
+            .extra
+            .dashboards
+            .iter_mut()
+            .find(|d| d.id == did)
+            .unwrap()
+    }
+    dash(&mut a, did).private = true;
+    assert!(
+        hits(&a, "salary").contains(&Hit::Dashboard(did)),
+        "my own private one shows"
+    );
+    dash(&mut a, did).owner = me + 100;
+    assert!(
+        !hits(&a, "salary").contains(&Hit::Dashboard(did)),
+        "someone else's stays out"
+    );
+    // older dashboards without a maker are everyone's
+    dash(&mut a, did).owner = 0;
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    // a public dashboard in someone else's Personal space stays out too
+    let sid = a.data.space_of_list(lists[0]).unwrap().id;
+    let d = dash(&mut a, did);
+    d.private = false;
+    d.owner = me + 100;
+    d.space = Some(sid);
+    a.data.extra.forms.push(Form {
+        id: 777_001,
+        name: "Secret survey".into(),
+        list_id: lists[0],
+        description: String::new(),
+        fields: vec![],
+        owner: me + 100,
+    });
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me + 100);
+    assert!(!hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(!hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+    let d = a
+        .data
+        .extra
+        .dashboards
+        .iter()
+        .find(|d| d.id == did)
+        .unwrap()
+        .clone();
+    let f = a.data.extra.forms.last().unwrap().clone();
+    assert!(!a.dash_shown(&d) && !a.form_shown(&f));
+    // my own Personal space: both show
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me);
+    assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
+    assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));
+}
+
+#[test]
+fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
+    let mut a = app();
+    let folder = temp_folder("trash-reupload");
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    a.add_media(false, Some(picture_file("trash.png", 24, 24)), None);
+    let files = until_ready(&mut a, false);
+    let ch = a.data.channels[0].id;
+    a.apply_chat(vec![ChatAction::Send {
+        ch,
+        text: "with a picture".into(),
+        parent: None,
+        files: files.clone(),
+    }]);
+    let dest = folder.join("files").join(&files[0].file);
+    let wait = |ok: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !ok() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    wait(&|| dest.is_file());
+    assert!(dest.is_file());
+    // the channel goes to Trash, and the shared copy of its picture is cleaned up
+    let gone = a.data.channels.remove(0);
+    a.data.extra.trash.push(TrashItem {
+        id: 990_001,
+        kind: "Channel".into(),
+        title: format!("#{}", gone.name),
+        deleted: now_ts(),
+        payload: serde_json::to_string(&gone).unwrap(),
+    });
+    assert_eq!(
+        super::files::trash_attachments(&a.data.extra.trash.last().unwrap().payload)
+            .iter()
+            .map(|x| x.file.clone())
+            .collect::<Vec<_>>(),
+        vec![files[0].file.clone()]
+    );
+    std::fs::remove_file(&dest).unwrap();
+    let i = a.data.extra.trash.len() - 1;
+    a.restore_trash(i);
+    assert!(a.data.channels.iter().any(|c| c.id == ch));
+    wait(&|| dest.is_file());
+    assert!(dest.is_file(), "the picture is back in the shared folder");
+}
+
+/// Every sentence the team server can send an app (refusals, sign-in and
+/// account errors) and the ones its client adds read in Korean, numbers
+/// included. Texts only the server's command line prints are left out.
+#[test]
+fn server_refusals_are_shown_in_the_interface_language() {
+    use super::together::server_text;
+    const CLI_ONLY: [&str; 4] = [
+        "Invite code for member {} as {}: {}  (works once, for {} days)",
+        "No member with id {} in the workspace (see `workboard-server people`).",
+        "Restored {}. Everyone's app gets it now (the copy from before is in {}/before-restore-*.json).",
+        "This address takes Workboard's WebSocket connection.",
+    ];
+    let sentences = |src: &str| -> Vec<String> {
+        let src = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let mut out = vec![];
+        // each `"` followed by a capital letter, up to the next `"`
+        let starts = src.match_indices('"').map(|(i, _)| i + 1);
+        for part in starts.filter_map(|i| src[i..].split('"').next()) {
+            let long = part.chars().count() > 10;
+            if long
+                && part.starts_with(|c: char| c.is_ascii_uppercase())
+                && part.ends_with(['.', '?', '!', ')'])
+                && !part.contains('\\')
+                && !CLI_ONLY.contains(&part)
+            {
+                out.push(part.to_string());
+            }
+        }
+        out
+    };
+    let mut all = sentences(include_str!("../../server/src/lib.rs"));
+    all.extend(sentences(include_str!("../../crates/wb-net/src/lib.rs")));
+    all.extend(sentences(include_str!("../../crates/wb-net/src/files.rs")));
+    assert!(all.len() > 30, "found the texts: {}", all.len());
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown: Vec<(String, String)> = all
+        .iter()
+        .map(|s| {
+            let filled = s.replace("{}", "5");
+            (filled.clone(), server_text(&filled))
+        })
+        .collect();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let english: Vec<&String> = shown
+        .iter()
+        .filter(|(en, ko)| en == ko || !ko.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c)))
+        .map(|(en, _)| en)
+        .collect();
+    assert!(english.is_empty(), "no Korean for: {:#?}", english);
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let tries =
+        server_text("Too many wrong tries. Wait 15 minutes and try again, or use Forgot password.");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(tries.contains("15분"), "{}", tries);
 }

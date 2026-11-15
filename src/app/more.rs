@@ -3109,24 +3109,34 @@ impl App {
                     Hit::Whiteboard(w.id),
                 )
             }));
-            apps.extend(x.forms.iter().filter(|f| has(&f.name)).map(|f| {
-                (
-                    "Apps",
-                    "\u{1F4CB}",
-                    f.name.clone(),
-                    tr("Form").into(),
-                    Hit::Form(f.id),
-                )
-            }));
-            apps.extend(x.dashboards.iter().filter(|d| has(&d.name)).map(|d| {
-                (
-                    "Apps",
-                    "\u{1F4CA}",
-                    d.name.clone(),
-                    tr("Dashboard").into(),
-                    Hit::Dashboard(d.id),
-                )
-            }));
+            apps.extend(
+                x.forms
+                    .iter()
+                    .filter(|f| self.form_shown(f) && has(&f.name))
+                    .map(|f| {
+                        (
+                            "Apps",
+                            "\u{1F4CB}",
+                            f.name.clone(),
+                            tr("Form").into(),
+                            Hit::Form(f.id),
+                        )
+                    }),
+            );
+            apps.extend(
+                x.dashboards
+                    .iter()
+                    .filter(|d| self.dash_shown(d) && has(&d.name))
+                    .map(|d| {
+                        (
+                            "Apps",
+                            "\u{1F4CA}",
+                            d.name.clone(),
+                            tr("Dashboard").into(),
+                            Hit::Dashboard(d.id),
+                        )
+                    }),
+            );
             apps.extend(x.goals.iter().filter(|g| has(&g.name)).map(|g| {
                 (
                     "Apps",

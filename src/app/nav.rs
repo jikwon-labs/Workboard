@@ -176,14 +176,7 @@ impl App {
         };
         let mut out = vec![];
         for task in &self.data.tasks {
-            // a task I made (or made as a copy of another) is mine like one I'm assigned to
-            let mine = task.assignees.contains(&me)
-                || task.activity.iter().any(|a| {
-                    a.author == me
-                        && !a.comment
-                        && (a.text == "created this task"
-                            || a.text.starts_with("duplicated this task from "))
-                });
+            let mine = self.my_task(task);
             for a in &task.activity {
                 if a.author == me {
                     continue;
@@ -282,6 +275,20 @@ impl App {
             }
         }
         out
+    }
+
+    /// A task whose comments are for me (the Inbox's Primary tab and
+    /// desktop notifications): one I'm assigned to, or one I made, as new
+    /// or as a copy of another.
+    pub(super) fn my_task(&self, t: &Task) -> bool {
+        let me = self.data.me;
+        t.assignees.contains(&me)
+            || t.activity.iter().any(|a| {
+                a.author == me
+                    && !a.comment
+                    && (a.text == "created this task"
+                        || a.text.starts_with("duplicated this task from "))
+            })
     }
 
     /// The Inbox badge: the Primary rows (not cleared, not saved for later)
@@ -449,6 +456,26 @@ impl App {
             })
     }
 
+    /// A dashboard shown in lists and search: not someone else's private
+    /// one (older ones without a maker are everyone's) and not in a space I
+    /// can't go to.
+    pub(super) fn dash_shown(&self, d: &Dashboard) -> bool {
+        (!d.private || d.owner == self.data.me || d.owner == 0)
+            && d.space.is_none_or(|s| {
+                !self.data.location_exists(Location::Space(s))
+                    || self.location_shown(Location::Space(s))
+            })
+    }
+
+    /// A form shown in lists and search: not one for a list in someone
+    /// else's Personal space.
+    pub(super) fn form_shown(&self, f: &Form) -> bool {
+        let me = self.data.me;
+        self.data
+            .space_of_list(f.list_id)
+            .is_none_or(|s| s.private_owner.is_none_or(|o| o == me))
+    }
+
     /// What a workboard:// link opens: `None` when this workspace doesn't
     /// have it, `Some(false)` when it is there but archived or someone
     /// else's private place.
@@ -465,7 +492,13 @@ impl App {
     /// Opens a workboard:// link; false when it isn't one this workspace has
     /// (or it is archived or in someone else's Personal space).
     pub(super) fn open_link(&mut self, url: &str) -> bool {
-        let link = parse_link(url);
+        self.go_link(parse_link(url))
+    }
+
+    /// Opens a link already read (`None`: not one this app can read), the
+    /// same way wherever it was clicked: chat, task comments, search or a
+    /// link from macOS.
+    pub(super) fn go_link(&mut self, link: Option<Link>) -> bool {
         let shown = link.and_then(|l| self.link_shown(l));
         match (link, shown) {
             (Some(Link::Task(id)), Some(true)) => self.actions.push(Action::Open(id)),

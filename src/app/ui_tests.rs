@@ -5894,6 +5894,15 @@ fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
         .find(|c| c.id == cid)
         .unwrap()
         .creator = 2;
+    // a plain member (an owner or admin may manage anyone's channel)
+    let me = h.app.data.me;
+    h.app
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .role = "Member".into();
     h.app.modal = Some(Modal::ChannelSettings(cid));
     h.settle();
     // Alex Kim (2) is in it and Sam Lee (3) isn't: neither checkbox changes
@@ -6415,6 +6424,182 @@ fn click_a_notification_toast_to_open_the_conversation() {
     h.click(&format!("Open {}", toast));
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat_open, Some(dm));
+}
+
+#[test]
+fn a_shared_folder_says_private_items_are_readable_from_its_files() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("Work together");
+    assert!(h.has(together::FOLDER_PRIVACY), "said before sharing");
+    let dir = std::env::temp_dir().join(format!("wb-folder-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: dir.to_string_lossy().into(),
+        device: "dev1".into(),
+        tag: 5,
+        server: None,
+    });
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(h.has("This workspace is shared"));
+    assert!(h.has(together::FOLDER_PRIVACY), "and while sharing");
+    // on a server, other people's copies leave private items out: no note
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(!h.has(together::FOLDER_PRIVACY));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn comment_links_to_private_or_archived_places_do_not_open() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let me = h.app.data.me;
+    let task_list = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .list_id;
+    // a list in another space, made someone else's Personal space
+    let (sid, lid) = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .filter(|s| s.lists.iter().all(|l| l.id != task_list))
+        .find_map(|s| s.lists.first().map(|l| (s.id, l.id)))
+        .unwrap();
+    h.app
+        .data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me + 100);
+    let link = format!("workboard://list/{}", lid);
+    let folder_link = "workboard://folder/987654".to_string();
+    {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.activity.push(Activity {
+            ts: now_ts(),
+            author: 2,
+            text: format!("see {}\nand {}", link, folder_link),
+            comment: true,
+            id: 77_002,
+            ..Default::default()
+        });
+    }
+    h.settle();
+    let loc = h.app.loc;
+    h.click(&link);
+    assert_eq!(h.app.open_task, Some(id), "the task stays open");
+    assert_eq!(h.app.loc, loc);
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("archived or private")));
+    // a folder link is a link too, and one this workspace doesn't have says so
+    h.app.toast = None;
+    h.click(&folder_link);
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("can't be opened")));
+    // my own Personal space opens like a link in chat: task window closed
+    h.app
+        .data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == sid)
+        .unwrap()
+        .private_owner = Some(me);
+    h.click(&link);
+    assert_eq!(h.app.open_task, None);
+    assert_eq!(h.app.loc, Location::List(lid));
+}
+
+#[test]
+fn an_owner_without_a_server_manages_someone_elses_channel() {
+    let mut h = Ui1::new();
+    let cid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "website-redesign")
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .creator = 2;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Sam Lee");
+    assert!(h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .members
+        .contains(&3));
+}
+
+#[test]
+fn an_admin_sees_code_buttons_only_for_members_without_a_password() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    let me = h.app.data.me;
+    let others: Vec<u64> = h
+        .app
+        .data
+        .members
+        .iter()
+        .map(|m| m.id)
+        .filter(|id| *id != me)
+        .take(3)
+        .collect();
+    let person = |member, role, account| wb_net::Person {
+        member,
+        role,
+        devices: 0,
+        invite: None,
+        account,
+    };
+    h.app.sync_rt.people = vec![
+        person(me, wb_net::Role::Admin, true),
+        person(others[0], wb_net::Role::Admin, false),
+        person(others[1], wb_net::Role::Member, true),
+        person(others[2], wb_net::Role::Member, false),
+    ];
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    let codes = |h: &Ui1| h.tree.iter().filter(|(n, _)| n == "Invite code").count();
+    assert_eq!(codes(&h), 1, "only the member without a password");
+    // the owner makes codes for everyone else
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.sync_rt.people[0].role = wb_net::Role::Owner;
+    h.settle();
+    assert_eq!(codes(&h), 3);
 }
 
 #[test]

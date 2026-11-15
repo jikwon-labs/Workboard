@@ -668,3 +668,29 @@ fn a_mention_picked_from_the_list_is_announced_by_member_not_name() {
     a.notify_scan();
     assert_eq!(a.notify_rt.sent.len(), 1);
 }
+
+#[test]
+fn comments_on_a_task_i_duplicated_notify_like_the_inbox_shows_them() {
+    let mut a = app();
+    // a teammate's task, not assigned to me: I make a copy
+    let theirs = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.parent.is_none() && !t.assignees.contains(&1))
+        .unwrap()
+        .id;
+    let copy = a.duplicate_task(theirs).unwrap();
+    if let Some(t) = a.data.tasks.iter_mut().find(|t| t.id == copy) {
+        t.assignees.clear();
+    }
+    a.notify_scan();
+    a.notify_rt.sent.clear();
+    teammate_line(&mut a, copy, 2, "Thanks for copying it", true);
+    assert!(a
+        .inbox_items()
+        .iter()
+        .any(|i| i.tab == 0 && i.text == "Thanks for copying it"));
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Comment]);
+}

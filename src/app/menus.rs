@@ -2940,6 +2940,9 @@ impl App {
 
     pub(super) fn restore_trash(&mut self, i: usize) {
         let item = self.data.extra.trash.remove(i);
+        // the server may have cleaned up files only the trash still named
+        // (Trash stays on this computer): put this computer's copies back
+        self.reupload_files(&super::files::trash_attachments(&item.payload));
         match item.kind.as_str() {
             "Task" => {
                 if let Ok(mut tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {

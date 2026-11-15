@@ -170,56 +170,14 @@ pub struct Member {
     pub status_text: String,
 }
 
-/// The people a text @mentions. At each "@" that starts a word the longest
-/// matching name wins, so "@Alex Kim" is Alex Kim and not Alex. A Latin name
-/// running on into more letters or digits ("@Alexander") is not that name;
-/// anything else may follow it, so "@지원님" still mentions 지원. When several
-/// people share the name, the ones in `picked` (chosen from the mention list)
-/// are meant, else all of them.
+/// The people a text @mentions, by the rule the team server uses too
+/// (`wb_sync::mentions`): at each "@" that starts a word the longest
+/// matching name wins, so "@Alex Kim" is Alex Kim and not Alex; "@Alexander"
+/// is not Alex but "@지원님" is 지원. When several people share the name, the
+/// ones in `picked` (chosen from the mention list) are meant, else all.
 pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64> {
-    let mut out: Vec<u64> = vec![];
-    for (i, _) in text.match_indices('@') {
-        if i > 0 && !text[..i].ends_with(char::is_whitespace) {
-            continue;
-        }
-        let rest = &text[i + 1..];
-        let fits = |name: &str| {
-            !name.is_empty()
-                && rest.starts_with(name)
-                && !(name
-                    .chars()
-                    .last()
-                    .is_some_and(|c| c.is_ascii_alphanumeric())
-                    && rest[name.len()..]
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_alphanumeric()))
-        };
-        let Some(best) = members
-            .iter()
-            .filter(|m| fits(&m.name))
-            .map(|m| m.name.len())
-            .max()
-        else {
-            continue;
-        };
-        let named: Vec<u64> = members
-            .iter()
-            .filter(|m| m.name.len() == best && fits(&m.name))
-            .map(|m| m.id)
-            .collect();
-        let chosen: Vec<u64> = named
-            .iter()
-            .copied()
-            .filter(|id| picked.contains(id))
-            .collect();
-        for id in if chosen.is_empty() { named } else { chosen } {
-            if !out.contains(&id) {
-                out.push(id);
-            }
-        }
-    }
-    out
+    let people: Vec<(u64, &str)> = members.iter().map(|m| (m.id, m.name.as_str())).collect();
+    wb_sync::mentions::mentioned_ids(text, &people, picked)
 }
 
 impl Member {

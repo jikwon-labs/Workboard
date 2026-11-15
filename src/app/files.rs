@@ -402,6 +402,19 @@ impl Files {
         }
     }
 
+    /// Like `upload_soon`, without trusting what this computer last knew
+    /// of the server: a file the server had may be gone since (cleaned up
+    /// while only someone's Trash named it).
+    pub fn reupload(&mut self, att: &Attachment, remote: &Remote) {
+        if let Remote::Server { addr, .. } = remote {
+            self.on_server
+                .lock()
+                .unwrap()
+                .remove(&format!("{}\n{}", addr, att.file));
+        }
+        self.upload_soon(att, remote);
+    }
+
     fn is_on_server(&self, addr: &str, sha: &str) -> bool {
         self.on_server
             .lock()
@@ -988,6 +1001,18 @@ impl App {
         atts.extend(self.boxed_attachments());
         for a in atts.iter().filter(|a| seen.insert(a.file.clone())) {
             self.files.upload_soon(a, &remote);
+        }
+    }
+
+    /// Items came back from Trash: their pictures and videos (the ones this
+    /// computer has) go where the team can get them again.
+    pub(super) fn reupload_files(&mut self, atts: &[Attachment]) {
+        if atts.is_empty() {
+            return;
+        }
+        let remote = self.media_remote();
+        for a in atts {
+            self.files.reupload(a, &remote);
         }
     }
 
@@ -1843,7 +1868,7 @@ impl App {
 
 /// The values in `text` that fill the "{}"s of `pattern`, when it was made
 /// from it.
-fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
+pub(super) fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
     let parts: Vec<&str> = pattern.split("{}").collect();
     let mut rest = text.strip_prefix(parts[0])?;
     let mut values = vec![];
@@ -1916,4 +1941,35 @@ fn save_copy(from: &Path, name: &str) -> Result<PathBuf, String> {
     }
     std::fs::copy(from, &dest).map_err(|e| e.to_string())?;
     Ok(dest)
+}
+
+/// The pictures and videos named anywhere in a Trash item (a channel's
+/// messages, tasks, the tasks of a list, folder or space), each once.
+pub(super) fn trash_attachments(payload: &str) -> Vec<Attachment> {
+    fn walk(v: &serde_json::Value, out: &mut Vec<Attachment>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                for (k, x) in o {
+                    if k == "attachments" {
+                        if let Ok(a) = serde_json::from_value::<Vec<Attachment>>(x.clone()) {
+                            for a in a {
+                                if !out.iter().any(|o| o.file == a.file) {
+                                    out.push(a);
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    walk(x, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+        walk(&v, &mut out);
+    }
+    out
 }

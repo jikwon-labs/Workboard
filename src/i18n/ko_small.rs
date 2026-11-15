@@ -116,6 +116,7 @@ pub const T: &[(&str, &str)] = &[
     ("1 other computer is working in it.", "다른 컴퓨터 1대가 작업 중입니다."),
     ("{} other computers are working in it.", "다른 컴퓨터 {}대가 작업 중입니다."),
     ("Tasks, chat, docs and calls show up for everyone within a few seconds of their sync app copying the folder.", "동기화 앱이 폴더를 복사하면 몇 초 안에 작업, 채팅, 문서, 통화가 모두에게 보입니다."),
+    ("Private items (Personal spaces, private docs, channels and dashboards) are hidden in the app, but anyone with this folder can read them in its files. Use a team server to keep them private.", "비공개 항목(개인 스페이스, 비공개 문서·채널·대시보드)은 앱에서는 숨겨지지만, 이 폴더를 가진 사람은 누구나 폴더의 파일에서 읽을 수 있습니다. 비공개로 지키려면 팀 서버를 쓰세요."),
     ("Check for changes now", "지금 변경 사항 확인"),
     ("Got the latest changes.", "최신 변경 사항을 받았습니다."),
     ("Everything is up to date.", "모두 최신 상태입니다."),

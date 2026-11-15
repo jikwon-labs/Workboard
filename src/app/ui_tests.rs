@@ -2083,3 +2083,239 @@ fn composer_mention_and_emoji_pickers() {
     h.click_side("Jordan Park", true);
     assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
+
+// ---------------------------------------------------------------- views and sidebar slice
+// (board, calendar, gantt, table and the sidebar's spaces, folders, lists, favorites)
+
+fn task_named<'a>(h: &'a Ui1, name: &str) -> &'a Task {
+    h.app.data.tasks.iter().find(|t| t.name == name).unwrap_or_else(|| panic!("no task {:?}", name))
+}
+
+fn rect_of(h: &Ui1, name: &str) -> Rect {
+    h.tree.iter().rev().find(|(n, _)| n == name).map(|(_, r)| *r).unwrap_or_else(|| panic!("nothing named {:?}", name))
+}
+
+fn drag_by(h: &mut Ui1, from: Pos2, to: Pos2) {
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+    for i in 1..=12 {
+        h.frame(vec![egui::Event::PointerMoved(from + (to - from) * (i as f32 / 12.0))]);
+    }
+    h.frame(vec![egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+    h.settle();
+}
+
+#[test]
+fn board_card_boxes_open_the_pickers_and_the_card_opens() {
+    let mut h = Ui1::new();
+    h.click("View Board");
+    h.click("Card priority Set up analytics dashboard");
+    h.click("Urgent");
+    assert_eq!(task_named(&h, "Set up analytics dashboard").priority, 1);
+    assert!(h.app.open_task.is_none(), "the box changes the field, it doesn't open the task");
+    h.click("Card assignees Set up analytics dashboard");
+    h.click_side("Sam Lee", true);
+    assert_eq!(task_named(&h, "Set up analytics dashboard").assignees, vec![3]);
+    h.key(egui::Key::Escape);
+    h.click("Card due date Collect feedback from beta users");
+    h.click("Today");
+    assert_eq!(task_named(&h, "Collect feedback from beta users").due, Some(today()));
+    h.key(egui::Key::Escape);
+    h.click("Card Write copy for landing page");
+    assert_eq!(h.app.open_task, Some(task_named(&h, "Write copy for landing page").id));
+}
+
+#[test]
+fn board_card_options_button_opens_the_task_menu() {
+    let mut h = Ui1::new();
+    h.click("View Board");
+    let n = h.app.data.tasks.len();
+    h.click("Card options Set up analytics dashboard");
+    h.click("Duplicate");
+    assert!(h.app.data.tasks.len() > n, "Duplicate from the card's ... menu");
+}
+
+#[test]
+fn board_add_task_asks_for_a_name_first() {
+    let mut h = Ui1::new();
+    h.click("View Board");
+    let n = h.app.data.tasks.len();
+    h.click("Add Task in TO DO");
+    assert_eq!(h.app.data.tasks.len(), n, "no Untitled task is made by the click");
+    h.type_text("Board task");
+    h.key(egui::Key::Enter);
+    assert_eq!(task_named(&h, "Board task").status, "to do");
+    // Esc on an empty field leaves nothing behind
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.data.tasks.len(), n + 1);
+    assert!(h.app.open_task.is_none());
+}
+
+#[test]
+fn board_columns_collapse_and_expand() {
+    let mut h = Ui1::new();
+    h.click("View Board");
+    h.click("Collapse group TO DO");
+    assert!(!h.has("Card Set up analytics dashboard"), "the column's cards are hidden");
+    h.click("Expand group TO DO");
+    assert!(h.has("Card Set up analytics dashboard"));
+}
+
+#[test]
+fn board_card_dropped_on_a_sidebar_list_moves_the_task() {
+    // tall enough for the whole sidebar
+    let mut h = Ui1::sized(1440.0, 1200.0);
+    h.click("View Board");
+    let personal = h.app.data.spaces[0].lists[0].id;
+    h.drag("Card Set up analytics dashboard", "Personal");
+    assert_eq!(task_named(&h, "Set up analytics dashboard").list_id, personal);
+}
+
+#[test]
+fn calendar_more_opens_the_days_tasks_and_spans_show_every_day() {
+    let mut h = Ui1::new();
+    let td = today();
+    let base = task_named(&h, "Set up analytics dashboard").clone();
+    for k in 0..8 {
+        let mut x = base.clone();
+        x.id = 9000 + k;
+        x.name = format!("Busy day {}", k);
+        x.start = None;
+        x.due = Some(td);
+        h.app.data.tasks.push(x);
+    }
+    let mut span = base.clone();
+    span.id = 9100;
+    span.name = "Three day task".into();
+    span.start = Some(td);
+    span.due = Some(td + Duration::days(2));
+    h.app.data.tasks.push(span);
+    h.click("View Calendar");
+    for d in 0..3 {
+        assert!(h.has(&format!("Calendar Three day task {}", td + Duration::days(d))), "drawn on day {}", d);
+    }
+    h.click(&format!("More tasks on {}", td));
+    h.click("Busy day 7");
+    assert_eq!(h.app.open_task, Some(9007));
+}
+
+#[test]
+fn calendar_unscheduled_items_have_the_task_menu() {
+    let mut h = Ui1::new();
+    h.click("View Calendar");
+    let n = h.app.data.tasks.len();
+    h.right_click("Unscheduled Collect feedback from beta users", 20.0);
+    h.click("Duplicate");
+    assert_eq!(h.app.data.tasks.len(), n + 1);
+}
+
+#[test]
+fn gantt_bar_ends_resize_and_empty_rows_schedule() {
+    let mut h = Ui1::new();
+    h.click("View Gantt");
+    let before = task_named(&h, "Write copy for landing page").clone();
+    let r = rect_of(&h, "End of Write copy for landing page");
+    // a day is 30 px wide at the Day scale
+    drag_by(&mut h, r.center(), r.center() + vec2(90.0, 0.0));
+    let after = task_named(&h, "Write copy for landing page").clone();
+    assert_eq!(after.due, before.due.map(|d| d + Duration::days(3)));
+    assert_eq!(after.start, before.start, "only the end moved");
+    let r = rect_of(&h, "Start of Write copy for landing page");
+    drag_by(&mut h, r.center(), r.center() - vec2(60.0, 0.0));
+    assert_eq!(task_named(&h, "Write copy for landing page").start, before.start.map(|d| d - Duration::days(2)));
+    // a task without dates gets them from a click in its row
+    let r = rect_of(&h, "Schedule Collect feedback from beta users");
+    // (the row runs under the names column too; click where it shows)
+    h.click_at(pos2(1000.0, r.center().y));
+    assert!(task_named(&h, "Collect feedback from beta users").due.is_some());
+}
+
+#[test]
+fn gantt_shows_subtasks_when_expanded() {
+    let mut h = Ui1::new();
+    h.click("View Gantt");
+    assert!(!h.has("Schedule Wireframe hero section"));
+    h.click("Subtasks of Design new homepage layout");
+    assert!(h.has("Schedule Wireframe hero section"), "the subtask gets its own row");
+}
+
+#[test]
+fn table_sorts_renames_and_chooses_columns() {
+    // wide enough for every column and the "+" after them
+    let mut h = Ui1::sized(1900.0, 900.0);
+    h.click("View Table");
+    h.click("Sort by Name");
+    let y = |h: &Ui1, n: &str| rect_of(h, &format!("Rename {}", n)).center().y;
+    assert!(y(&h, "Collect feedback from beta users") < y(&h, "Write copy for landing page"), "A to Z");
+    h.click("Sort by Name");
+    assert!(y(&h, "Collect feedback from beta users") > y(&h, "Write copy for landing page"), "Z to A");
+    h.click("Rename Collect feedback from beta users");
+    h.frame(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.type_text("Pick colours");
+    h.key(egui::Key::Enter);
+    assert!(h.app.data.tasks.iter().any(|t| t.name == "Pick colours"));
+    assert!(h.app.open_task.is_none(), "renaming doesn't open the task");
+    // custom fields get columns; any column but # and Name can be hidden
+    h.app.data.extra.fields.push(CustomField { id: 777, name: "Budget".into(), kind: "number".into(), options: vec![] });
+    h.settle();
+    assert!(h.has("Sort by Budget"));
+    h.click("Table columns");
+    h.click("Column Tags");
+    assert!(!h.has("Sort by Tags"));
+    h.click("Column Budget");
+    assert!(!h.has("Sort by Budget"));
+}
+
+#[test]
+fn folder_row_menu_duplicate_archive_and_move() {
+    let mut h = Ui1::new();
+    h.click("Folder options Projects");
+    h.click("Duplicate");
+    assert_eq!(h.app.data.spaces[0].folders.len(), 2);
+    let copy = h.app.data.spaces[0].folders[1].id;
+    assert_eq!(h.app.data.spaces[0].folders[1].lists.len(), 2, "the lists are copied");
+    h.key(egui::Key::Escape);
+    h.click("Folder options Projects (copy)");
+    h.click("Archive");
+    assert!(h.app.data.spaces[0].folders[1].archived);
+    assert!(!h.has("Projects (copy)"), "archived folders leave the sidebar");
+    let lid = h.app.data.spaces[0].folders[1].lists[0].id;
+    assert!(h.app.data.list_archived(lid));
+    h.app.set_folder_archived(copy, false);
+    let side = h.app.data.spaces[1].id;
+    h.app.move_folder(copy, side);
+    assert!(h.app.data.spaces[1].folders.iter().any(|f| f.id == copy));
+    assert_eq!(h.app.data.spaces[0].folders.len(), 1);
+}
+
+#[test]
+fn list_color_from_the_list_menu() {
+    let mut h = Ui1::new();
+    h.click("List options Personal");
+    h.click("Color");
+    let c = STATUS_PALETTE[2];
+    h.click(&format!("List color {:02x}{:02x}{:02x}", c[0], c[1], c[2]));
+    assert_eq!(h.app.data.spaces[0].lists[0].color, Some(c));
+}
+
+#[test]
+fn favorite_a_task_and_open_it_from_the_sidebar() {
+    let mut h = Ui1::new();
+    h.click("Task options Write copy for landing page");
+    h.click("Add to Favorites");
+    let id = task_named(&h, "Write copy for landing page").id;
+    assert!(h.app.data.extra.starred.contains(&format!("task:{}", id)));
+    h.click_side("Write copy for landing page", false);
+    assert_eq!(h.app.open_task, Some(id));
+}
+
+#[test]
+fn sidebar_lists_reorder_by_drag() {
+    let mut h = Ui1::sized(1440.0, 1200.0);
+    let personal = h.app.data.spaces[0].lists[0].id;
+    h.drag("Personal", "Marketing");
+    let f = &h.app.data.spaces[0].folders[0];
+    assert_eq!(f.lists.iter().map(|l| l.id).collect::<Vec<_>>()[1], personal, "Personal lands before Marketing");
+    assert!(h.app.data.spaces[0].lists.is_empty());
+}
+

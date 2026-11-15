@@ -3423,12 +3423,13 @@ fn renaming_or_deleting_a_status_carries_its_tasks() {
         .iter()
         .position(|s| s.name == "in progress")
         .unwrap();
+    let mut rules = orig.clone();
     // a rename that matches another status waits, so tasks never merge
     a.data.spaces[si].statuses[i].name = "to do".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     assert_eq!(a.task(id).unwrap().status, "in progress");
     a.data.spaces[si].statuses[i].name = "doing".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     assert_eq!(a.task(id).unwrap().status, "doing");
     // the other space still has "in progress", so the automation stays
     assert_eq!(a.data.extra.automations[0].trigger_status, "in progress");
@@ -5235,8 +5236,9 @@ fn status_renames_and_deletes_carry_automations_of_that_space() {
         .iter()
         .position(|s| s.name == "in progress")
         .unwrap();
+    let mut rules = orig.clone();
     a.data.spaces[si].statuses[i].name = "doing".into();
-    a.commit_status_renames(si, &mut orig);
+    a.commit_status_renames(si, &mut orig, &mut rules);
     let trig: Vec<String> = a
         .data
         .extra
@@ -5887,4 +5889,53 @@ fn my_timer_counts_only_my_time() {
     let t = a.data.tasks[0].clone();
     assert_eq!(a.data.my_tracked_secs(&t, now), 110);
     assert_eq!(t.tracked_secs(now), 1610);
+}
+
+#[test]
+fn a_status_name_another_status_still_carries_waits_and_closing_settles_names() {
+    let mut a = app();
+    let si = 0;
+    let sid = a.data.spaces[si].id;
+    let list = a.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let t1 = add_task(&mut a, list, "On to do");
+    let t2 = add_task(&mut a, list, "On doing");
+    let mut t = a.task(t2).unwrap().clone();
+    t.status = "in progress".into();
+    a.apply(Action::Replace(t));
+    let mut orig: Vec<Option<String>> = a.data.spaces[si]
+        .statuses
+        .iter()
+        .map(|s| Some(s.name.clone()))
+        .collect();
+    let mut rules = orig.clone();
+    // "to do" emptied, then "in progress" renamed to "to do": the name is
+    // still carried by the first status's tasks, so the rename waits
+    a.data.spaces[si].statuses[0].name = String::new();
+    a.data.spaces[si].statuses[1].name = "to do".into();
+    a.commit_status_renames(si, &mut orig, &mut rules);
+    assert_eq!(a.task(t1).unwrap().status, "to do");
+    assert_eq!(a.task(t2).unwrap().status, "in progress");
+    // swapping two names at once works
+    a.data.spaces[si].statuses[0].name = "in progress".into();
+    a.commit_status_renames(si, &mut orig, &mut rules);
+    assert_eq!(a.task(t1).unwrap().status, "in progress");
+    assert_eq!(a.task(t2).unwrap().status, "to do");
+    // an added status with an empty or taken name gets a free one on close
+    a.data.spaces[si]
+        .statuses
+        .push(Status::new("", [1, 1, 1], StatusKind::Custom));
+    orig.push(None);
+    a.data.spaces[si].statuses[1].name = "".into();
+    assert!(a.settle_status_names(si, &orig));
+    let names: Vec<String> = a.data.spaces[si]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert_eq!(names[1], "to do");
+    assert_eq!(names.last().unwrap(), "new status");
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len());
 }

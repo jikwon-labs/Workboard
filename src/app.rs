@@ -2040,29 +2040,52 @@ impl App {
         self.dirty = true;
     }
 
-    /// Passes status renames made in the status editor on to the space's tasks
-    /// (and to automations no other space's status uses). `orig` holds the
-    /// name tasks carry for each status; a rename waits while the new name
-    /// matches another status, so two statuses' tasks never merge.
-    fn commit_status_renames(&mut self, si: usize, orig: &mut [Option<String>]) {
+    /// Passes status renames typed in the status editor on to the space's
+    /// tasks as they are typed. `orig` holds the name tasks carry for each
+    /// status (None: added in the editor). A rename waits while the new name
+    /// is empty, matches another status, or is the name another status's
+    /// tasks still carry, so two statuses' tasks never merge.
+    fn follow_status_renames(&mut self, si: usize, orig: &mut [Option<String>]) {
         let Some(sp) = self.data.spaces.get(si) else {
             return;
         };
         let sid = sp.id;
         let names: Vec<String> = sp.statuses.iter().map(|s| s.name.clone()).collect();
+        // statuses whose new name can be passed on; a name another status's
+        // tasks still carry is only free when that status moves off it in
+        // the same step (a swap)
+        let mut ok: Vec<bool> = (0..orig.len())
+            .map(|i| match (&orig[i], names.get(i)) {
+                (Some(old), Some(new)) => {
+                    new != old
+                        && !new.trim().is_empty()
+                        && !names.iter().enumerate().any(|(j, n)| j != i && n == new)
+                }
+                _ => false,
+            })
+            .collect();
+        loop {
+            let mut again = false;
+            for i in 0..ok.len() {
+                if ok[i]
+                    && orig.iter().enumerate().any(|(j, o)| {
+                        j != i && !ok[j] && o.as_deref() == names.get(i).map(|s| s.as_str())
+                    })
+                {
+                    ok[i] = false;
+                    again = true;
+                }
+            }
+            if !again {
+                break;
+            }
+        }
         let mut map: Vec<(String, String)> = vec![];
         for (i, o) in orig.iter_mut().enumerate() {
-            let (Some(old), Some(new)) = (o.clone(), names.get(i)) else {
-                continue;
-            };
-            if *new == old
-                || new.trim().is_empty()
-                || names.iter().enumerate().any(|(j, n)| j != i && n == new)
-            {
-                continue;
+            if ok[i] {
+                map.push((o.clone().unwrap_or_default(), names[i].clone()));
+                *o = Some(names[i].clone());
             }
-            map.push((old, new.clone()));
-            *o = Some(new.clone());
         }
         if map.is_empty() {
             return;
@@ -2078,34 +2101,123 @@ impl App {
                 t.status = new.clone();
             }
         }
-        for (old, new) in &map {
-            self.retarget_automations(sid, &lists, old, new);
-        }
         self.dirty = true;
     }
 
-    /// Points automations on status `old` of space `sid` to `new`: those
-    /// that run in the space or one of its lists always, workspace-wide ones
-    /// only when no other space has a status called `old`.
+    /// A status rename is done (the name field lost focus, Enter, a delete
+    /// or the editor closed): tasks follow, and automations follow from the
+    /// name they had when the last rename was done (`rules`) to the name
+    /// now, so a name only passed through while typing (another space's
+    /// status, say) never catches a workspace-wide automation.
+    fn commit_status_renames(
+        &mut self,
+        si: usize,
+        orig: &mut [Option<String>],
+        rules: &mut [Option<String>],
+    ) {
+        self.follow_status_renames(si, orig);
+        let Some(sp) = self.data.spaces.get(si) else {
+            return;
+        };
+        let sid = sp.id;
+        let mut map: Vec<(String, String)> = vec![];
+        for (r, o) in rules.iter_mut().zip(orig.iter()) {
+            if let (Some(old), Some(new)) = (r.as_ref(), o.as_ref()) {
+                if old != new {
+                    map.push((old.clone(), new.clone()));
+                }
+            }
+            *r = o.clone();
+        }
+        if map.is_empty() {
+            return;
+        }
+        let lists = self.data.lists_in(Location::Space(sid)).unwrap_or_default();
+        self.retarget_automations_all(sid, &lists, &map);
+        self.dirty = true;
+    }
+
+    /// The status editor closes: a name still empty or taken goes back to
+    /// the last name its tasks carry (a status added in the editor gets a
+    /// free name), so no task is left on a status that doesn't exist.
+    /// Returns whether a name had to be changed.
+    fn settle_status_names(&mut self, si: usize, orig: &[Option<String>]) -> bool {
+        let Some(sp) = self.data.spaces.get_mut(si) else {
+            return false;
+        };
+        let mut fixed = false;
+        for (st, o) in sp.statuses.iter_mut().zip(orig.iter()) {
+            if let Some(o) = o {
+                if st.name != *o {
+                    st.name = o.clone();
+                    fixed = true;
+                }
+            }
+        }
+        for i in 0..sp.statuses.len() {
+            if orig.get(i).is_some_and(|o| o.is_some()) {
+                continue;
+            }
+            let taken = |sp: &Space, n: &str| {
+                sp.statuses
+                    .iter()
+                    .enumerate()
+                    .any(|(j, s)| j != i && s.name == n)
+            };
+            let name = sp.statuses[i].name.trim().to_string();
+            if !name.is_empty() && !taken(sp, &name) {
+                continue;
+            }
+            let base = if name.is_empty() {
+                "new status".to_string()
+            } else {
+                name
+            };
+            let mut cand = base.clone();
+            let mut k = 2;
+            while taken(sp, &cand) {
+                cand = format!("{} {}", base, k);
+                k += 1;
+            }
+            sp.statuses[i].name = cand;
+            fixed = true;
+        }
+        if fixed {
+            self.dirty = true;
+        }
+        fixed
+    }
+
+    /// Points automations on status `old` of space `sid` to `new` (see
+    /// `retarget_automations_all`).
     fn retarget_automations(&mut self, sid: u64, lists: &[u64], old: &str, new: &str) {
-        let elsewhere = self
-            .data
-            .spaces
+        self.retarget_automations_all(sid, lists, &[(old.to_string(), new.to_string())]);
+    }
+
+    /// Points automations on each status `old` of space `sid` to its `new`,
+    /// all at once (so swapping two names swaps their rules): those that
+    /// run in the space or one of its lists always, workspace-wide ones
+    /// only when no other space has a status called `old`.
+    fn retarget_automations_all(&mut self, sid: u64, lists: &[u64], map: &[(String, String)]) {
+        let elsewhere: Vec<bool> = map
             .iter()
-            .any(|s| s.id != sid && s.statuses.iter().any(|x| x.name == old));
-        for a in self
-            .data
-            .extra
-            .automations
-            .iter_mut()
-            .filter(|a| a.trigger_status == old)
-        {
+            .map(|(old, _)| {
+                self.data
+                    .spaces
+                    .iter()
+                    .any(|s| s.id != sid && s.statuses.iter().any(|x| x.name == *old))
+            })
+            .collect();
+        for a in self.data.extra.automations.iter_mut() {
+            let Some(k) = map.iter().position(|(old, _)| *old == a.trigger_status) else {
+                continue;
+            };
             let here = match a.list {
                 Some(l) => l == sid || lists.contains(&l),
-                None => !elsewhere,
+                None => !elsewhere[k],
             };
             if here {
-                a.trigger_status = new.to_string();
+                a.trigger_status = map[k].1.clone();
             }
         }
     }
@@ -2113,6 +2225,19 @@ impl App {
     /// Moves the tasks of a status deleted in the status editor to a status of
     /// the same kind (else the first one) and notes it in each task's history.
     fn move_off_status(&mut self, si: usize, old: &str, kind: StatusKind, orig: &[Option<String>]) {
+        self.move_off_status_with(si, old, old, kind, orig);
+    }
+
+    /// `move_off_status` where the automations of the deleted status are
+    /// still on `rule_old` (its rename wasn't done when it was deleted).
+    fn move_off_status_with(
+        &mut self,
+        si: usize,
+        old: &str,
+        rule_old: &str,
+        kind: StatusKind,
+        orig: &[Option<String>],
+    ) {
         let Some(sp) = self.data.spaces.get(si) else {
             return;
         };
@@ -2158,7 +2283,7 @@ impl App {
             );
         }
         // automations on the deleted status follow its tasks
-        self.retarget_automations(sid, &lists, old, &to);
+        self.retarget_automations(sid, &lists, rule_old, &to);
         self.dirty = true;
     }
 
@@ -5730,8 +5855,15 @@ impl App {
                             .map(|s| Some(s.name.clone()))
                             .collect()
                     });
+                // the names automations were last pointed at (see
+                // commit_status_renames)
+                let rules_id = egui::Id::new(("status_rules", sid));
+                let mut rules: Vec<Option<String>> = ctx
+                    .data(|d| d.get_temp(rules_id))
+                    .filter(|o: &Vec<Option<String>>| o.len() == orig.len())
+                    .unwrap_or_else(|| orig.clone());
                 let mut commit = false;
-                let mut removed: Option<(String, StatusKind)> = None;
+                let mut removed: Option<(String, String, StatusKind)> = None;
                 egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
                     let sts = &mut self.data.spaces[si].statuses;
                     let mut remove = None;
@@ -5776,7 +5908,8 @@ impl App {
                     if let Some(i) = remove {
                         let st = sts.remove(i);
                         let old = orig.remove(i).unwrap_or(st.name);
-                        removed = Some((old, st.kind));
+                        let rule_old = rules.remove(i).unwrap_or_else(|| old.clone());
+                        removed = Some((old, rule_old, st.kind));
                         changed = true;
                     }
                     if ui.button(tr("+ Add status")).clicked() {
@@ -5784,23 +5917,38 @@ impl App {
                         let pos = sts.iter().position(|s| matches!(s.kind, StatusKind::Done | StatusKind::Closed)).unwrap_or(sts.len());
                         sts.insert(pos, Status::new("new status", c, StatusKind::Custom));
                         orig.insert(pos, None);
+                        rules.insert(pos, None);
                         changed = true;
                     }
                     ui.label(RichText::new(tr("Renamed statuses are renamed on their tasks too; tasks of a deleted status move to a status of the same kind.")).small().color(t.text3));
                 });
-                if let Some((old, kind)) = removed {
-                    self.move_off_status(si, &old, kind, &orig);
+                if let Some((old, rule_old, kind)) = removed {
+                    // a delete finishes the other renames first
+                    self.commit_status_renames(si, &mut orig, &mut rules);
+                    self.move_off_status_with(si, &old, &rule_old, kind, &orig);
                 }
-                // pass renames on as they are typed, so closing the app
-                // mid-edit can't leave tasks on a name that no longer exists
-                if changed || commit || !open {
-                    self.commit_status_renames(si, &mut orig);
+                if commit || !open {
+                    self.commit_status_renames(si, &mut orig, &mut rules);
+                } else if changed {
+                    // tasks follow as names are typed, so closing the app
+                    // mid-edit can't leave tasks on a name that no longer
+                    // exists; automations wait for the rename to be done
+                    self.follow_status_renames(si, &mut orig);
+                }
+                if !open && self.settle_status_names(si, &orig) {
+                    self.toast = Some((
+                        tr("A status name that was empty or already used went back to its last name")
+                            .into(),
+                        now_ts(),
+                    ));
                 }
                 ctx.data_mut(|d| {
                     if open {
                         d.insert_temp(orig_id, orig);
+                        d.insert_temp(rules_id, rules);
                     } else {
                         d.remove::<Vec<Option<String>>>(orig_id);
+                        d.remove::<Vec<Option<String>>>(rules_id);
                     }
                 });
                 if changed {

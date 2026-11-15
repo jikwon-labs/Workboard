@@ -6586,3 +6586,126 @@ fn docs_hub_leaves_out_docs_in_archived_or_other_peoples_spaces() {
     h.settle();
     assert!(h.has("Doc Project brief"));
 }
+
+// ---- the status editor: renames reach automations once done, and closing
+// never leaves tasks on a missing status (r3-work)
+
+#[test]
+fn status_editor_retargets_automations_only_when_a_rename_is_done() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    h.app.data.spaces[0]
+        .statuses
+        .insert(1, Status::new("triage", [1, 2, 3], StatusKind::Custom));
+    h.app.data.spaces[1]
+        .statuses
+        .insert(1, Status::new("review", [1, 2, 3], StatusKind::Custom));
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == list)
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == tid)
+        .unwrap()
+        .status = "triage".into();
+    let rule = |id, s: &str| Automation {
+        id,
+        enabled: true,
+        trigger_status: s.into(),
+        action: "priority".into(),
+        value: "1".into(),
+        list: None,
+    };
+    h.app.data.extra.automations = vec![rule(1, "review"), rule(2, "triage")];
+    h.app.edit_statuses = Some(sid);
+    h.settle();
+    let status = |h: &Ui1| h.app.task(tid).unwrap().status.clone();
+    let triggers = |h: &Ui1| {
+        h.app
+            .data
+            .extra
+            .automations
+            .iter()
+            .map(|a| a.trigger_status.clone())
+            .collect::<Vec<_>>()
+    };
+    // type a name through the other space's "review": tasks follow live
+    h.click("triage");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("review");
+    assert_eq!(status(&h), "review");
+    assert_eq!(
+        triggers(&h),
+        ["review", "triage"],
+        "rules wait for the rename"
+    );
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("reviewed");
+    assert_eq!(status(&h), "reviewed");
+    h.key(egui::Key::Enter);
+    assert_eq!(
+        triggers(&h),
+        ["review", "reviewed"],
+        "the other space's rule stays; this status's rule follows to the final name"
+    );
+}
+
+#[test]
+fn closing_the_status_editor_puts_back_an_empty_or_taken_name() {
+    let mut h = Ui1::new();
+    let sid = h.app.data.spaces[0].id;
+    let list = h.app.data.lists_in(Location::Space(sid)).unwrap()[0];
+    let tid = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == list)
+        .unwrap()
+        .id;
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == tid)
+        .unwrap()
+        .status = "in progress".into();
+    h.app.edit_statuses = Some(sid);
+    h.settle();
+    // "in progress" typed into "to do": taken, so its tasks wait
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("to do");
+    assert_eq!(h.app.task(tid).unwrap().status, "in progress");
+    h.click("Close window");
+    assert!(h.app.edit_statuses.is_none());
+    let names: Vec<String> = h.app.data.spaces[0]
+        .statuses
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert!(names.contains(&"in progress".to_string()), "{:?}", names);
+    let st = h.app.task(tid).unwrap().status.clone();
+    assert!(names.contains(&st), "the task's status exists: {}", st);
+    assert!(h.app.toast.is_some());
+    // an empty name goes back too
+    h.app.edit_statuses = Some(sid);
+    h.settle();
+    h.click("in progress");
+    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.click("Close window");
+    assert!(h.app.data.spaces[0]
+        .statuses
+        .iter()
+        .any(|s| s.name == "in progress"));
+    assert_eq!(h.app.task(tid).unwrap().status, "in progress");
+}

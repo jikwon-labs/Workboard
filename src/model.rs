@@ -847,6 +847,11 @@ pub struct Bookmark {
     pub id: u64,
     pub title: String,
     pub url: String,
+    /// Only on this computer: bookmarks someone had before bookmarks were
+    /// shared with the team stay theirs (`wb_sync::shareable` leaves them
+    /// out). New ones are shared.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub personal: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -1035,6 +1040,11 @@ pub struct Extra {
     pub automations: Vec<Automation>,
     pub templates: Vec<TaskTemplate>,
     pub bookmarks: Vec<Bookmark>,
+    /// Bookmarks here are shared with the team; false in files from before
+    /// they were, whose bookmarks then stay personal
+    /// (`Data::keep_old_bookmarks_personal`).
+    #[serde(default)]
+    pub bookmarks_shared: bool,
     pub dashboards: Vec<Dashboard>,
     pub notepad: String,
     pub apps: ClickApps,
@@ -1114,6 +1124,7 @@ impl Default for Extra {
             automations: vec![],
             templates: vec![],
             bookmarks: vec![],
+            bookmarks_shared: true,
             dashboards: vec![],
             notepad: String::new(),
             apps: ClickApps::default(),
@@ -1264,11 +1275,28 @@ impl Data {
 
     pub fn load_file(file: &str) -> Option<Self> {
         let s = std::fs::read_to_string(Self::dir().join(file)).ok()?;
-        let d = serde_json::from_str(&s).ok();
-        if d.is_none() {
-            Self::keep_unreadable(file, &s);
+        let mut d: Option<Data> = serde_json::from_str(&s).ok();
+        match d.as_mut() {
+            Some(d) => {
+                d.keep_old_bookmarks_personal();
+            }
+            None => Self::keep_unreadable(file, &s),
         }
         d
+    }
+
+    /// A file from before bookmarks were shared: the bookmarks in it are
+    /// this person's own, so they stay on this computer instead of going to
+    /// the whole team. True when that happened.
+    pub fn keep_old_bookmarks_personal(&mut self) -> bool {
+        if self.extra.bookmarks_shared {
+            return false;
+        }
+        for b in &mut self.extra.bookmarks {
+            b.personal = true;
+        }
+        self.extra.bookmarks_shared = true;
+        true
     }
 
     /// A saved workspace that couldn't be read is copied aside before
@@ -1372,6 +1400,7 @@ impl Data {
     pub fn load() -> Self {
         if let Ok(s) = std::fs::read_to_string(Self::path()) {
             if let Ok(mut d) = serde_json::from_str::<Data>(&s) {
+                d.keep_old_bookmarks_personal();
                 // move the earlier default colours to the measured ones
                 for sp in &mut d.spaces {
                     for st in &mut sp.statuses {

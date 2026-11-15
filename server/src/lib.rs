@@ -2094,6 +2094,8 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
         password,
         new_password,
         reset_code,
+        app,
+        sync,
     }) = Msg::parse(t.as_str())
     else {
         let _ = send(&mut socket, &Msg::error("Say hello first.", None).to_json()).await;
@@ -2124,6 +2126,17 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
         }
     };
     let _online = Online::new(&hub, &device);
+    // an app too old to know every field would erase the ones it doesn't
+    // know when its copy wins: it gets the team's copy but sends no changes
+    let too_old = sync.is_none_or(|v| v < wb_net::OLDEST_SYNC);
+    if too_old {
+        eprintln!(
+            "device {} runs an old app ({}): taking no changes from it",
+            device,
+            app.as_deref().unwrap_or("no version")
+        );
+    }
+    let mut told_too_old = false;
     // signed in: from now on a message may hold a whole workspace. The app
     // sends nothing between hello and welcome, so nothing read ahead is lost.
     let mut socket = WebSocketStream::from_raw_socket(
@@ -2155,6 +2168,10 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                     if matches!(m, Message::Close(_)) { break } else { continue }
                 };
                 let out = match Msg::parse(t.as_str()) {
+                    Some(Msg::Push { .. }) if too_old => {
+                        // said once per connection; the app stays connected
+                        (!std::mem::replace(&mut told_too_old, true)).then(|| Msg::error(wb_net::UPDATE_NEEDED, Some(CODE_DENIED)).to_json())
+                    }
                     Some(Msg::Push { data }) => {
                         let (hub2, device2) = (hub.clone(), device.clone());
                         // merging can take a moment on a big workspace

@@ -76,4 +76,9 @@ pub const T: &[(&str, &str)] = &[
     ("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", "{}명을 초대했습니다. 초대 코드를 보내는 중입니다 (함께 작업하기 > 사람에서도 볼 수 있습니다)."),
     // wb_net::UNSURE_SEND, shown when a request may or may not have gone
     ("The connection broke while sending that, so it may not have reached the server. Check whether it happened, then try again.", "보내는 중에 연결이 끊겨 서버에 닿았는지 알 수 없습니다. 반영됐는지 확인한 뒤 필요하면 다시 시도하세요."),
+    // wb_net::UPDATE_NEEDED, from a server that takes no changes from this version
+    ("This version of Workboard is too old to send changes to your team's server. Update Workboard to keep working together; until then you only see what others change.", "이 버전의 Workboard는 너무 오래되어 팀 서버에 변경 사항을 보낼 수 없습니다. 계속 함께 작업하려면 Workboard를 업데이트하세요. 그전까지는 다른 사람의 변경만 보입니다."),
+    // someone in a shared folder runs an older app
+    ("Someone in this shared folder uses an older version of Workboard. Ask them to update, or their changes can undo yours.", "이 공유 폴더의 누군가가 더 오래된 버전의 Workboard를 쓰고 있습니다. 업데이트를 부탁하세요. 그렇지 않으면 그 사람의 변경이 내 변경을 되돌릴 수 있습니다."),
+    ("Someone in this shared folder uses Workboard {}, an older version. Ask them to update, or their changes can undo yours.", "이 공유 폴더의 누군가가 더 오래된 Workboard {} 버전을 쓰고 있습니다. 업데이트를 부탁하세요. 그렇지 않으면 그 사람의 변경이 내 변경을 되돌릴 수 있습니다."),
 ];

@@ -526,6 +526,25 @@ fn value_hashes(data: &Value) -> BTreeMap<String, u64> {
         .collect()
 }
 
+/// Only items inside a space (folders, lists) ever move; move times kept
+/// for anything else are left out. Copies merged with an older app's copy
+/// used to get one for every item.
+pub fn shrink_moved(moved: &mut BTreeMap<u64, i64>, data: &Value) {
+    if moved.is_empty() {
+        return;
+    }
+    let mut movable = std::collections::HashSet::new();
+    if let Some(spaces) = data.get("spaces") {
+        let mut inner = BTreeMap::new();
+        walk(spaces, None, false, &mut inner);
+        for s in spaces.as_array().into_iter().flatten().filter_map(id_of) {
+            inner.remove(&s);
+        }
+        movable.extend(inner.into_keys());
+    }
+    moved.retain(|id, _| movable.contains(id));
+}
+
 /// Record what changed since the last save: new stamps for edited items,
 /// tombstones for removed ones, revivals for restored ones. `now` is in
 /// milliseconds. A new stamp is always later than the item's last one, so a
@@ -553,6 +572,7 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
         }
     }
     meta.parents = places;
+    shrink_moved(&mut meta.moved, data);
     meta.v = META_V;
     let parts = part_hashes(data);
     for (id, h) in &cur {
@@ -677,7 +697,19 @@ impl<'a> Ctx<'a> {
                 }
             }
             home.insert(id, best.1);
-            home_moved.insert(id, best_key.0);
+            // a move time worth keeping: one the deciding copy keeps, or a
+            // real move (the copies disagree where it is). Copies that don't
+            // keep move times otherwise record nothing, or every item they
+            // win would get one.
+            let recorded = if moved[best.0].is_some() || list.iter().any(|c| c.1 != best.1) {
+                best_key.0
+            } else {
+                list.iter()
+                    .filter_map(|c| moved[c.0].and_then(|m| m.get(&id)).copied())
+                    .max()
+                    .unwrap_or(0)
+            };
+            home_moved.insert(id, recorded);
             cands.insert(id, list.into_iter().map(|(s, _, v)| (s, v)).collect());
         }
         Ctx {
@@ -1147,6 +1179,7 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     lmeta.revived = revived;
     lmeta.stamps = out_stamps;
     lmeta.moved = out_moved;
+    shrink_moved(&mut lmeta.moved, local);
     lmeta.fields = out_fields;
     lmeta.hashes = fingerprints(local);
     lmeta.field_hashes = part_hashes(local);
@@ -1167,6 +1200,39 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         v
     };
     strip(&before) != strip(local)
+}
+
+/// The app version a copy in a shared folder was written by (`"app"`,
+/// written by `write_mine` from this version on). None for copies from
+/// before.
+pub fn app_version_of(copy: &Value) -> Option<&str> {
+    copy.get("app").and_then(|a| a.as_str())
+}
+
+/// "0.1.7" -> (0, 1, 7); missing parts count as 0.
+fn version_key(v: &str) -> Vec<u64> {
+    v.split('.')
+        .map(|p| {
+            p.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// A copy written by an app older than `mine` (or by one from before apps
+/// wrote their version, or with an older sync format): such an app erases
+/// fields it doesn't know when its copy wins. Returns its version when it
+/// wrote one ("" when it didn't).
+pub fn older_app<'a>(copy: &'a Value, mine: &str) -> Option<&'a str> {
+    let v = meta_of(copy).v;
+    match app_version_of(copy) {
+        None => Some(""),
+        Some(a) if version_key(a) < version_key(mine) || v < META_V => Some(a),
+        Some(_) => None,
+    }
 }
 
 /// The other people's files in a shared folder, with their change times.
@@ -1191,10 +1257,17 @@ pub fn read_json(p: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// The copy other people get: personal notes, reminders and this computer's
-/// fingerprints left out.
+/// The copy other people get: personal notes, reminders, items marked
+/// `personal` and this computer's fingerprints left out.
 pub fn shareable(data: &Value) -> Value {
     let mut v = data.clone();
+    // items marked personal (bookmarks a person had before bookmarks were
+    // shared) stay on this computer
+    for path in SHARED {
+        if let Some(a) = get_path_mut(&mut v, path).and_then(|a| a.as_array_mut()) {
+            a.retain(|x| x.get("personal").and_then(|p| p.as_bool()) != Some(true));
+        }
+    }
     if let Some(e) = v.get_mut("extra").and_then(|e| e.as_object_mut()) {
         e.insert("notepad".into(), Value::String(String::new()));
         e.insert("reminders".into(), Value::Array(vec![]));
@@ -1352,10 +1425,14 @@ fn get_path_mut<'a>(v: &'a mut Value, path: &str) -> Option<&'a mut Value> {
     Some(cur)
 }
 
-/// Write this computer's copy (personal notes and reminders left out).
-pub fn write_mine(folder: &Path, device: &str, data: &Value) -> std::io::Result<()> {
+/// Write this computer's copy (personal notes and reminders left out),
+/// saying which app version wrote it (`app`, see `older_app`).
+pub fn write_mine(folder: &Path, device: &str, data: &Value, app: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(folder)?;
-    let v = shareable(data);
+    let mut v = shareable(data);
+    if let Some(o) = v.as_object_mut() {
+        o.insert("app".into(), Value::from(app));
+    }
     let tmp = folder.join(format!(".{}.tmp", device));
     std::fs::write(&tmp, serde_json::to_string(&v).unwrap_or_default())?;
     std::fs::rename(&tmp, folder.join(format!("{}{}", device, FILE_SUFFIX)))
@@ -2411,5 +2488,90 @@ mod tests {
             ),
             "1,2,3|old|10|20"
         );
+    }
+
+    #[test]
+    fn an_older_copy_records_move_times_only_for_real_moves() {
+        let (mut a, _, mut old, mut mo) = pair(json!([
+            space(100, json!([]), json!([list(101), list(102)])),
+            space(200, json!([]), json!([]))
+        ]));
+        a["tasks"] = json!([{"id": 7, "name": "t"}]);
+        let mut ma = meta_of(&a);
+        save(&mut a, &mut ma, 15);
+        // an app that doesn't keep move times moves 101 and edits everything
+        change(
+            &mut old,
+            &mut mo,
+            json!([
+                space(100, json!([]), json!([list(102)])),
+                space(200, json!([]), json!([list(101)]))
+            ]),
+            30,
+        );
+        old["extra"]["sync"]["v"] = json!(1);
+        old["extra"]["sync"]
+            .as_object_mut()
+            .unwrap()
+            .remove("moved");
+        merge(&mut a, &[old]);
+        assert_eq!(places(&a), vec![(100, 102), (200, 101)]);
+        let m = meta_of(&a);
+        assert_eq!(
+            m.moved.keys().copied().collect::<Vec<_>>(),
+            vec![101],
+            "only the list that moved: {:?}",
+            m.moved
+        );
+        // a bloated map from before shrinks to the items that can move
+        let mut bloated: BTreeMap<u64, i64> =
+            [(7, 5), (100, 5), (101, 30), (102, 5), (999, 5)].into();
+        shrink_moved(&mut bloated, &a);
+        assert_eq!(bloated, [(101, 30), (102, 5)].into());
+    }
+
+    #[test]
+    fn personal_items_stay_on_this_computer() {
+        let (mut a, _, _, _) = pair(json!([]));
+        a["extra"]["bookmarks"] = json!([{"id": 5, "title": "Mine", "url": "u", "personal": true}, {"id": 6, "title": "Team", "url": "v"}]);
+        let out = shareable(&a);
+        assert_eq!(
+            out["extra"]["bookmarks"],
+            json!([{"id": 6, "title": "Team", "url": "v"}])
+        );
+        // and merging the team's copy (without it) keeps it here
+        let mut ma = meta_of(&a);
+        save(&mut a, &mut ma, 20);
+        let team = shareable(&a);
+        merge(&mut a, &[team]);
+        assert_eq!(a["extra"]["bookmarks"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn copies_from_older_apps_are_told_apart() {
+        let new = json!({"app": "0.1.7", "extra": {"sync": {"v": META_V}}});
+        assert_eq!(older_app(&new, "0.1.7"), None);
+        assert_eq!(
+            older_app(&new, "0.1.10"),
+            Some("0.1.7"),
+            "compared as numbers"
+        );
+        assert_eq!(
+            older_app(&json!({"extra": {"sync": {"v": 2}}}), "0.1.7"),
+            Some("")
+        );
+        assert_eq!(
+            older_app(
+                &json!({"app": "0.1.7", "extra": {"sync": {"v": 2}}}),
+                "0.1.7"
+            ),
+            Some("0.1.7"),
+            "an older sync format"
+        );
+        let dir = std::env::temp_dir().join(format!("wb-sync-app-{:x}", random_u64()));
+        write_mine(&dir, "d1", &new, "0.1.7").unwrap();
+        let back = read_json(&dir.join(format!("d1{}", FILE_SUFFIX))).unwrap();
+        assert_eq!(app_version_of(&back), Some("0.1.7"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

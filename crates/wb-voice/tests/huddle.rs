@@ -125,6 +125,8 @@ impl App {
     fn start(port: u16, sign_in: SignIn) -> App {
         let mut s = sign_in;
         s.device = format!("d{:x}", wb_sync::random_u64() as u32);
+        // an app of this version (the server takes no changes from older ones)
+        s.sync = Some(wb_sync::META_V);
         App {
             client: Client::start(&format!("127.0.0.1:{}", port), s, Arc::new(|| {})),
             data: None,

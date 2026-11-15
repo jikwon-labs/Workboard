@@ -396,6 +396,9 @@ public final class SyncClient {
 
     private func sendHello(on ws: URLSessionWebSocketTask) {
         var h = Hello(device: settings.device, tag: settings.tag)
+        // the server takes changes only from apps that know every field
+        h.app = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "ios"
+        h.sync = UInt64(Sync.metaV)
         if let attempt = pendingSignIn {
             attempt.fill(&h)
             helloUsedToken = false

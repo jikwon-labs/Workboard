@@ -294,6 +294,16 @@ extension Sync {
         return out
     }
 
+    /// Only items inside a space (folders, lists) ever move; move times
+    /// for anything else are left out (wb_sync::shrink_moved).
+    public static func shrinkMoved(_ moved: inout [UInt64: Int64], _ data: JSON) {
+        guard !moved.isEmpty else { return }
+        var inner: [UInt64: UInt64] = [:]
+        if let spaces = data["spaces"] { walk(spaces, parent: nil, placed: false, &inner) }
+        for s in data["spaces"]?.array ?? [] { if let id = idOf(s) { inner[id] = nil } }
+        moved = moved.filter { inner[$0.key] != nil }
+    }
+
     /// After the shape items are written in changed (`legacy` is the
     /// workspace the old way, `current` the new way): fingerprints that still
     /// match the old way are carried over, so the change in shape alone
@@ -392,6 +402,7 @@ extension Sync {
             }
         }
         meta.parents = places
+        shrinkMoved(&meta.moved, data)
         meta.v = metaV
         let parts = partHashes(data)
         for (id, h) in cur {
@@ -491,7 +502,13 @@ extension Sync {
                     }
                 }
                 home[id] = .some(best.parent)
-                homeMoved[id] = bestKey.0
+                // a move time worth keeping: one the deciding copy keeps, or
+                // a real move (the copies disagree where it is)
+                if moved[best.src] != nil || list.contains(where: { $0.parent != best.parent }) {
+                    homeMoved[id] = bestKey.0
+                } else {
+                    homeMoved[id] = list.compactMap { moved[$0.src]?[id] }.max() ?? 0
+                }
                 cands[id] = list.map { (src: $0.src, value: $0.value) }
             }
         }
@@ -775,6 +792,7 @@ extension Sync {
         lmeta.revived = revived
         lmeta.stamps = cx.out
         lmeta.moved = cx.outMoved
+        shrinkMoved(&lmeta.moved, local)
         lmeta.fields = cx.outFields
         lmeta.hashes = fingerprints(local)
         lmeta.fieldHashes = partHashes(local)
@@ -798,6 +816,12 @@ extension Sync {
     /// wb_sync::shareable does.
     public static func outgoing(_ data: JSON) -> JSON {
         var v = data
+        // items marked personal stay on this device (wb_sync::shareable)
+        for path in shared {
+            guard let a = v.at(path)?.array else { continue }
+            let kept = a.filter { $0["personal"]?.bool != true }
+            if kept.count != a.count { v.set(path, .array(kept)) }
+        }
         if v.at("extra.sync")?.object != nil {
             v.set("extra.sync.hashes", .object([:]))
             v.set("extra.sync.value_hashes", .object([:]))

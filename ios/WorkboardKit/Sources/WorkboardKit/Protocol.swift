@@ -3,7 +3,10 @@
 // snake_case "type".
 //
 //   app -> server  hello        {device, tag?, token?, invite?, claim?,
-//                                email?, password?, new_password?, reset_code?}
+//                                email?, password?, new_password?, reset_code?,
+//                                app?, sync?}   (app version and sync format;
+//                                the server takes no pushes from apps with
+//                                sync below wb_net::OLDEST_SYNC or none)
 //   server -> app  welcome      {tag, snapshot|null, rev, member, role, token?, email?}
 //   app -> server  push         {data}
 //   server -> all  update       {data, rev, hidden?}   (hidden also in welcome: ids
@@ -40,9 +43,15 @@ public struct Hello: Equatable, Sendable {
     public var password: String?
     public var newPassword: String?
     public var resetCode: String?
+    /// This app's version, and the sync format it writes (Sync.metaV).
+    public var app: String?
+    public var sync: UInt64?
 
     public init(device: String, tag: UInt64? = nil, token: String? = nil, invite: String? = nil, claim: UInt64? = nil,
-                email: String? = nil, password: String? = nil, newPassword: String? = nil, resetCode: String? = nil) {
+                email: String? = nil, password: String? = nil, newPassword: String? = nil, resetCode: String? = nil,
+                app: String? = nil, sync: UInt64? = nil) {
+        self.app = app
+        self.sync = sync
         self.device = device
         self.tag = tag
         self.token = token
@@ -77,6 +86,8 @@ public enum ClientMessage: Equatable, Sendable {
             put("password", h.password)
             put("new_password", h.newPassword)
             put("reset_code", h.resetCode)
+            put("app", h.app)
+            if let v = h.sync { o["sync"] = .id(v) }
             return .object(o)
         case let .push(data):
             return ["type": "push", "data": data]
@@ -102,7 +113,8 @@ public enum ClientMessage: Equatable, Sendable {
             guard let device = j["device"]?.string else { return nil }
             self = .hello(Hello(device: device, tag: j["tag"]?.uint, token: j["token"]?.string, invite: j["invite"]?.string,
                                 claim: j["claim"]?.uint, email: j["email"]?.string, password: j["password"]?.string,
-                                newPassword: j["new_password"]?.string, resetCode: j["reset_code"]?.string))
+                                newPassword: j["new_password"]?.string, resetCode: j["reset_code"]?.string,
+                                app: j["app"]?.string, sync: j["sync"]?.uint))
         case "push":
             guard let s = j["data"], s.object != nil else { return nil }
             self = .push(data: s)

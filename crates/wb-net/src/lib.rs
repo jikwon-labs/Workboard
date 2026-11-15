@@ -210,6 +210,15 @@ impl Backup {
     }
 }
 
+/// The oldest sync format (`wb_sync::META_V`) whose changes the server
+/// takes. Older apps would erase fields they don't know when their copy
+/// wins (see `UPDATE_NEEDED`).
+pub const OLDEST_SYNC: u32 = 3;
+
+/// Said to an app older than `OLDEST_SYNC` when it sends changes. It goes
+/// with `CODE_DENIED`, which every app shows and stays connected for.
+pub const UPDATE_NEEDED: &str = "This version of Workboard is too old to send changes to your team's server. Update Workboard to keep working together; until then you only see what others change.";
+
 /// Why the server said no to signing in. The app stops trying.
 pub const CODE_AUTH: &str = "auth";
 /// A request the person isn't allowed to make. The connection stays.
@@ -243,6 +252,14 @@ pub enum Msg {
         /// The code a password-reset email gave.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reset_code: Option<String>,
+        /// The app's version ("0.1.7"), for the server's log and messages.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app: Option<String>,
+        /// The sync format the app writes (`wb_sync::META_V`). Apps from
+        /// before it send none; the server takes no changes from apps older
+        /// than `OLDEST_SYNC` (they still get the team's copy).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sync: Option<u32>,
     },
     Welcome {
         /// The id tag this device must use; the server keeps them unique.
@@ -552,6 +569,9 @@ pub struct SignIn {
     pub password: Option<String>,
     pub new_password: Option<String>,
     pub reset_code: Option<String>,
+    /// The app's version and sync format, sent in hello.
+    pub app: Option<String>,
+    pub sync: Option<u32>,
 }
 
 enum Cmd {
@@ -776,6 +796,8 @@ fn session(
         password: sign_in.password.clone(),
         new_password: sign_in.new_password.clone(),
         reset_code: sign_in.reset_code.clone(),
+        app: sign_in.app.clone(),
+        sync: sign_in.sync,
     };
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
@@ -978,10 +1000,22 @@ mod tests {
             password: None,
             new_password: None,
             reset_code: None,
+            app: None,
+            sync: None,
         };
         assert_eq!(
             hello(Some(3)).to_json(),
             r#"{"type":"hello","device":"d1","tag":3}"#
+        );
+        // the app's version goes along; an older server ignores it
+        let mut h = hello(None);
+        if let Msg::Hello { app, sync, .. } = &mut h {
+            *app = Some("0.1.7".into());
+            *sync = Some(3);
+        }
+        assert_eq!(
+            h.to_json(),
+            r#"{"type":"hello","device":"d1","app":"0.1.7","sync":3}"#
         );
         assert_eq!(
             Msg::parse(r#"{"type":"hello","device":"d1"}"#),

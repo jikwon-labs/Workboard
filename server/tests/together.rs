@@ -154,6 +154,13 @@ impl App {
         if sign_in.device.is_empty() {
             sign_in.device = format!("dev{:x}", wb_sync::random_u64());
         }
+        // an app of this version (`old_app` tests leave it out)
+        if sign_in.app.as_deref() != Some("none") {
+            sign_in.app.get_or_insert_with(|| "test".into());
+            sign_in.sync.get_or_insert(wb_sync::META_V);
+        } else {
+            sign_in.app = None;
+        }
         let device = sign_in.device.clone();
         let client = Client::start(&format!("127.0.0.1:{}", port), sign_in, Arc::new(|| {}));
         App {
@@ -2622,6 +2629,56 @@ fn two_people_editing_one_task_at_once_both_keep_their_change() {
                 && t["timers"] == json!([{"member": 2, "start": 1005}])
         });
     }
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn an_app_too_old_to_know_every_field_gets_changes_but_cannot_send_them() {
+    let home = temp_home("old-app");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    // B's computer runs an app from before the hello said its version
+    let token = b.token.clone();
+    let device = b.device.clone();
+    drop(b);
+    let mut old = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            app: Some("none".into()),
+            ..Default::default()
+        },
+    );
+    old.wait("the old app still gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    old.change(|d| d["tasks"][0]["name"] = json!("Plan (old app)"));
+    old.until("the old app is told to update", |o| {
+        o.denied.iter().any(|d| d == wb_net::UPDATE_NEEDED)
+    });
+    assert!(
+        matches!(old.status, Some(Status::Connected)),
+        "it stays connected: {:?}",
+        old.status
+    );
+    // its change didn't reach the team, but the team's changes reach it
+    a.change(|d| d["tasks"][1]["name"] = json!("Ship (A)"));
+    old.wait("A's change at the old app", |d| {
+        d["tasks"][1]["name"] == "Ship (A)"
+    });
+    a.wait("A's copy", |d| d["tasks"][1]["name"] == "Ship (A)");
+    assert_eq!(
+        a.data["tasks"][0]["name"], "Plan",
+        "the old app's change was not taken"
+    );
+    // and it is said once, not on every change
+    old.change(|d| d["tasks"][0]["name"] = json!("again"));
+    std::thread::sleep(Duration::from_millis(300));
+    old.pump();
+    assert_eq!(old.denied.len(), 1, "{:?}", old.denied);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

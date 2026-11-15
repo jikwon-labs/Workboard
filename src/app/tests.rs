@@ -5853,3 +5853,77 @@ fn whiteboard_strokes_and_notes_get_the_ids_every_app_works_out() {
     let back: Data = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
     assert_eq!(back.extra.whiteboards[0].strokes[0].id, w.strokes[0].id);
 }
+
+#[test]
+fn a_shared_folder_copy_from_an_older_app_is_pointed_out_once() {
+    let dir = temp_folder("old-app");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    // our own file says which version wrote it
+    let mine = crate::sync::read_json(&dir.join(format!(
+        "{}{}",
+        a.data.extra.shared.as_ref().unwrap().device,
+        crate::sync::FILE_SUFFIX
+    )))
+    .unwrap();
+    assert_eq!(
+        crate::sync::app_version_of(&mine),
+        Some(together::APP_VERSION)
+    );
+    a.toast = None;
+    a.sync_pull();
+    assert!(a.toast.is_none(), "nobody else here yet");
+    // a teammate's copy written by an app from before versions were written
+    let mut old = serde_json::to_value(&a.data).unwrap();
+    old["extra"]["sync"]["v"] = serde_json::json!(2);
+    std::fs::write(
+        dir.join(format!("old{}", crate::sync::FILE_SUFFIX)),
+        old.to_string(),
+    )
+    .unwrap();
+    a.sync_pull();
+    let t = a.toast.take().map(|t| t.0).unwrap_or_default();
+    assert!(t.contains("older version of Workboard"), "{}", t);
+    a.sync_pull();
+    assert!(a.toast.is_none(), "said once");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn bookmarks_from_before_sharing_stay_personal_and_new_ones_are_shared() {
+    // a file saved before bookmarks were shared
+    let mut old = serde_json::to_value(Data::seed()).unwrap();
+    old["extra"]["bookmarks"] =
+        serde_json::json!([{"id": 5, "title": "My bank", "url": "https://bank.example"}]);
+    old["extra"]
+        .as_object_mut()
+        .unwrap()
+        .remove("bookmarks_shared");
+    let mut d: Data = serde_json::from_value(old).unwrap();
+    assert!(d.keep_old_bookmarks_personal());
+    assert!(!d.keep_old_bookmarks_personal(), "only once");
+    assert!(d.extra.bookmarks[0].personal);
+    d.extra.bookmarks.push(Bookmark {
+        id: 6,
+        title: "Team wiki".into(),
+        url: "https://wiki.example".into(),
+        personal: false,
+    });
+    let shared = crate::sync::shareable(&serde_json::to_value(&d).unwrap());
+    let titles: Vec<&str> = shared["extra"]["bookmarks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["Team wiki"],
+        "only the new one goes to the team"
+    );
+    // both still show here, and a new workspace shares from the start
+    let back: Data = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
+    assert_eq!(back.extra.bookmarks.len(), 2);
+    assert!(Data::seed().extra.bookmarks_shared);
+}

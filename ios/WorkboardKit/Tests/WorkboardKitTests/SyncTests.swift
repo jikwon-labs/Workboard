@@ -322,6 +322,38 @@ final class RustPortTests2: XCTestCase {
         XCTAssertEqual(Sync.legacyShape(d).at("extra.forms")?[0]?["owner"], 0)
     }
 
+    func testAnOlderCopyRecordsMoveTimesOnlyForRealMoves() {
+        var (a, _, old, mo) = pair([space(100, [], [list(101), list(102)]), space(200, [], [])])
+        a["tasks"] = [["id": 7, "name": "t"]]
+        var ma = SyncMeta(of: a)
+        Sync.stamp(a, &ma, now: 15)
+        a.set("extra.sync", ma.json)
+        change(&old, &mo, [space(100, [], [list(102)]), space(200, [], [list(101)])], 30)
+        var om = SyncMeta(of: old)
+        om.v = 1
+        om.moved = [:]
+        old.set("extra.sync", om.json)
+        Sync.merge(&a, [old])
+        XCTAssertEqual(places(a), [[100, 102], [200, 101]])
+        XCTAssertEqual(Array(SyncMeta(of: a).moved.keys), [101], "only the list that moved")
+        var bloated: [UInt64: Int64] = [7: 5, 100: 5, 101: 30, 102: 5, 999: 5]
+        Sync.shrinkMoved(&bloated, a)
+        XCTAssertEqual(bloated, [101: 30, 102: 5])
+    }
+
+    func testPersonalItemsStayOnThisDevice() {
+        var (a, _, _, _) = pair([])
+        a.set("extra.bookmarks", [["id": 5, "title": "Mine", "url": "u", "personal": true], ["id": 6, "title": "Team", "url": "v"]])
+        XCTAssertEqual(Sync.outgoing(a).at("extra.bookmarks"), [["id": 6, "title": "Team", "url": "v"]])
+    }
+
+    func testHelloSaysTheAppVersionAndSyncFormat() {
+        let h = Hello(device: "d1", app: "1.0", sync: 3)
+        let text = ClientMessage.hello(h).text
+        XCTAssertTrue(text.contains(#""app":"1.0""#) && text.contains(#""sync":3"#), text)
+        XCTAssertEqual(ClientMessage(text: text), .hello(h))
+    }
+
     func testMetaKeepsMoveTimesAndLeavesThisDevicesPlacesOut() throws {
         var m = SyncMeta(stamps: [1: 10], v: Sync.metaV)
         m.moved = [101: 30]

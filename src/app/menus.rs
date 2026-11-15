@@ -2648,6 +2648,7 @@ impl App {
                         id,
                         title: ttl,
                         url: url.trim().to_string(),
+                        personal: false,
                     });
                     self.dirty = true;
                     close = true;

@@ -165,6 +165,8 @@ pub struct SyncRt {
     pub(super) restore_confirm: Option<String>,
     /// The person was told the team's copy couldn't be read (said once).
     told_unreadable: bool,
+    /// Told this session that someone in the shared folder runs an older app.
+    pub(super) told_old_app: bool,
     /// When a request other than joining a huddle last went to the server
     /// (see huddle_denied_unnamed).
     pub(super) other_asked: Option<std::time::Instant>,
@@ -301,6 +303,9 @@ pub(super) fn folder_people(folder: &str) -> usize {
     sync::other_files(Path::new(folder.trim()), "").len()
 }
 
+/// This app's version, written into the shared folder and sent in hello.
+pub(super) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub(super) fn call_link() -> String {
     format!("https://meet.jit.si/Workboard-{:016x}", sync::random_u64())
 }
@@ -383,7 +388,7 @@ impl App {
             self.sync_rt.pending = false;
             return;
         }
-        if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v).is_err() {
+        if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v, APP_VERSION).is_err() {
             self.toast = Some((
                 tr("Couldn't write to the shared folder. Is it still there?").into(),
                 now_ts(),
@@ -417,6 +422,19 @@ impl App {
             .iter()
             .filter_map(|(p, _)| sync::read_json(p))
             .collect();
+        if !self.sync_rt.told_old_app {
+            if let Some(v) = others.iter().find_map(|o| sync::older_app(o, APP_VERSION)) {
+                self.sync_rt.told_old_app = true;
+                self.toast = Some((
+                    if v.is_empty() {
+                        tr("Someone in this shared folder uses an older version of Workboard. Ask them to update, or their changes can undo yours.").to_string()
+                    } else {
+                        trf!("Someone in this shared folder uses Workboard {}, an older version. Ask them to update, or their changes can undo yours.", v)
+                    },
+                    now_ts(),
+                ));
+            }
+        }
         self.merge_in(&others, &[])
     }
 
@@ -552,7 +570,7 @@ impl App {
     /// Returns true when the team's changes came in.
     pub(super) fn net_tick(&mut self, ctx: Option<&egui::Context>) -> bool {
         if self.sync_rt.net.is_none() {
-            let (addr, sign_in) = if let Some(j) = &self.sync_rt.joining {
+            let (addr, mut sign_in) = if let Some(j) = &self.sync_rt.joining {
                 (j.addr.clone(), j.how.sign_in(&j.device, self.data.me))
             } else if let Some(SharedCfg {
                 server: Some(addr),
@@ -574,6 +592,9 @@ impl App {
             } else {
                 return false;
             };
+            // the server takes changes only from apps that know every field
+            sign_in.app = Some(APP_VERSION.to_string());
+            sign_in.sync = Some(sync::META_V);
             let wake: wb_net::Wake = match ctx {
                 Some(c) => {
                     let c = c.clone();

@@ -1209,6 +1209,17 @@ impl App {
                 } else {
                     super::files::CHAT_BOX
                 });
+                // the people the @ list offers
+                let me = self.data.me;
+                let people: Vec<Member> = self
+                    .data
+                    .members
+                    .iter()
+                    .filter(|m| !m.invited && m.id != me)
+                    .cloned()
+                    .collect();
+                let mut picked: Option<u64> = None;
+                let mut insert: Option<String> = None;
                 let text = if thread {
                     &mut self.thread_text
                 } else {
@@ -1234,6 +1245,15 @@ impl App {
                         },
                     )
                 });
+                // typing "@" at the start of a word offers the people to
+                // mention, as in the channel's box
+                let mention_popup = egui::Id::new(("reply_mention_popup", thread));
+                if r.changed() && text.ends_with('@') {
+                    let before = text[..text.len() - 1].chars().last();
+                    if before.map_or(true, char::is_whitespace) {
+                        ui.memory_mut(|m| m.open_popup(mention_popup));
+                    }
+                }
                 let mut pick = false;
                 ui.horizontal(|ui| {
                     let b = ui
@@ -1247,6 +1267,26 @@ impl App {
                         )
                     });
                     pick = b.clicked();
+                    let at = ui
+                        .add(ghost(egui::Button::new(RichText::new("@").color(t.text2))))
+                        .on_hover_text(tr("Mention someone"));
+                    name_it(&at, "Mention someone in the reply");
+                    popup(ui, &at, mention_popup, 210.0, |ui| {
+                        if people.is_empty() {
+                            ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
+                        }
+                        for m in &people {
+                            if menu_row(ui, &t, &m.name, false, |p, c| {
+                                paint_avatar(p, c, 8.0, m, t.card)
+                            })
+                            .clicked()
+                            {
+                                insert = Some(format!("@{} ", m.name));
+                                picked = Some(m.id);
+                                close_popup(ui);
+                            }
+                        }
+                    });
                     ui.label(
                         RichText::new(tr("Enter to send, Shift+Enter for a new line"))
                             .small()
@@ -1262,6 +1302,28 @@ impl App {
                         }
                     });
                 });
+                if let Some(new) = insert {
+                    // a picked @name replaces an "@" already typed
+                    if text.ends_with('@') {
+                        text.pop();
+                    }
+                    text.push_str(&new);
+                    ui.memory_mut(|m| m.request_focus(id));
+                    let n = text.chars().count();
+                    let mut st = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                    st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(n),
+                    )));
+                    st.store(ui.ctx(), id);
+                }
+                if let Some(m) = picked {
+                    // the picks go with the reply (see apply_chat)
+                    if thread {
+                        self.thread_picked.push(m);
+                    } else {
+                        self.chat_picked.push(m);
+                    }
+                }
                 if out.is_some() {
                     if thread {
                         self.thread_files.clear();
@@ -2257,12 +2319,12 @@ impl App {
                     }
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    // the channel's box (not a thread reply): the people
-                    // picked from its @ list
+                    // the people picked from the @ list of the box it was
+                    // written in: the channel's, or the thread's
                     let picked = if parent.is_none() {
                         std::mem::take(&mut self.chat_picked)
                     } else {
-                        vec![]
+                        std::mem::take(&mut self.thread_picked)
                     };
                     let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {

@@ -359,6 +359,7 @@ struct Drafts {
     chat_files: DraftBox<Vec<files::Pending>>,
     thread_files: DraftBox<Vec<files::Pending>>,
     chat_picked: DraftBox<Vec<u64>>,
+    thread_picked: DraftBox<Vec<u64>>,
 }
 
 pub struct App {
@@ -397,6 +398,8 @@ pub struct App {
     /// (kept with its draft), so a name two people share means the one
     /// picked.
     chat_picked: Vec<u64>,
+    /// The same for the open thread's reply box (kept with its draft).
+    thread_picked: Vec<u64>,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -723,6 +726,7 @@ impl App {
             comment_text: String::new(),
             comment_picked: vec![],
             chat_picked: vec![],
+            thread_picked: vec![],
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),
@@ -6468,6 +6472,9 @@ impl App {
         self.drafts
             .chat_picked
             .swap(self.chat_open, &mut self.chat_picked);
+        self.drafts
+            .thread_picked
+            .swap(self.thread_open, &mut self.thread_picked);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
         self.sync_view_prefs();

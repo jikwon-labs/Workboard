@@ -10164,3 +10164,90 @@ fn the_slack_matching_picker_tells_members_of_one_name_apart() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
+    let mut h = Ui1::new();
+    let sam = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    let sam2 = h.app.data.new_id();
+    h.app.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        email: "sam2@example.com".into(),
+        role: "Member".into(),
+        ..Default::default()
+    });
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.click("1 reply");
+    let mid = h.app.thread_open.unwrap();
+    let before: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Sam Lee")
+        .map(|(_, r)| *r)
+        .collect();
+    h.click("Mention someone in the reply");
+    let mut rows: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Sam Lee" && !before.contains(r))
+        .map(|(_, r)| *r)
+        .collect();
+    rows.sort_by(|a, b| a.center().y.total_cmp(&b.center().y));
+    rows.dedup();
+    assert_eq!(rows.len(), 2, "both are offered in the thread's list");
+    h.click_at(rows[1].center());
+    assert_eq!(h.app.thread_text, "@Sam Lee ");
+    assert!(h.app.chat_text.is_empty(), "not into the channel's box");
+    assert_eq!(h.app.thread_picked, vec![sam2]);
+    h.type_text("see this");
+    h.key(egui::Key::Enter);
+    let reply = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .messages
+            .iter()
+            .find(|m| m.id == mid)
+            .unwrap()
+            .replies
+            .last()
+            .unwrap()
+            .clone()
+    };
+    let r = reply(&h);
+    assert_eq!(r.text, "@Sam Lee see this");
+    assert_eq!(r.mentions, vec![sam2], "the one picked, not both");
+    assert!(h.app.thread_picked.is_empty(), "used up by the reply");
+    // typing "@" opens the same list
+    h.click("Reply composer");
+    h.type_text("@");
+    let rows: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Sam Lee" && !before.contains(r))
+        .map(|(_, r)| *r)
+        .collect();
+    assert!(rows.len() >= 2, "the @ list opens on typing @");
+    let first = rows
+        .iter()
+        .min_by(|a, b| a.center().y.total_cmp(&b.center().y))
+        .unwrap();
+    h.click_at(first.center());
+    assert_eq!(h.app.thread_text, "@Sam Lee ", "the typed @ is replaced");
+    h.type_text("too");
+    h.key(egui::Key::Enter);
+    assert_eq!(reply(&h).mentions, vec![sam]);
+}

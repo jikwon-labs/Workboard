@@ -6960,3 +6960,52 @@ fn list_of_other(h: &Ui1, not: u64) -> u64 {
         .find(|l| *l != not)
         .unwrap()
 }
+
+#[test]
+fn home_lists_card_says_when_there_are_no_lists_and_offers_one() {
+    let mut h = Ui1::new();
+    // a workspace without Spaces or Lists, as a first start has
+    h.app.data.spaces.retain(|s| s.private_owner.is_some());
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.has("No Lists yet. Lists keep a Space's tasks together."));
+    h.click("Home new list");
+    assert!(
+        matches!(h.app.modal, Some(Modal::NewSpace { .. })),
+        "no Space yet: make one first"
+    );
+    h.key(egui::Key::Escape);
+    // with a Space, the button makes a List in it
+    let mut h = Ui1::new();
+    for s in h.app.data.spaces.iter_mut() {
+        s.lists.clear();
+        s.folders.clear();
+    }
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    h.click("Home new list");
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+}
+
+#[test]
+fn inbox_with_reminders_waiting_is_not_all_caught_up() {
+    let mut h = Ui1::new();
+    h.click("Inbox");
+    h.app.data.extra.inbox_cleared = h.app.inbox_items().into_iter().map(|i| i.key).collect();
+    h.settle();
+    assert!(h.has("You're all caught up") || h.has("Looking to collaborate?"));
+    let id = h.app.data.new_id();
+    h.app.data.extra.reminders.push(Reminder {
+        id,
+        text: "Call the bank".into(),
+        due_ts: now_ts() - 60,
+        owner: h.app.data.me,
+        ..Default::default()
+    });
+    h.settle();
+    assert!(h.has("Call the bank"));
+    assert!(!h.has("You're all caught up"), "a reminder is waiting");
+    assert!(h.has("No new comments, mentions or assignments."));
+}

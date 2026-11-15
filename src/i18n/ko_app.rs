@@ -165,4 +165,5 @@ pub const T: &[(&str, &str)] = &[
     ("Monthly", "매월"),
     ("Yearly", "매년"),
     // timers
+    ("No Lists yet. Lists keep a Space's tasks together.", "아직 목록이 없습니다. 목록은 스페이스의 작업을 한데 모아 둡니다."),
 ];

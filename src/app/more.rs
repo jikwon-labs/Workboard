@@ -467,7 +467,21 @@ impl App {
                         if self.inbox_tab == 0 {
                             self.reminders_block(ui);
                         }
-                        if items.is_empty() {
+                        // reminders are waiting above: not "all caught up"
+                        let reminders_shown = self.inbox_tab == 0
+                            && self
+                                .data
+                                .extra
+                                .reminders
+                                .iter()
+                                .any(|r| r.owner == self.data.me && !r.done);
+                        if items.is_empty() && reminders_shown {
+                            ui.add_space(16.0);
+                            ui.label(
+                                RichText::new(tr("No new comments, mentions or assignments."))
+                                    .color(t.text3),
+                            );
+                        } else if items.is_empty() {
                             ui.add_space(ui.available_height() * 0.3);
                             ui.vertical_centered(|ui| {
                                 let alone = self.data.members.len() <= 1;

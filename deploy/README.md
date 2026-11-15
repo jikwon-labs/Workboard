@@ -1,5 +1,6 @@
 # Running workboard-server on the Mac mini
 
+Next steps on the Mac mini (accounts and invite mail): `docs/mac-mini-todo.md`.
 Design and current state: `docs/server-design.md`. Testing (also from another
 Mac): `docs/testing.md`. App releases: `docs/release/README.md`.
 

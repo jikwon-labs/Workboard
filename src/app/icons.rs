@@ -98,6 +98,25 @@ pub(super) const KINDS: &[&str] = &[
     "logout",
 ];
 
+/// `line_icon` drawn `scale` times larger around `c` (the big icon of an
+/// empty page), with the stroke kept at about the usual weight.
+pub(super) fn line_icon_scaled(
+    p: &egui::Painter,
+    kind: &str,
+    c: Pos2,
+    color: Color32,
+    scale: f32,
+) -> bool {
+    let layer = p.layer_id();
+    let start = p.ctx().graphics_mut(|g| g.entry(layer).next_idx());
+    let ok = line_icon(p, kind, c, color);
+    let end = p.ctx().graphics_mut(|g| g.entry(layer).next_idx());
+    let tf = egui::emath::TSTransform::new(c.to_vec2() * (1.0 - scale), scale);
+    p.ctx()
+        .graphics_mut(|g| g.entry(layer).transform_range(start, end, tf));
+    ok
+}
+
 /// The gap between an icon and the text after it.
 pub(super) const ICON_GAP: f32 = 6.0;
 
@@ -130,6 +149,11 @@ pub(super) fn icon_button_ex(
     text_color: Color32,
     icon_color: Color32,
 ) -> Response {
+    let (text_color, icon_color) = if ui.is_enabled() {
+        (text_color, icon_color)
+    } else {
+        (t.text3, t.text3)
+    };
     let g = (!text.is_empty()).then(|| {
         ui.painter()
             .layout_no_wrap(text.to_string(), FontId::proportional(14.0), text_color)
@@ -1110,6 +1134,14 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-2.0, 0.0), vec2(7.0, 0.0));
             line(vec2(7.0, 0.0), vec2(4.0, -3.0));
             line(vec2(7.0, 0.0), vec2(4.0, 3.0));
+        }
+        "sort" => {
+            line(vec2(-3.5, -7.0), vec2(-3.5, 7.0));
+            line(vec2(-3.5, -7.0), vec2(-6.5, -4.0));
+            line(vec2(-3.5, -7.0), vec2(-0.5, -4.0));
+            line(vec2(3.5, 7.0), vec2(3.5, -7.0));
+            line(vec2(3.5, 7.0), vec2(0.5, 4.0));
+            line(vec2(3.5, 7.0), vec2(6.5, 4.0));
         }
         _ => return false,
     }

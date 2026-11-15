@@ -1,6 +1,7 @@
 // Pages reached from the sidebar, the rail and the menus: People, Posts,
 // Meetings, Goals, Forms, Whiteboards, Reminders, AI and the Overview view.
 
+use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
 use super::menus::ROLES;
 use super::*;
 
@@ -361,10 +362,10 @@ impl App {
         let (tabs_r, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
         let tw = (w - 20.0) / 4.0;
         for (i, (icon, label)) in [
-            ("\u{1F4E5}", "Primary"),
-            ("\u{26A1}", "Other"),
-            ("\u{23F0}", "Later"),
-            ("\u{2714}", "Cleared"),
+            ("inbox", "Primary"),
+            ("bolt", "Other"),
+            ("alarm", "Later"),
+            ("check", "Cleared"),
         ]
         .iter()
         .enumerate()
@@ -379,11 +380,10 @@ impl App {
             if resp.hovered() && !sel {
                 ui.painter().rect_filled(r.shrink(4.0), 6.0, t.hover);
             }
-            ui.painter().text(
+            line_icon(
+                ui.painter(),
+                icon,
                 r.left_center() + vec2(26.0, 0.0),
-                Align2::CENTER_CENTER,
-                *icon,
-                FontId::proportional(14.0),
                 if sel { t.text } else { t.text2 },
             );
             ui.painter().text(
@@ -437,13 +437,10 @@ impl App {
             .inner_margin(egui::Margin::symmetric(18, 10))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let label = [
-                        "\u{2261}  Filter",
-                        "\u{2261}  Comments",
-                        "\u{2261}  Mentions",
-                        "\u{2261}  Assigned",
-                    ][self.inbox_filter as usize % 4];
-                    let fr = ui.add(egui::Button::new(tr(label)).corner_radius(13));
+                    let label = ["Filter", "Comments", "Mentions", "Assigned"]
+                        [self.inbox_filter as usize % 4];
+                    // framed like the buttons on the right of this row
+                    let fr = icon_button(ui, &t, "filter", tr(label), label, true);
                     popup(ui, &fr, ui.id().with("inbox_filter"), 180.0, |ui| {
                         for (i, l) in ["Everything", "Comments", "Mentions", "Assigned to me"]
                             .iter()
@@ -459,25 +456,31 @@ impl App {
                         }
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let can_clear = !items.is_empty() && self.inbox_tab != 3;
                         if ui
-                            .add_enabled(
-                                !items.is_empty() && self.inbox_tab != 3,
-                                egui::Button::new(tr("\u{2714}  Clear all")).corner_radius(6),
-                            )
+                            .add_enabled_ui(can_clear, |ui| {
+                                icon_button(
+                                    ui,
+                                    &t,
+                                    "check",
+                                    crate::i18n::tr_ctx("Clear all (inbox)", "Clear all"),
+                                    "Clear all",
+                                    true,
+                                )
+                            })
+                            .inner
                             .clicked()
+                            && can_clear
                         {
                             clear_all = true;
                         }
-                        if ui
-                            .add(egui::Button::new("\u{2699}").corner_radius(6))
+                        if icon_button(ui, &t, "settings", "", "Notification settings", true)
                             .on_hover_text(tr("Notification settings"))
                             .clicked()
                         {
                             self.modal = Some(Modal::Notifications);
                         }
-                        if ui
-                            .add(egui::Button::new(tr("\u{23F0}  Reminder")).corner_radius(6))
-                            .clicked()
+                        if icon_button(ui, &t, "alarm", tr("Reminder"), "Reminder", true).clicked()
                         {
                             self.modal = Some(Modal::Reminder {
                                 text: String::new(),
@@ -541,32 +544,32 @@ impl App {
                                     0 if point_to_due => (
                                         "Nothing from other people",
                                         "The Inbox collects comments, mentions and assignments from others.",
-                                        "\u{2713}",
+                                        "check",
                                     ),
                                     0 if alone => (
                                         "Looking to collaborate?",
                                         "Collaboration is one invite away.",
-                                        "\u{1F465}",
+                                        "teams",
                                     ),
                                     0 => (
                                         "You're all caught up",
                                         "New comments, mentions and assignments show up here.",
-                                        "\u{2713}",
+                                        "check",
                                     ),
                                     1 => (
                                         "Nothing in Other",
                                         "Updates that don't need you show up here.",
-                                        "\u{1F4E5}",
+                                        "inbox",
                                     ),
                                     2 => (
                                         "Nothing saved for later",
                                         "Use Later on an item to come back to it.",
-                                        "\u{23F0}",
+                                        "alarm",
                                     ),
                                     _ => (
                                         "Nothing cleared yet",
                                         "Cleared items show up here.",
-                                        "\u{2713}",
+                                        "check",
                                     ),
                                 };
                                 let (r, _) =
@@ -577,12 +580,12 @@ impl App {
                                     Stroke::new(1.5, t.border),
                                     egui::StrokeKind::Inside,
                                 );
-                                ui.painter().text(
-                                    r.center(),
-                                    Align2::CENTER_CENTER,
+                                line_icon_scaled(
+                                    ui.painter(),
                                     icon,
-                                    FontId::proportional(22.0),
+                                    r.center(),
                                     Color32::from_rgb(0x5f, 0x55, 0xee),
+                                    1.6,
                                 );
                                 ui.add_space(10.0);
                                 ui.label(RichText::new(tr(title)).size(18.0).color(t.text));

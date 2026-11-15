@@ -2452,7 +2452,7 @@ fn task_window_assign_this_task_button() {
 fn fields_panel_searches_and_adds_property_columns() {
     let mut h = Ui1::new();
     assert!(!h.app.col_on("Created by"), "properties start hidden");
-    h.click("\u{25A5}  Columns");
+    h.click("Columns");
     assert!(h.app.fields_open);
     assert!(h.has("Shown") && h.has("Properties"));
     h.click("Search fields");
@@ -2524,7 +2524,7 @@ fn filter_builder_rows_are_joined_with_and() {
     let mut h = Ui1::new();
     h.app.loc = Location::Everything;
     h.settle();
-    h.click("\u{2261}  Filter");
+    h.click("Filter");
     assert!(h.app.filter_open);
     h.click("+ Add filter");
     h.click("Filter 1 field");
@@ -2569,7 +2569,7 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
     let mut h = Ui1::new();
     h.app.loc = Location::Everything;
     h.settle();
-    h.click("\u{2261}  Filter");
+    h.click("Filter");
     // Priority is Urgent
     h.click("+ Add filter");
     h.click("Filter 1 field");
@@ -2612,14 +2612,14 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
     assert!(shown.iter().any(|(p, _)| *p != 1), "not only Urgent");
     // the badge counts every condition, the ones in the group too
     assert_eq!(h.app.filter.count(), 3);
-    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    assert!(h.has("Filter \u{00B7} 3"));
     // removing a row in the group, then the group
     h.click("Remove group 1 filter 2");
     assert_eq!(h.app.filter.count(), 2);
     h.click("Remove group 1");
     assert!(h.app.filter.groups.is_empty());
     assert_eq!(h.app.filter.count(), 1);
-    assert!(h.has("\u{2261}  Filter \u{00B7} 1"));
+    assert!(h.has("Filter \u{00B7} 1"));
 }
 
 #[test]
@@ -2628,7 +2628,7 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
     let mut h = Ui1::new();
     h.app.loc = Location::Everything;
     h.settle();
-    h.click("\u{2261}  Filter");
+    h.click("Filter");
     // nothing to save yet
     h.click("Saved filter name");
     h.type_text("Urgent or to do");
@@ -2665,7 +2665,7 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
     assert_eq!(h.app.filter.count(), 3);
     assert_eq!(h.app.filter.groups, saved.groups);
     assert_eq!(h.app.filtered().len(), shown);
-    assert!(h.has("\u{2261}  Filter \u{00B7} 3"));
+    assert!(h.has("Filter \u{00B7} 3"));
     // rename
     h.click("Rename saved filter Urgent or to do");
     h.type_text(" soon");
@@ -3090,8 +3090,8 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
         if open {
             h.click("Search tasks");
         }
-        let cols_chip = h.rect("\u{25A5}  Columns");
-        let sort = h.rect("\u{21C5}  Sort: Manual");
+        let cols_chip = h.rect("Columns");
+        let sort = h.rect("Sort: Manual");
         assert!(
             cols_chip.right() <= sort.left(),
             "search open {}: Columns {:?} Sort {:?}",
@@ -3110,7 +3110,7 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
     }
     // the wide window still shows every label in full
     let w = Ui1::new();
-    assert!(w.rect("\u{25A5}  Columns").width() > 60.0 && w.has("Team Space") && w.has("Projects"));
+    assert!(w.rect("Columns").width() > 60.0 && w.has("Team Space") && w.has("Projects"));
 }
 
 #[test]
@@ -7868,7 +7868,7 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     h.click("M");
     assert_eq!(custom(&h, 9002).as_deref(), Some("M"));
     // the Columns panel turns a field column off; the list remembers it
-    h.click("\u{25A5}  Columns");
+    h.click("Columns");
     assert!(h.has("Custom fields"));
     h.click("Field Billable");
     assert!(h.app.hidden_cols.contains("field:9001"));

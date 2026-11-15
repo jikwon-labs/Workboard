@@ -2008,6 +2008,11 @@ impl App {
 
     /// The space menu (right click, or the "..." button on a sidebar space).
     pub(super) fn space_menu(&mut self, ui: &mut Ui, sid: u64) {
+        let level = self.space_level(sid);
+        if level < crate::sync::Level::Full {
+            self.limited_space_menu(ui, sid, level);
+            return;
+        }
         let t = self.t();
         let loc = Location::Space(sid);
         ui.set_min_width(200.0);
@@ -2027,6 +2032,15 @@ impl App {
         if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://space/{}", sid));
             self.toast = Some((tr("Link copied").into(), now_ts()));
+            close_any(ui);
+        }
+        let personal = self
+            .data
+            .spaces
+            .iter()
+            .any(|s| s.id == sid && s.private_owner.is_some());
+        if !personal && ui.button(tr("Share & permissions")).clicked() {
+            self.open_sharing(sid);
             close_any(ui);
         }
         ui.menu_button(tr("Create new"), |ui| {

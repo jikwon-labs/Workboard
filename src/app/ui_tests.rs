@@ -7906,3 +7906,157 @@ fn filled_buttons_tint_on_hover() {
         "a tint goes over the button's own fill"
     );
 }
+
+// ---- spaces shared with chosen people (sharing.rs)
+
+fn sharing_of(h: &Ui1, sid: u64) -> Option<(bool, Vec<(u64, String)>)> {
+    let s = h.app.data.spaces.iter().find(|s| s.id == sid)?;
+    s.sharing.as_ref().map(|x| {
+        (
+            x.everyone,
+            x.people
+                .iter()
+                .map(|p| (p.member, p.level.clone()))
+                .collect(),
+        )
+    })
+}
+
+#[test]
+fn share_dialog_chooses_people_and_their_levels() {
+    let mut h = Ui1::new();
+    let sid = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .find(|s| s.name == "Side Projects")
+        .unwrap()
+        .id;
+    h.click("Space options Side Projects");
+    h.click("Share & permissions");
+    assert!(
+        h.has("Sharing is enforced on a team server only. Alone or in a shared folder, everyone with the workspace can see and change every space."),
+        "without a server the dialog says nothing is enforced"
+    );
+    h.click("Share with chosen people");
+    h.click("Add person");
+    h.click("Add Sam Lee");
+    h.click("Sam Lee View");
+    h.click("Save");
+    assert_eq!(
+        sharing_of(&h, sid),
+        Some((false, vec![(1, "full".into()), (3, "view".into())])),
+        "whoever closes the space keeps Full in it"
+    );
+    // back to everyone: the people stay for next time
+    h.click("Space options Side Projects");
+    h.click("Share & permissions");
+    h.click("Remove Sam Lee");
+    h.click("Share with everyone");
+    h.click("Save");
+    assert_eq!(sharing_of(&h, sid), Some((true, vec![(1, "full".into())])));
+    // a space never shared stays without the field when saved as everyone's
+    let other = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .find(|s| s.id != sid && s.private_owner.is_none())
+        .unwrap()
+        .clone();
+    h.app.open_sharing(other.id);
+    h.settle();
+    h.click("Save");
+    assert_eq!(sharing_of(&h, other.id), None);
+}
+
+#[test]
+fn a_space_shared_to_view_or_comment_reads_only() {
+    let mut h = Ui1::new();
+    // on a team server, as a plain member
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    let task = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.name == "Write copy for landing page")
+        .unwrap()
+        .clone();
+    let space = h.app.data.space_of_list(task.list_id).unwrap().clone();
+    let share = |h: &mut Ui1, level: &str| {
+        let s = h
+            .app
+            .data
+            .spaces
+            .iter_mut()
+            .find(|s| s.id == space.id)
+            .unwrap();
+        s.sharing = Some(SpaceSharing {
+            everyone: false,
+            people: vec![SpaceGrant {
+                member: 1,
+                level: level.into(),
+            }],
+        });
+        h.settle();
+    };
+    share(&mut h, "view");
+    // the list says so, and the space menu leaves out what would change it
+    h.app.loc = Location::List(task.list_id);
+    h.settle();
+    assert!(h.has("View only"));
+    h.click(&format!("Space options {}", space.name));
+    assert!(h.has("You can read this space.") && !h.has("Rename") && !h.has("Delete"));
+    h.key(egui::Key::Escape);
+    // the task window: fields and the comment box are off
+    h.click_left("Task Write copy for landing page", 120.0);
+    assert_eq!(h.app.open_task, Some(task.id));
+    h.click("Comment box");
+    h.type_text("hello");
+    assert!(h.app.comment_text.is_empty(), "the comment box is off");
+    // an edit that gets through some other way is turned down
+    let mut renamed = task.clone();
+    renamed.name = "Renamed".into();
+    h.app.actions.push(Action::Replace(renamed.clone()));
+    h.app.apply_actions();
+    assert_eq!(h.app.task(task.id).unwrap().name, task.name);
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("You can only view this space.")
+    );
+    h.app.actions.push(Action::DeleteTask(task.id));
+    h.app.apply_actions();
+    assert!(h.app.task(task.id).is_some(), "not deleted");
+    // Comment: the box works and comments go in, nothing else does
+    share(&mut h, "comment");
+    assert!(h.has("Can comment"));
+    h.click("Comment box");
+    h.type_text("looks good");
+    h.click("Send Comment");
+    assert!(h
+        .app
+        .task(task.id)
+        .unwrap()
+        .activity
+        .iter()
+        .any(|a| a.comment && a.text == "looks good" && a.author == 1));
+    h.app.actions.push(Action::Replace(renamed));
+    h.app.apply_actions();
+    assert_eq!(h.app.task(task.id).unwrap().name, task.name);
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("You can only view and comment in this space.")
+    );
+    // an admin has Full everywhere
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.settle();
+    assert!(!h.has("Can comment"));
+}

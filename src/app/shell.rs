@@ -3162,6 +3162,7 @@ impl App {
                             self.actions.push(Action::ToggleFavorite(self.loc));
                         }
                     }
+                    self.level_note(ui, &t, self.loc_level(self.loc));
                     let right_start = ui.max_rect().right();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;

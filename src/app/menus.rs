@@ -127,6 +127,11 @@ pub enum Modal {
     MoveList {
         list: u64,
     },
+    /// Share & permissions for a space (sharing.rs); `draft` until Save.
+    SpaceSharing {
+        space: u64,
+        draft: SpaceSharing,
+    },
     NewChannel {
         name: String,
         private: bool,
@@ -1136,6 +1141,7 @@ impl App {
             Modal::NewSpace { .. } => tr("Create a Space").into(),
             Modal::MoveTasks { .. } => tr("Move to").into(),
             Modal::MoveList { .. } => tr("Move List").into(),
+            Modal::SpaceSharing { .. } => tr("Share & permissions").into(),
             Modal::NewChannel { .. } => tr("Create Channel").into(),
             Modal::ListInfo { .. } => tr("List Info").into(),
             Modal::PickTask { mode, .. } => tr(mode.title()).into(),
@@ -1228,6 +1234,10 @@ impl App {
             Modal::MoveList { list } => {
                 let l = *list;
                 close = self.move_list_body(ui, t, l);
+            }
+            Modal::SpaceSharing { space, draft } => {
+                let s = *space;
+                close = self.sharing_body(ui, t, s, draft);
             }
             Modal::PickTask { task, mode, query } => {
                 let (tid, m) = (*task, *mode);

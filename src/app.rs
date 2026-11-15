@@ -32,6 +32,7 @@ mod notify_tests;
 mod pages;
 mod parity;
 mod settings;
+mod sharing;
 mod shell;
 mod slack;
 mod taskfields;
@@ -1427,6 +1428,11 @@ impl App {
 
     fn apply(&mut self, a: Action) {
         let me = self.data.me;
+        // a space shared with me to view or comment only (the server would put it back)
+        if let Some(why) = self.refused_here(&a) {
+            self.toast = Some((tr(why).into(), now_ts()));
+            return;
+        }
         match a {
             Action::Open(id) => {
                 self.open_task = Some(id);
@@ -4365,6 +4371,7 @@ impl App {
         let mut task = orig.clone();
         let now = now_ts();
         let statuses = self.data.statuses_for_list(task.list_id);
+        let level = self.list_level(task.list_id);
         egui::Window::new("task")
             .id(win_id)
             .title_bar(false)
@@ -4419,6 +4426,7 @@ impl App {
                             if task.archived {
                                 ui.label(RichText::new(tr("Archived")).small().color(t.danger));
                             }
+                            self.level_note(ui, &t, level);
                             if let Some(pid) = task.parent {
                                 if let Some(p) = self.task(pid) {
                                     ui.label(RichText::new("/").color(t.text3));
@@ -4583,6 +4591,10 @@ impl App {
                     .id_salt("detail_left")
                     .auto_shrink([false, false])
                     .show(&mut left_ui, |ui| {
+                        // shared with me to view or comment: the fields read only
+                        if level < crate::sync::Level::Edit {
+                            ui.disable();
+                        }
                         // task type label above the title, as in the original
                         taskfields::task_type_pill(ui, &t, win_id, &mut task.milestone);
                         ui.add_space(6.0);
@@ -5387,6 +5399,9 @@ impl App {
                         self.comment_feed(ui, &mut task, q.as_deref(), only_comments, win_id);
                     });
                 right_ui.add_space(6.0);
+                if level < crate::sync::Level::Comment {
+                    right_ui.disable();
+                }
                 // Comment / Post tabs, the box, then the tool row
                 let tab_id = win_id.with("comment_tab");
                 let mut post: bool = right_ui.data(|d| d.get_temp(tab_id)).unwrap_or(false);

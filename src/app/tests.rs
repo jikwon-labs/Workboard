@@ -7030,3 +7030,115 @@ fn a_slack_export_zip_opens_and_anything_else_says_why() {
     assert!(a.modal.is_none());
     assert!(a.toast.as_ref().unwrap().0.contains(".zip"));
 }
+
+/// Through a real server: Sam can only view a space Ann shares with him.
+/// An edit his app makes there anyway is put back and he's told why; when
+/// Ann takes the space away it leaves his copy, and nothing is deleted.
+#[test]
+fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A sees the people list", |a| {
+        a.sync_rt.people.iter().any(|p| p.member == 3)
+    });
+    let space = a
+        .data
+        .spaces
+        .iter()
+        .find(|s| s.private_owner.is_none() && !s.archived)
+        .unwrap()
+        .id;
+    let task = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| a.data.space_of_list(t.list_id).map(|s| s.id) == Some(space))
+        .unwrap()
+        .clone();
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == space)
+        .unwrap()
+        .sharing = Some(SpaceSharing {
+        everyone: false,
+        people: vec![SpaceGrant {
+            member: 3,
+            level: "view".into(),
+        }],
+    });
+    a.sync_note_change();
+    a.write_shared();
+    a.access_request(wb_net::Msg::CreateInvite {
+        member: 3,
+        role: wb_net::Role::Member,
+    });
+    net_until(&mut a, "invite code", |a| {
+        a.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == 3 && p.invite.is_some())
+    });
+    let code = a
+        .sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == 3)
+        .and_then(|p| p.invite.clone())
+        .unwrap();
+    let mut b = App::build(
+        None,
+        Some(Data::blank(
+            "Theirs",
+            Member {
+                id: 1,
+                name: "B".into(),
+                ..Default::default()
+            },
+        )),
+    );
+    b.connect_server(&addr, &code).unwrap();
+    net_until(&mut b, "Sam has the space, to view", |b| {
+        b.data.extra.shared.is_some()
+            && b.task(task.id).is_some()
+            && b.space_level(space) == crate::sync::Level::View
+    });
+    // his app changes the task anyway (an older app, say)
+    b.data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == task.id)
+        .unwrap()
+        .name = "Sam was here".into();
+    b.sync_note_change();
+    b.write_shared();
+    net_until(&mut b, "put back, with a word", |b| {
+        b.task(task.id).is_some_and(|t| t.name == task.name)
+            && b.toast.as_ref().is_some_and(|t| {
+                t.0 == "Some changes were put back because that space is shared with you at a level that doesn't allow them."
+            })
+    });
+    assert_eq!(a.task(task.id).unwrap().name, task.name);
+    // taken away: it leaves Sam's copy without a tombstone
+    a.data
+        .spaces
+        .iter_mut()
+        .find(|s| s.id == space)
+        .unwrap()
+        .sharing
+        .as_mut()
+        .unwrap()
+        .people
+        .clear();
+    a.sync_note_change();
+    a.write_shared();
+    net_until(&mut b, "the space leaves Sam's copy", |b| {
+        b.task(task.id).is_none() && !b.data.spaces.iter().any(|s| s.id == space)
+    });
+    assert!(!b.data.extra.sync.tombs.contains_key(&task.id));
+    b.sync_note_change();
+    b.write_shared();
+    net_until(&mut a, "A keeps it all", |a| a.task(task.id).is_some());
+}

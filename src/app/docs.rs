@@ -318,6 +318,11 @@ impl App {
                 .layout(Layout::top_down(Align::Min)),
         );
         let ui = &mut mui;
+        // in a space shared with me to view or comment, the page only reads
+        let level = self.doc_level(self.data.docs[idx].id);
+        if level < crate::sync::Level::Edit {
+            self.doc_preview = true;
+        }
         // formatting bar
         let body_id = egui::Id::new(("doc_body", self.data.docs[idx].id));
         let mut pick: Option<&'static str> = None;
@@ -331,6 +336,7 @@ impl App {
                     if ui.selectable_label(self.doc_preview, tr("View")).clicked() {
                         self.doc_preview = true;
                     }
+                    self.level_note(ui, &t, level);
                     ui.separator();
                     if !self.doc_preview {
                         for (short, label) in [

@@ -546,6 +546,46 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.modal = Some(a.together_modal());
         }),
     ));
+    v.push((
+        "space sharing".into(),
+        Box::new(move |a: &mut App| {
+            a.data.extra.shared = None;
+            a.modal = Some(Modal::SpaceSharing {
+                space,
+                draft: SpaceSharing {
+                    everyone: false,
+                    people: vec![SpaceGrant {
+                        member: 2,
+                        level: "comment".into(),
+                    }],
+                },
+            });
+        }),
+    ));
+    v.push((
+        "view only space".into(),
+        Box::new(move |a: &mut App| {
+            a.data.extra.shared = Some(crate::sync::SharedCfg {
+                folder: String::new(),
+                device: "dev1".into(),
+                tag: 5,
+                server: Some("127.0.0.1:1".into()),
+            });
+            a.sync_rt.role = Some(wb_net::Role::Member);
+            if let Some(s) = a.data.spaces.iter_mut().find(|s| s.id == space) {
+                s.sharing = Some(SpaceSharing {
+                    everyone: false,
+                    people: vec![SpaceGrant {
+                        member: a.data.me,
+                        level: "view".into(),
+                    }],
+                });
+            }
+            a.section = Section::Home;
+            a.loc = Location::Space(space);
+            a.modal = None;
+        }),
+    ));
     v
 }
 

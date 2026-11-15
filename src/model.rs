@@ -151,6 +151,32 @@ pub struct Space {
     /// A symbol drawn in place of the first letter (Color & Icon); empty = letter.
     #[serde(default)]
     pub icon: String,
+    /// Who the space is shared with (Share & permissions). Left out of the
+    /// file until first shared; spaces without it are everyone's. Going
+    /// back to everyone keeps it with `everyone: true`, so it never goes
+    /// back to missing (an older app's copy, which drops it, can't open a
+    /// shared space up; see `wb_sync::space_level`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharing: Option<SpaceSharing>,
+}
+
+/// Who a space is shared with (see `Space::sharing`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SpaceSharing {
+    /// Everyone in the workspace; the people below are kept for next time.
+    #[serde(default)]
+    pub everyone: bool,
+    #[serde(default)]
+    pub people: Vec<SpaceGrant>,
+}
+
+/// One person a space is shared with and what they may do there.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SpaceGrant {
+    pub member: u64,
+    /// "full", "edit", "comment" or "view" (`wb_sync::Level`); kept as
+    /// written, so a level from a newer app survives a save here.
+    pub level: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

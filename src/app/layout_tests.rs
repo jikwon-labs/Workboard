@@ -110,16 +110,42 @@ fn small_window_settings_reach_every_section_and_its_controls() {
             "the {} section opens",
             label
         );
-        let past = h.past_right_edge();
-        assert!(
-            past.is_empty(),
-            "{}: past the right edge: {:?}",
-            label,
-            past
-        );
-        let body = Rect::from_min_max(pos2(300.0, 40.0), h.size.to_pos2());
-        let cut = h.cut_texts(body);
-        assert!(cut.is_empty(), "{}: cut texts: {:?}", label, cut);
+        // top and bottom of the section: nothing past the body's right
+        // margin, no text cut off
+        for pass in 0..2 {
+            if pass == 1 {
+                for _ in 0..8 {
+                    h.frame(vec![egui::Event::PointerMoved(pos2(600.0, 300.0))]);
+                    h.frame(vec![egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: vec2(0.0, -400.0),
+                        modifiers: Default::default(),
+                    }]);
+                }
+                h.settle();
+            }
+            let edge = h.size.x - 24.0;
+            let past: Vec<&String> = h
+                .tree
+                .iter()
+                .filter(|(_, r)| {
+                    r.left() > 300.0
+                        && r.top() >= 40.0
+                        && r.bottom() <= h.size.y
+                        && r.right() > edge
+                })
+                .map(|(n, _)| n)
+                .collect();
+            assert!(
+                past.is_empty(),
+                "{}: past the right edge: {:?}",
+                label,
+                past
+            );
+            let body = Rect::from_min_max(pos2(300.0, 40.0), h.size.to_pos2());
+            let cut = h.cut_texts(body);
+            assert!(cut.is_empty(), "{}: cut texts: {:?}", label, cut);
+        }
     }
 }
 

@@ -239,10 +239,20 @@ impl App {
 
     pub(super) fn people_page(&mut self, ui: &mut Ui) {
         let t = self.t();
+        // in Settings the section title above already says "People", and the
+        // body lines up with the other sections
+        let in_settings = self.section == Section::Settings;
+        let margin = if in_settings {
+            egui::Margin::ZERO
+        } else {
+            egui::Margin::symmetric(24, 16)
+        };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
+            egui::Frame::new().inner_margin(margin).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("People")).size(20.0));
+                    if !in_settings {
+                        ui.label(RichText::new(tr("People")).size(20.0));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if primary_button(ui, &t, tr("Invite people")).clicked() {
                             self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
@@ -486,24 +496,33 @@ impl App {
                             ui.add_space(ui.available_height() * 0.3);
                             ui.vertical_centered(|ui| {
                                 let alone = self.data.members.len() <= 1;
-                                let (title, sub) = match self.inbox_tab {
+                                // the people icon only where it invites people
+                                let (title, sub, icon) = match self.inbox_tab {
                                     0 if alone => (
                                         "Looking to collaborate?",
                                         "Collaboration is one invite away.",
+                                        "\u{1F465}",
                                     ),
                                     0 => (
                                         "You're all caught up",
                                         "New comments, mentions and assignments show up here.",
+                                        "\u{2713}",
                                     ),
                                     1 => (
                                         "Nothing in Other",
                                         "Updates that don't need you show up here.",
+                                        "\u{1F4E5}",
                                     ),
                                     2 => (
                                         "Nothing saved for later",
                                         "Use Later on an item to come back to it.",
+                                        "\u{23F0}",
                                     ),
-                                    _ => ("Nothing cleared yet", "Cleared items show up here."),
+                                    _ => (
+                                        "Nothing cleared yet",
+                                        "Cleared items show up here.",
+                                        "\u{2713}",
+                                    ),
                                 };
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(60.0, 60.0), Sense::hover());
@@ -516,14 +535,14 @@ impl App {
                                 ui.painter().text(
                                     r.center(),
                                     Align2::CENTER_CENTER,
-                                    "\u{1F465}",
+                                    icon,
                                     FontId::proportional(22.0),
                                     Color32::from_rgb(0x5f, 0x55, 0xee),
                                 );
                                 ui.add_space(10.0);
                                 ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
                                 ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
-                                if self.inbox_tab == 0 {
+                                if self.inbox_tab == 0 && alone {
                                     ui.add_space(10.0);
                                     if ui
                                         .add(Tint(

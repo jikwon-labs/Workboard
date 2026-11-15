@@ -370,7 +370,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Teams")).size(20.0).strong());
+                    ui.label(RichText::new(tr("Analytics")).size(20.0).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button(tr("\u{1F464} Manage people")).clicked() {
                             // the People settings page: server roles, removal with a question

@@ -3176,7 +3176,7 @@ impl App {
                         }
                     }
                     if show(4) {
-                        let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (ql.is_empty() || c.name.to_lowercase().contains(&ql))).map(|c| (c.id, c.name.clone())).take(20).collect();
+                        let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.can_see(c) && (ql.is_empty() || c.name.to_lowercase().contains(&ql))).map(|c| (c.id, c.name.clone())).take(20).collect();
                         if !chans.is_empty() {
                             ui.label(RichText::new(tr("Channels")).small().color(t.text3));
                             for (id, name) in chans {
@@ -3190,7 +3190,7 @@ impl App {
                     }
                     if show(5) && ql.len() > 1 {
                         let mut hits: Vec<(u64, String, String)> = vec![];
-                        for c in &self.data.channels {
+                        for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
                             for m in &c.messages {
                                 if m.text.to_lowercase().contains(&ql) {
                                     hits.push((c.id, if c.name.is_empty() { tr("Direct message").into() } else { format!("#{}", c.name) }, m.text.clone()));

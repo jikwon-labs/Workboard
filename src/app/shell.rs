@@ -1164,7 +1164,7 @@ impl App {
                             self.modal = Some(Modal::NewChannel { name: String::new(), private: false, add_list: false });
                         }
                         // the Unread filter uses the real count; muting only hides the badge
-                        let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone(), self.unread_count(c))).collect();
+                        let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.listed(c)).map(|c| (c.id, c.name.clone(), self.unread_count(c))).collect();
                         for (id, name, real_unread) in chans {
                             if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                                 continue;
@@ -1242,7 +1242,7 @@ impl App {
                             .data
                             .channels
                             .iter()
-                            .filter(|c| c.kind == ChannelKind::Direct)
+                            .filter(|c| c.kind == ChannelKind::Direct && self.listed(c))
                             .map(|c| (c.id, c.members.iter().find(|m| **m != me).and_then(|m| self.data.member(*m)).cloned(), self.unread_count(c)))
                             .collect();
                         for (id, other, real_unread) in dms {

@@ -294,4 +294,8 @@ pub const T: &[(&str, &str)] = &[
     ("Its list is gone, so it went to {}", "원래 목록이 없어 {} 목록으로 옮겼습니다"),
     ("\"{}\" was restored to {} because its old place is gone", "원래 위치가 없어 \"{}\"을(를) {}에 복원했습니다"),
     ("There is no space to restore it into. Make a space first.", "복원할 스페이스가 없습니다. 먼저 스페이스를 만드세요."),
+    // channel settings: close a conversation, delete a channel
+    ("Hides it from your sidebar until a new message arrives. Nothing is deleted.", "새 메시지가 올 때까지 사이드바에서 숨깁니다. 아무것도 삭제되지 않습니다."),
+    ("Only members of this channel can delete it.", "이 채널의 멤버만 삭제할 수 있습니다."),
+    ("Delete #{} for everyone? Its messages are removed for the whole team.", "모든 사람에게서 #{} 채널을 삭제할까요? 메시지가 팀 전체에서 삭제됩니다."),
 ];

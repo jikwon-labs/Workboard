@@ -292,7 +292,7 @@ impl App {
                     ui.set_width(cw - 34.0);
                     // the frame sits in a horizontal row; stack its contents top to bottom
                     ui.vertical(|ui| {
-                    let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
+                    let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.can_see(c)).map(|c| (c.id, c.name.clone())).collect();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(tr("Channel:")).color(t.text2));
                         let cur = chans.iter().find(|c| c.0 == self.post_channel).map(|c| format!("# {}", c.1)).unwrap_or_else(|| tr("Select Channel").into());
@@ -358,7 +358,7 @@ impl App {
                 if ui.add(fol).clicked() {
                     self.post_following = !self.post_following;
                 }
-                let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
+                let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.can_see(c)).map(|c| (c.id, c.name.clone())).collect();
                 let cl = self.post_f_channel.and_then(|id| chans.iter().find(|c| c.0 == id)).map(|c| format!("#  {}", c.1)).unwrap_or_else(|| tr("#  Channel").into());
                 let cr = ui.add(egui::Button::new(cl).corner_radius(13));
                 popup(ui, &cr, ui.id().with("pf_ch"), 180.0, |ui| {
@@ -411,7 +411,7 @@ impl App {
             });
             ui.add_space(12.0);
             let mut posts: Vec<(String, u64, Message)> = vec![];
-            for c in &self.data.channels {
+            for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
                 for m in &c.messages {
                     if m.post_title.is_some() {
                         posts.push((c.name.clone(), c.id, m.clone()));

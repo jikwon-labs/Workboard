@@ -1329,16 +1329,46 @@ impl App {
                         self.data.channels[ci].last_read = now_ts();
                         self.dirty = true;
                     }
-                    let label = if is_channel { tr("Delete channel") } else { tr("Close conversation") };
-                    if ui.add(egui::Button::new(RichText::new(label).color(t.danger))).clicked() {
-                        self.data.channels.remove(ci);
-                        if self.chat_open == Some(cid) {
-                            self.chat_open = None;
+                    if !is_channel {
+                        // only hides it for me; it comes back with the next message
+                        if ui.add(egui::Button::new(RichText::new(tr("Close conversation")).color(t.danger))).on_hover_text(tr("Hides it from your sidebar until a new message arrives. Nothing is deleted.")).clicked() {
+                            self.close_dm(cid);
+                            close = true;
                         }
-                        self.dirty = true;
-                        close = true;
+                        return;
+                    }
+                    // deleting removes it for everyone: members only, and asked first
+                    let member = self.data.channels[ci].members.contains(&self.data.me);
+                    let ask = egui::Id::new(("delete_channel", cid));
+                    let asking = ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false));
+                    if !asking {
+                        let b = ui.add_enabled(member, egui::Button::new(RichText::new(tr("Delete channel")).color(t.danger)));
+                        let b = if member { b } else { b.on_disabled_hover_text(tr("Only members of this channel can delete it.")) };
+                        if b.clicked() {
+                            ui.data_mut(|d| d.insert_temp(ask, true));
+                        }
                     }
                 });
+                let ask = egui::Id::new(("delete_channel", cid));
+                if is_channel && ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false)) {
+                    ui.add_space(6.0);
+                    let name = self.data.channels[ci].name.clone();
+                    ui.label(RichText::new(crate::trf!("Delete #{} for everyone? Its messages are removed for the whole team.", name)).color(t.text));
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() && self.data.channels[ci].members.contains(&self.data.me) {
+                            self.data.channels.remove(ci);
+                            if self.chat_open == Some(cid) {
+                                self.chat_open = None;
+                            }
+                            self.dirty = true;
+                            close = true;
+                            ui.data_mut(|d| d.remove::<bool>(ask));
+                        }
+                        if ui.button(tr("Cancel")).clicked() {
+                            ui.data_mut(|d| d.remove::<bool>(ask));
+                        }
+                    });
+                }
             }
             Modal::Share { emails } => {
                 let name = self.data.location_name(self.loc);
@@ -1794,7 +1824,7 @@ impl App {
                         .data
                         .channels
                         .iter()
-                        .filter(|c| c.kind == ChannelKind::Channel || tab == 0)
+                        .filter(|c| (c.kind == ChannelKind::Channel || tab == 0) && self.can_see(c) && !self.dm_duplicate(c))
                         .map(|c| (c.id, self.channel_label(c), c.messages.last().map(|m| m.ts).unwrap_or(c.last_read)))
                         .filter(|c| hit(&c.1))
                         .collect();
@@ -1821,7 +1851,7 @@ impl App {
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
         if let Some(uid) = dm_with {
-            let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((uid == me && c.members == vec![me]) || (uid != me && c.members.contains(&uid) && c.members.contains(&me)))).map(|c| c.id);
+            let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((uid == me && c.members == vec![me]) || (uid != me && c.members.contains(&uid) && c.members.contains(&me))) && !self.dm_duplicate(c)).map(|c| c.id);
             go = Some(existing.unwrap_or_else(|| {
                 let id = self.data.new_id();
                 let members = if uid == me { vec![me] } else { vec![me, uid] };

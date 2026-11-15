@@ -1534,3 +1534,130 @@ fn a_login_name_starting_with_a_non_ascii_letter() {
     assert_eq!(Data::display_user("\u{c9c0}\u{c6d0}"), "\u{c9c0}\u{c6d0}");
     assert_eq!(Data::display_user(""), "Me");
 }
+
+fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
+    Message { id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
+}
+
+#[test]
+fn private_channels_and_dms_show_only_to_their_members() {
+    let mut a = app();
+    let secret = a.create_channel("secret plans", true, false);
+    let public = a.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    let dm_me_alex = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    let ch = |a: &App, id: u64| a.data.channels.iter().find(|c| c.id == id).unwrap().clone();
+    assert!(a.can_see(&ch(&a, secret)), "the person who made it is in it");
+    // Sam (3) is in neither the private channel nor my DM with Alex
+    a.data.me = 3;
+    assert!(!a.can_see(&ch(&a, secret)));
+    assert!(!a.can_see(&ch(&a, dm_me_alex)));
+    assert!(a.can_see(&ch(&a, public)), "public channels stay open to all");
+    // added as a member, Sam sees it
+    a.data.channels.iter_mut().find(|c| c.id == secret).unwrap().members.push(3);
+    assert!(a.can_see(&ch(&a, secret)));
+}
+
+#[test]
+fn closing_a_dm_hides_it_for_me_until_a_new_message() {
+    let mut a = app();
+    let dm = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    let n = a.data.channels.len();
+    a.chat_open = Some(dm);
+    a.close_dm(dm);
+    assert_eq!(a.data.channels.len(), n, "nothing is deleted");
+    assert_eq!(a.chat_open, None);
+    let listed = |a: &App| a.listed(a.data.channels.iter().find(|c| c.id == dm).unwrap());
+    assert!(!listed(&a));
+    // only this computer remembers it: it's not in what the team shares
+    let v = serde_json::to_value(&a.data).unwrap();
+    assert!(v["channels"].as_array().unwrap().iter().all(|c| c.get("closed").is_none()));
+    assert!(!crate::sync::SHARED.iter().any(|p| p.contains("closed_dms")));
+    // Alex writes again: it's back
+    let id = a.data.new_id();
+    let c = a.data.channels.iter_mut().find(|c| c.id == dm).unwrap();
+    c.messages.push(test_msg(id, 2, "still there?", now_ts() + 5));
+    assert!(listed(&a));
+    // opening it from New message also brings it back
+    a.close_dm(dm);
+    assert!(!listed(&a));
+    a.apply_chat(vec![ChatAction::Dm(2)]);
+    assert_eq!(a.chat_open, Some(dm));
+}
+
+#[test]
+fn two_dms_with_the_same_people_show_as_one() {
+    let mut a = app();
+    let older = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 3]).unwrap().id;
+    let newer = a.data.new_id();
+    a.data.channels.push(Channel { id: newer, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![3, 1], messages: vec![], last_read: now_ts(), ..Default::default() });
+    let get = |a: &App, id: u64| a.data.channels.iter().find(|c| c.id == id).unwrap().clone();
+    assert!(a.listed(&get(&a, older)));
+    assert!(!a.listed(&get(&a, newer)), "the newer empty copy gives way");
+    a.apply_chat(vec![ChatAction::Dm(3)]);
+    assert_eq!(a.chat_open, Some(older));
+    // a copy with messages wins over an empty one
+    let id = a.data.new_id();
+    a.data.channels.iter_mut().find(|c| c.id == newer).unwrap().messages.push(test_msg(id, 3, "hi", now_ts()));
+    assert!(!a.listed(&get(&a, older)));
+    assert!(a.listed(&get(&a, newer)));
+}
+
+#[test]
+fn a_missing_file_is_fetched_again_later() {
+    let folder = temp_folder("retry-files");
+    std::fs::create_dir_all(folder.join("files")).unwrap();
+    let pic = picture_file("later.png", 30, 20);
+    let (sha, bytes) = wb_net::sha256_file(&pic).unwrap();
+    let att = Attachment { file: sha.clone(), name: "later.png".into(), kind: MediaKind::Image, bytes, w: 30, h: 20, secs: 0.0 };
+    let mut f = super::files::Files::new(temp_folder("retry-cache"));
+    let remote = super::files::Remote::Folder(folder.clone());
+    // not in the shared folder yet: the first try fails and the next one waits
+    f.settle(&remote, |f| {
+        f.want(&att, super::files::THUMB);
+        matches!(f.state(&sha), Some(super::files::Transfer::Failed(_))) && f.fetch_tries(&sha) == Some((1, true))
+    });
+    std::fs::copy(&pic, folder.join("files").join(&sha)).unwrap();
+    f.retry_due(&sha);
+    f.settle(&remote, |f| {
+        f.want(&att, super::files::THUMB);
+        f.local(&sha).is_some()
+    });
+}
+
+#[test]
+fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 1, server: Some("127.0.0.1:9".into()) });
+    assert_eq!(a.media_remote(), super::files::Remote::SignedOut);
+    a.add_media(false, Some(picture_file("wait.png", 20, 20)), None);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while a.chat_files[0].att.is_none() && std::time::Instant::now() < end {
+        a.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let att = a.chat_files[0].att.clone().unwrap();
+    assert_eq!(a.files.state(&att.file), Some(super::files::Transfer::Failed(super::files::NOT_SIGNED_IN.into())), "not silently done");
+    assert!(!a.pending_ready(false).0);
+    // a sign-in is seen at once (the cached token is dropped when one is saved)
+    super::together::save_token("127.0.0.1:9", "dev1", "tok");
+    assert!(matches!(a.media_remote(), super::files::Remote::Server { auth, .. } if auth.token == "tok"));
+    super::together::forget_token("127.0.0.1:9", "dev1");
+    assert_eq!(a.media_remote(), super::files::Remote::SignedOut);
+}
+
+#[test]
+fn sharing_a_folder_brings_earlier_pictures_along() {
+    let mut a = app();
+    a.add_media(false, Some(picture_file("before.png", 24, 24)), None);
+    let files = until_ready(&mut a, false);
+    let ch = a.data.channels[0].id;
+    a.apply_chat(vec![ChatAction::Send { ch, text: "from before sharing".into(), parent: None, files: files.clone() }]);
+    let folder = temp_folder("share-later");
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    let dest = folder.join("files").join(&files[0].file);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !dest.is_file() && std::time::Instant::now() < end {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(dest.is_file(), "the picture sent earlier is in the shared folder");
+}

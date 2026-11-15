@@ -1098,7 +1098,7 @@ impl App {
                             let id = self.data.new_id();
                             self.data.extra.meetings.push(Meeting {
                                 id,
-                                title: "New meeting".into(),
+                                title: tr("New meeting").into(),
                                 date: today(),
                                 time: "10:00".into(),
                                 attendees: vec![self.data.me],
@@ -1289,7 +1289,7 @@ impl App {
                                         STATUS_PALETTE[1 + self.data.extra.goals.len() % 13];
                                     self.data.extra.goals.push(Goal {
                                         id,
-                                        name: "New goal".into(),
+                                        name: tr("New goal").into(),
                                         color,
                                         due: None,
                                         owner: self.data.me,

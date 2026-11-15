@@ -738,7 +738,7 @@ impl App {
             "people" => self.section = Section::People,
             "dashboard" => {
                 self.modal = Some(Modal::NewDashboard {
-                    name: "New Dashboard".into(),
+                    name: tr("New Dashboard").into(),
                 })
             }
             _ => self.modal = Some(unavailable("AI Notetaker")),
@@ -760,7 +760,7 @@ impl App {
                 wiki: None,
                 views: vec![],
                 parent: None,
-                title: "Untitled".into(),
+                title: tr("Untitled").into(),
                 body: String::new(),
                 created: now,
                 updated: now,
@@ -777,7 +777,7 @@ impl App {
         let n = self.data.extra.whiteboards.len() + 1;
         self.data.extra.whiteboards.push(Whiteboard {
             id,
-            name: format!("Whiteboard {}", n),
+            name: crate::trf!("Whiteboard {}", n),
             strokes: vec![],
             notes: vec![],
             owner: self.data.me,
@@ -792,17 +792,17 @@ impl App {
         let list = self.default_list().unwrap_or(0);
         self.data.extra.forms.push(Form {
             id,
-            name: "New Form".into(),
+            name: tr("New Form").into(),
             list_id: list,
-            description: "Fill out this form to create a task.".into(),
+            description: tr("Fill out this form to create a task.").into(),
             fields: vec![
                 FormField {
-                    label: "Title".into(),
+                    label: tr("Title").into(),
                     map: "name".into(),
                     ..Default::default()
                 },
                 FormField {
-                    label: "Details".into(),
+                    label: tr("Details").into(),
                     map: "description".into(),
                     ..Default::default()
                 },
@@ -934,7 +934,7 @@ impl App {
                     "Form" => self.new_form(),
                     "Dashboard" => {
                         self.modal = Some(Modal::NewDashboard {
-                            name: "New Dashboard".into(),
+                            name: tr("New Dashboard").into(),
                         })
                     }
                     "Whiteboard" => self.new_whiteboard(),

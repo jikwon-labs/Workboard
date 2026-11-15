@@ -1127,7 +1127,7 @@ impl App {
         }
         if plus {
             self.modal = Some(Modal::NewDashboard {
-                name: "New Dashboard".into(),
+                name: tr("New Dashboard").into(),
             });
         }
         let mine_only = self.hub_filter.min(1) == 1;
@@ -1175,7 +1175,7 @@ impl App {
                             "Project Management" => "project",
                             _ => "",
                         };
-                        let n = if name == "Start from scratch" { "New Dashboard".to_string() } else { name };
+                        let n = if name == "Start from scratch" { tr("New Dashboard").to_string() } else { tr(&name).to_string() };
                         self.data.extra.dashboards.push(Dashboard { id, name: n, space: None, owner: me, kind: kind.into(), ..Default::default() });
                         self.dash_open = Some(id);
                         self.dirty = true;
@@ -1385,8 +1385,8 @@ impl App {
                     };
                     if let Some(f) = self.form_open.and_then(|id| self.data.extra.forms.iter_mut().find(|f| f.id == id)) {
                         if name != "Start from scratch" {
-                            f.name = name.clone();
-                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: l.to_string(), map: m.to_string(), ..Default::default() }).collect();
+                            f.name = tr(&name).to_string();
+                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: form_question(l).to_string(), map: m.to_string(), ..Default::default() }).collect();
                         }
                     }
                 }
@@ -1438,7 +1438,7 @@ impl App {
             ui.add_space(30.0);
             if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
                 let id = self.data.new_id();
-                self.data.extra.goals.push(Goal { id, name: "New goal".into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
+                self.data.extra.goals.push(Goal { id, name: tr("New goal").into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
                 self.goal_open = Some(id);
                 self.dirty = true;
             }
@@ -2438,4 +2438,29 @@ pub(super) fn ts_day(ts: i64) -> NaiveDate {
 /// How a week is stored with a timesheet row: its first day, counted in days.
 fn sheet_week_key(ws: NaiveDate) -> u64 {
     ws.num_days_from_ce().max(0) as u64
+}
+
+/// A form template's question in the interface language: it is saved as the
+/// question's text, so a Korean screen starts with Korean questions. Some
+/// read differently in a form than elsewhere ("Comments" is 의견 here, not 댓글).
+fn form_question(label: &str) -> &str {
+    match label {
+        "Your name" => crate::i18n::tr_ctx("Your name (form question)", label),
+        "Comments" => crate::i18n::tr_ctx("Comments (form question)", label),
+        "Goal" => crate::i18n::tr_ctx("Goal (form question)", label),
+        "Role" => crate::i18n::tr_ctx("Role (form question)", label),
+        "Full name" => crate::i18n::tr_ctx("Full name (form question)", label),
+        "How was your experience?" => tr("How was your experience?"),
+        "Project name" => tr("Project name"),
+        "Deadline" => tr("Deadline"),
+        "Customer" => tr("Customer"),
+        "Items" => tr("Items"),
+        "Quantity" => tr("Quantity"),
+        "Needed by" => tr("Needed by"),
+        "Experience" => tr("Experience"),
+        "Links" => tr("Links"),
+        "Issue" => tr("Issue"),
+        "Urgency" => tr("Urgency"),
+        _ => tr(label),
+    }
 }

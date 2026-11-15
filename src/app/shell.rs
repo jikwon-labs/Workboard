@@ -2639,7 +2639,7 @@ impl App {
                         "Form" => self.new_form(),
                         "Dashboard" => {
                             self.modal = Some(Modal::NewDashboard {
-                                name: "New Dashboard".into(),
+                                name: tr("New Dashboard").into(),
                             })
                         }
                         _ => self.new_whiteboard(),

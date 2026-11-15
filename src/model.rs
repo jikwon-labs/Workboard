@@ -1552,15 +1552,17 @@ impl Data {
         };
         let sid = d.new_id();
         let lid = d.new_id();
+        // named in the language the screen is in; a new workspace has one
+        // person, so the space isn't called a team's
         d.spaces.push(Space {
             id: sid,
-            name: "Team Space".into(),
+            name: crate::i18n::tr("Main space").into(),
             color: [0x5f, 0x55, 0xee],
             statuses: default_statuses(),
             folders: vec![],
             lists: vec![ListItem {
                 id: lid,
-                name: "List".into(),
+                name: crate::i18n::tr("List").into(),
                 ..Default::default()
             }],
             expanded: true,

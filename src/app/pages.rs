@@ -486,7 +486,7 @@ impl App {
                                     wiki: None,
                                     views: vec![],
                                     parent: None,
-                                    title: "Untitled".into(),
+                                    title: tr("Untitled").into(),
                                     body: String::new(),
                                     created: now,
                                     updated: now,
@@ -766,7 +766,7 @@ impl App {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if primary_button(ui, &t, tr("+ Dashboard")).clicked() {
                                     self.modal = Some(Modal::NewDashboard {
-                                        name: "New Dashboard".into(),
+                                        name: tr("New Dashboard").into(),
                                     });
                                 }
                             });

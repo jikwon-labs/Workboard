@@ -1671,7 +1671,7 @@ impl App {
                     list_id: list,
                     parent,
                     name: if name.trim().is_empty() {
-                        "Untitled task".into()
+                        tr("Untitled task").into()
                     } else {
                         name.trim().to_string()
                     },
@@ -1841,20 +1841,20 @@ impl App {
                 let color = STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13];
                 self.data.spaces.push(Space {
                     id,
-                    name: "New Space".into(),
+                    name: tr("New Space").into(),
                     color,
                     statuses: default_statuses(),
                     folders: vec![],
                     lists: vec![ListItem {
                         id: lid,
-                        name: "List".into(),
+                        name: tr("List").into(),
                         ..Default::default()
                     }],
                     expanded: true,
                     private_owner: None,
                     ..Default::default()
                 });
-                self.rename = Some((Target::Space(id), "New Space".into()));
+                self.rename = Some((Target::Space(id), tr("New Space").into()));
                 self.dirty = true;
             }
             Action::NewFolder(sid) => {
@@ -1863,10 +1863,10 @@ impl App {
                 if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
                     s.folders.push(Folder {
                         id,
-                        name: "New Folder".into(),
+                        name: tr("New Folder").into(),
                         lists: vec![ListItem {
                             id: lid,
-                            name: "List".into(),
+                            name: tr("List").into(),
                             ..Default::default()
                         }],
                         expanded: true,
@@ -1874,7 +1874,7 @@ impl App {
                     });
                     s.expanded = true;
                 }
-                self.rename = Some((Target::Folder(id), "New Folder".into()));
+                self.rename = Some((Target::Folder(id), tr("New Folder").into()));
                 self.dirty = true;
             }
             Action::NewList { space, folder } => {
@@ -1883,7 +1883,7 @@ impl App {
                     s.expanded = true;
                     let item = ListItem {
                         id,
-                        name: "New List".into(),
+                        name: tr("New List").into(),
                         ..Default::default()
                     };
                     match folder {
@@ -1897,7 +1897,7 @@ impl App {
                     }
                 }
                 self.loc = Location::List(id);
-                self.rename = Some((Target::List(id), "New List".into()));
+                self.rename = Some((Target::List(id), tr("New List").into()));
                 self.dirty = true;
             }
             Action::StartRename(tg) => {

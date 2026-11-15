@@ -1818,7 +1818,7 @@ impl App {
                     "Doc" => self.new_doc(sid),
                     "Dashboard" => {
                         self.modal = Some(Modal::NewDashboard {
-                            name: "New Dashboard".into(),
+                            name: tr("New Dashboard").into(),
                         })
                     }
                     "Whiteboard" => self.new_whiteboard(),

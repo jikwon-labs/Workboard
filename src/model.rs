@@ -1597,20 +1597,30 @@ impl Data {
     /// The member a Slack person goes to by an earlier decision: their
     /// entry in the shared `Extra::slack_map`, else (data from an older
     /// version that came in since the workspace opened) the first member
-    /// whose `Member::slack` has them. An entry for a member no longer here
-    /// counts as none.
+    /// whose `Member::slack` has them. Once they have an entry, or had one
+    /// taken away, the older versions' lists no longer count for them (the
+    /// lists stay as they were, for those versions, and may name a member
+    /// a later decision moved them off): an entry for a member no longer
+    /// here is no decision at all, and matching goes on by email or name.
     pub fn slack_member(&self, sid: &str) -> Option<u64> {
-        self.extra
-            .slack_map
-            .get(sid)
-            .copied()
-            .filter(|m| self.member(*m).is_some())
-            .or_else(|| {
-                self.members
-                    .iter()
-                    .find(|m| m.slack.iter().any(|x| x == sid))
-                    .map(|m| m.id)
-            })
+        let decided = self.extra.slack_map.contains_key(sid)
+            || self
+                .extra
+                .sync
+                .values
+                .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+        if decided {
+            return self
+                .extra
+                .slack_map
+                .get(sid)
+                .copied()
+                .filter(|m| self.member(*m).is_some());
+        }
+        self.members
+            .iter()
+            .find(|m| m.slack.iter().any(|x| x == sid))
+            .map(|m| m.id)
     }
 
     /// The Slack matches an older version kept on the members

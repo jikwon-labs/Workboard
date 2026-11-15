@@ -8691,6 +8691,48 @@ fn concurrent_slack_matches_go_through_a_server() {
     assert_eq!(slack_next(&a, "UA"), Some(Assign::Member(sam)));
 }
 
+/// A Slack person an earlier version kept on Alex, moved to Sam in the
+/// dialog: once Sam is gone the older list doesn't bring Alex back; the
+/// next import matches them like anyone else (no email or name here, so a
+/// new member).
+#[test]
+fn an_overturned_slack_match_from_an_earlier_version_stays_overturned() {
+    use super::slack::{plan, Assign};
+    let mut a = app();
+    let (alex, sam) = (2, 3);
+    a.data
+        .members
+        .iter_mut()
+        .find(|m| m.id == alex)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(alex)));
+    let (u, c) = slack_moves(&[(1, "UX")]);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UX".into(), Assign::Member(sam));
+    a.import_slack(&p);
+    assert_eq!(a.data.extra.slack_map.get("UX"), Some(&sam));
+    assert_eq!(
+        a.data.member(alex).unwrap().slack,
+        ["UX"],
+        "kept for older versions"
+    );
+    a.data.members.retain(|m| m.id != sam);
+    assert_eq!(a.data.slack_member("UX"), None);
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::New));
+    // an entry taken away (its stamp stays) doesn't bring Alex back either
+    a.data.extra.slack_map.remove("UX");
+    a.data
+        .extra
+        .sync
+        .values
+        .insert(crate::sync::map_part(crate::model::SLACK_MAP, "UX"), 5);
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::New));
+    // a Slack person nothing was ever decided for still finds the older list
+    a.data.extra.sync.values.clear();
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(alex)));
+}
+
 /// A shared workspace whose bookkeeping has no fingerprint for a Slack
 /// match it holds (saved by a version that didn't fingerprint the map):
 /// opening it records the match as it is, so the first change made

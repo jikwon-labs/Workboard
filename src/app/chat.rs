@@ -1062,6 +1062,7 @@ impl App {
                         .filter(|m| !m.invited && m.id != me)
                         .cloned()
                         .collect();
+                    let mut picked = None;
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
                             ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
@@ -1073,10 +1074,14 @@ impl App {
                             .clicked()
                             {
                                 insert = Some(format!("@{} ", m.name));
+                                picked = Some(m.id);
                                 close_popup(ui);
                             }
                         }
                     });
+                    if let Some(id) = picked {
+                        self.chat_picked.push(id);
+                    }
                     let em = tool(ui, "\u{263A}", "Emoji");
                     popup(ui, &em, egui::Id::new("chat_emoji_popup"), 248.0, |ui| {
                         if let Some(e) = emoji_grid(ui) {
@@ -1121,6 +1126,7 @@ impl App {
                             };
                             out = Some((text, title, files));
                             self.chat_text.clear();
+                            // the picks go with the message (see apply_chat)
                             self.post_title.clear();
                             self.chat_files.clear();
                         } else if enter && files_ok && self.chat_files.is_empty() {
@@ -1970,7 +1976,9 @@ impl App {
                 } => {
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    let mentions = self.data.mentions_in(&text);
+                    // the channel's box: the people picked from its @ list
+                    let picked = std::mem::take(&mut self.chat_picked);
+                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {
                         edited: None,
                         imported: None,
@@ -2219,7 +2227,14 @@ impl App {
                     }
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    let mentions = self.data.mentions_in(&text);
+                    // the channel's box (not a thread reply): the people
+                    // picked from its @ list
+                    let picked = if parent.is_none() {
+                        std::mem::take(&mut self.chat_picked)
+                    } else {
+                        vec![]
+                    };
+                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
                     let m = Message {
                         edited: None,
                         imported: None,

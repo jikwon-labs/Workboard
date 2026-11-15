@@ -8266,3 +8266,75 @@ fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
     assert_eq!(design.messages[0].text, "Alex Kim: first sketch");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name() {
+    let mut h = Ui1::new();
+    let sam = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Sam Lee")
+        .unwrap()
+        .id;
+    let sam2 = h.app.data.new_id();
+    h.app.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        email: "sam2@example.com".into(),
+        role: "Member".into(),
+        invited: false,
+        status_text: String::new(),
+    });
+    h.click("general");
+    let before: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Sam Lee")
+        .map(|(_, r)| *r)
+        .collect();
+    h.click("Mention someone");
+    // the list's rows: the second Sam Lee is the lower one
+    let mut rows: Vec<egui::Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Sam Lee" && !before.contains(r))
+        .map(|(_, r)| *r)
+        .collect();
+    rows.sort_by(|a, b| a.center().y.total_cmp(&b.center().y));
+    rows.dedup();
+    assert_eq!(rows.len(), 2, "both are offered");
+    h.click_at(rows[1].center());
+    assert_eq!(h.app.chat_text, "@Sam Lee ");
+    h.type_text("can you look?");
+    h.key(egui::Key::Enter);
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let m = general.messages.last().unwrap();
+    assert_eq!(m.text, "@Sam Lee can you look?");
+    assert_eq!(m.mentions, vec![sam2], "the one picked, not both");
+    assert!(!m.mentions.contains(&sam));
+    assert!(h.app.chat_picked.is_empty(), "used up by the message");
+    // typed by hand, without the list: both (it can't tell which)
+    h.type_text("@Sam Lee again");
+    h.key(egui::Key::Enter);
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let mut both = general.messages.last().unwrap().mentions.clone();
+    both.sort();
+    let mut want = vec![sam, sam2];
+    want.sort();
+    assert_eq!(both, want);
+}

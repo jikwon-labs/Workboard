@@ -649,6 +649,17 @@ impl App {
             }
             close_any(ui);
         }
+        let star = format!("task:{}", tid);
+        let fav = self.data.extra.starred.contains(&star);
+        if ui.button(if fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
+            if fav {
+                self.data.extra.starred.retain(|s| *s != star);
+            } else {
+                self.data.extra.starred.push(star);
+            }
+            self.dirty = true;
+            close_any(ui);
+        }
         let selected = self.selected.contains(&tid);
         if ui.button(if selected { "Deselect" } else { "Select" }).clicked() {
             if selected {
@@ -802,6 +813,35 @@ impl App {
             self.modal = Some(Modal::ListInfo { list: lid });
             close_any(ui);
         }
+        let cur = self.data.list_item(lid).and_then(|l| l.color);
+        ui.menu_button("Color", |ui| {
+            ui.label(RichText::new("List color").small().color(t.text3));
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(190.0);
+                for c in STATUS_PALETTE.iter().skip(1) {
+                    let (rr, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    name_it(&resp, &format!("List color {:02x}{:02x}{:02x}", c[0], c[1], c[2]));
+                    ui.painter().circle_filled(rr.center(), 8.0, rgb(*c));
+                    if cur == Some(*c) {
+                        ui.painter().circle_stroke(rr.center(), 9.5, Stroke::new(1.5_f32, t.text));
+                    }
+                    if resp.clicked() {
+                        if let Some(l) = self.data.list_item_mut(lid) {
+                            l.color = Some(*c);
+                            self.dirty = true;
+                        }
+                        close_any(ui);
+                    }
+                }
+            });
+            if cur.is_some() && ui.button("No color").clicked() {
+                if let Some(l) = self.data.list_item_mut(lid) {
+                    l.color = None;
+                    self.dirty = true;
+                }
+                close_any(ui);
+            }
+        });
         ui.separator();
         ui.menu_button("Create new", |ui| self.list_create_menu(ui, lid));
         if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
@@ -839,6 +879,173 @@ impl App {
             self.actions.push(Action::AskDelete(Target::List(lid)));
             close_any(ui);
         }
+    }
+
+    /// The folder menu (right click, or the "..." button on a sidebar folder).
+    pub(super) fn folder_menu(&mut self, ui: &mut Ui, fid: u64) {
+        let t = self.t();
+        let floc = Location::Folder(fid);
+        let Some(sid) = self.data.spaces.iter().find(|s| s.folders.iter().any(|f| f.id == fid)).map(|s| s.id) else { return };
+        ui.set_min_width(200.0);
+        let fav = if self.data.favorites.contains(&floc) { "Remove from Favorites" } else { "Add to Favorites" };
+        if ui.button(fav).clicked() {
+            self.actions.push(Action::ToggleFavorite(floc));
+            close_any(ui);
+        }
+        if ui.button("Rename").clicked() {
+            self.actions.push(Action::StartRename(Target::Folder(fid)));
+            close_any(ui);
+        }
+        if ui.button("Copy link").clicked() {
+            ui.ctx().copy_text(format!("workboard://folder/{}", fid));
+            self.toast = Some(("Link copied".into(), now_ts()));
+            close_any(ui);
+        }
+        ui.separator();
+        ui.menu_button("Create new", |ui| {
+            if ui.button("List").clicked() {
+                self.open_new_list(Some(sid), Some(fid));
+                close_any(ui);
+            }
+            if ui.button("Doc").clicked() {
+                self.new_doc(Some(sid));
+                close_any(ui);
+            }
+        });
+        let others: Vec<(u64, String)> = self.open_spaces().iter().filter(|s| s.id != sid).map(|s| (s.id, s.name.clone())).collect();
+        ui.menu_button("Move to Space", |ui| {
+            if others.is_empty() {
+                ui.label(RichText::new("No other Space").color(t.text3));
+            }
+            for (id, name) in &others {
+                if ui.button(name).clicked() {
+                    self.move_folder(fid, *id);
+                    close_any(ui);
+                }
+            }
+        });
+        if ui.button("Duplicate").clicked() {
+            if let Some(n) = self.duplicate_folder(fid) {
+                self.actions.push(Action::Go(Location::Folder(n)));
+                self.toast = Some(("Folder duplicated".into(), now_ts()));
+            }
+            close_any(ui);
+        }
+        if ui.button("Archive").clicked() {
+            self.set_folder_archived(fid, true);
+            close_any(ui);
+        }
+        ui.separator();
+        if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
+            self.actions.push(Action::AskDelete(Target::Folder(fid)));
+            close_any(ui);
+        }
+    }
+
+    pub(super) fn set_folder_archived(&mut self, fid: u64, archived: bool) {
+        let mut name = String::new();
+        let mut lists = vec![];
+        for f in self.data.spaces.iter_mut().flat_map(|s| s.folders.iter_mut()).filter(|f| f.id == fid) {
+            f.archived = archived;
+            name = f.name.clone();
+            lists = f.lists.iter().map(|l| l.id).collect();
+            self.dirty = true;
+        }
+        let here = self.loc == Location::Folder(fid) || matches!(self.loc, Location::List(l) if lists.contains(&l));
+        if archived && here {
+            self.loc = Location::Home;
+        }
+        let msg = if archived { format!("Archived \"{}\". Restore it from Settings > Spaces.", name) } else { format!("Restored \"{}\".", name) };
+        self.toast = Some((msg, now_ts()));
+    }
+
+    /// Moves a folder, with its lists, to the end of another space.
+    pub(super) fn move_folder(&mut self, fid: u64, space: u64) {
+        if !self.data.spaces.iter().any(|s| s.id == space) {
+            return;
+        }
+        let mut taken = None;
+        for s in &mut self.data.spaces {
+            if let Some(i) = s.folders.iter().position(|f| f.id == fid) {
+                taken = Some(s.folders.remove(i));
+            }
+        }
+        let Some(f) = taken else { return };
+        let lists: Vec<u64> = f.lists.iter().map(|l| l.id).collect();
+        let name = f.name.clone();
+        let statuses = self.data.spaces.iter().find(|s| s.id == space).map(|s| s.statuses.clone()).unwrap_or_else(default_statuses);
+        if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == space) {
+            s.expanded = true;
+            s.folders.push(f);
+        }
+        // tasks take the new space's statuses
+        for t in self.data.tasks.iter_mut().filter(|t| lists.contains(&t.list_id)) {
+            if !statuses.iter().any(|s| s.name == t.status) {
+                t.status = statuses[0].name.clone();
+            }
+        }
+        self.toast = Some((format!("Moved {} to {}", name, self.data.location_name(Location::Space(space))), now_ts()));
+        self.dirty = true;
+    }
+
+    /// A copy of a folder next to it, with copies of its lists and their tasks.
+    pub(super) fn duplicate_folder(&mut self, fid: u64) -> Option<u64> {
+        let (sid, src) = self.data.spaces.iter().find_map(|s| s.folders.iter().find(|f| f.id == fid).map(|f| (s.id, f.clone())))?;
+        let nid = self.data.new_id();
+        let mut copy = Folder { id: nid, name: format!("{} (copy)", src.name), lists: vec![], expanded: true, archived: false };
+        for l in src.lists.iter().filter(|l| !l.archived) {
+            if let Some(n) = self.duplicate_list(l.id) {
+                if let Some(item) = self.take_list(n) {
+                    copy.lists.push(ListItem { name: l.name.clone(), ..item });
+                }
+            }
+        }
+        let s = self.data.spaces.iter_mut().find(|s| s.id == sid)?;
+        let pos = s.folders.iter().position(|f| f.id == fid).map(|i| i + 1).unwrap_or(s.folders.len());
+        s.folders.insert(pos, copy);
+        self.dirty = true;
+        Some(nid)
+    }
+
+    /// Puts a list just before another one (sidebar drag and drop), in the
+    /// other one's space or folder.
+    pub(super) fn place_list_before(&mut self, list: u64, before: u64) {
+        if list == before || self.data.list_item(before).is_none() {
+            return;
+        }
+        let Some(item) = self.take_list(list) else { return };
+        let mut space = None;
+        for s in &mut self.data.spaces {
+            if let Some(i) = s.lists.iter().position(|l| l.id == before) {
+                s.lists.insert(i, item.clone());
+                space = Some(s.id);
+            }
+            for f in &mut s.folders {
+                if let Some(i) = f.lists.iter().position(|l| l.id == before) {
+                    f.lists.insert(i, item.clone());
+                    space = Some(s.id);
+                }
+            }
+        }
+        let statuses = space.and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid)).map(|s| s.statuses.clone()).unwrap_or_else(default_statuses);
+        for t in self.data.tasks.iter_mut().filter(|t| t.list_id == list) {
+            if !statuses.iter().any(|s| s.name == t.status) {
+                t.status = statuses[0].name.clone();
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Puts a space just before another one (sidebar drag and drop).
+    pub(super) fn place_space_before(&mut self, space: u64, before: u64) {
+        if space == before || !self.data.spaces.iter().any(|s| s.id == before) {
+            return;
+        }
+        let Some(i) = self.data.spaces.iter().position(|s| s.id == space) else { return };
+        let s = self.data.spaces.remove(i);
+        let j = self.data.spaces.iter().position(|s| s.id == before).unwrap_or(self.data.spaces.len());
+        self.data.spaces.insert(j, s);
+        self.dirty = true;
     }
 
     /// The "+" on a sidebar list, and the list menu's "Create new".
@@ -916,7 +1123,7 @@ impl App {
             }
         }
         for (fi, f) in src.folders.iter().enumerate() {
-            copy.folders.push(Folder { id: self.data.new_id(), name: f.name.clone(), lists: vec![], expanded: true });
+            copy.folders.push(Folder { id: self.data.new_id(), name: f.name.clone(), lists: vec![], expanded: true, archived: false });
             for l in f.lists.iter().filter(|l| !l.archived) {
                 if let Some(n) = self.duplicate_list(l.id) {
                     if let Some(item) = self.take_list(n) {

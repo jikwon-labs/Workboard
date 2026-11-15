@@ -180,9 +180,10 @@ impl App {
             .filter(|s| !s.archived)
             .flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).filter(|l| l.archived).map(move |l| (l.id, format!("{} / {}", s.name, l.name))))
             .collect();
+        let arch_folders: Vec<(u64, String)> = self.data.spaces.iter().filter(|s| !s.archived).flat_map(|s| s.folders.iter().filter(|f| f.archived).map(move |f| (f.id, format!("{} / {}", s.name, f.name)))).collect();
         ui.add_space(18.0);
         ui.label(RichText::new("Archived").strong());
-        if arch_spaces.is_empty() && arch_lists.is_empty() {
+        if arch_spaces.is_empty() && arch_lists.is_empty() && arch_folders.is_empty() {
             ui.label(RichText::new("Nothing is archived. Archived Spaces and Lists show here so you can restore them.").color(t.text3));
         }
         egui::Grid::new("archived_table").num_columns(3).striped(true).spacing(vec2(24.0, 8.0)).show(ui, |ui| {
@@ -193,6 +194,16 @@ impl App {
                 name_it(&b, &format!("Restore {}", name));
                 if b.clicked() {
                     self.set_space_archived(id, false);
+                }
+                ui.end_row();
+            }
+            for (id, name) in arch_folders {
+                ui.label(RichText::new("Folder").small().color(t.text3));
+                ui.label(&name);
+                let b = ui.button("Restore");
+                name_it(&b, &format!("Restore {}", name));
+                if b.clicked() {
+                    self.set_folder_archived(id, false);
                 }
                 ui.end_row();
             }

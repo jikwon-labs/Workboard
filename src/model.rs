@@ -101,6 +101,9 @@ pub struct Folder {
     pub lists: Vec<ListItem>,
     #[serde(default = "yes")]
     pub expanded: bool,
+    /// Archived folders leave the sidebar (with their lists) until restored.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 fn yes() -> bool {
@@ -1043,9 +1046,10 @@ impl Data {
         })
     }
 
-    /// True when the list, or the space it sits in, is archived.
+    /// True when the list, or the folder or space it sits in, is archived.
     pub fn list_archived(&self, id: u64) -> bool {
-        self.list_item(id).is_some_and(|l| l.archived) || self.space_of_list(id).is_some_and(|s| s.archived)
+        self.list_item(id).is_some_and(|l| l.archived)
+            || self.space_of_list(id).is_some_and(|s| s.archived || s.folders.iter().any(|f| f.archived && f.lists.iter().any(|l| l.id == id)))
     }
 
     /// The letter or symbol drawn on a space's square.
@@ -1235,6 +1239,7 @@ impl Data {
                     ListItem { id: l_mkt, name: "Marketing".into(), ..Default::default() },
                 ],
                 expanded: true,
+                archived: false,
             }],
             lists: vec![ListItem { id: l_personal, name: "Personal".into(), ..Default::default() }],
             expanded: true,

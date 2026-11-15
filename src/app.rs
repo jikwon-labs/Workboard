@@ -154,6 +154,58 @@ pub enum Action {
     SetSpaceColor(u64, [u8; 3]),
 }
 
+/// A column of the Table view.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TableCol {
+    Num,
+    Name,
+    Status,
+    Assignee,
+    Due,
+    Priority,
+    Tags,
+    Tracked,
+    Created,
+    Field(u64),
+}
+
+impl TableCol {
+    /// The columns that can be hidden, in their order (custom fields follow).
+    const FIXED: [TableCol; 7] = [TableCol::Status, TableCol::Assignee, TableCol::Due, TableCol::Priority, TableCol::Tags, TableCol::Tracked, TableCol::Created];
+    fn label(self) -> &'static str {
+        match self {
+            TableCol::Num => "#",
+            TableCol::Name => "Name",
+            TableCol::Status => "Status",
+            TableCol::Assignee => "Assignee",
+            TableCol::Due => "Due date",
+            TableCol::Priority => "Priority",
+            TableCol::Tags => "Tags",
+            TableCol::Tracked => "Time tracked",
+            TableCol::Created => "Date created",
+            TableCol::Field(_) => "",
+        }
+    }
+    fn width(self) -> f32 {
+        match self {
+            TableCol::Num => 44.0,
+            TableCol::Name => 300.0,
+            TableCol::Status => 130.0,
+            TableCol::Tags => 150.0,
+            TableCol::Tracked => 100.0,
+            TableCol::Field(_) => 140.0,
+            _ => 110.0,
+        }
+    }
+    /// Its entry in `hidden_cols` (kept apart from the List's columns).
+    fn key(self) -> String {
+        match self {
+            TableCol::Field(id) => format!("table:field:{}", id),
+            c => format!("table:{}", c.label()),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Group {
     key: String,
@@ -1195,7 +1247,7 @@ impl App {
                 let id = self.data.new_id();
                 let lid = self.data.new_id();
                 if let Some(s) = self.data.spaces.iter_mut().find(|s| s.id == sid) {
-                    s.folders.push(Folder { id, name: "New Folder".into(), lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true });
+                    s.folders.push(Folder { id, name: "New Folder".into(), lists: vec![ListItem { id: lid, name: "List".into(), ..Default::default() }], expanded: true, archived: false });
                     s.expanded = true;
                 }
                 self.rename = Some((Target::Folder(id), "New Folder".into()));
@@ -1554,24 +1606,61 @@ impl App {
                     self.open_quick_add(Some(d));
                 }
             }
-            let day_tasks: Vec<&Task> = tasks.iter().filter(|x| x.due == Some(d)).collect();
+            // a task with a start and a due date shows on every day between
+            let span = |x: &Task| match (x.start, x.due) {
+                (Some(s), Some(e)) if s <= e => Some((s, e)),
+                (_, Some(e)) => Some((e, e)),
+                _ => None,
+            };
+            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate)> = tasks.iter().filter_map(|x| span(x).filter(|(s, e)| *s <= d && d <= *e).map(|(s, e)| (x, s, e))).collect();
+            // longer spans first, so a bar keeps its line from day to day
+            day_tasks.sort_by_key(|(x, s, e)| (std::cmp::Reverse((*e - *s).num_days()), *s, x.id));
             let max = ((ch - 30.0) / 22.0).floor().max(1.0) as usize;
-            for (k, task) in day_tasks.iter().enumerate() {
+            for (k, (task, s0, e0)) in day_tasks.iter().enumerate() {
                 if k >= max {
-                    p.text(cell.left_top() + vec2(8.0, 28.0 + 22.0 * k as f32 + 9.0), Align2::LEFT_CENTER, format!("+{} more", day_tasks.len() - k), FontId::proportional(11.5), t.text3);
+                    let more = Rect::from_min_size(cell.left_top() + vec2(4.0, 26.0 + 22.0 * k as f32), vec2(cw - 8.0, 20.0));
+                    let mr = ui.interact(more, ui.id().with(("calmore", i)), Sense::click());
+                    name_it(&mr, &format!("More tasks on {}", d));
+                    if mr.hovered() {
+                        p.rect_filled(more, 4.0, t.hover);
+                    }
+                    p.text(more.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, format!("+{} more", day_tasks.len() - k), FontId::proportional(11.5), if mr.hovered() { t.text } else { t.text3 });
+                    // the day's whole list in a popup
+                    let all: Vec<(u64, String, Status)> = day_tasks.iter().map(|(x, _, _)| (x.id, x.name.clone(), self.data.status_of(x))).collect();
+                    popup(ui, &mr, ui.id().with(("calmore_pop", i)), 240.0, |ui| {
+                        ui.label(RichText::new(d.format("%A, %b %-d").to_string()).strong());
+                        ui.add_space(4.0);
+                        for (tid, name, st) in &all {
+                            let r = menu_row(ui, &t, name, false, |p, c| paint_status_circle(p, c, 5.5, st));
+                            if r.clicked() {
+                                self.actions.push(Action::Open(*tid));
+                                close_popup(ui);
+                            }
+                        }
+                    });
                     break;
                 }
-                let r = Rect::from_min_size(cell.left_top() + vec2(4.0, 26.0 + 22.0 * k as f32), vec2(cw - 8.0, 20.0));
-                let resp = ui.interact(r, ui.id().with(("calt", task.id)), Sense::click_and_drag());
+                let starts = d == *s0 || i % 7 == 0;
+                let goes_on = d < *e0 && i % 7 != 6;
+                let left = if d > *s0 && i % 7 != 0 { cell.left() } else { cell.left() + 4.0 };
+                let right = if goes_on { cell.right() } else { cell.right() - 4.0 };
+                let r = Rect::from_min_max(pos2(left, cell.top() + 26.0 + 22.0 * k as f32), pos2(right, cell.top() + 46.0 + 22.0 * k as f32));
+                let resp = ui.interact(r, ui.id().with(("calt", task.id, i)), Sense::click_and_drag());
                 if resp.drag_started() {
                     egui::DragAndDrop::set_payload(ui.ctx(), task.id);
+                    // remember the day it was picked up by, to move a span as a whole
+                    ui.data_mut(|m| m.insert_temp(egui::Id::new("cal_grab"), d));
                 }
                 let st = self.data.status_of(task);
                 let col = rgb(st.color);
-                p.rect_filled(r, 4.0, if resp.hovered() { col.gamma_multiply(0.30) } else { col.gamma_multiply(0.16) });
-                p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
-                let max_chars = ((cw - 24.0) / 6.5) as usize;
-                p.with_clip_rect(r).text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, truncate(&task.name, max_chars.max(4)), FontId::proportional(12.0), t.text);
+                let round = egui::CornerRadius { nw: if d > *s0 && i % 7 != 0 { 0 } else { 4 }, sw: if d > *s0 && i % 7 != 0 { 0 } else { 4 }, ne: if goes_on { 0 } else { 4 }, se: if goes_on { 0 } else { 4 } };
+                p.rect_filled(r, round, if resp.hovered() { col.gamma_multiply(0.30) } else { col.gamma_multiply(0.16) });
+                if starts {
+                    p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
+                    let max_chars = ((cw - 24.0) / 6.5) as usize;
+                    p.with_clip_rect(r).text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, truncate(&task.name, max_chars.max(4)), FontId::proportional(12.0), t.text);
+                }
+                name_it(&resp, &format!("Calendar {} {}", task.name, d));
                 let tid = task.id;
                 resp.context_menu(|ui| self.task_menu(ui, tid));
                 if resp.clicked() {
@@ -1604,12 +1693,16 @@ impl App {
                 let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click_and_drag());
                 if resp.drag_started() {
                     egui::DragAndDrop::set_payload(ui.ctx(), task.id);
+                    ui.data_mut(|m| m.remove::<NaiveDate>(egui::Id::new("cal_grab")));
                 }
                 ui.painter().rect_filled(r, 6.0, if resp.hovered() { t.hover } else { t.card });
                 ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                 let st = self.data.status_of(task);
                 paint_status_circle(ui.painter(), r.left_center() + vec2(14.0, 0.0), 6.0, &st);
                 ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(12.5), t.text);
+                name_it(&resp, &format!("Unscheduled {}", task.name));
+                let tid = task.id;
+                resp.context_menu(|ui| self.task_menu(ui, tid));
                 if resp.clicked() {
                     self.actions.push(Action::Open(task.id));
                 }
@@ -1625,10 +1718,21 @@ impl App {
         }
         if let Some(d) = drop_on {
             if let Some(id) = egui::DragAndDrop::take_payload::<u64>(ui.ctx()) {
+                let grab: Option<NaiveDate> = ui.data_mut(|m| m.remove_temp(egui::Id::new("cal_grab")));
                 if let Some(mut task) = self.task(*id).cloned() {
-                    task.due = Some(d);
-                    if task.start.map_or(false, |s| s > d) {
-                        task.start = Some(d);
+                    match (grab, task.start, task.due) {
+                        // a task picked up from the grid moves by as many days as it was dragged
+                        (Some(g), s, Some(e)) => {
+                            let delta = d - g;
+                            task.due = Some(e + delta);
+                            task.start = s.map(|s| s + delta);
+                        }
+                        _ => {
+                            task.due = Some(d);
+                            if task.start.map_or(false, |s| s > d) {
+                                task.start = Some(d);
+                            }
+                        }
                     }
                     self.actions.push(Action::Replace(task));
                 }
@@ -1694,8 +1798,17 @@ impl App {
             });
         });
         ui.add_space(4.0);
+        // each task's subtasks follow it once it is expanded
+        let mut rows: Vec<(Task, usize, usize)> = vec![];
+        for task in &tasks {
+            let subs: Vec<Task> = self.subtasks(task.id).into_iter().filter(|x| !x.archived).cloned().collect();
+            rows.push((task.clone(), 0, subs.len()));
+            if self.expanded_tasks.contains(&task.id) {
+                rows.extend(subs.into_iter().map(|x| (x, 1, 0)));
+            }
+        }
         // fill the view so the horizontal scrollbar sits at the bottom, not under the last row
-        let rows_h = (head + rh * (tasks.len() + 1) as f32).max(ui.available_height() - 24.0);
+        let rows_h = (head + rh * (rows.len() + 1) as f32).max(ui.available_height() - 24.0);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -1706,18 +1819,40 @@ impl App {
                     let (hr, _) = ui.allocate_exact_size(vec2(name_w, head), Sense::hover());
                     ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "Name", FontId::proportional(12.0), t.text3);
                     ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-                    for task in &tasks {
+                    for (task, depth, nsub) in &rows {
                         let (r, resp) = ui.allocate_exact_size(vec2(name_w, rh), Sense::click());
                         if resp.hovered() {
                             ui.painter().rect_filled(r, 0.0, t.hover);
                         }
+                        let x0 = r.left() + 16.0 + *depth as f32 * 20.0;
+                        // the arrow that shows or hides the subtasks
+                        let ar = Rect::from_center_size(pos2(x0 - 4.0, r.center().y), vec2(16.0, 16.0));
+                        let mut on_arrow = false;
+                        if *nsub > 0 {
+                            let a = ui.interact(ar, ui.id().with(("gexp", task.id)), Sense::click());
+                            name_it(&a, &format!("Subtasks of {}", task.name));
+                            let open = self.expanded_tasks.contains(&task.id);
+                            paint_triangle(ui.painter(), ar.center(), open, if a.hovered() { t.text } else { t.text3 });
+                            if a.clicked() {
+                                if open {
+                                    self.expanded_tasks.remove(&task.id);
+                                } else {
+                                    self.expanded_tasks.insert(task.id);
+                                }
+                            }
+                            on_arrow = a.clicked() || a.hovered();
+                        }
                         let st = self.data.status_of(task);
-                        paint_status_circle(ui.painter(), r.left_center() + vec2(14.0, 0.0), 6.5, &st);
-                        ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(30.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
+                        paint_status_circle(ui.painter(), pos2(x0 + 12.0, r.center().y), 6.5, &st);
+                        ui.painter().with_clip_rect(r.shrink(2.0)).text(pos2(x0 + 26.0, r.center().y), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
+                        if *nsub > 0 {
+                            let g = ui.painter().layout_no_wrap(task.name.clone(), FontId::proportional(13.0), t.text);
+                            ui.painter().with_clip_rect(r.shrink(2.0)).text(pos2(x0 + 32.0 + g.size().x, r.center().y), Align2::LEFT_CENTER, format!("\u{2934} {}", nsub), FontId::proportional(11.5), t.text3);
+                        }
                         ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
                         let tid = task.id;
                         resp.context_menu(|ui| self.task_menu(ui, tid));
-                        if resp.clicked() {
+                        if resp.clicked() && !on_arrow {
                             self.actions.push(Action::Open(task.id));
                         }
                     }
@@ -1770,35 +1905,95 @@ impl App {
                     p.hline(area.x_range(), area.top() + head, Stroke::new(1.0, t.border));
                     let today_x = area.left() + cw * (td - start).num_days() as f32 + cw / 2.0;
                     p.vline(today_x, area.top() + head..=area.top() + total_h, Stroke::new(1.5, t.danger));
-                    for (k, task) in tasks.iter().enumerate() {
+                    for (k, (task, _, _)) in rows.iter().enumerate() {
                         let y = area.top() + head + rh * k as f32;
                         p.hline(area.x_range(), y + rh, Stroke::new(0.5, t.border));
+                        let day_at = |x: f32| start + Duration::days(((x - area.left()) / cw).floor() as i64);
                         let (s, e) = match (task.start, task.due) {
                             (Some(s), Some(e)) => (s.min(e), e.max(s)),
                             (None, Some(e)) => (e, e),
                             (Some(s), None) => (s, s),
-                            _ => continue,
+                            _ => {
+                                // no dates yet: click a day, or drag across days, to schedule it
+                                let row = Rect::from_min_size(pos2(area.left(), y), vec2(area.width(), rh));
+                                let resp = ui.interact(row, ui.id().with(("gsched", task.id)), Sense::click_and_drag());
+                                name_it(&resp, &format!("Schedule {}", task.name));
+                                let from_id = resp.id.with("from");
+                                if resp.drag_started() {
+                                    if let Some(pp) = resp.interact_pointer_pos() {
+                                        ui.data_mut(|d| d.insert_temp(from_id, day_at(pp.x)));
+                                    }
+                                }
+                                let from: Option<NaiveDate> = ui.data(|d| d.get_temp(from_id));
+                                let at = resp.interact_pointer_pos().or(resp.hover_pos()).map(|pp| day_at(pp.x));
+                                if let Some(at) = at {
+                                    let (a0, a1) = match (resp.dragged() || resp.drag_stopped(), from) {
+                                        (true, Some(f)) => (f.min(at), f.max(at)),
+                                        _ => (at, at),
+                                    };
+                                    let gx0 = area.left() + cw * (a0 - start).num_days() as f32 + 1.0;
+                                    let gx1 = area.left() + cw * ((a1 - start).num_days() + 1) as f32 - 1.0;
+                                    let ghost = Rect::from_min_max(pos2(gx0, y + 7.0), pos2(gx1.max(gx0 + 8.0), y + rh - 7.0));
+                                    p.rect_stroke(ghost, 5.0, Stroke::new(1.0_f32, t.text3), egui::StrokeKind::Inside);
+                                    if resp.clicked() || resp.drag_stopped() {
+                                        let mut e2 = task.clone();
+                                        e2.start = if a0 < a1 { Some(a0) } else { None };
+                                        e2.due = Some(a1);
+                                        self.actions.push(Action::Replace(e2));
+                                    }
+                                }
+                                if resp.drag_stopped() {
+                                    ui.data_mut(|d| d.remove::<NaiveDate>(from_id));
+                                }
+                                continue;
+                            }
                         };
                         let x0 = area.left() + cw * (s - start).num_days() as f32 + 1.0;
                         let x1 = area.left() + cw * ((e - start).num_days() + 1) as f32 - 1.0;
                         let mut r = Rect::from_min_max(pos2(x0, y + 7.0), pos2(x1.max(x0 + 8.0), y + rh - 7.0));
-                        // drag a bar to move its dates
+                        // drag a bar to move its dates, or one of its ends to change one date
                         let resp = ui.interact(r, ui.id().with(("bar", task.id)), Sense::click_and_drag());
-                        let acc_id = resp.id.with("acc");
-                        if resp.dragged() {
-                            let dx = resp.drag_delta().x;
-                            ui.data_mut(|d| *d.get_temp_mut_or_default::<f32>(acc_id) += dx);
+                        name_it(&resp, &format!("Bar {}", task.name));
+                        let edge_w = 6.0_f32.min(r.width() / 3.0);
+                        let lh = ui.interact(Rect::from_min_max(r.min, pos2(r.left() + edge_w, r.bottom())), ui.id().with(("barl", task.id)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                        let rhd = ui.interact(Rect::from_min_max(pos2(r.right() - edge_w, r.top()), r.max), ui.id().with(("barr", task.id)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                        name_it(&lh, &format!("Start of {}", task.name));
+                        name_it(&rhd, &format!("End of {}", task.name));
+                        let mut shifts = [0i64; 3];
+                        for (n, h) in [&resp, &lh, &rhd].into_iter().enumerate() {
+                            let acc_id = h.id.with("acc");
+                            if h.dragged() {
+                                let dx = h.drag_delta().x;
+                                ui.data_mut(|d| *d.get_temp_mut_or_default::<f32>(acc_id) += dx);
+                            }
+                            let acc: f32 = ui.data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
+                            if h.drag_stopped() {
+                                ui.data_mut(|d| d.remove::<f32>(acc_id));
+                            }
+                            shifts[n] = (acc / cw).round() as i64;
                         }
-                        let acc: f32 = ui.data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
-                        if resp.drag_stopped() {
-                            ui.data_mut(|d| d.remove::<f32>(acc_id));
-                        }
-                        let shift_days = (acc / cw).round() as i64;
+                        let [shift_days, shift_start, shift_end] = shifts;
+                        // an end can't be pulled past the other end
+                        let span = (e - s).num_days();
+                        let shift_start = shift_start.min(span);
+                        let shift_end = shift_end.max(-span);
                         if resp.dragged() {
                             r = r.translate(vec2(shift_days as f32 * cw, 0.0));
                         }
+                        if lh.dragged() {
+                            r.min.x += shift_start as f32 * cw;
+                        }
+                        if rhd.dragged() {
+                            r.max.x += shift_end as f32 * cw;
+                        }
+                        let active = resp.hovered() || resp.dragged() || lh.dragged() || rhd.dragged();
                         let col = rgb(self.data.status_of(task).color);
-                        p.rect_filled(r, 5.0, if resp.hovered() || resp.dragged() { col } else { col.gamma_multiply(0.85) });
+                        p.rect_filled(r, 5.0, if active { col } else { col.gamma_multiply(0.85) });
+                        if lh.hovered() || rhd.hovered() || active {
+                            for hx in [r.left() + 3.0, r.right() - 3.0] {
+                                p.vline(hx, r.top() + 5.0..=r.bottom() - 5.0, Stroke::new(2.0_f32, Color32::from_white_alpha(200)));
+                            }
+                        }
                         if r.width() > 60.0 {
                             p.with_clip_rect(r).text(r.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(11.5), Color32::WHITE);
                         } else {
@@ -1808,6 +2003,16 @@ impl App {
                             let mut e2 = task.clone();
                             e2.start = e2.start.map(|d| d + Duration::days(shift_days));
                             e2.due = e2.due.map(|d| d + Duration::days(shift_days));
+                            self.actions.push(Action::Replace(e2));
+                        } else if lh.drag_stopped() && shift_start != 0 {
+                            let mut e2 = task.clone();
+                            e2.start = Some(s + Duration::days(shift_start));
+                            e2.due = Some(e);
+                            self.actions.push(Action::Replace(e2));
+                        } else if rhd.drag_stopped() && shift_end != 0 {
+                            let mut e2 = task.clone();
+                            e2.start = Some(s);
+                            e2.due = Some(e + Duration::days(shift_end));
                             self.actions.push(Action::Replace(e2));
                         } else if resp.clicked() {
                             self.actions.push(Action::Open(task.id));
@@ -1822,18 +2027,140 @@ impl App {
 
     fn table_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
+        let mut tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let now = now_ts();
-        let widths = [44.0, 300.0, 130.0, 110.0, 110.0, 110.0, 150.0, 100.0, 110.0];
-        let heads = ["#", "Name", "Status", "Assignee", "Due date", "Priority", "Tags", "Time tracked", "Date created"];
+        // the columns: the fixed ones and one per custom field; all but # and
+        // Name can be hidden with the "+" at the end of the header
+        let fields: Vec<CustomField> = if self.data.extra.apps.custom_fields { self.data.extra.fields.clone() } else { vec![] };
+        let mut cols: Vec<TableCol> = vec![TableCol::Num, TableCol::Name];
+        for c in TableCol::FIXED {
+            if !self.hidden_cols.contains(&c.key()) {
+                cols.push(c);
+            }
+        }
+        for f in &fields {
+            let c = TableCol::Field(f.id);
+            if !self.hidden_cols.contains(&c.key()) {
+                cols.push(c);
+            }
+        }
+        let field_name = |id: u64| fields.iter().find(|f| f.id == id).map(|f| f.name.clone()).unwrap_or_default();
+        let field_num = |id: u64| fields.iter().any(|f| f.id == id && f.kind == "number");
+        // a click on a header sorts by it; another click turns the order round
+        let sort_id = egui::Id::new("table_sort");
+        let sort: Option<(TableCol, bool)> = ui.data(|d| d.get_temp(sort_id)).flatten();
+        if let Some((col, desc)) = sort {
+            let data = &self.data;
+            let first_name = |x: &Task| x.assignees.first().and_then(|a| data.member(*a)).map(|m| m.name.to_lowercase());
+            tasks.sort_by(|a, b| {
+                use std::cmp::Ordering;
+                // empty cells stay at the bottom either way
+                let last = |x: Option<Ordering>| x.unwrap_or(Ordering::Equal);
+                let o = match col {
+                    TableCol::Num | TableCol::Created => Some(a.created.cmp(&b.created)),
+                    TableCol::Name => Some(a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                    TableCol::Status => {
+                        let sts = data.statuses_for_list(a.list_id);
+                        let pos = |x: &Task| sts.iter().position(|s| s.name == x.status).unwrap_or(usize::MAX);
+                        Some(pos(a).cmp(&pos(b)))
+                    }
+                    TableCol::Assignee => match (first_name(a), first_name(b)) {
+                        (Some(x), Some(y)) => Some(x.cmp(&y)),
+                        (x, y) => return x.is_none().cmp(&y.is_none()),
+                    },
+                    TableCol::Due => match (a.due, b.due) {
+                        (Some(x), Some(y)) => Some(x.cmp(&y)),
+                        (x, y) => return x.is_none().cmp(&y.is_none()),
+                    },
+                    TableCol::Priority => match (a.priority, b.priority) {
+                        (0, 0) => Some(Ordering::Equal),
+                        (0, _) | (_, 0) => return (a.priority == 0).cmp(&(b.priority == 0)),
+                        (x, y) => Some(x.cmp(&y)),
+                    },
+                    TableCol::Tags => match (a.tags.first(), b.tags.first()) {
+                        (Some(x), Some(y)) => Some(x.to_lowercase().cmp(&y.to_lowercase())),
+                        (x, y) => return x.is_none().cmp(&y.is_none()),
+                    },
+                    TableCol::Tracked => Some(a.tracked_secs(now).cmp(&b.tracked_secs(now))),
+                    TableCol::Field(id) => {
+                        let va = a.custom.get(&id).cloned().unwrap_or_default();
+                        let vb = b.custom.get(&id).cloned().unwrap_or_default();
+                        match (va.is_empty(), vb.is_empty()) {
+                            (false, false) if field_num(id) => va.parse::<f64>().unwrap_or(0.0).partial_cmp(&vb.parse::<f64>().unwrap_or(0.0)),
+                            (false, false) => Some(va.to_lowercase().cmp(&vb.to_lowercase())),
+                            (x, y) => return x.cmp(&y),
+                        }
+                    }
+                };
+                let o = last(o);
+                if desc { o.reverse() } else { o }
+            });
+        }
+        let widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
+        let edit_id = egui::Id::new("table_rename");
+        let mut renaming: Option<(u64, String)> = ui.data(|d| d.get_temp(edit_id));
         egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-            let total: f32 = widths.iter().sum();
+            let total: f32 = widths.iter().sum::<f32>() + 36.0;
             let (hr, _) = ui.allocate_exact_size(vec2(total, 30.0), Sense::hover());
             let mut x = hr.left();
-            for (i, h) in heads.iter().enumerate() {
-                ui.painter().text(pos2(x + 8.0, hr.center().y), Align2::LEFT_CENTER, *h, FontId::proportional(12.0), t.text3);
+            let mut new_sort = sort;
+            for (i, c) in cols.iter().enumerate() {
+                let cell = Rect::from_min_size(pos2(x, hr.top()), vec2(widths[i], hr.height()));
+                let label = match c {
+                    TableCol::Field(id) => field_name(*id),
+                    _ => c.label().to_string(),
+                };
+                let hresp = ui.interact(cell, ui.id().with(("thead", i)), Sense::click());
+                name_it(&hresp, &format!("Sort by {}", label));
+                if hresp.hovered() {
+                    ui.painter().rect_filled(cell, 0.0, t.hover);
+                }
+                let g = ui.painter().layout_no_wrap(label, FontId::proportional(12.0), t.text3);
+                let gw = g.size().x;
+                ui.painter().with_clip_rect(cell).galley(pos2(x + 8.0, hr.center().y - g.size().y / 2.0), g, t.text3);
+                if let Some((sc, desc)) = sort {
+                    if sc == *c {
+                        ui.painter().text(pos2(x + 12.0 + gw, hr.center().y), Align2::LEFT_CENTER, if desc { "\u{2193}" } else { "\u{2191}" }, FontId::proportional(12.0), t.text);
+                    }
+                }
+                if hresp.clicked() {
+                    new_sort = match sort {
+                        Some((sc, false)) if sc == *c => Some((*c, true)),
+                        Some((sc, true)) if sc == *c => None,
+                        _ => Some((*c, false)),
+                    };
+                }
                 ui.painter().vline(x, hr.y_range(), Stroke::new(0.5, t.border));
                 x += widths[i];
+            }
+            // "+" at the end: choose the columns
+            let plus = Rect::from_min_size(pos2(x, hr.top()), vec2(36.0, hr.height()));
+            let pr = ui.interact(plus, ui.id().with("thead_plus"), Sense::click());
+            name_it(&pr, "Table columns");
+            ui.painter().vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
+            ui.painter().text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(15.0), if pr.hovered() { t.text } else { t.text3 });
+            let mut choices: Vec<(String, String)> = TableCol::FIXED.iter().map(|c| (c.key(), c.label().to_string())).collect();
+            choices.extend(fields.iter().map(|f| (TableCol::Field(f.id).key(), f.name.clone())));
+            popup(ui, &pr, ui.id().with("thead_plus_pop"), 220.0, |ui| {
+                ui.label(RichText::new("Columns").small().color(t.text3));
+                for (key, label) in &choices {
+                    let mut on = !self.hidden_cols.contains(key);
+                    let r = ui.checkbox(&mut on, label.as_str());
+                    name_it(&r, &format!("Column {}", label));
+                    if r.changed() {
+                        if on {
+                            self.hidden_cols.remove(key);
+                        } else {
+                            self.hidden_cols.insert(key.clone());
+                        }
+                    }
+                }
+                if fields.is_empty() {
+                    ui.label(RichText::new("Custom Fields you add show here too.").small().color(t.text3));
+                }
+            });
+            if new_sort != sort {
+                ui.data_mut(|d| d.insert_temp(sort_id, new_sort));
             }
             ui.painter().rect_filled(Rect::from_min_size(hr.left_bottom() - vec2(0.0, 1.0), vec2(total, 1.0)), 0.0, t.border);
             for (n, task) in tasks.iter().enumerate() {
@@ -1848,8 +2175,8 @@ impl App {
                 ui.painter().hline(rr.x_range(), rr.bottom(), Stroke::new(0.5, t.border));
                 let mut cells = vec![];
                 let mut x = rr.left();
-                for w in widths {
-                    cells.push(Rect::from_min_size(pos2(x, rr.top()), vec2(w, rr.height())));
+                for w in &widths {
+                    cells.push(Rect::from_min_size(pos2(x, rr.top()), vec2(*w, rr.height())));
                     ui.painter().vline(x, rr.y_range(), Stroke::new(0.5, t.border));
                     x += w;
                 }
@@ -1857,71 +2184,126 @@ impl App {
                 let closed = matches!(st.kind, StatusKind::Closed | StatusKind::Done);
                 let mut edited = task.clone();
                 let mut changed = false;
-                // row number, or the selection box on hover
-                let on = self.selected.contains(&task.id);
-                if resp.hovered() || on || !self.selected.is_empty() || ui.rect_contains_pointer(cells[0]) {
-                    // row_checkbox centres the box 2px right of the rect's left edge
-                    let cell = Rect::from_min_size(pos2(cells[0].center().x - 2.0, cells[0].top()), vec2(1.0, cells[0].height()));
-                    self.row_checkbox(ui, cell, task.id, true);
-                } else {
-                    ui.painter().text(cells[0].center(), Align2::CENTER_CENTER, (n + 1).to_string(), FontId::proportional(12.0), t.text3);
-                }
-                let cells: Vec<Rect> = cells[1..].to_vec();
-                ui.painter().with_clip_rect(cells[0].shrink(2.0)).text(cells[0].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
-                // status
-                let sr = ui.interact(cells[1], id.with("s"), Sense::click());
-                {
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cells[1].shrink2(vec2(8.0, 6.0))).layout(Layout::left_to_right(Align::Center)));
-                    status_pill(&mut child, &st, Sense::hover());
-                }
-                let statuses = self.data.statuses_for_list(task.list_id);
-                if let Some(true) = popup(ui, &sr, id.with("sp"), 200.0, |ui| status_menu(ui, &t, &statuses, &mut edited.status)) {
-                    changed = true;
-                }
-                // assignee
-                let ar = ui.interact(cells[2], id.with("a"), Sense::click());
-                paint_avatars(ui.painter(), cells[2].left_center() + vec2(8.0, 0.0), 10.0, &task.assignees, &self.data, t.bg);
-                let data = &self.data;
-                if let Some(true) = popup(ui, &ar, id.with("ap"), 220.0, |ui| assignee_menu(ui, &t, data, &mut edited.assignees)) {
-                    changed = true;
-                }
-                // due
-                let dr = ui.interact(cells[3], id.with("d"), Sense::click());
-                if let Some(d) = task.due {
-                    ui.painter().text(cells[3].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_date(d), FontId::proportional(13.0), date_color(d, closed, &t));
-                }
-                if let Some(true) = popup(ui, &dr, id.with("dp"), 380.0, |ui| date_menu(ui, &t, id.with("dc"), &mut edited.due)) {
-                    changed = true;
-                }
-                // priority
-                let pr = ui.interact(cells[4], id.with("p"), Sense::click());
-                if task.priority > 0 {
-                    paint_flag(ui.painter(), cells[4].left_center() + vec2(10.0, 0.0), priority_color(task.priority, &t), 12.0);
-                    ui.painter().text(cells[4].left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, PRIORITIES[task.priority as usize].label, FontId::proportional(13.0), t.text);
-                }
-                if let Some(true) = popup(ui, &pr, id.with("pp"), 180.0, |ui| priority_menu(ui, &t, &mut edited.priority)) {
-                    changed = true;
-                }
-                // tags
-                {
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cells[5].shrink2(vec2(8.0, 6.0))).layout(Layout::left_to_right(Align::Center)));
-                    child.set_clip_rect(cells[5]);
-                    for tag in &task.tags {
-                        chip(&mut child, tag, tag_color(tag));
+                let mut on_cell = false;
+                for (ci, c) in cols.iter().enumerate() {
+                    let cell = cells[ci];
+                    match c {
+                        TableCol::Num => {
+                            // row number, or the selection box on hover
+                            let on = self.selected.contains(&task.id);
+                            if resp.hovered() || on || !self.selected.is_empty() || ui.rect_contains_pointer(cell) {
+                                // row_checkbox centres the box 2px right of the rect's left edge
+                                let bx = Rect::from_min_size(pos2(cell.center().x - 2.0, cell.top()), vec2(1.0, cell.height()));
+                                self.row_checkbox(ui, bx, task.id, true);
+                            } else {
+                                ui.painter().text(cell.center(), Align2::CENTER_CENTER, (n + 1).to_string(), FontId::proportional(12.0), t.text3);
+                            }
+                        }
+                        TableCol::Name => {
+                            let editing = renaming.as_ref().is_some_and(|(rid, _)| *rid == task.id);
+                            if editing {
+                                let mut text = renaming.as_ref().map(|(_, s)| s.clone()).unwrap_or_default();
+                                let r = put_over(ui, cell.shrink2(vec2(4.0, 5.0)), egui::TextEdit::singleline(&mut text).hint_text("Task name"));
+                                name_field(&r, &format!("Name of {}", task.name));
+                                focus_once(ui, &r);
+                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                    renaming = None;
+                                } else if r.lost_focus() {
+                                    if !text.trim().is_empty() && text.trim() != task.name {
+                                        edited.name = text.trim().to_string();
+                                        changed = true;
+                                    }
+                                    renaming = None;
+                                } else {
+                                    renaming = Some((task.id, text));
+                                }
+                                on_cell = true;
+                            } else {
+                                ui.painter().with_clip_rect(cell.shrink(2.0)).text(cell.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(13.0), t.text);
+                                // a pencil on hover renames in place
+                                let pen = Rect::from_center_size(cell.right_center() - vec2(16.0, 0.0), vec2(22.0, 22.0));
+                                let pr = ui.interact(pen, id.with("ren"), Sense::click());
+                                name_it(&pr, &format!("Rename {}", task.name));
+                                if resp.hovered() || pr.hovered() {
+                                    ui.painter().rect_filled(pen, 5.0, if pr.hovered() { t.border } else { t.card });
+                                    ui.painter().text(pen.center(), Align2::CENTER_CENTER, "\u{270E}", FontId::proportional(13.0), t.text2);
+                                }
+                                if pr.clicked() {
+                                    renaming = Some((task.id, task.name.clone()));
+                                }
+                                on_cell |= pr.hovered() || pr.clicked();
+                            }
+                        }
+                        TableCol::Status => {
+                            let sr = ui.interact(cell, id.with("s"), Sense::click());
+                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell.shrink2(vec2(8.0, 6.0))).layout(Layout::left_to_right(Align::Center)));
+                            status_pill(&mut child, &st, Sense::hover());
+                            let statuses = self.data.statuses_for_list(task.list_id);
+                            if let Some(true) = popup(ui, &sr, id.with("sp"), 200.0, |ui| status_menu(ui, &t, &statuses, &mut edited.status)) {
+                                changed = true;
+                            }
+                        }
+                        TableCol::Assignee => {
+                            let ar = ui.interact(cell, id.with("a"), Sense::click());
+                            paint_avatars(ui.painter(), cell.left_center() + vec2(8.0, 0.0), 10.0, &task.assignees, &self.data, t.bg);
+                            let data = &self.data;
+                            if let Some(true) = popup(ui, &ar, id.with("ap"), 220.0, |ui| assignee_menu(ui, &t, data, &mut edited.assignees)) {
+                                changed = true;
+                            }
+                        }
+                        TableCol::Due => {
+                            let dr = ui.interact(cell, id.with("d"), Sense::click());
+                            if let Some(d) = task.due {
+                                ui.painter().text(cell.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_date(d), FontId::proportional(13.0), date_color(d, closed, &t));
+                            }
+                            if let Some(true) = popup(ui, &dr, id.with("dp"), 380.0, |ui| date_menu(ui, &t, id.with("dc"), &mut edited.due)) {
+                                changed = true;
+                            }
+                        }
+                        TableCol::Priority => {
+                            let pr = ui.interact(cell, id.with("p"), Sense::click());
+                            if task.priority > 0 {
+                                paint_flag(ui.painter(), cell.left_center() + vec2(10.0, 0.0), priority_color(task.priority, &t), 12.0);
+                                ui.painter().text(cell.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, PRIORITIES[task.priority as usize].label, FontId::proportional(13.0), t.text);
+                            }
+                            if let Some(true) = popup(ui, &pr, id.with("pp"), 180.0, |ui| priority_menu(ui, &t, &mut edited.priority)) {
+                                changed = true;
+                            }
+                        }
+                        TableCol::Tags => {
+                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell.shrink2(vec2(8.0, 6.0))).layout(Layout::left_to_right(Align::Center)));
+                            child.set_clip_rect(cell);
+                            for tag in &task.tags {
+                                chip(&mut child, tag, tag_color(tag));
+                            }
+                        }
+                        TableCol::Tracked => {
+                            let secs = task.tracked_secs(now);
+                            if secs > 0 {
+                                ui.painter().text(cell.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_duration(secs), FontId::proportional(13.0), t.text2);
+                            }
+                        }
+                        TableCol::Created => {
+                            let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or(td_default());
+                            ui.painter().text(cell.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_date(created), FontId::proportional(13.0), t.text2);
+                        }
+                        TableCol::Field(fid) => {
+                            let v = task.custom.get(fid).cloned().unwrap_or_default();
+                            let shown = match fields.iter().find(|f| f.id == *fid).map(|f| f.kind.as_str()) {
+                                Some("checkbox") => if v == "true" { "\u{2611}".to_string() } else { String::new() },
+                                Some("date") => NaiveDate::parse_from_str(&v, "%Y-%m-%d").map(fmt_date).unwrap_or(v),
+                                _ => v,
+                            };
+                            ui.painter().with_clip_rect(cell.shrink(2.0)).text(cell.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, shown, FontId::proportional(13.0), t.text2);
+                        }
                     }
                 }
-                let secs = task.tracked_secs(now);
-                if secs > 0 {
-                    ui.painter().text(cells[6].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_duration(secs), FontId::proportional(13.0), t.text2);
-                }
-                let created = chrono::DateTime::from_timestamp(task.created, 0).map(|d| d.with_timezone(&chrono::Local).date_naive()).unwrap_or(td_default());
-                ui.painter().text(cells[7].left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, fmt_date(created), FontId::proportional(13.0), t.text2);
                 let tid = task.id;
                 resp.context_menu(|ui| self.task_menu(ui, tid));
                 let in_box = resp.interact_pointer_pos().map_or(false, |p| p.x < rr.left() + 44.0);
                 if changed {
                     self.actions.push(Action::Replace(edited));
-                } else if resp.clicked() && !in_box {
+                } else if resp.clicked() && !in_box && !on_cell {
                     if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
                         if !self.selected.remove(&tid) {
                             self.selected.insert(tid);
@@ -1939,6 +2321,10 @@ impl App {
             if resp.clicked() {
                 self.open_quick_add(None);
             }
+        });
+        ui.data_mut(|d| match renaming {
+            Some(r) => d.insert_temp(edit_id, r),
+            None => d.remove::<(u64, String)>(edit_id),
         });
     }
 

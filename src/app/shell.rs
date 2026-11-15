@@ -7,6 +7,13 @@ use super::*;
 use egui::{Pos2, Response};
 use chrono::Datelike;
 
+/// What is being dragged in the sidebar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum SideDrag {
+    Space(u64),
+    List(u64),
+}
+
 // ------------------------------------------------------------------ icons
 
 pub(super) fn paint_dashed_circle(p: &egui::Painter, c: Pos2, r: f32, color: Color32) {
@@ -1073,7 +1080,8 @@ impl App {
                         }
 
                         // (while searching, the heading only shows with a match under it)
-                        let fav_match = self.data.favorites.iter().any(|f| self.matches_search(&self.data.location_name(*f)));
+                        let fav_tasks: Vec<(u64, String)> = self.favorite_tasks();
+                        let fav_match = self.data.favorites.iter().any(|f| self.matches_search(&self.data.location_name(*f))) || fav_tasks.iter().any(|(_, n)| self.matches_search(n));
                         if fav_match && !self.hidden("Favorites") {
                             self.side_header(ui, "Favorites", &[]);
                             for f in self.data.favorites.clone() {
@@ -1088,6 +1096,31 @@ impl App {
                                 if r.clicked() {
                                     self.actions.push(Action::Go(f));
                                 }
+                                // the same menu as the item has where it lives
+                                r.context_menu(|ui| match f {
+                                    Location::List(id) => self.list_menu(ui, id),
+                                    Location::Folder(id) => self.folder_menu(ui, id),
+                                    Location::Space(id) => self.space_menu(ui, id),
+                                    _ => {
+                                        if ui.button("Remove from Favorites").clicked() {
+                                            self.actions.push(Action::ToggleFavorite(f));
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                            }
+                            for (tid, name) in fav_tasks {
+                                if !self.matches_search(&name) {
+                                    continue;
+                                }
+                                let sel = self.open_task == Some(tid);
+                                let r = self.side_row(ui, 0.0, sel, |p, c| {
+                                    p.text(c, Align2::CENTER_CENTER, "\u{2605}", FontId::proportional(12.0), Color32::from_rgb(0xf8, 0xae, 0x00));
+                                }, &name, None, None, false);
+                                if r.clicked() {
+                                    self.actions.push(Action::Open(tid));
+                                }
+                                r.context_menu(|ui| self.task_menu(ui, tid));
                             }
                         }
                     }
@@ -1391,11 +1424,22 @@ impl App {
         }
         click_menu(&dr, |ui| self.space_menu(ui, sid));
         r.context_menu(|ui| self.space_menu(ui, sid));
+        // drag a space onto another to reorder; drop a list on it to move it here
+        let r = r.interact(Sense::click_and_drag());
+        if r.drag_started() {
+            egui::DragAndDrop::set_payload(ui.ctx(), SideDrag::Space(sid));
+        }
+        if let Some(d) = self.side_drop(ui, r.rect) {
+            match d {
+                SideDrag::Space(other) => self.place_space_before(other, sid),
+                SideDrag::List(l) => self.move_list(l, sid, None),
+            }
+        }
         if !expanded {
             return;
         }
         let tc = t.text2;
-        for f in &s.folders {
+        for f in s.folders.iter().filter(|f| !f.archived) {
             if searching && !self.matches_search(&f.name) && !f.lists.iter().any(|l| !l.archived && self.matches_search(&l.name)) {
                 continue;
             }
@@ -1407,34 +1451,44 @@ impl App {
                 p.rect_stroke(rr, 2.0, Stroke::new(1.2, tc), egui::StrokeKind::Inside);
                 p.line_segment([rr.left_top() + vec2(0.0, 2.5), rr.left_top() + vec2(5.0, 2.5)], Stroke::new(1.2, tc));
             }, &f.name, None, None, false);
-            if fr.clicked() {
-                self.actions.push(Action::Go(floc));
-                self.actions.push(Action::ToggleFolder(f.id));
-                if !fexp {
-                    // opening also expands
+            let fid = f.id;
+            // "..." and "+" on hover, as on a space or list row
+            let dots = Rect::from_center_size(fr.rect.right_center() - vec2(36.0, 0.0), vec2(20.0, 20.0));
+            let plus = Rect::from_center_size(fr.rect.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0));
+            let dr = ui.interact(dots, ui.id().with(("fdots", fid)), Sense::click());
+            let pr = ui.interact(plus, ui.id().with(("fplus", fid)), Sense::click());
+            name_it(&dr, &format!("Folder options {}", f.name));
+            name_it(&pr, &format!("Create in {}", f.name));
+            if fr.hovered() || dr.hovered() || pr.hovered() {
+                for (rr, hov, glyph) in [(dots, dr.hovered(), "\u{22EF}"), (plus, pr.hovered(), "+")] {
+                    ui.painter().rect_filled(rr, 5.0, if hov { t.border } else { t.hover });
+                    ui.painter().text(rr.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(14.0), t.text2);
                 }
             }
-            let fid = f.id;
-            fr.context_menu(|ui| {
-                if ui.button("New List").clicked() {
+            click_menu(&dr, |ui| self.folder_menu(ui, fid));
+            click_menu(&pr, |ui| {
+                ui.set_min_width(180.0);
+                ui.label(RichText::new("Create").small().color(t.text3));
+                if ui.button("\u{2630}  List").clicked() {
                     self.open_new_list(Some(sid), Some(fid));
                     ui.close_menu();
                 }
-                if ui.button("Rename").clicked() {
-                    self.actions.push(Action::StartRename(Target::Folder(fid)));
-                    ui.close_menu();
-                }
-                let fav = if self.data.favorites.contains(&floc) { "Remove from Favorites" } else { "Add to Favorites" };
-                if ui.button(fav).clicked() {
-                    self.actions.push(Action::ToggleFavorite(floc));
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
-                    self.actions.push(Action::AskDelete(Target::Folder(fid)));
+                if ui.button("\u{1F4C4}  Doc").clicked() {
+                    self.new_doc(Some(sid));
                     ui.close_menu();
                 }
             });
+            let on_button = fr.interact_pointer_pos().is_some_and(|p| dots.contains(p) || plus.contains(p));
+            if fr.clicked() && !on_button {
+                self.actions.push(Action::Go(floc));
+                self.actions.push(Action::ToggleFolder(f.id));
+            }
+            fr.context_menu(|ui| self.folder_menu(ui, fid));
+            // a list dropped on a folder moves into it
+            let fr = fr.interact(Sense::click_and_drag());
+            if let Some(SideDrag::List(l)) = self.side_drop(ui, fr.rect) {
+                self.move_list(l, sid, Some(fid));
+            }
             if fexp {
                 let shown: Vec<&ListItem> = f.lists.iter().filter(|l| !l.archived && self.matches_search(&l.name)).collect();
                 for l in shown {
@@ -1474,7 +1528,9 @@ impl App {
         let n = self.count_open(l.id);
         let tc = t.text2;
         let sel = self.section == Section::Home && self.loc == loc;
-        let r = self.side_row(ui, indent, sel, |p, c| paint_checklist_icon(p, c, tc), &l.name, None, if n > 0 { Some(n.to_string()) } else { None }, false);
+        // the List's colour (Space Overview, or the list menu's Color) tints its icon
+        let ic = l.color.map(rgb).unwrap_or(tc);
+        let r = self.side_row(ui, indent, sel, |p, c| paint_checklist_icon(p, c, ic), &l.name, None, if n > 0 { Some(n.to_string()) } else { None }, false);
         let dots_hit = r.interact_pointer_pos().map_or(false, |p| p.x > r.rect.right() - 48.0);
         if r.clicked() && !dots_hit {
             self.actions.push(Action::Go(loc));
@@ -1500,6 +1556,42 @@ impl App {
         // the same "Create" menu as the original's list "+"
         click_menu(&pr, |ui| self.list_create_menu(ui, lid));
         r.context_menu(|ui| self.list_menu(ui, lid));
+        // drag a list onto another list to put it there; drop a task card on
+        // a list to move the task into it
+        let r = r.interact(Sense::click_and_drag());
+        if r.drag_started() {
+            egui::DragAndDrop::set_payload(ui.ctx(), SideDrag::List(lid));
+        }
+        if let Some(SideDrag::List(other)) = self.side_drop(ui, r.rect) {
+            self.place_list_before(other, lid);
+        }
+        let task_over = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx()) && ui.rect_contains_pointer(r.rect);
+        if task_over {
+            ui.painter().rect_stroke(r.rect, 7.0, Stroke::new(1.5_f32, t.accent_text), egui::StrokeKind::Inside);
+            if ui.input(|i| i.pointer.any_released()) {
+                if let Some(tid) = egui::DragAndDrop::take_payload::<u64>(ui.ctx()) {
+                    self.move_tasks(&[*tid], lid);
+                }
+            }
+        }
+    }
+
+    /// Tasks starred with "Add to Favorites", for the Favorites section.
+    fn favorite_tasks(&self) -> Vec<(u64, String)> {
+        self.data.extra.starred.iter().filter_map(|s| s.strip_prefix("task:")?.parse::<u64>().ok()).filter_map(|id| self.task(id)).filter(|t| !t.archived).map(|t| (t.id, t.name.clone())).collect()
+    }
+
+    /// While a sidebar item is dragged over `rect`: marks the spot and, when
+    /// the mouse is let go there, hands back what was dropped.
+    fn side_drop(&self, ui: &Ui, rect: Rect) -> Option<SideDrag> {
+        if !egui::DragAndDrop::has_payload_of_type::<SideDrag>(ui.ctx()) || !ui.rect_contains_pointer(rect) {
+            return None;
+        }
+        ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(2.0_f32, self.t().accent_text));
+        if !ui.input(|i| i.pointer.any_released()) {
+            return None;
+        }
+        egui::DragAndDrop::take_payload::<SideDrag>(ui.ctx()).map(|d| *d)
     }
 
     // ---------------------------------------------------------------- page header
@@ -2346,42 +2438,59 @@ impl App {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 for (gi, g) in groups.iter().enumerate() {
-                    let col_w = 252.0;
                     let open = g.status.as_ref().map(|s| s.kind == StatusKind::Open).unwrap_or(false);
                     let tint = if open || g.status.is_none() && g.color == t.text3 { Color32::from_black_alpha(9) } else { g.color.gamma_multiply(0.07) };
                     let accent = if open { t.text2 } else { g.color };
+                    // a collapsed column is a narrow strip with the name running down it
+                    let ckey = format!("board:{}", g.key);
+                    let folded = self.collapsed.contains(&ckey);
+                    let col_w = if folded { 44.0 } else { 252.0 };
                     ui.vertical(|ui| {
                         ui.set_width(col_w);
                         let frame = egui::Frame::new().fill(tint).corner_radius(10).inner_margin(egui::Margin::same(8));
                         let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
                             ui.set_width(col_w - 16.0);
+                            if folded {
+                                let (r, resp) = ui.allocate_exact_size(vec2(col_w - 16.0, (ui.available_height() - 40.0).clamp(160.0, 420.0)), Sense::click());
+                                name_it(&resp, &format!("Expand group {}", g.label));
+                                if resp.hovered() {
+                                    ui.painter().rect_filled(r, 6.0, Color32::from_black_alpha(8));
+                                }
+                                let p = ui.painter();
+                                p.text(r.center_top() + vec2(0.0, 10.0), Align2::CENTER_CENTER, g.tasks.len().to_string(), FontId::proportional(12.5), accent);
+                                let gal = p.layout_no_wrap(g.label.to_uppercase(), FontId::proportional(12.0), accent);
+                                let at = pos2(r.center().x + gal.size().y / 2.0, r.top() + 24.0);
+                                p.add(egui::epaint::TextShape::new(at, gal, accent).with_angle(std::f32::consts::FRAC_PI_2));
+                                if resp.clicked() {
+                                    self.collapsed.remove(&ckey);
+                                }
+                                return;
+                            }
                             ui.horizontal(|ui| {
                                 self.group_pill(ui, g);
                                 ui.label(RichText::new(g.tasks.len().to_string()).color(accent));
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let b = ui.add(egui::Button::new(RichText::new("\u{2039}").color(t.text3).size(15.0)).frame(false)).on_hover_text("Collapse group");
+                                    name_it(&b, &format!("Collapse group {}", g.label));
+                                    if b.clicked() {
+                                        self.collapsed.insert(ckey.clone());
+                                    }
+                                });
                             });
                             ui.add_space(4.0);
                             egui::ScrollArea::vertical().id_salt(("col", gi)).auto_shrink([false, true]).max_height(ui.available_height() - 60.0).show(ui, |ui| {
                                 for id in &g.tasks {
                                     if let Some(task) = tasks.iter().find(|x| x.id == *id) {
-                                        let resp = ui.dnd_drag_source(egui::Id::new(("card", task.id)), task.id, |ui| {
-                                            self.card(ui, task, col_w - 16.0);
-                                        });
-                                        name_it(&resp.response, &format!("Card {}", task.name));
+                                        let resp = self.board_card(ui, task, col_w - 16.0);
+                                        name_it(&resp, &format!("Card {}", task.name));
                                         let tid = task.id;
-                                        resp.response.context_menu(|ui| self.task_menu(ui, tid));
-                                        if resp.response.clicked() {
+                                        resp.context_menu(|ui| self.task_menu(ui, tid));
+                                        if resp.clicked() {
                                             self.actions.push(Action::Open(task.id));
                                         }
                                     }
                                 }
-                                let (r, resp) = ui.allocate_exact_size(vec2(col_w - 16.0, 32.0), Sense::click());
-                                if resp.hovered() {
-                                    ui.painter().rect_filled(r, 6.0, Color32::from_black_alpha(8));
-                                }
-                                ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, "+  Add Task", FontId::proportional(14.0), accent);
-                                if resp.clicked() {
-                                    self.add_from_group(g, String::new(), true);
-                                }
+                                self.board_add_task(ui, g, col_w - 16.0, accent);
                             });
                         });
                         if let Some(p) = payload {
@@ -2421,15 +2530,104 @@ impl App {
         }
     }
 
-    fn card(&self, ui: &mut Ui, task: &Task, w: f32) {
+    /// "+ Add Task" at the foot of a board column: a name field, as in the
+    /// List (a task is only made once it has a name).
+    fn board_add_task(&mut self, ui: &mut Ui, g: &Group, w: f32, accent: Color32) {
+        let t = self.t();
+        let key = format!("board:{}", g.key);
+        let here = self.adding.as_ref().is_some_and(|(k, _)| *k == key);
+        if !here {
+            let (r, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+            name_it(&resp, &format!("Add Task in {}", g.label));
+            if resp.hovered() {
+                ui.painter().rect_filled(r, 6.0, Color32::from_black_alpha(8));
+            }
+            ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, "+  Add Task", FontId::proportional(14.0), accent);
+            if resp.clicked() {
+                self.adding = Some((key, String::new()));
+            }
+            return;
+        }
+        let mut text = self.adding.as_ref().map(|(_, s)| s.clone()).unwrap_or_default();
+        let (mut submit, mut cancel) = (false, false);
+        egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(8).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            ui.set_width(w - 18.0);
+            let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Task Name").desired_width(f32::INFINITY));
+            focus_once(ui, &r);
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                submit = true;
+                r.request_focus();
+            } else if r.lost_focus() && text.trim().is_empty() {
+                cancel = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                cancel = true;
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+                if primary_button(ui, &t, "Save").clicked() {
+                    submit = true;
+                }
+            });
+        });
+        if submit && !text.trim().is_empty() {
+            self.add_from_group(g, text.trim().to_string(), false);
+            self.adding = Some((key, String::new()));
+        } else if cancel || submit {
+            self.adding = None;
+        } else {
+            self.adding = Some((key, text));
+        }
+    }
+
+    /// A board card that can be dragged to another column and clicked to
+    /// open, with its assignee, date and priority boxes and "..." clickable
+    /// on top. (egui's drag source covers what's inside it, so the card
+    /// takes its drag and click under the boxes instead.)
+    fn board_card(&mut self, ui: &mut Ui, task: &Task, w: f32) -> Response {
+        let id = egui::Id::new(("card", task.id));
+        let h_id = id.with("h");
+        if ui.ctx().is_being_dragged(id) {
+            egui::DragAndDrop::set_payload(ui.ctx(), task.id);
+            let layer = egui::LayerId::new(egui::Order::Tooltip, id);
+            let r = ui.scope_builder(egui::UiBuilder::new().layer_id(layer), |ui| self.card(ui, task, w, false)).inner;
+            if let Some(p) = ui.ctx().pointer_interact_pos() {
+                ui.ctx().transform_layer_shapes(layer, egui::emath::TSTransform::from_translation(p - r.center()));
+            }
+            ui.add_space(6.0);
+            return ui.interact(r, id, Sense::click_and_drag());
+        }
+        let h: f32 = ui.data(|d| d.get_temp(h_id)).unwrap_or(84.0);
+        let rect = Rect::from_min_size(ui.cursor().min, vec2(w, h));
+        let body = ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Grab);
+        let drawn = self.card(ui, task, w, true);
+        ui.add_space(6.0);
+        if (drawn.height() - h).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(h_id, drawn.height()));
+            ui.ctx().request_repaint();
+        }
+        body
+    }
+
+    /// Draws a card and returns where it went. `live` makes the boxes and
+    /// the "..." clickable (not on the copy that follows the mouse).
+    fn card(&mut self, ui: &mut Ui, task: &Task, w: f32, live: bool) -> Rect {
         let t = self.t();
         let closed = self.data.is_closed(task);
-        egui::Frame::new()
+        let cid = egui::Id::new(("cardp", task.id));
+        let mut edited = task.clone();
+        let mut changed = false;
+        let mut open = false;
+        let frame = egui::Frame::new()
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.border))
             .corner_radius(8)
             .inner_margin(egui::Margin::same(11))
             .show(ui, |ui| {
+                // text on a card must not take the card's click or drag
+                ui.style_mut().interaction.selectable_labels = false;
                 ui.set_width(w - 24.0);
                 if !matches!(self.loc, Location::List(_)) {
                     ui.label(RichText::new(self.data.list_name(task.list_id)).size(11.5).color(t.text3));
@@ -2442,42 +2640,47 @@ impl App {
                 if !task.tags.is_empty() && self.data.extra.apps.tags {
                     ui.horizontal_wrapped(|ui| {
                         for tag in &task.tags {
-                            chip(ui, tag, tag_color(tag));
+                            open |= chip(ui, tag, tag_color(tag)).clicked();
                         }
                     });
                 }
                 ui.add_space(2.0);
                 let (r, _) = ui.allocate_exact_size(vec2(w - 24.0, 22.0), Sense::hover());
-                let p = ui.painter();
+                let p = ui.painter().clone();
                 let icon_col = Color32::from_rgb(150, 150, 150);
                 let boxed = |x: f32| Rect::from_min_size(pos2(x, r.top()), vec2(22.0, 22.0));
                 let mut x = r.left();
-                let used = paint_avatars(p, pos2(x, r.center().y), 10.0, &task.assignees, &self.data, t.card);
-                if used > 0.0 {
+                let used = paint_avatars(&p, pos2(x, r.center().y), 10.0, &task.assignees, &self.data, t.card);
+                let a_rect = if used > 0.0 {
+                    let b = Rect::from_min_size(pos2(x - 2.0, r.top()), vec2(used + 4.0, 22.0));
                     x += used + 6.0;
+                    b
                 } else {
                     let b = boxed(x);
                     p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                    paint_person_icon(p, b.center(), icon_col);
+                    paint_person_icon(&p, b.center(), icon_col);
                     x += 26.0;
-                }
-                match task.due {
+                    b
+                };
+                let d_rect = match task.due {
                     Some(d) => {
                         let g = p.layout_no_wrap(fmt_date(d), FontId::proportional(12.5), date_color(d, closed, &t));
                         let b = Rect::from_min_size(pos2(x, r.top()), vec2(g.size().x + 26.0, 22.0));
                         p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                        paint_calendar_icon(p, b.left_center() + vec2(11.0, 0.0), icon_col);
+                        paint_calendar_icon(&p, b.left_center() + vec2(11.0, 0.0), icon_col);
                         let gw = g.size().x;
                         p.galley(pos2(b.left() + 20.0, b.center().y - g.size().y / 2.0), g, t.text2);
                         x += gw + 30.0;
+                        b
                     }
                     None => {
                         let b = boxed(x);
                         p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                        paint_calendar_icon(p, b.center(), icon_col);
+                        paint_calendar_icon(&p, b.center(), icon_col);
                         x += 26.0;
+                        b
                     }
-                }
+                };
                 let b = boxed(x);
                 let show_pr = self.data.extra.apps.priorities;
                 if show_pr {
@@ -2485,16 +2688,56 @@ impl App {
                 }
                 if !show_pr {
                 } else if task.priority > 0 {
-                    paint_flag(p, b.center() + vec2(-3.0, 0.0), priority_color(task.priority, &t), 12.0);
+                    paint_flag(&p, b.center() + vec2(-3.0, 0.0), priority_color(task.priority, &t), 12.0);
                 } else {
-                    paint_outline_flag(p, b.center(), icon_col);
+                    paint_outline_flag(&p, b.center(), icon_col);
                 }
                 let nsub = self.data.tasks.iter().filter(|s| s.parent == Some(task.id)).count();
                 if nsub > 0 {
                     p.text(pos2(b.right() + 8.0, r.center().y), Align2::LEFT_CENTER, format!("\u{2934} {}", nsub), FontId::proportional(12.0), t.text3);
                 }
+                if !live {
+                    return;
+                }
+                // the same pickers as a List row's cells
+                let ar = ui.interact(a_rect, cid.with("as"), Sense::click());
+                name_it(&ar, &format!("Card assignees {}", task.name));
+                let data = &self.data;
+                if let Some(true) = popup(ui, &ar, cid.with("asp"), 220.0, |ui| assignee_menu(ui, &t, data, &mut edited.assignees)) {
+                    changed = true;
+                }
+                let dr = ui.interact(d_rect, cid.with("du"), Sense::click());
+                name_it(&dr, &format!("Card due date {}", task.name));
+                if let Some(true) = popup(ui, &dr, cid.with("dup"), 380.0, |ui| dates_menu(ui, &t, cid.with("dcal"), &mut edited.start, &mut edited.due, &mut edited.recur)) {
+                    changed = true;
+                }
+                if show_pr {
+                    let pr = ui.interact(b, cid.with("pr"), Sense::click());
+                    name_it(&pr, &format!("Card priority {}", task.name));
+                    if let Some(true) = popup(ui, &pr, cid.with("prp"), 180.0, |ui| priority_menu(ui, &t, &mut edited.priority)) {
+                        changed = true;
+                    }
+                }
             });
-        ui.add_space(6.0);
+        let rect = frame.response.rect;
+        if live {
+            // "..." in the corner on hover opens the task menu
+            let dots = Rect::from_center_size(rect.right_top() + vec2(-16.0, 16.0), vec2(22.0, 22.0));
+            let dr = ui.interact(dots, cid.with("dots"), Sense::click());
+            name_it(&dr, &format!("Card options {}", task.name));
+            if ui.rect_contains_pointer(rect) || dr.hovered() {
+                ui.painter().rect_filled(dots, 5.0, if dr.hovered() { t.border } else { t.card });
+                ui.painter().text(dots.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(14.0), t.text2);
+            }
+            let tid = task.id;
+            click_menu(&dr, |ui| self.task_menu(ui, tid));
+        }
+        if changed {
+            self.actions.push(Action::Replace(edited));
+        } else if open {
+            self.actions.push(Action::Open(task.id));
+        }
+        rect
     }
 }
 

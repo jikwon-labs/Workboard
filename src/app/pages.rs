@@ -567,10 +567,9 @@ impl App {
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
-                            .add(
-                                egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
-                                    .frame(false),
-                            )
+                            .add(ghost(egui::Button::new(
+                                RichText::new(tr("Delete")).color(t.danger),
+                            )))
                             .clicked()
                         {
                             delete = true;
@@ -657,7 +656,7 @@ impl App {
                                         format!("\u{1F465} {}", tr("Shared"))
                                     };
                                     if ui
-                                        .add(egui::Button::new(label).frame(false))
+                                        .add(ghost(egui::Button::new(label)))
                                         .on_hover_text(tr("Only you see a private dashboard"))
                                         .clicked()
                                     {
@@ -727,7 +726,7 @@ impl App {
                                     for (k, title) in super::more::DASH_CARDS {
                                         let b = ui.add_enabled(
                                             !cards.iter().any(|c| c.kind == k),
-                                            egui::Button::new(tr(title)).frame(false),
+                                            ghost(egui::Button::new(tr(title))),
                                         );
                                         name_it(&b, &format!("Add card {}", title));
                                         if b.clicked() {
@@ -743,12 +742,9 @@ impl App {
                                     }
                                 });
                                 if ui
-                                    .add(
-                                        egui::Button::new(
-                                            RichText::new(tr("Delete")).color(t.danger),
-                                        )
-                                        .frame(false),
-                                    )
+                                    .add(ghost(egui::Button::new(
+                                        RichText::new(tr("Delete")).color(t.danger),
+                                    )))
                                     .clicked()
                                 {
                                     let d = &self.data.extra.dashboards[di];
@@ -874,10 +870,9 @@ impl App {
                                         ] {
                                             let b = ui.add_enabled(
                                                 on,
-                                                egui::Button::new(
+                                                ghost(egui::Button::new(
                                                     RichText::new(glyph).small().color(t.text3),
-                                                )
-                                                .frame(false),
+                                                )),
                                             );
                                             name_it(&b, &format!("{} {}", what, title));
                                             if b.clicked() {

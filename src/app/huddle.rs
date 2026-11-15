@@ -407,6 +407,7 @@ impl App {
                                             .corner_radius(8)
                                             .sense(Sense::click()),
                                     );
+                                    hover_bg(ui, &r, r.rect, 8.0);
                                     r.widget_info(|| {
                                         egui::WidgetInfo::labeled(
                                             egui::WidgetType::Image,
@@ -617,14 +618,14 @@ impl App {
                                 camera = Some(!cam);
                             }
                             if ui
-                                .add(
+                                .add(Tint(
                                     egui::Button::new(
                                         RichText::new(tr("Leave")).color(Color32::WHITE),
                                     )
                                     .fill(t.danger)
                                     .min_size(vec2(64.0, 30.0))
                                     .corner_radius(7),
-                                )
+                                ))
                                 .clicked()
                             {
                                 leave = true;

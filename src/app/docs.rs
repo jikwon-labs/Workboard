@@ -260,10 +260,9 @@ impl App {
                 self.page_rows(ui, root, 1);
                 ui.add_space(6.0);
                 if ui
-                    .add(
-                        egui::Button::new(RichText::new(tr("+  Add page")).color(t.text2))
-                            .frame(false),
-                    )
+                    .add(ghost(egui::Button::new(
+                        RichText::new(tr("+  Add page")).color(t.text2),
+                    )))
                     .clicked()
                 {
                     self.add_page(root);
@@ -283,10 +282,9 @@ impl App {
                     for (level, text, line) in heads {
                         ui.horizontal(|ui| {
                             ui.add_space((level as f32 - 1.0) * 12.0);
-                            let r = ui.add(
-                                egui::Button::new(RichText::new(&text).size(12.5).color(t.text2))
-                                    .frame(false),
-                            );
+                            let r = ui.add(ghost(egui::Button::new(
+                                RichText::new(&text).size(12.5).color(t.text2),
+                            )));
                             name_it(&r, &format!("Contents {}", text));
                             if r.clicked() {
                                 ui.data_mut(|m| {
@@ -356,11 +354,7 @@ impl App {
                                 _ => RichText::new(short),
                             };
                             if ui
-                                .add(
-                                    egui::Button::new(txt)
-                                        .frame(false)
-                                        .min_size(vec2(26.0, 24.0)),
-                                )
+                                .add(ghost(egui::Button::new(txt).min_size(vec2(26.0, 24.0))))
                                 .on_hover_text(tr(label))
                                 .clicked()
                             {
@@ -368,7 +362,7 @@ impl App {
                             }
                         }
                         ui.separator();
-                        let lr = ui.add(egui::Button::new(tr("Link task")).frame(false));
+                        let lr = ui.add(ghost(egui::Button::new(tr("Link task"))));
                         let tasks: Vec<(u64, String)> = self
                             .data
                             .tasks
@@ -673,12 +667,9 @@ impl App {
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 if ui
-                                    .add(
-                                        egui::Button::new(
-                                            RichText::new(tr("Start writing")).color(t.text2),
-                                        )
-                                        .frame(false),
-                                    )
+                                    .add(ghost(egui::Button::new(
+                                        RichText::new(tr("Start writing")).color(t.text2),
+                                    )))
                                     .clicked()
                                 {
                                     set_cursor(ui.ctx(), body_id, 0);
@@ -1875,9 +1866,9 @@ impl App {
                     remove = Some(g.clone());
                 }
             }
-            let r = ui.add(
-                egui::Button::new(RichText::new(tr("+ Tag")).small().color(t.text3)).frame(false),
-            );
+            let r = ui.add(ghost(egui::Button::new(
+                RichText::new(tr("+ Tag")).small().color(t.text3),
+            )));
             name_it(&r, "Add tag");
             let known: Vec<String> = self
                 .doc_tags()
@@ -1905,7 +1896,9 @@ impl App {
                 ui.data_mut(|m| m.insert_temp(nid, s));
                 for g in known {
                     if ui
-                        .add(egui::Button::new(RichText::new(&g).color(tag_color(&g))).frame(false))
+                        .add(ghost(egui::Button::new(
+                            RichText::new(&g).color(tag_color(&g)),
+                        )))
                         .clicked()
                     {
                         add = Some(g);

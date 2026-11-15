@@ -423,10 +423,9 @@ impl App {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let more = ui.add(
-                            egui::Button::new(RichText::new("\u{22EF}").color(t.text2))
-                                .frame(false),
-                        );
+                        let more = ui.add(ghost(egui::Button::new(
+                            RichText::new("\u{22EF}").color(t.text2),
+                        )));
                         name_it(&more, "Comment actions");
                         click_menu(&more, |ui| {
                             if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
@@ -480,19 +479,15 @@ impl App {
                                 }
                             }
                         });
-                        let react = ui.add(
-                            egui::Button::new(RichText::new("\u{263A}").color(t.text2))
-                                .frame(false),
-                        );
+                        let react = ui.add(ghost(egui::Button::new(
+                            RichText::new("\u{263A}").color(t.text2),
+                        )));
                         name_it(&react, "Add reaction");
                         popup(ui, &react, ui.id().with(("react", a.id)), 180.0, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 for e in REACTIONS {
                                     if ui
-                                        .add(
-                                            egui::Button::new(RichText::new(e).size(18.0))
-                                                .frame(false),
-                                        )
+                                        .add(ghost(egui::Button::new(RichText::new(e).size(18.0))))
                                         .clicked()
                                     {
                                         acts.push(Act::React {
@@ -514,10 +509,11 @@ impl App {
                             .member(to)
                             .map(|m| m.name.clone())
                             .unwrap_or_else(|| tr("someone").into());
-                        let tick = ui.add(
-                            egui::Button::new(if a.resolved { "\u{2611}" } else { "\u{2610}" })
-                                .frame(false),
-                        );
+                        let tick = ui.add(ghost(egui::Button::new(if a.resolved {
+                            "\u{2611}"
+                        } else {
+                            "\u{2610}"
+                        })));
                         name_it(
                             &tick,
                             if a.resolved {
@@ -581,13 +577,15 @@ impl App {
                     ui.horizontal_wrapped(|ui| {
                         for rc in &a.reactions {
                             let on = rc.users.contains(&me);
-                            let b = egui::Button::new(
-                                RichText::new(format!("{} {}", rc.emoji, rc.users.len()))
-                                    .size(12.0),
-                            )
-                            .fill(if on { t.selected_bg } else { t.hover })
-                            .stroke(Stroke::new(1.0_f32, if on { t.primary } else { t.border }))
-                            .corner_radius(10);
+                            let b = Tint(
+                                egui::Button::new(
+                                    RichText::new(format!("{} {}", rc.emoji, rc.users.len()))
+                                        .size(12.0),
+                                )
+                                .fill(if on { t.selected_bg } else { t.hover })
+                                .stroke(Stroke::new(1.0_f32, if on { t.primary } else { t.border }))
+                                .corner_radius(10),
+                            );
                             let who: Vec<String> = rc
                                 .users
                                 .iter()
@@ -633,9 +631,11 @@ impl App {
                 };
                 if let Some((done, r)) = check {
                     rest = r;
-                    let b = ui.add(
-                        egui::Button::new(if done { "\u{2611}" } else { "\u{2610}" }).frame(false),
-                    );
+                    let b = ui.add(ghost(egui::Button::new(if done {
+                        "\u{2611}"
+                    } else {
+                        "\u{2610}"
+                    })));
                     name_it(&b, &format!("Tick {}", r.trim()));
                     if b.clicked() {
                         acts.push(Act::Check { id: a.id, line: li });

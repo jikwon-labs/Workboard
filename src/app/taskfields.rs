@@ -212,10 +212,9 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
             ui.label(RichText::new(day).color(t.text2));
             ui.label(fmt_duration(e.end - e.start));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let r = ui.add(
-                    egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text3))
-                        .frame(false),
-                );
+                let r = ui.add(ghost(egui::Button::new(
+                    RichText::new("\u{2716}").size(10.0).color(t.text3),
+                )));
                 name_it(&r, &format!("Remove entry {}", i + 1));
                 if r.on_hover_text(tr("Remove this entry")).clicked() {
                     remove = Some(i);
@@ -338,18 +337,15 @@ impl App {
     ) {
         let me = self.data.me;
         let on = task.watchers.contains(&me);
-        let b = ui.add(
-            egui::Button::new(
-                RichText::new(tr(if on {
-                    "\u{1F441} Watching"
-                } else {
-                    "\u{1F441} Watch"
-                }))
-                .size(12.0)
-                .color(if on { t.text } else { t.text2 }),
-            )
-            .frame(false),
-        );
+        let b = ui.add(ghost(egui::Button::new(
+            RichText::new(tr(if on {
+                "\u{1F441} Watching"
+            } else {
+                "\u{1F441} Watch"
+            }))
+            .size(12.0)
+            .color(if on { t.text } else { t.text2 }),
+        )));
         name_it(&b, if on { "Stop watching" } else { "Watch task" });
         if b.on_hover_text(tr(if on {
             "Stop getting updates"
@@ -558,19 +554,27 @@ impl App {
                 if item.done {
                     txt = txt.strikethrough().color(t.text3);
                 }
-                let l = row.add(egui::Label::new(txt).sense(Sense::click()).truncate());
+                let l = row.add(Tint(
+                    egui::Label::new(txt)
+                        .sense(Sense::click())
+                        .selectable(false)
+                        .truncate(),
+                ));
                 if l.on_hover_text(tr("Click to rename")).clicked() {
                     editing = Some(i);
                 }
             }
             row.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let small = |s: &str| {
-                    egui::Button::new(RichText::new(s).size(11.0).color(t.text2)).frame(false)
+                    ghost(egui::Button::new(
+                        RichText::new(s).size(11.0).color(t.text2),
+                    ))
                 };
                 // the assignee shows always once set; the button only on hover
                 let pid = id.with(("ck_as", tid, i));
                 if item.assignee.is_some() || hover || ui.memory(|m| m.is_popup_open(pid)) {
                     let (ar, aresp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                    hover_bg(ui, &aresp, ar, 11.0);
                     name_it(&aresp, &format!("Assign item {}", label));
                     match item
                         .assignee
@@ -859,12 +863,13 @@ impl App {
                 name_it(&resp, &format!("{} {}", mode.title(), o.name));
                 let x = ui.put(
                     Rect::from_center_size(r.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0)),
-                    egui::Button::new(RichText::new("\u{2716}").size(10.0).color(if hover {
-                        t.text2
-                    } else {
-                        Color32::TRANSPARENT
-                    }))
-                    .frame(false),
+                    ghost(egui::Button::new(
+                        RichText::new("\u{2716}").size(10.0).color(if hover {
+                            t.text2
+                        } else {
+                            Color32::TRANSPARENT
+                        }),
+                    )),
                 );
                 name_it(&x, &format!("Remove link {}", o.name));
                 if x.on_hover_text(tr("Remove")).clicked() {
@@ -1001,10 +1006,9 @@ impl App {
                 ui.label(RichText::new(task.attachments.len().to_string()).color(t.text3));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let b = ui.add(
-                    egui::Button::new(RichText::new(tr("\u{1F4CE} Attach")).color(t.text2))
-                        .frame(false),
-                );
+                let b = ui.add(ghost(egui::Button::new(
+                    RichText::new(tr("\u{1F4CE} Attach")).color(t.text2),
+                )));
                 name_it(&b, "Attach file");
                 if b.on_hover_text(tr("Attach pictures or videos (or drop them here)"))
                     .clicked()
@@ -1054,6 +1058,7 @@ impl App {
                             );
                         }
                     }
+                    hover_bg(ui, &resp, pic, 8.0);
                     ui.painter().with_clip_rect(rect).text(
                         pos2(rect.left(), pic.bottom() + 9.0),
                         Align2::LEFT_CENTER,
@@ -1110,10 +1115,9 @@ impl App {
             ui.horizontal(|ui| match &p.error {
                 Some(e) => {
                     ui.label(RichText::new(e).small().color(t.danger));
-                    let x = ui.add(
-                        egui::Button::new(RichText::new("\u{2716}").size(10.0).color(t.text3))
-                            .frame(false),
-                    );
+                    let x = ui.add(ghost(egui::Button::new(
+                        RichText::new("\u{2716}").size(10.0).color(t.text3),
+                    )));
                     name_it(&x, &format!("Dismiss {}", p.name));
                     if x.clicked() {
                         dismiss = Some(i);

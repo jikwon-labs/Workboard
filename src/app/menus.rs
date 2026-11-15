@@ -551,11 +551,7 @@ impl App {
                                 tr(label)
                             };
                             if ui
-                                .add(
-                                    egui::Button::new(shown)
-                                        .frame(false)
-                                        .min_size(vec2(140.0, 26.0)),
-                                )
+                                .add(ghost(egui::Button::new(shown).min_size(vec2(140.0, 26.0))))
                                 .clicked()
                             {
                                 self.data.extra.muted_until =
@@ -675,13 +671,13 @@ impl App {
                     self.run_tool(id);
                     close_popup(ui);
                 }
-                let pin =
-                    egui::Button::new(RichText::new("\u{1F4CC}").size(11.0).color(if pinned {
+                let pin = ghost(egui::Button::new(
+                    RichText::new("\u{1F4CC}").size(11.0).color(if pinned {
                         t.text
                     } else {
                         t.border
-                    }))
-                    .frame(false);
+                    }),
+                ));
                 if ui
                     .add(pin)
                     .on_hover_text(if pinned {
@@ -1037,14 +1033,13 @@ impl App {
                     close_popup(ui);
                 }
                 if ui
-                    .add(
-                        egui::Button::new(RichText::new("\u{1F4CC}").size(11.0).color(if pinned {
+                    .add(ghost(egui::Button::new(
+                        RichText::new("\u{1F4CC}").size(11.0).color(if pinned {
                             t.text
                         } else {
                             t.border
-                        }))
-                        .frame(false),
-                    )
+                        }),
+                    )))
                     .on_hover_text(tr("Pin to the left bar"))
                     .clicked()
                 {
@@ -1167,6 +1162,7 @@ impl App {
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
                 let r = ui.allocate_rect(screen, Sense::click());
+                crate::widgets::no_pointer(&r);
                 ui.painter()
                     .rect_filled(screen, 0.0, Color32::from_black_alpha(90));
                 if r.clicked() {
@@ -1300,7 +1296,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let valid: Vec<String> = emails.split(|c: char| c == ',' || c.is_whitespace()).map(|s| s.trim().to_string()).filter(|s| s.contains('@') && s.contains('.')).collect();
-                        let send = ui.add_enabled(!valid.is_empty(), egui::Button::new(RichText::new(tr("Send free invite")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 32.0)));
+                        let send = ui.add_enabled(!valid.is_empty(), Tint(egui::Button::new(RichText::new(tr("Send free invite")).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 32.0))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
                             let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
@@ -1323,6 +1319,7 @@ impl App {
                     for c in STATUS_PALETTE.iter().skip(1) {
                         let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
                         ui.painter().rect_filled(r.shrink(2.0), 5.0, rgb(*c));
+                        hover_ring(ui, &resp, r.shrink(1.0), 6.0);
                         if self.data.extra.workspace_color == *c {
                             ui.painter().rect_stroke(
                                 r,
@@ -1413,6 +1410,7 @@ impl App {
                         let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
                         name_it(&resp, &format!("Avatar color {}", i + 1));
                         ui.painter().circle_filled(r.center(), 9.0, rgb(*c));
+                        hover_ring(ui, &resp, r.shrink(1.0), 10.0);
                         if cur == Some(*c) {
                             ui.painter()
                                 .circle_stroke(r.center(), 11.0, Stroke::new(1.5, t.text));
@@ -1509,6 +1507,7 @@ impl App {
                     for (name, c) in theme::ACCENTS {
                         let sel = self.data.extra.accent == name;
                         let (r, resp) = ui.allocate_exact_size(vec2(64.0, 52.0), Sense::click());
+                        hover_bg(ui, &resp, r, 8.0);
                         ui.painter()
                             .circle_filled(r.center_top() + vec2(0.0, 16.0), 13.0, rgb(c));
                         if sel {
@@ -1704,10 +1703,9 @@ impl App {
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
-                                .add(
-                                    egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
-                                        .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(
+                                    RichText::new(tr("Delete")).color(t.danger),
+                                )))
                                 .clicked()
                             {
                                 remove = Some(i);
@@ -1818,10 +1816,9 @@ impl App {
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
-                                .add(
-                                    egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
-                                        .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(
+                                    RichText::new(tr("Delete")).color(t.danger),
+                                )))
                                 .clicked()
                             {
                                 remove = Some(i);
@@ -1994,18 +1991,14 @@ impl App {
                         ui.label(RichText::new(crate::trf!("{} tasks", n)).color(t.text2));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
-                                .add(
-                                    egui::Button::new(RichText::new(tr("Delete")).color(t.danger))
-                                        .frame(false),
-                                )
+                                .add(ghost(egui::Button::new(
+                                    RichText::new(tr("Delete")).color(t.danger),
+                                )))
                                 .clicked()
                             {
                                 delete = Some(tag.clone());
                             }
-                            if ui
-                                .add(egui::Button::new(tr("Rename")).frame(false))
-                                .clicked()
-                            {
+                            if ui.add(ghost(egui::Button::new(tr("Rename")))).clicked() {
                                 *from = tag.clone();
                                 *to = tag.clone();
                             }
@@ -2087,12 +2080,9 @@ impl App {
                                 });
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new(tr("Delete")).color(t.danger),
-                                            )
-                                            .frame(false),
-                                        )
+                                        .add(ghost(egui::Button::new(
+                                            RichText::new(tr("Delete")).color(t.danger),
+                                        )))
                                         .clicked()
                                     {
                                         remove = Some(i);
@@ -2170,12 +2160,14 @@ impl App {
                         let ok = !name.trim().is_empty();
                         let b = ui.add_enabled(
                             ok,
-                            egui::Button::new(
-                                RichText::new(tr("Create template")).color(Color32::WHITE),
-                            )
-                            .fill(t.primary)
-                            .corner_radius(7)
-                            .min_size(vec2(0.0, 30.0)),
+                            Tint(
+                                egui::Button::new(
+                                    RichText::new(tr("Create template")).color(Color32::WHITE),
+                                )
+                                .fill(t.primary)
+                                .corner_radius(7)
+                                .min_size(vec2(0.0, 30.0)),
+                            ),
                         );
                         if b.clicked() {
                             let id = self.data.new_id();
@@ -2307,12 +2299,12 @@ impl App {
                     ui.label(RichText::new(crate::trf!("Delete #{} for everyone? It goes to your Trash with its messages, and restoring it brings it back for the whole team.", name)).color(t.text));
                     ui.horizontal(|ui| {
                         if ui
-                            .add(
+                            .add(Tint(
                                 egui::Button::new(
                                     RichText::new(tr("Delete")).color(Color32::WHITE),
                                 )
                                 .fill(t.danger),
-                            )
+                            ))
                             .clicked()
                             && self.may_manage_channel(&self.data.channels[ci])
                         {
@@ -2594,12 +2586,9 @@ impl App {
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new(tr("Delete forever")).color(t.danger),
-                                            )
-                                            .frame(false),
-                                        )
+                                        .add(ghost(egui::Button::new(
+                                            RichText::new(tr("Delete forever")).color(t.danger),
+                                        )))
                                         .clicked()
                                     {
                                         purge = Some(i);
@@ -3519,13 +3508,9 @@ impl App {
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 let b = ui
-                                    .add(
-                                        egui::Button::new(
-                                            RichText::new(format!("\u{2192} {}", tr("Task")))
-                                                .small(),
-                                        )
-                                        .frame(false),
-                                    )
+                                    .add(ghost(egui::Button::new(
+                                        RichText::new(format!("\u{2192} {}", tr("Task"))).small(),
+                                    )))
                                     .on_hover_text(tr("Make a task from this line"));
                                 name_it(&b, &format!("Make task {}", text));
                                 if b.clicked() {
@@ -3603,6 +3588,7 @@ impl App {
                     let resp = ui
                         .interact(r.response.rect, ui.id().with("toast_open"), Sense::click())
                         .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    hover_bg(ui, &resp, resp.rect, 10.0);
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,

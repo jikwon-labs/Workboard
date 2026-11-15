@@ -178,6 +178,9 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     }
     v.widgets.inactive.fg_stroke.color = t.text;
     v.widgets.hovered.fg_stroke.color = t.text;
+    // buttons show the pointing hand like a web app (widgets::pointer_over_clickables
+    // does the same for painted controls)
+    v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);

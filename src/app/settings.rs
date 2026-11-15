@@ -88,10 +88,9 @@ impl App {
                 .layout(Layout::top_down(Align::Min)),
         );
         if nui
-            .add(
-                egui::Button::new(RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2))
-                    .frame(false),
-            )
+            .add(ghost(egui::Button::new(
+                RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2),
+            )))
             .clicked()
         {
             self.section = Section::Home;

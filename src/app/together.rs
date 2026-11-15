@@ -2185,7 +2185,7 @@ impl App {
                     } else {
                         format!("{}   {}", m.name, m.email)
                     };
-                    if ui.add(egui::Button::new(label).frame(false)).clicked() {
+                    if ui.add(ghost(egui::Button::new(label))).clicked() {
                         self.become_member(Some(m.id), "", "");
                         close = true;
                     }

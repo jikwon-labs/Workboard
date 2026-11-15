@@ -1152,6 +1152,10 @@ impl App {
                         format!("Attachment {}", p.name),
                     )
                 });
+                // a click only means something on a failed upload (try again)
+                if failed.is_none() || p.error.is_some() {
+                    no_pointer(&resp);
+                }
                 let painter = ui.painter_at(rect.expand(6.0));
                 match p.att.as_ref().and_then(|a| {
                     self.files.want(a, THUMB);
@@ -1403,7 +1407,7 @@ impl App {
                     }
                 }
                 if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    painter.rect_filled(rect, 8.0, Color32::from_white_alpha(28));
                 }
                 if resp.clicked() {
                     clicked = Some(i);
@@ -1512,6 +1516,7 @@ impl App {
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
                 let (bg, bg_resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+                crate::widgets::no_pointer(&bg_resp);
                 ui.painter()
                     .rect_filled(bg, 0.0, Color32::from_black_alpha(225));
                 let bar_h = 56.0;
@@ -1546,6 +1551,12 @@ impl App {
                         format!("Large {}", a.name),
                     )
                 });
+                // the picture takes a click only to retry a failed download
+                let retryable =
+                    tex.is_none() && matches!(self.files.state(&a.file), Some(Transfer::Failed(_)));
+                if !retryable {
+                    no_pointer(&pic_resp);
+                }
                 match &tex {
                     Some(tex) => {
                         ui.painter().image(
@@ -1601,12 +1612,12 @@ impl App {
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let b = |ui: &mut Ui, s: &str| {
-                                ui.add(
+                                ui.add(Tint(
                                     egui::Button::new(RichText::new(s).color(Color32::WHITE))
                                         .fill(Color32::from_white_alpha(28))
                                         .corner_radius(6)
                                         .min_size(vec2(0.0, 28.0)),
-                                )
+                                ))
                             };
                             if b(ui, tr("Close")).on_hover_text("Esc").clicked() {
                                 close = true;
@@ -1689,7 +1700,7 @@ impl App {
                                 .layout(Layout::left_to_right(Align::Center)),
                             |ui| {
                                 let playing = p.playing();
-                                let pb = ui.add(
+                                let pb = ui.add(ghost(
                                     egui::Button::new(
                                         RichText::new(if playing {
                                             "\u{23F8}"
@@ -1699,9 +1710,8 @@ impl App {
                                         .color(Color32::WHITE)
                                         .size(16.0),
                                     )
-                                    .frame(false)
                                     .min_size(vec2(32.0, 32.0)),
-                                );
+                                ));
                                 pb.widget_info(|| {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Button,
@@ -1769,7 +1779,7 @@ impl App {
                                         .size(12.0),
                                 );
                                 let muted = p.muted();
-                                let mb = ui.add(
+                                let mb = ui.add(ghost(
                                     egui::Button::new(
                                         RichText::new(if muted {
                                             "\u{1F507}"
@@ -1779,9 +1789,8 @@ impl App {
                                         .color(Color32::WHITE)
                                         .size(15.0),
                                     )
-                                    .frame(false)
                                     .min_size(vec2(32.0, 32.0)),
-                                );
+                                ));
                                 mb.widget_info(|| {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Button,

@@ -365,6 +365,8 @@ pub struct App {
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
+    /// Page state of the apps (reminders, search, whiteboards, forms, ...).
+    sweep: more::SweepUi,
 }
 
 impl App {
@@ -558,6 +560,7 @@ impl App {
             doc_preview: false,
             settings_tab: 0,
             settings_state: None,
+            sweep: Default::default(),
         }
     }
 
@@ -1029,9 +1032,10 @@ impl App {
             Action::ToggleTimer(id) => {
                 let now = now_ts();
                 let running = self.task(id).and_then(|t| t.timer_started).is_some();
+                let me = self.data.me;
                 for t in &mut self.data.tasks {
                     if let Some(st) = t.timer_started.take() {
-                        t.time_entries.push(TimeEntry { start: st, end: now });
+                        t.time_entries.push(TimeEntry { start: st, end: now, user: Some(me) });
                     }
                 }
                 if !running {
@@ -1100,10 +1104,16 @@ impl App {
 
     fn do_delete(&mut self, tg: Target) {
         let mut lists: Vec<u64> = vec![];
+        // everything deleted goes to Trash whole, so Restore can put it back
+        let tasks_in = |d: &Data, lists: &[u64]| -> Vec<Task> { d.tasks.iter().filter(|t| lists.contains(&t.list_id)).cloned().collect() };
         match tg {
             Target::Space(id) => {
                 if let Some(l) = self.data.lists_in(Location::Space(id)) {
                     lists = l;
+                }
+                if let Some(sp) = self.data.spaces.iter().find(|s| s.id == id).cloned() {
+                    let tasks = tasks_in(&self.data, &lists);
+                    self.to_trash("Space", &sp.name, &(sp.clone(), tasks));
                 }
                 self.data.spaces.retain(|s| s.id != id);
             }
@@ -1111,18 +1121,22 @@ impl App {
                 if let Some(l) = self.data.lists_in(Location::Folder(id)) {
                     lists = l;
                 }
+                let found = self.data.spaces.iter().find_map(|s| s.folders.iter().find(|f| f.id == id).map(|f| (s.id, f.clone())));
+                if let Some((sid, f)) = found {
+                    let tasks = tasks_in(&self.data, &lists);
+                    self.to_trash("Folder", &f.name, &(sid, f.clone(), tasks));
+                }
                 for s in &mut self.data.spaces {
                     s.folders.retain(|f| f.id != id);
                 }
             }
             Target::List(id) => {
                 lists = vec![id];
-                if let Some(sp) = self.data.space_of_list(id) {
+                if let (Some(sp), Some(item)) = (self.data.space_of_list(id), self.data.list_item(id).cloned()) {
                     let sid = sp.id;
-                    let item = ListItem { id, name: self.data.list_name(id), ..Default::default() };
-                    let tasks: Vec<Task> = self.data.tasks.iter().filter(|t| t.list_id == id).cloned().collect();
-                    let tid = self.data.new_id();
-                    self.data.extra.trash.push(TrashItem { id: tid, kind: "List".into(), title: item.name.clone(), deleted: now_ts(), payload: serde_json::to_string(&(sid, item, tasks)).unwrap_or_default() });
+                    let folder = sp.folders.iter().find(|f| f.lists.iter().any(|l| l.id == id)).map(|f| f.id);
+                    let tasks = tasks_in(&self.data, &lists);
+                    self.to_trash("List", &item.name.clone(), &(sid, item, tasks, folder));
                 }
                 for s in &mut self.data.spaces {
                     s.lists.retain(|l| l.id != id);
@@ -1795,7 +1809,14 @@ impl App {
                                     if let Some(d) = task.due {
                                         ui.painter().text(r.right_center() - vec2(6.0, 0.0), Align2::RIGHT_CENTER, fmt_date(d), FontId::proportional(12.0), date_color(d, false, &t));
                                     }
-                                    if resp.clicked() {
+                                    // the status circle ticks the task done (or opens it again)
+                                    let cr = Rect::from_center_size(r.left_center() + vec2(24.0, 0.0), vec2(20.0, 20.0));
+                                    let tick = ui.interact(cr, ui.id().with(("home_tick", task.id)), Sense::click());
+                                    let closed = self.data.is_closed(task);
+                                    name_it(&tick, &format!("{} {}", if closed { "Reopen" } else { "Complete" }, task.name));
+                                    if tick.clicked() {
+                                        self.toggle_done(task.id);
+                                    } else if resp.clicked() {
                                         self.actions.push(Action::Open(task.id));
                                     }
                                 }
@@ -1843,6 +1864,11 @@ impl App {
     }
 
     fn inbox(&mut self, ui: &mut Ui, mode: u8) {
+        if mode == 1 {
+            // Replies has its own page (chat replies, per-item read)
+            self.replies_page(ui);
+            return;
+        }
         let t = self.t();
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
             let (title, sub) = match mode {
@@ -2896,179 +2922,7 @@ impl App {
             }
         }
         // command search
-        if let Some(mut q) = self.palette.take() {
-            let mut open = true;
-            egui::Window::new("search_palette").title_bar(false).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 60.0]).fixed_size([620.0, 420.0]).show(ctx, |ui| {
-                let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search, or jump to a task, list, doc or channel...").font(FontId::proportional(16.0)).desired_width(f32::INFINITY));
-                r.request_focus();
-                // kind chips, as in the original's search
-                let kid = egui::Id::new("palette_kind");
-                let mut kind: u8 = ui.data(|d| d.get_temp(kid)).unwrap_or(0);
-                ui.horizontal(|ui| {
-                    for (i, label) in ["All", "Tasks", "Lists", "Docs", "Channels", "Messages"].iter().enumerate() {
-                        if ui.selectable_label(kind == i as u8, *label).clicked() {
-                            kind = i as u8;
-                        }
-                    }
-                });
-                ui.data_mut(|d| d.insert_temp(kid, kind));
-                ui.separator();
-                let ql = q.to_lowercase();
-                let mut first: Option<Action> = None;
-                let mut open_doc: Option<u64> = None;
-                let mut open_chat: Option<u64> = None;
-                let show = |k: u8| kind == 0 || kind == k;
-                egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
-                    if ql.is_empty() && kind == 0 {
-                        let items = self.recent_items(None);
-                        if !items.is_empty() {
-                            ui.label(RichText::new("Recent").small().color(t.text3));
-                            for (k, id, name, place) in items.into_iter().take(8) {
-                                ui.horizontal(|ui| {
-                                    let glyph = match k.as_str() {
-                                        "task" => "\u{2611}",
-                                        "doc" => "\u{1F4C4}",
-                                        _ => "\u{2630}",
-                                    };
-                                    ui.label(RichText::new(glyph).color(t.text3));
-                                    if ui.add(egui::Button::new(&name).frame(false)).clicked() {
-                                        match k.as_str() {
-                                            "task" => self.actions.push(Action::Open(id)),
-                                            "doc" => open_doc = Some(id),
-                                            _ => self.actions.push(Action::Go(Location::List(id))),
-                                        }
-                                        open = false;
-                                    }
-                                    ui.label(RichText::new(place).small().color(t.text3));
-                                });
-                            }
-                            ui.add_space(4.0);
-                        }
-                    }
-                    if show(2) {
-                        let mut locs: Vec<(Location, String)> = vec![];
-                        for s in &self.data.spaces {
-                            locs.push((Location::Space(s.id), s.name.clone()));
-                            for f in &s.folders {
-                                locs.push((Location::Folder(f.id), format!("{} / {}", s.name, f.name)));
-                                for l in &f.lists {
-                                    locs.push((Location::List(l.id), format!("{} / {} / {}", s.name, f.name, l.name)));
-                                }
-                            }
-                            for l in &s.lists {
-                                locs.push((Location::List(l.id), format!("{} / {}", s.name, l.name)));
-                            }
-                        }
-                        let locs: Vec<&(Location, String)> = locs.iter().filter(|(_, n)| ql.is_empty() || n.to_lowercase().contains(&ql)).take(if kind == 2 { 40 } else { 8 }).collect();
-                        // like Docs and Channels: no heading over an empty group
-                        if !locs.is_empty() {
-                            ui.label(RichText::new("Locations").small().color(t.text3));
-                        }
-                        for (l, name) in locs {
-                            if first.is_none() {
-                                first = Some(Action::Go(*l));
-                            }
-                            if ui.add(egui::Button::new(name).frame(false)).clicked() {
-                                self.actions.push(Action::Go(*l));
-                                open = false;
-                            }
-                        }
-                        ui.add_space(4.0);
-                    }
-                    if show(1) {
-                        let tasks: Vec<&Task> = self.data.tasks.iter().filter(|x| !x.archived && (ql.is_empty() || x.name.to_lowercase().contains(&ql) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 }).collect();
-                        if !tasks.is_empty() {
-                            ui.label(RichText::new("Tasks").small().color(t.text3));
-                        }
-                        for task in tasks {
-                            if first.is_none() {
-                                first = Some(Action::Open(task.id));
-                            }
-                            ui.horizontal(|ui| {
-                                let st = self.data.status_of(task);
-                                let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                                paint_status_circle(ui.painter(), r.center(), 6.0, &st);
-                                if ui.add(egui::Button::new(&task.name).frame(false)).clicked() {
-                                    self.actions.push(Action::Open(task.id));
-                                    open = false;
-                                }
-                                ui.label(RichText::new(self.data.list_name(task.list_id)).small().color(t.text3));
-                            });
-                        }
-                        ui.add_space(4.0);
-                    }
-                    if show(3) {
-                        let docs: Vec<(u64, String)> = self.data.docs.iter().filter(|d| !d.archived && (ql.is_empty() || d.title.to_lowercase().contains(&ql) || (ql.len() > 2 && d.body.to_lowercase().contains(&ql)))).map(|d| (d.id, d.title.clone())).take(20).collect();
-                        if !docs.is_empty() {
-                            ui.label(RichText::new("Docs").small().color(t.text3));
-                            for (id, title) in docs {
-                                if ui.add(egui::Button::new(format!("\u{1F4C4}  {}", title)).frame(false)).clicked() {
-                                    open_doc = Some(id);
-                                    open = false;
-                                }
-                            }
-                            ui.add_space(4.0);
-                        }
-                    }
-                    if show(4) {
-                        let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (ql.is_empty() || c.name.to_lowercase().contains(&ql))).map(|c| (c.id, c.name.clone())).take(20).collect();
-                        if !chans.is_empty() {
-                            ui.label(RichText::new("Channels").small().color(t.text3));
-                            for (id, name) in chans {
-                                if ui.add(egui::Button::new(format!("#  {}", name)).frame(false)).clicked() {
-                                    open_chat = Some(id);
-                                    open = false;
-                                }
-                            }
-                            ui.add_space(4.0);
-                        }
-                    }
-                    if show(5) && ql.len() > 1 {
-                        let mut hits: Vec<(u64, String, String)> = vec![];
-                        for c in &self.data.channels {
-                            for m in &c.messages {
-                                if m.text.to_lowercase().contains(&ql) {
-                                    hits.push((c.id, if c.name.is_empty() { "Direct message".into() } else { format!("#{}", c.name) }, m.text.clone()));
-                                }
-                            }
-                        }
-                        if !hits.is_empty() {
-                            ui.label(RichText::new("Messages").small().color(t.text3));
-                            for (cid, where_, text) in hits.into_iter().take(20) {
-                                ui.horizontal(|ui| {
-                                    if ui.add(egui::Button::new(truncate(&text, 60)).frame(false)).clicked() {
-                                        open_chat = Some(cid);
-                                        open = false;
-                                    }
-                                    ui.label(RichText::new(where_).small().color(t.text3));
-                                });
-                            }
-                        }
-                    }
-                });
-                if let Some(id) = open_doc {
-                    self.doc_open = Some(id);
-                    self.section = Section::Docs;
-                }
-                if let Some(id) = open_chat {
-                    self.section = Section::Chat;
-                    self.chat_open = Some(id);
-                    self.thread_open = None;
-                }
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    if let Some(a) = first {
-                        self.actions.push(a);
-                    }
-                    open = false;
-                }
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    open = false;
-                }
-            });
-            if open {
-                self.palette = Some(q);
-            }
-        }
+        self.search_palette(ctx);
     }
 
     /// One frame of the whole interface (everything except the native window buttons).
@@ -3109,6 +2963,7 @@ impl App {
             self.new_message_open = true;
         }
         self.single_key_shortcuts(ctx);
+        self.reminder_tick(ctx);
         self.top_bar(ctx);
         self.rail(ctx);
         self.content(ctx);
@@ -3242,9 +3097,10 @@ impl eframe::App for App {
         if self.persist {
             // stop a running timer cleanly so tracked time is kept
             let now = now_ts();
+            let me = self.data.me;
             for t in &mut self.data.tasks {
                 if let Some(st) = t.timer_started.take() {
-                    t.time_entries.push(TimeEntry { start: st, end: now });
+                    t.time_entries.push(TimeEntry { start: st, end: now, user: Some(me) });
                 }
             }
             self.data.save();

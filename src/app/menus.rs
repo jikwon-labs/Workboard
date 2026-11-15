@@ -397,7 +397,7 @@ impl App {
     pub(super) fn new_whiteboard(&mut self) {
         let id = self.data.new_id();
         let n = self.data.extra.whiteboards.len() + 1;
-        self.data.extra.whiteboards.push(Whiteboard { id, name: format!("Whiteboard {}", n), strokes: vec![], notes: vec![] });
+        self.data.extra.whiteboards.push(Whiteboard { id, name: format!("Whiteboard {}", n), strokes: vec![], notes: vec![], owner: self.data.me });
         self.wb_open = Some(id);
         self.section = Section::Whiteboards;
         self.dirty = true;
@@ -411,7 +411,8 @@ impl App {
             name: "New Form".into(),
             list_id: list,
             description: "Fill out this form to create a task.".into(),
-            fields: vec![FormField { label: "Title".into(), map: "name".into() }, FormField { label: "Details".into(), map: "description".into() }],
+            fields: vec![FormField { label: "Title".into(), map: "name".into(), ..Default::default() }, FormField { label: "Details".into(), map: "description".into(), ..Default::default() }],
+            owner: self.data.me,
         });
         self.form_open = Some(id);
         self.section = Section::Forms;
@@ -803,9 +804,14 @@ impl App {
                 ui.label("Avatar color");
                 let me = self.data.me;
                 ui.horizontal_wrapped(|ui| {
-                    for c in STATUS_PALETTE.iter().skip(1) {
+                    let cur = self.data.member(me).map(|m| m.color);
+                    for (i, c) in STATUS_PALETTE.iter().skip(1).enumerate() {
                         let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                        name_it(&resp, &format!("Avatar color {}", i + 1));
                         ui.painter().circle_filled(r.center(), 9.0, rgb(*c));
+                        if cur == Some(*c) {
+                            ui.painter().circle_stroke(r.center(), 11.0, Stroke::new(1.5, t.text));
+                        }
                         if resp.clicked() {
                             if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
                                 m.color = *c;
@@ -904,6 +910,7 @@ impl App {
                         ("\u{2318}/\u{21E7} click", "Select several tasks"),
                         ("/", "Commands in a Doc"),
                         ("\u{2318}[  /  \u{2318}]", "Back / forward"),
+                        ("\u{2318},", "Settings"),
                         ("Enter", "Send a message or save a new task"),
                         ("Shift+Enter", "New line in a message"),
                         ("Esc", "Close a window or menu"),
@@ -1420,6 +1427,23 @@ impl App {
             Modal::Trash => {
                 if self.data.extra.trash.is_empty() {
                     ui.label(RichText::new("Trash is empty.").color(t.text3));
+                } else {
+                    ui.horizontal(|ui| {
+                        if self.sweep.confirm.as_deref() == Some("empty_trash") {
+                            ui.label(RichText::new(format!("Delete all {} items for good?", self.data.extra.trash.len())).color(t.danger));
+                            if ui.button("Yes").clicked() {
+                                self.data.extra.trash.clear();
+                                self.sweep.confirm = None;
+                                self.dirty = true;
+                            }
+                            if ui.button("No").clicked() {
+                                self.sweep.confirm = None;
+                            }
+                        } else if ui.add(egui::Button::new(RichText::new("Empty trash").color(t.danger))).clicked() {
+                            self.sweep.confirm = Some("empty_trash".into());
+                        }
+                    });
+                    ui.add_space(4.0);
                 }
                 let mut restore = None;
                 let mut purge = None;
@@ -1488,11 +1512,8 @@ impl App {
                 ui.label(RichText::new("Shows the whole Workspace; pick a Space later from the Dashboards page.").small().color(t.text2));
                 let _ = spaces;
                 if primary_button(ui, t, "Create Dashboard").clicked() && !name.trim().is_empty() {
-                    let id = self.data.new_id();
-                    self.data.extra.dashboards.push(Dashboard { id, name: name.trim().to_string(), space: None });
-                    self.dash_open = Some(id);
+                    self.new_dashboard(name.trim());
                     self.section = Section::Dashboards;
-                    self.dirty = true;
                     close = true;
                 }
             }
@@ -1600,17 +1621,73 @@ impl App {
                 }
             }
             "List" => {
-                if let Ok((sid, l, tasks)) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(&item.payload) {
+                // (space, list, tasks, folder); lists trashed before the folder was kept have no folder
+                let parsed = serde_json::from_str::<(u64, ListItem, Vec<Task>, Option<u64>)>(&item.payload).ok().or_else(|| serde_json::from_str::<(u64, ListItem, Vec<Task>)>(&item.payload).ok().map(|(s, l, t)| (s, l, t, None)));
+                if let Some((sid, l, tasks, folder)) = parsed {
                     let idx = self.data.spaces.iter().position(|s| s.id == sid).unwrap_or(0);
                     if let Some(s) = self.data.spaces.get_mut(idx) {
-                        s.lists.push(l);
+                        match folder.and_then(|fid| s.folders.iter_mut().find(|f| f.id == fid)) {
+                            Some(f) => f.lists.push(l),
+                            None => s.lists.push(l),
+                        }
                     }
-                    self.data.tasks.extend(tasks);
+                    self.restore_tasks(tasks);
+                }
+            }
+            "Folder" => {
+                if let Ok((sid, f, tasks)) = serde_json::from_str::<(u64, Folder, Vec<Task>)>(&item.payload) {
+                    let idx = self.data.spaces.iter().position(|s| s.id == sid).unwrap_or(0);
+                    if let Some(s) = self.data.spaces.get_mut(idx) {
+                        s.folders.push(f);
+                    }
+                    self.restore_tasks(tasks);
+                }
+            }
+            "Space" => {
+                if let Ok((sp, tasks)) = serde_json::from_str::<(Space, Vec<Task>)>(&item.payload) {
+                    if !self.data.spaces.iter().any(|s| s.id == sp.id) {
+                        self.data.spaces.push(sp);
+                    }
+                    self.restore_tasks(tasks);
+                }
+            }
+            "Whiteboard" => {
+                if let Ok(w) = serde_json::from_str::<Whiteboard>(&item.payload) {
+                    self.data.extra.whiteboards.push(w);
+                }
+            }
+            "Form" => {
+                if let Ok(f) = serde_json::from_str::<Form>(&item.payload) {
+                    self.data.extra.forms.push(f);
+                }
+            }
+            "Dashboard" => {
+                if let Ok(d) = serde_json::from_str::<Dashboard>(&item.payload) {
+                    self.data.extra.dashboards.push(d);
+                }
+            }
+            "Goal" => {
+                if let Ok(g) = serde_json::from_str::<Goal>(&item.payload) {
+                    self.data.extra.goals.push(g);
+                }
+            }
+            "Team" => {
+                if let Ok(tm) = serde_json::from_str::<Team>(&item.payload) {
+                    self.data.extra.teams.push(tm);
                 }
             }
             _ => {}
         }
         self.dirty = true;
+    }
+
+    /// Puts trashed tasks back, skipping any that are somehow still there.
+    fn restore_tasks(&mut self, tasks: Vec<Task>) {
+        for t in tasks {
+            if !self.data.tasks.iter().any(|x| x.id == t.id) {
+                self.data.tasks.push(t);
+            }
+        }
     }
 
     /// "New message" picker (sidebar + New message, Create > Message, Cmd+G).
@@ -1772,8 +1849,77 @@ impl App {
         }
         let mut open = true;
         egui::Window::new("Notepad").open(&mut open).default_size([360.0, 420.0]).default_pos([ctx.screen_rect().right() - 400.0, 80.0]).show(ctx, |ui| {
-            if ui.add(egui::TextEdit::multiline(&mut self.data.extra.notepad).hint_text("Write anything. Only you can see this.").desired_width(f32::INFINITY).desired_rows(18)).changed() {
+            // Write: the plain text; List: each line with its checkbox and a
+            // button that turns it into a task ("- [ ] " lines are checklist items)
+            let mode_id = egui::Id::new("notepad_list");
+            let mut list: bool = ui.data(|d| d.get_temp(mode_id)).unwrap_or(false);
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut list, false, "Write");
+                ui.selectable_value(&mut list, true, "List");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("+ Checklist item").clicked() {
+                        let n = &mut self.data.extra.notepad;
+                        if !n.is_empty() && !n.ends_with('\n') {
+                            n.push('\n');
+                        }
+                        n.push_str("- [ ] ");
+                        list = false;
+                        self.dirty = true;
+                    }
+                });
+            });
+            ui.data_mut(|d| d.insert_temp(mode_id, list));
+            if !list {
+                if ui.add(egui::TextEdit::multiline(&mut self.data.extra.notepad).hint_text("Write anything. Only you can see this.").desired_width(f32::INFINITY).desired_rows(18)).changed() {
+                    self.dirty = true;
+                }
+                return;
+            }
+            let lines: Vec<String> = self.data.extra.notepad.lines().map(String::from).collect();
+            let mut toggle = None;
+            let mut make = None;
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if lines.iter().all(|l| l.trim().is_empty()) {
+                    ui.label(RichText::new("Nothing written yet").color(self.t().text3));
+                }
+                for (i, line) in lines.iter().enumerate() {
+                    let (check, text) = notepad_line(line);
+                    if text.is_empty() {
+                        continue;
+                    }
+                    ui.horizontal(|ui| {
+                        if let Some(done) = check {
+                            let mut on = done;
+                            let cb = ui.checkbox(&mut on, "");
+                            name_it(&cb, &format!("Check {}", text));
+                            if cb.changed() {
+                                toggle = Some(i);
+                            }
+                        }
+                        ui.label(if check == Some(true) { RichText::new(text).strikethrough().color(self.t().text3) } else { RichText::new(text) });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let b = ui.add(egui::Button::new(RichText::new("\u{2192} Task").small()).frame(false)).on_hover_text("Make a task from this line");
+                            name_it(&b, &format!("Make task {}", text));
+                            if b.clicked() {
+                                make = Some(text.to_string());
+                            }
+                        });
+                    });
+                }
+            });
+            if let Some(i) = toggle {
+                let mut v = lines.clone();
+                let l = &v[i];
+                v[i] = if let Some(rest) = l.trim_start().strip_prefix("- [ ] ") { format!("- [x] {}", rest) } else { format!("- [ ] {}", notepad_line(l).1) };
+                self.data.extra.notepad = v.join("\n");
                 self.dirty = true;
+            }
+            if let Some(name) = make {
+                if let Some(list) = self.default_list() {
+                    let me = self.data.me;
+                    self.actions.push(Action::Add { list, name, status: None, priority: 0, assignees: vec![me], due: None, parent: None, open: false });
+                    self.toast = Some((format!("Task created in {}", self.data.list_name(list)), now_ts()));
+                }
             }
         });
         if !open {
@@ -1796,5 +1942,17 @@ impl App {
         });
         let _ = t;
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+}
+
+/// A notepad line as (checklist state, text): "- [ ] a" is (Some(false), "a").
+pub fn notepad_line(l: &str) -> (Option<bool>, &str) {
+    let x = l.trim_start();
+    if let Some(r) = x.strip_prefix("- [ ] ") {
+        (Some(false), r.trim())
+    } else if let Some(r) = x.strip_prefix("- [x] ").or_else(|| x.strip_prefix("- [X] ")) {
+        (Some(true), r.trim())
+    } else {
+        (None, x.trim())
     }
 }

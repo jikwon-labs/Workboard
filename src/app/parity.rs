@@ -1515,10 +1515,22 @@ impl App {
     // ---------------------------------------------------------------- shortcuts
 
     /// Single-key shortcuts (only while no text field has focus):
-    /// T new task, R reminder, N or P notepad, Cmd+\ sidebar.
+    /// T new task, R reminder, N or P notepad, Cmd+\ sidebar, Cmd+[ / ] history.
     pub(super) fn single_key_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Backslash)) {
             self.sidebar_collapsed = !self.sidebar_collapsed;
+        }
+        // apps sweep: Cmd+[ / Cmd+] back and forward, Cmd+, Settings
+        if self.modal.is_none() && self.palette.is_none() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::OpenBracket)) {
+                self.go_back();
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::CloseBracket)) {
+                self.go_forward();
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
+                self.open_settings("My Settings");
+            }
         }
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         if typing || self.modal.is_some() || self.quick_add.is_some() || self.palette.is_some() || self.rename.is_some() {

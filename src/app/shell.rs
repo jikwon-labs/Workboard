@@ -1324,8 +1324,8 @@ impl App {
     }
 
     fn unseen_activity(&self) -> usize {
-        let day = now_ts() - 86400;
-        self.data.tasks.iter().flat_map(|t| t.activity.iter()).filter(|a| a.comment && a.author != self.data.me && a.ts > day).count()
+        // what the Inbox's Primary tab still shows (Clear and Later take items off)
+        self.inbox_unseen()
     }
 
     fn space_rows(&mut self, ui: &mut Ui, s: &Space) {

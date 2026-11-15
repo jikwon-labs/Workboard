@@ -1221,3 +1221,214 @@ fn one_message_takes_at_most_ten_pictures() {
     assert!(a.add_media(false, Some(pic), None));
     assert_eq!(a.chat_files.len(), 10);
 }
+
+// ---------------------------------------------------------------- apps sweep (inbox, trash, forms, search, timesheets)
+
+#[test]
+fn inbox_assigned_means_assigned_to_me() {
+    let mut a = app();
+    let tid = a.data.tasks[0].id;
+    let to_me = Activity { ts: now_ts(), author: 2, text: "assigned to Me".into(), comment: false, post: false };
+    let to_sam = Activity { ts: now_ts(), author: 2, text: "assigned to Sam Lee".into(), comment: false, post: false };
+    assert!(a.assigned_to_me(&to_me));
+    assert!(!a.assigned_to_me(&to_sam));
+    assert_eq!(a.inbox_tab_of(&format!("{}:{}:2", tid, to_me.ts), &to_me), 0);
+    assert_eq!(a.inbox_tab_of("x", &to_sam), 1, "someone else's assignment is not Primary");
+    a.data.tasks[0].activity.push(to_me);
+}
+
+#[test]
+fn inbox_badge_drops_cleared_and_later_items() {
+    let mut a = app();
+    let tid = a.data.tasks[0].id;
+    let ts = now_ts() - 10;
+    a.data.tasks[0].activity.push(Activity { ts, author: 2, text: "Ping".into(), comment: true, post: false });
+    let n = a.inbox_unseen();
+    assert!(n >= 1);
+    a.data.extra.inbox_cleared.push(format!("{}:{}:2", tid, ts));
+    assert_eq!(a.inbox_unseen(), n - 1);
+    a.data.extra.inbox_cleared.clear();
+    a.data.extra.inbox_later.push(format!("{}:{}:2", tid, ts));
+    assert_eq!(a.inbox_unseen(), n - 1);
+}
+
+#[test]
+fn deleted_folder_and_space_come_back_from_trash() {
+    let mut a = app();
+    let space = a.data.spaces[0].clone();
+    let folder = space.folders[0].clone();
+    let lists: Vec<u64> = folder.lists.iter().map(|l| l.id).collect();
+    let n_tasks = a.data.tasks.iter().filter(|t| lists.contains(&t.list_id)).count();
+    assert!(n_tasks > 0);
+    a.do_delete(Target::Folder(folder.id));
+    assert!(!a.data.tasks.iter().any(|t| lists.contains(&t.list_id)));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "Folder").expect("folder in Trash");
+    a.restore_trash(i);
+    let back = a.data.spaces[0].folders.iter().find(|f| f.id == folder.id).expect("folder restored");
+    assert_eq!(back.lists.len(), folder.lists.len());
+    assert_eq!(a.data.tasks.iter().filter(|t| lists.contains(&t.list_id)).count(), n_tasks);
+
+    let all = a.data.lists_in(Location::Space(space.id)).unwrap();
+    let total = a.data.tasks.iter().filter(|t| all.contains(&t.list_id)).count();
+    a.do_delete(Target::Space(space.id));
+    assert!(!a.data.spaces.iter().any(|s| s.id == space.id));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "Space").expect("space in Trash");
+    a.restore_trash(i);
+    let s = a.data.spaces.iter().find(|s| s.id == space.id).expect("space restored");
+    assert_eq!(s.folders.len(), space.folders.len());
+    assert_eq!(a.data.tasks.iter().filter(|t| all.contains(&t.list_id)).count(), total);
+}
+
+#[test]
+fn deleted_list_comes_back_into_its_folder_with_its_details() {
+    let mut a = app();
+    let fid = a.data.spaces[0].folders[0].id;
+    let lid = a.data.spaces[0].folders[0].lists[0].id;
+    {
+        let l = a.data.list_item_mut(lid).unwrap();
+        l.color = Some([1, 2, 3]);
+        l.description = "About the site".into();
+    }
+    a.do_delete(Target::List(lid));
+    assert!(a.data.list_item(lid).is_none());
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List").unwrap();
+    a.restore_trash(i);
+    let f = a.data.spaces[0].folders.iter().find(|f| f.id == fid).unwrap();
+    let l = f.lists.iter().find(|l| l.id == lid).expect("back in its folder");
+    assert_eq!(l.color, Some([1, 2, 3]));
+    assert_eq!(l.description, "About the site");
+    // a List trashed by an older version (no folder) still restores
+    let sid = a.data.spaces[0].id;
+    let old = serde_json::to_string(&(sid, ListItem { id: 77, name: "Old".into(), ..Default::default() }, Vec::<Task>::new())).unwrap();
+    a.data.extra.trash.push(TrashItem { id: 1, kind: "List".into(), title: "Old".into(), deleted: 0, payload: old });
+    let i = a.data.extra.trash.len() - 1;
+    a.restore_trash(i);
+    assert!(a.data.spaces[0].lists.iter().any(|l| l.id == 77));
+}
+
+#[test]
+fn app_items_go_to_trash_and_back() {
+    let mut a = app();
+    let id = a.data.new_id();
+    let g = Goal { id, name: "Ship".into(), color: [1, 1, 1], due: None, owner: a.data.me, targets: vec![] };
+    a.to_trash("Goal", &g.name, &g);
+    let tm = Team { id: id + 1, name: "Core".into(), members: vec![], color: [2, 2, 2] };
+    a.to_trash("Team", &tm.name, &tm);
+    a.new_dashboard("Sales");
+    let d = a.data.extra.dashboards.pop().unwrap();
+    a.to_trash("Dashboard", &d.name, &d);
+    while !a.data.extra.trash.is_empty() {
+        a.restore_trash(0);
+    }
+    assert!(a.data.extra.goals.iter().any(|x| x.name == "Ship"));
+    assert!(a.data.extra.teams.iter().any(|x| x.name == "Core"));
+    assert!(a.data.extra.dashboards.iter().any(|x| x.name == "Sales" && x.owner == a.data.me));
+}
+
+#[test]
+fn form_answers_check_required_number_and_email() {
+    use super::more::form_answers;
+    let f = Form {
+        id: 1,
+        name: "Intake".into(),
+        list_id: 0,
+        description: String::new(),
+        fields: vec![
+            FormField { label: "Title".into(), map: "name".into(), required: true, ..Default::default() },
+            FormField { label: "Seats".into(), map: "number".into(), ..Default::default() },
+            FormField { label: "Mail".into(), map: "email".into(), ..Default::default() },
+            FormField { label: "Who".into(), map: "assignee".into(), ..Default::default() },
+            FormField { label: "Size".into(), map: "dropdown".into(), options: vec!["S".into(), "M".into()], ..Default::default() },
+        ],
+        owner: 1,
+    };
+    let mut fill: HashMap<usize, String> = HashMap::new();
+    assert!(form_answers(&f, &fill).unwrap_err().contains("Title"));
+    fill.insert(0, "New desk".into());
+    fill.insert(1, "lots".into());
+    assert!(form_answers(&f, &fill).unwrap_err().contains("number"));
+    fill.insert(1, "4".into());
+    fill.insert(2, "nope".into());
+    assert!(form_answers(&f, &fill).unwrap_err().contains("email"));
+    fill.insert(2, "a@b.co".into());
+    fill.insert(3, "2".into());
+    fill.insert(4, "M".into());
+    let ans = form_answers(&f, &fill).unwrap();
+    assert_eq!(ans.name, "New desk");
+    assert_eq!(ans.assignees, vec![2]);
+    assert!(ans.description.contains("Seats: 4") && ans.description.contains("Size: M"));
+}
+
+#[test]
+fn search_reads_copied_links_and_finds_apps_and_people() {
+    use super::more::{parse_wb_link, Hit};
+    let mut a = app();
+    let tid = a.data.tasks[2].id;
+    assert_eq!(parse_wb_link(&format!("workboard://task/{}", tid)), Some(("task", tid)));
+    assert_eq!(parse_wb_link("https://x"), None);
+    let rows = a.search_rows(&format!("workboard://task/{}", tid), 0);
+    assert_eq!(rows[0].4, Hit::Task(tid));
+    let lid = a.data.first_list().unwrap();
+    assert_eq!(a.search_rows(&format!("workboard://list/{}", lid), 0)[0].4, Hit::Go(Location::List(lid)));
+    let sid = a.data.spaces[1].id;
+    assert_eq!(a.search_rows(&format!("workboard://space/{}/", sid), 0)[0].4, Hit::Go(Location::Space(sid)));
+    a.new_dashboard("Quarterly numbers");
+    let did = a.dash_open.unwrap();
+    assert!(a.search_rows("quarterly", 0).iter().any(|r| r.4 == Hit::Dashboard(did)));
+    assert!(a.search_rows("alex", 0).iter().any(|r| r.4 == Hit::Person(2)));
+    // a message found by its text opens the channel
+    assert!(a.search_rows("newsletter draft is due", 5).iter().any(|r| matches!(r.4, Hit::Chat(_))));
+}
+
+#[test]
+fn timesheet_hours_only_replace_my_own_time() {
+    use super::hubs::entry_is;
+    let mut a = app();
+    let tid = a.data.tasks[0].id;
+    let day = today();
+    let start = day.and_hms_opt(10, 0, 0).unwrap().and_local_timezone(chrono::Local).single().unwrap().timestamp();
+    a.data.tasks[0].time_entries = vec![TimeEntry { start, end: start + 3600, user: Some(2) }];
+    a.set_day_time(tid, day, 2.0);
+    let t = a.task(tid).unwrap();
+    assert_eq!(t.time_entries.len(), 2, "Alex's hour stays");
+    let mine: i64 = t.time_entries.iter().filter(|e| entry_is(e, &t.assignees, 1)).map(|e| e.end - e.start).sum();
+    assert_eq!(mine, 7200);
+    // older entries without a tracker count for the assignees
+    let old = TimeEntry { start, end: start + 60, user: None };
+    assert!(entry_is(&old, &[1], 1) && !entry_is(&old, &[2], 1) && entry_is(&old, &[], 1));
+}
+
+#[test]
+fn notepad_lines_and_reminder_alerts() {
+    use super::menus::notepad_line;
+    assert_eq!(notepad_line("- [ ] Buy milk"), (Some(false), "Buy milk"));
+    assert_eq!(notepad_line("  - [x] Done"), (Some(true), "Done"));
+    assert_eq!(notepad_line("plain"), (None, "plain"));
+    let mut a = app();
+    let me = a.data.me;
+    a.data.extra.reminders.push(Reminder { id: 9, text: "Stand-up".into(), due_ts: now_ts() - 5, done: false, owner: me });
+    let ctx = egui::Context::default();
+    a.reminder_tick(&ctx);
+    assert_eq!(a.toast.as_ref().map(|t| t.0.as_str()), Some("Reminder: Stand-up"));
+    a.toast = None;
+    a.reminder_tick(&ctx);
+    assert!(a.toast.is_none(), "announced once");
+    a.data.extra.reminders.push(Reminder { id: 10, text: "Quiet".into(), due_ts: now_ts() - 5, done: false, owner: me });
+    a.data.extra.notify.reminders = false;
+    a.reminder_tick(&ctx);
+    assert!(a.toast.is_none(), "the setting turns the alert off");
+}
+
+#[test]
+fn whiteboard_undo_brings_back_a_deleted_note() {
+    use super::more::WbUndo;
+    let mut a = app();
+    a.new_whiteboard();
+    let wid = a.wb_open.unwrap();
+    let wb = a.data.extra.whiteboards.iter_mut().find(|w| w.id == wid).unwrap();
+    assert_eq!(wb.owner, 1);
+    let n = Sticky { pos: [0.0, 0.0], text: "Idea".into(), color: [1, 1, 1] };
+    a.sweep.wb_undo.push((wid, WbUndo::NoteGone(0, n)));
+    a.wb_undo(wid);
+    assert_eq!(a.data.extra.whiteboards.iter().find(|w| w.id == wid).unwrap().notes[0].text, "Idea");
+}

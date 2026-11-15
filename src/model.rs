@@ -186,6 +186,9 @@ pub struct Activity {
 pub struct TimeEntry {
     pub start: i64,
     pub end: i64,
+    /// Who tracked it (older entries don't say; they count for the task's assignees).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -410,11 +413,18 @@ pub struct Goal {
     pub targets: Vec<GoalTarget>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct FormField {
     pub label: String,
-    /// name, description, priority, due or text
+    /// name, description, priority, due, assignee or text; dropdown, number,
+    /// email and checkbox answers are added to the description too
     pub map: String,
+    /// The form can't be submitted without an answer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub required: bool,
+    /// Choices of a dropdown question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -424,6 +434,9 @@ pub struct Form {
     pub list_id: u64,
     pub description: String,
     pub fields: Vec<FormField>,
+    /// Who made it (0 for forms made before this was kept).
+    #[serde(default)]
+    pub owner: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -446,6 +459,9 @@ pub struct Whiteboard {
     pub name: String,
     pub strokes: Vec<WbStroke>,
     pub notes: Vec<Sticky>,
+    /// Who made it (0 for whiteboards made before this was kept).
+    #[serde(default)]
+    pub owner: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -507,11 +523,30 @@ pub struct Bookmark {
     pub url: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Dashboard {
     pub id: u64,
     pub name: String,
     pub space: Option<u64>,
+    /// Who made it (0 for dashboards made before this was kept).
+    #[serde(default)]
+    pub owner: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
+    /// The cards in order; None shows the standard set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cards: Option<Vec<DashCard>>,
+}
+
+/// One card on a dashboard. No `id` on purpose (see `Attachment`): the
+/// whole list is one field, so reordering merges as a single change.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DashCard {
+    /// stats, status, priority, workload, time or overdue
+    pub kind: String,
+    /// Shown instead of the kind's own title when set.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -600,6 +635,9 @@ pub struct Extra {
     /// Space Overview cards turned off with Customize.
     #[serde(default)]
     pub hidden_cards: Vec<String>,
+    /// Replies marked read one by one: "taskid:ts:author" or "msg:ID".
+    #[serde(default)]
+    pub replies_read: Vec<String>,
 }
 
 impl Default for Extra {
@@ -638,6 +676,7 @@ impl Default for Extra {
             sync: Default::default(),
             demo_removed: false,
             hidden_cards: vec![],
+            replies_read: vec![],
         }
     }
 }
@@ -1312,8 +1351,8 @@ impl Data {
         d.channels.push(Channel { id: c3, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 2], messages: vec![m5], last_read: 0, ..Default::default() });
         let c4 = d.new_id();
         d.channels.push(Channel { id: c4, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 3], messages: vec![], last_read: now2, ..Default::default() });
-        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400 });
-        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800 });
+        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400, user: None });
+        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800, user: None });
         d.tasks[0].activity.push(Activity { ts: now - 3600 * 5, author: 2, text: "Looks great so far, let's review on Friday.".into(), comment: true, ..Default::default() });
         d
     }

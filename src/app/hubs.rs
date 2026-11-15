@@ -442,7 +442,6 @@ impl App {
         if plus {
             self.modal = Some(Modal::NewDashboard { name: "New Dashboard".into() });
         }
-        let _ = me;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             if self.dash_open.is_some() || (self.hub_filter == 0 && !self.data.extra.dashboards.is_empty() && self.dash_open.is_none() && false) {
                 self.dashboard_content(ui);
@@ -451,17 +450,23 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if !self.data.extra.dashboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new("Your Dashboards").size(15.0));
-                        for d in self.data.extra.dashboards.clone() {
+                        let f = self.hub_filter.min(3);
+                        ui.label(RichText::new(["Your Dashboards", "My Dashboards", "Shared with me", "Private"][f as usize]).size(15.0));
+                        let shown: Vec<Dashboard> = self.data.extra.dashboards.iter().filter(|d| hub_shows(f, d.owner, d.private, me)).cloned().collect();
+                        if shown.is_empty() {
+                            ui.label(RichText::new("Nothing here yet").color(t.text3));
+                        }
+                        for d in shown {
                             if ui.add(egui::Button::new(format!("\u{1F4CA}  {}", d.name)).frame(false)).clicked() {
                                 self.dash_open = Some(d.id);
                             }
                         }
                         if ui.add(egui::Button::new("\u{1F4CA}  Workspace overview").frame(false)).clicked() {
-                            let id = self.data.new_id();
-                            self.data.extra.dashboards.push(Dashboard { id, name: "Workspace overview".into(), space: None });
-                            self.dash_open = Some(id);
-                            self.dirty = true;
+                            // open the one made before instead of adding another each click
+                            match self.data.extra.dashboards.iter().find(|d| d.name == "Workspace overview" && d.space.is_none()) {
+                                Some(d) => self.dash_open = Some(d.id),
+                                None => self.new_dashboard("Workspace overview"),
+                            }
                         }
                     });
                 }
@@ -476,11 +481,8 @@ impl App {
                     if name.starts_with("AI ") {
                         self.modal = Some(super::menus::unavailable(&name));
                     } else {
-                        let id = self.data.new_id();
                         let n = if name == "Start from scratch" { "New Dashboard".to_string() } else { name };
-                        self.data.extra.dashboards.push(Dashboard { id, name: n, space: None });
-                        self.dash_open = Some(id);
-                        self.dirty = true;
+                        self.new_dashboard(&n);
                     }
                 }
             });
@@ -540,8 +542,14 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if !self.data.extra.whiteboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new("Your Whiteboards").size(15.0));
-                        for w in self.data.extra.whiteboards.clone() {
+                        let f = self.hub_filter.min(1);
+                        let me = self.data.me;
+                        ui.label(RichText::new(if f == 1 { "My Whiteboards" } else { "Your Whiteboards" }).size(15.0));
+                        let shown: Vec<Whiteboard> = self.data.extra.whiteboards.iter().filter(|w| hub_shows(f, w.owner, false, me)).cloned().collect();
+                        if shown.is_empty() {
+                            ui.label(RichText::new("Nothing here yet").color(t.text3));
+                        }
+                        for w in shown {
                             if ui.add(egui::Button::new(format!("\u{1F3A8}  {}", w.name)).frame(false)).clicked() {
                                 self.wb_open = Some(w.id);
                             }
@@ -600,8 +608,14 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if !self.data.extra.forms.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new("Your Forms").size(15.0));
-                        for f in self.data.extra.forms.clone() {
+                        let fl = self.hub_filter.min(1);
+                        let me = self.data.me;
+                        ui.label(RichText::new(if fl == 1 { "My Forms" } else { "Your Forms" }).size(15.0));
+                        let shown: Vec<Form> = self.data.extra.forms.iter().filter(|f| hub_shows(fl, f.owner, false, me)).cloned().collect();
+                        if shown.is_empty() {
+                            ui.label(RichText::new("Nothing here yet").color(t.text3));
+                        }
+                        for f in shown {
                             if ui.add(egui::Button::new(format!("\u{1F4CB}  {}", f.name)).frame(false)).clicked() {
                                 self.form_open = Some(f.id);
                             }
@@ -628,7 +642,7 @@ impl App {
                     if let Some(f) = self.form_open.and_then(|id| self.data.extra.forms.iter_mut().find(|f| f.id == id)) {
                         if name != "Start from scratch" {
                             f.name = name.clone();
-                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: l.to_string(), map: m.to_string() }).collect();
+                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: l.to_string(), map: m.to_string(), ..Default::default() }).collect();
                         }
                     }
                 }
@@ -687,8 +701,9 @@ impl App {
     pub(super) fn teams_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let people = self.data.members.len();
-        let items: [(&str, &str, Option<usize>); 4] = [("\u{1F465}", "All Teams", None), ("\u{1F4C7}", "All People", Some(people)), ("\u{2630}", "Org Chart", None), ("\u{1F4CA}", "Analytics", None)];
-        let sel = if self.hub_filter == 9 { 99 } else { self.hub_filter.min(3) };
+        let mine = self.data.extra.teams.iter().filter(|x| x.members.contains(&self.data.me)).count();
+        let items: [(&str, &str, Option<usize>); 5] = [("\u{1F465}", "All Teams", None), ("\u{1F4C7}", "All People", Some(people)), ("\u{2630}", "Org Chart", None), ("\u{1F4CA}", "Analytics", None), ("@me", "My Teams", Some(mine))];
+        let sel = if self.hub_filter == 9 { 99 } else { self.hub_filter.min(4) };
         let (clicked, plus) = self.hub_sidebar(ui, "teams", "Teams", &items, sel, true);
         if let Some(i) = clicked {
             self.hub_filter = i;
@@ -701,8 +716,9 @@ impl App {
             1 => self.people_page(ui),
             2 => self.org_chart(ui),
             3 => self.teams_workload(ui),
+            4 => self.all_teams(ui, true),
             9 => self.team_detail(ui),
-            _ => self.all_teams(ui),
+            _ => self.all_teams(ui, false),
         });
     }
 
@@ -715,9 +731,9 @@ impl App {
         self.dirty = true;
     }
 
-    fn all_teams(&mut self, ui: &mut Ui) {
+    fn all_teams(&mut self, ui: &mut Ui, mine: bool) {
         let t = self.t();
-        self.page_bar(ui, "All Teams", |s, ui| {
+        self.page_bar(ui, if mine { "My Teams" } else { "All Teams" }, |s, ui| {
             let tt = s.t();
             if primary_button(ui, &tt, "Create Team").clicked() {
                 s.new_team();
@@ -725,8 +741,11 @@ impl App {
         });
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                let teams = self.data.extra.teams.clone();
-                if teams.is_empty() {
+                let me = self.data.me;
+                let teams: Vec<Team> = self.data.extra.teams.iter().filter(|x| !mine || x.members.contains(&me)).cloned().collect();
+                if teams.is_empty() && mine && !self.data.extra.teams.is_empty() {
+                    ui.label(RichText::new("You're not in any team yet").color(t.text3));
+                } else if teams.is_empty() {
                     ui.add_space(60.0);
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new("Manage teams and see their work").size(24.0));
@@ -767,11 +786,29 @@ impl App {
         };
         let members = self.data.members.clone();
         let mut delete = false;
+        let team_key = format!("team:{}", self.data.extra.teams[ti].id);
+        let asking = self.sweep.confirm.as_deref() == Some(team_key.as_str());
+        let mut ask = None;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
             let tm = &mut self.data.extra.teams[ti];
             if ui.add(egui::TextEdit::singleline(&mut tm.name).font(FontId::proportional(24.0)).frame(false).desired_width(400.0)).changed() {
                 self.dirty = true;
             }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Color").color(t.text2));
+                for (i, c) in STATUS_PALETTE.iter().skip(1).enumerate() {
+                    let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                    name_it(&resp, &format!("Team color {}", i + 1));
+                    ui.painter().rect_filled(r.shrink(2.0), 4.0, rgb(*c));
+                    if tm.color == *c {
+                        ui.painter().rect_stroke(r, 5.0, Stroke::new(1.5, t.text), egui::StrokeKind::Inside);
+                    }
+                    if resp.clicked() {
+                        tm.color = *c;
+                        self.dirty = true;
+                    }
+                }
+            });
             ui.label(RichText::new("Members").color(t.text2));
             ui.horizontal_wrapped(|ui| {
                 for m in &members {
@@ -786,10 +823,21 @@ impl App {
                     }
                 }
             });
-            if ui.add(egui::Button::new(RichText::new("Delete team").color(t.danger)).frame(false)).clicked() {
-                delete = true;
+            if asking {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Move this team to Trash?").color(t.danger));
+                    delete = ui.button("Yes").clicked();
+                    if ui.button("No").clicked() {
+                        ask = Some(false);
+                    }
+                });
+            } else if ui.add(egui::Button::new(RichText::new("Delete team").color(t.danger)).frame(false)).clicked() {
+                ask = Some(true);
             }
         });
+        if let Some(on) = ask {
+            self.sweep.confirm = on.then_some(team_key);
+        }
         ui.separator();
         let ids = self.data.extra.teams[ti].members.clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -814,7 +862,9 @@ impl App {
             });
         });
         if delete {
-            self.data.extra.teams.remove(ti);
+            let tm = self.data.extra.teams.remove(ti);
+            self.to_trash("Team", &tm.name, &tm);
+            self.sweep.confirm = None;
             self.team_open = None;
             self.hub_filter = 0;
             self.dirty = true;
@@ -899,9 +949,12 @@ impl App {
                         self.sheet_week = ws + Duration::days(7);
                     }
                     let r = ui.add(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.format("%b %-d"), (ws + Duration::days(6)).format("%b %-d"))).size(20.0)).frame(false));
-                    if r.clicked() {
-                        let td = today();
-                        self.sheet_week = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+                    name_it(&r, "Pick a week");
+                    // a calendar: the week of the picked day opens
+                    let mut d = Some(ws);
+                    if let Some(true) = popup(ui, &r, ui.id().with("sheet_week_pick"), 380.0, |ui| date_menu(ui, &t, ui.id().with("sheet_week_cal"), &mut d)) {
+                        let d = d.unwrap_or_else(today);
+                        self.sheet_week = d - Duration::days(d.weekday().num_days_from_sunday() as i64);
                     }
                     if self.hub_filter == 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -923,7 +976,7 @@ impl App {
                         });
                     }
                     _ => {
-                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) }) || x.timer_started.is_some()) || !self.sheet_rows.is_empty() || self.sheet_force;
+                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) && entry_is(e, &x.assignees, me) }) || x.timer_started.is_some()) || !self.sheet_rows.is_empty() || self.sheet_force;
                         if !has_any {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
@@ -983,11 +1036,12 @@ impl App {
     fn timesheet_grid(&mut self, ui: &mut Ui, ws: NaiveDate) {
         let t = self.t();
         let now = now_ts();
+        let me = self.data.me;
         let mut ids: Vec<u64> = self.sheet_rows.clone();
         for x in &self.data.tasks {
             let any = x.time_entries.iter().any(|e| {
                 let i = (ts_day(e.start) - ws).num_days();
-                (0..7).contains(&i)
+                (0..7).contains(&i) && entry_is(e, &x.assignees, me)
             }) || x.timer_started.is_some();
             if any && !ids.contains(&x.id) {
                 ids.push(x.id);
@@ -1007,13 +1061,15 @@ impl App {
             ui.painter().text(pos2(hr.left() + name_w + col * 7.5, hr.center().y), Align2::CENTER_CENTER, "Total", FontId::proportional(12.5), t.text2);
             ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
             let mut totals = [0i64; 7];
+            let mut drop_row = None;
             for id in &ids {
                 let Some(ti) = self.data.tasks.iter().position(|x| x.id == *id) else { continue };
                 let name = self.data.tasks[ti].name.clone();
+                let assignees = self.data.tasks[ti].assignees.clone();
                 let mut per = [0i64; 7];
                 for e in &self.data.tasks[ti].time_entries {
                     let i = (ts_day(e.start) - ws).num_days();
-                    if (0..7).contains(&i) {
+                    if (0..7).contains(&i) && entry_is(e, &assignees, me) {
                         per[i as usize] += e.end - e.start;
                     }
                 }
@@ -1026,8 +1082,17 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let (nr, nresp) = ui.allocate_exact_size(vec2(name_w, 34.0), Sense::click());
-                    ui.painter().with_clip_rect(nr).text(nr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text);
-                    if nresp.clicked() {
+                    ui.painter().with_clip_rect(Rect::from_min_max(nr.min, nr.max - vec2(26.0, 0.0))).text(nr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text);
+                    // take the row off (and my time on it this week)
+                    let xr = Rect::from_center_size(nr.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0));
+                    let x = ui.interact(xr, ui.id().with(("sheet_x", *id)), Sense::click());
+                    name_it(&x, &format!("Remove row {}", name));
+                    if nresp.hovered() || x.hovered() {
+                        ui.painter().text(xr.center(), Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), if x.hovered() { t.danger } else { t.text3 });
+                    }
+                    if x.clicked() {
+                        drop_row = Some(*id);
+                    } else if nresp.clicked() {
                         self.actions.push(Action::Open(*id));
                     }
                     let mut sum = 0;
@@ -1045,6 +1110,18 @@ impl App {
                     let (tr, _) = ui.allocate_exact_size(vec2(col, 34.0), Sense::hover());
                     ui.painter().text(tr.center(), Align2::CENTER_CENTER, fmt_duration(sum), FontId::proportional(13.0), t.text);
                 });
+            }
+            if let Some(id) = drop_row {
+                self.sheet_rows.retain(|x| *x != id);
+                if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == id) {
+                    let assignees = task.assignees.clone();
+                    let before = task.time_entries.len();
+                    task.time_entries.retain(|e| !((0..7).contains(&(ts_day(e.start) - ws).num_days()) && entry_is(e, &assignees, me)));
+                    if task.time_entries.len() != before {
+                        self.dirty = true;
+                        self.toast = Some((format!("Removed this week's time on {}", task.name), now_ts()));
+                    }
+                }
             }
             let (fr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
             ui.painter().hline(fr.x_range(), fr.top(), Stroke::new(1.0, t.border));
@@ -1073,22 +1150,26 @@ impl App {
 
     /// Replaces a task's time on one day with a single entry of `hours`.
     pub(super) fn set_day_time(&mut self, task_id: u64, day: NaiveDate, hours: f64) {
+        let me = self.data.me;
         let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == task_id) else { return };
-        task.time_entries.retain(|e| ts_day(e.start) != day);
+        // only my own time that day is replaced; teammates' entries stay
+        let assignees = task.assignees.clone();
+        task.time_entries.retain(|e| ts_day(e.start) != day || !entry_is(e, &assignees, me));
         if hours > 0.0 {
             let start = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or_else(now_ts);
-            task.time_entries.push(TimeEntry { start, end: start + (hours * 3600.0).round() as i64 });
+            task.time_entries.push(TimeEntry { start, end: start + (hours * 3600.0).round() as i64, user: Some(me) });
         }
         self.dirty = true;
     }
 
     fn time_entries_list(&mut self, ui: &mut Ui, ws: NaiveDate) {
         let t = self.t();
+        let me = self.data.me;
         let mut rows: Vec<(i64, i64, String, u64, usize)> = vec![];
         for x in &self.data.tasks {
             for (k, e) in x.time_entries.iter().enumerate() {
                 let i = (ts_day(e.start) - ws).num_days();
-                if (0..7).contains(&i) {
+                if (0..7).contains(&i) && entry_is(e, &x.assignees, me) {
                     rows.push((e.start, e.end, x.name.clone(), x.id, k));
                 }
             }
@@ -1097,9 +1178,27 @@ impl App {
         egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let mut remove = None;
+            let mut save = None;
             for (s, e, name, id, k) in &rows {
                 ui.horizontal(|ui| {
-                    let when = chrono::DateTime::from_timestamp(*s, 0).map(|d| d.with_timezone(&chrono::Local).format("%a %b %-d, %-I:%M %p").to_string()).unwrap_or_default();
+                    let local = chrono::DateTime::from_timestamp(*s, 0).map(|d| d.with_timezone(&chrono::Local));
+                    let when = local.map(|d| d.format("%a %b %-d, %-I:%M %p").to_string()).unwrap_or_default();
+                    if let Some((_, _, start, hours)) = self.sweep.entry_edit.as_mut().filter(|x| x.0 == *id && x.1 == *k) {
+                        ui.label(RichText::new(local.map(|d| d.format("%a %b %-d").to_string()).unwrap_or_default()).color(t.text2));
+                        let st = ui.add(egui::TextEdit::singleline(start).hint_text("09:00").desired_width(54.0));
+                        name_it(&st, "Entry start");
+                        let hr = ui.add(egui::DragValue::new(hours).range(0.0..=24.0).speed(0.05).max_decimals(2).suffix("h"));
+                        name_it(&hr, "Entry hours");
+                        ui.label(name.as_str());
+                        if ui.button("Save").clicked() {
+                            let day = local.map(|d| d.date_naive()).unwrap_or_else(today);
+                            save = Some((*id, *k, super::more::reminder_ts(day, start), *hours));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.sweep.entry_edit = None;
+                        }
+                        return;
+                    }
                     ui.label(RichText::new(when).color(t.text2));
                     if ui.link(name).clicked() {
                         self.actions.push(Action::Open(*id));
@@ -1108,6 +1207,12 @@ impl App {
                         if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
                             remove = Some((*id, *k));
                         }
+                        let ed = ui.add(egui::Button::new(RichText::new("Edit").small()).frame(false));
+                        name_it(&ed, &format!("Edit entry {}", name));
+                        if ed.clicked() {
+                            let start = local.map(|d| d.format("%H:%M").to_string()).unwrap_or_else(|| "09:00".into());
+                            self.sweep.entry_edit = Some((*id, *k, start, (e - s) as f64 / 3600.0));
+                        }
                         ui.label(fmt_duration(e - s));
                     });
                 });
@@ -1115,10 +1220,19 @@ impl App {
             if rows.is_empty() {
                 ui.label(RichText::new("No time entries this week").color(t.text3));
             }
+            if let Some((id, k, start, hours)) = save {
+                if let Some(e) = self.data.tasks.iter_mut().find(|x| x.id == id).and_then(|x| x.time_entries.get_mut(k)) {
+                    e.start = start;
+                    e.end = start + (hours * 3600.0).round() as i64;
+                    self.dirty = true;
+                }
+                self.sweep.entry_edit = None;
+            }
             if let Some((id, k)) = remove {
                 if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == id) {
                     if k < task.time_entries.len() {
                         task.time_entries.remove(k);
+                        self.sweep.entry_edit = None;
                         self.dirty = true;
                     }
                 }
@@ -1132,10 +1246,11 @@ impl App {
             ui.set_width(ui.available_width());
             for m in self.data.members.clone() {
                 let mut total = 0;
-                for x in self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id)) {
+                for x in &self.data.tasks {
                     for e in &x.time_entries {
                         let i = (ts_day(e.start) - ws).num_days();
-                        if (0..7).contains(&i) {
+                        // credited to whoever tracked it (old entries: the assignees)
+                        if (0..7).contains(&i) && e.user.map_or(x.assignees.contains(&m.id), |u| u == m.id) {
                             total += e.end - e.start;
                         }
                     }
@@ -1150,6 +1265,26 @@ impl App {
                 });
             }
         });
+    }
+}
+
+/// True when a time entry counts for `who`: tracked by them, or (entries
+/// from before the tracker was kept) on a task assigned to them or nobody.
+pub(super) fn entry_is(e: &TimeEntry, assignees: &[u64], who: u64) -> bool {
+    match e.user {
+        Some(u) => u == who,
+        None => assignees.is_empty() || assignees.contains(&who),
+    }
+}
+
+/// Hub filters: 0 all, 1 mine, 2 made by others, 3 my private ones.
+fn hub_shows(filter: u8, owner: u64, private: bool, me: u64) -> bool {
+    match filter {
+        1 => owner == me,
+        2 => owner != me && owner != 0,
+        3 => private && owner == me,
+        // someone else's private item stays out of the lists
+        _ => !private || owner == me || owner == 0,
     }
 }
 

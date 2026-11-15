@@ -159,6 +159,19 @@ impl App {
         }
     }
 
+    /// A request was turned down without naming a conversation. Servers from
+    /// before refusals named theirs answer a refused call_join this way, so
+    /// while waiting for a huddle's token it's taken as that refusal, unless
+    /// another request went out shortly before the call_join (the server
+    /// answers in order, so the refusal could be that one's).
+    pub(super) fn huddle_denied_unnamed(&mut self) {
+        let Some(asked) = self.huddle.asked.filter(|_| self.huddle.waiting) else { return };
+        let other_first = self.sync_rt.other_asked.is_some_and(|t| t <= asked && asked.duration_since(t) < std::time::Duration::from_secs(HUDDLE_JOIN_SECS));
+        if let Some(ch) = self.huddle.channel.filter(|_| !other_first) {
+            self.huddle_denied(ch);
+        }
+    }
+
     /// Once per frame: start the call when the token is here, take in news.
     pub(super) fn huddle_tick(&mut self, ctx: Option<&egui::Context>) {
         if self.huddle.waiting && self.huddle.asked.is_some_and(|t| t.elapsed() >= std::time::Duration::from_secs(HUDDLE_JOIN_SECS)) {

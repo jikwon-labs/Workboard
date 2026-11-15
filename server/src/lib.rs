@@ -30,8 +30,8 @@
 // change roles and remove someone's access.
 //
 // Accounts: joining with an invite code (or setting up an empty server) can
-// also choose a password; the account's email is the one on the person's
-// member record. With it the person signs in on any other computer or phone
+// also choose a password (someone who already has one keeps it); the
+// account's email is the one on the person's member record. With it the person signs in on any other computer or phone
 // without a new code. When mail.json is set up the server emails invite codes
 // (with a link to /join) and password-reset codes (POST /auth/forgot).
 // Removing someone's access also deletes their account.
@@ -58,7 +58,7 @@ use tokio::sync::{broadcast, watch};
 use wb_net::{Backup, Msg, Person, Role, CODE_AUTH, CODE_DENIED, MIN_PASSWORD};
 
 mod files;
-pub use files::{file_name_ok, parse_range, FILES_DIR, MAX_FILE};
+pub use files::{collect_garbage, file_name_ok, parse_range, FILES_DIR, FILE_KEEP_DAYS, MAX_FILE};
 pub mod mail;
 pub use mail::{load_mail, MailCfg, MAIL_FILE, OUTBOX_DIR};
 
@@ -82,6 +82,8 @@ pub const RESET_MINUTES: i64 = 30;
 pub const MAX_TRIES: u32 = 5;
 /// ...for this long.
 pub const LOCK_MINUTES: i64 = 15;
+/// At most this many emails' wrong tries are kept in memory.
+const MAX_FAIL_ENTRIES: usize = 10_000;
 /// PBKDF2-HMAC-SHA256 rounds for new password hashes.
 const PBKDF2_ROUNDS: u32 = 100_000;
 /// before-restore-*.json copies kept (the newest ones).
@@ -260,6 +262,13 @@ impl Account {
         Account { email: email.trim().to_string(), salt: hex(&salt), hash: hex(&pbkdf2_sha256(password.as_bytes(), &salt, PBKDF2_ROUNDS)), rounds: PBKDF2_ROUNDS, created: now_ms() }
     }
 
+    /// The same password hash under another email (hashing takes a
+    /// moment, so it's done before taking the hub's lock).
+    fn with_email(mut self, email: &str) -> Account {
+        self.email = email.trim().to_string();
+        self
+    }
+
     fn check(&self, password: &str) -> bool {
         let salt: Vec<u8> = (0..self.salt.len() / 2).filter_map(|i| u8::from_str_radix(&self.salt[2 * i..2 * i + 2], 16).ok()).collect();
         same(&hex(&pbkdf2_sha256(password.as_bytes(), &salt, self.rounds)), &self.hash)
@@ -360,8 +369,16 @@ impl Saved {
         password_problem(password)
     }
 
+    /// Whether an admin (not only the owner) may make and see a code for
+    /// `member`: a code signs in as that person, so only for plain members
+    /// who haven't set up an account (new people).
+    fn admin_may_invite(&self, member: u64) -> bool {
+        self.role_of(member) == Role::Member && !self.accounts.contains_key(&member)
+    }
+
     /// Everyone the workspace knows, with their access, as `viewer` may see
-    /// it: a code for the owner signs in as the owner, so only the owner sees it.
+    /// it: a code signs in as its person, so admins see only the codes they
+    /// may make (see admin_may_invite); the owner sees every code.
     fn people(&self, canon: Option<&Value>, viewer: Role) -> Vec<Person> {
         let mut ids: Vec<u64> = canon.and_then(|c| c.get("members")).and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.get("id")?.as_u64()).collect()).unwrap_or_default();
         for d in self.devices.values() {
@@ -374,7 +391,7 @@ impl Saved {
                 member,
                 role: self.role_of(member),
                 devices: self.devices.values().filter(|d| d.member == member).count(),
-                invite: self.open_invite(member, now_ms()).cloned().filter(|_| viewer == Role::Owner || self.role_of(member) != Role::Owner),
+                invite: self.open_invite(member, now_ms()).cloned().filter(|_| viewer == Role::Owner || self.admin_may_invite(member)),
                 account: self.accounts.contains_key(&member),
             })
             .collect()
@@ -597,12 +614,30 @@ impl Inner {
 
     fn failed(&mut self, email: &str) {
         let now = now_ms();
+        if self.fails.len() >= MAX_FAIL_ENTRIES {
+            self.prune_fails(now);
+        }
         let e = self.fails.entry(norm_email(email)).or_insert((0, now));
         if now - e.1 >= LOCK_MINUTES * 60_000 {
             e.0 = 0;
         }
         e.0 += 1;
         e.1 = now;
+    }
+
+    /// Forget wrong tries that no longer count (older than LOCK_MINUTES).
+    /// When that isn't enough (someone typing many different emails), drop
+    /// the oldest emails that aren't locked; locked ones stay until they expire.
+    fn prune_fails(&mut self, now: i64) {
+        self.fails.retain(|_, (_, last)| now - *last < LOCK_MINUTES * 60_000);
+        if self.fails.len() >= MAX_FAIL_ENTRIES {
+            let mut open: Vec<(i64, String)> = self.fails.iter().filter(|(_, (n, _))| *n < MAX_TRIES).map(|(e, (_, last))| (*last, e.clone())).collect();
+            open.sort();
+            let extra = self.fails.len() + 1 - MAX_FAIL_ENTRIES / 2;
+            for (_, e) in open.into_iter().take(extra) {
+                self.fails.remove(&e);
+            }
+        }
     }
 }
 
@@ -701,6 +736,20 @@ impl Hub {
         }
     }
 
+    /// Daily: delete chat files nothing names anymore (see collect_garbage),
+    /// and forget wrong sign-in tries that no longer count.
+    fn clean_up(&self) {
+        let canon = {
+            let mut g = self.inner.lock().unwrap();
+            g.prune_fails(now_ms());
+            g.canon.as_ref().map(|c| serde_json::to_string(c).unwrap_or_default())
+        };
+        let gone = collect_garbage(&self.home, canon.as_deref(), std::time::SystemTime::now());
+        if !gone.is_empty() {
+            eprintln!("deleted {} file(s) no message names anymore", gone.len());
+        }
+    }
+
     fn broadcast_canon(&self, g: &mut Inner) {
         g.saved.rev += 1;
         g.dirty = true;
@@ -710,17 +759,26 @@ impl Hub {
     }
 
     /// Check a hello. Ok: (member, role, tag, new token).
+    ///
+    /// Hashing a password takes a moment (PBKDF2), so it happens outside the
+    /// hub's lock: what's needed is read under the lock, hashed without it,
+    /// and the result committed under the lock again, after checking that
+    /// nothing it relied on changed meanwhile.
     fn sign_in(&self, h: &Hello) -> Result<(u64, Role, u16, Option<String>), String> {
-        let mut g = self.inner.lock().unwrap();
         let device = h.device.as_str();
         // a password-reset code from the email POST /auth/forgot sent
         if let Some(code) = given(&h.reset_code) {
             let email = given(&h.email).ok_or("Type the email you sign in with.")?;
-            if let Some(why) = g.locked(email) {
+            if let Some(why) = self.inner.lock().unwrap().locked(email) {
                 return Err(why);
             }
             let pw = h.new_password.as_deref().unwrap_or("");
             if let Some(why) = password_problem(pw) {
+                return Err(why);
+            }
+            let hashed = Account::new("", pw);
+            let mut g = self.inner.lock().unwrap();
+            if let Some(why) = g.locked(email) {
                 return Err(why);
             }
             let key = norm_email(email);
@@ -733,16 +791,23 @@ impl Hub {
             g.resets.remove(&key);
             g.fails.remove(&key);
             let kept = g.saved.accounts[&member].email.clone();
-            g.saved.accounts.insert(member, Account::new(&kept, pw));
+            g.saved.accounts.insert(member, hashed.with_email(&kept));
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(code) = given(&h.invite) {
+            // a password to choose, hashed before the lock (checked below)
+            let hashed = h.new_password.as_deref().filter(|pw| password_problem(pw).is_none()).map(|pw| Account::new("", pw));
+            let mut g = self.inner.lock().unwrap();
             let Some(key) = g.saved.find_invite(code) else {
                 return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
             };
             let member = g.saved.invites[&key].member;
-            // choosing a password: check it all before the code is used up
+            // choosing a password: check it all before the code is used up.
+            // Someone who already has a password keeps it: a code signs this
+            // computer in, it doesn't take over their account (they use their
+            // password, or Forgot password, to change it).
             let account = match h.new_password.as_deref() {
+                Some(_) if g.saved.accounts.contains_key(&member) => None,
                 Some(pw) => {
                     let email = given(&h.email).map(|e| e.trim().to_string()).unwrap_or_else(|| member_field(g.canon.as_ref(), member, "email"));
                     if email.is_empty() {
@@ -751,7 +816,10 @@ impl Hub {
                     if let Some(why) = g.saved.account_problem(member, &email, pw) {
                         return Err(why);
                     }
-                    Some(Account::new(&email, pw))
+                    match hashed {
+                        Some(a) => Some(a.with_email(&email)),
+                        None => return Err(password_problem(pw).unwrap_or_else(|| "Choose another password.".into())),
+                    }
                 }
                 None => None,
             };
@@ -765,32 +833,49 @@ impl Hub {
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let (Some(email), Some(pw)) = (given(&h.email), h.password.as_deref()) {
-            if let Some(why) = g.locked(email) {
-                return Err(why);
-            }
-            let found = g.saved.account_member(email);
-            let ok = match found {
-                Some(m) => g.saved.accounts[&m].check(pw),
+            // the try counts as a wrong one until the password proves right,
+            // so many tries at once can't get past MAX_TRIES while they hash
+            let stored = {
+                let mut g = self.inner.lock().unwrap();
+                if let Some(why) = g.locked(email) {
+                    return Err(why);
+                }
+                g.failed(email);
+                g.saved.account_member(email).map(|m| (m, g.saved.accounts[&m].clone()))
+            };
+            let ok = match &stored {
+                Some((_, a)) => a.check(pw),
                 None => {
                     // as slow as a real check, so the answer doesn't tell who has an account
                     let _ = Account::new("x@x.x", pw);
                     false
                 }
             };
-            let Some(member) = found.filter(|_| ok) else {
-                g.failed(email);
+            let mut g = self.inner.lock().unwrap();
+            // the account may have changed or gone meanwhile
+            let member = stored.filter(|(m, a)| ok && g.saved.accounts.get(m) == Some(a)).map(|(m, _)| m);
+            let Some(member) = member else {
                 return Err("That email and password don't match an account on this server.".into());
             };
             g.fails.remove(&norm_email(email));
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(token) = &h.token {
+            let g = self.inner.lock().unwrap();
             return match g.saved.devices.get(device) {
                 Some(d) if same(&d.token, &hash_token(token)) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
                 _ => Err("This computer isn't signed in to this server anymore. Sign in with your email and password, or ask the owner or an admin for a new invite code.".into()),
             };
         }
         if let Some(member) = h.claim {
+            let hashed = h.new_password.as_deref().filter(|pw| password_problem(pw).is_none()).map(|pw| Account::new("", pw));
+            let mut g = self.inner.lock().unwrap();
+            // a server that once had a workspace (its revision moved past 0)
+            // but lost workspace.json is never up for grabs: its owner brings
+            // the workspace back with `workboard-server restore`.
+            if g.canon.is_none() && g.saved.rev > 0 {
+                return Err("This server lost its workspace file. Ask its owner to restore a backup on the server (workboard-server restore).".into());
+            }
             // only the very first claim wins: two people setting up the same
             // empty server at once must not end up with their workspaces merged.
             // A claim that never brought its workspace (the app quit right
@@ -817,7 +902,8 @@ impl Hub {
                     if let Some(why) = g.saved.account_problem(member, &email, pw) {
                         return Err(why);
                     }
-                    g.saved.accounts.insert(member, Account::new(&email, pw));
+                    let Some(a) = hashed else { return Err(password_problem(pw).unwrap_or_else(|| "Choose another password.".into())) };
+                    g.saved.accounts.insert(member, a.with_email(&email));
                 }
                 g.saved.set_role(member, Role::Owner);
                 return Ok(self.signed_in(g, device, member, h.tag));
@@ -836,22 +922,41 @@ impl Hub {
         (member, role, tag, Some(token))
     }
 
-    /// Set up `member`'s account or change its password.
+    /// Set up `member`'s account or change its password. The hashing happens
+    /// outside the hub's lock (see sign_in).
     fn set_password(&self, member: u64, email: &str, password: &str, old: Option<&str>) -> Result<Msg, String> {
-        let mut g = self.inner.lock().unwrap();
-        if let Some(existing) = g.saved.accounts.get(&member).cloned() {
-            if let Some(why) = g.locked(&existing.email) {
+        let existing = {
+            let mut g = self.inner.lock().unwrap();
+            let existing = g.saved.accounts.get(&member).cloned();
+            if let Some(a) = &existing {
+                if let Some(why) = g.locked(&a.email) {
+                    return Err(why);
+                }
+                // a wrong try until the current password proves right
+                g.failed(&a.email);
+            }
+            if let Some(why) = g.saved.account_problem(member, email, password) {
                 return Err(why);
             }
-            if !existing.check(old.unwrap_or("")) {
-                g.failed(&existing.email);
+            existing
+        };
+        if let Some(a) = &existing {
+            if !a.check(old.unwrap_or("")) {
                 return Err("Your current password isn't right.".into());
             }
+        }
+        let fresh = Account::new(email, password);
+        let mut g = self.inner.lock().unwrap();
+        if g.saved.accounts.get(&member) != existing.as_ref() {
+            return Err("Your account changed in the meantime. Try again.".into());
         }
         if let Some(why) = g.saved.account_problem(member, email, password) {
             return Err(why);
         }
-        g.saved.accounts.insert(member, Account::new(email, password));
+        if let Some(a) = &existing {
+            g.fails.remove(&norm_email(&a.email));
+        }
+        g.saved.accounts.insert(member, fresh);
         g.dirty = true;
         drop(g);
         let _ = self.access.send(());
@@ -1009,6 +1114,11 @@ impl Hub {
                 // a code for the owner signs in as the owner: only the owner makes one
                 if g.saved.role_of(who) == Role::Owner && me != Role::Owner {
                     return Reply::Denied("Only the owner can make a code for the owner.".into());
+                }
+                // a code signs in as that person: admins make them only for
+                // members who haven't set up an account yet
+                if me != Role::Owner && !g.saved.admin_may_invite(who) {
+                    return Reply::Denied("Only the owner can make a code for an admin or for someone who already has a password. They can sign in with their email and password, or use Forgot password.".into());
                 }
                 g.saved.drop_expired_invites(now_ms());
                 let code = g.saved.make_invite(who, role);
@@ -1482,6 +1592,10 @@ pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, option
                     if tick % 60 == 1 {
                         hub.backup_now();
                     }
+                    // ten minutes after starting (after a backup), then daily
+                    if tick % 86_400 == 600 {
+                        hub.clean_up();
+                    }
                 })
                 .await;
             }
@@ -1695,5 +1809,226 @@ mod tests {
         let mut ok = json!({"members": [{"id": 1}]});
         assert!(label_role(&mut ok, 1, Role::Owner));
         assert_eq!(ok["members"][0]["role"], "Owner");
+    }
+
+    fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
+        Hub {
+            home: home.to_path_buf(),
+            inner: Mutex::new(Inner { canon, saved, dirty: false, resets: Default::default(), fails: Default::default() }),
+            updates: broadcast::channel(64).0,
+            kicks: broadcast::channel(16).0,
+            access: broadcast::channel(16).0,
+            stop: watch::channel(false).1,
+            connections: AtomicUsize::new(0),
+            max_file: MAX_FILE,
+            claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
+        }
+    }
+
+    fn hello(device: &str) -> Hello {
+        Hello { device: device.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn wrong_tries_are_forgotten_and_never_pile_up() {
+        let mut g = Inner { canon: None, saved: Saved::default(), dirty: false, resets: Default::default(), fails: Default::default() };
+        let now = now_ms();
+        // old tries no longer count and go
+        g.fails.insert("old@x.io".into(), (3, now - LOCK_MINUTES * 60_000 - 1));
+        for _ in 0..MAX_TRIES {
+            g.failed("locked@x.io");
+        }
+        g.prune_fails(now);
+        assert!(!g.fails.contains_key("old@x.io"));
+        assert!(g.locked("locked@x.io").is_some());
+        // many different emails: the map stays bounded and the locked one stays locked
+        for i in 0..(MAX_FAIL_ENTRIES + 500) {
+            g.failed(&format!("guess{}@x.io", i));
+        }
+        assert!(g.fails.len() <= MAX_FAIL_ENTRIES, "{}", g.fails.len());
+        assert!(g.locked("locked@x.io").is_some(), "flooding doesn't unlock an email");
+        assert!(g.fails.contains_key(&format!("guess{}@x.io", MAX_FAIL_ENTRIES + 499)), "the newest tries are kept");
+    }
+
+    #[test]
+    fn password_checks_dont_hold_up_everyone_else() {
+        let home = std::env::temp_dir().join(format!("wb-lock-{:x}", wb_sync::random_u64()));
+        let mut saved = Saved::default();
+        saved.accounts.insert(2, Account::new("bo@team.io", "bo-secret-22"));
+        let hub = Arc::new(test_hub(&home, Some(json!({"members": [{"id": 1}, {"id": 2}]})), saved));
+        let t = std::time::Instant::now();
+        let _ = Account::new("x@x.x", "timing it");
+        let one_hash = t.elapsed();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // people trying passwords all the time (different emails, so none is locked)
+        let workers: Vec<_> = (0..4)
+            .map(|w| {
+                let (hub, stop) = (hub.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    let mut i = 0;
+                    while !stop.load(Ordering::Relaxed) {
+                        let h = Hello { email: Some(format!("try{}-{}@team.io", w, i)), password: Some("nope-nope".into()), ..hello("d") };
+                        assert!(hub.sign_in(&h).is_err());
+                        i += 1;
+                    }
+                })
+            })
+            .collect();
+        // meanwhile sync takes the lock: it doesn't wait for their hashing
+        let mut waits = vec![];
+        let until = std::time::Instant::now() + Duration::from_millis(600).max(one_hash * 20);
+        while std::time::Instant::now() < until {
+            let t = std::time::Instant::now();
+            drop(hub.inner.lock().unwrap());
+            waits.push(t.elapsed());
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        stop.store(true, Ordering::Relaxed);
+        for w in workers {
+            w.join().unwrap();
+        }
+        waits.sort();
+        let median = waits[waits.len() / 2];
+        assert!(median < one_hash / 4, "median wait {:?}, one hash {:?}", median, one_hash);
+        // and the right password still signs in, the wrong one doesn't
+        assert_eq!(hub.sign_in(&Hello { email: Some("Bo@team.io".into()), password: Some("bo-secret-22".into()), ..hello("phone") }).map(|r| r.0), Ok(2));
+        assert!(hub.sign_in(&Hello { email: Some("bo@team.io".into()), password: Some("bo-secret-23".into()), ..hello("phone") }).is_err());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn tries_made_at_once_still_stop_at_the_limit() {
+        let home = std::env::temp_dir().join(format!("wb-limit-{:x}", wb_sync::random_u64()));
+        let mut saved = Saved::default();
+        saved.accounts.insert(2, Account::new("bo@team.io", "bo-secret-22"));
+        let hub = Arc::new(test_hub(&home, Some(json!({"members": [{"id": 2}]})), saved));
+        let guesses: Vec<_> = (0..20)
+            .map(|i| {
+                let hub = hub.clone();
+                std::thread::spawn(move || hub.sign_in(&Hello { email: Some("bo@team.io".into()), password: Some(format!("guess-{}", i)), ..hello("d") }).unwrap_err())
+            })
+            .collect();
+        let answers: Vec<String> = guesses.into_iter().map(|g| g.join().unwrap()).collect();
+        let checked = answers.iter().filter(|a| !a.contains("Too many")).count();
+        assert!(checked <= MAX_TRIES as usize, "{} guesses were checked", checked);
+        let right = Hello { email: Some("bo@team.io".into()), password: Some("bo-secret-22".into()), ..hello("d") };
+        assert!(hub.sign_in(&right).unwrap_err().contains("Too many"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_server_that_had_a_workspace_is_never_claimed_again() {
+        let home = std::env::temp_dir().join(format!("wb-claimed-{:x}", wb_sync::random_u64()));
+        let claim = |device: &str| Hello { claim: Some(9), ..hello(device) };
+        // workspace.json is gone but server.json says there was one (rev > 0)
+        let mut saved = Saved { rev: 12, ..Default::default() };
+        saved.devices.insert("owner-mac".into(), Device { tag: 1, member: 1, token: hash_token("t"), created: now_ms() - 3_600_000 });
+        saved.roles.insert(1, Role::Owner);
+        let hub = test_hub(&home, None, saved);
+        for device in ["stranger", "owner-mac"] {
+            assert!(hub.sign_in(&claim(device)).unwrap_err().contains("restore"), "{}", device);
+        }
+        assert_eq!(hub.inner.lock().unwrap().saved.role_of(1), Role::Owner, "nothing was cleared");
+        // even with nobody's computer left on it
+        hub.inner.lock().unwrap().saved.devices.clear();
+        assert!(hub.sign_in(&claim("stranger")).is_err());
+        // the owner's way back: a restore brings the workspace, then the token works
+        hub.inner.lock().unwrap().saved.devices.insert("owner-mac".into(), Device { tag: 1, member: 1, token: hash_token("t"), created: 0 });
+        assert_eq!(hub.sign_in(&Hello { token: Some("t".into()), ..hello("owner-mac") }).map(|r| r.0), Ok(1));
+
+        // a claim that never brought its workspace (rev 0) gives way after claim_wait
+        let mut saved = Saved::default();
+        saved.devices.insert("quit-app".into(), Device { tag: 1, member: 1, token: hash_token("t"), created: now_ms() - (CLAIM_WAIT_SECS as i64 + 1) * 1000 });
+        saved.roles.insert(1, Role::Owner);
+        let hub = test_hub(&home, None, saved);
+        assert_eq!(hub.sign_in(&claim("stranger")).map(|r| (r.0, r.1)), Ok((9, Role::Owner)));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn admins_make_codes_only_for_new_members_and_codes_never_replace_a_password() {
+        let home = std::env::temp_dir().join(format!("wb-codes-{:x}", wb_sync::random_u64()));
+        let canon = json!({"members": [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4, "email": "di@team.io"}, {"id": 5}]});
+        let mut saved = Saved::default();
+        saved.set_role(1, Role::Owner);
+        saved.set_role(2, Role::Admin);
+        saved.set_role(5, Role::Admin);
+        saved.accounts.insert(3, Account::new("cy@team.io", "cy-secret-33"));
+        let hub = test_hub(&home, Some(canon), saved);
+        let ask = |from: u64, who: u64| match hub.request(from, Msg::CreateInvite { member: who, role: Role::Member }) {
+            Reply::To(Msg::Invite { code, .. }) => Ok(code),
+            Reply::To(_) => Err("other answer".to_string()),
+            Reply::Denied(why) => Err(why),
+        };
+        // admin 2: not for the owner, another admin, or someone with a password
+        assert!(ask(2, 1).unwrap_err().contains("Only the owner"));
+        assert!(ask(2, 5).unwrap_err().contains("Only the owner"));
+        assert!(ask(2, 3).unwrap_err().contains("Only the owner"));
+        // a new member without an account: yes
+        let code4 = ask(2, 4).unwrap();
+        // the owner may make any of them
+        let code3 = ask(1, 3).unwrap();
+        assert!(ask(1, 5).is_ok());
+        // admins don't see the codes they couldn't make
+        let people = {
+            let g = hub.inner.lock().unwrap();
+            g.saved.people(g.canon.as_ref(), Role::Admin)
+        };
+        let shown = |m: u64| people.iter().find(|p| p.member == m).unwrap().invite.is_some();
+        assert!(shown(4) && !shown(3) && !shown(5));
+
+        // redeeming a code for someone with a password signs in but keeps the password
+        let join = |code: &str, pw: &str| Hello { invite: Some(code.into()), new_password: Some(pw.into()), ..hello("new-mac") };
+        assert_eq!(hub.sign_in(&join(&code3, "taken-over-1")).map(|r| r.0), Ok(3));
+        let cy = |pw: &str| Hello { email: Some("cy@team.io".into()), password: Some(pw.into()), ..hello("phone") };
+        assert!(hub.sign_in(&cy("taken-over-1")).is_err());
+        assert_eq!(hub.sign_in(&cy("cy-secret-33")).map(|r| r.0), Ok(3));
+        // a new member's code still sets up their account
+        assert_eq!(hub.sign_in(&join(&code4, "di-secret-44")).map(|r| r.0), Ok(4));
+        assert_eq!(hub.inner.lock().unwrap().saved.accounts[&4].email, "di@team.io");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn files_nothing_names_go_after_30_days_but_not_while_a_backup_names_them() {
+        let home = std::env::temp_dir().join(format!("wb-gc-{:x}", wb_sync::random_u64()));
+        let dir = home.join(FILES_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(home.join(BACKUP_DIR)).unwrap();
+        let name = |c: char| std::iter::repeat(c).take(64).collect::<String>();
+        let now = std::time::SystemTime::now();
+        let old = now - Duration::from_secs((FILE_KEEP_DAYS + 1) * 86_400);
+        let put = |n: &str, when: std::time::SystemTime| {
+            std::fs::write(dir.join(n), b"x").unwrap();
+            std::fs::write(dir.join(format!("{}.type", n)), "image/png").unwrap();
+            std::fs::File::options().write(true).open(dir.join(n)).unwrap().set_modified(when).unwrap();
+        };
+        let (in_canon, in_backup, orphan, recent) = (name('a'), name('b'), name('c'), name('d'));
+        for n in [&in_canon, &in_backup, &orphan] {
+            put(n, old);
+        }
+        put(&recent, now);
+        std::fs::write(dir.join(".tmp-0011"), b"part").unwrap();
+        std::fs::File::options().write(true).open(dir.join(".tmp-0011")).unwrap().set_modified(old).unwrap();
+        let canon = json!({"channels": [{"messages": [{"attachments": [{"file": in_canon, "name": "a.png"}]}]}]}).to_string();
+        std::fs::write(home.join(BACKUP_DIR).join("daily-20261101.json"), json!({"tasks": [{"attachments": [{"file": in_backup}]}]}).to_string()).unwrap();
+
+        // no team copy: nothing goes
+        assert!(collect_garbage(&home, None, now).is_empty());
+        assert_eq!(collect_garbage(&home, Some(&canon), now), vec![orphan.clone()]);
+        assert!(!dir.join(&orphan).exists() && !dir.join(format!("{}.type", orphan)).exists());
+        assert!(!dir.join(".tmp-0011").exists(), "an old broken upload goes too");
+        for n in [&in_canon, &in_backup, &recent] {
+            assert!(dir.join(n).exists() && dir.join(format!("{}.type", n)).exists(), "{} stays", &n[..4]);
+        }
+        // once the backup that named it is gone, it goes too
+        std::fs::remove_file(home.join(BACKUP_DIR).join("daily-20261101.json")).unwrap();
+        assert_eq!(collect_garbage(&home, Some(&canon), now), vec![in_backup.clone()]);
+        // a backup that can't be read: nothing is deleted
+        put(&orphan, old);
+        std::fs::create_dir_all(home.join(BACKUP_DIR).join("odd.json")).unwrap();
+        assert!(collect_garbage(&home, Some(&canon), now).is_empty());
+        assert!(dir.join(&orphan).exists());
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

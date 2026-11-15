@@ -2511,3 +2511,37 @@ fn mentions_in_private_channels_i_am_not_in_stay_out() {
     a.data.channels.iter_mut().find(|c| c.private).unwrap().members.push(1);
     assert_eq!(a.inbox_badge(), 1);
 }
+
+#[test]
+fn an_older_servers_unnamed_refusal_ends_a_waiting_huddle() {
+    let mut a = app();
+    let ch = a.data.channels[0].id;
+    let now = std::time::Instant::now();
+    let waiting = |asked: std::time::Instant| {
+        let mut h = huddle::HuddleRt::default();
+        (h.channel, h.waiting, h.asked) = (Some(ch), true, Some(asked));
+        h
+    };
+    // only the call_join went out: its refusal ends the huddle at once
+    a.huddle = waiting(now);
+    a.sync_rt.other_asked = None;
+    a.huddle_denied_unnamed();
+    assert!(a.huddle.channel.is_none() && !a.huddle.waiting);
+    // another request went just before it: the refusal may be that one's, keep waiting
+    a.huddle = waiting(now);
+    a.sync_rt.other_asked = Some(now - std::time::Duration::from_secs(1));
+    a.huddle_denied_unnamed();
+    assert!(a.huddle.waiting && a.huddle.channel == Some(ch));
+    // one sent after the call_join is answered after it, and one long before is done
+    a.sync_rt.other_asked = Some(now + std::time::Duration::from_millis(5));
+    a.huddle_denied_unnamed();
+    assert!(a.huddle.channel.is_none());
+    a.huddle = waiting(now);
+    a.sync_rt.other_asked = Some(now - std::time::Duration::from_secs(huddle::HUDDLE_JOIN_SECS + 1));
+    a.huddle_denied_unnamed();
+    assert!(a.huddle.channel.is_none());
+    // not waiting for a huddle: nothing to end
+    a.huddle = huddle::HuddleRt::default();
+    a.huddle_denied_unnamed();
+    assert!(a.huddle.channel.is_none());
+}

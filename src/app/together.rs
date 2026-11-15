@@ -143,6 +143,9 @@ pub struct SyncRt {
     pub(super) restore_confirm: Option<String>,
     /// The person was told the team's copy couldn't be read (said once).
     told_unreadable: bool,
+    /// When a request other than joining a huddle last went to the server
+    /// (see huddle_denied_unnamed).
+    pub(super) other_asked: Option<std::time::Instant>,
 }
 
 // ---------------------------------------------------------------- tokens
@@ -436,7 +439,10 @@ impl App {
                     self.sync_rt.role = Some(role);
                     self.send_auto_invites();
                 }
-                NetEvent::Denied(why) => self.toast = Some((why, now_ts())),
+                NetEvent::Denied(why) => {
+                    self.huddle_denied_unnamed();
+                    self.toast = Some((tr(&why).to_string(), now_ts()));
+                }
                 NetEvent::CallDenied { channel, why } => {
                     self.huddle_denied(channel);
                     self.toast = Some((why, now_ts()));
@@ -591,7 +597,12 @@ impl App {
     /// Send an access request to the server (owners and admins).
     pub(super) fn access_request(&mut self, msg: NetMsg) {
         match &self.sync_rt.net {
-            Some(n) if self.sync_rt.net_status == Some(NetStatus::Connected) => n.send(msg),
+            Some(n) if self.sync_rt.net_status == Some(NetStatus::Connected) => {
+                if !matches!(msg, NetMsg::CallJoin { .. }) {
+                    self.sync_rt.other_asked = Some(std::time::Instant::now());
+                }
+                n.send(msg)
+            }
             _ => self.toast = Some((tr("Not connected to the server right now.").into(), now_ts())),
         }
     }

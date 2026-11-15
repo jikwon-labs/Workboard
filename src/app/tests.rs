@@ -2688,7 +2688,7 @@ fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
     a.data.channels.push(Channel { id: 7300, kind: ChannelKind::Direct, members: vec![2, 3], ..Default::default() });
     a.sync_note_change();
     // I write in the channel just as I'm taken out of it
-    a.data.channels.iter_mut().find(|c| c.id == ch).unwrap().messages.push(Message { id: 7301, author: me, text: "my last words".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None });
+    a.data.channels.iter_mut().find(|c| c.id == ch).unwrap().messages.push(Message { id: 7301, author: me, text: "my last words".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None, mentions: vec![] });
     let mut team = serde_json::to_value(&a.data).unwrap();
     crate::sync::hide(&mut team, &[ch, 7300]);
     a.merge_in(&[team], &[ch]);

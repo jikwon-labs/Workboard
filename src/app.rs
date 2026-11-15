@@ -610,6 +610,7 @@ impl App {
         };
         let mut data = data;
         data.fix_activity_ids();
+        together::fill_sync_baseline(&mut data);
         let loc = data
             .first_list()
             .map(Location::List)

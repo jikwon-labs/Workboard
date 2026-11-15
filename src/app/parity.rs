@@ -133,7 +133,10 @@ fn age_matches(which: u8, ts: i64) -> bool {
 
 fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
     let td = today();
-    let week_start = td - Duration::days(td.weekday().num_days_from_monday() as i64);
+    // weeks start on Sunday as in the calendar, or Monday with the Labs option
+    let monday = data.extra.labs.iter().any(|l| l == "week_monday");
+    let back = if monday { td.weekday().num_days_from_monday() } else { td.weekday().num_days_from_sunday() };
+    let week_start = td - Duration::days(back as i64);
     match due {
         1 => t.due.map_or(false, |d| d < td) && !data.is_closed(t),
         2 => t.due == Some(td),
@@ -436,6 +439,7 @@ impl App {
             t.created = now;
             t.updated = now;
             t.timer_started = None;
+            t.timer_by = None;
             t.time_entries.clear();
             t.activity = vec![Activity { ts: now, author: app.data.me, text: format!("duplicated this task from {}", src.name), comment: false, ..Default::default() }];
             t.order = src.order;
@@ -707,8 +711,10 @@ impl App {
                     let mut e = task.clone();
                     if on {
                         e.assignees.retain(|a| *a != m.id);
-                    } else {
+                    } else if self.data.extra.apps.multiple_assignees {
                         e.assignees.push(m.id);
+                    } else {
+                        e.assignees = vec![m.id];
                     }
                     self.actions.push(Action::Replace(e));
                     close_any(ui);
@@ -766,6 +772,7 @@ impl App {
         }
         if ui.button(tr("Remind me")).clicked() {
             self.modal = Some(Modal::Reminder { text: task.name.clone(), date: Some(today() + Duration::days(1)), time: "09:00".into() });
+            self.reminder_about = (Some(task.id), None);
             close_any(ui);
         }
         if ui.button(if task.timer_started.is_some() { tr("Stop timer") } else { tr("Start timer") }).clicked() {
@@ -855,7 +862,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Automations")).clicked() {
-            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
+            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: Some(Location::List(lid)) });
             close_any(ui);
         }
         ui.separator();
@@ -1281,7 +1288,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Automations")).clicked() {
-            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
+            self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: Some(Location::Space(sid)) });
             close_any(ui);
         }
         ui.separator();
@@ -1694,7 +1701,12 @@ impl App {
                             }
                         }
                         if let Some(a) = pick_asg {
-                            if !e.assignees.contains(&a) {
+                            if !self.data.extra.apps.multiple_assignees {
+                                if e.assignees != [a] {
+                                    e.assignees = vec![a];
+                                    ch = true;
+                                }
+                            } else if !e.assignees.contains(&a) {
                                 e.assignees.push(a);
                                 ch = true;
                             }
@@ -1809,6 +1821,9 @@ impl App {
             new.start = Some(s + shift);
         }
         new.status = first;
+        // it's open again: no Date done / Date closed until it next closes
+        new.done_at = None;
+        new.closed_at = None;
         new.activity.push(Activity { ts: now_ts(), author: self.data.me, text: format!("completed a {} repeat; next due {}", r, crate::i18n::in_english(|| fmt_date(next))), comment: false, ..Default::default() });
         for c in &mut new.checklist {
             c.done = false;
@@ -1884,20 +1899,21 @@ impl App {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Backslash)) {
             self.sidebar_collapsed = !self.sidebar_collapsed;
         }
-        // apps sweep: Cmd+[ / Cmd+] back and forward, Cmd+, Settings
-        if self.modal.is_none() && self.palette.is_none() {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::OpenBracket)) {
-                self.go_back();
-            }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::CloseBracket)) {
-                self.go_forward();
-            }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
-                self.open_settings("My Settings");
-            }
+        // Cmd+, Settings
+        if self.modal.is_none() && self.palette.is_none() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
+            self.open_settings("My Settings");
         }
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         if typing || self.modal.is_some() || self.quick_add.is_some() || self.palette.is_some() || self.rename.is_some() {
+            return;
+        }
+        // Cmd+[ / Cmd+]: back / forward, like the top bar arrows
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::OpenBracket)) {
+            self.go_back();
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::CloseBracket)) {
+            self.go_forward();
             return;
         }
         let plain = ctx.input(|i| !i.modifiers.command && !i.modifiers.alt && !i.modifiers.ctrl);

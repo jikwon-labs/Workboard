@@ -38,7 +38,7 @@ impl App {
             "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
             "Tag Manager" => Modal::TagManager { from: String::new(), to: String::new() },
             "Templates" => Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 },
-            "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() },
+            "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None },
             "Work together" => self.together_modal(),
             "My Settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();

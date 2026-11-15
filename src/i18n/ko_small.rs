@@ -1,7 +1,15 @@
 // Korean text for src/app/small (see src/i18n.rs): files.rs, huddle.rs,
-// together.rs, updater.rs and media.rs.
+// together.rs, updater.rs, media.rs and nav.rs.
 
 pub const T: &[(&str, &str)] = &[
+    // nav: workboard:// links, Inbox rows, reminders coming due
+    ("This link can't be opened in this Workspace", "이 워크스페이스에서 열 수 없는 링크입니다"),
+    ("Open link: {}", "링크 열기: {}"),
+    ("{} replied: {}", "{}님의 답글: {}"),
+    ("{} mentioned you: {}", "{}님이 나를 멘션함: {}"),
+    ("Reminder", "리마인더"),
+    ("Reminder: {}", "리마인더: {}"),
+    ("{} reminders are due", "리마인더 {}개의 시간이 되었습니다"),
     // files: attachments and the large viewer
     ("Loading {}%", "불러오는 중 {}%"),
     ("Can't show this file", "이 파일을 표시할 수 없습니다"),
@@ -25,6 +33,7 @@ pub const T: &[(&str, &str)] = &[
     ("Choose pictures or videos to send", "보낼 사진이나 동영상을 고르세요"),
     // huddle
     ("Huddles need the team's server. Connect in Work together.", "허들은 팀 서버가 있어야 합니다. 함께 작업하기에서 연결하세요."),
+    ("The server didn't answer, so the huddle didn't start. Try again in a moment.", "서버가 응답하지 않아 허들을 시작하지 못했습니다. 잠시 후 다시 시도하세요."),
     ("Click to make smaller", "클릭하면 작게 보기"),
     ("Click to make larger", "클릭하면 크게 보기"),
     ("You", "나"),
@@ -124,7 +133,7 @@ pub const T: &[(&str, &str)] = &[
     ("Email", "이메일"),
     ("Join as new member", "새 멤버로 참가"),
     // together: calls
-    ("The call opens in your browser (Jitsi Meet: free, no account). Everyone in the conversation gets a Join button.", "통화는 브라우저에서 열립니다 (Jitsi Meet: 무료, 계정 불필요). 대화에 있는 모두에게 참가 버튼이 보입니다."),
+    ("The call opens in your browser on Jitsi Meet (free). The person who starts it may be asked to sign in with Google, GitHub or Facebook; everyone else joins without an account. Everyone in the conversation gets a Join button.", "통화는 브라우저의 Jitsi Meet(무료)에서 열립니다. 통화를 시작하는 사람은 Google, GitHub, Facebook 계정으로 로그인하라는 요청을 받을 수 있고, 나머지는 계정 없이 참가합니다. 대화에 있는 모두에게 참가 버튼이 보입니다."),
     ("Call in", "통화할 곳"),
     ("Choose", "선택"),
     ("Or use your own meeting link (Zoom, Google Meet...)", "또는 내 회의 링크 사용 (Zoom, Google Meet...)"),
@@ -138,4 +147,6 @@ pub const T: &[(&str, &str)] = &[
     ("Show in sidebar", "사이드바에 표시"),
     ("Nothing is archived. Archived Spaces and Lists show here so you can restore them.", "보관된 항목이 없습니다. 보관한 스페이스와 목록은 여기에 표시되며 다시 복원할 수 있습니다."),
     ("You can send up to {} pictures or videos in one message.", "메시지 하나에 사진이나 동영상을 {}개까지 보낼 수 있습니다."),
+    ("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard.", "팀의 변경 사항을 읽지 못했습니다. 누군가 더 새 버전의 앱을 쓰고 있을 수 있으니 Workboard를 업데이트하세요."),
+    ("A saved workspace couldn't be read, so a copy was kept as {}.", "저장된 워크스페이스를 읽지 못해 사본을 {}(으)로 보관했습니다."),
 ];

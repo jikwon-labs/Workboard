@@ -344,9 +344,9 @@ fn due_date_groups_follow_the_rule() {
 fn reminders_count_when_due() {
     let mut a = app();
     let me = a.data.me;
-    a.data.extra.reminders.push(Reminder { id: 1, text: "Call".into(), due_ts: now_ts() - 60, done: false, owner: me });
-    a.data.extra.reminders.push(Reminder { id: 2, text: "Later".into(), due_ts: now_ts() + 3600, done: false, owner: me });
-    a.data.extra.reminders.push(Reminder { id: 3, text: "Done".into(), due_ts: now_ts() - 60, done: true, owner: me });
+    a.data.extra.reminders.push(Reminder { id: 1, text: "Call".into(), due_ts: now_ts() - 60, done: false, owner: me, ..Default::default() });
+    a.data.extra.reminders.push(Reminder { id: 2, text: "Later".into(), due_ts: now_ts() + 3600, done: false, owner: me, ..Default::default() });
+    a.data.extra.reminders.push(Reminder { id: 3, text: "Done".into(), due_ts: now_ts() - 60, done: true, owner: me, ..Default::default() });
     assert_eq!(a.due_reminders(), 1);
 }
 
@@ -980,10 +980,11 @@ fn a_huddle_on_the_server_connects_two_computers() {
     a.open_call_dialog();
     assert!(a.modal.is_none(), "no browser-call dialog on the server");
     assert_eq!(a.huddle.channel, Some(ch));
+    let msg_is_huddle = |x: &App| x.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.last()).and_then(|m| m.call.as_deref()).and_then(huddle::huddle_channel) == Some(ch);
+    // the card goes out once the server hands A the call token
+    net_until(&mut a, "A's huddle card", msg_is_huddle);
     a.sync_note_change();
     a.write_shared();
-    let msg_is_huddle = |x: &App| x.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.last()).and_then(|m| m.call.as_deref()).and_then(huddle::huddle_channel) == Some(ch);
-    assert!(msg_is_huddle(&a));
     net_until(&mut b, "B sees the huddle message", |b| msg_is_huddle(b));
 
     // B presses Join on it; both hear each other (a tone in tests)
@@ -1635,66 +1636,11 @@ fn new_task_fields_load_from_old_files_and_stay_out_when_empty() {
     w.watchers.push(2);
     assert!(task_changed(&t, &w));
     let mut e = t.clone();
-    e.time_entries.push(TimeEntry { start: 0, end: 60, user: None });
+    e.time_entries.push(TimeEntry { start: 0, end: 60, member: 0 });
     assert!(task_changed(&t, &e));
 }
 
 // ---------------------------------------------------------------- apps sweep (inbox, trash, forms, search, timesheets)
-
-#[test]
-fn inbox_assigned_means_assigned_to_me() {
-    let mut a = app();
-    let tid = a.data.tasks[0].id;
-    let to_me = Activity { ts: now_ts(), author: 2, text: "assigned to Me".into(), comment: false, post: false, ..Default::default() };
-    let to_sam = Activity { ts: now_ts(), author: 2, text: "assigned to Sam Lee".into(), comment: false, post: false, ..Default::default() };
-    assert!(a.assigned_to_me(&to_me));
-    assert!(!a.assigned_to_me(&to_sam));
-    assert_eq!(a.inbox_tab_of(&format!("{}:{}:2", tid, to_me.ts), &to_me), 0);
-    assert_eq!(a.inbox_tab_of("x", &to_sam), 1, "someone else's assignment is not Primary");
-    a.data.tasks[0].activity.push(to_me);
-}
-
-#[test]
-fn inbox_badge_drops_cleared_and_later_items() {
-    let mut a = app();
-    let tid = a.data.tasks[0].id;
-    let ts = now_ts() - 10;
-    a.data.tasks[0].activity.push(Activity { ts, author: 2, text: "Ping".into(), comment: true, post: false, ..Default::default() });
-    let n = a.inbox_unseen();
-    assert!(n >= 1);
-    a.data.extra.inbox_cleared.push(format!("{}:{}:2", tid, ts));
-    assert_eq!(a.inbox_unseen(), n - 1);
-    a.data.extra.inbox_cleared.clear();
-    a.data.extra.inbox_later.push(format!("{}:{}:2", tid, ts));
-    assert_eq!(a.inbox_unseen(), n - 1);
-}
-
-#[test]
-fn deleted_folder_and_space_come_back_from_trash() {
-    let mut a = app();
-    let space = a.data.spaces[0].clone();
-    let folder = space.folders[0].clone();
-    let lists: Vec<u64> = folder.lists.iter().map(|l| l.id).collect();
-    let n_tasks = a.data.tasks.iter().filter(|t| lists.contains(&t.list_id)).count();
-    assert!(n_tasks > 0);
-    a.do_delete(Target::Folder(folder.id));
-    assert!(!a.data.tasks.iter().any(|t| lists.contains(&t.list_id)));
-    let i = a.data.extra.trash.iter().position(|x| x.kind == "Folder").expect("folder in Trash");
-    a.restore_trash(i);
-    let back = a.data.spaces[0].folders.iter().find(|f| f.id == folder.id).expect("folder restored");
-    assert_eq!(back.lists.len(), folder.lists.len());
-    assert_eq!(a.data.tasks.iter().filter(|t| lists.contains(&t.list_id)).count(), n_tasks);
-
-    let all = a.data.lists_in(Location::Space(space.id)).unwrap();
-    let total = a.data.tasks.iter().filter(|t| all.contains(&t.list_id)).count();
-    a.do_delete(Target::Space(space.id));
-    assert!(!a.data.spaces.iter().any(|s| s.id == space.id));
-    let i = a.data.extra.trash.iter().position(|x| x.kind == "Space").expect("space in Trash");
-    a.restore_trash(i);
-    let s = a.data.spaces.iter().find(|s| s.id == space.id).expect("space restored");
-    assert_eq!(s.folders.len(), space.folders.len());
-    assert_eq!(a.data.tasks.iter().filter(|t| all.contains(&t.list_id)).count(), total);
-}
 
 #[test]
 fn deleted_list_comes_back_into_its_folder_with_its_details() {
@@ -1727,13 +1673,15 @@ fn deleted_list_comes_back_into_its_folder_with_its_details() {
 fn app_items_go_to_trash_and_back() {
     let mut a = app();
     let id = a.data.new_id();
-    let g = Goal { id, name: "Ship".into(), color: [1, 1, 1], due: None, owner: a.data.me, targets: vec![] };
-    a.to_trash("Goal", &g.name, &g);
-    let tm = Team { id: id + 1, name: "Core".into(), members: vec![], color: [2, 2, 2] };
-    a.to_trash("Team", &tm.name, &tm);
+    a.data.extra.goals.push(Goal { id, name: "Ship".into(), color: [1, 1, 1], due: None, owner: a.data.me, targets: vec![] });
+    a.remove_item("goal", id);
+    a.data.extra.teams.push(Team { id: id + 1, name: "Core".into(), members: vec![], color: [2, 2, 2] });
+    a.remove_item("team", id + 1);
     a.new_dashboard("Sales");
-    let d = a.data.extra.dashboards.pop().unwrap();
-    a.to_trash("Dashboard", &d.name, &d);
+    let d = a.dash_open.unwrap();
+    a.remove_item("dashboard", d);
+    assert!(a.data.extra.goals.is_empty() || !a.data.extra.goals.iter().any(|x| x.name == "Ship"));
+    assert!(!a.data.extra.dashboards.iter().any(|x| x.id == d));
     while !a.data.extra.trash.is_empty() {
         a.restore_trash(0);
     }
@@ -1778,11 +1726,9 @@ fn form_answers_check_required_number_and_email() {
 
 #[test]
 fn search_reads_copied_links_and_finds_apps_and_people() {
-    use super::more::{parse_wb_link, Hit};
+    use super::more::Hit;
     let mut a = app();
     let tid = a.data.tasks[2].id;
-    assert_eq!(parse_wb_link(&format!("workboard://task/{}", tid)), Some(("task", tid)));
-    assert_eq!(parse_wb_link("https://x"), None);
     let rows = a.search_rows(&format!("workboard://task/{}", tid), 0);
     assert_eq!(rows[0].4, Hit::Task(tid));
     let lid = a.data.first_list().unwrap();
@@ -1798,42 +1744,11 @@ fn search_reads_copied_links_and_finds_apps_and_people() {
 }
 
 #[test]
-fn timesheet_hours_only_replace_my_own_time() {
-    use super::hubs::entry_is;
-    let mut a = app();
-    let tid = a.data.tasks[0].id;
-    let day = today();
-    let start = day.and_hms_opt(10, 0, 0).unwrap().and_local_timezone(chrono::Local).single().unwrap().timestamp();
-    a.data.tasks[0].time_entries = vec![TimeEntry { start, end: start + 3600, user: Some(2) }];
-    a.set_day_time(tid, day, 2.0);
-    let t = a.task(tid).unwrap();
-    assert_eq!(t.time_entries.len(), 2, "Alex's hour stays");
-    let mine: i64 = t.time_entries.iter().filter(|e| entry_is(e, &t.assignees, 1)).map(|e| e.end - e.start).sum();
-    assert_eq!(mine, 7200);
-    // older entries without a tracker count for the assignees
-    let old = TimeEntry { start, end: start + 60, user: None };
-    assert!(entry_is(&old, &[1], 1) && !entry_is(&old, &[2], 1) && entry_is(&old, &[], 1));
-}
-
-#[test]
-fn notepad_lines_and_reminder_alerts() {
+fn notepad_lines() {
     use super::menus::notepad_line;
     assert_eq!(notepad_line("- [ ] Buy milk"), (Some(false), "Buy milk"));
     assert_eq!(notepad_line("  - [x] Done"), (Some(true), "Done"));
     assert_eq!(notepad_line("plain"), (None, "plain"));
-    let mut a = app();
-    let me = a.data.me;
-    a.data.extra.reminders.push(Reminder { id: 9, text: "Stand-up".into(), due_ts: now_ts() - 5, done: false, owner: me });
-    let ctx = egui::Context::default();
-    a.reminder_tick(&ctx);
-    assert_eq!(a.toast.as_ref().map(|t| t.0.as_str()), Some("Reminder: Stand-up"));
-    a.toast = None;
-    a.reminder_tick(&ctx);
-    assert!(a.toast.is_none(), "announced once");
-    a.data.extra.reminders.push(Reminder { id: 10, text: "Quiet".into(), due_ts: now_ts() - 5, done: false, owner: me });
-    a.data.extra.notify.reminders = false;
-    a.reminder_tick(&ctx);
-    assert!(a.toast.is_none(), "the setting turns the alert off");
 }
 
 #[test]
@@ -1848,4 +1763,751 @@ fn whiteboard_undo_brings_back_a_deleted_note() {
     a.sweep.wb_undo.push((wid, WbUndo::NoteGone(0, n)));
     a.wb_undo(wid);
     assert_eq!(a.data.extra.whiteboards.iter().find(|w| w.id == wid).unwrap().notes[0].text, "Idea");
+}
+
+#[test]
+fn a_huddle_join_gives_up_after_a_while_and_only_its_own_denial_cancels_it() {
+    let mut a = app();
+    let ch = a.data.channels[0].id;
+    let other = a.data.channels.get(1).map(|c| c.id).unwrap_or(ch + 1);
+    let waiting = |asked: std::time::Instant| {
+        let mut h = huddle::HuddleRt::default();
+        (h.channel, h.waiting, h.asked, h.announce) = (Some(ch), true, Some(asked), true);
+        h
+    };
+    let cards = |a: &App| a.data.channels[0].messages.iter().filter(|m| m.call.as_deref().and_then(huddle::huddle_channel) == Some(ch)).count();
+
+    // an unrelated refusal (a backup, an invite, another conversation) leaves it waiting
+    a.huddle = waiting(std::time::Instant::now());
+    a.huddle_denied(other);
+    assert!(a.huddle.waiting && a.huddle.channel == Some(ch));
+    // its own refusal ends it, and no "Started a huddle" card was posted
+    a.huddle_denied(ch);
+    assert!(a.huddle.channel.is_none());
+    assert_eq!(cards(&a), 0);
+
+    // no answer for HUDDLE_JOIN_SECS: give up and say so
+    a.huddle = waiting(std::time::Instant::now() - std::time::Duration::from_secs(huddle::HUDDLE_JOIN_SECS + 1));
+    a.toast = None;
+    a.huddle_tick(None);
+    assert!(a.huddle.channel.is_none() && !a.huddle.waiting);
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("didn't answer")), "{:?}", a.toast);
+    assert_eq!(cards(&a), 0);
+
+    // the token came: now the card goes out, once
+    a.huddle = waiting(std::time::Instant::now());
+    a.huddle_token(ch, "ws://x".into(), "t".into());
+    assert_eq!(cards(&a), 1);
+    assert!(!a.huddle.waiting && a.huddle.token.is_some());
+    a.huddle_token(ch, "ws://x".into(), "t".into());
+    assert_eq!(cards(&a), 1);
+}
+
+#[test]
+fn team_settings_and_moved_lists_reach_everyone_once() {
+    let dir = temp_folder("move");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.data.extra.accent = "pink".into();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.data.extra.accent = "teal".into();
+    b.join_shared(&folder).unwrap();
+    assert_eq!(b.data.extra.accent, "teal", "the joiner keeps their own theme");
+    assert_eq!(b.data.workspace, a.data.workspace);
+    b.become_member(None, "Bora", "bora@team.kr");
+    b.sync_note_change();
+    b.write_shared();
+    a.sync_pull();
+
+    // A adds a second space, moves a list there and renames the workspace
+    let sid = a.data.new_id();
+    a.data.spaces.push(Space { id: sid, name: "Other".into(), statuses: default_statuses(), ..Default::default() });
+    a.dirty = true;
+    a.sync_note_change();
+    a.write_shared();
+    b.sync_pull();
+    let list = a.data.first_list().unwrap();
+    a.move_list(list, sid, None);
+    a.data.workspace = "Renamed".into();
+    a.data.extra.apps.priorities = false;
+    a.sync_note_change();
+    a.write_shared();
+    // B, not having seen that yet, writes its stale copy
+    b.sync_note_change();
+    b.write_shared();
+    b.sync_pull();
+    a.sync_pull();
+    for d in [&a.data, &b.data] {
+        let homes = d.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter()))).filter(|l| l.id == list).count();
+        assert_eq!(homes, 1, "the moved list is in one place");
+        assert!(d.spaces.iter().find(|s| s.id == sid).unwrap().lists.iter().any(|l| l.id == list));
+        assert_eq!(d.workspace, "Renamed");
+        assert!(!d.extra.apps.priorities);
+    }
+    assert_eq!(b.data.extra.accent, "teal", "theme stays personal");
+
+    // a copy this app can't read is reported once, not on every update
+    let mut bad = serde_json::to_value(&b.data).unwrap();
+    // a newer app changed what a setting looks like
+    bad["workspace"] = serde_json::json!({"name": "Renamed"});
+    bad["extra"]["sync"]["values"]["workspace"] = serde_json::json!(i64::MAX / 2);
+    std::fs::write(dir.join(format!("zz{}", crate::sync::FILE_SUFFIX)), bad.to_string()).unwrap();
+    a.toast = None;
+    assert!(!a.sync_pull());
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("newer version")));
+    a.toast = None;
+    a.sync_pull();
+    assert!(a.toast.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn deleting_a_folder_or_space_sends_its_lists_to_trash() {
+    let mut a = app();
+    let sid = a.data.spaces[0].id;
+    let fid = a.data.spaces[0].folders[0].id;
+    let web = a.data.spaces[0].folders[0].lists[0].id;
+    let n = a.data.tasks.iter().filter(|t| t.list_id == web).count();
+    assert!(n > 0);
+    a.do_delete(Target::Folder(fid));
+    assert!(!list_ids(&a).contains(&web));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List" && x.title == "Website Redesign").expect("folder's list in trash");
+    // the folder is gone, so it comes back in its space and says so
+    a.restore_trash(i);
+    assert!(a.data.spaces[0].lists.iter().any(|l| l.id == web));
+    assert_eq!(a.data.tasks.iter().filter(|t| t.list_id == web).count(), n);
+    assert!(a.toast.is_some());
+    // a whole space: each list goes to Trash and lands in the first space
+    let ideas_space = a.data.spaces[1].id;
+    let ideas = a.data.spaces[1].lists[0].id;
+    a.do_delete(Target::Space(ideas_space));
+    let i = a.data.extra.trash.iter().position(|x| x.title == "Ideas").expect("space's list in trash");
+    a.restore_trash(i);
+    assert!(a.data.spaces.iter().find(|s| s.id == sid).unwrap().lists.iter().any(|l| l.id == ideas));
+}
+
+#[test]
+fn a_restored_list_keeps_its_settings_and_folder() {
+    let mut a = app();
+    let fid = a.data.spaces[0].folders[0].id;
+    let mkt = a.data.spaces[0].folders[0].lists[1].id;
+    {
+        let l = a.data.list_item_mut(mkt).unwrap();
+        l.color = Some([1, 2, 3]);
+        l.description = "about".into();
+        l.priority = 2;
+    }
+    a.do_delete(Target::List(mkt));
+    let i = a.data.extra.trash.iter().position(|x| x.kind == "List").unwrap();
+    a.restore_trash(i);
+    let f = a.data.spaces[0].folders.iter().find(|f| f.id == fid).unwrap();
+    let l = f.lists.iter().find(|l| l.id == mkt).expect("back in its folder");
+    assert_eq!((l.color, l.description.as_str(), l.priority), (Some([1, 2, 3]), "about", 2));
+    // an entry saved by an older version (space id, list, tasks) still restores
+    let sid = a.data.spaces[1].id;
+    let old = ListItem { id: 9999, name: "Old one".into(), ..Default::default() };
+    let payload = serde_json::to_string(&(sid, old, Vec::<Task>::new())).unwrap();
+    a.data.extra.trash.push(TrashItem { id: 1, kind: "List".into(), title: "Old one".into(), deleted: 0, payload });
+    let i = a.data.extra.trash.len() - 1;
+    a.restore_trash(i);
+    assert!(a.data.spaces[1].lists.iter().any(|l| l.id == 9999));
+}
+
+#[test]
+fn a_restored_task_whose_list_is_gone_finds_a_home() {
+    let mut a = app();
+    let ideas = a.data.spaces[1].lists[0].id;
+    let id = add_task(&mut a, ideas, "Lonely");
+    a.apply(Action::DeleteTask(id));
+    a.do_delete(Target::List(ideas));
+    // the list is in Trash: it comes back with the task
+    let i = a.data.extra.trash.iter().position(|x| x.title == "Lonely").unwrap();
+    a.restore_trash(i);
+    assert!(list_ids(&a).contains(&ideas));
+    assert_eq!(a.task(id).unwrap().list_id, ideas);
+    // the list is gone for good: the task goes to the first list
+    a.apply(Action::DeleteTask(id));
+    a.do_delete(Target::List(ideas));
+    a.data.extra.trash.retain(|x| x.kind != "List");
+    let i = a.data.extra.trash.iter().position(|x| x.title == "Lonely").unwrap();
+    a.restore_trash(i);
+    assert_eq!(a.task(id).unwrap().list_id, a.data.first_list().unwrap());
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("list is gone")));
+}
+
+#[test]
+fn renaming_or_deleting_a_status_carries_its_tasks() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Moving");
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "in progress".into();
+    a.apply(Action::Replace(t));
+    a.data.extra.automations.push(Automation { id: 5, enabled: true, trigger_status: "in progress".into(), action: "priority".into(), value: "1".into(), list: None });
+    let si = 0;
+    let mut orig: Vec<Option<String>> = a.data.spaces[si].statuses.iter().map(|s| Some(s.name.clone())).collect();
+    let i = a.data.spaces[si].statuses.iter().position(|s| s.name == "in progress").unwrap();
+    // a rename that matches another status waits, so tasks never merge
+    a.data.spaces[si].statuses[i].name = "to do".into();
+    a.commit_status_renames(si, &mut orig);
+    assert_eq!(a.task(id).unwrap().status, "in progress");
+    a.data.spaces[si].statuses[i].name = "doing".into();
+    a.commit_status_renames(si, &mut orig);
+    assert_eq!(a.task(id).unwrap().status, "doing");
+    // the other space still has "in progress", so the automation stays
+    assert_eq!(a.data.extra.automations[0].trigger_status, "in progress");
+    // deleting it moves the task to a status of the same kind (or the first)
+    let st = a.data.spaces[si].statuses.remove(i);
+    let old = orig.remove(i).unwrap();
+    a.move_off_status(si, &old, st.kind, &orig);
+    let t = a.task(id).unwrap();
+    let kind_match = a.data.spaces[si].statuses.iter().find(|s| s.kind == st.kind).map(|s| s.name.clone()).unwrap_or_else(|| a.data.spaces[si].statuses[0].name.clone());
+    assert_eq!(t.status, kind_match);
+    assert!(t.activity.iter().any(|x| x.text.contains("changed status from DOING")));
+}
+
+#[test]
+fn archived_subtasks_hide_and_my_subtasks_show_on_personal_views() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let parent = add_task(&mut a, list, "Parent");
+    let me = a.data.me;
+    a.apply(Action::Add { list, name: "Mine sub".into(), status: None, priority: 0, assignees: vec![me], due: Some(today()), parent: Some(parent), open: false });
+    let sub = a.data.tasks.iter().find(|t| t.name == "Mine sub").unwrap().id;
+    a.loc = Location::MyTasks;
+    assert!(a.filtered().iter().any(|t| t.id == sub), "my subtask on Assigned to me");
+    a.loc = Location::TodayOverdue;
+    assert!(a.filtered().iter().any(|t| t.id == sub), "my subtask on Today & Overdue");
+    a.set_archived(&[sub], true);
+    assert!(a.subtasks(parent).is_empty(), "archived subtask hidden");
+    assert!(!a.filtered().iter().any(|t| t.id == sub));
+    // the archived view still reaches it
+    a.loc = Location::List(list);
+    a.filter.archived = true;
+    assert!(a.filtered().iter().any(|t| t.id == sub));
+    assert!(!a.task_visible(a.task(sub).unwrap()));
+}
+
+#[test]
+fn tasks_made_on_today_and_overdue_stay_there() {
+    let mut a = app();
+    a.loc = Location::TodayOverdue;
+    let g = Group { key: "all".into(), label: String::new(), color: Color32::WHITE, status: None, priority: None, assignee: None, due: None, tasks: vec![] };
+    a.add_from_group(&g, "Due now".into(), false);
+    a.apply_actions();
+    let t = a.data.tasks.iter().find(|t| t.name == "Due now").unwrap();
+    assert!(t.assignees.contains(&a.data.me));
+    assert_eq!(t.due, Some(today()));
+    assert!(a.filtered().iter().any(|x| x.name == "Due now"));
+    a.open_quick_add(None);
+    let qa = a.quick_add.as_ref().unwrap();
+    assert_eq!((qa.assignees.clone(), qa.due), (vec![a.data.me], Some(today())));
+}
+
+#[test]
+fn first_list_skips_archived_spaces() {
+    let mut a = app();
+    a.data.spaces[0].archived = true;
+    let ideas = a.data.spaces[1].lists[0].id;
+    assert_eq!(a.data.first_list(), Some(ideas));
+    a.loc = Location::Everything;
+    assert_eq!(a.default_list(), Some(ideas));
+}
+
+#[test]
+fn going_somewhere_clears_the_selection_and_overview() {
+    let mut a = app();
+    a.selected.insert(1);
+    let sid = a.data.spaces[0].id;
+    a.apply(Action::Go(Location::Space(sid)));
+    assert!(a.selected.is_empty());
+    a.view = ViewKind::Overview;
+    a.apply(Action::Go(Location::Everything));
+    assert!(a.view == ViewKind::List);
+}
+
+#[test]
+fn a_recurring_task_reopens_without_a_date_done() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Repeat me");
+    let mut t = a.task(id).unwrap().clone();
+    t.due = Some(today());
+    t.recur = Some("daily".into());
+    a.apply(Action::Replace(t));
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let t = a.task(id).unwrap();
+    assert_eq!(t.status, "to do");
+    assert!(t.done_at.is_none() && t.closed_at.is_none());
+}
+
+#[test]
+fn csv_export_reads_back_with_commas_quotes_and_line_breaks() {
+    let mut a = app();
+    let list = a.data.spaces[1].lists[0].id;
+    a.loc = Location::List(list);
+    let names = ["Plain", "Commas, and more", "Say \"hi\"", "Two\nlines"];
+    for n in names {
+        add_task(&mut a, list, n);
+    }
+    let text = a.csv_text();
+    let dir = std::env::temp_dir().join(format!("wb-csv-{}", now_ts()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("round.csv");
+    std::fs::write(&f, &text).unwrap();
+    let before = a.data.tasks.len();
+    let msg = a.import_csv(f.to_str().unwrap());
+    a.apply_actions();
+    assert!(msg.contains(&format!("Imported {}", a.data.tasks.len() - before)), "{}", msg);
+    assert!(a.data.tasks.len() - before >= names.len());
+    let new: Vec<String> = a.data.tasks[before..].iter().map(|t| t.name.clone()).collect();
+    for n in names {
+        assert!(new.iter().any(|x| x == n), "{:?} missing from {:?}", n, new);
+    }
+    assert_eq!(super::menus::parse_csv("a, \"b,\"\"c\"\"\" ,d\n"), vec![vec!["a".to_string(), "b,\"c\"".into(), "d".into()]]);
+}
+
+#[test]
+fn a_login_name_starting_with_a_non_ascii_letter() {
+    assert_eq!(Data::display_user("\u{e9}va"), "\u{c9}va");
+    assert_eq!(Data::display_user("\u{c9c0}\u{c6d0}"), "\u{c9c0}\u{c6d0}");
+    assert_eq!(Data::display_user(""), "Me");
+}
+
+fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
+    Message { id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
+}
+
+#[test]
+fn private_channels_and_dms_show_only_to_their_members() {
+    let mut a = app();
+    let secret = a.create_channel("secret plans", true, false);
+    let public = a.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    let dm_me_alex = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    let ch = |a: &App, id: u64| a.data.channels.iter().find(|c| c.id == id).unwrap().clone();
+    assert!(a.can_see(&ch(&a, secret)), "the person who made it is in it");
+    // Sam (3) is in neither the private channel nor my DM with Alex
+    a.data.me = 3;
+    assert!(!a.can_see(&ch(&a, secret)));
+    assert!(!a.can_see(&ch(&a, dm_me_alex)));
+    assert!(a.can_see(&ch(&a, public)), "public channels stay open to all");
+    // added as a member, Sam sees it
+    a.data.channels.iter_mut().find(|c| c.id == secret).unwrap().members.push(3);
+    assert!(a.can_see(&ch(&a, secret)));
+}
+
+#[test]
+fn closing_a_dm_hides_it_for_me_until_a_new_message() {
+    let mut a = app();
+    let dm = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    let n = a.data.channels.len();
+    a.chat_open = Some(dm);
+    a.close_dm(dm);
+    assert_eq!(a.data.channels.len(), n, "nothing is deleted");
+    assert_eq!(a.chat_open, None);
+    let listed = |a: &App| a.listed(a.data.channels.iter().find(|c| c.id == dm).unwrap());
+    assert!(!listed(&a));
+    // only this computer remembers it: it's not in what the team shares
+    let v = serde_json::to_value(&a.data).unwrap();
+    assert!(v["channels"].as_array().unwrap().iter().all(|c| c.get("closed").is_none()));
+    assert!(!crate::sync::SHARED.iter().any(|p| p.contains("closed_dms")));
+    // Alex writes again: it's back
+    let id = a.data.new_id();
+    let c = a.data.channels.iter_mut().find(|c| c.id == dm).unwrap();
+    c.messages.push(test_msg(id, 2, "still there?", now_ts() + 5));
+    assert!(listed(&a));
+    // opening it from New message also brings it back
+    a.close_dm(dm);
+    assert!(!listed(&a));
+    a.apply_chat(vec![ChatAction::Dm(2)]);
+    assert_eq!(a.chat_open, Some(dm));
+}
+
+#[test]
+fn two_dms_with_the_same_people_show_as_one() {
+    let mut a = app();
+    let older = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 3]).unwrap().id;
+    let newer = a.data.new_id();
+    a.data.channels.push(Channel { id: newer, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![3, 1], messages: vec![], last_read: now_ts(), ..Default::default() });
+    let get = |a: &App, id: u64| a.data.channels.iter().find(|c| c.id == id).unwrap().clone();
+    assert!(a.listed(&get(&a, older)));
+    assert!(!a.listed(&get(&a, newer)), "the newer empty copy gives way");
+    a.apply_chat(vec![ChatAction::Dm(3)]);
+    assert_eq!(a.chat_open, Some(older));
+    // a copy with messages wins over an empty one
+    let id = a.data.new_id();
+    a.data.channels.iter_mut().find(|c| c.id == newer).unwrap().messages.push(test_msg(id, 3, "hi", now_ts()));
+    assert!(!a.listed(&get(&a, older)));
+    assert!(a.listed(&get(&a, newer)));
+}
+
+#[test]
+fn a_missing_file_is_fetched_again_later() {
+    let folder = temp_folder("retry-files");
+    std::fs::create_dir_all(folder.join("files")).unwrap();
+    let pic = picture_file("later.png", 30, 20);
+    let (sha, bytes) = wb_net::sha256_file(&pic).unwrap();
+    let att = Attachment { file: sha.clone(), name: "later.png".into(), kind: MediaKind::Image, bytes, w: 30, h: 20, secs: 0.0 };
+    let mut f = super::files::Files::new(temp_folder("retry-cache"));
+    let remote = super::files::Remote::Folder(folder.clone());
+    // not in the shared folder yet: the first try fails and the next one waits
+    f.settle(&remote, |f| {
+        f.want(&att, super::files::THUMB);
+        matches!(f.state(&sha), Some(super::files::Transfer::Failed(_))) && f.fetch_tries(&sha) == Some((1, true))
+    });
+    std::fs::copy(&pic, folder.join("files").join(&sha)).unwrap();
+    f.retry_due(&sha);
+    f.settle(&remote, |f| {
+        f.want(&att, super::files::THUMB);
+        f.local(&sha).is_some()
+    });
+}
+
+#[test]
+fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
+    let mut a = app();
+    a.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 1, server: Some("127.0.0.1:9".into()) });
+    assert_eq!(a.media_remote(), super::files::Remote::SignedOut);
+    a.add_media(false, Some(picture_file("wait.png", 20, 20)), None);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while a.chat_files[0].att.is_none() && std::time::Instant::now() < end {
+        a.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let att = a.chat_files[0].att.clone().unwrap();
+    assert_eq!(a.files.state(&att.file), Some(super::files::Transfer::Failed(super::files::NOT_SIGNED_IN.into())), "not silently done");
+    assert!(!a.pending_ready(false).0);
+    // a sign-in is seen at once (the cached token is dropped when one is saved)
+    super::together::save_token("127.0.0.1:9", "dev1", "tok");
+    assert!(matches!(a.media_remote(), super::files::Remote::Server { auth, .. } if auth.token == "tok"));
+    super::together::forget_token("127.0.0.1:9", "dev1");
+    assert_eq!(a.media_remote(), super::files::Remote::SignedOut);
+}
+
+#[test]
+fn sharing_a_folder_brings_earlier_pictures_along() {
+    let mut a = app();
+    a.add_media(false, Some(picture_file("before.png", 24, 24)), None);
+    let files = until_ready(&mut a, false);
+    let ch = a.data.channels[0].id;
+    a.apply_chat(vec![ChatAction::Send { ch, text: "from before sharing".into(), parent: None, files: files.clone() }]);
+    let folder = temp_folder("share-later");
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    let dest = folder.join("files").join(&files[0].file);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !dest.is_file() && std::time::Instant::now() < end {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(dest.is_file(), "the picture sent earlier is in the shared folder");
+}
+
+#[test]
+fn my_timer_leaves_a_teammates_running() {
+    let mut a = app();
+    let ids: Vec<u64> = a.data.tasks.iter().take(2).map(|t| t.id).collect();
+    let started = now_ts() - 600;
+    if let Some(t) = a.data.tasks.iter_mut().find(|t| t.id == ids[0]) {
+        t.timer_started = Some(started);
+        t.timer_by = Some(2);
+    }
+    // starting mine stops only mine
+    a.apply(Action::ToggleTimer(ids[1]));
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started), "Alex's timer keeps running");
+    assert_eq!(a.task(ids[1]).unwrap().timer_by, Some(1));
+    // clicking Alex's timer doesn't stop it
+    a.apply(Action::ToggleTimer(ids[0]));
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started));
+    assert!(a.task(ids[1]).unwrap().timer_started.is_some());
+    // closing the app (on_exit) stops mine and keeps Alex's
+    a.data.stop_my_timers(now_ts());
+    assert!(a.task(ids[1]).unwrap().timer_started.is_none());
+    assert_eq!(a.task(ids[1]).unwrap().time_entries.last().unwrap().member, 1, "the stopped time is mine");
+    assert_eq!(a.task(ids[0]).unwrap().timer_started, Some(started));
+    // an old timer without an owner is never stopped behind anyone's back
+    if let Some(t) = a.data.tasks.iter_mut().find(|t| t.id == ids[0]) {
+        t.timer_by = None;
+    }
+    a.data.stop_my_timers(now_ts());
+    assert!(a.task(ids[0]).unwrap().timer_started.is_some());
+}
+
+#[test]
+fn timesheet_edits_only_my_entries() {
+    let mut a = app();
+    let id = a.data.tasks[1].id;
+    let day = today();
+    let nine = day.and_hms_opt(9, 0, 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).unwrap().timestamp();
+    let task = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    task.assignees = vec![3];
+    task.time_entries.push(TimeEntry { start: nine, end: nine + 3600, member: 2 });
+    // an old entry with no owner belongs to the first assignee (Sam), not me
+    task.time_entries.push(TimeEntry { start: nine, end: nine + 1800, member: 0 });
+    a.set_day_time(id, day, 2.0);
+    let t = a.task(id).unwrap();
+    let mine: i64 = t.time_entries.iter().filter(|e| a.data.is_my_entry(t, e)).map(|e| e.end - e.start).sum();
+    assert_eq!(mine, 7200);
+    assert!(t.time_entries.iter().any(|e| e.member == 2 && e.end - e.start == 3600), "Alex's hour stays");
+    assert!(t.time_entries.iter().any(|e| e.member == 0 && e.end - e.start == 1800), "the old entry stays");
+    a.set_day_time(id, day, 0.5);
+    let t = a.task(id).unwrap();
+    assert_eq!(t.time_entries.iter().filter(|e| e.member == 1).map(|e| e.end - e.start).sum::<i64>(), 1800);
+    a.set_day_time(id, day, 0.0);
+    let t = a.task(id).unwrap();
+    assert!(!t.time_entries.iter().any(|e| e.member == 1));
+    assert_eq!(t.time_entries.len(), 2);
+    assert_eq!(t.entry_owner(&t.time_entries[1]), 3);
+}
+
+#[test]
+fn scoped_automation_runs_only_in_its_list_and_moves_subtasks() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    let (list, other) = (lists[0], lists[1]);
+    a.data.extra.automations.push(Automation { id: 1, enabled: true, trigger_status: "complete".into(), action: "priority".into(), value: "4".into(), list: Some(other) });
+    a.data.extra.automations.push(Automation { id: 2, enabled: true, trigger_status: "complete".into(), action: "move".into(), value: other.to_string(), list: Some(list) });
+    let id = add_task(&mut a, list, "Scoped");
+    a.apply(Action::Add { list, name: "Scoped child".into(), status: None, priority: 0, assignees: vec![], due: None, parent: Some(id), open: false });
+    let child = a.data.tasks.iter().find(|t| t.name == "Scoped child").unwrap().id;
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let t = a.task(id).unwrap();
+    assert_eq!(t.priority, 0, "the rule for the other list must not run here");
+    assert_eq!(t.list_id, other);
+    assert_eq!(a.task(child).unwrap().list_id, other, "subtasks move along");
+    let statuses = a.data.statuses_for_list(other);
+    assert!(statuses.iter().any(|s| s.name == a.task(child).unwrap().status));
+}
+
+#[test]
+fn removing_a_person_drops_them_from_teams_and_meetings() {
+    let mut a = app();
+    a.data.extra.teams.push(Team { id: 900, name: "T".into(), members: vec![1, 3], color: [0, 0, 0] });
+    a.data.extra.meetings.push(Meeting { id: 901, title: "M".into(), date: today(), time: "10:00".into(), attendees: vec![1, 3], agenda: String::new(), notes: String::new() });
+    a.remove_item("person", 3);
+    assert!(a.data.member(3).is_none());
+    assert_eq!(a.data.extra.teams[0].members, vec![1]);
+    assert_eq!(a.data.extra.meetings[0].attendees, vec![1]);
+    a.remove_item("meeting", 901);
+    assert!(a.data.extra.meetings.is_empty());
+}
+
+#[test]
+fn goal_tasks_ignore_deleted_ones() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Goal task");
+    let mut t = a.task(id).unwrap().clone();
+    t.status = "complete".into();
+    a.apply(Action::Replace(t));
+    let g = Goal { id: 902, name: "G".into(), color: [0, 0, 0], due: None, owner: 1, targets: vec![GoalTarget { name: "x".into(), kind: TargetKind::Tasks { ids: vec![id, 123456789] } }] };
+    assert_eq!(a.goal_progress(&g), 1.0);
+}
+
+
+// ---------------------------------------------------------------- getting around (nav.rs)
+
+#[test]
+fn workboard_links_are_read_back() {
+    use super::nav::{location_link, parse_link, Link};
+    assert_eq!(parse_link("workboard://task/42"), Some(Link::Task(42)));
+    assert_eq!(parse_link("  workboard://list/7/  "), Some(Link::Loc(Location::List(7))));
+    assert_eq!(parse_link("workboard://space/3."), Some(Link::Loc(Location::Space(3))));
+    assert_eq!(parse_link("workboard://folder/9"), Some(Link::Loc(Location::Folder(9))));
+    assert_eq!(parse_link("workboard://inbox"), Some(Link::Loc(Location::Inbox)));
+    assert_eq!(parse_link("workboard://task/abc"), None);
+    assert_eq!(parse_link("workboard://task"), None);
+    assert_eq!(parse_link("workboard://task/1/2"), None);
+    assert_eq!(parse_link("https://task/1"), None);
+    assert_eq!(parse_link("workboard://My-Workspace/Team-Space"), None);
+    for l in [Location::Home, Location::Inbox, Location::Replies, Location::Assigned, Location::MyTasks, Location::TodayOverdue, Location::Everything, Location::Space(1), Location::Folder(2), Location::List(3)] {
+        assert_eq!(parse_link(&location_link(l)), Some(Link::Loc(l)));
+    }
+    // links inside a message, by character (Korean text before one)
+    let found = super::nav::find_links("보세요 workboard://task/5, and (workboard://list/6) not workboard://x");
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0], (4, 22, "workboard://task/5".to_string()));
+    assert_eq!(found[1].2, "workboard://list/6");
+}
+
+#[test]
+fn opening_a_link_goes_there() {
+    let mut a = app();
+    let list = list_ids(&a)[1];
+    let tid = add_task(&mut a, list, "Linked");
+    assert!(a.open_link(&format!("workboard://task/{}", tid)));
+    a.apply_actions();
+    assert_eq!(a.open_task, Some(tid));
+    assert!(a.open_link(&format!("workboard://list/{}", list)));
+    a.apply_actions();
+    assert_eq!(a.loc, Location::List(list));
+    // a task that isn't here: a notice, nothing opens
+    a.open_task = None;
+    assert!(!a.open_link("workboard://task/999999"));
+    a.apply_actions();
+    assert_eq!(a.open_task, None);
+    assert!(a.toast.is_some());
+}
+
+#[test]
+fn back_returns_to_the_previous_channel() {
+    let mut a = app();
+    let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).collect();
+    a.section = Section::Chat;
+    a.chat_open = Some(chans[0]);
+    a.track_history();
+    a.chat_open = Some(chans[1]);
+    a.track_history();
+    a.go_back();
+    a.track_history();
+    assert_eq!((a.section, a.chat_open), (Section::Chat, Some(chans[0])));
+    a.go_forward();
+    a.track_history();
+    assert_eq!(a.chat_open, Some(chans[1]));
+}
+
+#[test]
+fn back_skips_deleted_pages_and_new_workspace_forgets_history() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    a.apply(Action::Go(Location::List(lists[0])));
+    a.track_history();
+    a.apply(Action::Go(Location::List(lists[1])));
+    a.track_history();
+    a.apply(Action::Go(Location::Inbox));
+    a.track_history();
+    // the list before goes away: Back lands on the one before it
+    for s in &mut a.data.spaces {
+        s.lists.retain(|l| l.id != lists[1]);
+        for f in &mut s.folders {
+            f.lists.retain(|l| l.id != lists[1]);
+        }
+    }
+    a.go_back();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[0]));
+    a.clear_history();
+    assert!(a.nav_back.is_empty() && a.nav_fwd.is_empty());
+}
+
+fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
+    Message { id, author, text: text.into(), ts, reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None, attachments: vec![], edited: None }
+}
+
+#[test]
+fn inbox_primary_and_badge_follow_the_settings() {
+    let mut a = app();
+    a.data.tasks.clear();
+    a.data.channels.clear();
+    let list = list_ids(&a)[0];
+    let mine = add_task(&mut a, list, "Mine");
+    let theirs = add_task(&mut a, list, "Theirs");
+    // someone else made "Theirs" and I'm not on it
+    a.data.tasks.iter_mut().find(|t| t.id == theirs).unwrap().activity.iter_mut().for_each(|x| x.author = 2);
+    let now = now_ts();
+    let push = |a: &mut App, id: u64, ts: i64, author: u64, text: &str, comment: bool| {
+        a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().activity.push(Activity { ts, author, text: text.into(), comment, ..Default::default() });
+    };
+    push(&mut a, mine, now - 10, 2, "Looks good", true);
+    push(&mut a, theirs, now - 9, 3, "Not for you", true);
+    push(&mut a, theirs, now - 8, 3, "@Me can you check?", true);
+    push(&mut a, theirs, now - 7, 3, "assigned to Me", false);
+    push(&mut a, theirs, now - 6, 3, "assigned to Alex Kim", false);
+    push(&mut a, mine, now - 5, 1, "my own note", true);
+    let primary = |a: &App| a.inbox_items().into_iter().filter(|i| i.tab == 0).map(|i| i.text).collect::<Vec<_>>();
+    let mut p = primary(&a);
+    p.sort();
+    assert_eq!(p, vec!["@Me can you check?", "Looks good", "assigned to Me"]);
+    // my own actions are nowhere; the rest is Other
+    assert!(!a.inbox_items().iter().any(|i| i.text == "my own note"));
+    assert!(a.inbox_items().iter().any(|i| i.text == "Not for you" && i.tab == 1));
+    assert!(a.inbox_items().iter().any(|i| i.text == "assigned to Alex Kim" && i.tab == 1 && !i.assigned));
+    assert_eq!(a.inbox_badge(), 3);
+    // clearing and Later take rows off the badge
+    let keys: Vec<String> = a.inbox_items().into_iter().filter(|i| i.tab == 0).map(|i| i.key).collect();
+    a.data.extra.inbox_cleared.push(keys[0].clone());
+    a.data.extra.inbox_later.push(keys[1].clone());
+    assert_eq!(a.inbox_badge(), 1);
+    // turning comments off takes "Looks good" out of Primary
+    a.data.extra.inbox_cleared.clear();
+    a.data.extra.inbox_later.clear();
+    a.data.extra.notify.comments = false;
+    assert!(!primary(&a).contains(&"Looks good".to_string()));
+    a.data.extra.notify.assigned = false;
+    a.data.extra.notify.mentions = false;
+    assert_eq!(a.inbox_badge(), 0);
+}
+
+#[test]
+fn chat_mentions_and_thread_replies_reach_the_inbox() {
+    let mut a = app();
+    a.data.tasks.clear();
+    let now = now_ts();
+    let cid = a.data.channels.iter().find(|c| c.kind == ChannelKind::Channel).unwrap().id;
+    let c = a.data.channels.iter_mut().find(|c| c.id == cid).unwrap();
+    c.messages.clear();
+    let mut root = chat_msg(900, 1, "Plan for Friday?", now - 100);
+    root.replies.push(chat_msg(901, 2, "Sounds good", now - 50));
+    c.messages.push(root);
+    c.messages.push(chat_msg(902, 3, "@Me please look", now - 40));
+    c.messages.push(chat_msg(903, 3, "nothing for me", now - 30));
+    let items = a.inbox_items();
+    assert!(items.iter().any(|i| i.text == "Sounds good" && i.reply && i.tab == 0));
+    assert!(items.iter().any(|i| i.text == "@Me please look" && i.mention && i.tab == 0));
+    assert!(!items.iter().any(|i| i.text == "nothing for me"));
+    assert_eq!(a.inbox_badge(), 2);
+    assert_eq!(a.chat_replies().len(), 1);
+    // opening the reply shows its thread
+    let src = items.iter().find(|i| i.reply).unwrap().src;
+    a.open_inbox_src(src);
+    assert_eq!((a.section, a.chat_open, a.thread_open), (Section::Chat, Some(cid), Some(900)));
+}
+
+#[test]
+fn reminders_alert_once_when_due() {
+    let mut a = app();
+    let me = a.data.me;
+    let list = list_ids(&a)[0];
+    let tid = add_task(&mut a, list, "Call back");
+    a.data.extra.reminders.push(Reminder { id: 50, text: "Call back".into(), due_ts: now_ts() - 1, owner: me, task: Some(tid), ..Default::default() });
+    a.data.extra.reminders.push(Reminder { id: 51, text: "Later on".into(), due_ts: now_ts() + 3600, owner: me, ..Default::default() });
+    a.toast = None;
+    a.reminder_tick(None);
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("Call back")));
+    assert!(a.data.extra.reminders.iter().find(|r| r.id == 50).unwrap().alerted);
+    assert!(!a.data.extra.reminders.iter().find(|r| r.id == 51).unwrap().alerted);
+    // only once
+    a.toast = None;
+    a.reminder_tick(None);
+    assert!(a.toast.is_none());
+    // the reminder opens its task
+    let r = a.data.extra.reminders.iter().find(|r| r.id == 50).unwrap().clone();
+    a.open_reminder(&r);
+    a.apply_actions();
+    assert_eq!(a.open_task, Some(tid));
+    // with "A reminder is due" off there is no notice
+    a.data.extra.notify.reminders = false;
+    a.data.extra.reminders.push(Reminder { id: 52, text: "Quiet".into(), due_ts: now_ts() - 1, owner: me, ..Default::default() });
+    a.reminder_tick(None);
+    assert!(a.toast.is_none());
+}
+
+#[test]
+fn mentions_in_private_channels_i_am_not_in_stay_out() {
+    let mut a = app();
+    a.data.tasks.clear();
+    let now = now_ts();
+    for c in &mut a.data.channels {
+        c.messages.clear();
+    }
+    let c = a.data.channels.iter_mut().find(|c| c.kind == ChannelKind::Channel).unwrap();
+    c.private = true;
+    c.members = vec![2, 3];
+    c.messages.push(chat_msg(950, 3, "@Me secret", now - 10));
+    assert!(a.inbox_items().is_empty());
+    a.data.channels.iter_mut().find(|c| c.private).unwrap().members.push(1);
+    assert_eq!(a.inbox_badge(), 1);
 }

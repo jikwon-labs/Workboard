@@ -288,4 +288,18 @@ pub const T: &[(&str, &str)] = &[
     ("https://...", "https://... 주소"),
     // notepad
     ("Write anything. Only you can see this.", "무엇이든 적어 보세요. 나만 볼 수 있습니다."),
+    // restoring from Trash
+    ("Also restored its list \"{}\"", "목록 \"{}\"도 함께 복원했습니다"),
+    ("There is no list to restore it into. Make a list first.", "복원할 목록이 없습니다. 먼저 목록을 만드세요."),
+    ("Its list is gone, so it went to {}", "원래 목록이 없어 {} 목록으로 옮겼습니다"),
+    ("\"{}\" was restored to {} because its old place is gone", "원래 위치가 없어 \"{}\"을(를) {}에 복원했습니다"),
+    ("There is no space to restore it into. Make a space first.", "복원할 스페이스가 없습니다. 먼저 스페이스를 만드세요."),
+    // channel settings: close a conversation, delete a channel
+    ("Hides it from your sidebar until a new message arrives. Nothing is deleted.", "새 메시지가 올 때까지 사이드바에서 숨깁니다. 아무것도 삭제되지 않습니다."),
+    ("Only members of this channel can delete it.", "이 채널의 멤버만 삭제할 수 있습니다."),
+    ("Delete #{} for everyone? Its messages are removed for the whole team.", "모든 사람에게서 #{} 채널을 삭제할까요? 메시지가 팀 전체에서 삭제됩니다."),
+    // automation scope
+    ("Runs in the whole Workspace", "워크스페이스 전체에서 실행됩니다"),
+    ("Runs in {}", "{}에서 실행됩니다"),
+    ("in {}", "{}에서"),
 ];

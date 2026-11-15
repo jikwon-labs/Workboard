@@ -40,6 +40,10 @@ mkdir -p "$BIN_DIR" "$HOME/Library/LaunchAgents" "$(dirname "$LOG")"
 # copy then rename, so a running server keeps its old file until restarted
 cp target/release/workboard-server "$BIN.new" && mv "$BIN.new" "$BIN"
 
+# ProcessType Standard: Background lets macOS throttle CPU and I/O (and
+# timers) when it decides to, which delays chat messages and pushes for
+# everyone. Standard runs it like a normal program without asking for the
+# extra priority of Interactive, which only LiveKit's real-time audio needs.
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -55,7 +59,7 @@ cat > "$PLIST" <<PL
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Standard</string>
   <key>StandardOutPath</key><string>$LOG</string>
   <key>StandardErrorPath</key><string>$LOG</string>
 </dict>

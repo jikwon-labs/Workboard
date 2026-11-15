@@ -130,9 +130,7 @@ pub const T: &[(&str, &str)] = &[
     ("Delete all {} items for good?", "항목 {}개를 모두 영구 삭제할까요?"),
     ("Team", "팀"),
     // replies and inbox
-    ("Comments from others on tasks and replies to your chat messages", "다른 사람이 작업에 남긴 댓글과 내 채팅 메시지에 달린 답장"),
     ("Comments assigned to someone, or that @mention them, until resolved", "누군가에게 할당되었거나 @멘션한 댓글 (해결될 때까지)"),
-    ("Reply in {}", "{}의 답장"),
     ("{} commented: {}", "{}님의 댓글: {}"),
     ("{} replied: {}", "{}님의 답장: {}"),
     ("Mark read", "읽음으로 표시"),
@@ -141,8 +139,6 @@ pub const T: &[(&str, &str)] = &[
     ("Snooze", "다시 알림"),
     ("In 1 hour", "1시간 후"),
     ("Tomorrow 9 AM", "내일 오전 9시"),
-    ("Reminder: {}", "리마인더: {}"),
-    ("{} reminders are due", "리마인더 {}개의 시간이 되었습니다"),
     ("Hide done", "완료 항목 숨기기"),
     ("Show done ({})", "완료 항목 보기 ({})"),
     // forms
@@ -155,27 +151,19 @@ pub const T: &[(&str, &str)] = &[
     ("Please answer \"{}\".", "\"{}\"에 답해 주세요."),
     ("\"{}\" needs a number.", "\"{}\"에는 숫자를 입력해야 합니다."),
     ("\"{}\" needs an email address.", "\"{}\"에는 이메일 주소를 입력해야 합니다."),
-    ("This form has no List to put answers in. Pick one under Edit.", "이 양식에는 답변을 넣을 목록이 없습니다. 편집에서 목록을 고르세요."),
-    ("Move this form to Trash?", "이 양식을 휴지통으로 옮길까요?"),
     // goals
-    ("Move this goal to Trash?", "이 목표를 휴지통으로 옮길까요?"),
     ("Nobody", "없음"),
     // whiteboards
     ("width ", "굵기 "),
     ("\u{232B} Eraser", "\u{232B} 지우개"),
     ("Clear the whole board?", "보드 전체를 지울까요?"),
-    ("Move this whiteboard to Trash?", "이 화이트보드를 휴지통으로 옮길까요?"),
     // dashboards
     ("Task totals", "작업 합계"),
     ("Shared", "공유됨"),
-    ("Private dashboards are listed under Private", "비공개 대시보드는 비공개 아래에 표시됩니다"),
     ("No cards. Add one with + Add card.", "카드가 없습니다. + 카드 추가로 추가하세요."),
-    ("Move this dashboard to Trash?", "이 대시보드를 휴지통으로 옮길까요?"),
     // teams and timesheets
     ("My Teams", "내 팀"),
     ("You're not in any team yet", "아직 속한 팀이 없습니다"),
-    ("Move this team to Trash?", "이 팀을 휴지통으로 옮길까요?"),
-    ("Nothing here yet", "아직 아무것도 없습니다"),
     ("Removed this week's time on {}", "{}의 이번 주 시간을 제거했습니다"),
     // sidebar menus
     ("List color", "목록 색상"),
@@ -187,4 +175,10 @@ pub const T: &[(&str, &str)] = &[
     ("No results", "결과 없음"),
     ("Recent searches", "최근 검색"),
     ("Nothing with this link here (it may have been deleted)", "이 링크에 해당하는 항목이 없습니다 (삭제되었을 수 있습니다)"),
+    ("Delete the dashboard \"{}\"? It goes to Trash.", "대시보드 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
+    ("Delete the whiteboard \"{}\"? It goes to Trash.", "화이트보드 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
+    ("Delete the form \"{}\"? It goes to Trash.", "양식 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
+    ("Delete the goal \"{}\"? It goes to Trash.", "목표 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
+    ("Delete the team \"{}\"? It goes to Trash.", "팀 \"{}\"을(를) 삭제할까요? 휴지통으로 옮겨집니다."),
+    ("Only you see a private dashboard", "비공개 대시보드는 나만 볼 수 있습니다"),
 ];

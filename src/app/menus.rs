@@ -22,7 +22,8 @@ pub enum Modal {
     Notifications,
     ClickApps,
     CustomFields { name: String, kind: String, opts: String },
-    Automations { status: String, action: String, value: String },
+    /// `scope`: the List or Space it was opened from (new rules run only there).
+    Automations { status: String, action: String, value: String, scope: Option<Location> },
     TagManager { from: String, to: String },
     Templates { name: String, desc: String, checklist: String, priority: u8 },
     Import { path: String, result: String },
@@ -42,6 +43,9 @@ pub enum Modal {
     /// `code`: an invite code typed in.
     Together { path: String, addr: String, code: String, result: String },
     WhoAmI { name: String, email: String },
+    /// The first start. `step`: 0 the choice, 1 your name, 2 join a team,
+    /// 3 set up a team server; `addr`: the server address typed in.
+    Welcome { step: u8, name: String, addr: String },
     Call { ch: u64, link: String },
     NewList { name: String, space: u64, folder: Option<u64>, private: bool },
     NewSpace { name: String, color: [u8; 3] },
@@ -51,6 +55,9 @@ pub enum Modal {
     ListInfo { list: u64 },
     /// Pick a task to set as parent, subtask, dependency or link.
     PickTask { task: u64, mode: super::TaskPick, query: String },
+    /// "Delete this?" for a dashboard, whiteboard, form, goal, meeting, team
+    /// or person (see `remove_item`).
+    ConfirmRemove { kind: &'static str, id: u64, name: String },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -170,7 +177,7 @@ impl App {
                     "Apps" => Modal::ClickApps,
                     "Templates" => Modal::Templates { name: String::new(), desc: String::new(), checklist: String::new(), priority: 0 },
                     "Custom Fields" => Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() },
-                    "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() },
+                    "Automations" => Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None },
                     _ => Modal::TagManager { from: String::new(), to: String::new() },
                 });
                 close_popup(ui);
@@ -236,6 +243,9 @@ impl App {
             self.data.save_file(&self.ws_file);
         }
         let d = if file == "data.json" { Some(Data::load()) } else { Data::load_file(file) };
+        if let Some(p) = Data::take_unreadable() {
+            self.toast = Some((super::unreadable_note(&p), now_ts()));
+        }
         if let Some(d) = d {
             self.data = d;
             self.ws_file = file.to_string();
@@ -247,6 +257,7 @@ impl App {
             self.open_task = None;
             self.chat_open = None;
             self.recent.clear();
+            self.clear_history();
             self.sync_rt = Default::default();
             self.leave_huddle();
         }
@@ -605,6 +616,9 @@ impl App {
     // ---------------------------------------------------------------- dialogs
 
     pub(super) fn modals(&mut self, ctx: &egui::Context) {
+        if !matches!(self.modal, Some(Modal::Reminder { .. })) {
+            self.reminder_about = (None, None);
+        }
         let Some(mut modal) = self.modal.take() else { return };
         let t = self.t();
         let mut open = true;
@@ -639,6 +653,9 @@ impl App {
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
+            Modal::Welcome { step: 2, .. } => tr("Join your team").into(),
+            Modal::Welcome { step: 3, .. } => tr("Set up your team's server").into(),
+            Modal::Welcome { .. } => tr("Welcome to Workboard").into(),
             Modal::Call { .. } => tr("Start a call").into(),
             Modal::NewList { .. } => tr("Create List").into(),
             Modal::NewSpace { .. } => tr("Create a Space").into(),
@@ -647,6 +664,7 @@ impl App {
             Modal::NewChannel { .. } => tr("Create Channel").into(),
             Modal::ListInfo { .. } => tr("List Info").into(),
             Modal::PickTask { mode, .. } => tr(mode.title()).into(),
+            Modal::ConfirmRemove { kind, .. } => if *kind == "person" { tr("Remove") } else { tr("Delete") }.into(),
         };
         // dim backdrop
         let screen = ctx.screen_rect();
@@ -690,6 +708,7 @@ impl App {
         match modal {
             Modal::Together { path, addr, code, result } => close = self.together_body(ui, t, path, addr, code, result),
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
+            Modal::Welcome { step, name, addr } => close = self.welcome_body(ui, t, step, name, addr),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList { name, space, folder, .. } => close = self.new_list_body(ui, t, name, space, folder),
             Modal::NewSpace { name, color } => close = self.new_space_body(ui, t, name, color),
@@ -723,7 +742,8 @@ impl App {
                     ui.painter().text(r.center(), Align2::CENTER_CENTER, "\u{1F464}", FontId::proportional(14.0), t.text2);
                     ui.vertical(|ui| {
                         egui::ComboBox::from_id_salt("invite_role").selected_text(role_text(role)).show_ui(ui, |ui| {
-                            for (name, _) in ROLES.iter().take(3) {
+                            // no Guest: nothing limits what a guest can see yet
+                            for (name, _) in ROLES.iter().take(2) {
                                 ui.selectable_value(role, name.to_string(), role_text(name));
                             }
                         });
@@ -734,7 +754,7 @@ impl App {
                 let shared = self.data.extra.shared.is_some();
                 let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(if on_server { tr("This workspace is on a server: after inviting, give each person their invite code (Work together > People).") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
+                    ui.label(RichText::new(if on_server { tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
                     if ui.link(if shared { tr("Sharing") } else { tr("Work together") }).clicked() {
                         self.modal = Some(self.together_modal());
                     }
@@ -748,7 +768,7 @@ impl App {
                         if send.clicked() {
                             self.invite_people(&valid, role);
                             let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
-                            self.toast = Some((if on_server { crate::trf!("Invited {} people. Get their invite codes in Work together > People.", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            self.toast = Some((if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
                             self.dirty = true;
                             close = true;
                         }
@@ -1047,7 +1067,7 @@ impl App {
                     self.dirty = true;
                 }
             }
-            Modal::Automations { status, action, value } => {
+            Modal::Automations { status, action, value, scope } => {
                 let mut remove = None;
                 let rules = self.data.extra.automations.clone();
                 for (i, a) in rules.iter().enumerate() {
@@ -1058,6 +1078,9 @@ impl App {
                             self.dirty = true;
                         }
                         ui.label(crate::trf!("When status changes to {}, {}", crate::i18n::status_text(&a.trigger_status).to_uppercase(), self.action_text(a)));
+                        if let Some(l) = a.list {
+                            ui.label(RichText::new(crate::trf!("in {}", self.scope_name(l))).color(t.text3));
+                        }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
                                 remove = Some(i);
@@ -1074,6 +1097,15 @@ impl App {
                 }
                 ui.separator();
                 ui.label(RichText::new(tr("New automation")).strong());
+                // opened from a List or Space menu: the new rule runs only there
+                let scope_id = match *scope {
+                    Some(Location::List(id)) | Some(Location::Space(id)) => Some(id),
+                    _ => None,
+                };
+                ui.label(RichText::new(match scope_id {
+                    Some(id) => crate::trf!("Runs in {}", self.scope_name(id)),
+                    None => tr("Runs in the whole Workspace").to_string(),
+                }).small().color(t.text2));
                 let mut names: Vec<String> = vec![];
                 for s in &self.data.spaces {
                     for st in &s.statuses {
@@ -1139,7 +1171,7 @@ impl App {
                 });
                 if primary_button(ui, t, tr("Add automation")).clicked() && !value.trim().is_empty() {
                     let id = self.data.new_id();
-                    self.data.extra.automations.push(Automation { id, enabled: true, trigger_status: status.clone(), action: action.clone(), value: value.trim().to_string(), list: None });
+                    self.data.extra.automations.push(Automation { id, enabled: true, trigger_status: status.clone(), action: action.clone(), value: value.trim().to_string(), list: scope_id });
                     value.clear();
                     self.dirty = true;
                 }
@@ -1193,7 +1225,9 @@ impl App {
                                         *tag = nt.clone();
                                     }
                                 }
-                                task.tags.dedup();
+                                // drop repeats anywhere in the list, keeping the first
+                                let mut seen = std::collections::HashSet::new();
+                                task.tags.retain(|g| seen.insert(g.clone()));
                             }
                             from.clear();
                             self.dirty = true;
@@ -1331,16 +1365,46 @@ impl App {
                         self.data.channels[ci].last_read = now_ts();
                         self.dirty = true;
                     }
-                    let label = if is_channel { tr("Delete channel") } else { tr("Close conversation") };
-                    if ui.add(egui::Button::new(RichText::new(label).color(t.danger))).clicked() {
-                        self.data.channels.remove(ci);
-                        if self.chat_open == Some(cid) {
-                            self.chat_open = None;
+                    if !is_channel {
+                        // only hides it for me; it comes back with the next message
+                        if ui.add(egui::Button::new(RichText::new(tr("Close conversation")).color(t.danger))).on_hover_text(tr("Hides it from your sidebar until a new message arrives. Nothing is deleted.")).clicked() {
+                            self.close_dm(cid);
+                            close = true;
                         }
-                        self.dirty = true;
-                        close = true;
+                        return;
+                    }
+                    // deleting removes it for everyone: members only, and asked first
+                    let member = self.data.channels[ci].members.contains(&self.data.me);
+                    let ask = egui::Id::new(("delete_channel", cid));
+                    let asking = ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false));
+                    if !asking {
+                        let b = ui.add_enabled(member, egui::Button::new(RichText::new(tr("Delete channel")).color(t.danger)));
+                        let b = if member { b } else { b.on_disabled_hover_text(tr("Only members of this channel can delete it.")) };
+                        if b.clicked() {
+                            ui.data_mut(|d| d.insert_temp(ask, true));
+                        }
                     }
                 });
+                let ask = egui::Id::new(("delete_channel", cid));
+                if is_channel && ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false)) {
+                    ui.add_space(6.0);
+                    let name = self.data.channels[ci].name.clone();
+                    ui.label(RichText::new(crate::trf!("Delete #{} for everyone? Its messages are removed for the whole team.", name)).color(t.text));
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)).clicked() && self.data.channels[ci].members.contains(&self.data.me) {
+                            self.data.channels.remove(ci);
+                            if self.chat_open == Some(cid) {
+                                self.chat_open = None;
+                            }
+                            self.dirty = true;
+                            close = true;
+                            ui.data_mut(|d| d.remove::<bool>(ask));
+                        }
+                        if ui.button(tr("Cancel")).clicked() {
+                            ui.data_mut(|d| d.remove::<bool>(ask));
+                        }
+                    });
+                }
             }
             Modal::Share { emails } => {
                 let name = self.data.location_name(self.loc);
@@ -1363,7 +1427,8 @@ impl App {
                         close = true;
                     }
                     if ui.button(tr("\u{1F517} Copy link")).clicked() {
-                        ui.ctx().copy_text(format!("workboard://{}/{}", self.data.workspace.replace(' ', "-"), name.replace(' ', "-")));
+                        // the same kind of link the app opens (search, messages, macOS)
+                        ui.ctx().copy_text(super::nav::location_link(self.loc));
                         self.toast = Some((tr("Link copied").into(), now_ts()));
                     }
                 });
@@ -1405,7 +1470,7 @@ impl App {
                     }
                 });
                 let now = now_ts();
-                let running = self.data.tasks.iter().find(|x| x.timer_started.is_some()).map(|x| (x.id, x.name.clone(), x.tracked_secs(now)));
+                let running = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)).map(|x| (x.id, x.name.clone(), x.tracked_secs(now)));
                 if let Some((_, n, secs)) = &running {
                     ui.label(crate::trf!("Running: {} \u{2022} {}", n, fmt_duration(*secs)));
                     ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
@@ -1435,7 +1500,8 @@ impl App {
                     let (h, m) = time.split_once(':').map(|(h, m)| (h.trim().parse().unwrap_or(9), m.trim().parse().unwrap_or(0))).unwrap_or((9, 0));
                     let ts = d.and_hms_opt(h.min(23), m.min(59), 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or_else(now_ts);
                     let id = self.data.new_id();
-                    self.data.extra.reminders.push(Reminder { id, text: text.trim().to_string(), due_ts: ts, done: false, owner: self.data.me });
+                    let (task, message) = std::mem::take(&mut self.reminder_about);
+                    self.data.extra.reminders.push(Reminder { id, text: text.trim().to_string(), due_ts: ts, done: false, owner: self.data.me, task, message, ..Default::default() });
                     self.dirty = true;
                     self.toast = Some((tr("Reminder created").into(), now_ts()));
                     close = true;
@@ -1523,6 +1589,7 @@ impl App {
                     }
                 }
             }
+            Modal::ConfirmRemove { kind, id, name } => close = self.confirm_remove_body(ui, t, kind, *id, name),
             Modal::NewDashboard { name } => {
                 ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
                 let spaces: Vec<(u64, String)> = self.data.spaces.iter().map(|s| (s.id, s.name.clone())).collect();
@@ -1559,6 +1626,10 @@ impl App {
                 .join(" ");
             let color = STATUS_PALETTE[1 + (id as usize % 13)];
             self.data.members.push(Member { id, name, color, email: e.to_string(), role: role.to_string(), invited: true, status_text: String::new() });
+            // on a server: ask for their invite code (emailed by the server) once it has them
+            if self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some()) {
+                self.sync_rt.auto_invite.push((id, if role == "Admin" { wb_net::Role::Admin } else { wb_net::Role::Member }));
+            }
             if let Some(g) = self.data.channels.iter_mut().find(|c| c.kind == ChannelKind::Channel && c.name == "general") {
                 g.members.push(id);
             }
@@ -1568,6 +1639,14 @@ impl App {
             self.dirty = true;
         }
         added
+    }
+
+    /// The List or Space an automation runs in, by id.
+    fn scope_name(&self, id: u64) -> String {
+        match self.data.spaces.iter().find(|s| s.id == id) {
+            Some(s) => s.name.clone(),
+            None => self.data.list_name(id),
+        }
     }
 
     pub(super) fn describe_action(&self, a: &Automation) -> String {
@@ -1594,8 +1673,7 @@ impl App {
         let Some(list) = self.default_list() else { return tr("Open a list first").into() };
         let statuses = self.data.statuses_for_list(list);
         let mut n = 0;
-        for (i, line) in text.lines().enumerate() {
-            let cols: Vec<String> = line.split(',').map(|c| c.trim().trim_matches('"').to_string()).collect();
+        for (i, cols) in parse_csv(&text).into_iter().enumerate() {
             if cols.is_empty() || cols[0].is_empty() {
                 continue;
             }
@@ -1612,20 +1690,22 @@ impl App {
         crate::trf!("Imported {} tasks into {}", n, self.data.list_name(list))
     }
 
-    pub(super) fn export_csv(&self) -> String {
+    /// The current tasks as CSV text (every field quoted, so names keep their
+    /// commas, quotes and line breaks; `import_csv` reads it back).
+    pub(super) fn csv_text(&self) -> String {
+        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
         let mut out = String::from("name,status,priority,due,assignee,list\n");
         for t in self.filtered() {
             let who = t.assignees.first().and_then(|a| self.data.member(*a)).map(|m| m.name.clone()).unwrap_or_default();
-            out.push_str(&format!(
-                "\"{}\",{},{},{},{},\"{}\"\n",
-                t.name.replace('"', "'"),
-                t.status,
-                PRIORITIES[t.priority as usize].label,
-                t.due.map(|d| d.to_string()).unwrap_or_default(),
-                who,
-                self.data.list_name(t.list_id)
-            ));
+            let row = [t.name.clone(), t.status.clone(), PRIORITIES[t.priority as usize].label.to_string(), t.due.map(|d| d.to_string()).unwrap_or_default(), who, self.data.list_name(t.list_id)];
+            out.push_str(&row.iter().map(|f| q(f)).collect::<Vec<_>>().join(","));
+            out.push('\n');
         }
+        out
+    }
+
+    pub(super) fn export_csv(&self) -> String {
+        let out = self.csv_text();
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         let path = PathBuf::from(home).join("Downloads").join(format!("tasks-{}.csv", today()));
         match std::fs::write(&path, out) {
@@ -1638,8 +1718,40 @@ impl App {
         let item = self.data.extra.trash.remove(i);
         match item.kind.as_str() {
             "Task" => {
-                if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {
+                if let Ok(mut tasks) = serde_json::from_str::<Vec<Task>>(&item.payload) {
+                    // the list it came from may be gone: bring the list back
+                    // from Trash too, or else put the task in the first list
+                    let mut gone: Vec<u64> = tasks.iter().map(|t| t.list_id).filter(|l| !self.data.location_exists(Location::List(*l))).collect();
+                    gone.sort_unstable();
+                    gone.dedup();
+                    let mut note = None;
+                    for l in gone {
+                        if self.data.location_exists(Location::List(l)) {
+                            continue;
+                        }
+                        let in_trash = self.data.extra.trash.iter().position(|x| x.kind == "List" && ListTrash::parse(&x.payload).is_some_and(|lt| lt.list.id == l));
+                        if let Some(j) = in_trash {
+                            let name = self.data.extra.trash[j].title.clone();
+                            self.restore_trash(j);
+                            if self.data.location_exists(Location::List(l)) {
+                                note = Some(crate::trf!("Also restored its list \"{}\"", name));
+                                continue;
+                            }
+                        }
+                        let Some(to) = self.data.first_list() else {
+                            self.data.extra.trash.insert(i.min(self.data.extra.trash.len()), item);
+                            self.toast = Some((tr("There is no list to restore it into. Make a list first.").into(), now_ts()));
+                            return;
+                        };
+                        for t in tasks.iter_mut().filter(|t| t.list_id == l) {
+                            t.list_id = to;
+                        }
+                        note = Some(crate::trf!("Its list is gone, so it went to {}", self.data.list_name(to)));
+                    }
                     self.data.tasks.extend(tasks);
+                    if let Some(n) = note {
+                        self.toast = Some((n, now_ts()));
+                    }
                 }
             }
             "Doc" => {
@@ -1648,34 +1760,27 @@ impl App {
                 self.restore_doc_pages(pages);
             }
             "List" => {
-                // (space, list, tasks, folder); lists trashed before the folder was kept have no folder
-                let parsed = serde_json::from_str::<(u64, ListItem, Vec<Task>, Option<u64>)>(&item.payload).ok().or_else(|| serde_json::from_str::<(u64, ListItem, Vec<Task>)>(&item.payload).ok().map(|(s, l, t)| (s, l, t, None)));
-                if let Some((sid, l, tasks, folder)) = parsed {
-                    let idx = self.data.spaces.iter().position(|s| s.id == sid).unwrap_or(0);
-                    if let Some(s) = self.data.spaces.get_mut(idx) {
-                        match folder.and_then(|fid| s.folders.iter_mut().find(|f| f.id == fid)) {
-                            Some(f) => f.lists.push(l),
-                            None => s.lists.push(l),
+                if let Some(lt) = ListTrash::parse(&item.payload) {
+                    // back into its folder, else its space, else the first space
+                    let folder = lt.folder.and_then(|f| self.data.spaces.iter().position(|s| s.folders.iter().any(|x| x.id == f)).map(|si| (si, f)));
+                    let space = self.data.spaces.iter().position(|s| s.id == lt.space);
+                    let name = lt.list.name.clone();
+                    if let Some((si, fid)) = folder {
+                        if let Some(f) = self.data.spaces[si].folders.iter_mut().find(|x| x.id == fid) {
+                            f.lists.push(lt.list);
                         }
+                    } else if let Some(si) = space.or(if self.data.spaces.is_empty() { None } else { Some(0) }) {
+                        let home = self.data.spaces[si].name.clone();
+                        self.data.spaces[si].lists.push(lt.list);
+                        if lt.folder.is_some() || space.is_none() {
+                            self.toast = Some((crate::trf!("\"{}\" was restored to {} because its old place is gone", name, home), now_ts()));
+                        }
+                    } else {
+                        self.data.extra.trash.insert(i.min(self.data.extra.trash.len()), item);
+                        self.toast = Some((tr("There is no space to restore it into. Make a space first.").into(), now_ts()));
+                        return;
                     }
-                    self.restore_tasks(tasks);
-                }
-            }
-            "Folder" => {
-                if let Ok((sid, f, tasks)) = serde_json::from_str::<(u64, Folder, Vec<Task>)>(&item.payload) {
-                    let idx = self.data.spaces.iter().position(|s| s.id == sid).unwrap_or(0);
-                    if let Some(s) = self.data.spaces.get_mut(idx) {
-                        s.folders.push(f);
-                    }
-                    self.restore_tasks(tasks);
-                }
-            }
-            "Space" => {
-                if let Ok((sp, tasks)) = serde_json::from_str::<(Space, Vec<Task>)>(&item.payload) {
-                    if !self.data.spaces.iter().any(|s| s.id == sp.id) {
-                        self.data.spaces.push(sp);
-                    }
-                    self.restore_tasks(tasks);
+                    self.data.tasks.extend(lt.tasks);
                 }
             }
             "Whiteboard" => {
@@ -1706,15 +1811,6 @@ impl App {
             _ => {}
         }
         self.dirty = true;
-    }
-
-    /// Puts trashed tasks back, skipping any that are somehow still there.
-    fn restore_tasks(&mut self, tasks: Vec<Task>) {
-        for t in tasks {
-            if !self.data.tasks.iter().any(|x| x.id == t.id) {
-                self.data.tasks.push(t);
-            }
-        }
     }
 
     /// "New message" picker (sidebar + New message, Create > Message, Cmd+G).
@@ -1814,7 +1910,7 @@ impl App {
                         .data
                         .channels
                         .iter()
-                        .filter(|c| c.kind == ChannelKind::Channel || tab == 0)
+                        .filter(|c| (c.kind == ChannelKind::Channel || tab == 0) && self.can_see(c) && !self.dm_duplicate(c))
                         .map(|c| (c.id, self.channel_label(c), c.messages.last().map(|m| m.ts).unwrap_or(c.last_read)))
                         .filter(|c| hit(&c.1))
                         .collect();
@@ -1841,7 +1937,7 @@ impl App {
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
         if let Some(uid) = dm_with {
-            let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((uid == me && c.members == vec![me]) || (uid != me && c.members.contains(&uid) && c.members.contains(&me)))).map(|c| c.id);
+            let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && ((uid == me && c.members == vec![me]) || (uid != me && c.members.contains(&uid) && c.members.contains(&me))) && !self.dm_duplicate(c)).map(|c| c.id);
             go = Some(existing.unwrap_or_else(|| {
                 let id = self.data.new_id();
                 let members = if uid == me { vec![me] } else { vec![me, uid] };
@@ -1982,4 +2078,54 @@ pub fn notepad_line(l: &str) -> (Option<bool>, &str) {
     } else {
         (None, x.trim())
     }
+}
+
+/// Splits CSV text into rows of fields. A quoted field may hold commas, line
+/// breaks and doubled quotes (""); unquoted fields are trimmed.
+pub(super) fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows: Vec<Vec<String>> = vec![];
+    let mut row: Vec<String> = vec![];
+    let mut field = String::new();
+    let (mut quoted, mut was_quoted) = (false, false);
+    let finish = |field: &mut String, was_quoted: &mut bool, row: &mut Vec<String>| {
+        row.push(if *was_quoted { std::mem::take(field) } else { std::mem::take(field).trim().to_string() });
+        *was_quoted = false;
+    };
+    let mut it = text.chars().peekable();
+    while let Some(c) = it.next() {
+        if quoted {
+            if c == '"' {
+                if it.peek() == Some(&'"') {
+                    it.next();
+                    field.push('"');
+                } else {
+                    quoted = false;
+                }
+            } else {
+                field.push(c);
+            }
+            continue;
+        }
+        match c {
+            ',' => finish(&mut field, &mut was_quoted, &mut row),
+            '\n' => {
+                finish(&mut field, &mut was_quoted, &mut row);
+                rows.push(std::mem::take(&mut row));
+            }
+            '\r' => {}
+            '"' if !was_quoted && field.trim().is_empty() => {
+                field.clear();
+                quoted = true;
+                was_quoted = true;
+            }
+            // anything after a closing quote, before the comma, is dropped
+            _ if was_quoted => {}
+            _ => field.push(c),
+        }
+    }
+    if !field.is_empty() || was_quoted || !row.is_empty() {
+        finish(&mut field, &mut was_quoted, &mut row);
+        rows.push(row);
+    }
+    rows
 }

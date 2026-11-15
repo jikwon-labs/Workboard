@@ -48,6 +48,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <!-- 초대 링크(workboard://join?server=...&code=...)를 이 앱이 연다. src/links.rs 가 받는다. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>local.workboard.app.join</string>
+      <key>CFBundleURLSchemes</key><array><string>workboard</string></array>
+    </dict>
+  </array>
   <key>NSMicrophoneUsageDescription</key><string>Workboard uses the microphone for huddles and Talk to Text.</string>
   <key>NSCameraUsageDescription</key><string>Workboard uses the camera for huddles and clips.</string>
   <!-- Sparkle: 업데이트는 팀 서버(GET /updates/appcast.xml)에서 받는다. 하루 한 번 스스로 확인한다. -->

@@ -35,7 +35,6 @@ pub struct SweepUi {
     /// The reminder being changed: (id, text, date, time).
     pub reminder_edit: Option<(u64, String, Option<NaiveDate>, String)>,
     /// Due reminders already announced this session.
-    pub reminders_alerted: HashSet<u64>,
     /// Planner: the day a task is being typed into, and its name.
     pub planner_add: Option<(NaiveDate, String)>,
     /// Search: the highlighted result, and the query it belongs to.
@@ -103,7 +102,10 @@ pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswe
             "name" => a.name = v,
             "description" => a.description.push_str(&v),
             "priority" => a.priority = PRIORITIES.iter().position(|p| p.label == v).unwrap_or(0) as u8,
-            "due" => a.due = NaiveDate::parse_from_str(&v, "%Y-%m-%d").ok(),
+            "due" => match NaiveDate::parse_from_str(&v, "%Y-%m-%d") {
+                Ok(d) => a.due = Some(d),
+                Err(_) => return Err(trf!("\"{}\" isn't a date. Write it as YYYY-MM-DD.", fld.label)),
+            },
             "assignee" => a.assignees.extend(v.parse::<u64>().ok()),
             k => {
                 if k == "number" && v.parse::<f64>().is_err() {
@@ -120,12 +122,13 @@ pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswe
 }
 
 /// The standard dashboard cards, in order, with their titles.
-pub const DASH_CARDS: [(&str, &str); 6] = [
+pub const DASH_CARDS: [(&str, &str); 7] = [
     ("stats", "Task totals"),
     ("status", "Tasks by status"),
     ("priority", "Tasks by priority"),
     ("workload", "Workload by assignee"),
     ("time", "Time tracked this week"),
+    ("time_people", "Time tracked this week by person"),
     ("overdue", "Overdue tasks"),
 ];
 
@@ -136,16 +139,16 @@ pub fn dash_card_title(c: &DashCard) -> String {
     DASH_CARDS.iter().find(|k| k.0 == c.kind).map(|k| k.1.to_string()).unwrap_or_else(|| c.kind.clone())
 }
 
-pub fn default_dash_cards() -> Vec<DashCard> {
-    DASH_CARDS.iter().map(|k| DashCard { kind: k.0.into(), title: String::new() }).collect()
-}
-
-/// Reads a workboard:// link (from Copy link): ("task" | "list" | "space" | "folder", id).
-pub fn parse_wb_link(q: &str) -> Option<(&str, u64)> {
-    let rest = q.trim().strip_prefix("workboard://")?;
-    let (kind, id) = rest.split_once('/')?;
-    let id = id.trim_end_matches('/').parse().ok()?;
-    matches!(kind, "task" | "list" | "space" | "folder").then_some((kind, id))
+/// The cards a dashboard shows until its cards are customised: those of its
+/// template (`Dashboard::kind`; "" shows all but the per-person time card).
+pub fn default_dash_cards(kind: &str) -> Vec<DashCard> {
+    let on = |card: &str| match kind {
+        "simple" => matches!(card, "stats" | "status" | "priority" | "overdue"),
+        "time" => matches!(card, "time" | "time_people"),
+        "project" => matches!(card, "stats" | "status" | "workload" | "overdue"),
+        _ => card != "time_people",
+    };
+    DASH_CARDS.iter().filter(|k| on(k.0)).map(|k| DashCard { kind: k.0.into(), title: String::new() }).collect()
 }
 
 impl App {
@@ -173,6 +176,10 @@ impl App {
                 ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
                 let members = self.data.members.clone();
                 let me = self.data.me;
+                // on a team server only its owner and admins manage people, and
+                // the server keeps the roles; alone or in a shared folder it's local
+                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                let manages = !server || self.sync_rt.role.is_some_and(|r| r.manages());
                 let mut remove = None;
                 for m in &members {
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
@@ -187,16 +194,21 @@ impl App {
                     let role_rect = Rect::from_min_size(pos2(r.left() + w * 0.6, r.center().y - 13.0), vec2(w * 0.15, 26.0));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
                     let mut role = if m.role.is_empty() { "Member".to_string() } else { m.role.clone() };
-                    if m.role == "Owner" {
-                        child.label(tr("Owner"));
+                    if m.role == "Owner" || !manages || (server && m.id == me) {
+                        child.label(super::menus::role_text(&role));
                     } else {
-                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(tr(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
-                            for (n, _) in ROLES.iter().take(3) {
-                                ui.selectable_value(&mut role, n.to_string(), tr(n));
+                        // Guest isn't offered: nothing limits what a guest can see yet
+                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
+                            for (n, _) in ROLES.iter().take(2) {
+                                ui.selectable_value(&mut role, n.to_string(), super::menus::role_text(n));
                             }
                         });
                         if role != m.role && !(m.role.is_empty() && role == "Member") {
-                            if let Some(mm) = self.data.members.iter_mut().find(|x| x.id == m.id) {
+                            if server {
+                                // the server changes the role and everyone's copy follows
+                                let r = if role == "Admin" { wb_net::Role::Admin } else { wb_net::Role::Member };
+                                self.access_request(wb_net::Msg::SetRole { member: m.id, role: r });
+                            } else if let Some(mm) = self.data.members.iter_mut().find(|x| x.id == m.id) {
                                 mm.role = role;
                                 self.dirty = true;
                             }
@@ -204,22 +216,15 @@ impl App {
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, tr(st), FontId::proportional(13.0), col);
-                    if m.id != me && m.role != "Owner" {
+                    if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         if put_over(ui, br, egui::Button::new(RichText::new(tr("Remove")).color(t.danger)).frame(false)).clicked() {
-                            remove = Some(m.id);
+                            remove = Some((m.id, m.name.clone()));
                         }
                     }
                 }
-                if let Some(id) = remove {
-                    self.data.members.retain(|m| m.id != id);
-                    for task in &mut self.data.tasks {
-                        task.assignees.retain(|a| *a != id);
-                    }
-                    for c in &mut self.data.channels {
-                        c.members.retain(|a| *a != id);
-                    }
-                    self.dirty = true;
+                if let Some((id, name)) = remove {
+                    self.modal = Some(Modal::ConfirmRemove { kind: "person", id, name });
                 }
                 ui.add_space(12.0);
                 ui.label(RichText::new(tr("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.")).small().color(t.text3));
@@ -231,8 +236,6 @@ impl App {
 
     pub(super) fn inbox_page(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let me = self.data.me;
-        let my_name = self.data.member(me).map(|m| format!("@{}", m.name)).unwrap_or_default();
         // tabs
         let w = ui.available_width();
         let (tabs_r, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
@@ -258,24 +261,15 @@ impl App {
             }
         }
         ui.painter().hline(tabs_r.x_range(), tabs_r.bottom(), Stroke::new(1.0, t.border));
-        // collect items
-        let _ = me;
-        let mut items: Vec<(String, i64, u64, String, Activity)> = vec![];
-        for task in &self.data.tasks {
-            for a in &task.activity {
-                let key = format!("{}:{}:{}", task.id, a.ts, a.author);
-                if self.inbox_tab_of(&key, a) == self.inbox_tab {
-                    items.push((key, a.ts, task.id, task.name.clone(), a.clone()));
-                }
-            }
-        }
+        // collect items (what is on which tab: inbox_items)
+        let mut items: Vec<super::nav::InboxItem> = self.inbox_items().into_iter().filter(|x| x.tab == self.inbox_tab).collect();
         match self.inbox_filter {
-            1 => items.retain(|x| x.4.comment),
-            2 => items.retain(|x| x.4.comment && x.4.text.contains(&my_name)),
-            3 => items.retain(|x| self.assigned_to_me(&x.4)),
+            1 => items.retain(|x| x.comment),
+            2 => items.retain(|x| x.mention),
+            3 => items.retain(|x| x.assigned),
             _ => {}
         }
-        items.sort_by_key(|x| std::cmp::Reverse(x.1));
+        items.sort_by_key(|x| std::cmp::Reverse(x.ts));
         let mut clear_all = false;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(18, 10)).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -303,7 +297,7 @@ impl App {
             });
         });
         if clear_all {
-            for (k, ..) in &items {
+            for k in items.iter().map(|x| &x.key) {
                 self.data.extra.inbox_later.retain(|x| x != k);
                 self.data.extra.inbox_cleared.push(k.clone());
             }
@@ -339,7 +333,8 @@ impl App {
                         }
                     });
                 }
-                for (key, ts, tid, tname, a) in items {
+                for it in items {
+                    let (key, ts, tname) = (it.key.clone(), it.ts, it.title.clone());
                     let w = ui.available_width();
                     let (r, resp) = ui.allocate_exact_size(vec2(w, 58.0), Sense::click());
                     name_it(&resp, &tname);
@@ -347,12 +342,11 @@ impl App {
                         ui.painter().rect_filled(r, 8.0, t.hover);
                     }
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
-                    if let Some(m) = self.data.member(a.author) {
+                    if let Some(m) = self.data.member(it.author) {
                         paint_avatar(ui.painter(), r.left_center() + vec2(22.0, 0.0), 13.0, m, t.bg);
                     }
                     ui.painter().text(r.left_top() + vec2(48.0, 18.0), Align2::LEFT_CENTER, &tname, FontId::proportional(14.0), t.text);
-                    let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_default();
-                    let line = if a.comment { trf!("{} commented: {}", who, a.text) } else { crate::i18n::history_line(&who, &a.text) };
+                    let line = self.inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
                     ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()))).text(r.left_top() + vec2(48.0, 40.0), Align2::LEFT_CENTER, line, FontId::proportional(13.0), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(12.0), t.text3);
                     let mut handled = false;
@@ -383,146 +377,7 @@ impl App {
                         }
                     }
                     if resp.clicked() && !handled {
-                        self.actions.push(Action::Open(tid));
-                    }
-                }
-            });
-        });
-    }
-
-    /// True for "assigned to <my name>" activity (what assigning logs).
-    pub(super) fn assigned_to_me(&self, a: &Activity) -> bool {
-        let Some(m) = self.data.member(self.data.me) else { return false };
-        !a.comment && !m.name.is_empty() && a.text == format!("assigned to {}", m.name)
-    }
-
-    /// Which Inbox tab an activity belongs in: 0 Primary, 1 Other, 2 Later, 3 Cleared.
-    pub(super) fn inbox_tab_of(&self, key: &str, a: &Activity) -> u8 {
-        let x = &self.data.extra;
-        if x.inbox_cleared.iter().any(|k| k == key) {
-            return 3;
-        }
-        if x.inbox_later.iter().any(|k| k == key) {
-            return 2;
-        }
-        let n = &x.notify;
-        let my_name = self.data.member(self.data.me).map(|m| format!("@{}", m.name)).unwrap_or_default();
-        let mention = !my_name.is_empty() && a.text.contains(&my_name);
-        let primary = a.author != self.data.me && ((a.comment && (n.comments || (n.mentions && mention))) || (n.assigned && self.assigned_to_me(a)));
-        if primary {
-            0
-        } else {
-            1
-        }
-    }
-
-    /// The Inbox badge: Primary items of the last day not cleared or put off.
-    pub(super) fn inbox_unseen(&self) -> usize {
-        let day = now_ts() - 86400;
-        let mut n = 0;
-        for task in &self.data.tasks {
-            for a in task.activity.iter().filter(|a| a.ts > day) {
-                if self.inbox_tab_of(&format!("{}:{}:{}", task.id, a.ts, a.author), a) == 0 {
-                    n += 1;
-                }
-            }
-        }
-        n
-    }
-
-    // ---------------------------------------------------------------- replies
-
-    /// Replies: others' comments on tasks and replies to my chat messages,
-    /// each one readable on its own or all at once.
-    pub(super) fn replies_page(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        let me = self.data.me;
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-            ui.label(RichText::new(tr("Replies")).size(20.0).strong());
-            ui.label(RichText::new(tr("Comments from others on tasks and replies to your chat messages")).color(t.text2));
-            ui.add_space(8.0);
-            let tab_id = egui::Id::new(("inbox_tab", 1u8));
-            let mut tab: u8 = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
-            ui.horizontal(|ui| {
-                for (i, l) in ["Unread", "Read"].iter().enumerate() {
-                    if ui.selectable_label(tab == i as u8, tr(l)).clicked() {
-                        tab = i as u8;
-                    }
-                }
-                if tab == 0 {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(tr("Mark all as read")).clicked() {
-                            self.data.extra.replies_seen = now_ts();
-                            self.dirty = true;
-                        }
-                    });
-                }
-            });
-            ui.data_mut(|d| d.insert_temp(tab_id, tab));
-            ui.add_space(10.0);
-            // (key, ts, author, title, line, open: task or (channel, message))
-            let mut items: Vec<(String, i64, u64, String, String, Result<u64, (u64, u64)>)> = vec![];
-            for task in &self.data.tasks {
-                for a in task.activity.iter().filter(|a| a.comment && a.author != me) {
-                    items.push((format!("{}:{}:{}", task.id, a.ts, a.author), a.ts, a.author, task.name.clone(), a.text.clone(), Ok(task.id)));
-                }
-            }
-            for c in &self.data.channels {
-                let place = if c.kind == ChannelKind::Direct { tr("Direct message").to_string() } else { format!("#{}", c.name) };
-                for m in c.messages.iter().filter(|m| m.author == me) {
-                    for r in m.replies.iter().filter(|r| r.author != me) {
-                        items.push((format!("msg:{}", r.id), r.ts, r.author, trf!("Reply in {}", place), r.text.clone(), Err((c.id, m.id))));
-                    }
-                }
-            }
-            let seen = self.data.extra.replies_seen;
-            let read = |k: &str, ts: i64| ts <= seen || self.data.extra.replies_read.iter().any(|x| x == k);
-            items.retain(|x| read(&x.0, x.1) == (tab == 1));
-            items.sort_by_key(|x| std::cmp::Reverse(x.1));
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                if items.is_empty() {
-                    ui.label(RichText::new(tr("You're all caught up")).color(t.text3));
-                }
-                for (key, ts, author, title, text, open) in items.into_iter().take(200) {
-                    let w = ui.available_width();
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 56.0), Sense::click());
-                    name_it(&resp, &title);
-                    if resp.hovered() {
-                        ui.painter().rect_filled(r, 8.0, t.hover);
-                    }
-                    ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
-                    if let Some(m) = self.data.member(author) {
-                        paint_avatar(ui.painter(), r.left_center() + vec2(22.0, 0.0), 13.0, m, t.bg);
-                    }
-                    ui.painter().text(r.left_top() + vec2(48.0, 16.0), Align2::LEFT_CENTER, &title, FontId::proportional(13.5), t.text);
-                    let who = self.data.member(author).map(|m| m.name.clone()).unwrap_or_default();
-                    let line = if open.is_ok() { trf!("{} commented: {}", who, text) } else { trf!("{} replied: {}", who, text) };
-                    ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 200.0, r.bottom()))).text(r.left_top() + vec2(48.0, 38.0), Align2::LEFT_CENTER, line, FontId::proportional(12.5), t.text2);
-                    ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(11.5), t.text3);
-                    let mut handled = false;
-                    if tab == 0 {
-                        let br = Rect::from_min_size(pos2(r.right() - 190.0, r.center().y - 13.0), vec2(90.0, 26.0));
-                        let b = put_over(ui, br, egui::Button::new(tr("Mark read")).corner_radius(6));
-                        name_it(&b, &format!("Mark read {}", text));
-                        if b.clicked() {
-                            self.data.extra.replies_read.push(key.clone());
-                            self.dirty = true;
-                            handled = true;
-                        }
-                    }
-                    if resp.clicked() && !handled {
-                        match open {
-                            Ok(tid) => self.actions.push(Action::Open(tid)),
-                            Err((cid, mid)) => {
-                                self.section = Section::Chat;
-                                self.chat_open = Some(cid);
-                                self.thread_open = Some(mid);
-                            }
-                        }
-                        if !self.data.extra.replies_read.contains(&key) {
-                            self.data.extra.replies_read.push(key);
-                            self.dirty = true;
-                        }
+                        self.open_inbox_src(it.src);
                     }
                 }
             });
@@ -555,7 +410,7 @@ impl App {
                     ui.set_width(cw - 34.0);
                     // the frame sits in a horizontal row; stack its contents top to bottom
                     ui.vertical(|ui| {
-                    let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
+                    let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.can_see(c)).map(|c| (c.id, c.name.clone())).collect();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(tr("Channel:")).color(t.text2));
                         let cur = chans.iter().find(|c| c.0 == self.post_channel).map(|c| format!("# {}", c.1)).unwrap_or_else(|| tr("Select Channel").into());
@@ -621,7 +476,7 @@ impl App {
                 if ui.add(fol).clicked() {
                     self.post_following = !self.post_following;
                 }
-                let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
+                let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.can_see(c)).map(|c| (c.id, c.name.clone())).collect();
                 let cl = self.post_f_channel.and_then(|id| chans.iter().find(|c| c.0 == id)).map(|c| format!("#  {}", c.1)).unwrap_or_else(|| tr("#  Channel").into());
                 let cr = ui.add(egui::Button::new(cl).corner_radius(13));
                 popup(ui, &cr, ui.id().with("pf_ch"), 180.0, |ui| {
@@ -674,7 +529,7 @@ impl App {
             });
             ui.add_space(12.0);
             let mut posts: Vec<(String, u64, Message)> = vec![];
-            for c in &self.data.channels {
+            for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
                 for m in &c.messages {
                     if m.post_title.is_some() {
                         posts.push((c.name.clone(), c.id, m.clone()));
@@ -833,18 +688,24 @@ impl App {
                 }
             }
             if !make_tasks.is_empty() {
-                if let Some(list) = self.data.first_list() {
-                    let who = self.data.extra.meetings[idx].attendees.clone();
+                // the List in view, else the first one that isn't archived
+                let list = self.default_list().filter(|l| !self.data.list_archived(*l)).or_else(|| {
+                    self.data.spaces.iter().filter(|s| !s.archived && s.private_owner.is_none_or(|o| o == self.data.me)).flat_map(|s| s.folders.iter().flat_map(|f| f.lists.iter()).chain(s.lists.iter())).find(|l| !l.archived).map(|l| l.id)
+                });
+                if let Some(list) = list {
+                    // assigned to the attendees ticked above (none ticked: nobody)
+                    let who: Vec<u64> = self.data.extra.meetings[idx].attendees.iter().copied().filter(|a| self.data.member(*a).is_some()).collect();
                     for n in make_tasks {
-                        self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.iter().take(1).copied().collect(), due: None, parent: None, open: false });
+                        self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.clone(), due: None, parent: None, open: false });
                     }
-                    self.toast = Some((tr("Tasks created from the meeting notes").into(), now_ts()));
+                    self.toast = Some((trf!("Tasks created from the meeting notes in {}", self.data.list_name(list)), now_ts()));
+                } else {
+                    self.toast = Some((tr("Make a List first: action items become tasks in a List").into(), now_ts()));
                 }
             }
             if delete {
-                self.data.extra.meetings.remove(idx);
-                self.meeting_open = None;
-                self.dirty = true;
+                let m = &self.data.extra.meetings[idx];
+                self.modal = Some(Modal::ConfirmRemove { kind: "meeting", id: m.id, name: m.title.clone() });
             }
         });
     }
@@ -874,10 +735,12 @@ impl App {
                     }
                 }
                 TargetKind::Tasks { ids } => {
-                    if ids.is_empty() {
+                    // tasks deleted since they were picked don't count either way
+                    let live: Vec<&Task> = ids.iter().filter_map(|id| self.task(*id)).collect();
+                    if live.is_empty() {
                         0.0
                     } else {
-                        ids.iter().filter(|id| self.task(**id).map(|x| self.data.is_closed(x)).unwrap_or(false)).count() as f32 / ids.len() as f32
+                        live.iter().filter(|x| self.data.is_closed(x)).count() as f32 / live.len() as f32
                     }
                 }
             })
@@ -949,8 +812,7 @@ impl App {
         let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|x| x.parent.is_none()).map(|x| (x.id, x.name.clone())).collect();
         let closed: Vec<u64> = self.data.tasks.iter().filter(|x| self.data.is_closed(x)).map(|x| x.id).collect();
         let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.name.clone())).collect();
-        let asking = self.sweep.confirm.as_deref() == Some("goal");
-        let mut ask = None;
+        let exists: HashSet<u64> = self.data.tasks.iter().map(|x| x.id).collect();
         let mut delete = false;
         egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 0, top: 6, bottom: 6 }).show(ui, |ui| {
             let g = &mut self.data.extra.goals[gi];
@@ -964,14 +826,8 @@ impl App {
                     g.due = d;
                     ch = true;
                 }
-                if asking {
-                    ui.label(RichText::new(tr("Move this goal to Trash?")).color(t.danger));
-                    delete = ui.button(tr("Yes")).clicked();
-                    if ui.button(tr("No")).clicked() {
-                        ask = Some(false);
-                    }
-                } else if ui.add(egui::Button::new(RichText::new(tr("Delete goal")).color(t.danger)).frame(false)).clicked() {
-                    ask = Some(true);
+                if ui.add(egui::Button::new(RichText::new(tr("Delete goal")).color(t.danger)).frame(false)).clicked() {
+                    delete = true;
                 }
             });
             ui.horizontal(|ui| {
@@ -1014,7 +870,7 @@ impl App {
                         }
                         TargetKind::Tasks { ids } => {
                             let n = ids.iter().filter(|id| closed.contains(id)).count();
-                            ui.label(trf!("{}/{} tasks done", n, ids.len()));
+                            ui.label(trf!("{}/{} tasks done", n, ids.iter().filter(|id| exists.contains(id)).count()));
                             ui.menu_button(tr("Pick tasks"), |ui| {
                                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                                     for (id, name) in &tasks {
@@ -1060,17 +916,9 @@ impl App {
                 self.dirty = true;
             }
         });
-        match ask {
-            Some(true) => self.sweep.confirm = Some("goal".into()),
-            Some(false) => self.sweep.confirm = None,
-            None => {}
-        }
         if delete {
-            let g = self.data.extra.goals.remove(gi);
-            self.to_trash("Goal", &g.name, &g);
-            self.sweep.confirm = None;
-            self.goal_open = None;
-            self.dirty = true;
+            let g = &self.data.extra.goals[gi];
+            self.modal = Some(Modal::ConfirmRemove { kind: "goal", id: g.id, name: g.name.clone() });
         }
     }
 
@@ -1078,11 +926,9 @@ impl App {
 
     pub(super) fn form_detail(&mut self, ui: &mut Ui) {
         let t = self.t();
-        // answers belong to one form; another form starts empty
+        // a message about one form doesn't stay on another
         if self.sweep.form_for != self.form_open {
-            self.form_fill.clear();
             self.sweep.form_error = None;
-            self.sweep.confirm = None;
             self.sweep.form_for = self.form_open;
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(32, 20))).show_inside(ui, |ui| {
@@ -1090,18 +936,23 @@ impl App {
                 ui.label(RichText::new(tr("Create a form to collect requests; each answer becomes a task.")).color(t.text2));
                 return;
             };
-            let fid = self.data.extra.forms[fi].id;
             let lists: Vec<(u64, String)> = self.data.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).map(move |l| (l.id, format!("{} / {}", s.name, l.name)))).collect();
             let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.name.clone())).collect();
+            // answers typed into one form don't carry over to another
+            let fid = self.data.extra.forms[fi].id;
+            let for_id = egui::Id::new("form_fill_for");
+            if ui.data(|d| d.get_temp::<u64>(for_id)) != Some(fid) {
+                self.form_fill.clear();
+                ui.data_mut(|d| d.insert_temp(for_id, fid));
+            }
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.form_mode_fill, false, tr("\u{1F4DD} Edit"));
                 ui.selectable_value(&mut self.form_mode_fill, true, tr("\u{1F441} Fill out"));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.star_button(ui, &format!("form:{}", fid)));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.star_toggle(ui, format!("form:{}", fid)));
             });
             ui.separator();
             if !self.form_mode_fill {
                 let mut delete = false;
-                let asking = self.sweep.confirm.as_deref() == Some("form_delete");
                 let f = &mut self.data.extra.forms[fi];
                 let mut ch = false;
                 ch |= ui.add(egui::TextEdit::singleline(&mut f.name).font(FontId::proportional(24.0)).frame(false).desired_width(f32::INFINITY)).changed();
@@ -1173,29 +1024,16 @@ impl App {
                         f.fields.push(FormField { label: "Question".into(), map: "text".into(), ..Default::default() });
                         ch = true;
                     }
-                    if asking {
-                        ui.label(RichText::new(tr("Move this form to Trash?")).color(t.danger));
-                        if ui.button(tr("Yes")).clicked() {
-                            delete = true;
-                        }
-                        if ui.button(tr("No")).clicked() {
-                            self.sweep.confirm = None;
-                        }
-                    } else if ui.add(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)).frame(false)).clicked() {
-                        self.sweep.confirm = Some("form_delete".into());
+                    if ui.add(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)).frame(false)).clicked() {
+                        delete = true;
                     }
                 });
                 if ch {
                     self.dirty = true;
                 }
                 if delete {
-                    let f = self.data.extra.forms[fi].clone();
-                    self.to_trash("Form", &f.name, &f);
-                    self.data.extra.forms.remove(fi);
-                    self.data.extra.starred.retain(|s| s != &format!("form:{}", fid));
-                    self.sweep.confirm = None;
-                    self.form_open = None;
-                    self.dirty = true;
+                    let f = &self.data.extra.forms[fi];
+                    self.modal = Some(Modal::ConfirmRemove { kind: "form", id: f.id, name: f.name.clone() });
                 }
             } else {
                 let f = self.data.extra.forms[fi].clone();
@@ -1269,7 +1107,10 @@ impl App {
                         match form_answers(&f, &self.form_fill) {
                             Err(e) => self.sweep.form_error = Some(e),
                             Ok(_) if self.data.space_of_list(f.list_id).is_none() => {
-                                self.sweep.form_error = Some(tr("This form has no List to put answers in. Pick one under Edit.").into());
+                                // the List was never chosen or has been deleted
+                                self.toast = Some((tr("This form has no List for its answers. Choose one under Edit.").into(), now_ts()));
+                                self.sweep.form_error = None;
+                                self.form_mode_fill = false;
                             }
                             Ok(a) => {
                                 let name = if a.name.trim().is_empty() { format!("{} submission", f.name) } else { a.name };
@@ -1320,7 +1161,6 @@ impl App {
                 if ui.add(egui::TextEdit::singleline(&mut self.data.extra.whiteboards[wi].name).font(FontId::proportional(18.0)).frame(false).desired_width(200.0)).changed() {
                     self.dirty = true;
                 }
-                self.star_button(ui, &format!("wb:{}", wid));
                 ui.separator();
                 ui.selectable_value(&mut self.wb_tool, 0, tr("\u{1F4DD} Pen"));
                 ui.selectable_value(&mut self.wb_tool, 3, tr("\u{232B} Eraser"));
@@ -1346,20 +1186,15 @@ impl App {
                 // the question belongs to this board only
                 let asking = self.sweep.confirm.clone().and_then(|c| c.strip_suffix(&format!(":{}", wid)).map(String::from));
                 match asking.as_deref() {
-                    Some("wb_clear") | Some("wb_delete") => {
-                        let clear = asking.as_deref() == Some("wb_clear");
-                        ui.label(RichText::new(tr(if clear { "Clear the whole board?" } else { "Move this whiteboard to Trash?" })).color(t.danger));
+                    Some("wb_clear") => {
+                        ui.label(RichText::new(tr("Clear the whole board?")).color(t.danger));
                         if ui.button(tr("Yes")).clicked() {
                             self.sweep.confirm = None;
-                            if clear {
-                                let wb = &mut self.data.extra.whiteboards[wi];
-                                wb.strokes.clear();
-                                wb.notes.clear();
-                                self.sweep.wb_undo.retain(|u| u.0 != wid);
-                                self.dirty = true;
-                            } else {
-                                delete = true;
-                            }
+                            let wb = &mut self.data.extra.whiteboards[wi];
+                            wb.strokes.clear();
+                            wb.notes.clear();
+                            self.sweep.wb_undo.retain(|u| u.0 != wid);
+                            self.dirty = true;
                         }
                         if ui.button(tr("No")).clicked() {
                             self.sweep.confirm = None;
@@ -1370,10 +1205,12 @@ impl App {
                             self.sweep.confirm = Some(format!("wb_clear:{}", wid));
                         }
                         if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
-                            self.sweep.confirm = Some(format!("wb_delete:{}", wid));
+                            delete = true;
                         }
                     }
                 }
+                let wid = self.data.extra.whiteboards[wi].id;
+                self.star_toggle(ui, format!("wb:{}", wid));
             });
             let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
             let p = ui.painter_at(rect);
@@ -1396,7 +1233,7 @@ impl App {
                 p.add(egui::Shape::line(pts, Stroke::new(s.width, rgb(s.color))));
             }
             let mut drag_note = None;
-            let mut note_gone = None;
+            let mut drop_note = None;
             let mut recolor = None;
             for (i, n) in wb.notes.iter_mut().enumerate() {
                 let r = Rect::from_min_size(origin + vec2(n.pos[0], n.pos[1]), vec2(160.0, 120.0));
@@ -1412,7 +1249,7 @@ impl App {
                         drag_note = Some((i, h.drag_delta()));
                     }
                 }
-                // a colour dot and a close mark along the note's top edge
+                // a colour dot along the note's top edge recolours it
                 let dot = Rect::from_center_size(r.left_top() + vec2(12.0, 10.0), vec2(14.0, 14.0));
                 let dr = ui.interact(dot, ui.id().with(("note_color", wid, i)), Sense::click());
                 name_it(&dr, &format!("Note colour {}", i + 1));
@@ -1433,26 +1270,27 @@ impl App {
                         }
                     });
                 });
-                let x = Rect::from_center_size(r.right_top() + vec2(-12.0, 10.0), vec2(14.0, 14.0));
-                let xr = ui.interact(x, ui.id().with(("note_x", wid, i)), Sense::click());
-                name_it(&xr, &format!("Delete note {}", i + 1));
-                p.text(x.center(), Align2::CENTER_CENTER, "\u{2716}", FontId::proportional(10.0), if xr.hovered() { t.danger } else { t.text3 });
-                if xr.clicked() {
-                    note_gone = Some(i);
+                // a small x on the corner deletes just this note
+                let xr = Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0), vec2(16.0, 16.0));
+                let x = ui.put(xr, egui::Button::new(RichText::new("\u{2716}").size(9.0).color(t.text3)).frame(false)).on_hover_text(tr("Delete note"));
+                name_it(&x, &format!("Delete note {}", i));
+                if x.clicked() {
+                    drop_note = Some(i);
                 }
             }
             if let Some((i, c)) = recolor {
                 wb.notes[i].color = c;
                 self.dirty = true;
             }
+            if let Some(i) = drop_note {
+                // Undo brings it back
+                let n = wb.notes.remove(i);
+                self.sweep.wb_undo.push((wid, WbUndo::NoteGone(i, n)));
+                self.dirty = true;
+            }
             if let Some((i, d)) = drag_note {
                 wb.notes[i].pos[0] += d.x;
                 wb.notes[i].pos[1] += d.y;
-                self.dirty = true;
-            }
-            if let Some(i) = note_gone {
-                let n = wb.notes.remove(i);
-                self.sweep.wb_undo.push((wid, WbUndo::NoteGone(i, n)));
                 self.dirty = true;
             }
             if let Some(pos) = resp.interact_pointer_pos() {
@@ -1493,13 +1331,8 @@ impl App {
                 }
             }
             if delete {
-                let w = self.data.extra.whiteboards[wi].clone();
-                self.to_trash("Whiteboard", &w.name, &w);
-                self.data.extra.whiteboards.remove(wi);
-                self.data.extra.starred.retain(|s| s != &format!("wb:{}", wid));
-                self.sweep.wb_undo.retain(|u| u.0 != wid);
-                self.wb_open = None;
-                self.dirty = true;
+                let w = &self.data.extra.whiteboards[wi];
+                self.modal = Some(Modal::ConfirmRemove { kind: "whiteboard", id: w.id, name: w.name.clone() });
             }
         });
     }
@@ -1567,9 +1400,10 @@ impl App {
                     if let Some(x) = self.data.extra.reminders.iter_mut().find(|x| x.id == id) {
                         x.text = text;
                         x.due_ts = ts;
+                        // a new time alerts again
+                        x.alerted = false;
                         self.dirty = true;
                     }
-                    self.sweep.reminders_alerted.remove(&id);
                     self.sweep.reminder_edit = None;
                 } else if cancel {
                     self.sweep.reminder_edit = None;
@@ -1586,7 +1420,15 @@ impl App {
                         self.dirty = true;
                     }
                 }
-                ui.label(if r.done { RichText::new(&r.text).strikethrough().color(t.text3) } else { RichText::new(&r.text) });
+                let text = if r.done { RichText::new(&r.text).strikethrough().color(t.text3) } else { RichText::new(&r.text) };
+                if r.task.is_some() || r.message.is_some() {
+                    // opens the task or message it is about
+                    if ui.link(text).clicked() {
+                        self.open_reminder(&r);
+                    }
+                } else {
+                    ui.label(text);
+                }
                 let when = chrono::DateTime::from_timestamp(r.due_ts, 0).map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p")).unwrap_or_default();
                 ui.label(RichText::new(when).small().color(if r.due_ts < now && !r.done { t.danger } else { t.text3 }));
                 if !r.done {
@@ -1599,9 +1441,9 @@ impl App {
                             if ui.button(tr(label)).clicked() {
                                 if let Some(x) = self.data.extra.reminders.iter_mut().find(|x| x.id == r.id) {
                                     x.due_ts = ts;
+                                    x.alerted = false;
                                     self.dirty = true;
                                 }
-                                self.sweep.reminders_alerted.remove(&r.id);
                                 close_popup(ui);
                             }
                         }
@@ -1733,7 +1575,8 @@ impl App {
                 let space = self.current_space();
                 if card_on(self, "Docs") {
                 self.ov_card(ui, cw, "Docs", |s, ui| {
-                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none() && !d.archived).map(|d| (d.id, d.title.clone())).collect();
+                    let me = s.data.me;
+                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none() && !d.archived && (!d.private || d.owner == me)).map(|d| (d.id, d.title.clone())).collect();
                     if docs.is_empty() {
                         ui.label(RichText::new(tr("There are no Docs in this location yet.")).color(s.t().text2));
                     }
@@ -1967,41 +1810,8 @@ pub fn reminder_ts(d: NaiveDate, time: &str) -> i64 {
     d.and_hms_opt(u32::min(h, 23), u32::min(m, 59), 0).and_then(|x| x.and_local_timezone(chrono::Local).single()).map(|x| x.timestamp()).unwrap_or_else(now_ts)
 }
 
-/// A notification from the system (macOS), next to the in-app toast.
-fn os_notify(title: &str, body: &str) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("display notification \"{}\" with title \"{}\"", q(body), q(title));
-    let _ = std::process::Command::new("osascript").arg("-e").arg(script).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
-}
-
 // Apps sweep: Home, Planner, Reminders, Notepad, Trash and the hubs.
 impl App {
-    /// A star that adds the item ("wb:ID", "form:ID", "dash:ID") to Favorites.
-    pub(super) fn star_button(&mut self, ui: &mut Ui, key: &str) {
-        let t = self.t();
-        let starred = self.data.extra.starred.iter().any(|s| s == key);
-        let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" }).size(16.0).color(if starred { Color32::from_rgb(0xf8, 0xae, 0x00) } else { t.text2 });
-        let b = ui.add(egui::Button::new(star).frame(false)).on_hover_text(tr(if starred { "Remove from Favorites" } else { "Add to Favorites" }));
-        name_it(&b, if starred { "Unstar" } else { "Star" });
-        if b.clicked() {
-            if starred {
-                self.data.extra.starred.retain(|s| s != key);
-            } else {
-                self.data.extra.starred.push(key.to_string());
-            }
-            self.dirty = true;
-        }
-    }
-
-    /// Keeps a deleted item in Trash so it can be restored.
-    pub(super) fn to_trash<T: serde::Serialize>(&mut self, kind: &str, title: &str, item: &T) {
-        let id = self.data.new_id();
-        self.data.extra.trash.push(TrashItem { id, kind: kind.into(), title: title.into(), deleted: now_ts(), payload: serde_json::to_string(item).unwrap_or_default() });
-    }
-
     /// Adds a dashboard owned by me and opens it.
     pub(super) fn new_dashboard(&mut self, name: &str) {
         let id = self.data.new_id();
@@ -2047,30 +1857,6 @@ impl App {
             r.request_focus();
         }
     }
-
-    /// Announces reminders as they fall due (once each), if the person
-    /// wants that (Notifications > A reminder is due) and isn't muted.
-    pub(super) fn reminder_tick(&mut self, ctx: &egui::Context) {
-        let now = now_ts();
-        let me = self.data.me;
-        let mine = || self.data.extra.reminders.iter().filter(|r| r.owner == me && !r.done);
-        if let Some(next) = mine().filter(|r| r.due_ts > now).map(|r| r.due_ts).min() {
-            ctx.request_repaint_after(std::time::Duration::from_secs((next - now).clamp(1, 3600) as u64));
-        }
-        let due: Vec<(u64, String)> = mine().filter(|r| r.due_ts <= now && !self.sweep.reminders_alerted.contains(&r.id)).map(|r| (r.id, r.text.clone())).collect();
-        if due.is_empty() {
-            return;
-        }
-        self.sweep.reminders_alerted.extend(due.iter().map(|d| d.0));
-        if !self.data.extra.notify.reminders || self.data.extra.muted_until > now {
-            return;
-        }
-        let msg = if due.len() == 1 { trf!("Reminder: {}", due[0].1) } else { trf!("{} reminders are due", due.len()) };
-        self.toast = Some((msg.clone(), now));
-        if self.persist {
-            os_notify("Workboard", &msg);
-        }
-    }
 }
 
 /// Where a search result leads.
@@ -2103,12 +1889,14 @@ impl App {
         let show = |k: u8| kind == 0 || kind == k;
         let many = |k: u8| if kind == k { 60 } else { 8 };
         let mut rows: Vec<SearchRow> = vec![];
-        if let Some((k, id)) = parse_wb_link(q) {
-            let hit = match k {
-                "task" => self.task(id).map(|t| ("\u{2611}", t.name.clone(), self.data.list_name(t.list_id), Hit::Task(id))),
-                "list" => self.data.location_exists(Location::List(id)).then(|| ("\u{2630}", self.data.list_name(id), self.data.space_of_list(id).map(|s| s.name.clone()).unwrap_or_default(), Hit::Go(Location::List(id)))),
-                "folder" => self.data.location_exists(Location::Folder(id)).then(|| ("\u{1F4C1}", self.data.location_name(Location::Folder(id)), tr("Folder").into(), Hit::Go(Location::Folder(id)))),
-                _ => self.data.location_exists(Location::Space(id)).then(|| ("\u{25A0}", self.data.location_name(Location::Space(id)), tr("Space").into(), Hit::Go(Location::Space(id)))),
+        // a pasted workboard:// link (from Copy link)
+        if let Some(link) = super::nav::parse_link(q) {
+            let hit = match link {
+                super::nav::Link::Task(id) => self.task(id).map(|t| ("\u{2611}", t.name.clone(), self.data.list_name(t.list_id), Hit::Task(id))),
+                super::nav::Link::Loc(l @ Location::List(id)) => self.data.location_exists(l).then(|| ("\u{2630}", self.data.list_name(id), self.data.space_of_list(id).map(|s| s.name.clone()).unwrap_or_default(), Hit::Go(l))),
+                super::nav::Link::Loc(l @ Location::Folder(_)) => self.data.location_exists(l).then(|| ("\u{1F4C1}", self.data.location_name(l), tr("Folder").into(), Hit::Go(l))),
+                super::nav::Link::Loc(l @ Location::Space(_)) => self.data.location_exists(l).then(|| ("\u{25A0}", self.data.location_name(l), tr("Space").into(), Hit::Go(l))),
+                super::nav::Link::Loc(l) => Some(("\u{2192}", self.data.location_name(l), String::new(), Hit::Go(l))),
             };
             match hit {
                 Some((g, title, place, hit)) => rows.push(("Link", g, title, place, hit)),
@@ -2130,24 +1918,28 @@ impl App {
             }
         }
         let has = |s: &str| ql.is_empty() || s.to_lowercase().contains(&ql);
+        let me = self.data.me;
+        // like the sidebar: no other people's Personal spaces, nothing archived
+        let space_shown = |s: &Space| !s.archived && s.private_owner.map_or(true, |o| o == me);
         if show(2) {
             let mut locs: Vec<SearchRow> = vec![];
-            for s in self.data.spaces.iter().filter(|s| !s.archived) {
+            for s in self.data.spaces.iter().filter(|s| space_shown(s)) {
                 locs.push(("Locations", "\u{25A0}", s.name.clone(), tr("Space").into(), Hit::Go(Location::Space(s.id))));
+                // folders and lists by their path, as in the sidebar
                 for f in &s.folders {
-                    locs.push(("Locations", "\u{1F4C1}", f.name.clone(), s.name.clone(), Hit::Go(Location::Folder(f.id))));
+                    locs.push(("Locations", "\u{1F4C1}", format!("{} / {}", s.name, f.name), tr("Folder").into(), Hit::Go(Location::Folder(f.id))));
                     for l in f.lists.iter().filter(|l| !l.archived) {
-                        locs.push(("Locations", "\u{2630}", l.name.clone(), format!("{} / {}", s.name, f.name), Hit::Go(Location::List(l.id))));
+                        locs.push(("Locations", "\u{2630}", format!("{} / {} / {}", s.name, f.name, l.name), tr("List").into(), Hit::Go(Location::List(l.id))));
                     }
                 }
                 for l in s.lists.iter().filter(|l| !l.archived) {
-                    locs.push(("Locations", "\u{2630}", l.name.clone(), s.name.clone(), Hit::Go(Location::List(l.id))));
+                    locs.push(("Locations", "\u{2630}", format!("{} / {}", s.name, l.name), tr("List").into(), Hit::Go(Location::List(l.id))));
                 }
             }
-            rows.extend(locs.into_iter().filter(|r| has(&r.2) || has(&format!("{} / {}", r.3, r.2))).take(many(2)));
+            rows.extend(locs.into_iter().filter(|r| has(&r.2)).take(many(2)));
         }
         if show(1) {
-            let tasks = self.data.tasks.iter().filter(|x| !x.archived && (has(&x.name) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 });
+            let tasks = self.data.tasks.iter().filter(|x| !x.archived && self.data.space_of_list(x.list_id).map_or(true, |s| space_shown(s)) && (has(&x.name) || x.id.to_string() == ql)).take(if kind == 1 { 60 } else { 20 });
             rows.extend(tasks.map(|x| ("Tasks", "\u{2611}", x.name.clone(), self.data.list_name(x.list_id), Hit::Task(x.id))));
         }
         if show(3) {
@@ -2155,12 +1947,12 @@ impl App {
             rows.extend(docs.map(|d| ("Docs", "\u{1F4C4}", d.title.clone(), tr("Doc").into(), Hit::Doc(d.id))));
         }
         if show(4) {
-            let chans = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && has(&c.name)).take(many(4));
+            let chans = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.can_see(c) && has(&c.name)).take(many(4));
             rows.extend(chans.map(|c| ("Channels", "#", c.name.clone(), tr("Channel").into(), Hit::Chat(c.id))));
         }
         if show(5) && ql.len() > 1 {
             let mut n = 0;
-            'outer: for c in &self.data.channels {
+            'outer: for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
                 let place = if c.kind == ChannelKind::Direct { tr("Direct message").to_string() } else { format!("#{}", c.name) };
                 for m in c.messages.iter().chain(c.messages.iter().flat_map(|m| m.replies.iter())) {
                     if m.text.to_lowercase().contains(&ql) {
@@ -2308,7 +2100,7 @@ impl App {
                 }
                 Some(hit) => {
                     let typed = q.trim().to_string();
-                    if !typed.is_empty() && parse_wb_link(&typed).is_none() {
+                    if !typed.is_empty() && super::nav::parse_link(&typed).is_none() {
                         self.sweep.search_recent.retain(|x| x != &typed);
                         self.sweep.search_recent.insert(0, typed);
                         self.sweep.search_recent.truncate(8);
@@ -2325,5 +2117,126 @@ impl App {
         if open {
             self.palette = Some(q);
         }
+    }
+}
+
+impl App {
+    /// The "Delete this?" dialog for `Modal::ConfirmRemove`; true closes it.
+    pub(super) fn confirm_remove_body(&mut self, ui: &mut Ui, t: &Theme, kind: &str, id: u64, name: &str) -> bool {
+        let mut close = false;
+        let text = match kind {
+            "dashboard" => trf!("Delete the dashboard \"{}\"? It goes to Trash.", name),
+            "whiteboard" => trf!("Delete the whiteboard \"{}\"? It goes to Trash.", name),
+            "form" => trf!("Delete the form \"{}\"? It goes to Trash.", name),
+            "goal" => trf!("Delete the goal \"{}\"? It goes to Trash.", name),
+            "meeting" => trf!("Delete the meeting \"{}\"? This can't be undone.", name),
+            "team" => trf!("Delete the team \"{}\"? It goes to Trash.", name),
+            _ => trf!("Remove {} from the Workspace? Their tasks and conversations stay, without them.", name),
+        };
+        ui.label(text);
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let label = if kind == "person" { tr("Remove") } else { tr("Delete") };
+            if ui.add(egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(t.danger)).clicked() {
+                self.remove_item(kind, id);
+                close = true;
+            }
+            if ui.button(tr("Cancel")).clicked() {
+                close = true;
+            }
+        });
+        close
+    }
+
+    /// Deletes a dashboard, whiteboard, form, goal, meeting or team, or
+    /// removes a person, once confirmed. All but meetings and people go to
+    /// Trash, where Restore brings them back.
+    pub(super) fn remove_item(&mut self, kind: &str, id: u64) {
+        let x = &self.data.extra;
+        let trashed = match kind {
+            "dashboard" => x.dashboards.iter().find(|d| d.id == id).map(|d| ("Dashboard", d.name.clone(), serde_json::to_string(d))),
+            "whiteboard" => x.whiteboards.iter().find(|w| w.id == id).map(|w| ("Whiteboard", w.name.clone(), serde_json::to_string(w))),
+            "form" => x.forms.iter().find(|f| f.id == id).map(|f| ("Form", f.name.clone(), serde_json::to_string(f))),
+            "goal" => x.goals.iter().find(|g| g.id == id).map(|g| ("Goal", g.name.clone(), serde_json::to_string(g))),
+            "team" => x.teams.iter().find(|tm| tm.id == id).map(|tm| ("Team", tm.name.clone(), serde_json::to_string(tm))),
+            _ => None,
+        };
+        if let Some((k, title, Ok(payload))) = trashed {
+            let tid = self.data.new_id();
+            self.data.extra.trash.push(TrashItem { id: tid, kind: k.into(), title, deleted: now_ts(), payload });
+        }
+        if kind == "whiteboard" {
+            self.sweep.wb_undo.retain(|u| u.0 != id);
+        }
+        let x = &mut self.data.extra;
+        match kind {
+            "dashboard" => {
+                x.dashboards.retain(|d| d.id != id);
+                x.starred.retain(|s| s != &format!("dash:{}", id));
+                if self.dash_open == Some(id) {
+                    self.dash_open = None;
+                }
+            }
+            "whiteboard" => {
+                x.whiteboards.retain(|w| w.id != id);
+                x.starred.retain(|s| s != &format!("wb:{}", id));
+                if self.wb_open == Some(id) {
+                    self.wb_open = None;
+                }
+            }
+            "form" => {
+                x.forms.retain(|f| f.id != id);
+                x.starred.retain(|s| s != &format!("form:{}", id));
+                if self.form_open == Some(id) {
+                    self.form_open = None;
+                }
+            }
+            "goal" => {
+                x.goals.retain(|g| g.id != id);
+                if self.goal_open == Some(id) {
+                    self.goal_open = None;
+                }
+            }
+            "meeting" => {
+                x.meetings.retain(|m| m.id != id);
+                if self.meeting_open == Some(id) {
+                    self.meeting_open = None;
+                }
+            }
+            "team" => {
+                x.teams.retain(|tm| tm.id != id);
+                if self.team_open == Some(id) {
+                    self.team_open = None;
+                    self.hub_filter = 0;
+                }
+            }
+            "person" => {
+                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                if server {
+                    // their computers are signed out by the server; without it,
+                    // nothing changes here either
+                    if self.sync_rt.net_status != Some(wb_net::Status::Connected) {
+                        self.access_request(wb_net::Msg::Revoke { member: id });
+                        return;
+                    }
+                    self.access_request(wb_net::Msg::Revoke { member: id });
+                }
+                self.data.members.retain(|m| m.id != id);
+                for task in &mut self.data.tasks {
+                    task.assignees.retain(|a| *a != id);
+                }
+                for c in &mut self.data.channels {
+                    c.members.retain(|a| *a != id);
+                }
+                for tm in &mut self.data.extra.teams {
+                    tm.members.retain(|a| *a != id);
+                }
+                for m in &mut self.data.extra.meetings {
+                    m.attendees.retain(|a| *a != id);
+                }
+            }
+            _ => return,
+        }
+        self.dirty = true;
     }
 }

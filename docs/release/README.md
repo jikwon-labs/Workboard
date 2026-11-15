@@ -29,7 +29,9 @@ Sparkle 은 `scripts/fetch-sparkle.sh` 가 `vendor/Sparkle` 에 받는다(버전
    `build/Workboard-<버전>-arm64.zip` 이 생긴다. 공증에 몇 분 걸린다.
 3. 업데이트로 올린다.
 
-       UPDATES_DEST='mac-mini:Library/Application Support/WorkboardServer/updates' scripts/publish-update.sh
+       UPDATES_DEST='seojigwon@macmini:Library/Application Support/WorkboardServer/updates' scripts/publish-update.sh
+
+   - Mac mini 접속은 Tailscale 호스트 `macmini`, 계정 `seojigwon` 이다(`ssh seojigwon@macmini` 가 되어야 한다). 경로는 그 계정의 홈 기준이다.
 
    - zip 을 `build/updates/` 에 모으고, Sparkle 키로 서명해 `appcast.xml` 을 다시 만든 뒤, 그 폴더를 서버의 `updates/` 로 복사한다(rsync over ssh).
    - Mac mini 에서 직접 돌릴 때는 `UPDATES_DEST="$HOME/Library/Application Support/WorkboardServer/updates"`.

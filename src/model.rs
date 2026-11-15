@@ -215,9 +215,10 @@ fn is_zero(n: &u64) -> bool {
 pub struct TimeEntry {
     pub start: i64,
     pub end: i64,
-    /// Who tracked it (older entries don't say; they count for the task's assignees).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user: Option<u64>,
+    /// Whose time this is; 0 for entries from before entries had an owner
+    /// (see `Task::entry_owner`).
+    #[serde(default)]
+    pub member: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -237,6 +238,10 @@ pub struct Task {
     pub activity: Vec<Activity>,
     pub time_entries: Vec<TimeEntry>,
     pub timer_started: Option<i64>,
+    /// Who started the running timer; None for timers started before this
+    /// was recorded (see `Data::is_my_timer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_by: Option<u64>,
     pub estimate_min: Option<u32>,
     pub created: i64,
     pub updated: i64,
@@ -299,6 +304,16 @@ impl Task {
             s += now - st;
         }
         s
+    }
+
+    /// Who a time entry belongs to: its owner, or for an entry from before
+    /// entries had one, the task's first assignee (0 when there is none).
+    pub fn entry_owner(&self, e: &TimeEntry) -> u64 {
+        if e.member != 0 {
+            e.member
+        } else {
+            self.assignees.first().copied().unwrap_or(0)
+        }
     }
 }
 
@@ -407,7 +422,8 @@ pub struct Channel {
     pub messages: Vec<Message>,
     #[serde(default)]
     pub last_read: i64,
-    /// Made with "Make Private" (stored only; everyone in this app can still see it).
+    /// Made with "Make Private": only its members see it (a direct message is
+    /// always seen only by the people in it).
     #[serde(default)]
     pub private: bool,
     /// The List made with "Add a List" and tied to this channel.
@@ -428,6 +444,9 @@ pub enum Location {
     Folder(u64),
     List(u64),
 }
+
+/// See `Data::take_unreadable`.
+static UNREADABLE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Data {
@@ -455,6 +474,15 @@ pub struct Reminder {
     pub due_ts: i64,
     pub done: bool,
     pub owner: u64,
+    /// The task it is about ("Remind me" on a task).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<u64>,
+    /// The message it is about: (channel, message).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<(u64, u64)>,
+    /// The due notice was shown.
+    #[serde(default)]
+    pub alerted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -501,7 +529,7 @@ pub struct Form {
     pub list_id: u64,
     pub description: String,
     pub fields: Vec<FormField>,
-    /// Who made it (0 for forms made before this was kept).
+    /// Who made it; 0 for forms from before this was recorded.
     #[serde(default)]
     pub owner: u64,
 }
@@ -526,7 +554,7 @@ pub struct Whiteboard {
     pub name: String,
     pub strokes: Vec<WbStroke>,
     pub notes: Vec<Sticky>,
-    /// Who made it (0 for whiteboards made before this was kept).
+    /// Who made it; 0 for whiteboards from before this was recorded.
     #[serde(default)]
     pub owner: u64,
 }
@@ -551,6 +579,29 @@ pub struct TrashItem {
     pub payload: String,
 }
 
+/// What a deleted list keeps in Trash: the whole list with its settings, where
+/// it sat (space and folder) and its tasks. Older entries were saved as a
+/// `(space id, list, tasks)` tuple; `parse` reads both.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ListTrash {
+    pub space: u64,
+    #[serde(default)]
+    pub folder: Option<u64>,
+    pub list: ListItem,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+}
+
+impl ListTrash {
+    pub fn parse(payload: &str) -> Option<ListTrash> {
+        if let Ok(t) = serde_json::from_str::<ListTrash>(payload) {
+            return Some(t);
+        }
+        let (space, list, tasks) = serde_json::from_str::<(u64, ListItem, Vec<Task>)>(payload).ok()?;
+        Some(ListTrash { space, folder: None, list, tasks })
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CustomField {
     pub id: u64,
@@ -569,6 +620,8 @@ pub struct Automation {
     /// ...then: assign, priority, comment or move
     pub action: String,
     pub value: String,
+    /// The List or Space (by id; ids are unique across both) it runs in;
+    /// None runs it everywhere.
     pub list: Option<u64>,
 }
 
@@ -595,12 +648,15 @@ pub struct Dashboard {
     pub id: u64,
     pub name: String,
     pub space: Option<u64>,
-    /// Who made it (0 for dashboards made before this was kept).
+    /// Who made it; 0 for dashboards from before this was recorded.
     #[serde(default)]
     pub owner: u64,
+    /// Which cards it shows: "simple", "time", "project", or "" for all of them.
+    #[serde(default)]
+    pub kind: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub private: bool,
-    /// The cards in order; None shows the standard set.
+    /// The cards in order, once customised; None shows the set `kind` picks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cards: Option<Vec<DashCard>>,
 }
@@ -702,9 +758,20 @@ pub struct Extra {
     /// Space Overview cards turned off with Customize.
     #[serde(default)]
     pub hidden_cards: Vec<String>,
-    /// Replies marked read one by one: "taskid:ts:author" or "msg:ID".
+    /// Replies marked read one by one: "taskid:ts:author" or "chat:CHANNEL:MESSAGE".
     #[serde(default)]
     pub replies_read: Vec<String>,
+    /// A first start: show the welcome (files from before read as false).
+    #[serde(default)]
+    pub welcome: bool,
+    /// Direct messages I closed, with when: each stays out of my sidebar
+    /// until a message newer than that arrives (only on this computer).
+    #[serde(default)]
+    pub closed_dms: Vec<(u64, i64)>,
+    /// Tasks people added to their own timesheet with "+ Add task":
+    /// [member, task] pairs.
+    #[serde(default)]
+    pub sheet_rows: Vec<[u64; 2]>,
 }
 
 impl Default for Extra {
@@ -744,6 +811,9 @@ impl Default for Extra {
             demo_removed: false,
             hidden_cards: vec![],
             replies_read: vec![],
+            welcome: false,
+            closed_dms: vec![],
+            sheet_rows: vec![],
         }
     }
 }
@@ -839,7 +909,27 @@ impl Data {
 
     pub fn load_file(file: &str) -> Option<Self> {
         let s = std::fs::read_to_string(Self::dir().join(file)).ok()?;
-        serde_json::from_str(&s).ok()
+        let d = serde_json::from_str(&s).ok();
+        if d.is_none() {
+            Self::keep_unreadable(file, &s);
+        }
+        d
+    }
+
+    /// A saved workspace that couldn't be read is copied aside before
+    /// anything can save over it; the app tells the person where it went.
+    fn keep_unreadable(file: &str, text: &str) {
+        let stem = file.strip_suffix(".json").unwrap_or(file);
+        let p = Self::dir().join(format!("{}-unreadable-{}.json", stem, now_ts()));
+        eprintln!("workboard: couldn't read {}; a copy is kept at {}", file, p.display());
+        if std::fs::write(&p, text).is_ok() {
+            *UNREADABLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(p);
+        }
+    }
+
+    /// The copy of a workspace file that couldn't be read, once.
+    pub fn take_unreadable() -> Option<PathBuf> {
+        UNREADABLE.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
     pub fn save_file(&self, file: &str) {
@@ -924,16 +1014,31 @@ impl Data {
                 }
                 return d;
             }
+            if !s.trim().is_empty() {
+                Self::keep_unreadable("data.json", &s);
+            }
         }
         Self::fresh()
     }
 
     /// The empty workspace a first start opens with.
+    /// The login name with its first letter in capitals ("Me" when empty);
+    /// works on any first character, not only ASCII.
+    pub fn display_user(user: &str) -> String {
+        let mut cs = user.chars();
+        match cs.next() {
+            None => "Me".to_string(),
+            Some(c) => c.to_uppercase().collect::<String>() + cs.as_str(),
+        }
+    }
+
     pub fn fresh() -> Self {
         let user = std::env::var("USER").unwrap_or_default();
-        let name = if user.is_empty() { "Me".to_string() } else { user[..1].to_uppercase() + &user[1..] };
+        let name = Self::display_user(&user);
         let owner = Member { id: 1, name, color: [0x5f, 0x55, 0xee], email: String::new(), role: "Owner".into(), ..Default::default() };
-        Self::blank("My Workspace", owner)
+        let mut d = Self::blank("My Workspace", owner);
+        d.extra.welcome = true;
+        d
     }
 
     /// Take out the example content (people, spaces, tasks, docs, chat...)
@@ -1102,6 +1207,49 @@ impl Data {
             || self.space_of_list(id).is_some_and(|s| s.archived || s.folders.iter().any(|f| f.archived && f.lists.iter().any(|l| l.id == id)))
     }
 
+    /// Not archived, and not in an archived list or space.
+    pub fn task_live(&self, t: &Task) -> bool {
+        !t.archived && !self.list_archived(t.list_id)
+    }
+
+    /// Only one person in the workspace: everything unowned is theirs.
+    pub fn solo(&self) -> bool {
+        self.members.len() <= 1
+    }
+
+    /// The task's timer runs and it is mine. A timer from before timers
+    /// recorded who started it counts as mine only when I'm alone in the
+    /// workspace, so it is never stopped behind a teammate's back.
+    pub fn is_my_timer(&self, t: &Task) -> bool {
+        t.timer_started.is_some()
+            && match t.timer_by {
+                Some(m) => m == self.me,
+                None => self.solo(),
+            }
+    }
+
+    /// A time entry counts as mine (old entries: see `Task::entry_owner`;
+    /// with nobody to give it to, it is mine when I'm alone).
+    pub fn is_my_entry(&self, t: &Task, e: &TimeEntry) -> bool {
+        match t.entry_owner(e) {
+            0 => self.solo(),
+            o => o == self.me,
+        }
+    }
+
+    /// Stops every timer of mine, keeping the time as my entries.
+    pub fn stop_my_timers(&mut self, now: i64) {
+        let me = self.me;
+        let mine: Vec<usize> = (0..self.tasks.len()).filter(|i| self.is_my_timer(&self.tasks[*i])).collect();
+        for i in mine {
+            let t = &mut self.tasks[i];
+            if let Some(st) = t.timer_started.take() {
+                t.time_entries.push(TimeEntry { start: st, end: now, member: me });
+            }
+            t.timer_by = None;
+        }
+    }
+
     /// The letter or symbol drawn on a space's square.
     pub fn space_glyph(s: &Space) -> String {
         if s.icon.is_empty() {
@@ -1236,14 +1384,19 @@ impl Data {
         }
     }
 
+    /// The first list new tasks can go into: skips archived spaces and lists
+    /// and other people's private spaces.
     pub fn first_list(&self) -> Option<u64> {
         for s in &self.spaces {
+            if s.archived || s.private_owner.is_some_and(|o| o != self.me) {
+                continue;
+            }
             for f in &s.folders {
-                if let Some(l) = f.lists.first() {
+                if let Some(l) = f.lists.iter().find(|l| !l.archived) {
                     return Some(l.id);
                 }
             }
-            if let Some(l) = s.lists.first() {
+            if let Some(l) = s.lists.iter().find(|l| !l.archived) {
                 return Some(l.id);
             }
         }
@@ -1345,6 +1498,7 @@ impl Data {
                 activity: vec![Activity { ts: now - 86400 * 3, author: 1, text: "created this task".into(), comment: false, ..Default::default() }],
                 time_entries: vec![],
                 timer_started: None,
+                timer_by: None,
                 estimate_min: None,
                 created: now - 86400 * 3 + i as i64,
                 updated: now,
@@ -1381,6 +1535,7 @@ impl Data {
                 activity: vec![],
                 time_entries: vec![],
                 timer_started: None,
+                timer_by: None,
                 estimate_min: None,
                 created: now,
                 updated: now,
@@ -1452,8 +1607,8 @@ impl Data {
         d.channels.push(Channel { id: c3, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 2], messages: vec![m5], last_read: 0, ..Default::default() });
         let c4 = d.new_id();
         d.channels.push(Channel { id: c4, name: String::new(), kind: ChannelKind::Direct, topic: String::new(), members: vec![1, 3], messages: vec![], last_read: now2, ..Default::default() });
-        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400, user: None });
-        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800, user: None });
+        d.tasks[0].time_entries.push(TimeEntry { start: now2 - 86400 - 5400, end: now2 - 86400, member: 0 });
+        d.tasks[3].time_entries.push(TimeEntry { start: now2 - 7200, end: now2 - 4800, member: 0 });
         d.tasks[0].activity.push(Activity { ts: now - 3600 * 5, author: 2, text: "Looks great so far, let's review on Friday.".into(), comment: true, ..Default::default() });
         d
     }

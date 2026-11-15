@@ -8,8 +8,10 @@
 // Showing: a message's file comes from the cache, else the server, else the
 // shared folder; pictures for the screen are decoded on a worker thread.
 //
-// Two threads: "workboard-files" moves files (one at a time, so a big video
-// doesn't stall behind another), "workboard-media" prepares and decodes.
+// Moving files runs on two lanes of two "workboard-files" threads each, one
+// lane for pictures and one for videos, so a big video never holds up a
+// picture; "workboard-media" prepares and decodes. A file that couldn't be
+// fetched is tried again later (see RETRY_SECS).
 
 use super::*;
 use crate::media::{self, Rgba};
@@ -17,6 +19,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Longer side of a picture in the chat.
 pub(super) const THUMB: u32 = 720;
@@ -26,6 +29,12 @@ pub(super) const FULL: u32 = 2560;
 pub(super) const MAX_FILE: u64 = 500 << 20;
 /// Pictures and videos in one message.
 pub(super) const MAX_PER_MESSAGE: usize = 10;
+/// Waits before fetching a missing file again: after the first failure, the
+/// second, the third, and from then on.
+const RETRY_SECS: [u64; 4] = [5, 15, 60, 300];
+/// Why an attachment waits when the workspace is on a server this computer
+/// isn't signed in to (it goes up by itself once it is).
+pub(super) const NOT_SIGNED_IN: &str = "This computer isn't signed in to the team server yet. The file goes up once it is.";
 
 /// An attachment waiting in the message box.
 #[derive(Clone, Debug)]
@@ -64,6 +73,8 @@ pub(super) enum Remote {
     Folder(PathBuf),
     /// the team server
     Server { addr: String, auth: wb_net::Auth },
+    /// a team server, but no sign-in for it on this computer (yet)
+    SignedOut,
 }
 
 enum Job {
@@ -71,6 +82,8 @@ enum Job {
     Upload { sha: String, ctype: String, addr: String, auth: wb_net::Auth },
     Download { sha: String, addr: String, auth: wb_net::Auth },
     FromFolder { sha: String, folder: PathBuf },
+    /// copy a cached file into the shared folder
+    ToFolder { sha: String, folder: PathBuf },
     Decode { key: String, sha: String, ext: String, kind: MediaKind, max: u32 },
 }
 
@@ -79,8 +92,18 @@ enum Done {
     Decoded { key: String, img: Option<Rgba> },
 }
 
+/// Fetching a file that isn't here: how many tries so far, and when the
+/// next one is due (set once the last one failed).
+struct Fetch {
+    tries: usize,
+    next: Option<Instant>,
+}
+
 pub(super) struct Files {
     dir: PathBuf,
+    /// moving pictures
+    small: Sender<Job>,
+    /// moving videos
     net: Sender<Job>,
     work: Sender<Job>,
     done: Receiver<Done>,
@@ -88,6 +111,12 @@ pub(super) struct Files {
     /// files a message on screen wants (asked while drawing)
     wants: RefCell<Vec<(String, String, MediaKind, u32)>>,
     asked: HashSet<String>,
+    fetches: HashMap<String, Fetch>,
+    /// uploads to stop (their attachment was taken out of the message box)
+    cancelled: Arc<Mutex<HashSet<String>>>,
+    /// the server sign-in last read from the keychain: (server, device,
+    /// together::token_gen() then, token)
+    token: RefCell<Option<(String, String, u64, Option<String>)>>,
     textures: HashMap<String, Option<egui::TextureHandle>>,
     /// decoded keys that came out as a picture
     ok: HashSet<String>,
@@ -100,6 +129,8 @@ pub(super) struct Files {
 impl Files {
     pub fn new(dir: PathBuf) -> Files {
         let (net, net_rx) = mpsc::channel::<Job>();
+        let (small, small_rx) = mpsc::channel::<Job>();
+        let cancelled: Arc<Mutex<HashSet<String>>> = Default::default();
         let (work, work_rx) = mpsc::channel::<Job>();
         let (done_tx, done) = mpsc::channel::<Done>();
         let states: Arc<Mutex<HashMap<String, Transfer>>> = Default::default();
@@ -112,13 +143,18 @@ impl Files {
                 }
             }
         };
-        {
-            let (dir, states, wake) = (dir.clone(), states.clone(), wake.clone());
-            let _ = std::thread::Builder::new().name("workboard-files".into()).spawn(move || {
-                for job in net_rx {
-                    move_file(&dir, job, &states, &wake);
-                }
-            });
+        for rx in [net_rx, small_rx] {
+            let rx = Arc::new(Mutex::new(rx));
+            for _ in 0..2 {
+                let (dir, states, wake, rx, cancelled) = (dir.clone(), states.clone(), wake.clone(), rx.clone(), cancelled.clone());
+                let _ = std::thread::Builder::new().name("workboard-files".into()).spawn(move || loop {
+                    let job = rx.lock().unwrap().recv();
+                    match job {
+                        Ok(job) => move_file(&dir, job, &states, &cancelled, &wake),
+                        Err(_) => return,
+                    }
+                });
+            }
         }
         {
             let (dir, done_tx) = (dir.clone(), done_tx);
@@ -136,7 +172,7 @@ impl Files {
                 }
             });
         }
-        Files { dir, net, work, done, states, wants: Default::default(), asked: Default::default(), textures: Default::default(), ok: Default::default(), prepared: vec![], next_local: 1, ctx }
+        Files { dir, small, net, work, done, states, wants: Default::default(), asked: Default::default(), fetches: Default::default(), cancelled, token: Default::default(), textures: Default::default(), ok: Default::default(), prepared: vec![], next_local: 1, ctx }
     }
 
     /// The file in the cache, when it's there.
@@ -162,12 +198,44 @@ impl Files {
         Pending { local, name, att: None, error: None }
     }
 
+    /// The lane a picture's or a video's transfer goes on.
+    fn lane(&self, kind: MediaKind) -> &Sender<Job> {
+        match kind {
+            MediaKind::Image => &self.small,
+            MediaKind::Video => &self.net,
+        }
+    }
+
+    /// The token this computer has for a server. Read from the keychain once
+    /// and kept until the server or device changes or a sign-in is saved or
+    /// forgotten (the app asks every frame).
+    pub fn token(&self, addr: &str, device: &str) -> Option<String> {
+        let gen = together::token_gen();
+        let mut c = self.token.borrow_mut();
+        if let Some((a, d, g, t)) = c.as_ref() {
+            if a == addr && d == device && *g == gen {
+                return t.clone();
+            }
+        }
+        let t = together::load_token(addr, device);
+        *c = Some((addr.to_string(), device.to_string(), gen, t.clone()));
+        t
+    }
+
     /// A file is in the cache: send it to the server, or (without one) it's
-    /// ready as it is.
+    /// ready as it is. On a server this computer isn't signed in to, it
+    /// waits with NOT_SIGNED_IN as its error.
     pub fn upload(&self, att: &Attachment, remote: &Remote) {
-        let Remote::Server { addr, auth } = remote else {
-            self.states.lock().unwrap().insert(att.file.clone(), Transfer::Done);
-            return;
+        let (addr, auth) = match remote {
+            Remote::Server { addr, auth } => (addr, auth),
+            Remote::SignedOut => {
+                self.states.lock().unwrap().insert(att.file.clone(), Transfer::Failed(NOT_SIGNED_IN.into()));
+                return;
+            }
+            Remote::None | Remote::Folder(_) => {
+                self.states.lock().unwrap().insert(att.file.clone(), Transfer::Done);
+                return;
+            }
         };
         {
             let mut s = self.states.lock().unwrap();
@@ -176,8 +244,26 @@ impl Files {
             }
             s.insert(att.file.clone(), Transfer::Up(0.0));
             drop(s);
+            self.cancelled.lock().unwrap().remove(&att.file);
             let ctype = media::content_type(Path::new(&att.name)).to_string();
-            let _ = self.net.send(Job::Upload { sha: att.file.clone(), ctype, addr: addr.clone(), auth: auth.clone() });
+            let _ = self.lane(att.kind).send(Job::Upload { sha: att.file.clone(), ctype, addr: addr.clone(), auth: auth.clone() });
+        }
+    }
+
+    /// Stop sending a file (its tile was removed before it got there).
+    pub fn cancel_upload(&self, sha: &str) {
+        let mut s = self.states.lock().unwrap();
+        if matches!(s.get(sha), Some(Transfer::Up(_))) {
+            self.cancelled.lock().unwrap().insert(sha.to_string());
+            s.remove(sha);
+        }
+    }
+
+    /// Copy a cached file into the shared folder's files/ (quietly; for
+    /// files sent before the workspace was shared).
+    pub fn to_folder(&self, att: &Attachment, folder: &Path) {
+        if self.local(&att.file).is_some() && !folder.join(&att.file).is_file() {
+            let _ = self.lane(att.kind).send(Job::ToFolder { sha: att.file.clone(), folder: folder.to_path_buf() });
         }
     }
 
@@ -203,10 +289,11 @@ impl Files {
         self.textures.contains_key(&k) && !self.ok.contains(&k)
     }
 
-    /// Try a failed transfer again.
+    /// Try a failed transfer again (now, not when the next try is due).
     pub fn retry(&mut self, sha: &str) {
         self.states.lock().unwrap().remove(sha);
         self.asked.retain(|k| !k.starts_with(sha));
+        self.fetches.remove(sha);
     }
 
     /// Once a frame: collect finished work, start what's wanted.
@@ -238,27 +325,36 @@ impl Files {
                 continue;
             }
             if self.local(&sha).is_some() {
+                self.fetches.remove(&sha);
                 self.asked.insert(k.clone());
                 let _ = self.work.send(Job::Decode { key: k, sha, ext, kind, max });
                 continue;
             }
-            // not here yet: fetch it once
-            let fetch = format!("{}:fetch", sha);
-            if self.asked.contains(&fetch) {
+            // not here yet: fetch it, and when that fails try again a while later
+            if matches!(remote, Remote::None | Remote::SignedOut) || matches!(self.state(&sha), Some(Transfer::Down(_) | Transfer::Up(_))) {
                 continue;
             }
-            match remote {
-                Remote::Server { addr, auth } => {
-                    self.asked.insert(fetch);
-                    self.states.lock().unwrap().insert(sha.clone(), Transfer::Down(0.0));
-                    let _ = self.net.send(Job::Download { sha, addr: addr.clone(), auth: auth.clone() });
+            let now = Instant::now();
+            if let Some(f) = self.fetches.get_mut(&sha) {
+                let at = *f.next.get_or_insert_with(|| now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)]));
+                if now < at {
+                    if let Some(c) = ctx {
+                        c.request_repaint_after(at - now);
+                    }
+                    continue;
                 }
-                Remote::Folder(f) => {
-                    self.asked.insert(fetch);
-                    let _ = self.net.send(Job::FromFolder { sha, folder: f.join("files") });
-                }
-                Remote::None => {}
+                f.tries += 1;
+                f.next = None;
+            } else {
+                self.fetches.insert(sha.clone(), Fetch { tries: 1, next: None });
             }
+            let job = match remote {
+                Remote::Server { addr, auth } => Job::Download { sha: sha.clone(), addr: addr.clone(), auth: auth.clone() },
+                Remote::Folder(f) => Job::FromFolder { sha: sha.clone(), folder: f.join("files") },
+                Remote::None | Remote::SignedOut => continue,
+            };
+            self.states.lock().unwrap().insert(sha, Transfer::Down(0.0));
+            let _ = self.lane(kind).send(job);
         }
     }
 
@@ -284,6 +380,20 @@ impl Files {
     #[cfg(test)]
     pub fn decoded(&self, sha: &str, max: u32) -> bool {
         self.ok.contains(&key(sha, max))
+    }
+
+    /// Tries so far at fetching a file, and whether the next one waits (tests).
+    #[cfg(test)]
+    pub fn fetch_tries(&self, sha: &str) -> Option<(usize, bool)> {
+        self.fetches.get(sha).map(|f| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
+    }
+
+    /// Make a waiting retry due now (tests).
+    #[cfg(test)]
+    pub fn retry_due(&mut self, sha: &str) {
+        if let Some(f) = self.fetches.get_mut(sha) {
+            f.next = Some(Instant::now());
+        }
     }
 }
 
@@ -361,17 +471,21 @@ fn prepare(dir: &Path, path: Option<&Path>, png: Option<Vec<u8>>, name: &str, fo
     out
 }
 
-/// The files thread: one upload, download or folder copy.
-fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, wake: &impl Fn()) {
+/// A files thread: one upload, download or folder copy.
+fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, cancelled: &Mutex<HashSet<String>>, wake: &impl Fn()) {
     let set = |sha: &str, t: Transfer| {
         states.lock().unwrap().insert(sha.to_string(), t);
         wake();
     };
-    // progress at most every 1%
+    let stopped = |sha: &str| cancelled.lock().unwrap().contains(sha);
+    // progress at most every 1%; false once the upload was cancelled
     let report = |sha: &str, up: bool| {
         let mut last = -1i32;
         let sha = sha.to_string();
         move |done: u64, total: u64| {
+            if up && stopped(&sha) {
+                return false;
+            }
             let pct = if total == 0 { 100 } else { (done * 100 / total) as i32 };
             if pct != last {
                 last = pct;
@@ -384,9 +498,19 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, wa
     match job {
         Job::Upload { sha, ctype, addr, auth } => {
             let path = dir.join(&sha);
-            let mut progress = report(&sha, true);
-            match wb_net::upload(&addr, &auth, &sha, &path, &ctype, &mut progress) {
+            let result = if stopped(&sha) {
+                Err(wb_net::FileError::Cancelled)
+            } else {
+                let mut progress = report(&sha, true);
+                wb_net::upload(&addr, &auth, &sha, &path, &ctype, &mut progress)
+            };
+            match result {
                 Ok(()) => set(&sha, Transfer::Done),
+                Err(wb_net::FileError::Cancelled) => {
+                    cancelled.lock().unwrap().remove(&sha);
+                    states.lock().unwrap().remove(&sha);
+                    wake();
+                }
                 Err(e) => set(&sha, Transfer::Failed(e.explain())),
             }
         }
@@ -401,6 +525,9 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, wa
             Ok(()) => set(&sha, Transfer::Done),
             Err(_) => set(&sha, Transfer::Failed("The file isn't in the shared folder yet.".into())),
         },
+        Job::ToFolder { sha, folder } => {
+            let _ = store(&folder, &dir.join(&sha), &sha);
+        }
         _ => {}
     }
 }
@@ -414,11 +541,13 @@ pub(super) struct Viewer {
     pub index: usize,
     player: Option<(String, media::Player)>,
     frame: Option<egui::TextureHandle>,
+    /// a video found not to play here (so it isn't tried every frame)
+    unplayable: Option<String>,
 }
 
 impl Viewer {
     pub fn new(ch: u64, msg: u64, index: usize) -> Viewer {
-        Viewer { ch, msg, index, player: None, frame: None }
+        Viewer { ch, msg, index, player: None, frame: None, unplayable: None }
     }
 }
 
@@ -429,9 +558,9 @@ impl App {
     /// Where this workspace's files go besides the cache.
     pub(super) fn media_remote(&self) -> Remote {
         match &self.data.extra.shared {
-            Some(crate::sync::SharedCfg { server: Some(addr), device, .. }) => match together::load_token(addr, device) {
+            Some(crate::sync::SharedCfg { server: Some(addr), device, .. }) => match self.files.token(addr, device) {
                 Some(token) => Remote::Server { addr: addr.clone(), auth: wb_net::Auth { device: device.clone(), token } },
-                None => Remote::None,
+                None => Remote::SignedOut,
             },
             Some(cfg) if !cfg.folder.is_empty() => Remote::Folder(PathBuf::from(&cfg.folder)),
             _ => Remote::None,
@@ -466,6 +595,13 @@ impl App {
             }
         }
         self.attach_ready_task_files();
+        // attachments that waited for a sign-in go up once there is one
+        if matches!(remote, Remote::Server { .. }) {
+            let waiting: Vec<Attachment> = self.boxed_attachments().into_iter().filter(|a| matches!(self.files.state(&a.file), Some(Transfer::Failed(e)) if e == NOT_SIGNED_IN)).collect();
+            for a in waiting {
+                self.files.upload(&a, &remote);
+            }
+        }
         if let Some(p) = self.pasted.take() {
             if self.section == Section::Chat && self.chat_open.is_some() {
                 let thread = ctx.is_some_and(|c| c.memory(|m| m.focused()) == Some(egui::Id::new(THREAD_BOX))) && self.thread_open.is_some();
@@ -478,6 +614,36 @@ impl App {
                         self.add_media(thread, Some(f), None);
                     }
                 }
+            }
+        }
+    }
+
+    /// The attachments in every message box (this one and the ones kept
+    /// with other channels).
+    fn boxed_attachments(&self) -> Vec<Attachment> {
+        let boxes = [&self.chat_files, &self.thread_files].into_iter().chain(self.drafts.chat_files.saved.values()).chain(self.drafts.thread_files.saved.values());
+        boxes.flat_map(|l| l.iter().filter_map(|p| p.att.clone())).collect()
+    }
+
+    /// Sharing just started: the pictures and videos earlier messages refer
+    /// to (the ones this computer has) go where the team can get them.
+    pub(super) fn share_cached_files(&mut self) {
+        let remote = self.media_remote();
+        let mut seen = HashSet::new();
+        let atts: Vec<Attachment> = self
+            .data
+            .channels
+            .iter()
+            .flat_map(|c| c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter())))
+            .flat_map(|m| m.attachments.iter())
+            .filter(|a| self.files.local(&a.file).is_some() && seen.insert(a.file.clone()))
+            .cloned()
+            .collect();
+        for a in &atts {
+            match &remote {
+                Remote::Server { .. } => self.files.upload(a, &remote),
+                Remote::Folder(f) => self.files.to_folder(a, &f.join("files")),
+                Remote::None | Remote::SignedOut => {}
             }
         }
     }
@@ -597,7 +763,7 @@ impl App {
                 if let Some(why) = &failed {
                     painter.rect_stroke(rect, 8.0, Stroke::new(2.0, t.danger), egui::StrokeKind::Inside);
                     painter.text(rect.center(), Align2::CENTER_CENTER, "!", FontId::proportional(18.0), t.danger);
-                    let r = resp.clone().on_hover_text(tr(why));
+                    let r = resp.clone().on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN { format!("{}\n{}", tr(why), tr("Click to try again")) } else { tr(why).to_string() });
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
@@ -624,7 +790,14 @@ impl App {
         }
         if let Some(l) = remove {
             let list = if thread { &mut self.thread_files } else { &mut self.chat_files };
+            let gone = list.iter().find(|p| p.local == l).and_then(|p| p.att.clone());
             list.retain(|p| p.local != l);
+            // stop its upload, unless another message box has the same file
+            if let Some(a) = gone {
+                if !self.boxed_attachments().iter().any(|x| x.file == a.file) {
+                    self.files.cancel_upload(&a.file);
+                }
+            }
         }
     }
 
@@ -672,7 +845,7 @@ impl App {
                         painter.rect_filled(rect, 8.0, t.hover);
                         let status = match self.files.state(&a.file) {
                             Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                            Some(Transfer::Failed(e)) => tr(&e).to_string(),
+                            Some(Transfer::Failed(e)) => format!("{}\n{}", tr(&e), tr("Click to try again")),
                             _ if self.files.broken(&a.file, THUMB) => tr("Can't show this file").into(),
                             _ => a.name.clone(),
                         };
@@ -736,17 +909,26 @@ impl App {
         }
         // the video player follows the file shown
         if a.kind == MediaKind::Video {
-            if v.player.as_ref().map(|(s, _)| s != &a.file).unwrap_or(true) {
+            if v.player.as_ref().map(|(s, _)| s != &a.file).unwrap_or(true) && v.unplayable.as_deref() != Some(a.file.as_str()) {
                 v.player = None;
                 v.frame = None;
                 if let Some(path) = self.files.playable(&a).filter(|_| local.is_some()) {
                     let path = &path;
                     let (w, h) = fit(a.w.max(1) as f32, a.h.max(1) as f32, 1280.0, 1280.0);
-                    if let Some(mut p) = media::Player::new(path, w as u32, h as u32) {
-                        p.play();
-                        v.player = Some((a.file.clone(), p));
+                    match media::Player::new(path, w as u32, h as u32) {
+                        Some(mut p) => {
+                            p.play();
+                            v.player = Some((a.file.clone(), p));
+                        }
+                        None => v.unplayable = Some(a.file.clone()),
                     }
                 }
+            }
+            // it opened but AVFoundation gave up on it: say so instead of a dead Play button
+            if v.player.as_ref().is_some_and(|(s, p)| s == &a.file && p.failed()) {
+                v.player = None;
+                v.frame = None;
+                v.unplayable = Some(a.file.clone());
             }
             if let Some((_, p)) = v.player.as_mut() {
                 if let Some(f) = p.frame() {
@@ -785,9 +967,13 @@ impl App {
                     ui.painter().image(tex.id(), pic, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 }
                 None => {
+                    let failed = matches!(self.files.state(&a.file), Some(Transfer::Failed(_)));
+                    if failed && pic_resp.clicked() {
+                        self.files.retry(&a.file);
+                    }
                     let status = match self.files.state(&a.file) {
                         Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => tr(&e).to_string(),
+                        Some(Transfer::Failed(e)) => format!("{}\n{}", tr(&e), tr("Click to try again")),
                         _ => tr("Loading...").into(),
                     };
                     ui.painter().text(pic.center(), Align2::CENTER_CENTER, status, FontId::proportional(15.0), Color32::from_gray(200));
@@ -873,7 +1059,7 @@ impl App {
                     let status = match self.files.state(&a.file) {
                         Some(Transfer::Down(f)) => trf!("Loading the video {}%", (f * 100.0) as u32),
                         Some(Transfer::Failed(e)) => tr(&e).to_string(),
-                        _ if local.is_some() => tr("This video can't be played on this Mac.").into(),
+                        _ if local.is_some() || v.unplayable.as_deref() == Some(a.file.as_str()) => tr("This video can't be played on this Mac.").into(),
                         _ => tr("Loading the video...").into(),
                     };
                     ui.painter().text(bar.center(), Align2::CENTER_CENTER, status, FontId::proportional(13.0), Color32::from_gray(220));

@@ -9,7 +9,8 @@
 #    다운로드 주소는 상대 경로라서 앱이 어느 서버 주소로 붙든 그대로 맞는다.
 #    같은 폴더에 Workboard-<버전>-arm64.html 이 있으면 업데이트 창에 릴리즈 노트로 보인다.
 # 2. UPDATES_DEST 가 있으면 build/updates/ 를 서버 폴더의 updates/ 로 복사한다(rsync).
-#    Mac mini 로:  UPDATES_DEST='mac-mini:Library/Application Support/WorkboardServer/updates'
+#    Mac mini 로:  UPDATES_DEST='seojigwon@macmini:Library/Application Support/WorkboardServer/updates'
+#                  (Tailscale 호스트 macmini, 계정 seojigwon. 경로는 그 계정의 홈 기준)
 #    이 맥이 서버:  UPDATES_DEST="$HOME/Library/Application Support/WorkboardServer/updates"
 #    서버는 그 폴더를 GET /updates/<파일> 로 내준다. 서버를 다시 띄울 필요는 없다.
 #

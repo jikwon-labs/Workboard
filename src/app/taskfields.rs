@@ -209,7 +209,7 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
     if add {
         if let Some(min) = parse_estimate(&buf).filter(|m| *m > 0) {
             let end = now_ts() - if yesterday { 86400 } else { 0 };
-            task.time_entries.push(TimeEntry { start: end - min as i64 * 60, end, user: Some(me) });
+            task.time_entries.push(TimeEntry { start: end - min as i64 * 60, end, member: me });
             buf.clear();
         }
     }

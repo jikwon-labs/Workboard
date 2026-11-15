@@ -1,0 +1,9 @@
+#!/bin/sh
+# Claude Code sessions commit only inside a worktree (see CLAUDE.md).
+# Commits made by people (no CLAUDECODE in the environment) are not affected.
+[ -n "$CLAUDECODE" ] || exit 0
+[ -n "$WB_ALLOW_MAIN" ] && exit 0
+if [ "$(git rev-parse --path-format=absolute --git-dir)" = "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
+  echo "pre-commit: Claude commits only inside a worktree. Start one with: scripts/wt new <name>" >&2
+  exit 1
+fi

@@ -1,0 +1,6 @@
+# Swift package and Xcode build output
+WorkboardKit/.build/
+WorkboardKit/.swiftpm/
+xcuserdata/
+*.xcresult
+DerivedData/

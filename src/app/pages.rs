@@ -134,7 +134,7 @@ impl App {
                 ui.label(RichText::new(format!("{} - {}", week.text("%b %-d"), end.text("%b %-d, %Y"))).size(15.0));
             });
             ui.add_space(10.0);
-            let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x)).cloned().collect();
+            let mine: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
             let avail = ui.available_rect_before_wrap();
             let left_w = 260.0;
             let mut dropped: Option<(u64, Option<NaiveDate>)> = None;
@@ -257,7 +257,7 @@ impl App {
                 let members = self.data.members.clone();
                 let max_open = members
                     .iter()
-                    .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).count())
+                    .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).count())
                     .max()
                     .unwrap_or(1)
                     .max(1);
@@ -267,10 +267,10 @@ impl App {
                 for row in members.chunks(cols) {
                     ui.horizontal_top(|ui| {
                         for m in row {
-                            let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x)).cloned().collect();
+                            let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
                             let active = open.iter().filter(|x| self.data.status_of(x).kind == StatusKind::Custom).count();
                             let overdue = open.iter().filter(|x| x.due.map(|d| d < td).unwrap_or(false)).count();
-                            let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x)).count();
+                            let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x) && self.data.task_live(x)).count();
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.set_width(cw - 30.0);
@@ -426,10 +426,10 @@ impl App {
                                 self.dirty = true;
                             }
                             let id = dashes[di].id;
-                            self.star_button(ui, &format!("dash:{}", id));
+                            self.star_toggle(ui, format!("dash:{}", id));
                             let d = &mut self.data.extra.dashboards[di];
                             let label = if d.private { format!("\u{1F512} {}", tr("Private")) } else { format!("\u{1F465} {}", tr("Shared")) };
-                            if ui.add(egui::Button::new(label).frame(false)).on_hover_text(tr("Private dashboards are listed under Private")).clicked() {
+                            if ui.add(egui::Button::new(label).frame(false)).on_hover_text(tr("Only you see a private dashboard")).clicked() {
                                 d.private = !d.private;
                                 self.dirty = true;
                             }
@@ -441,6 +441,8 @@ impl App {
                     // switch between dashboards (the overview is one of them once made)
                     let mut pick = self.dash_open;
                     egui::ComboBox::from_id_salt("dash_pick").selected_text(tr("Switch")).show_ui(ui, |ui| {
+                        // the built-in overview; None would leave the dashboard for the hub
+                        ui.selectable_value(&mut pick, Some(super::hubs::WORKSPACE_OVERVIEW), tr("Workspace overview"));
                         for d in &dashes {
                             ui.selectable_value(&mut pick, Some(d.id), &d.name);
                         }
@@ -464,7 +466,7 @@ impl App {
                             self.data.extra.dashboards[di].space = sp;
                             self.dirty = true;
                         }
-                        let cards = self.data.extra.dashboards[di].cards.clone().unwrap_or_else(super::more::default_dash_cards);
+                        let cards = self.data.extra.dashboards[di].cards.clone().unwrap_or_else(|| super::more::default_dash_cards(&self.data.extra.dashboards[di].kind));
                         let add = ui.button(tr("+ Add card"));
                         popup(ui, &add, ui.id().with("dash_add_card"), 200.0, |ui| {
                             for (k, title) in super::more::DASH_CARDS {
@@ -479,21 +481,9 @@ impl App {
                                 }
                             }
                         });
-                        if self.sweep.confirm.as_deref() == Some("dash_delete") {
-                            ui.label(RichText::new(tr("Move this dashboard to Trash?")).color(t.danger));
-                            if ui.button(tr("Yes")).clicked() {
-                                let d = self.data.extra.dashboards.remove(di);
-                                self.data.extra.starred.retain(|s| s != &format!("dash:{}", d.id));
-                                self.to_trash("Dashboard", &d.name, &d);
-                                self.dash_open = None;
-                                self.sweep.confirm = None;
-                                self.dirty = true;
-                            }
-                            if ui.button(tr("No")).clicked() {
-                                self.sweep.confirm = None;
-                            }
-                        } else if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
-                            self.sweep.confirm = Some("dash_delete".into());
+                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
+                            let d = &self.data.extra.dashboards[di];
+                            self.modal = Some(Modal::ConfirmRemove { kind: "dashboard", id: d.id, name: d.name.clone() });
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -513,13 +503,17 @@ impl App {
     fn dashboard_cards(&mut self, ui: &mut Ui) {
         let t = self.t();
         let dash = self.dash_open.and_then(|id| self.data.extra.dashboards.iter().find(|d| d.id == id)).cloned();
-        let cards = dash.as_ref().and_then(|d| d.cards.clone()).unwrap_or_else(super::more::default_dash_cards);
+        // the dashboard's own cards once customised, else its template's set
+        let cards = dash.as_ref().and_then(|d| d.cards.clone()).unwrap_or_else(|| super::more::default_dash_cards(dash.as_ref().map_or("", |d| d.kind.as_str())));
         if cards.is_empty() {
             ui.label(RichText::new(tr("No cards. Add one with + Add card.")).color(t.text3));
             return;
         }
         let space_lists: Option<Vec<u64>> = dash.as_ref().and_then(|d| d.space).and_then(|sid| self.data.lists_in(Location::Space(sid)));
-        let top: Vec<Task> = self.data.tasks.iter().filter(|x| x.parent.is_none()).filter(|x| space_lists.as_ref().map(|l| l.contains(&x.list_id)).unwrap_or(true)).cloned().collect();
+        // the Space filter, and nothing archived (tasks, or their list or space)
+        let in_view = |x: &Task| space_lists.as_ref().map(|l| l.contains(&x.list_id)).unwrap_or(true) && self.data.task_live(x);
+        let scope: Vec<Task> = self.data.tasks.iter().filter(|x| in_view(x)).cloned().collect();
+        let top: Vec<Task> = scope.iter().filter(|x| x.parent.is_none()).cloned().collect();
         let w = ui.available_width();
         let half = (w - 12.0) / 2.0;
         let full = |k: &str| k == "stats" || k == "overdue";
@@ -564,7 +558,7 @@ impl App {
                             });
                             ui.add_space(6.0);
                             let tops: Vec<&Task> = top.iter().collect();
-                            if let Some(id) = self.dash_card_body(ui, &cards[ci].kind, cw - 34.0, &tops) {
+                            if let Some(id) = self.dash_card_body(ui, &cards[ci].kind, cw - 34.0, &tops, &scope) {
                                 open = Some(id);
                             }
                         });
@@ -600,8 +594,9 @@ impl App {
         self.dirty = true;
     }
 
-    /// One card's contents; returns a task clicked in it.
-    fn dash_card_body(&self, ui: &mut Ui, kind: &str, w: f32, top: &[&Task]) -> Option<u64> {
+    /// One card's contents; returns a task clicked in it. `top` are the top
+    /// level tasks in view, `scope` every task in view (for tracked time).
+    fn dash_card_body(&self, ui: &mut Ui, kind: &str, w: f32, top: &[&Task], scope: &[Task]) -> Option<u64> {
         let t = self.t();
         let td = today();
         let now = now_ts();
@@ -651,10 +646,37 @@ impl App {
                     bar_row(ui, &t, &name, n as f32, max, c, trf!("{} open", n));
                 }
             }
+            "time_people" => {
+                let ws = week_start(td);
+                let solo = self.data.solo();
+                let me = self.data.me;
+                let mut per: HashMap<u64, i64> = HashMap::new();
+                for task in scope {
+                    for e in &task.time_entries {
+                        if (0..7).contains(&(ts_date(e.start) - ws).num_days()) {
+                            let o = match task.entry_owner(e) {
+                                0 if solo => me,
+                                o => o,
+                            };
+                            *per.entry(o).or_default() += e.end - e.start;
+                        }
+                    }
+                    if let (Some(st), Some(by)) = (task.timer_started, task.timer_by.or(if solo { Some(me) } else { None })) {
+                        if (0..7).contains(&(ts_date(st) - ws).num_days()) {
+                            *per.entry(by).or_default() += now - st;
+                        }
+                    }
+                }
+                let rows: Vec<(String, i64, Color32)> = self.data.members.iter().map(|m| (m.name.clone(), per.get(&m.id).copied().unwrap_or(0), rgb(m.color))).collect();
+                let max = rows.iter().map(|r| r.1).max().unwrap_or(1).max(1) as f32;
+                for (name, secs, c) in rows {
+                    bar_row(ui, &t, &name, secs as f32, max, c, if secs > 0 { fmt_duration(secs) } else { "-".into() });
+                }
+            }
             "time" => {
                 let ws = week_start(td);
                 let mut per_day = [0i64; 7];
-                for task in &self.data.tasks {
+                for task in scope {
                     for e in &task.time_entries {
                         let i = (ts_date(e.start) - ws).num_days();
                         if (0..7).contains(&i) {
@@ -820,7 +842,7 @@ impl App {
  && task_id != 0 {
                         let start = day_start_ts(ws + Duration::days(day));
                         if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == task_id) {
-                            task.time_entries.push(TimeEntry { start, end: start + mins as i64 * 60, user: None });
+                            task.time_entries.push(TimeEntry { start, end: start + mins as i64 * 60, member: self.data.me });
                             self.dirty = true;
                         }
                     }

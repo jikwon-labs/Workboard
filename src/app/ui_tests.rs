@@ -535,13 +535,28 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     h.click("Server address");
     h.type_text("127.0.0.1:1");
     h.settle();
+    // email and password first; an invite code on its own tab
+    assert!(h.has("Email entry") && h.has("Password entry") && h.has("Forgot password?"));
+    h.click("Invite code");
     h.click("Invite code entry");
     h.type_text("abcd-efgh-jkmn");
+    h.click("Choose a password entry");
+    h.type_text("pw-123");
+    h.click("Repeat password entry");
+    h.type_text("pw-123");
+    h.settle();
+    h.click("Connect");
+    assert!(h.app.sync_rt.joining.is_none(), "too short");
+    assert!(h.has("Choose a password of at least 8 characters."));
+    h.click("Choose a password entry");
+    h.type_text("45678");
+    h.click("Repeat password entry");
+    h.type_text("45678");
     h.settle();
     h.click("Connect");
     let j = h.app.sync_rt.joining.as_ref().expect("connecting");
     assert_eq!(j.addr, "127.0.0.1:1");
-    assert_eq!(j.invite, "abcd-efgh-jkmn");
+    assert_eq!(j.how, together::How::Invite { code: "abcd-efgh-jkmn".into(), email: String::new(), password: "pw-12345678".into() });
     assert!(h.has("Cancel"));
     h.click("Cancel");
     assert!(h.app.sync_rt.joining.is_none());
@@ -569,8 +584,8 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     let me = h.app.data.me;
     let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().clone();
     h.app.sync_rt.people = vec![
-        wb_net::Person { member: me, role: wb_net::Role::Owner, devices: 1, invite: None },
-        wb_net::Person { member: other.id, role: wb_net::Role::Member, devices: 0, invite: Some("ABCD-EFGH-JKMN".into()) },
+        wb_net::Person { member: me, role: wb_net::Role::Owner, devices: 1, invite: None, account: true },
+        wb_net::Person { member: other.id, role: wb_net::Role::Member, devices: 0, invite: Some("ABCD-EFGH-JKMN".into()), account: false },
     ];
     h.settle();
     let my_name = h.app.data.member(me).unwrap().name.clone();
@@ -595,22 +610,37 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     // an admin can't make a code for the owner
     h.app.sync_rt.role = Some(wb_net::Role::Admin);
     h.app.sync_rt.people[0].member = other.id;
-    h.app.sync_rt.people[1] = wb_net::Person { member: me, role: wb_net::Role::Admin, devices: 1, invite: None };
+    h.app.sync_rt.people[1] = wb_net::Person { member: me, role: wb_net::Role::Admin, devices: 1, invite: None, account: false };
     h.settle();
     assert!(!h.has("Invite code") && !h.has("New code"), "no code button on the owner's row for an admin");
     // a member sees no People list
     h.app.sync_rt.role = Some(wb_net::Role::Member);
     h.settle();
     assert!(!h.has("People") && !h.has("Make admin"));
-    // access removed: sign in again with a code
+    // access removed: sign in again with email and password, or a new code
+    h.app.sync_rt.form = together::Form::default();
     h.app.sync_rt.net_status = Some(wb_net::Status::Refused("Your access to this server was removed.".into()));
     h.settle();
     assert!(h.has("Sign in"));
-    h.click("Invite code entry");
-    h.type_text("NEWC-ODEX-XXXX");
+    h.click("Email entry");
+    h.type_text("me@team.io");
+    h.click("Password entry");
+    h.type_text("secret-pass");
     h.settle();
     h.click("Sign in");
-    assert_eq!(h.app.sync_rt.reinvite.as_deref(), Some("NEWC-ODEX-XXXX"));
+    assert_eq!(h.app.sync_rt.resign, Some(together::How::Account { email: "me@team.io".into(), password: "secret-pass".into() }));
+    h.app.sync_rt.net_status = Some(wb_net::Status::Refused("That email and password don't match an account on this server.".into()));
+    h.settle();
+    h.click("Invite code");
+    h.click("Invite code entry");
+    h.type_text("NEWC-ODEX-XXXX");
+    h.click("Choose a password entry");
+    h.type_text("new-secret-1");
+    h.click("Repeat password entry");
+    h.type_text("new-secret-1");
+    h.settle();
+    h.click("Sign in");
+    assert!(matches!(&h.app.sync_rt.resign, Some(together::How::Invite { code, .. }) if code == "NEWC-ODEX-XXXX"));
     h.click("Reconnect now");
     assert!(h.app.sync_rt.net.is_none(), "starts over on the next frame");
     h.click("Stop sharing");
@@ -1081,7 +1111,7 @@ fn create_task_window_has_description_status_and_tags() {
     h.click("Create");
     h.click("Task");
     assert!(h.has("Close"), "header with a close button");
-    assert!(h.has("Task Name or type '/' for commands"));
+    assert!(h.has("Task Name"));
     h.type_text("Full task");
     h.click("Add description");
     h.type_text("Some details");
@@ -3194,8 +3224,8 @@ fn planner_day_adds_a_task_for_me() {
 fn reminders_snooze_edit_delete_and_show_done() {
     let mut h = Ui1::new();
     let me = h.app.data.me;
-    h.app.data.extra.reminders.push(Reminder { id: 501, text: "Call the bank".into(), due_ts: now_ts() + 600, done: false, owner: me });
-    h.app.data.extra.reminders.push(Reminder { id: 502, text: "Old one".into(), due_ts: now_ts() - 600, done: true, owner: me });
+    h.app.data.extra.reminders.push(Reminder { id: 501, text: "Call the bank".into(), due_ts: now_ts() + 600, done: false, owner: me, ..Default::default() });
+    h.app.data.extra.reminders.push(Reminder { id: 502, text: "Old one".into(), due_ts: now_ts() - 600, done: true, owner: me, ..Default::default() });
     h.click("Inbox");
     h.click("Snooze Call the bank");
     h.click("Tomorrow 9 AM");
@@ -3249,11 +3279,12 @@ fn replies_show_chat_replies_and_mark_one_read() {
     m.replies = vec![r];
     c.messages.push(m);
     h.app.data.extra.replies_seen = now_ts() - 100;
+    let ch = h.app.data.channels.iter().find(|c| c.name == "general").unwrap().id;
     h.click("Replies");
-    assert!(h.has("Reply in #general"));
+    assert!(h.has("Mark read I do"));
     h.click("Mark read I do");
-    assert!(h.app.data.extra.replies_read.contains(&"msg:9002".to_string()));
-    assert!(!h.has("Reply in #general"));
+    assert!(h.app.data.extra.replies_read.contains(&format!("chat:{}:9002", ch)));
+    assert!(!h.has("Mark read I do"));
 }
 
 #[test]
@@ -3270,7 +3301,7 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
     h.settle();
     let board = |h: &Ui1| h.app.data.extra.whiteboards.iter().find(|w| w.id == wid).cloned().unwrap();
     h.key(egui::Key::Escape);
-    h.click("Delete note 1");
+    h.click("Delete note 0");
     assert!(board(&h).notes.is_empty());
     h.click("Undo");
     assert_eq!(board(&h).notes.len(), 1, "undo brings the note back");
@@ -3280,7 +3311,10 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
     let b = board(&h);
     assert!(b.strokes.is_empty() && b.notes.is_empty(), "{:?} {:?} {:?}", b.strokes.len(), b.notes.len(), h.app.sweep.confirm);
     h.click("Delete");
-    h.click("Yes");
+    assert!(matches!(h.app.modal, Some(Modal::ConfirmRemove { kind: "whiteboard", .. })), "Delete asks first: {:?}", h.app.modal.is_some());
+    // the confirm dialog's own Delete button (the lowest of the "Delete"s)
+    let at = h.tree.iter().filter(|(n, r)| n == "Delete" && r.height() < 40.0).map(|(_, r)| r.center()).max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    h.click_at(at);
     assert!(h.app.data.extra.whiteboards.iter().all(|w| w.id != wid));
     assert!(h.app.data.extra.trash.iter().any(|x| x.kind == "Whiteboard"));
 }
@@ -3333,24 +3367,8 @@ fn dashboard_cards_move_rename_remove_and_add() {
     h.click("Add card Tasks by priority");
     assert_eq!(cards(&h).unwrap().last().unwrap().kind, "priority");
     // the dashboard can be renamed and starred
-    h.click("Star");
+    h.click(&format!("Star dash:{}", did));
     assert!(h.app.data.extra.starred.contains(&format!("dash:{}", did)));
-}
-
-#[test]
-fn hub_workspace_overview_opens_the_same_dashboard() {
-    let mut h = Ui1::new();
-    h.app.section = Section::Dashboards;
-    h.app.new_dashboard("Other");
-    h.app.dash_open = None;
-    h.settle();
-    h.click("\u{1F4CA}  Workspace overview");
-    let first = h.app.dash_open;
-    h.app.dash_open = None;
-    h.settle();
-    h.click("\u{1F4CA}  Workspace overview");
-    assert_eq!(h.app.dash_open, first);
-    assert_eq!(h.app.data.extra.dashboards.iter().filter(|d| d.name == "Workspace overview").count(), 1);
 }
 
 #[test]
@@ -3424,7 +3442,7 @@ fn timesheet_entry_edits_and_week_picker() {
     let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
     let start = td.and_hms_opt(10, 0, 0).unwrap().and_local_timezone(chrono::Local).single().unwrap().timestamp();
     let i = h.app.data.tasks.iter().position(|t| t.name == "Renew passport").unwrap();
-    h.app.data.tasks[i].time_entries = vec![TimeEntry { start, end: start + 1800, user: Some(1) }];
+    h.app.data.tasks[i].time_entries = vec![TimeEntry { start, end: start + 1800, member: 1 }];
     h.app.section = Section::Timesheets;
     h.app.sheet_week = ws;
     h.app.sheet_entries = true;
@@ -3441,3 +3459,252 @@ fn timesheet_entry_edits_and_week_picker() {
 }
 #[path = "i18n_tests.rs"]
 mod i18n_tests;
+
+#[test]
+fn the_first_start_offers_working_alone_joining_or_a_new_server() {
+    let mut h = Ui1::new();
+    assert!(Data::fresh().extra.welcome, "a first start shows the welcome");
+    let old: Data = serde_json::from_str(&serde_json::to_string(&Data::seed()).unwrap().replace(r#","welcome":false"#, "")).unwrap();
+    assert!(!old.extra.welcome, "files from before don't");
+    h.app.modal = Some(Modal::Welcome { step: 0, name: String::new(), addr: String::new() });
+    h.settle();
+    assert!(h.has("Use it on this Mac") && h.has("Join my team") && h.has("Set up a server for my team"));
+
+    // alone: just a name
+    h.click("Use it on this Mac");
+    assert!(h.has("Your name entry"));
+    let me = h.app.data.me;
+    h.app.modal = Some(Modal::Welcome { step: 1, name: "Jiwon".into(), addr: String::new() });
+    h.settle();
+    h.click("Start");
+    assert!(h.app.modal.is_none());
+    assert_eq!(h.app.data.member(me).unwrap().name, "Jiwon");
+
+    // join: server, then email and password or an invite code
+    h.app.modal = Some(Modal::Welcome { step: 0, name: String::new(), addr: String::new() });
+    h.settle();
+    h.click("Join my team");
+    assert!(h.has("Join your team") && h.has("Server address") && h.has("Email entry") && h.has("Invite code"));
+    h.click("Server address");
+    h.type_text("127.0.0.1:1");
+    h.click("Email entry");
+    h.type_text("me@team.io");
+    h.click("Password entry");
+    h.type_text("secret-pass");
+    h.settle();
+    h.click("Connect");
+    let j = h.app.sync_rt.joining.as_ref().expect("connecting");
+    assert_eq!(j.how, together::How::Account { email: "me@team.io".into(), password: "secret-pass".into() });
+    assert!(h.has("Cancel"));
+    h.click("Cancel");
+
+    // a new server: the owner's email and password
+    h.click("Back");
+    h.click("Set up a server for my team");
+    assert!(h.has("Set up your team's server") && h.has("Repeat password entry") && !h.has("Invite code entry"));
+}
+
+#[test]
+fn an_invite_link_opens_the_join_form_filled_in() {
+    let mut h = Ui1::new();
+    h.app.open_join_link("workboard://join?server=mac-mini.tail1.ts.net%3A8787&code=ABCD-EFGH-JKMN&email=bo%40team.io");
+    h.settle();
+    assert!(matches!(&h.app.modal, Some(Modal::Welcome { step: 2, addr, .. }) if addr == "mac-mini.tail1.ts.net:8787"));
+    assert_eq!(h.app.sync_rt.form.mode, together::Mode::Invite);
+    assert_eq!((h.app.sync_rt.form.code.as_str(), h.app.sync_rt.form.email.as_str()), ("ABCD-EFGH-JKMN", "bo@team.io"));
+    assert!(h.has("Invite code entry") && h.has("Choose a password entry"));
+
+    // a whole invite mail pasted into the code field fills in the server too
+    h.app.modal = Some(Modal::Welcome { step: 2, name: String::new(), addr: String::new() });
+    h.app.sync_rt.form = together::Form { mode: together::Mode::Invite, ..Default::default() };
+    h.settle();
+    h.click("Invite code entry");
+    h.type_text("Open this: workboard://join?server=macmini&code=WXYZ-2345-6789 thanks");
+    h.settle();
+    h.settle();
+    assert_eq!(h.app.sync_rt.form.code, "WXYZ-2345-6789");
+    assert!(matches!(&h.app.modal, Some(Modal::Welcome { addr, .. }) if addr == "macmini"));
+
+    // already on a server: says so instead of switching
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+    h.app.open_join_link("workboard://join?server=other&code=ABCD-EFGH-JKMN");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    assert!(h.app.toast.as_ref().is_some_and(|t| t.0.contains("already on 127.0.0.1:1")));
+}
+
+#[test]
+fn signed_in_on_a_server_you_set_a_password_or_change_it() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev1".into(), tag: 5, server: Some("127.0.0.1:1".into()) });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert!(h.has("Your account") && h.has("Set a password to sign in on your other computers and phones without a new invite code."));
+    h.click("Password entry");
+    h.type_text("long-enough");
+    h.click("Repeat password entry");
+    h.type_text("long-enougH");
+    h.settle();
+    h.click("Save password");
+    assert!(h.has("The two passwords aren't the same."));
+    // with an account: change it (needs the current one)
+    h.app.sync_rt.account = Some("me@team.io".into());
+    h.app.sync_rt.acct = together::Form::default();
+    h.settle();
+    assert!(h.has("You sign in with me@team.io on your other computers and phones."));
+    h.click("Change password");
+    assert!(h.has("Current password entry") && h.has("New password entry"));
+}
+
+#[test]
+fn enter_in_the_middle_sends_without_a_line_break_and_shift_enter_keeps_one() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    h.click("Message composer");
+    h.type_text("helloworld");
+    for _ in 0..5 {
+        h.key(egui::Key::ArrowLeft);
+    }
+    h.key(egui::Key::Enter);
+    let last = h.app.data.channels.iter().find(|c| c.id == cid).unwrap().messages.last().unwrap().text.clone();
+    assert_eq!(last, "helloworld", "the cursor's spot gets no line break");
+    // Shift+Enter is still a new line
+    h.click("Message composer");
+    h.type_text("one");
+    let shift = egui::Modifiers { shift: true, ..Default::default() };
+    h.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: shift }]);
+    h.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: false, repeat: false, modifiers: shift }]);
+    h.type_text("two");
+    assert_eq!(h.app.chat_text, "one\ntwo");
+}
+
+#[test]
+fn others_never_see_a_private_channel_even_when_it_was_left_open() {
+    let mut h = Ui1::new();
+    let secret = h.app.create_channel("hush", true, false);
+    h.settle();
+    assert!(h.has("hush"));
+    // Sam signs in on this computer with the private channel still open
+    h.app.data.me = 3;
+    h.app.section = Section::Chat;
+    h.app.chat_open = Some(secret);
+    h.settle();
+    assert!(!h.has("hush"), "not in the sidebar");
+    assert_ne!(h.app.chat_open, Some(secret), "the chat moved to a channel Sam may see");
+    // and my DM with Alex isn't Sam's either
+    let dm = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().clone();
+    assert!(!h.app.listed(&dm));
+}
+
+#[test]
+fn a_message_from_a_clock_ahead_is_read_once() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    let ahead = now_ts() + 3600;
+    let id = h.app.data.new_id();
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == cid).unwrap();
+    let mut m = c.messages[0].clone();
+    m.id = id;
+    m.author = 2;
+    m.ts = ahead;
+    c.messages.push(m);
+    h.settle();
+    let c = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert!(c.last_read >= ahead, "read up to the newest message");
+    assert_eq!(c.messages.iter().filter(|m| m.ts > c.last_read).count(), 0);
+}
+
+#[test]
+fn delete_channel_asks_first_and_close_conversation_only_hides() {
+    let mut h = Ui1::new();
+    let cid = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Delete channel");
+    assert!(h.app.data.channels.iter().any(|c| c.id == cid), "one click doesn't delete");
+    h.click("Cancel");
+    assert!(h.app.data.channels.iter().any(|c| c.id == cid));
+    h.click("Delete channel");
+    h.click("Delete");
+    assert!(!h.app.data.channels.iter().any(|c| c.id == cid), "deleted after saying yes");
+    // a DM is only closed for me
+    let dm = h.app.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    h.app.modal = Some(Modal::ChannelSettings(dm));
+    h.settle();
+    h.click("Close conversation");
+    assert!(h.app.data.channels.iter().any(|c| c.id == dm));
+    assert!(!h.has("Alex Kim"));
+}
+
+#[test]
+fn mentions_of_names_with_spaces_are_marked_whole() {
+    let h = Ui1::new();
+    let job = h.app.mention_text("hi @Alex Kim and @Sam Lee, also @someone", 14.0);
+    let t = h.app.t();
+    let marked: Vec<&str> = job.sections.iter().filter(|s| s.format.background == t.selected_bg).map(|s| &job.text[s.byte_range.clone()]).collect();
+    assert_eq!(marked, vec!["@Alex Kim", "@Sam Lee", "@someone"]);
+}
+
+
+#[test]
+fn cmd_brackets_go_back_and_forward() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    let cmd = egui::Modifiers { command: true, mac_cmd: true, ..Default::default() };
+    let press = |h: &mut Ui1, key| {
+        h.frame(vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: cmd }]);
+        h.settle();
+    };
+    press(&mut h, egui::Key::OpenBracket);
+    assert_eq!(h.app.loc, start);
+    press(&mut h, egui::Key::CloseBracket);
+    assert_eq!(h.app.loc, Location::Inbox);
+}
+
+#[test]
+fn option_t_while_typing_and_enter_in_search() {
+    let mut h = Ui1::new();
+    h.app.palette = Some(String::new());
+    h.settle();
+    // Option+T types into the search box, it doesn't open Create Task
+    let alt = egui::Modifiers { alt: true, ..Default::default() };
+    h.frame(vec![egui::Event::Key { key: egui::Key::T, physical_key: None, pressed: true, repeat: false, modifiers: alt }]);
+    h.settle();
+    assert!(h.app.quick_add.is_none());
+    // a pasted task link opens the task on Enter
+    let tid = h.app.data.tasks[0].id;
+    h.app.palette = Some(format!("workboard://task/{}", tid));
+    h.settle();
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(h.app.palette.is_none());
+    assert_eq!(h.app.open_task, Some(tid));
+    // Enter on a search that only finds a channel opens the channel
+    h.app.open_task = None;
+    let ch = h.app.data.channels.iter().find(|c| c.name == "website-redesign").unwrap().id;
+    h.app.palette = Some("website-redesign".into());
+    h.settle();
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert_eq!((h.app.section, h.app.chat_open), (Section::Chat, Some(ch)));
+}
+
+#[test]
+fn search_leaves_out_other_peoples_personal_space_and_archived_lists() {
+    let mut h = Ui1::new();
+    let other = h.app.data.spaces.len() as u64 + 90_000;
+    h.app.data.spaces.push(Space { id: other, name: "Someone Private".into(), private_owner: Some(2), lists: vec![ListItem { id: other + 1, name: "Their Secret List".into(), ..Default::default() }], ..Default::default() });
+    if let Some(l) = h.app.data.spaces[0].lists.first_mut() {
+        l.name = "Old Archived List".into();
+        l.archived = true;
+    }
+    h.app.palette = Some(String::new());
+    h.settle();
+    // the palette names lists by their path
+    assert!(h.has("Team Space / Projects / Marketing"));
+    assert!(!h.has("Someone Private") && !h.has("Someone Private / Their Secret List") && !h.has("Team Space / Old Archived List"));
+}

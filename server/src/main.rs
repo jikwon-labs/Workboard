@@ -1,5 +1,5 @@
 // workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
-// workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE   [--home FOLDER]
+// workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER]
 //
 // Listens on this Mac's Tailscale address by default (127.0.0.1 when
 // Tailscale isn't running), port 8787. It never listens on every network
@@ -22,7 +22,8 @@ const USAGE: &str = "usage:
   workboard-server backups                      list the backups
   workboard-server restore FILE                 go back to a backup (a file from `backups`)
   workboard-server invite MEMBER [--role R]     a one-time invite code for member id MEMBER
-                                                (R: member, admin or owner; for when the owner lost access)";
+                                                (R: member, admin or owner; for when the owner lost access)
+  workboard-server mail-test ADDRESS            send a test mail with the settings in mail.json";
 
 fn main() {
     let mut bind: Option<String> = std::env::var("WORKBOARD_SERVER_BIND").ok().filter(|s| !s.trim().is_empty());
@@ -74,7 +75,20 @@ fn main() {
             }
             request(&home, json!({"invite": member, "role": role}));
         }
+        ["mail-test", to] => mail_test(&home, to),
         _ => fail(USAGE),
+    }
+}
+
+fn mail_test(home: &std::path::Path, to: &str) {
+    let Some(cfg) = workboard_server::load_mail(home) else {
+        fail(&format!("No usable {} in {}. See the top of server/src/mail.rs for what goes in it.", workboard_server::MAIL_FILE, home.display()));
+    };
+    let mail = workboard_server::mail::Mail { to: to.to_string(), subject: "Workboard test mail".into(), body: "This is a test from workboard-server. Invite codes and password-reset codes will come like this.\n".into() };
+    match workboard_server::mail::send(home, &cfg, &mail) {
+        Ok(()) if cfg.transport == "folder" => println!("Written to {}", home.join(workboard_server::OUTBOX_DIR).display()),
+        Ok(()) => println!("Sent to {}.", to),
+        Err(e) => fail(&e),
     }
 }
 
@@ -126,13 +140,15 @@ fn people(home: &std::path::Path) {
         println!("No workspace yet. The first app that connects sets it up and becomes the owner.");
         return;
     }
-    println!("{:<22} {:<28} {:<7} {:>9}  {}", "id", "name", "role", "computers", "open invite");
+    println!("{:<22} {:<28} {:<7} {:>9}  {:<30} {}", "id", "name", "role", "computers", "account", "open invite");
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     for m in members {
         let id = m.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
         let name = m.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let devices = saved.devices.values().filter(|d| d.member == id).count();
-        let invite = saved.invites.iter().find(|(_, i)| i.member == id).map(|(c, _)| c.as_str()).unwrap_or("");
-        println!("{:<22} {:<28} {:<7} {:>9}  {}", id, name, saved.role_of(id).label(), devices, invite);
+        let invite = saved.open_invite(id, now_ms).map(|c| c.as_str()).unwrap_or("");
+        let account = saved.accounts.get(&id).map(|a| a.email.as_str()).unwrap_or("-");
+        println!("{:<22} {:<28} {:<7} {:>9}  {:<30} {}", id, name, saved.role_of(id).label(), devices, account, invite);
     }
 }
 

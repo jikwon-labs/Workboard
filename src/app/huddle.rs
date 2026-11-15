@@ -12,11 +12,18 @@ use wb_voice::{Audio, Call, Event as VoiceEvent, Join, Person, Picture, Video, M
 /// The `call` field of a chat message announcing an in-app huddle.
 pub(super) const HUDDLE_PREFIX: &str = "workboard-huddle:";
 
+/// How long to wait for the server's answer to joining a huddle.
+pub(super) const HUDDLE_JOIN_SECS: u64 = 15;
+
 pub struct HuddleRt {
     /// The conversation whose huddle this computer is in (or joining).
     pub(super) channel: Option<u64>,
     /// Asked the server for a token, waiting for it.
     pub(super) waiting: bool,
+    /// When the token was asked for (gives up after HUDDLE_JOIN_SECS).
+    pub(super) asked: Option<std::time::Instant>,
+    /// Started here: post "Started a huddle" once the server lets us in.
+    pub(super) announce: bool,
     pub(super) token: Option<Join>,
     pub(super) call: Option<Call>,
     pub(super) joined: bool,
@@ -41,6 +48,8 @@ impl Default for HuddleRt {
         HuddleRt {
             channel: None,
             waiting: false,
+            asked: None,
+            announce: false,
             token: None,
             call: None,
             joined: false,
@@ -71,18 +80,30 @@ impl App {
     /// Start a huddle in a conversation and tell everyone in it.
     pub(super) fn start_huddle(&mut self, ch: u64) {
         let already = self.huddle.channel == Some(ch);
+        if !already && self.huddles_on_server() {
+            // a conversation made a moment ago goes to the server first (the
+            // copy is sent before the call request), so the server knows it
+            self.sync_note_change();
+            self.write_shared();
+        }
         self.join_huddle(ch);
         if already || self.huddle.channel != Some(ch) {
             return;
         }
+        // the "Started a huddle" card goes out when the token comes (huddle_token)
+        self.huddle.announce = true;
+        self.section = Section::Chat;
+        self.chat_open = Some(ch);
+    }
+
+    /// Tell everyone in the conversation that a huddle started.
+    fn post_huddle_card(&mut self, ch: u64) {
         let id = self.data.new_id();
         let me = self.data.me;
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
             c.messages.push(Message { edited: None, attachments: vec![], id, author: me, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", HUDDLE_PREFIX, ch)) });
             c.last_read = now_ts();
         }
-        self.section = Section::Chat;
-        self.chat_open = Some(ch);
         self.dirty = true;
     }
 
@@ -96,7 +117,7 @@ impl App {
             return;
         }
         let (audio, video) = (self.huddle.audio, self.huddle.video);
-        self.huddle = HuddleRt { channel: Some(ch), waiting: true, audio, video, ..Default::default() };
+        self.huddle = HuddleRt { channel: Some(ch), waiting: true, asked: Some(std::time::Instant::now()), audio, video, ..Default::default() };
         self.access_request(wb_net::Msg::CallJoin { channel: ch });
     }
 
@@ -124,18 +145,31 @@ impl App {
         if self.huddle.channel == Some(channel) && self.huddle.waiting {
             self.huddle.waiting = false;
             self.huddle.token = Some(Join { url, token });
+            if std::mem::take(&mut self.huddle.announce) {
+                self.post_huddle_card(channel);
+            }
         }
     }
 
-    /// The server said no (not in the conversation, voice not set up...).
-    pub(super) fn huddle_denied(&mut self) {
-        if self.huddle.waiting {
+    /// The server said no to this conversation's huddle (not in it, voice
+    /// not set up...).
+    pub(super) fn huddle_denied(&mut self, channel: u64) {
+        if self.huddle.waiting && self.huddle.channel == Some(channel) {
             self.leave_huddle();
         }
     }
 
     /// Once per frame: start the call when the token is here, take in news.
     pub(super) fn huddle_tick(&mut self, ctx: Option<&egui::Context>) {
+        if self.huddle.waiting && self.huddle.asked.is_some_and(|t| t.elapsed() >= std::time::Duration::from_secs(HUDDLE_JOIN_SECS)) {
+            self.leave_huddle();
+            self.toast = Some((tr("The server didn't answer, so the huddle didn't start. Try again in a moment.").into(), now_ts()));
+        } else if self.huddle.waiting {
+            if let Some(c) = ctx {
+                // come back to check even when nothing else happens
+                c.request_repaint_after(std::time::Duration::from_secs(1));
+            }
+        }
         if let Some(join) = self.huddle.token.take() {
             let wake: wb_voice::Wake = match ctx {
                 Some(c) => {

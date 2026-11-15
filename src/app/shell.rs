@@ -418,8 +418,11 @@ impl App {
     // ---------------------------------------------------------------- history
 
     pub(super) fn track_history(&mut self) {
-        let cur = (self.section, self.loc);
+        let cur = self.nav_spot();
         match self.nav_last {
+            // a page filling in its default item (Chat opening the first
+            // channel) is not a move
+            Some(last) if last != cur && last.section == cur.section && last.loc == cur.loc && last.item.is_none() => {}
             Some(last) if last != cur => {
                 if self.nav_skip {
                     self.nav_skip = false;
@@ -434,20 +437,27 @@ impl App {
     }
 
     pub(super) fn go_back(&mut self) {
-        if let Some(prev) = self.nav_back.pop() {
-            self.nav_fwd.push((self.section, self.loc));
-            self.section = prev.0;
-            self.loc = prev.1;
+        // pages deleted since are dropped from the history
+        while let Some(prev) = self.nav_back.pop() {
+            if !self.nav_spot_exists(&prev) {
+                continue;
+            }
+            self.nav_fwd.push(self.nav_spot());
+            self.show_nav_spot(prev);
             self.nav_skip = true;
+            break;
         }
     }
 
     pub(super) fn go_forward(&mut self) {
-        if let Some(next) = self.nav_fwd.pop() {
-            self.nav_back.push((self.section, self.loc));
-            self.section = next.0;
-            self.loc = next.1;
+        while let Some(next) = self.nav_fwd.pop() {
+            if !self.nav_spot_exists(&next) {
+                continue;
+            }
+            self.nav_back.push(self.nav_spot());
+            self.show_nav_spot(next);
             self.nav_skip = true;
+            break;
         }
     }
 
@@ -590,7 +600,7 @@ impl App {
                     }
                 }
                 let now = now_ts();
-                if let Some(task) = self.data.tasks.iter().find(|x| x.timer_started.is_some()) {
+                if let Some(task) = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)) {
                     let txt = format!("\u{23F9} {}  {}", fmt_duration(task.tracked_secs(now)), truncate(&task.name, 22));
                     let b = egui::Button::new(RichText::new(txt).color(Color32::WHITE)).fill(t.danger).corner_radius(14);
                     let id = task.id;
@@ -776,7 +786,7 @@ impl App {
     // ---------------------------------------------------------------- sidebar
 
     pub(super) fn count_open(&self, list: u64) -> usize {
-        self.data.tasks.iter().filter(|t| t.list_id == list && t.parent.is_none() && !self.data.is_closed(t)).count()
+        self.data.tasks.iter().filter(|t| t.list_id == list && t.parent.is_none() && !t.archived && !self.data.is_closed(t)).count()
     }
 
     fn side_row(&self, ui: &mut Ui, indent: f32, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2), label: &str, sub: Option<&str>, trailing: Option<String>, muted: bool) -> Response {
@@ -962,7 +972,7 @@ impl App {
                     let tc = t.text2;
                     let muted = self.data.extra.muted_until > now_ts();
                     if filter.is_empty() {
-                        let inbox_n = if muted { 0 } else { self.unseen_activity() + self.due_reminders() };
+                        let inbox_n = if muted { 0 } else { self.inbox_badge() };
                         let nav: [(&str, &str); 9] = [
                             ("Inbox", "\u{1F4E5}"),
                             ("Replies", "\u{21A9}"),
@@ -1030,7 +1040,7 @@ impl App {
                                         self.actions.push(Action::Go(Location::MyTasks));
                                     }
                                     let me = self.data.me;
-                                    let td = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && x.due.map(|d| d <= today()).unwrap_or(false) && !self.data.is_closed(x)).count();
+                                    let td = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && x.due.map(|d| d <= today()).unwrap_or(false) && self.task_visible(x) && !self.data.is_closed(x)).count();
                                     let pl = self.personal_list_id();
                                     let subs: [(&str, Location, Option<String>); 3] = [
                                         ("Assigned to me", Location::MyTasks, None),
@@ -1197,7 +1207,7 @@ impl App {
                             self.modal = Some(Modal::NewChannel { name: String::new(), private: false, add_list: false });
                         }
                         // the Unread filter uses the real count; muting only hides the badge
-                        let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone(), self.unread_count(c))).collect();
+                        let chans: Vec<(u64, String, usize)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && self.listed(c)).map(|c| (c.id, c.name.clone(), self.unread_count(c))).collect();
                         for (id, name, real_unread) in chans {
                             if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                                 continue;
@@ -1275,7 +1285,7 @@ impl App {
                             .data
                             .channels
                             .iter()
-                            .filter(|c| c.kind == ChannelKind::Direct)
+                            .filter(|c| c.kind == ChannelKind::Direct && self.listed(c))
                             .map(|c| (c.id, c.members.iter().find(|m| **m != me).and_then(|m| self.data.member(*m)).cloned(), self.unread_count(c)))
                             .collect();
                         for (id, other, real_unread) in dms {
@@ -1370,11 +1380,6 @@ impl App {
             return 0;
         }
         c.messages.iter().filter(|m| m.ts > c.last_read && m.author != self.data.me).count()
-    }
-
-    fn unseen_activity(&self) -> usize {
-        // what the Inbox's Primary tab still shows (Clear and Later take items off)
-        self.inbox_unseen()
     }
 
     fn space_rows(&mut self, ui: &mut Ui, s: &Space) {
@@ -1494,10 +1499,22 @@ impl App {
                     ui.close_menu();
                 }
             });
+            // the folder icon is the expand arrow (as on spaces); clicking the
+            // rest of the row opens the folder and expands it
+            let ficon = Rect::from_center_size(fr.rect.left_center() + vec2(30.0, 0.0), vec2(20.0, 20.0));
+            let fir = ui.interact(ficon, ui.id().with(("ficon", f.id)), Sense::click());
+            if fir.hovered() {
+                ui.painter().rect_filled(ficon, 5.0, t.sidebar);
+                paint_triangle(ui.painter(), ficon.center(), fexp, t.text2);
+            }
             let on_button = fr.interact_pointer_pos().is_some_and(|p| dots.contains(p) || plus.contains(p));
-            if fr.clicked() && !on_button {
-                self.actions.push(Action::Go(floc));
+            if fir.clicked() {
                 self.actions.push(Action::ToggleFolder(f.id));
+            } else if fr.clicked() && !on_button {
+                self.actions.push(Action::Go(floc));
+                if !f.expanded {
+                    self.actions.push(Action::ToggleFolder(f.id));
+                }
             }
             fr.context_menu(|ui| self.folder_menu(ui, fid));
             // a list dropped on a folder moves into it
@@ -1779,7 +1796,7 @@ impl App {
                                     close_popup(ui);
                                 }
                                 if ui.button(tr("Export to CSV")).clicked() {
-                                    self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
+                                    self.toast = Some((self.export_csv(), now_ts()));
                                     close_popup(ui);
                                 }
                                 if ui.button(RichText::new(tr("Delete list")).color(t.danger)).clicked() {
@@ -1796,7 +1813,7 @@ impl App {
                         self.section = Section::Ai;
                     }
                     if hb(ui, "\u{2699}  Automate").clicked() {
-                        self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
+                        self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new(), scope: None });
                     }
                     if hb(ui, "\u{260E}").on_hover_text(tr("Start a huddle")).clicked() {
                         self.open_call_dialog();
@@ -1826,7 +1843,8 @@ impl App {
                     self.chat_open = Some(id);
                 }
                 ui.add_space(8.0);
-                let is_list = matches!(self.loc, Location::List(_) | Location::MyTasks);
+                // Overview only covers a space or a folder
+                let is_list = !matches!(self.loc, Location::Space(_) | Location::Folder(_));
                 if is_list && self.view == ViewKind::Overview {
                     self.view = ViewKind::List;
                 }
@@ -2546,6 +2564,13 @@ impl App {
                     }
                     GroupBy::Priority => task.priority = g.priority.unwrap_or(0),
                     GroupBy::Assignee => task.assignees = g.assignee.into_iter().collect(),
+                    // the DONE column closes the task and keeps its date
+                    GroupBy::DueDate if g.key == "d:done" => {
+                        let own = self.data.statuses_for_list(task.list_id);
+                        if let Some(s) = own.iter().find(|s| s.kind == StatusKind::Done).or_else(|| own.iter().find(|s| s.kind == StatusKind::Closed)) {
+                            task.status = s.name.clone();
+                        }
+                    }
                     GroupBy::DueDate => task.due = g.due,
                     GroupBy::None => {}
                     GroupBy::Tags | GroupBy::List => self.move_to_group(&mut task, g),

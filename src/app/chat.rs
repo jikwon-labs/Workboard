@@ -59,6 +59,25 @@ pub(super) enum ChatAction {
     Copied,
 }
 
+/// The newest message or reply in a channel (0 when it has none).
+pub(super) fn newest_ts(c: &Channel) -> i64 {
+    c.messages.iter().flat_map(|m| std::iter::once(m.ts).chain(m.replies.iter().map(|r| r.ts))).max().unwrap_or(0)
+}
+
+/// Takes a press of Enter (without Shift, Cmd or Option) meant for the text
+/// box `id` before the box sees it, so sending doesn't also put a line break
+/// where the cursor is. True when there was one.
+fn take_enter(ui: &Ui, id: egui::Id) -> bool {
+    if !ui.memory(|m| m.has_focus(id)) {
+        return false;
+    }
+    ui.input_mut(|i| {
+        let before = i.events.len();
+        i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if !modifiers.shift && !modifiers.command && !modifiers.alt));
+        i.events.len() != before
+    })
+}
+
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
@@ -89,21 +108,95 @@ impl App {
         c.messages.iter().filter(|m| m.ts > c.last_read && m.author != self.data.me).count()
     }
 
-    fn mention_text(&self, text: &str, size: f32) -> egui::text::LayoutJob {
+    /// Whether I may see a channel: a public channel is everyone's, a private
+    /// one its members', a direct message the people in it.
+    pub(super) fn can_see(&self, c: &Channel) -> bool {
+        match c.kind {
+            ChannelKind::Channel => !c.private || c.members.contains(&self.data.me),
+            ChannelKind::Direct => c.members.contains(&self.data.me),
+        }
+    }
+
+    /// Whether a channel shows in my lists: one I may see and, for a direct
+    /// message, not one I closed (until something newer arrives) or a second
+    /// copy of a conversation with the same people.
+    pub(super) fn listed(&self, c: &Channel) -> bool {
+        if !self.can_see(c) {
+            return false;
+        }
+        if c.kind != ChannelKind::Direct {
+            return true;
+        }
+        if self.data.extra.closed_dms.iter().any(|(id, at)| *id == c.id && newest_ts(c) <= *at) {
+            return false;
+        }
+        !self.dm_duplicate(c)
+    }
+
+    /// Two people who start a conversation with each other at the same moment
+    /// make two: an empty one gives way to one with messages, else the newer
+    /// to the older.
+    pub(super) fn dm_duplicate(&self, c: &Channel) -> bool {
+        if c.kind != ChannelKind::Direct || !c.messages.is_empty() {
+            return false;
+        }
+        let people = |c: &Channel| {
+            let mut v = c.members.clone();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+        let mine = people(c);
+        self.data.channels.iter().any(|d| d.id != c.id && d.kind == ChannelKind::Direct && people(d) == mine && (!d.messages.is_empty() || d.id < c.id))
+    }
+
+    /// "Close conversation": the direct message leaves my sidebar until a
+    /// new message comes in. Nobody else's copy changes.
+    pub(super) fn close_dm(&mut self, cid: u64) {
+        let Some(c) = self.data.channels.iter().find(|c| c.id == cid) else { return };
+        let at = now_ts().max(newest_ts(c));
+        self.data.extra.closed_dms.retain(|(id, _)| *id != cid);
+        self.data.extra.closed_dms.push((cid, at));
+        if self.chat_open == Some(cid) {
+            self.chat_open = None;
+            self.thread_open = None;
+        }
+        self.dirty = true;
+    }
+
+    /// Message text with mentions marked: "@" and a member's name (names
+    /// may have spaces), else "@" and the word after it.
+    pub(super) fn mention_text(&self, text: &str, size: f32) -> egui::text::LayoutJob {
         let t = self.t();
         let mut job = egui::text::LayoutJob::default();
-        for (i, word) in text.split(' ').enumerate() {
-            if i > 0 {
-                job.append(" ", 0.0, egui::TextFormat { font_id: FontId::proportional(size), color: t.text, ..Default::default() });
+        let plain = egui::TextFormat { font_id: FontId::proportional(size), color: t.text, ..Default::default() };
+        let marked = egui::TextFormat { font_id: FontId::proportional(size), color: t.selected_text, background: t.selected_bg, ..Default::default() };
+        let mut names: Vec<&str> = self.data.members.iter().map(|m| m.name.as_str()).filter(|n| !n.is_empty()).collect();
+        names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+        let (mut from, mut i) = (0, 0);
+        while i < text.len() {
+            let rest = &text[i..];
+            if rest.starts_with('@') && (i == 0 || text[..i].ends_with(char::is_whitespace)) {
+                let after = &rest[1..];
+                let len = names
+                    .iter()
+                    .find(|n| after.starts_with(**n) && after[n.len()..].chars().next().map_or(true, |c| !c.is_alphanumeric()))
+                    .map(|n| n.len())
+                    .or_else(|| Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0));
+                if let Some(len) = len {
+                    if from < i {
+                        job.append(&text[from..i], 0.0, plain.clone());
+                    }
+                    job.append(&text[i..i + 1 + len], 0.0, marked.clone());
+                    i += 1 + len;
+                    from = i;
+                    continue;
+                }
             }
-            let mention = word.starts_with('@') && word.len() > 1;
-            let fmt = egui::TextFormat {
-                font_id: FontId::proportional(size),
-                color: if mention { t.selected_text } else { t.text },
-                background: if mention { t.selected_bg } else { Color32::TRANSPARENT },
-                ..Default::default()
-            };
-            job.append(word, 0.0, fmt);
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+        if from < text.len() || text.is_empty() {
+            job.append(&text[from..], 0.0, plain);
         }
         job.wrap.max_width = f32::INFINITY;
         job
@@ -111,8 +204,11 @@ impl App {
 
     pub(super) fn chat(&mut self, ui: &mut Ui) {
         let t = self.t();
-        if self.chat_open.is_none() {
-            self.chat_open = self.data.channels.first().map(|c| c.id);
+        // nothing open, or (from a search, a saved place, a link) a channel I
+        // may not see: the first one in my list instead
+        if self.chat_open.map_or(true, |id| self.data.channels.iter().any(|c| c.id == id && !self.can_see(c))) {
+            self.chat_open = self.data.channels.iter().find(|c| self.listed(c)).map(|c| c.id);
+            self.thread_open = None;
         }
         let mut acts: Vec<ChatAction> = vec![];
         let Some(cid) = self.chat_open else {
@@ -155,6 +251,11 @@ impl App {
         };
         if self.chat_keep_unread.is_some_and(|k| k != cid) {
             self.chat_keep_unread = None;
+        }
+        // a closed conversation that's opened again is back in the sidebar
+        if self.data.extra.closed_dms.iter().any(|(id, _)| *id == cid) {
+            self.data.extra.closed_dms.retain(|(id, _)| *id != cid);
+            self.dirty = true;
         }
 
         // ---- thread panel
@@ -268,7 +369,7 @@ impl App {
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(230.0).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, u8); 6] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in Channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned Messages", 1), ("\u{1F464}", "Assigned", 3), ("\u{2699}", "Settings", 12)];
+                    let rows: [(&str, &str, u8); 7] = [("\u{1F464}", "Followers", 10), ("\u{1F50D}", "Find in Channel", 11), ("\u{21A9}", "Replies", 2), ("\u{1F4CC}", "Pinned Messages", 1), ("\u{1F516}", "Saved", 4), ("\u{1F464}", "Assigned", 3), ("\u{2699}", "Settings", 12)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -310,6 +411,7 @@ impl App {
                     let label = match self.channel_panel {
                         1 => tr("Pinned messages"),
                         2 => tr("Messages with replies"),
+                        4 => tr("Saved messages"),
                         _ => tr("Messages turned into tasks"),
                     };
                     if ui.add(egui::Button::new(format!("{}  \u{2716}", label)).corner_radius(14)).clicked() {
@@ -328,6 +430,7 @@ impl App {
                     1 => m.pinned,
                     2 => !m.replies.is_empty(),
                     3 => m.task.is_some(),
+                    4 => m.saved || m.replies.iter().any(|r| r.saved),
                     _ => true,
                 })
                 .cloned()
@@ -432,8 +535,11 @@ impl App {
             return;
         }
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == cid) {
-            if c.messages.iter().any(|m| m.ts > c.last_read) {
-                c.last_read = now;
+            // read up to the newest message even when its clock is ahead of
+            // ours, so it doesn't count as new again on the next frame
+            let newest = c.messages.iter().map(|m| m.ts).max().unwrap_or(0);
+            if newest > c.last_read {
+                c.last_read = now.max(newest);
                 if self.persist {
                     self.dirty = true;
                 }
@@ -480,9 +586,9 @@ impl App {
                 ui.add(egui::TextEdit::singleline(&mut self.post_title).hint_text(tr("Title")).font(FontId::proportional(15.0)).frame(false).desired_width(f32::INFINITY));
             }
             let hint = if self.composer_mode == 1 { tr("Share an announcement...").to_string() } else { trf!("Write to {}, press 'space' for AI, '/' for commands", target) };
+            let enter = take_enter(ui, text_id);
             let r = ui.add(egui::TextEdit::multiline(&mut self.chat_text).id(text_id).hint_text(hint).frame(false).desired_rows(1).desired_width(f32::INFINITY));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer"));
-            let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
             // typing "@" at the start of a word offers the people to mention
             let mention_popup = egui::Id::new("chat_mention_popup");
             if r.changed() && self.chat_text.ends_with('@') {
@@ -578,9 +684,9 @@ impl App {
             let has_files = !(if thread { &self.thread_files } else { &self.chat_files }).is_empty();
             let id = egui::Id::new(if thread { super::files::THREAD_BOX } else { super::files::CHAT_BOX });
             let text = if thread { &mut self.thread_text } else { &mut self.chat_text };
+            let enter = take_enter(ui, id);
             let r = ui.add(egui::TextEdit::multiline(text).id(id).hint_text(hint).frame(false).desired_rows(2).desired_width(f32::INFINITY));
             r.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, if thread { "Reply composer" } else { "Message composer" }));
-            let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
             let mut pick = false;
             ui.horizontal(|ui| {
                 let b = ui.add(egui::Button::new(RichText::new("+").color(t.text2)).frame(false)).on_hover_text(tr("Add pictures or videos"));
@@ -661,7 +767,10 @@ impl App {
                 if editing {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
-                    ui.add(egui::Label::new(self.mention_text(&m.text, 14.0)).wrap());
+                    let job = self.mention_text(&m.text, 14.0);
+                    if let Some(link) = self.text_with_links(ui, job, &m.text) {
+                        self.link_pending = Some(link);
+                    }
                     if compact && m.edited.is_some() {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
@@ -871,12 +980,12 @@ impl App {
         let t = self.t();
         let Some((_, _, text)) = self.chat_edit.as_mut() else { return };
         let id = egui::Id::new(("chat_edit", cid, mid));
+        let enter = take_enter(ui, id);
         let r = egui::Frame::new().stroke(Stroke::new(1.0, t.primary)).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 6)).fill(t.card).show(ui, |ui| {
             ui.add(egui::TextEdit::multiline(text).id(id).frame(false).desired_rows(1).desired_width(f32::INFINITY))
         }).inner;
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Edit message"));
         focus_once(ui, &r);
-        let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
         let esc = (r.has_focus() || r.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape));
         let mut save = enter;
         let mut cancel = esc;
@@ -940,7 +1049,7 @@ impl App {
                     let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         c.messages.push(m);
-                        c.last_read = now_ts();
+                        c.last_read = c.last_read.max(now_ts());
                     }
                     self.dirty = true;
                 }
@@ -1037,15 +1146,23 @@ impl App {
                     match at {
                         Some(ts) => {
                             let id = self.data.new_id();
-                            self.data.extra.reminders.push(Reminder { id, text: what, due_ts: ts, done: false, owner: me });
+                            self.data.extra.reminders.push(Reminder { id, text: what, due_ts: ts, done: false, owner: me, message: Some((ch, msg)), ..Default::default() });
                             self.dirty = true;
                             self.toast = Some((tr("Reminder created").into(), now_ts()));
                         }
-                        None => self.modal = Some(Modal::Reminder { text: what, date: Some(today()), time: "09:00".into() }),
+                        None => {
+                            self.modal = Some(Modal::Reminder { text: what, date: Some(today()), time: "09:00".into() });
+                            self.reminder_about = (None, Some((ch, msg)));
+                        }
                     }
                 }
                 ChatAction::Copied => self.toast = Some((tr("Copied").into(), now_ts())),
                 ChatAction::OpenMedia { ch, msg, index } => {
+                    // a picture that failed to load tries again right away
+                    let file = self.data.channels.iter().find(|c| c.id == ch).and_then(|c| c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter())).find(|m| m.id == msg)).and_then(|m| m.attachments.get(index)).map(|a| a.file.clone());
+                    if let Some(f) = file.filter(|f| matches!(self.files.state(f), Some(super::files::Transfer::Failed(_)))) {
+                        self.files.retry(&f);
+                    }
                     self.viewer = Some(super::files::Viewer::new(ch, msg, index));
                 }
                 ChatAction::Send { ch, text, parent, files } => {
@@ -1063,7 +1180,7 @@ impl App {
                             }
                             None => c.messages.push(m),
                         }
-                        c.last_read = now_ts();
+                        c.last_read = c.last_read.max(now_ts());
                     }
                     self.dirty = true;
                 }
@@ -1077,7 +1194,7 @@ impl App {
                     self.dirty = true;
                 }
                 ChatAction::Dm(uid) => {
-                    let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members.contains(&uid) && c.members.contains(&me)).map(|c| c.id);
+                    let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members.contains(&uid) && c.members.contains(&me) && !self.dm_duplicate(c)).map(|c| c.id);
                     let id = match existing {
                         Some(id) => id,
                         None => {

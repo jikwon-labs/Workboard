@@ -1221,3 +1221,62 @@ fn one_message_takes_at_most_ten_pictures() {
     assert!(a.add_media(false, Some(pic), None));
     assert_eq!(a.chat_files.len(), 10);
 }
+
+#[test]
+fn team_settings_and_moved_lists_reach_everyone_once() {
+    let dir = temp_folder("move");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.data.extra.accent = "pink".into();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.data.extra.accent = "teal".into();
+    b.join_shared(&folder).unwrap();
+    assert_eq!(b.data.extra.accent, "teal", "the joiner keeps their own theme");
+    assert_eq!(b.data.workspace, a.data.workspace);
+    b.become_member(None, "Bora", "bora@team.kr");
+    b.sync_note_change();
+    b.write_shared();
+    a.sync_pull();
+
+    // A adds a second space, moves a list there and renames the workspace
+    let sid = a.data.new_id();
+    a.data.spaces.push(Space { id: sid, name: "Other".into(), statuses: default_statuses(), ..Default::default() });
+    a.dirty = true;
+    a.sync_note_change();
+    a.write_shared();
+    b.sync_pull();
+    let list = a.data.first_list().unwrap();
+    a.move_list(list, sid, None);
+    a.data.workspace = "Renamed".into();
+    a.data.extra.apps.priorities = false;
+    a.sync_note_change();
+    a.write_shared();
+    // B, not having seen that yet, writes its stale copy
+    b.sync_note_change();
+    b.write_shared();
+    b.sync_pull();
+    a.sync_pull();
+    for d in [&a.data, &b.data] {
+        let homes = d.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter()))).filter(|l| l.id == list).count();
+        assert_eq!(homes, 1, "the moved list is in one place");
+        assert!(d.spaces.iter().find(|s| s.id == sid).unwrap().lists.iter().any(|l| l.id == list));
+        assert_eq!(d.workspace, "Renamed");
+        assert!(!d.extra.apps.priorities);
+    }
+    assert_eq!(b.data.extra.accent, "teal", "theme stays personal");
+
+    // a copy this app can't read is reported once, not on every update
+    let mut bad = serde_json::to_value(&b.data).unwrap();
+    // a newer app changed what a setting looks like
+    bad["workspace"] = serde_json::json!({"name": "Renamed"});
+    bad["extra"]["sync"]["values"]["workspace"] = serde_json::json!(i64::MAX / 2);
+    std::fs::write(dir.join(format!("zz{}", crate::sync::FILE_SUFFIX)), bad.to_string()).unwrap();
+    a.toast = None;
+    assert!(!a.sync_pull());
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("newer version")));
+    a.toast = None;
+    a.sync_pull();
+    assert!(a.toast.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}

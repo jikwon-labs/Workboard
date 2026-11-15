@@ -234,6 +234,9 @@ impl App {
             self.data.save_file(&self.ws_file);
         }
         let d = if file == "data.json" { Some(Data::load()) } else { Data::load_file(file) };
+        if let Some(p) = Data::take_unreadable() {
+            self.toast = Some((super::unreadable_note(&p), now_ts()));
+        }
         if let Some(d) = d {
             self.data = d;
             self.ws_file = file.to_string();

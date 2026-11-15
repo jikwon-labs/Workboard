@@ -9,6 +9,9 @@ pub const T: &[(&str, &str)] = &[
     ("\u{1F464}  Message someone", "\u{1F464}  메시지 보내기"),
     ("\u{1F465}  Work together", "\u{1F465}  함께 작업하기"),
     ("Share this workspace so others can chat with you", "이 워크스페이스를 공유해 다른 사람과 채팅하세요"),
+    // call and huddle messages (kept in English, shown in the reader's language)
+    ("Started a call", "통화를 시작했습니다"),
+    ("Started a huddle", "허들을 시작했습니다"),
     // thread
     ("Thread", "스레드"),
     ("1 reply", "답장 1개"),
@@ -21,9 +24,9 @@ pub const T: &[(&str, &str)] = &[
     ("+  View", "+  보기"),
     // side panel
     ("Followers", "팔로워"),
-    ("Find in Channel", "채널에서 찾기"),
+    ("Find in channel", "채널에서 찾기"),
     ("Replies", "답장"),
-    ("Pinned Messages", "고정된 메시지"),
+    ("Pinned messages", "고정된 메시지"),
     ("Assigned", "할당됨"),
     ("Add bookmarks, notes, and more", "북마크, 메모 등 추가"),
     ("\u{1F50D} Find in channel", "\u{1F50D} 채널에서 찾기"),
@@ -34,6 +37,7 @@ pub const T: &[(&str, &str)] = &[
     ("Chat in {}", "{}에서 채팅"),
     ("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.", "작업과 대화를 오가며 자연스럽게 협업하세요. 팀과 채팅을 시작하거나 작업을 연결해 할 일을 놓치지 마세요."),
     ("+  Add People", "+  사람 추가"),
+    ("+  Invite people", "+  사람 초대"),
     ("\u{2728}  Import from Slack", "\u{2728}  Slack에서 가져오기"),
     ("Track Tasks", "작업 추적"),
     ("Manage tasks, bugs, people, and more", "작업, 버그, 사람 등을 관리합니다"),

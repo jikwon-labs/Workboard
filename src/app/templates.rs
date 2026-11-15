@@ -1289,7 +1289,7 @@ impl App {
         ui.label(RichText::new(tr("New task template")).size(16.0).strong());
         ui.label(
             RichText::new(tr(
-                "Start new tasks from a saved shape: name, description, checklist and priority.",
+                "Save a name, description, checklist and priority to start new tasks with.",
             ))
             .small()
             .color(t.text2),

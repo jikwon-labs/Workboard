@@ -169,6 +169,10 @@ pub struct SyncRt {
     pub(super) backups: Option<Vec<wb_net::Backup>>,
     /// The backup the owner clicked Restore on, waiting for "Yes, restore".
     pub(super) restore_confirm: Option<String>,
+    /// Failed tries to reach the server in a row (none once connected).
+    pub(super) fails: u32,
+    /// Work together shows a field for the server's new address.
+    pub(super) editing_addr: bool,
     /// The person was told the team's copy couldn't be read (said once).
     told_unreadable: bool,
     /// Told this session that someone in the shared folder runs an older app.
@@ -293,12 +297,15 @@ pub(super) fn forget_token(addr: &str, device: &str) {
 /// What the team server (or its client) said, in the interface language:
 /// the server sends English, and some of it carries a number inside.
 pub(super) fn server_text(s: &str) -> String {
-    const WITH_VALUES: [&str; 5] = [
+    if s.starts_with("Couldn't reach the server: ") {
+        // the system's own words follow, untranslated
+        return tr("Couldn't reach the server. Check the address and your connection.").into();
+    }
+    const WITH_VALUES: [&str; 4] = [
         "Choose a password of at least {} characters.",
         "Too many wrong tries. Wait {} minutes and try again, or use Forgot password.",
         "That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.",
         "The server answered {}.",
-        "Couldn't reach the server: {}",
     ];
     for pattern in WITH_VALUES {
         if let Some(values) = super::files::fill_back(pattern, s) {
@@ -308,16 +315,72 @@ pub(super) fn server_text(s: &str) -> String {
     tr(s).to_string()
 }
 
-/// How the server connection is doing, in words.
-pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>) -> String {
+/// The colour of a connection that isn't working.
+pub(super) const WARN: Color32 = Color32::from_rgb(0xe1, 0x6b, 0x16);
+
+/// Failed tries in a row after which "Reconnecting" becomes "Can't reach
+/// the server" (the app keeps trying either way).
+pub(super) const FAILS_BEFORE_CANT_REACH: u32 = 3;
+
+/// Why the server can't be reached, in plain words: the connection code
+/// says it in English, with the system's own error inside.
+pub(super) fn reach_text(why: &str) -> String {
+    use super::files::fill_back;
+    if let Some(v) = fill_back("Can't reach {}: {}", why) {
+        return if v[1].to_lowercase().contains("refused") {
+            trf!(
+                "Nothing answers at {}. Check that workboard-server is running there.",
+                v[0]
+            )
+        } else {
+            trf!(
+                "Can't reach {}. Check the address and that this computer is on the team's network.",
+                v[0]
+            )
+        };
+    }
+    if let Some(v) = fill_back("Can't find {}: {}", why).or_else(|| fill_back("Can't find {}", why))
+    {
+        return trf!("Can't find {}. Check the server address.", v[0]);
+    }
+    if why.starts_with("The server didn't answer like Workboard") {
+        return tr("Something answered at this address, but not a Workboard server. Check the address and port.").into();
+    }
+    let said = server_text(why);
+    // what the connection library or the system said, untranslated
+    let raw = why.contains("os error")
+        || why.starts_with("IO error")
+        || (crate::i18n::is_ko() && said == why);
+    if raw {
+        tr("The connection to the server broke.").into()
+    } else {
+        said
+    }
+}
+
+/// How the server connection is doing, in a word or two. `fails`: failed
+/// tries in a row.
+pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>, fails: u32) -> String {
     match (net, s) {
         (false, _) => tr("Disconnected").into(),
         (true, None) | (true, Some(NetStatus::Connecting)) => tr("Connecting\u{2026}").into(),
         (true, Some(NetStatus::Connected)) => tr("Connected").into(),
-        (true, Some(NetStatus::Reconnecting(why))) => {
-            trf!("Reconnecting\u{2026} {}", server_text(why))
+        (true, Some(NetStatus::Reconnecting(_))) if fails >= FAILS_BEFORE_CANT_REACH => {
+            tr("Can't reach the server").into()
         }
-        (true, Some(NetStatus::Refused(why))) => trf!("Not signed in. {}", server_text(why)),
+        (true, Some(NetStatus::Reconnecting(_))) => tr("Reconnecting\u{2026}").into(),
+        (true, Some(NetStatus::Refused(_))) => tr("Not signed in").into(),
+    }
+}
+
+/// Why the connection isn't working, when it isn't.
+pub(super) fn net_problem(s: Option<&NetStatus>) -> Option<String> {
+    match s {
+        Some(NetStatus::Reconnecting(why)) => {
+            Some(trf!("{} Trying again every few seconds.", reach_text(why)))
+        }
+        Some(NetStatus::Refused(why)) => Some(server_text(why)),
+        _ => None,
     }
 }
 
@@ -327,6 +390,27 @@ pub(super) fn folder_people(folder: &str) -> usize {
         return 0;
     }
     sync::other_files(Path::new(folder.trim()), "").len()
+}
+
+/// A long folder path cut down from the front to whole folder names
+/// ("\u{2026}/Dropbox/Team/_shared"), so it fits on one line.
+pub(super) fn short_path(p: &str, max: usize) -> String {
+    if p.chars().count() <= max {
+        return p.to_string();
+    }
+    let mut out = String::new();
+    for part in p.rsplit('/').filter(|s| !s.is_empty()) {
+        let next = if out.is_empty() {
+            part.to_string()
+        } else {
+            format!("{}/{}", part, out)
+        };
+        if !out.is_empty() && next.chars().count() + 2 > max {
+            break;
+        }
+        out = next;
+    }
+    format!("\u{2026}/{}", out)
 }
 
 /// This app's version, written into the shared folder and sent in hello.
@@ -617,6 +701,22 @@ impl App {
         self.toast = Some((trf!("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", name), now_ts()));
     }
 
+    /// What the top bar says about a team server that isn't working: can't
+    /// be reached, or won't let this computer in. None while connected,
+    /// connecting, or without a server.
+    pub(super) fn server_trouble(&self) -> Option<String> {
+        self.data.extra.shared.as_ref()?.server.as_ref()?;
+        self.sync_rt.net.as_ref()?;
+        match &self.sync_rt.net_status {
+            Some(NetStatus::Reconnecting(_)) if self.sync_rt.fails >= FAILS_BEFORE_CANT_REACH => {
+                Some(tr("Not connected").into())
+            }
+            Some(NetStatus::Reconnecting(_)) => Some(tr("Reconnecting\u{2026}").into()),
+            Some(NetStatus::Refused(_)) => Some(tr("Not signed in").into()),
+            _ => None,
+        }
+    }
+
     /// The server connection: start it when needed and take in what arrived.
     /// Returns true when the team's changes came in.
     pub(super) fn net_tick(&mut self, ctx: Option<&egui::Context>) -> bool {
@@ -654,6 +754,7 @@ impl App {
                 None => std::sync::Arc::new(|| {}),
             };
             self.sync_rt.net_status = None;
+            self.sync_rt.fails = 0;
             self.sync_rt.net = Some(wb_net::Client::start(&addr, sign_in, wake));
         }
         let events = self
@@ -665,7 +766,14 @@ impl App {
         let mut changed = false;
         for e in events {
             match e {
-                NetEvent::Status(s) => self.sync_rt.net_status = Some(s),
+                NetEvent::Status(s) => {
+                    match &s {
+                        NetStatus::Reconnecting(_) => self.sync_rt.fails += 1,
+                        NetStatus::Connected => self.sync_rt.fails = 0,
+                        _ => {}
+                    }
+                    self.sync_rt.net_status = Some(s)
+                }
                 NetEvent::Welcome {
                     tag,
                     snapshot,
@@ -727,18 +835,24 @@ impl App {
                         .map(|m| m.name.clone())
                         .unwrap_or_default();
                     if let Some(to) = emailed {
-                        self.toast =
-                            Some((trf!("Emailed {}'s invite code to {}.", name, to), now_ts()));
+                        self.toast = Some((
+                            crate::i18n::particles(&trf!(
+                                "Emailed {}'s invite code to {}.",
+                                name,
+                                to
+                            )),
+                            now_ts(),
+                        ));
                     } else if let Some(why) = mail_error {
                         self.toast = Some((trf!("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", name, why), now_ts()));
                     }
                 }
                 NetEvent::Account(email) => {
                     self.toast = Some((
-                        trf!(
+                        crate::i18n::particles(&trf!(
                             "Password saved. Sign in with {} on your other computers and phones.",
                             email
-                        ),
+                        )),
                         now_ts(),
                     ));
                     self.sync_rt.account = Some(email);
@@ -833,7 +947,10 @@ impl App {
                             .member(member)
                             .map(|m| m.name.clone())
                             .unwrap_or_default();
-                        self.toast = Some((trf!("Joined as {}.", name), now_ts()));
+                        self.toast = Some((
+                            crate::i18n::particles(&trf!("Joined as {}.", name)),
+                            now_ts(),
+                        ));
                         if matches!(
                             self.modal,
                             Some(Modal::Together { .. } | Modal::Welcome { .. })
@@ -1176,6 +1293,33 @@ impl App {
         self.data.extra.sync = Default::default();
         self.sync_rt = SyncRt::default();
         self.dirty = true;
+    }
+
+    /// Keep this workspace on its server, reached at another address (the
+    /// server moved, or the address was mistyped), and connect again. The
+    /// sign-in goes along.
+    pub(super) fn change_server(&mut self, addr: &str) -> Result<(), String> {
+        wb_net::server_url(addr)?;
+        let new = addr.trim().to_string();
+        let Some(cfg) = self.data.extra.shared.as_mut() else {
+            return Ok(());
+        };
+        let Some(old) = cfg.server.clone() else {
+            return Ok(());
+        };
+        if old != new {
+            if let Some(token) = load_token(&old, &cfg.device) {
+                save_token(&new, &cfg.device, &token);
+                forget_token(&old, &cfg.device);
+            }
+            cfg.server = Some(new);
+            self.save_local();
+            self.dirty = true;
+        }
+        self.sync_rt.editing_addr = false;
+        self.sync_rt.net = None;
+        self.sync_rt.net_status = None;
+        Ok(())
     }
 
     /// Who you are in a joined workspace: an existing (invited) member, or someone new.
@@ -1526,8 +1670,11 @@ impl App {
         if self.sync_rt.joining.is_some() {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let status =
-                    net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+                let status = net_status_text(
+                    self.sync_rt.net.is_some(),
+                    self.sync_rt.net_status.as_ref(),
+                    self.sync_rt.fails,
+                );
                 ui.label(RichText::new(status).color(t.text2));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.button(tr("Cancel")).clicked() {
@@ -1537,6 +1684,11 @@ impl App {
                     }
                 });
             });
+            if let Some(why) = net_problem(self.sync_rt.net_status.as_ref())
+                .filter(|_| matches!(self.sync_rt.net_status, Some(NetStatus::Reconnecting(_))))
+            {
+                ui.label(RichText::new(why).small().color(WARN));
+            }
             // refused: say why and let them fix what they typed
             if let Some(NetStatus::Refused(why)) = self.sync_rt.net_status.clone() {
                 self.sync_rt.joining = None;
@@ -1834,10 +1986,10 @@ impl App {
             Some(email) => {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(trf!(
+                        RichText::new(crate::i18n::particles(&trf!(
                             "You sign in with {} on your other computers and phones.",
                             email
-                        ))
+                        )))
                         .color(t.text2),
                     );
                     if !form.changing && row_button(ui, tr("Change password")).clicked() {
@@ -1977,7 +2129,8 @@ impl App {
                 }
             }
             1 => {
-                ui.label(RichText::new(tr("What should your team call you?")).color(t.text2));
+                // only "Use it on this Mac" comes here: no team yet
+                ui.label(RichText::new(tr("What should we call you?")).color(t.text2));
                 let r = ui.add(
                     field(name)
                         .hint_text(tr("Your name"))
@@ -2068,15 +2221,27 @@ impl App {
             );
             ui.label(RichText::new(&server).color(t.text2));
             let connected = self.sync_rt.net_status == Some(NetStatus::Connected);
-            let status =
-                net_status_text(self.sync_rt.net.is_some(), self.sync_rt.net_status.as_ref());
+            let status = net_status_text(
+                self.sync_rt.net.is_some(),
+                self.sync_rt.net_status.as_ref(),
+                self.sync_rt.fails,
+            );
+            let trouble = matches!(
+                self.sync_rt.net_status,
+                Some(NetStatus::Reconnecting(_) | NetStatus::Refused(_))
+            );
             ui.label(
                 RichText::new(trf!("Status: {}", status)).color(if connected {
                     t.text
+                } else if trouble {
+                    WARN
                 } else {
                     t.text2
                 }),
             );
+            if let Some(why) = net_problem(self.sync_rt.net_status.as_ref()) {
+                ui.label(RichText::new(why).small().color(t.text2));
+            }
             if let Some(role) = self.sync_rt.role.filter(|_| connected) {
                 let name = self
                     .data
@@ -2084,8 +2249,12 @@ impl App {
                     .map(|m| m.name.clone())
                     .unwrap_or_default();
                 ui.label(
-                    RichText::new(trf!("Signed in as {} ({})", name, tr(role.label())))
-                        .color(t.text2),
+                    RichText::new(crate::i18n::particles(&trf!(
+                        "Signed in as {} ({})",
+                        name,
+                        tr(role.label())
+                    )))
+                    .color(t.text2),
                 );
             }
             if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
@@ -2099,7 +2268,39 @@ impl App {
                 }
             }
             ui.add_space(8.0);
-            ui.label(RichText::new(tr("Tasks, chat and docs show up for everyone within a second or two. While the server can't be reached you keep working here, and your changes go up when it's back.")).small().color(t.text3));
+            let how = if connected {
+                tr("Tasks, chat and docs show up for everyone within a second or two.")
+            } else if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
+                tr("You can keep working here. Your changes are kept on this computer and go up once it's signed in again.")
+            } else {
+                tr("You can keep working here. Your changes are kept on this computer and go up when the server is back.")
+            };
+            ui.label(RichText::new(how).small().color(t.text3));
+            if !connected && self.sync_rt.editing_addr {
+                ui.add_space(8.0);
+                ui.label(RichText::new(tr("New server address")).color(t.text2));
+                let r = ui.add(
+                    egui::TextEdit::singleline(addr)
+                        .hint_text(tr("macmini or 100.101.102.103"))
+                        .desired_width(f32::INFINITY),
+                );
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address")
+                });
+                ui.horizontal(|ui| {
+                    if primary_button(ui, t, tr("Save and reconnect")).clicked() {
+                        match self.change_server(addr) {
+                            Ok(()) => result.clear(),
+                            Err(e) => *result = server_text(&e),
+                        }
+                    }
+                    if ui.button(tr("Cancel")).clicked() {
+                        self.sync_rt.editing_addr = false;
+                        *addr = server.clone();
+                        result.clear();
+                    }
+                });
+            }
             if connected {
                 ui.add_space(10.0);
                 self.account_section(ui, t);
@@ -2118,6 +2319,19 @@ impl App {
                     self.sync_rt.net = None;
                     self.sync_rt.net_status = None;
                 }
+                // the server moved or the address was mistyped
+                if !connected
+                    && !self.sync_rt.editing_addr
+                    && ui
+                        .button(tr("Change address"))
+                        .on_hover_text(tr(
+                            "Connect this workspace to the server at another address",
+                        ))
+                        .clicked()
+                {
+                    self.sync_rt.editing_addr = true;
+                    *addr = server.clone();
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
                         .button(RichText::new(tr("Stop sharing")).color(t.danger))
@@ -2135,15 +2349,20 @@ impl App {
                     .size(15.0)
                     .strong(),
             );
-            ui.label(RichText::new(&cfg.folder).color(t.text2));
+            ui.add(
+                egui::Label::new(RichText::new(short_path(&cfg.folder, 48)).color(t.text2))
+                    .wrap_mode(egui::TextWrapMode::Truncate),
+            )
+            .on_hover_text(&cfg.folder);
+            // computers, not people: the people list counts everyone added
             let n = sync::other_files(Path::new(&cfg.folder), &cfg.device).len();
             ui.label(RichText::new(match n {
-                0 => tr("Nobody else has joined yet. Share this folder with your teammates in your sync app, then they choose Work together > Join.").to_string(),
+                0 => tr("No other computer is working in this folder yet. Share the folder with your teammates in your sync app. On their computer they open Work together, paste the folder's path and choose Join this workspace.").to_string(),
                 1 => tr("1 other computer is working in it.").to_string(),
                 n => trf!("{} other computers are working in it.", n),
             }).color(t.text2));
             ui.add_space(8.0);
-            ui.label(RichText::new(tr("Tasks, chat, docs and calls show up for everyone within a few seconds of their sync app copying the folder.")).small().color(t.text3));
+            ui.label(RichText::new(tr("Tasks, chat and docs show up for everyone a few seconds after their sync app copies the folder. Calls open in the browser from a link posted in chat.")).small().color(t.text3));
             ui.label(RichText::new(tr(FOLDER_PRIVACY)).small().color(t.text2));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -2195,7 +2414,11 @@ impl App {
             ui.label(RichText::new(tr("Folder")).color(t.text2));
             ui.add(
                 field(path)
-                    .hint_text(tr("Paste a folder path, or pick one above"))
+                    .hint_text(if sugg.is_empty() {
+                        tr("Paste a folder path")
+                    } else {
+                        tr("Paste a folder path, or pick one above")
+                    })
                     .desired_width(f32::INFINITY),
             );
             let n = folder_people(path);
@@ -2300,7 +2523,34 @@ impl App {
         link: &mut String,
     ) -> bool {
         let mut close = false;
+        // why it's a browser call rather than a huddle here
+        if self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some())
+            && self.sync_rt.net_status != Some(NetStatus::Connected)
+        {
+            ui.label(RichText::new(tr("The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.")).color(WARN));
+            ui.add_space(6.0);
+        }
         ui.label(RichText::new(tr("The call opens in your browser on Jitsi Meet (free). The person who starts it may be asked to sign in with Google, GitHub or Facebook; everyone else joins without an account. Everyone in the conversation gets a Join button.")).color(t.text2));
+        // nobody else to get the Join button
+        let me = self.data.me;
+        let alone = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == *ch)
+            .is_some_and(|c| {
+                !c.members
+                    .iter()
+                    .any(|id| *id != me && self.data.member(*id).is_some_and(|m| !m.invited))
+            });
+        if alone {
+            ui.label(RichText::new(tr("You're the only one in this conversation, so nobody else gets the Join button. Invite people first.")).small().color(t.text3));
+        }
         ui.add_space(8.0);
         ui.label(RichText::new(tr("Call in")).color(t.text2));
         let chans: Vec<(u64, String)> = self

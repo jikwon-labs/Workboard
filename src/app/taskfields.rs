@@ -70,8 +70,8 @@ pub fn parse_estimate(s: &str) -> Option<u32> {
         let v: f64 = num.parse().ok()?;
         num.clear();
         let mult = match unit.as_str() {
-            "h" | "hr" | "hrs" | "hour" | "hours" => 60.0,
-            "m" | "min" | "mins" | "minute" | "minutes" => 1.0,
+            "h" | "hr" | "hrs" | "hour" | "hours" | "\u{c2dc}\u{ac04}" => 60.0,
+            "m" | "min" | "mins" | "minute" | "minutes" | "\u{bd84}" => 1.0,
             "d" | "day" | "days" => 480.0,
             "w" | "wk" | "week" | "weeks" => 2400.0,
             _ => return None,
@@ -314,7 +314,7 @@ impl App {
                 ui.label(RichText::new(tr("Tags in use")).small().color(t.text3));
                 for g in &sugg {
                     let c = tag_color(g);
-                    if menu_row(ui, t, &trf!("Tag {}", g), false, |p, at| {
+                    if menu_row_named(ui, t, &format!("Tag {}", g), g, false, |p, at| {
                         p.circle_filled(at, 5.0, c);
                     })
                     .clicked()
@@ -394,9 +394,14 @@ impl App {
             for m in data.members.iter().filter(|m| !m.invited) {
                 let sel = task.watchers.contains(&m.id);
                 let ring = t.card;
-                let r = menu_row(ui, t, &trf!("Watcher {}", m.name), sel, |p, c| {
-                    paint_avatar(p, c, 9.0, m, ring)
-                });
+                let r = menu_row_named(
+                    ui,
+                    t,
+                    &format!("Watcher {}", m.name),
+                    &m.name,
+                    sel,
+                    |p, c| paint_avatar(p, c, 9.0, m, ring),
+                );
                 if sel {
                     ui.painter().text(
                         r.rect.right_center() - vec2(12.0, 0.0),
@@ -898,6 +903,7 @@ impl App {
     }
 
     /// The picker dialog: search tasks, click one to set the relation.
+    /// It lists at most `PICK_ROWS` tasks and says how many more match.
     pub(super) fn pick_task_body(
         &mut self,
         ui: &mut Ui,
@@ -927,32 +933,63 @@ impl App {
         let q = query.trim().to_lowercase();
         let ids = self.pick_candidates(tid, mode);
         let mut picked = None;
-        egui::ScrollArea::vertical()
+        let more = egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {
                 let mut shown = 0;
+                let mut more = 0;
                 for oid in ids {
                     let Some(o) = self.task(oid) else { continue };
                     if !q.is_empty() && !o.name.to_lowercase().contains(&q) {
                         continue;
                     }
                     shown += 1;
-                    if shown > 200 {
-                        break;
+                    // the first 200; the rest are counted and found by searching
+                    if shown > PICK_ROWS {
+                        more += 1;
+                        continue;
                     }
                     let st = self.data.status_of(o);
-                    if menu_row(ui, t, &trf!("Pick {}", o.name), false, |p, c| {
-                        paint_status_circle(p, c, 6.0, &st)
-                    })
+                    if menu_row_named(
+                        ui,
+                        t,
+                        &format!("Pick {}", o.name),
+                        &o.name,
+                        false,
+                        |p, c| paint_status_circle(p, c, 6.0, &st),
+                    )
                     .clicked()
                     {
                         picked = Some(oid);
                     }
                 }
                 if shown == 0 {
-                    ui.label(RichText::new(tr("No tasks match")).color(t.text3));
+                    // nothing typed yet: say why there is nothing, not "no match"
+                    let text = if !q.is_empty() {
+                        tr("No tasks match")
+                    } else if self
+                        .data
+                        .tasks
+                        .iter()
+                        .any(|x| x.id != tid && !self.data.task_live(x))
+                    {
+                        tr("No other tasks to pick. Archived tasks are not offered here.")
+                    } else {
+                        tr("No other tasks to pick yet.")
+                    };
+                    ui.label(RichText::new(text).color(t.text3));
                 }
-            });
+                more
+            })
+            .inner;
+        if more > 0 {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(trf!("{} more not shown. Search to find them.", more))
+                    .small()
+                    .color(t.text3),
+            );
+        }
         if let Some(oid) = picked {
             self.set_relation(tid, mode, oid);
             close = true;
@@ -1183,3 +1220,6 @@ impl App {
         }
     }
 }
+
+/// How many tasks the task picker lists before "N more not shown".
+pub(super) const PICK_ROWS: usize = 200;

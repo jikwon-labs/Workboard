@@ -278,6 +278,18 @@ pub fn fmt_duration(secs: i64) -> String {
     }
 }
 
+/// Tracked time in hours and minutes ("1h 20m", "40m", "2h"), the one way
+/// timesheets show it, in their cells and their totals; "-" for none.
+pub fn fmt_hm(secs: i64) -> String {
+    let min = (secs as f64 / 60.0).round() as i64;
+    match (min / 60, min % 60) {
+        (0, 0) => "-".into(),
+        (0, m) => crate::trf!("{}m", m),
+        (h, 0) => crate::trf!("{}h", h),
+        (h, m) => crate::trf!("{}h {}m", h, m),
+    }
+}
+
 pub fn fmt_ago(ts: i64) -> String {
     let d = now_ts() - ts;
     if d < 60 {
@@ -297,6 +309,70 @@ pub fn fmt_ago(ts: i64) -> String {
             .unwrap_or_default();
         dt
     }
+}
+
+/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
+pub fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
+    let w = |s: &str| {
+        p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    if w(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let cand: String = chars[..mid]
+            .iter()
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+            + "\u{2026}";
+        if w(&cand) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    chars[..lo]
+        .iter()
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+        + "\u{2026}"
+}
+
+/// Paints `text` at `pos`, cut with an ellipsis to at most `max_w` wide.
+/// When it had to be cut, hovering it shows the whole text. Returns the
+/// painted rect.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_fit(
+    ui: &Ui,
+    pos: Pos2,
+    align: Align2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_w: f32,
+) -> Rect {
+    let shown = fit_text(ui.painter(), text, &font, max_w.max(0.0));
+    let cut = shown != text;
+    let rect = ui.painter().text(pos, align, shown, font, color);
+    if cut && ui.rect_contains_pointer(rect) {
+        egui::show_tooltip_at_pointer(
+            ui.ctx(),
+            ui.layer_id(),
+            egui::Id::new(("fit_text_tip", text)),
+            |ui| {
+                ui.set_max_width(360.0);
+                ui.label(text);
+            },
+        );
+    }
+    rect
 }
 
 /// Opens a popup below `resp` when it is clicked; shows `add` while open.
@@ -417,9 +493,22 @@ pub fn menu_row(
     selected: bool,
     lead: impl FnOnce(&egui::Painter, Pos2),
 ) -> Response {
+    menu_row_named(ui, t, label, label, selected, lead)
+}
+
+/// A `menu_row` showing `label` whose accessibility name is `name` (a row
+/// that shows a task's name but is called "Pick <name>").
+pub fn menu_row_named(
+    ui: &mut Ui,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
     let w = ui.available_width().max(160.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-    name_it(&resp, label);
+    name_it(&resp, name);
     if resp.hovered() || selected {
         ui.painter()
             .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
@@ -755,14 +844,28 @@ pub fn row_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
 
 pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let font = FontId::proportional(11.0);
+    let bg = color;
+    // on a dark theme the full colour is too dark to read on its own tint
+    let color = if ui.visuals().dark_mode {
+        chip_text_on_dark(color)
+    } else {
+        color
+    };
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 18.0), Sense::click());
     let strength = if resp.hovered() { 0.28 } else { 0.16 };
     ui.painter()
-        .rect_filled(rect, 4.0, color.gamma_multiply(strength));
+        .rect_filled(rect, 4.0, bg.gamma_multiply(strength));
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, color);
     resp
+}
+
+/// A chip's text colour on a dark theme: the colour mixed halfway to white,
+/// so a dark green or purple tag stays readable on its tinted background.
+pub fn chip_text_on_dark(c: Color32) -> Color32 {
+    let mix = |x: u8| x + ((255 - x as u16) / 2) as u8;
+    Color32::from_rgb(mix(c.r()), mix(c.g()), mix(c.b()))
 }
 
 pub fn tag_color(tag: &str) -> Color32 {

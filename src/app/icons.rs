@@ -1143,6 +1143,22 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(3.5, 7.0), vec2(0.5, 4.0));
             line(vec2(3.5, 7.0), vec2(6.5, 4.0));
         }
+        "archive" => {
+            p.rect_stroke(
+                Rect::from_center_size(c + vec2(0.0, -4.5), vec2(16.0, 4.5)),
+                1.0,
+                s,
+                egui::StrokeKind::Middle,
+            );
+            let pts = vec![
+                c + vec2(-6.5, -2.0),
+                c + vec2(-6.5, 7.0),
+                c + vec2(6.5, 7.0),
+                c + vec2(6.5, -2.0),
+            ];
+            p.add(egui::Shape::line(pts, s));
+            line(vec2(-2.5, 1.5), vec2(2.5, 1.5));
+        }
         _ => return false,
     }
     true

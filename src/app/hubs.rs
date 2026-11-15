@@ -3,6 +3,7 @@
 // Favorites) and a template gallery; Goals has a start page; Timesheets has
 // tabs (My timesheet, All timesheets) and editable hours.
 
+use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
 use super::*;
 
 /// `dash_open` for the built-in Workspace overview (not a saved dashboard).
@@ -39,7 +40,8 @@ fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
         });
 }
 
-/// A template card as in the galleries: round coloured icon, title, description.
+/// A template card as in the galleries: round coloured icon (`glyph` is a
+/// line icon kind, or "+"), title, description.
 fn gallery_card(
     ui: &mut Ui,
     t: &Theme,
@@ -71,15 +73,11 @@ fn gallery_card(
             t.text2,
         );
     } else {
+        // a pale tile of the colour with the icon in the full colour (the
+        // emoji sat on a tile of nearly its own colour and hardly showed)
         ui.painter()
-            .circle_filled(c, 18.0, rgb(color).gamma_multiply(0.35));
-        ui.painter().text(
-            c,
-            Align2::CENTER_CENTER,
-            glyph,
-            FontId::proportional(15.0),
-            rgb(color),
-        );
+            .circle_filled(c, 18.0, rgb(color).gamma_multiply(0.14));
+        line_icon_scaled(ui.painter(), glyph, c, rgb(color), 1.15);
     }
     let tc = if ai {
         Color32::from_rgb(0x9b, 0x2d, 0xd6)
@@ -282,11 +280,10 @@ impl App {
                             );
                         }
                     } else {
-                        ui.painter().text(
+                        line_icon(
+                            ui.painter(),
+                            icon,
                             r.left_center() + vec2(16.0, 0.0),
-                            Align2::CENTER_CENTER,
-                            *icon,
-                            FontId::proportional(13.0),
                             t.text2,
                         );
                     }
@@ -418,11 +415,10 @@ impl App {
                         } else if resp.hovered() {
                             ui.painter().rect_filled(r, 7.0, t.hover);
                         }
-                        ui.painter().text(
+                        line_icon(
+                            ui.painter(),
+                            "notebook",
                             r.left_center() + vec2(16.0, 0.0),
-                            Align2::CENTER_CENTER,
-                            "\u{1F4D3}",
-                            FontId::proportional(12.0),
                             t.text2,
                         );
                         let p = ui.painter().with_clip_rect(r.shrink2(vec2(50.0, 0.0)));
@@ -533,13 +529,13 @@ impl App {
         let t = self.t();
         let me = self.data.me;
         let items: [(&str, &str, Option<usize>); 7] = [
-            ("\u{1F4C4}", "All Docs", None),
+            ("docs", "All Docs", None),
             ("@me", "My Docs", Some(self.my_docs_count())),
-            ("\u{1F465}", "Shared with me", None),
-            ("\u{1F512}", "Private", None),
-            ("\u{1F4DD}", "Meeting Notes", None),
-            ("\u{1F4D3}", "Wikis", None),
-            ("\u{1F5D1}", "Archived", None),
+            ("teams", "Shared with me", None),
+            ("lock", "Private", None),
+            ("edit", "Meeting Notes", None),
+            ("notebook", "Wikis", None),
+            ("archive", "Archived", None),
         ];
         let sel = if self.doc_open.is_some() {
             99
@@ -657,25 +653,28 @@ impl App {
                                 });
                                 ui.add_space(16.0);
                                 ui.horizontal(|ui| {
-                                    let r = ui.add(
-                                        egui::Button::new(if self.docs_mine {
-                                            tr("\u{2261}  Filters \u{2022} 1")
+                                    let r = icon_button(
+                                        ui,
+                                        &t,
+                                        "filter",
+                                        if self.docs_mine {
+                                            tr("Filters \u{2022} 1")
                                         } else {
-                                            tr("\u{2261}  Filters")
-                                        })
-                                        .corner_radius(13),
+                                            tr("Filters")
+                                        },
+                                        "Docs filters",
+                                        true,
                                     );
                                     popup(ui, &r, ui.id().with("docs_filters"), 200.0, |ui| {
                                         check(ui, &mut self.docs_mine, tr("Only Docs I created"));
                                     });
-                                    let sr = ui.add(
-                                        egui::Button::new(trf!(
-                                            "\u{21C5}  Sort: {}",
-                                            tr(["Date updated", "Name", "Date created"]
-                                                [self.docs_sort as usize % 3])
-                                        ))
-                                        .corner_radius(13),
+                                    let sort_text = trf!(
+                                        "Sort: {}",
+                                        tr(["Date updated", "Name", "Date created"]
+                                            [self.docs_sort as usize % 3])
                                     );
+                                    let sr =
+                                        icon_button(ui, &t, "sort", &sort_text, "Docs sort", true);
                                     popup(ui, &sr, ui.id().with("docs_sort"), 180.0, |ui| {
                                         for (i, l) in ["Date updated", "Name", "Date created"]
                                             .iter()
@@ -694,9 +693,14 @@ impl App {
                                         Some(g) => trf!("Tags: {}", g),
                                         None => tr("Tags").to_string(),
                                     };
-                                    let tagr =
-                                        ui.add(egui::Button::new(tag_label).corner_radius(13));
-                                    name_it(&tagr, "Docs tag filter");
+                                    let tagr = icon_button(
+                                        ui,
+                                        &t,
+                                        "tag",
+                                        &tag_label,
+                                        "Docs tag filter",
+                                        true,
+                                    );
                                     let all_tags = self.doc_tags();
                                     popup(ui, &tagr, ui.id().with("docs_tags"), 180.0, |ui| {
                                         if all_tags.is_empty() {
@@ -733,7 +737,7 @@ impl App {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let r = ui.add(
                                             field(&mut self.docs_search)
-                                                .hint_text(tr("\u{1F50D} Search"))
+                                                .hint_text(tr("Search"))
                                                 .desired_width(160.0),
                                         );
                                         name_field(&r, "Search Docs");
@@ -988,19 +992,13 @@ impl App {
                         wiki_badge(ui.painter(), &t, r.left_center() - vec2(8.0, 0.0));
                     }
                     if self.data.docs[idx].meeting_note {
-                        ui.label(
-                            RichText::new(format!("\u{1F4DD} {}", tr("Meeting Note")))
-                                .small()
-                                .color(t.text3),
-                        );
+                        let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                        line_icon(ui.painter(), "edit", r.center(), t.text3);
+                        ui.label(RichText::new(tr("Meeting Note")).small().color(t.text3));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let mr = ui
-                            .add(ghost(
-                                egui::Button::new("\u{22EF}").min_size(vec2(24.0, 24.0)),
-                            ))
+                        let mr = icon_button(ui, &t, "dots", "", "Doc options", false)
                             .on_hover_text(tr("More"));
-                        name_it(&mr, "Doc options");
                         click_menu(&mr, |ui| self.doc_menu(ui, id, false));
                         if ui
                             .add(ghost(egui::Button::new(
@@ -1050,14 +1048,24 @@ impl App {
                             return;
                         };
                         let d = &mut self.data.docs[idx];
-                        if ui
-                            .add(ghost(egui::Button::new(if d.private {
-                                tr("\u{1F512} Private")
-                            } else {
-                                tr("\u{1F465} Shared")
-                            })))
-                            .on_hover_text(tr("Who can see this Doc"))
-                            .clicked()
+                        let (kind, label) = if d.private {
+                            ("lock", "Private")
+                        } else {
+                            ("teams", "Shared")
+                        };
+                        if icon_button_ex(
+                            ui,
+                            &t,
+                            kind,
+                            tr(label),
+                            label,
+                            false,
+                            0.0,
+                            t.text,
+                            t.text2,
+                        )
+                        .on_hover_text(tr("Who can see this Doc"))
+                        .clicked()
                         {
                             d.private = !d.private;
                             self.dirty = true;
@@ -1111,7 +1119,7 @@ impl App {
         let t = self.t();
         let me = self.data.me;
         let items: [(&str, &str, Option<usize>); 2] = [
-            ("\u{1F4CA}", "All Dashboards", None),
+            ("dashboards", "All Dashboards", None),
             ("@me", "My Dashboards", None),
         ];
         let sel = if self.dash_open.is_some() {
@@ -1145,22 +1153,22 @@ impl App {
                         for d in shown.into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("dash:{}", d.id));
-                                if ui.add(ghost(egui::Button::new(format!("\u{1F4CA}  {}", d.name)))).clicked() {
+                                if icon_button_ex(ui, &t, "dashboards", &d.name, &d.name, false, 0.0, t.text, t.text2).clicked() {
                                     self.dash_open = Some(d.id);
                                 }
                             });
                         }
-                        if ui.add(ghost(egui::Button::new(tr("\u{1F4CA}  Workspace overview")))).clicked() {
+                        if icon_button_ex(ui, &t, "dashboards", tr("Workspace overview"), "Workspace overview", false, 0.0, t.text, t.text2).clicked() {
                             self.dash_open = Some(WORKSPACE_OVERVIEW);
                         }
                     });
                 }
                 let choice = self.gallery(ui, tr("Choose a Dashboard template"), tr("Get started with a Dashboard template or create a custom Dashboard\nto fit your exact needs."), &[
-                    ([0x44, 0x66, 0xff], "\u{1F4CA}", "Simple Dashboard", "Manage and prioritize tasks", false),
-                    ([0xb6, 0x60, 0xe0], "\u{2728}", "AI Team Center", "View team activity with AI", true),
-                    ([0x0f, 0x9d, 0x9f], "\u{23F1}", "Time Tracking", "View and report on time tracking metrics", false),
-                    ([0x10, 0x90, 0xe0], "\u{2630}", "Project Management", "Analyze project progress and metrics", false),
-                    ([0xb6, 0x60, 0xe0], "\u{2728}", "AI Personal Center", "Improve your performance and career with AI cards", true),
+                    ([0x44, 0x66, 0xff], "dashboards", "Simple Dashboard", "Manage and prioritize tasks", false),
+                    ([0xb6, 0x60, 0xe0], "sparkle", "AI Team Center", "View team activity with AI", true),
+                    ([0x0f, 0x9d, 0x9f], "clock", "Time Tracking", "View and report on time tracking metrics", false),
+                    ([0x10, 0x90, 0xe0], "list", "Project Management", "Analyze project progress and metrics", false),
+                    ([0xb6, 0x60, 0xe0], "sparkle", "AI Personal Center", "Improve your performance and career with AI cards", true),
                 ]);
                 if let Some(name) = choice {
                     if name.starts_with("AI ") {
@@ -1256,7 +1264,7 @@ impl App {
     pub(super) fn whiteboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let items: [(&str, &str, Option<usize>); 2] = [
-            ("\u{1F3A8}", "All Whiteboards", None),
+            ("whiteboards", "All Whiteboards", None),
             ("@me", "My Whiteboards", None),
         ];
         let sel = if self.wb_open.is_some() {
@@ -1287,7 +1295,7 @@ impl App {
                         for w in self.data.extra.whiteboards.clone().into_iter().filter(|w| !mine_only || w.owner == me || w.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("wb:{}", w.id));
-                                if ui.add(ghost(egui::Button::new(format!("\u{1F3A8}  {}", w.name)))).clicked() {
+                                if icon_button_ex(ui, &t, "whiteboards", &w.name, &w.name, false, 0.0, t.text, t.text2).clicked() {
                                     self.wb_open = Some(w.id);
                                 }
                             });
@@ -1295,11 +1303,11 @@ impl App {
                     });
                 }
                 let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans and brainstorm feature\nconcepts, on your own or with your team."), &[
-                    ([0xb6, 0x60, 0xe0], "\u{1F465}", "Organizational Chart", "Visualize your team structure", false),
-                    ([0x0f, 0x9d, 0x9f], "\u{2630}", "Action Plan", "Turn goals into actionable steps", false),
-                    ([0x10, 0x90, 0xe0], "\u{27A4}", "Customer Journey Map", "Optimize every customer touchpoint", false),
-                    ([0xee, 0x5e, 0x99], "\u{25A6}", "Flow Chart", "Structure and communicate processes and workflows", false),
-                    ([0xe1, 0x6b, 0x16], "\u{25CE}", "Root Cause Analysis", "Analyze issues using the Ishikawa Fishbone diagram", false),
+                    ([0xb6, 0x60, 0xe0], "teams", "Organizational Chart", "Visualize your team structure", false),
+                    ([0x0f, 0x9d, 0x9f], "list", "Action Plan", "Turn goals into actionable steps", false),
+                    ([0x10, 0x90, 0xe0], "send", "Customer Journey Map", "Optimize every customer touchpoint", false),
+                    ([0xee, 0x5e, 0x99], "shapes", "Flow Chart", "Structure and communicate processes and workflows", false),
+                    ([0xe1, 0x6b, 0x16], "search", "Root Cause Analysis", "Analyze issues using the Ishikawa Fishbone diagram", false),
                 ]);
                 if let Some(name) = choice {
                     self.new_whiteboard();
@@ -1331,7 +1339,7 @@ impl App {
     pub(super) fn forms_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let items: [(&str, &str, Option<usize>); 2] =
-            [("\u{1F4CB}", "All Forms", None), ("@me", "My Forms", None)];
+            [("forms", "All Forms", None), ("@me", "My Forms", None)];
         let sel = if self.form_open.is_some() {
             99
         } else {
@@ -1360,7 +1368,7 @@ impl App {
                         for f in self.data.extra.forms.clone().into_iter().filter(|f| self.form_shown(f)).collect::<Vec<_>>().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("form:{}", f.id));
-                                if ui.add(ghost(egui::Button::new(format!("\u{1F4CB}  {}", f.name)))).clicked() {
+                                if icon_button_ex(ui, &t, "forms", &f.name, &f.name, false, 0.0, t.text, t.text2).clicked() {
                                     self.form_open = Some(f.id);
                                 }
                             });
@@ -1368,11 +1376,11 @@ impl App {
                     });
                 }
                 let choice = self.gallery(ui, tr("Choose a Form template"), tr("Create forms to kick off projects, collect feedback, and supercharge\nyour productivity."), &[
-                    ([0x0f, 0x9d, 0x9f], "\u{1F44D}", "Feedback Form", "Survey and collect feedback", false),
-                    ([0xee, 0x5e, 0x99], "\u{1F4CB}", "Project Intake", "Streamline new project requests", false),
-                    ([0x5f, 0x55, 0xee], "\u{1F4BC}", "Order Form", "Capture and process client orders", false),
-                    ([0xe1, 0x6b, 0x16], "\u{1F464}", "Job Application", "Accept and review applications for open roles", false),
-                    ([0x44, 0x66, 0xff], "\u{2699}", "IT Requests", "Triage and prioritize IT service requests", false),
+                    ([0x0f, 0x9d, 0x9f], "smile", "Feedback Form", "Survey and collect feedback", false),
+                    ([0xee, 0x5e, 0x99], "forms", "Project Intake", "Streamline new project requests", false),
+                    ([0x5f, 0x55, 0xee], "briefcase", "Order Form", "Capture and process client orders", false),
+                    ([0xe1, 0x6b, 0x16], "person", "Job Application", "Accept and review applications for open roles", false),
+                    ([0x44, 0x66, 0xff], "settings", "IT Requests", "Triage and prioritize IT service requests", false),
                 ]);
                 if let Some(name) = choice {
                     self.new_form();
@@ -1464,10 +1472,10 @@ impl App {
             .filter(|x| x.members.contains(&self.data.me))
             .count();
         let items: [(&str, &str, Option<usize>); 5] = [
-            ("\u{1F465}", "All Teams", None),
-            ("\u{1F4C7}", "All People", Some(people)),
-            ("\u{2630}", "Org Chart", None),
-            ("\u{1F4CA}", "Analytics", None),
+            ("teams", "All Teams", None),
+            ("person", "All People", Some(people)),
+            ("subtasks", "Org Chart", None),
+            ("chart", "Analytics", None),
             ("@me", "My Teams", Some(mine)),
         ];
         let sel = if self.hub_filter == 9 {
@@ -1812,7 +1820,9 @@ impl App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_height(40.0);
-                    ui.label(RichText::new(tr("\u{23F1}  Timesheets")).size(15.5));
+                    let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
+                    line_icon(ui.painter(), "timesheets", r.center(), t.text2);
+                    ui.label(RichText::new(tr("Timesheets")).size(15.5));
                     ui.separator();
                     // no Approvals tab: submitting a week for approval isn't built
                     for (i, label) in ["My timesheet", "All timesheets"].iter().enumerate() {
@@ -1878,8 +1888,13 @@ impl App {
                     }
                     if self.hub_filter == 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.selectable_value(&mut self.sheet_entries, true, tr("\u{2630}  Time entries"));
-                            ui.selectable_value(&mut self.sheet_entries, false, tr("\u{25A4}  Timesheet"));
+                            // the view shown is outlined, like the composer's tabs
+                            for (on, kind, label) in [(true, "list", "Time entries"), (false, "table", "Timesheet")] {
+                                let sel = self.sheet_entries == on;
+                                if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).clicked() {
+                                    self.sheet_entries = on;
+                                }
+                            }
                         });
                     }
                 });
@@ -1892,7 +1907,8 @@ impl App {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new("\u{23F1}").size(44.0).color(t.text3));
+                                    let (r, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
+                                    line_icon_scaled(ui.painter(), "timesheets", r.center(), t.text3, 2.6);
                                     ui.label(RichText::new(tr("Add entries to this week's timesheet")).size(17.0));
                                     ui.add_space(14.0);
                                 });
@@ -1900,14 +1916,14 @@ impl App {
                                 let cw = 200.0;
                                 ui.horizontal(|ui| {
                                     ui.add_space(((w - 4.0 * cw - 30.0) / 2.0).max(0.0));
-                                    for (icon, label) in [("\u{1F465}", "All assigned tasks"), ("\u{25A4}", "Last week's tasks"), ("+", "Individual tasks"), ("\u{23F1}", "Track time")] {
+                                    for (icon, label) in [("teams", "All assigned tasks"), ("table", "Last week's tasks"), ("check_plus", "Individual tasks"), ("clock", "Track time")] {
                                         let (r, resp) = ui.allocate_exact_size(vec2(cw, 84.0), Sense::click());
                                         name_it(&resp, label);
                                         ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
                                         ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                                         let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
                                         ui.painter().rect_filled(ib, 6.0, t.hover);
-                                        ui.painter().text(ib.center(), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
+                                        line_icon(ui.painter(), icon, ib.center(), t.text2);
                                         ui.painter().text(r.left_top() + vec2(14.0, 62.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(13.5), t.text);
                                         if resp.clicked() {
                                             match label {

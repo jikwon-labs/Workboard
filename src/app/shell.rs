@@ -834,23 +834,24 @@ impl App {
                 let mut items: Vec<String> = vec!["Home".into()];
                 items.extend(self.data.extra.rail_items.iter().cloned());
                 let mut y = rect.top() + 4.0;
+                // the line icon of each item the rail can hold
                 let icon_of = |l: &str| -> &'static str {
                     match l {
-                        "Home" => "\u{1F3E0}",
-                        "Planner" => "\u{1F4C5}",
-                        "AI" => "\u{2728}",
-                        "Teams" => "\u{1F465}",
-                        "Chat" => "\u{1F4AC}",
-                        "Docs" => "\u{1F4C4}",
-                        "Dashboards" => "\u{1F4CA}",
-                        "Whiteboards" => "\u{1F3A8}",
-                        "Forms" => "\u{1F4CB}",
-                        "Goals" => "\u{1F3AF}",
-                        "Timesheets" => "\u{23F1}",
-                        "Clips" => "\u{1F3A5}",
-                        "Apps" => "\u{25A6}",
-                        "Spaces" => "\u{25CE}",
-                        _ => "\u{2022}",
+                        "Home" => "home",
+                        "Planner" => "planner",
+                        "AI" => "ai",
+                        "Teams" => "teams",
+                        "Chat" => "chat",
+                        "Docs" => "docs",
+                        "Dashboards" => "dashboards",
+                        "Whiteboards" => "whiteboards",
+                        "Forms" => "forms",
+                        "Goals" => "goals",
+                        "Timesheets" => "timesheets",
+                        "Clips" => "video",
+                        "Apps" => "apps",
+                        "Spaces" => "space",
+                        _ => "dots",
                     }
                 };
                 let section_of = |l: &str| -> Option<Section> {
@@ -895,15 +896,7 @@ impl App {
                     } else if resp.hovered() {
                         p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                     }
-                    if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
-                        p.text(
-                            ibox.center(),
-                            Align2::CENTER_CENTER,
-                            icon_of(label),
-                            FontId::proportional(17.0),
-                            white,
-                        );
-                    }
+                    line_icon(&p, icon_of(label), ibox.center(), white);
                     p.text(
                         pos2(cx, ibox.bottom() + 10.0),
                         Align2::CENTER_CENTER,
@@ -941,15 +934,7 @@ impl App {
                         } else if resp.hovered() {
                             p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                         }
-                        if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
-                            p.text(
-                                ibox.center(),
-                                Align2::CENTER_CENTER,
-                                icon_of(label),
-                                FontId::proportional(17.0),
-                                white,
-                            );
-                        }
+                        line_icon(&p, icon_of(label), ibox.center(), white);
                         let shown = tr(label);
                         let short = if shown.chars().count() > 8 {
                             format!("{}..", shown.chars().take(7).collect::<String>())
@@ -1574,22 +1559,19 @@ impl App {
                                     "More" => {
                                         popup(ui, &r, ui.id().with("side_more"), 220.0, |ui| {
                                             for (l, ic) in [
-                                                ("Overview", "\u{1F3E0}"),
-                                                ("Docs", "\u{1F4C4}"),
-                                                ("Dashboards", "\u{1F4CA}"),
-                                                ("Whiteboards", "\u{1F3A8}"),
-                                                ("Forms", "\u{1F4CB}"),
-                                                ("Goals", "\u{1F3AF}"),
-                                                ("Timesheets", "\u{23F1}"),
-                                                ("People", "\u{1F465}"),
+                                                ("Overview", "home"),
+                                                ("Docs", "docs"),
+                                                ("Dashboards", "dashboards"),
+                                                ("Whiteboards", "whiteboards"),
+                                                ("Forms", "forms"),
+                                                ("Goals", "goals"),
+                                                ("Timesheets", "timesheets"),
+                                                ("People", "teams"),
                                             ] {
-                                                if ui
-                                                    .add(ghost(egui::Button::new(format!(
-                                                        "{}  {}",
-                                                        ic,
-                                                        tr(l)
-                                                    ))))
-                                                    .clicked()
+                                                if menu_row(ui, &t, tr(l), false, |p, c| {
+                                                    line_icon(p, ic, c, t.text2);
+                                                })
+                                                .clicked()
                                                 {
                                                     match l {
                                                         "Overview" => self
@@ -1602,11 +1584,16 @@ impl App {
                                                 }
                                             }
                                             ui.separator();
-                                            if ui
-                                                .add(ghost(egui::Button::new(tr(
-                                                    "\u{25A6}  Customize your sidebar",
-                                                ))))
-                                                .clicked()
+                                            if menu_row(
+                                                ui,
+                                                &t,
+                                                tr("Customize your sidebar"),
+                                                false,
+                                                |p, c| {
+                                                    line_icon(p, "sidebar", c, t.text2);
+                                                },
+                                            )
+                                            .clicked()
                                             {
                                                 self.modal = Some(Modal::CustomizeSidebar);
                                                 close_popup(ui);

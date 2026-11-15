@@ -379,8 +379,13 @@ impl App {
                     });
                 });
                 ui.label(RichText::new(tr("What everyone is working on")).color(t.text2));
-                ui.add_space(12.0);
                 let members = self.data.members.clone();
+                // with one person the bar would always be full and read like progress
+                let bars = members.len() > 1;
+                if bars {
+                    ui.label(RichText::new(tr("Bars compare open tasks with the busiest person.")).small().color(t.text3));
+                }
+                ui.add_space(12.0);
                 let max_open = members
                     .iter()
                     .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).count())
@@ -410,10 +415,12 @@ impl App {
                                         });
                                     });
                                     ui.add_space(4.0);
-                                    let (r, _) = ui.allocate_exact_size(vec2(cw - 30.0, 8.0), Sense::hover());
-                                    ui.painter().rect_filled(r, 4.0, t.hover);
-                                    let f = open.len() as f32 / max_open as f32;
-                                    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * f, r.height())), 4.0, rgb(m.color));
+                                    if bars {
+                                        let (r, _) = ui.allocate_exact_size(vec2(cw - 30.0, 8.0), Sense::hover());
+                                        ui.painter().rect_filled(r, 4.0, t.hover);
+                                        let f = open.len() as f32 / max_open as f32;
+                                        ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * f, r.height())), 4.0, rgb(m.color));
+                                    }
                                     if overdue > 0 {
                                         ui.label(RichText::new(trf!("{} overdue", overdue)).small().color(t.danger));
                                     }
@@ -1019,6 +1026,10 @@ impl App {
                         }
                     }
                 }
+                // no space yet: the statuses a new space starts with, all at 0
+                if sts.is_empty() {
+                    sts = default_statuses();
+                }
                 let counts: Vec<usize> = sts
                     .iter()
                     .map(|st| {
@@ -1026,10 +1037,6 @@ impl App {
                             .iter()
                             .filter(|x| self.data.status_of(x).name == st.name)
                             .count()
-                // no space yet: the statuses a new space starts with, all at 0
-                if sts.is_empty() {
-                    sts = default_statuses();
-                }
                     })
                     .collect();
                 let max = counts.iter().copied().max().unwrap_or(1) as f32;
@@ -1083,6 +1090,24 @@ impl App {
                         )
                     })
                     .collect();
+                // one person: a bar against themselves is always full and
+                // reads like progress, so show the number alone
+                if counts.len() == 1 {
+                    for (name, n, _) in counts {
+                        ui.horizontal(|ui| {
+                            ui.label(name);
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new(trf!("{} open", n)).color(t.text2));
+                            });
+                        });
+                    }
+                    return None;
+                }
+                ui.label(
+                    RichText::new(tr("Bars compare open tasks with the busiest person."))
+                        .small()
+                        .color(t.text3),
+                );
                 let max = counts.iter().map(|c| c.1).max().unwrap_or(1) as f32;
                 for (name, n, c) in counts {
                     bar_row(ui, &t, &name, n as f32, max, c, trf!("{} open", n));

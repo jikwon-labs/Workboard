@@ -193,6 +193,7 @@ pub const T: &[(&str, &str)] = &[
     ("{} open", "열림 {}"),
     ("Time tracked this week", "이번 주 기록된 시간"),
     ("Overdue tasks", "기한 지난 작업"),
+    ("Bars compare open tasks with the busiest person.", "막대는 가장 바쁜 사람과 비교한 열린 작업 수입니다."),
     ("Nothing is overdue", "기한 지난 작업이 없습니다"),
     ("This week", "이번 주"),
     ("No time tracked this week. Start a timer from any task.", "이번 주 기록된 시간이 없습니다. 아무 작업에서나 타이머를 시작하세요."),

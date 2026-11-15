@@ -132,3 +132,37 @@ fn open_tasks_per_person_agree_on_dashboard_and_teams() {
     teams.sort();
     assert_eq!(teams, expected, "Teams > Analytics");
 }
+
+#[test]
+fn workload_bars_say_what_they_compare_and_go_away_when_alone() {
+    let caption = "Bars compare open tasks with the busiest person.";
+    let mut h = Ui1::sized(1440.0, 1400.0);
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 3;
+    h.settle();
+    assert!(h.has(caption), "a team sees what the bars mean");
+    // alone, with one open task: no full bar beside "done 0"
+    let d = solo();
+    let list = d.spaces[0].lists[0].id;
+    let mut h = with(d, 1440.0, 1400.0);
+    h.app.apply(Action::Add {
+        list,
+        name: "Write report".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![1],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 3;
+    h.settle();
+    assert!(!h.has(caption));
+    assert!(h.texts().iter().any(|x| x.starts_with("1 open  \u{2022}")));
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Board");
+    h.settle();
+    assert!(!h.has(caption));
+    assert!(h.texts().iter().any(|x| x == "1 open"));
+}

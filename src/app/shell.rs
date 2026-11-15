@@ -1045,7 +1045,7 @@ impl App {
                 if let Some(task) = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)) {
                     let txt = format!(
                         "\u{23F9} {}  {}",
-                        fmt_duration(task.tracked_secs(now)),
+                        fmt_duration(self.data.my_tracked_secs(task, now)),
                         truncate(&task.name, 22)
                     );
                     let b = egui::Button::new(RichText::new(txt).color(Color32::WHITE))

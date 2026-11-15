@@ -2907,6 +2907,12 @@ impl App {
                     String::new(),
                     Hit::Go(l),
                 )),
+                super::nav::Link::Doc(id) => self
+                    .data
+                    .docs
+                    .iter()
+                    .find(|d| d.id == id)
+                    .map(|d| ("\u{1F4C4}", d.title.clone(), tr("Doc").into(), Hit::Doc(id))),
             };
             match hit {
                 // archived, or in someone else's Personal space

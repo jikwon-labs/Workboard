@@ -763,6 +763,8 @@ impl App {
                 private: false,
                 archived: false,
                 meeting_note: false,
+                wiki: None,
+                views: vec![],
                 parent: None,
                 title: "Untitled".into(),
                 body: String::new(),

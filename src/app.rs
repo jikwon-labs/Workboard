@@ -442,6 +442,8 @@ pub struct App {
     channel_find: Option<String>,
     channel_panel: u8,
     hub_filter: u8,
+    /// The doc whose open was last counted (Popular Wikis views).
+    doc_viewed: Option<u64>,
     temp_app: Option<Section>,
     team_open: Option<u64>,
     sheet_entries: bool,
@@ -768,6 +770,7 @@ impl App {
             channel_find: None,
             channel_panel: 0,
             hub_filter: 0,
+            doc_viewed: None,
             temp_app: None,
             team_open: None,
             sheet_entries: false,

@@ -2279,7 +2279,8 @@ fn one_message_takes_at_most_ten_pictures() {
 
 // ---- task comments and activity (sf-comments)
 
-use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, LinkTo, Seg};
+use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, Seg};
+use super::nav::Link as LinkTo;
 
 #[test]
 fn comment_lines_split_into_mentions_and_links() {
@@ -2299,11 +2300,11 @@ fn comment_lines_split_into_mentions_and_links() {
     assert_eq!(segments("mail@Alex", &names), vec![Seg::Text("mail@Alex")]);
     assert_eq!(
         parse_link("workboard://list/7").map(|x| x.0),
-        Some(LinkTo::List(7))
+        Some(LinkTo::Loc(Location::List(7)))
     );
     assert_eq!(
         parse_link("workboard://space/9 more").map(|x| x.0),
-        Some(LinkTo::Space(9))
+        Some(LinkTo::Loc(Location::Space(9)))
     );
     assert_eq!(parse_link("workboard://task/"), None);
 }
@@ -5435,6 +5436,8 @@ fn search_leaves_out_archived_lists_and_other_peoples_private_docs() {
             private,
             archived: false,
             meeting_note: false,
+            wiki: None,
+            views: vec![],
             parent: None,
             title: title.into(),
             body: String::new(),
@@ -5812,4 +5815,76 @@ fn files_from_before_ids_were_kept_still_load_and_new_fields_stay_out_when_empty
         .inbox_items()
         .iter()
         .any(|i| i.assigned && i.text == "assigned to Me"));
+}
+
+#[test]
+fn back_and_forward_to_another_place_clear_the_selection() {
+    let mut a = app();
+    let lists = list_ids(&a);
+    a.apply(Action::Go(Location::List(lists[0])));
+    a.track_history();
+    a.apply(Action::Go(Location::List(lists[1])));
+    a.track_history();
+    let t = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == lists[1])
+        .map(|t| t.id);
+    if let Some(t) = t {
+        a.selected.insert(t);
+        a.open_task = Some(t);
+    }
+    a.go_back();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[0]));
+    assert!(a.selected.is_empty() && a.open_task.is_none());
+    let t0 = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.list_id == lists[0])
+        .unwrap()
+        .id;
+    a.selected.insert(t0);
+    a.go_forward();
+    a.track_history();
+    assert_eq!(a.loc, Location::List(lists[1]));
+    assert!(a.selected.is_empty());
+}
+
+#[test]
+fn my_timer_counts_only_my_time() {
+    let mut a = app();
+    let me = a.data.me;
+    let other = a.data.members.iter().find(|m| m.id != me).unwrap().id;
+    let now = now_ts();
+    let t = &mut a.data.tasks[0];
+    t.time_entries = vec![
+        TimeEntry {
+            start: 0,
+            end: 100,
+            member: me,
+        },
+        TimeEntry {
+            start: 0,
+            end: 1000,
+            member: other,
+        },
+    ];
+    t.timer_started = None;
+    t.timer_by = None;
+    t.timers = vec![
+        RunningTimer {
+            member: me,
+            start: now - 10,
+        },
+        RunningTimer {
+            member: other,
+            start: now - 500,
+        },
+    ];
+    let t = a.data.tasks[0].clone();
+    assert_eq!(a.data.my_tracked_secs(&t, now), 110);
+    assert_eq!(t.tracked_secs(now), 1610);
 }

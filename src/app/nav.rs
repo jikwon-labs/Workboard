@@ -23,10 +23,11 @@ pub(super) struct NavSpot {
 pub(crate) enum Link {
     Task(u64),
     Loc(Location),
+    Doc(u64),
 }
 
-/// Reads a workboard:// link: workboard://task/ID, list/ID, folder/ID,
-/// space/ID, and the fixed pages (home, inbox, replies, assigned, my-tasks,
+/// Reads a workboard:// link: workboard://task/ID, doc/ID, list/ID,
+/// folder/ID, space/ID, and the fixed pages (home, inbox, replies, assigned, my-tasks,
 /// today, everything). Spaces around the link and a trailing slash or
 /// punctuation are ignored.
 pub(crate) fn parse_link(s: &str) -> Option<Link> {
@@ -43,6 +44,7 @@ pub(crate) fn parse_link(s: &str) -> Option<Link> {
     let num = || id.and_then(|x| x.parse::<u64>().ok());
     Some(match (kind.as_str(), id) {
         ("task", _) => Link::Task(num()?),
+        ("doc", _) => Link::Doc(num()?),
         ("list", _) => Link::Loc(Location::List(num()?)),
         ("folder", _) => Link::Loc(Location::Folder(num()?)),
         ("space", _) => Link::Loc(Location::Space(num()?)),
@@ -386,6 +388,19 @@ impl App {
     /// Shows a history entry.
     pub(super) fn show_nav_spot(&mut self, s: NavSpot) {
         self.section = s.section;
+        if self.loc != s.loc {
+            // moving to another place resets what Action::Go resets: the
+            // selection, the open task and the collapsed groups belong to
+            // the place left behind
+            self.selected.clear();
+            self.open_task = None;
+            self.collapsed.clear();
+            if self.view == ViewKind::Overview
+                && !matches!(s.loc, Location::Space(_) | Location::Folder(_))
+            {
+                self.view = ViewKind::List;
+            }
+        }
         self.loc = s.loc;
         match s.section {
             Section::Chat => {
@@ -441,8 +456,13 @@ impl App {
     /// A doc shown in lists, search and the sidebar: not archived, not
     /// someone else's Private doc and not in a space I can't go to.
     pub(super) fn doc_shown(&self, d: &Doc) -> bool {
-        !d.archived
-            && (!d.private || d.owner == self.data.me)
+        !d.archived && self.doc_reachable(d)
+    }
+
+    /// `doc_shown` without the archived check (the Docs hub's Archived tab
+    /// lists archived docs, still only the ones I could otherwise see).
+    pub(super) fn doc_reachable(&self, d: &Doc) -> bool {
+        (!d.private || d.owner == self.data.me)
             && d.space.is_none_or(|s| {
                 !self.data.location_exists(Location::Space(s))
                     || self.location_shown(Location::Space(s))
@@ -459,17 +479,32 @@ impl App {
                 !self.data.location_exists(l) || self.location_shown(l)
             }),
             Link::Loc(l) => self.data.location_exists(l).then(|| self.location_shown(l)),
+            Link::Doc(id) => self
+                .data
+                .docs
+                .iter()
+                .find(|d| d.id == id)
+                .map(|d| self.doc_shown(d)),
         }
     }
 
     /// Opens a workboard:// link; false when it isn't one this workspace has
     /// (or it is archived or in someone else's Personal space).
     pub(super) fn open_link(&mut self, url: &str) -> bool {
-        let link = parse_link(url);
+        self.open_link_to(parse_link(url))
+    }
+
+    /// Opens what a read workboard:// link points to (see `open_link`).
+    pub(super) fn open_link_to(&mut self, link: Option<Link>) -> bool {
         let shown = link.and_then(|l| self.link_shown(l));
         match (link, shown) {
             (Some(Link::Task(id)), Some(true)) => self.actions.push(Action::Open(id)),
             (Some(Link::Loc(l)), Some(true)) => self.actions.push(Action::Go(l)),
+            (Some(Link::Doc(id)), Some(true)) => {
+                self.open_task = None;
+                self.section = Section::Docs;
+                self.doc_open = Some(id);
+            }
             (_, Some(false)) => {
                 self.toast = Some((
                     tr("This link points to something archived or private").into(),

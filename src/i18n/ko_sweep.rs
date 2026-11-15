@@ -135,8 +135,6 @@ pub const T: &[(&str, &str)] = &[
     ("someone", "누군가"),
     ("Delete comment", "댓글 삭제"),
     ("Comment deleted", "댓글을 삭제했습니다"),
-    ("That task no longer exists", "그 작업은 더 이상 없습니다"),
-    ("That place no longer exists", "그 위치는 더 이상 없습니다"),
     // docs
     ("Doc name", "문서 이름"),
     ("Doc duplicated", "문서를 복제했습니다"),

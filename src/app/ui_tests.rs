@@ -3685,6 +3685,8 @@ fn docs_delete_keeps_sub_pages_and_restore_brings_them_back() {
         private: false,
         archived: false,
         meeting_note: false,
+        wiki: None,
+        views: vec![],
         parent: Some(424242),
         title: "Old".into(),
         body: String::new(),
@@ -6398,4 +6400,189 @@ fn click_a_notification_toast_to_open_the_conversation() {
     h.click(&format!("Open {}", toast));
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat_open, Some(dm));
+}
+
+// ---- wikis, doc links and the Docs hub list (r3-work)
+
+fn doc_id(h: &Ui1, title: &str) -> u64 {
+    h.app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == title)
+        .map(|d| d.id)
+        .expect("doc exists")
+}
+
+#[test]
+fn docs_marked_as_wiki_show_in_popular_wikis_and_the_wikis_tab() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let a = h.app.doc_open.unwrap();
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == a)
+        .unwrap()
+        .title = "Handbook".into();
+    h.app.new_doc(None);
+    let b = h.app.doc_open.unwrap();
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == b)
+        .unwrap()
+        .title = "Onboarding".into();
+    h.settle();
+    // opening a doc counts one view, not one per frame
+    let views = |h: &Ui1, id: u64| {
+        h.app
+            .data
+            .docs
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap()
+            .views_since(0)
+    };
+    assert_eq!(views(&h, b), 1);
+    h.settle();
+    assert_eq!(views(&h, b), 1);
+    // mark both as Wikis from the doc menu
+    h.click("Doc options");
+    h.click("Mark as Wiki");
+    assert!(h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.id == b)
+        .unwrap()
+        .is_wiki());
+    assert!(h.has("Wiki badge"), "the doc header shows the Wiki badge");
+    h.app.doc_open = Some(a);
+    h.settle();
+    h.click("Doc options");
+    h.click("Mark as Wiki");
+    // open the handbook twice more: it becomes the most popular
+    for _ in 0..2 {
+        h.app.doc_open = None;
+        h.settle();
+        h.app.doc_open = Some(a);
+        h.settle();
+    }
+    assert_eq!(views(&h, a), 3);
+    let order: Vec<u64> = h.app.popular_wikis(now_ts()).iter().map(|w| w.0).collect();
+    assert_eq!(order, vec![a, b]);
+    assert!(h.has("Popular Wiki Handbook") && h.has("Popular Wiki Onboarding"));
+    // the card opens a wiki
+    h.click("Popular Wiki Onboarding");
+    assert_eq!(h.app.doc_open, Some(b));
+    // the Wikis tab lists only wikis
+    h.open_docs_list();
+    h.click("Wikis");
+    assert!(h.has("Doc Handbook") && h.has("Doc Onboarding"));
+    assert!(!h.has("Doc Project brief"));
+    // unmarking takes it out (and writes false, never back to missing)
+    h.right_click("Doc Onboarding", 60.0);
+    h.click("Unmark as Wiki");
+    let d = h.app.data.docs.iter().find(|d| d.id == b).unwrap();
+    assert_eq!(d.wiki, Some(false));
+    h.settle();
+    assert!(!h.has("Doc Onboarding") && !h.has("Popular Wiki Onboarding"));
+}
+
+#[test]
+fn doc_views_and_wiki_flag_round_trip_and_old_docs_still_load() {
+    let old: Doc =
+        serde_json::from_str(r#"{"id":5,"title":"T","body":"","created":0,"updated":0}"#).unwrap();
+    assert!(!old.is_wiki() && old.views.is_empty());
+    let out = serde_json::to_value(&old).unwrap();
+    assert!(out.get("wiki").is_none() && out.get("views").is_none());
+    let mut a = App::build(None, Some(Data::seed()));
+    let id = a.data.docs[0].id;
+    a.count_doc_view(id, 1000);
+    a.count_doc_view(id, 1000 + DOC_VIEW_DAYS * 86_400 + 5);
+    let d = a.data.docs[0].clone();
+    // the first open fell out of the 30 days
+    assert_eq!(d.views.len(), 1);
+    assert_eq!(d.views[0].at.len(), 1);
+    let back: Doc = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
+    assert_eq!(back.views, d.views);
+    // a duplicate starts unread, so no view entry id is used twice
+    let copy = a.duplicate_doc(id).unwrap();
+    assert!(a
+        .data
+        .docs
+        .iter()
+        .find(|d| d.id == copy)
+        .unwrap()
+        .views
+        .is_empty());
+}
+
+#[test]
+fn doc_copy_link_opens_the_doc_from_a_comment_chat_or_search() {
+    let mut h = Ui1::new();
+    let id = doc_id(&h, "Project brief");
+    let url = format!("workboard://doc/{}", id);
+    assert_eq!(
+        super::nav::parse_link(&url),
+        Some(super::nav::Link::Doc(id))
+    );
+    // comments read links with the same parser
+    assert_eq!(
+        super::comments::parse_link(&format!("{}, see", url)).map(|x| x.0),
+        Some(super::nav::Link::Doc(id))
+    );
+    assert!(h.app.open_link(&url));
+    h.settle();
+    assert_eq!((h.app.section, h.app.doc_open), (Section::Docs, Some(id)));
+    // a doc in someone else's Personal space is not opened
+    h.app.section = Section::Home;
+    h.app.doc_open = None;
+    let sid = h.app.data.spaces[0].id;
+    h.app.data.spaces[0].private_owner = Some(h.app.data.me + 1000);
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == id)
+        .unwrap()
+        .space = Some(sid);
+    assert!(!h.app.open_link(&url));
+    assert_eq!(h.app.doc_open, None);
+    // search finds the doc from its pasted link
+    h.app.data.spaces[0].private_owner = None;
+    let rows = h.app.search_rows(&url, 0);
+    assert!(rows
+        .iter()
+        .any(|r| matches!(r.4, super::more::Hit::Doc(x) if x == id)));
+}
+
+#[test]
+fn docs_hub_leaves_out_docs_in_archived_or_other_peoples_spaces() {
+    let mut h = Ui1::new();
+    let id = doc_id(&h, "Project brief");
+    h.open_docs_list();
+    assert!(h.has("Doc Project brief"));
+    let sid = h.app.data.spaces[0].id;
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == id)
+        .unwrap()
+        .space = Some(sid);
+    h.app.data.spaces[0].archived = true;
+    h.settle();
+    assert!(!h.has("Doc Project brief"), "archived space");
+    h.app.data.spaces[0].archived = false;
+    h.app.data.spaces[0].private_owner = Some(h.app.data.me + 1000);
+    h.settle();
+    assert!(!h.has("Doc Project brief"), "someone else's Personal space");
+    h.app.data.spaces[0].private_owner = None;
+    h.settle();
+    assert!(h.has("Doc Project brief"));
 }

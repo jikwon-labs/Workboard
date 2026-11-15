@@ -15,6 +15,8 @@
 // too, so edits, deletes and reactions carry over; lines saved before they
 // had ids get one worked out from their contents (`activity_id`).
 
+pub mod mentions;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};

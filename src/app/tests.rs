@@ -5047,14 +5047,19 @@ fn only_a_channels_maker_or_an_admin_may_delete_it() {
 
 #[test]
 fn a_mention_needs_the_whole_name() {
-    use super::chat::mentions;
-    assert!(mentions("hi @Bob", "Bob"));
-    assert!(mentions("@Bob, look", "Bob"));
-    assert!(mentions("(cc @Bob)", "Bob"));
-    assert!(!mentions("hi @Bobby", "Bob"));
-    assert!(!mentions("hi @Bob", "Bo"), "@Bo is not the start of @Bob");
-    assert!(mentions("hi @Alex Kim!", "Alex Kim"));
-    assert!(!mentions("hi @Bob", ""));
+    let a = app();
+    let ids = |t: &str| crate::model::mentioned_ids(t, &a.data.members, &[]);
+    let alex = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    assert_eq!(ids("hi @Alex Kim!"), vec![alex]);
+    assert_eq!(ids("(cc @Alex Kim)"), vec![alex]);
+    assert!(ids("hi @Alex Kimberly").is_empty());
+    assert!(ids("mail@Alex Kim").is_empty());
 }
 
 #[test]

@@ -477,12 +477,14 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "Someone".into())
     };
-    let mentioned = |t: &str| -> Vec<u64> {
-        people
+    // the app's rule (wb_sync::mentions): the ids a message keeps, else its text
+    let named: Vec<(u64, &str)> = people.iter().map(|(i, n)| (*i, n.as_str())).collect();
+    let mentioned = |m: &Value| -> Vec<u64> {
+        let saved: Vec<u64> = arr(m.get("mentions"))
             .iter()
-            .filter(|(_, n)| !n.is_empty() && t.contains(&format!("@{}", n)))
-            .map(|(i, _)| *i)
-            .collect()
+            .filter_map(|x| x.as_u64())
+            .collect();
+        wb_sync::mentions::mentions_of(&saved, &text(m, "text"), &named)
     };
     let mut out = vec![];
     for ch in arr(canon.get("channels")) {
@@ -526,7 +528,7 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
                 let to = if direct {
                     ch_members.clone()
                 } else {
-                    mentioned(&text(m, "text"))
+                    mentioned(m)
                 };
                 add(author, m, None, to);
             }
@@ -541,7 +543,7 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
                     ch_members.clone()
                 } else {
                     // the thread's people: who started it and who wrote in it
-                    let mut to = mentioned(&text(r, "text"));
+                    let mut to = mentioned(r);
                     to.push(author);
                     to.extend(replies.iter().filter_map(|x| num(x, "author")));
                     to
@@ -809,5 +811,19 @@ mod tests {
                 .contains("team_id, topic missing"));
         }
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn mentions_follow_the_apps_rule_and_the_saved_ids() {
+        let c = json!({"members": [{"id": 1, "name": "Alex"}, {"id": 2, "name": "Alex Kim"}, {"id": 3, "name": "Bo"}, {"id": 4, "name": "지원"}, {"id": 5, "name": "Bob"}],
+        "channels": [{"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [
+            msg(5, 3, "@Alex Kim look"),
+            msg(6, 3, "@Bobby and mail@Alex"),
+            msg(7, 3, "@지원님 확인"),
+            // the ids saved with the message win over its text (two Bobs, say)
+            {"id": 8, "author": 3, "text": "@Bob hi", "ts": now(), "mentions": [5]}
+        ]}]});
+        let n = notes(&c, &HashSet::new(), &[], now());
+        assert_eq!(who(&n), vec![(2, 5), (4, 7), (5, 8)]);
     }
 }

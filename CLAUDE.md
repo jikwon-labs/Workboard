@@ -26,7 +26,7 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 2. **작업**: 그 워크트리 안의 파일만 고친다. 커밋은 작게, 하나의 변경 단위로.
 3. **마무리**: 워크트리 안에서 `scripts/wt ship`
    - fetch → `origin/main` 위로 rebase → HEAD 가 아직 검증되지 않았으면 `scripts/wt verify` → `git push origin HEAD:main`.
-   - verify 는 바뀐 파일을 보고 테스트를 고른다: `ios/` 는 `swift test`, 문서(`*.md`, `docs/`)만이면 생략, 그 외는 `cargo test --workspace`. `WB_VERIFY_ALL=1` 은 전부, `WB_IOS_UI=1` 은 시뮬레이터 UI 테스트까지.
+   - verify 는 바뀐 파일을 보고 테스트를 고른다: `ios/` 는 `swift test`, 문서(`*.md`, `docs/`)만이면 생략, 그 외는 `cargo fmt --all --check` 와 `cargo test --workspace`. `WB_VERIFY_ALL=1` 은 전부, `WB_IOS_UI=1` 은 시뮬레이터 UI 테스트까지.
    - rebase 충돌이 나면 해결하고 `git rebase --continue` 후 다시 `scripts/wt ship`.
    - 테스트가 실패하면 고쳐서 커밋하고 다시 `scripts/wt ship`.
 4. **정리**: main 체크아웃에서 `scripts/wt rm <이름>`. 커밋 안 된 변경이나 main 에 없는 커밋이 있으면 거부한다.
@@ -39,7 +39,7 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 - 검증(`scripts/wt verify`)을 통과하지 않은 커밋, fast-forward 가 아닌 push, main 삭제 (`.githooks/pre-push`)
 - `--no-verify`, `core.hooksPath` 로 훅을 우회하는 명령
 
-Claude 가 `.rs` 파일을 고치면 rustfmt 가 그 파일만 정리한다(`.claude/hooks/fmt.sh`). 단, 커밋된 버전이 이미 정리돼 있던 파일(과 새 파일)만. 아직 대부분의 파일이 정리 전이라, 작은 수정에 파일 전체가 바뀌어 진짜 변경이 묻히는 것을 막는다. 손으로 `cargo fmt` 를 돌리지 않는다(전체 정리는 `docs/macbook/README.md` 의 할 일).
+모든 Rust 코드는 rustfmt 기본 규칙으로 정리돼 있다(`third_party/` 의 외부 코드는 제외). Claude 가 `.rs` 파일을 고치면 rustfmt 가 그 파일만 정리하고(`.claude/hooks/fmt.sh`), `scripts/wt verify` 가 `cargo fmt --all --check` 로 확인한다. 걸리면 `cargo fmt --all` 을 돌려 커밋한다. 전체 정리 커밋은 `.git-blame-ignore-revs` 에 있어 `git blame` 에서 빠진다(새로 clone 한 곳에서는 한 번 `git config blame.ignoreRevsFile .git-blame-ignore-revs`).
 
 git 훅은 `CLAUDECODE` 환경 변수가 있을 때(Claude Code 세션)만 동작한다. 사람이 직접 하는 커밋·push 는 막지 않는다. 새로 clone 한 곳에서는 한 번 `git config core.hooksPath .githooks` 를 해야 git 훅이 켜진다.
 

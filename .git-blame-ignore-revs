@@ -1,0 +1,5 @@
+# Formatting-only commits, skipped by git blame.
+# Turn on once per clone: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format all Rust code with rustfmt
+38d9c65a1cbfcf57ddce7768dbb7d0e66ef3dc68

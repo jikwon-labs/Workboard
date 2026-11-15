@@ -1,9 +1,9 @@
 #!/bin/bash
 # PostToolUse: rustfmt a Rust file Claude just edited, but only when the
 # committed version of that file was already rustfmt-clean (or the file is
-# new). Most of the tree is not formatted yet, and formatting a whole file
-# for a small edit would bury the real change and collide with other
-# branches. Formats only this file (stdin mode does not follow `mod x;`).
+# new). The whole workspace is formatted (scripts/wt verify checks it); the
+# check keeps vendored code under third_party/ from being reformatted by a
+# small edit. Formats only this file (stdin mode does not follow `mod x;`).
 # Never blocks.
 file=$(jq -r '.tool_input.file_path // empty')
 case $file in *.rs) ;; *) exit 0 ;; esac

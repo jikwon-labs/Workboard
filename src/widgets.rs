@@ -311,6 +311,70 @@ pub fn fmt_ago(ts: i64) -> String {
     }
 }
 
+/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
+pub fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
+    let w = |s: &str| {
+        p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    if w(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let cand: String = chars[..mid]
+            .iter()
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+            + "\u{2026}";
+        if w(&cand) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    chars[..lo]
+        .iter()
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+        + "\u{2026}"
+}
+
+/// Paints `text` at `pos`, cut with an ellipsis to at most `max_w` wide.
+/// When it had to be cut, hovering it shows the whole text. Returns the
+/// painted rect.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_fit(
+    ui: &Ui,
+    pos: Pos2,
+    align: Align2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_w: f32,
+) -> Rect {
+    let shown = fit_text(ui.painter(), text, &font, max_w.max(0.0));
+    let cut = shown != text;
+    let rect = ui.painter().text(pos, align, shown, font, color);
+    if cut && ui.rect_contains_pointer(rect) {
+        egui::show_tooltip_at_pointer(
+            ui.ctx(),
+            ui.layer_id(),
+            egui::Id::new(("fit_text_tip", text)),
+            |ui| {
+                ui.set_max_width(360.0);
+                ui.label(text);
+            },
+        );
+    }
+    rect
+}
+
 /// Opens a popup below `resp` when it is clicked; shows `add` while open.
 pub fn popup<R>(
     ui: &Ui,

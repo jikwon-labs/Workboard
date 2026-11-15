@@ -404,6 +404,8 @@ pub struct App {
     snap_pending: bool,
     actions: Vec<Action>,
     home_collapsed: HashSet<&'static str>,
+    /// Home "My Work" sections showing every task instead of the first few.
+    home_all: HashSet<&'static str>,
     section: Section,
     recent: Vec<u64>,
     doc_open: Option<u64>,
@@ -725,6 +727,7 @@ impl App {
             snap_pending: false,
             actions: vec![],
             home_collapsed: ["Done"].into_iter().collect(),
+            home_all: HashSet::new(),
             section: match arg("--section").as_deref() {
                 Some("planner") => Section::Planner,
                 Some("chat") => Section::Chat,
@@ -2686,6 +2689,59 @@ impl App {
         let dragging = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx());
         let released = ui.input(|i| i.pointer.any_released());
         let mut drop_on: Option<NaiveDate> = None;
+        // bar labels: (room, x, text, font, colour), drawn over all the days
+        let mut labels: Vec<(Rect, f32, String, FontId, Color32)> = vec![];
+        // a task with a start and a due date shows on every day between
+        let span = |x: &Task| match (x.start, x.due) {
+            (Some(s), Some(e)) if s <= e => Some((s, e)),
+            (_, Some(e)) => Some((e, e)),
+            _ => None,
+        };
+        // the time a bar starts at: its start time, or a one-day task's due time
+        let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
+            Some(at) if x.start == Some(s) => Some(at),
+            _ if s == e => x.due_at(),
+            _ => None,
+        };
+        // each week row gives every bar one line for all its days, so a bar
+        // that runs over several days stays in one piece: earlier starts and
+        // longer bars take the top lines, then all-day before timed ones
+        let mut lanes: HashMap<(i64, u64), usize> = HashMap::new();
+        for w in 0..rows as i64 {
+            let ws = start + Duration::days(w * 7);
+            let we = ws + Duration::days(6);
+            let mut week: Vec<(&Task, NaiveDate, NaiveDate, NaiveDate, NaiveDate)> = tasks
+                .iter()
+                .filter_map(|x| {
+                    span(x)
+                        .filter(|(s, e)| *s <= we && *e >= ws)
+                        .map(|(s, e)| (x, s, e, s.max(ws), e.min(we)))
+                })
+                .collect();
+            week.sort_by_key(|(x, s, e, a, b)| {
+                let at = bar_time(x, *s, *e);
+                (
+                    *a,
+                    std::cmp::Reverse((*b - *a).num_days()),
+                    at.is_some(),
+                    at,
+                    x.id,
+                )
+            });
+            // the last day each line is taken up to
+            let mut until: Vec<NaiveDate> = vec![];
+            for (x, _, _, a, b) in week {
+                let lane = match until.iter().position(|u| *u < a) {
+                    Some(l) => l,
+                    None => {
+                        until.push(b);
+                        until.len() - 1
+                    }
+                };
+                until[lane] = b;
+                lanes.insert((w, x.id), lane);
+            }
+        }
         for i in 0..(rows * 7) as i64 {
             let d = start + Duration::days(i);
             let cell = Rect::from_min_size(
@@ -2747,43 +2803,27 @@ impl App {
                     self.open_quick_add(Some(d));
                 }
             }
-            // a task with a start and a due date shows on every day between
-            let span = |x: &Task| match (x.start, x.due) {
-                (Some(s), Some(e)) if s <= e => Some((s, e)),
-                (_, Some(e)) => Some((e, e)),
-                _ => None,
-            };
-            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate)> = tasks
+            let week_row = i / 7;
+            let mut day_tasks: Vec<(&Task, NaiveDate, NaiveDate, usize)> = tasks
                 .iter()
                 .filter_map(|x| {
+                    let lane = *lanes.get(&(week_row, x.id))?;
                     span(x)
                         .filter(|(s, e)| *s <= d && d <= *e)
-                        .map(|(s, e)| (x, s, e))
+                        .map(|(s, e)| (x, s, e, lane))
                 })
                 .collect();
-            // the time a bar starts at: its start time, or a one-day task's due time
-            let bar_time = |x: &Task, s: NaiveDate, e: NaiveDate| match x.start_at() {
-                Some(at) if x.start == Some(s) => Some(at),
-                _ if s == e => x.due_at(),
-                _ => None,
-            };
-            // longer spans first, so a bar keeps its line from day to day; in a
-            // day, ones without a time (all day) first, then by time
-            day_tasks.sort_by_key(|(x, s, e)| {
-                let at = bar_time(x, *s, *e);
-                (
-                    std::cmp::Reverse((*e - *s).num_days()),
-                    *s,
-                    at.is_some(),
-                    at,
-                    x.id,
-                )
-            });
-            let max = ((ch - 30.0) / 22.0).floor().max(1.0) as usize;
-            for (k, (task, s0, e0)) in day_tasks.iter().enumerate() {
+            day_tasks.sort_by_key(|x| x.3);
+            // lines of 22 that fit under the day number; when some don't, the
+            // last line that fits says "+N more" instead
+            let fit = ((ch - 24.0) / 22.0).floor().max(1.0) as usize;
+            let needed = day_tasks.last().map(|x| x.3 + 1).unwrap_or(0);
+            let max = if needed > fit { fit - 1 } else { fit };
+            for (task, s0, e0, k) in day_tasks.iter().copied() {
                 if k >= max {
+                    let hidden = day_tasks.iter().filter(|x| x.3 >= max).count();
                     let more = Rect::from_min_size(
-                        cell.left_top() + vec2(4.0, 26.0 + 22.0 * k as f32),
+                        cell.left_top() + vec2(4.0, 26.0 + 22.0 * max as f32),
                         vec2(cw - 8.0, 20.0),
                     );
                     let mr = ui.interact(more, ui.id().with(("calmore", i)), Sense::click());
@@ -2794,14 +2834,14 @@ impl App {
                     p.text(
                         more.left_center() + vec2(4.0, 0.0),
                         Align2::LEFT_CENTER,
-                        trf!("+{} more", day_tasks.len() - k),
+                        trf!("+{} more", hidden),
                         FontId::proportional(11.5),
                         if mr.hovered() { t.text } else { t.text3 },
                     );
                     // the day's whole list in a popup
                     let all: Vec<(u64, String, Status)> = day_tasks
                         .iter()
-                        .map(|(x, _, _)| (x.id, x.name.clone(), self.data.status_of(x)))
+                        .map(|(x, _, _, _)| (x.id, x.name.clone(), self.data.status_of(x)))
                         .collect();
                     popup(ui, &mr, ui.id().with(("calmore_pop", i)), 240.0, |ui| {
                         ui.label(RichText::new(d.text("%A, %b %-d")).strong());
@@ -2818,9 +2858,9 @@ impl App {
                     });
                     break;
                 }
-                let starts = d == *s0 || i % 7 == 0;
-                let goes_on = d < *e0 && i % 7 != 6;
-                let left = if d > *s0 && i % 7 != 0 {
+                let starts = d == s0 || i % 7 == 0;
+                let goes_on = d < e0 && i % 7 != 6;
+                let left = if d > s0 && i % 7 != 0 {
                     cell.left()
                 } else {
                     cell.left() + 4.0
@@ -2847,8 +2887,8 @@ impl App {
                 let st = self.data.status_of(task);
                 let col = rgb(st.color);
                 let round = egui::CornerRadius {
-                    nw: if d > *s0 && i % 7 != 0 { 0 } else { 4 },
-                    sw: if d > *s0 && i % 7 != 0 { 0 } else { 4 },
+                    nw: if d > s0 && i % 7 != 0 { 0 } else { 4 },
+                    sw: if d > s0 && i % 7 != 0 { 0 } else { 4 },
                     ne: if goes_on { 0 } else { 4 },
                     se: if goes_on { 0 } else { 4 },
                 };
@@ -2863,25 +2903,24 @@ impl App {
                 );
                 if starts {
                     p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 2.0, col);
-                    let max_chars = ((cw - 24.0) / 6.5) as usize;
+                    // the label may use the bar's whole length in this week; it
+                    // is drawn after all days so later days don't paint over it
+                    let week_end = start + Duration::days(week_row * 7 + 6);
+                    let days = (e0.min(week_end) - d).num_days() as f32;
+                    let room = Rect::from_min_max(r.min, pos2(r.right() + cw * days, r.bottom()));
                     let mut label_x = r.left() + 8.0;
-                    if let Some(at) = bar_time(task, *s0, *e0).filter(|_| d == *s0) {
-                        let g = p.layout_no_wrap(fmt_time(at), FontId::proportional(11.0), t.text2);
-                        let w = g.size().x;
-                        p.with_clip_rect(r).galley(
-                            pos2(label_x, r.center().y - g.size().y / 2.0),
-                            g,
-                            t.text2,
-                        );
+                    if let Some(at) = bar_time(task, s0, e0).filter(|_| d == s0) {
+                        let font = FontId::proportional(11.0);
+                        let w = p
+                            .layout_no_wrap(fmt_time(at), font.clone(), t.text2)
+                            .size()
+                            .x;
+                        labels.push((room, label_x, fmt_time(at), font, t.text2));
                         label_x += w + 4.0;
                     }
-                    p.with_clip_rect(r).text(
-                        pos2(label_x, r.center().y),
-                        Align2::LEFT_CENTER,
-                        truncate(&task.name, max_chars.max(4)),
-                        FontId::proportional(12.0),
-                        t.text,
-                    );
+                    let font = FontId::proportional(12.0);
+                    let name = fit_text(&p, &task.name, &font, room.right() - 4.0 - label_x);
+                    labels.push((room, label_x, name, font, t.text));
                 }
                 name_it(&resp, &format!("Calendar {} {}", task.name, d));
                 let tid = task.id;
@@ -2890,6 +2929,15 @@ impl App {
                     self.actions.push(Action::Open(task.id));
                 }
             }
+        }
+        for (room, x, text, font, color) in labels {
+            p.with_clip_rect(room).text(
+                pos2(x, room.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                font,
+                color,
+            );
         }
         // Unscheduled / Overdue panel
         p.rect_filled(side, 8.0, t.column_bg);
@@ -3119,23 +3167,35 @@ impl App {
                                 6.5,
                                 &st,
                             );
-                            ui.painter().with_clip_rect(r.shrink(2.0)).text(
+                            // the name shortened to leave room for the subtask count
+                            let badge = format!("\u{2934} {}", nsub);
+                            let badge_w = if *nsub > 0 {
+                                ui.painter()
+                                    .layout_no_wrap(
+                                        badge.clone(),
+                                        FontId::proportional(11.5),
+                                        t.text3,
+                                    )
+                                    .size()
+                                    .x
+                                    + 6.0
+                            } else {
+                                0.0
+                            };
+                            let nr = paint_fit(
+                                ui,
                                 pos2(x0 + 26.0, r.center().y),
                                 Align2::LEFT_CENTER,
                                 &task.name,
                                 FontId::proportional(13.0),
                                 t.text,
+                                r.right() - 6.0 - badge_w - (x0 + 26.0),
                             );
                             if *nsub > 0 {
-                                let g = ui.painter().layout_no_wrap(
-                                    task.name.clone(),
-                                    FontId::proportional(13.0),
-                                    t.text,
-                                );
-                                ui.painter().with_clip_rect(r.shrink(2.0)).text(
-                                    pos2(x0 + 32.0 + g.size().x, r.center().y),
+                                ui.painter().text(
+                                    pos2(nr.right() + 6.0, r.center().y),
                                     Align2::LEFT_CENTER,
-                                    format!("\u{2934} {}", nsub),
+                                    badge,
                                     FontId::proportional(11.5),
                                     t.text3,
                                 );
@@ -3161,6 +3221,19 @@ impl App {
                         );
                         if resp.clicked() {
                             self.open_quick_add(None);
+                        }
+                        if rows.is_empty() {
+                            ui.add_space(12.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(tr(
+                                        "No tasks here yet. Add one, then click or drag across the days in its row to give it dates.",
+                                    ))
+                                    .small()
+                                    .color(t.text3),
+                                )
+                                .wrap(),
+                            );
                         }
                     });
                     // the divider only runs as far as the rows (it used to run to the bottom)
@@ -3558,12 +3631,15 @@ impl App {
                                     }
                                     on_cell = true;
                                 } else {
-                                    ui.painter().with_clip_rect(cell.shrink(2.0)).text(
+                                    // shortened to leave room for the pencil
+                                    paint_fit(
+                                        ui,
                                         cell.left_center() + vec2(8.0, 0.0),
                                         Align2::LEFT_CENTER,
                                         &task.name,
                                         FontId::proportional(13.0),
                                         t.text,
+                                        cell.width() - 8.0 - 32.0,
                                     );
                                     // a pencil on hover renames in place
                                     let pen = Rect::from_center_size(
@@ -3681,8 +3757,38 @@ impl App {
                                         .layout(Layout::left_to_right(Align::Center)),
                                 );
                                 child.set_clip_rect(cell);
-                                for tag in &task.tags {
-                                    chip(&mut child, tag, tag_color(tag));
+                                // the tags that fit whole, then "+N" (hover lists all)
+                                let font = FontId::proportional(11.0);
+                                let gap = child.spacing().item_spacing.x;
+                                let measure = child.painter().clone();
+                                let width_of = |s: &str| {
+                                    measure
+                                        .layout_no_wrap(s.to_string(), font.clone(), t.text)
+                                        .size()
+                                        .x
+                                        + 12.0
+                                };
+                                let plus_w = width_of(&format!("+{}", task.tags.len()));
+                                let mut shown = 0;
+                                for (k, tag) in task.tags.iter().enumerate() {
+                                    let short = fit_text(&measure, tag, &font, 90.0);
+                                    let rest = task.tags.len() - k - 1;
+                                    let need = width_of(&short)
+                                        + if rest > 0 { gap + plus_w } else { 0.0 };
+                                    if need > child.available_width() {
+                                        break;
+                                    }
+                                    chip(&mut child, &short, tag_color(tag))
+                                        .on_hover_text(tag.as_str());
+                                    shown += 1;
+                                }
+                                if shown < task.tags.len() {
+                                    chip(
+                                        &mut child,
+                                        &format!("+{}", task.tags.len() - shown),
+                                        t.text3,
+                                    )
+                                    .on_hover_text(task.tags.join(", "));
                                 }
                             }
                             TableCol::Tracked => {
@@ -3861,11 +3967,21 @@ impl App {
                             ),
                             ("Done", done_mine.iter().collect()),
                         ];
-                        // today's in the order of their times
+                        // today's in the order of their times, overdue and next
+                        // by date (the oldest first)
                         sections[0].1.sort_by_key(|x| x.due_moment());
+                        sections[1].1.sort_by_key(|x| x.due_moment());
+                        sections[2].1.sort_by_key(|x| x.due_moment());
                         let avail = ui.available_width();
-                        let card_w = ((avail - 20.0) / 2.0).max(320.0);
-                        ui.horizontal_top(|ui| {
+                        // side by side when both fit, else one above the other
+                        let side = avail >= 2.0 * 320.0 + 20.0;
+                        let card_w = if side { (avail - 20.0) / 2.0 } else { avail };
+                        let layout = if side {
+                            Layout::left_to_right(Align::Min)
+                        } else {
+                            Layout::top_down(Align::Min)
+                        };
+                        ui.with_layout(layout, |ui| {
                             // My Work card
                             egui::Frame::new()
                                 .stroke(Stroke::new(1.0, t.border))
@@ -3924,7 +4040,11 @@ impl App {
                                                 }
                                             }
                                             if !collapsed {
-                                                for task in list {
+                                                // a long section shows the first few and
+                                                // a row to show the rest
+                                                let all = self.home_all.contains(name);
+                                                let cap = if all { list.len() } else { HOME_ROWS };
+                                                for task in list.iter().take(cap) {
                                                     let (r, resp) = ui.allocate_exact_size(
                                                         vec2(card_w - 34.0, 30.0),
                                                         Sense::click(),
@@ -3939,37 +4059,37 @@ impl App {
                                                         6.5,
                                                         &st,
                                                     );
-                                                    ui.painter()
-                                                        .with_clip_rect(Rect::from_min_max(
-                                                            r.min,
-                                                            pos2(r.right() - 140.0, r.bottom()),
-                                                        ))
-                                                        .text(
-                                                            r.left_center() + vec2(40.0, 0.0),
-                                                            Align2::LEFT_CENTER,
-                                                            &task.name,
-                                                            FontId::proportional(13.0),
-                                                            t.text,
-                                                        );
-                                                    ui.painter().text(
-                                                        r.right_center() - vec2(70.0, 0.0),
-                                                        Align2::RIGHT_CENTER,
-                                                        truncate(
-                                                            &self.data.list_name(task.list_id),
-                                                            14,
-                                                        ),
-                                                        FontId::proportional(11.5),
-                                                        t.text3,
-                                                    );
+                                                    // right to left: the date, the list
+                                                    // name, then the task name in what is left
+                                                    let mut list_right = r.right() - 70.0;
                                                     if let Some(d) = fmt_due(task) {
-                                                        ui.painter().text(
+                                                        let dr = ui.painter().text(
                                                             r.right_center() - vec2(6.0, 0.0),
                                                             Align2::RIGHT_CENTER,
                                                             d,
                                                             FontId::proportional(12.0),
                                                             due_color(task, false, &t),
                                                         );
+                                                        list_right = list_right.min(dr.left() - 10.0);
                                                     }
+                                                    let lr = paint_fit(
+                                                        ui,
+                                                        pos2(list_right, r.center().y),
+                                                        Align2::RIGHT_CENTER,
+                                                        &self.data.list_name(task.list_id),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                        ((r.width() - 40.0) * 0.3).min(120.0),
+                                                    );
+                                                    paint_fit(
+                                                        ui,
+                                                        r.left_center() + vec2(40.0, 0.0),
+                                                        Align2::LEFT_CENTER,
+                                                        &task.name,
+                                                        FontId::proportional(13.0),
+                                                        t.text,
+                                                        lr.left() - 10.0 - (r.left() + 40.0),
+                                                    );
                                                     // the status circle ticks the task done (or opens it again)
                                                     let cr = Rect::from_center_size(
                                                         r.left_center() + vec2(24.0, 0.0),
@@ -3998,6 +4118,24 @@ impl App {
                                                         self.toggle_done(task.id);
                                                     } else if resp.clicked() {
                                                         self.actions.push(Action::Open(task.id));
+                                                    }
+                                                }
+                                                if list.len() > HOME_ROWS {
+                                                    let label = if all {
+                                                        tr("Show fewer").to_string()
+                                                    } else {
+                                                        trf!("Show all {}", list.len())
+                                                    };
+                                                    let b = ui.add(ghost(egui::Button::new(
+                                                        RichText::new(label).size(12.5).color(t.text2),
+                                                    )));
+                                                    name_it(&b, &format!("Home show all {}", name));
+                                                    if b.clicked() {
+                                                        if all {
+                                                            self.home_all.remove(name);
+                                                        } else {
+                                                            self.home_all.insert(name);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -4075,46 +4213,57 @@ impl App {
                                                     4.0,
                                                     rgb(s.color),
                                                 );
-                                                ui.painter().text(
-                                                    r.left_center() + vec2(30.0, 0.0),
-                                                    Align2::LEFT_CENTER,
-                                                    &l.name,
-                                                    FontId::proportional(13.0),
-                                                    t.text,
-                                                );
-                                                // an empty List: no bar and "0/0", just say so
-                                                if total == 0 {
-                                                    ui.painter().text(
+                                                // right to left: the count and progress bar
+                                                // (or for an empty List just "No tasks yet"),
+                                                // then the name in what is left
+                                                let name_right = if total == 0 {
+                                                    let note = ui.painter().text(
                                                         r.right_center() - vec2(6.0, 0.0),
                                                         Align2::RIGHT_CENTER,
                                                         tr("No tasks yet"),
                                                         FontId::proportional(11.5),
                                                         t.text3,
                                                     );
-                                                    if resp.clicked() {
-                                                        self.actions
-                                                            .push(Action::Go(Location::List(l.id)));
-                                                    }
-                                                    continue;
-                                                }
-                                                // progress bar
-                                                let bar = Rect::from_min_size(
-                                                    pos2(r.right() - 150.0, r.center().y - 3.0),
-                                                    vec2(100.0, 6.0),
-                                                );
-                                                ui.painter().rect_filled(bar, 3.0, t.hover);
-                                                let f = done as f32 / total as f32;
-                                                ui.painter().rect_filled(
-                                                    Rect::from_min_size(bar.min, vec2(100.0 * f, 6.0)),
-                                                    3.0,
-                                                    rgb([0x00, 0x88, 0x44]),
-                                                );
-                                                ui.painter().text(
-                                                    r.right_center() - vec2(6.0, 0.0),
-                                                    Align2::RIGHT_CENTER,
-                                                    format!("{}/{}", done, total),
-                                                    FontId::proportional(11.5),
-                                                    t.text3,
+                                                    note.left() - 10.0
+                                                } else {
+                                                    let count = ui.painter().text(
+                                                        r.right_center() - vec2(6.0, 0.0),
+                                                        Align2::RIGHT_CENTER,
+                                                        format!("{}/{}", done, total),
+                                                        FontId::proportional(11.5),
+                                                        t.text3,
+                                                    );
+                                                    let bar_w =
+                                                        ((r.width() - 30.0) * 0.25).min(100.0);
+                                                    let bar = Rect::from_min_size(
+                                                        pos2(
+                                                            count.left().min(r.right() - 50.0)
+                                                                - 10.0
+                                                                - bar_w,
+                                                            r.center().y - 3.0,
+                                                        ),
+                                                        vec2(bar_w, 6.0),
+                                                    );
+                                                    ui.painter().rect_filled(bar, 3.0, t.hover);
+                                                    let f = done as f32 / total as f32;
+                                                    ui.painter().rect_filled(
+                                                        Rect::from_min_size(
+                                                            bar.min,
+                                                            vec2(bar_w * f, 6.0),
+                                                        ),
+                                                        3.0,
+                                                        rgb([0x00, 0x88, 0x44]),
+                                                    );
+                                                    bar.left() - 10.0
+                                                };
+                                                paint_fit(
+                                                    ui,
+                                                    r.left_center() + vec2(30.0, 0.0),
+                                                    Align2::LEFT_CENTER,
+                                                    &l.name,
+                                                    FontId::proportional(13.0),
+                                                    t.text,
+                                                    name_right - (r.left() + 30.0),
                                                 );
                                                 if resp.clicked() {
                                                     self.actions
@@ -6490,6 +6639,9 @@ pub(crate) fn unreadable_note(copy: &std::path::Path) -> String {
             .unwrap_or_default()
     )
 }
+
+/// Home "My Work" shows this many tasks of a section until "Show all".
+const HOME_ROWS: usize = 10;
 
 /// Day offsets beyond this are grouped as "Future" (original: B$4 = 7).
 const DUE_GROUP_CAP: i64 = 7;

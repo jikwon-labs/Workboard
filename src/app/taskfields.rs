@@ -903,6 +903,7 @@ impl App {
     }
 
     /// The picker dialog: search tasks, click one to set the relation.
+    /// It lists at most `PICK_ROWS` tasks and says how many more match.
     pub(super) fn pick_task_body(
         &mut self,
         ui: &mut Ui,
@@ -932,18 +933,21 @@ impl App {
         let q = query.trim().to_lowercase();
         let ids = self.pick_candidates(tid, mode);
         let mut picked = None;
-        egui::ScrollArea::vertical()
+        let more = egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {
                 let mut shown = 0;
+                let mut more = 0;
                 for oid in ids {
                     let Some(o) = self.task(oid) else { continue };
                     if !q.is_empty() && !o.name.to_lowercase().contains(&q) {
                         continue;
                     }
                     shown += 1;
-                    if shown > 200 {
-                        break;
+                    // the first 200; the rest are counted and found by searching
+                    if shown > PICK_ROWS {
+                        more += 1;
+                        continue;
                     }
                     let st = self.data.status_of(o);
                     if menu_row_named(
@@ -975,7 +979,17 @@ impl App {
                     };
                     ui.label(RichText::new(text).color(t.text3));
                 }
-            });
+                more
+            })
+            .inner;
+        if more > 0 {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(trf!("{} more not shown. Search to find them.", more))
+                    .small()
+                    .color(t.text3),
+            );
+        }
         if let Some(oid) = picked {
             self.set_relation(tid, mode, oid);
             close = true;
@@ -1302,3 +1316,6 @@ fn write_task_files(dir: &std::path::Path, list: &[TaskFileEntry]) {
         }
     }
 }
+
+/// How many tasks the task picker lists before "N more not shown".
+pub(super) const PICK_ROWS: usize = 200;

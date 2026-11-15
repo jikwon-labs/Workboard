@@ -93,34 +93,42 @@ impl App {
         nui.add_space(6.0);
         let ws = self.data.workspace.clone();
         nui.label(RichText::new(ws).strong());
-        let mut last_group = "";
-        for (i, (group, label)) in SETTINGS.iter().enumerate() {
-            if *group != last_group {
-                last_group = group;
-                nui.add_space(8.0);
-                nui.label(RichText::new(tr(group)).small().color(t.text3));
-            }
-            let sel = self.settings_tab as usize == i;
-            let w = nui.available_width();
-            let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-            name_it(&resp, &format!("Settings {}", label));
-            if sel {
-                nui.painter().rect_filled(r, 6.0, t.selected_bg);
-            } else if resp.hovered() {
-                nui.painter().rect_filled(r, 6.0, t.hover);
-            }
-            nui.painter().text(
-                r.left_center() + vec2(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                tr(label),
-                FontId::proportional(13.5),
-                if sel { t.selected_text } else { t.text },
-            );
-            if resp.clicked() && !sel {
-                self.settings_tab = i as u8;
-                self.settings_state = None;
-            }
-        }
+        // a short window can't fit every section: the list scrolls
+        egui::ScrollArea::vertical()
+            .id_salt("settings_nav")
+            .auto_shrink([false, false])
+            .show(&mut nui, |nui| {
+                let mut last_group = "";
+                for (i, (group, label)) in SETTINGS.iter().enumerate() {
+                    if *group != last_group {
+                        last_group = group;
+                        nui.add_space(8.0);
+                        nui.label(RichText::new(tr(group)).small().color(t.text3));
+                    }
+                    let sel = self.settings_tab as usize == i;
+                    let w = nui.available_width();
+                    let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+                    name_it(&resp, &format!("Settings {}", label));
+                    if sel {
+                        nui.painter().rect_filled(r, 6.0, t.selected_bg);
+                    } else if resp.hovered() {
+                        nui.painter().rect_filled(r, 6.0, t.hover);
+                    }
+                    paint_fit(
+                        nui,
+                        r.left_center() + vec2(10.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        tr(label),
+                        FontId::proportional(13.5),
+                        if sel { t.selected_text } else { t.text },
+                        w - 14.0,
+                    );
+                    if resp.clicked() && !sel {
+                        self.settings_tab = i as u8;
+                        self.settings_state = None;
+                    }
+                }
+            });
         let label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
         let mut bui = ui.new_child(
             egui::UiBuilder::new()
@@ -148,7 +156,8 @@ impl App {
             .id_salt("settings_body")
             .auto_shrink([false, false])
             .show(&mut bui, |ui| {
-                ui.set_max_width(640.0);
+                // at most 640 wide, but never wider than a small window leaves
+                ui.set_max_width(ui.available_width().min(640.0));
                 let mut state = self
                     .settings_state
                     .take()

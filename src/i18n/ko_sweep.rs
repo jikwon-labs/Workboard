@@ -116,6 +116,7 @@ pub const T: &[(&str, &str)] = &[
         "\"{}\"에 연결할 작업을 고르세요.",
     ),
     ("No tasks match", "일치하는 작업이 없습니다"),
+    ("{} more not shown. Search to find them.", "{}개는 더 있습니다. 검색해서 찾으세요."),
     // attachments
     ("Attachments", "첨부 파일"),
     ("\u{1F4CE} Attach", "\u{1F4CE} 첨부"),

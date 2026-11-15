@@ -77,6 +77,9 @@ pub(super) const NAME_INSIDE_W: f32 = 60.0;
 /// Font size of the task name on a bar.
 pub(super) const BAR_NAME_SIZE: f32 = 11.5;
 
+/// A name written beside a narrow bar is shortened to at most this wide.
+pub(super) const BESIDE_NAME_MAX: f32 = 200.0;
+
 /// The days a task's bar covers: start to due, or a single day when only one
 /// of them is set. None when it has no dates.
 pub(super) fn bar_range(
@@ -265,7 +268,13 @@ impl App {
             r.max.x += shift_end as f32 * cw;
         }
         let active = resp.hovered() || resp.dragged() || lh.dragged() || rhd.dragged();
-        let col = rgb(self.data.status_of(task).color);
+        // overdue bars are red, as the date is in the list and calendar
+        let overdue = task.is_overdue() && !self.data.is_closed(task);
+        let col = if overdue {
+            t.danger
+        } else {
+            rgb(self.data.status_of(task).color)
+        };
         p.rect_filled(
             r,
             5.0,
@@ -284,22 +293,55 @@ impl App {
                 );
             }
         }
-        if r.width() > NAME_INSIDE_W {
+        let font = FontId::proportional(BAR_NAME_SIZE);
+        let view = p.clip_rect();
+        if r.right() < view.left() || r.left() > view.right() {
+            // the bar is out of sight: say which way and when, at that edge,
+            // so the row doesn't look like a task without dates
+            let (txt, pos, align) = if r.right() < view.left() {
+                (
+                    format!("\u{2039} {}", fmt_date(e)),
+                    pos2(view.left() + 6.0, r.center().y),
+                    Align2::LEFT_CENTER,
+                )
+            } else {
+                (
+                    format!("{} \u{203a}", fmt_date(s)),
+                    pos2(view.right() - 6.0, r.center().y),
+                    Align2::RIGHT_CENTER,
+                )
+            };
+            let g = p.layout_no_wrap(txt.clone(), font.clone(), Color32::WHITE);
+            let lr = align.anchor_size(pos, g.size());
+            p.rect_filled(lr.expand(3.0), 4.0, t.bg);
+            p.text(
+                pos,
+                align,
+                txt,
+                font,
+                if overdue { t.danger } else { t.text3 },
+            );
+        } else if r.width() > NAME_INSIDE_W {
+            let name = fit_text(p, &task.name, &font, r.width() - 12.0);
             p.with_clip_rect(r).text(
                 r.left_center() + vec2(6.0, 0.0),
                 Align2::LEFT_CENTER,
-                &task.name,
-                FontId::proportional(BAR_NAME_SIZE),
+                name,
+                font,
                 Color32::WHITE,
             );
         } else {
-            p.text(
-                r.right_center() + vec2(6.0, 0.0),
-                Align2::LEFT_CENTER,
-                &task.name,
-                FontId::proportional(BAR_NAME_SIZE),
-                t.text2,
+            // beside a short bar, shortened, on the page colour so the today
+            // line doesn't run through the letters
+            let name = fit_text(p, &task.name, &font, BESIDE_NAME_MAX);
+            let at = r.right_center() + vec2(6.0, 0.0);
+            let g = p.layout_no_wrap(name.clone(), font.clone(), Color32::WHITE);
+            p.rect_filled(
+                Align2::LEFT_CENTER.anchor_size(at, g.size()).expand(2.0),
+                3.0,
+                t.bg,
             );
+            p.text(at, Align2::LEFT_CENTER, name, font, t.text2);
         }
         if resp.drag_stopped() && shift_days != 0 {
             let mut e2 = task.clone();

@@ -596,7 +596,8 @@ impl App {
                                 });
                                 ui.add_space(4.0);
                                 let w = ui.available_width();
-                                let cw = ((w - 24.0) / 3.0).min(430.0);
+                                let gap = ui.spacing().item_spacing.x;
+                                let cw = ((w - 2.0 * gap) / 3.0).floor().min(430.0);
                                 ui.horizontal(|ui| {
                                     for b in super::templates::builtins()
                                         .into_iter()
@@ -630,19 +631,24 @@ impl App {
                                             FontId::proportional(14.0),
                                             rgb(color),
                                         );
-                                        ui.painter().text(
+                                        // shortened with an ellipsis in a narrow card
+                                        paint_fit(
+                                            ui,
                                             r.left_center() + vec2(62.0, -10.0),
                                             Align2::LEFT_CENTER,
                                             &b.tpl.name,
                                             FontId::proportional(15.0),
                                             t.text,
+                                            cw - 62.0 - 10.0,
                                         );
-                                        ui.painter().with_clip_rect(r.shrink(4.0)).text(
+                                        paint_fit(
+                                            ui,
                                             r.left_center() + vec2(62.0, 12.0),
                                             Align2::LEFT_CENTER,
                                             b.about,
                                             FontId::proportional(12.5),
                                             t.text2,
+                                            cw - 62.0 - 10.0,
                                         );
                                         if resp.clicked() {
                                             self.use_builtin_doc(b.key, self.current_space());
@@ -1653,7 +1659,7 @@ impl App {
                             let Some(m) = self.data.member(id).cloned() else {
                                 continue;
                             };
-                            let open: Vec<Task> = self
+                            let mut open: Vec<Task> = self
                                 .data
                                 .tasks
                                 .iter()
@@ -1664,6 +1670,8 @@ impl App {
                                 })
                                 .cloned()
                                 .collect();
+                            // the soonest due first (overdue on top), undated last
+                            open.sort_by_key(|x| (x.due.is_none(), x.due_moment()));
                             ui.horizontal(|ui| {
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
@@ -1682,6 +1690,16 @@ impl App {
                                 if ui.link(format!("      {}", task.name)).clicked() {
                                     self.actions.push(Action::Open(task.id));
                                 }
+                            }
+                            if open.len() > 6 {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "      {}",
+                                        trf!("+{} more", open.len() - 6)
+                                    ))
+                                    .small()
+                                    .color(t.text3),
+                                );
                             }
                             ui.add_space(6.0);
                         }
@@ -1722,43 +1740,53 @@ impl App {
                                 _ => tr("Members"),
                             };
                             ui.label(RichText::new(heading).color(t.text2));
-                            ui.horizontal_wrapped(|ui| {
-                                for m in people {
-                                    egui::Frame::new()
-                                        .fill(t.card)
-                                        .stroke(Stroke::new(1.0, t.border))
-                                        .corner_radius(10)
-                                        .inner_margin(egui::Margin::same(12))
-                                        .show(ui, |ui| {
-                                            ui.set_width(170.0);
-                                            ui.horizontal(|ui| {
-                                                let (r, _) = ui.allocate_exact_size(
-                                                    vec2(30.0, 30.0),
-                                                    Sense::hover(),
-                                                );
-                                                paint_avatar(
-                                                    ui.painter(),
-                                                    r.center(),
-                                                    13.0,
-                                                    &m,
-                                                    t.card,
-                                                );
-                                                ui.vertical(|ui| {
-                                                    ui.label(RichText::new(&m.name).strong());
-                                                    ui.label(
-                                                        RichText::new(if m.invited {
-                                                            tr("Invited")
-                                                        } else {
-                                                            tr(role)
-                                                        })
-                                                        .small()
-                                                        .color(t.text3),
+                            // cards line up at the top (a wrapped row centres
+                            // each on the row so far, which stepped them down)
+                            ui.with_layout(
+                                Layout::left_to_right(Align::Min).with_main_wrap(true),
+                                |ui| {
+                                    for m in people {
+                                        egui::Frame::new()
+                                            .fill(t.card)
+                                            .stroke(Stroke::new(1.0, t.border))
+                                            .corner_radius(10)
+                                            .inner_margin(egui::Margin::same(12))
+                                            .show(ui, |ui| {
+                                                ui.set_width(170.0);
+                                                ui.horizontal(|ui| {
+                                                    let (r, _) = ui.allocate_exact_size(
+                                                        vec2(30.0, 30.0),
+                                                        Sense::hover(),
                                                     );
+                                                    paint_avatar(
+                                                        ui.painter(),
+                                                        r.center(),
+                                                        13.0,
+                                                        &m,
+                                                        t.card,
+                                                    );
+                                                    ui.vertical(|ui| {
+                                                        ui.add(
+                                                            egui::Label::new(
+                                                                RichText::new(&m.name).strong(),
+                                                            )
+                                                            .truncate(),
+                                                        );
+                                                        ui.label(
+                                                            RichText::new(if m.invited {
+                                                                tr("Invited")
+                                                            } else {
+                                                                tr(role)
+                                                            })
+                                                            .small()
+                                                            .color(t.text3),
+                                                        );
+                                                    });
                                                 });
                                             });
-                                        });
-                                }
-                            });
+                                    }
+                                },
+                            );
                             ui.add_space(12.0);
                         }
                     });

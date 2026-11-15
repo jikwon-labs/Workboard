@@ -147,7 +147,7 @@ impl App {
                         .size()
                         .x
                 });
-                sc.reach(r, w)
+                sc.reach(r, w.min(timebar::BESIDE_NAME_MAX))
             },
         );
         let undated: Vec<&Task> = tasks

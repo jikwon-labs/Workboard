@@ -598,39 +598,8 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
     true
 }
 
-/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
-pub(super) fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
-    let w = |s: &str| {
-        p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-    };
-    if w(text) <= max_w {
-        return text.to_string();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let (mut lo, mut hi) = (0usize, chars.len());
-    while lo < hi {
-        let mid = (lo + hi + 1) / 2;
-        let cand: String = chars[..mid]
-            .iter()
-            .collect::<String>()
-            .trim_end()
-            .to_string()
-            + "\u{2026}";
-        if w(&cand) <= max_w {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    chars[..lo]
-        .iter()
-        .collect::<String>()
-        .trim_end()
-        .to_string()
-        + "\u{2026}"
-}
+// moved to widgets.rs; kept here for code that names it `shell::fit_text`
+pub(super) use crate::widgets::fit_text;
 
 pub(super) struct Cols {
     pub assignee: Rect,
@@ -1500,22 +1469,35 @@ impl App {
             pos2(x + 24.0, rect.top()),
             pos2(rect.right() - 28.0, rect.bottom()),
         );
-        let g = ui
-            .painter()
-            .layout_no_wrap(shown.to_string(), FontId::proportional(14.0), col);
-        let gw = g.size().x;
-        ui.painter().with_clip_rect(clip).galley(
-            pos2(x + 24.0, rect.center().y - g.size().y / 2.0),
-            g,
+        // too long for the row: shortened with an ellipsis, whole on hover;
+        // the grey note after the name keeps up to 40% of the room
+        let sub_font = FontId::proportional(12.0);
+        let sub_w = sub.map_or(0.0, |s| {
+            let w = ui
+                .painter()
+                .layout_no_wrap(s.to_string(), sub_font.clone(), t.text3)
+                .size()
+                .x;
+            (w + 4.0).min(clip.width() * 0.4)
+        });
+        let nr = paint_fit(
+            ui,
+            pos2(x + 24.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            shown,
+            FontId::proportional(14.0),
             col,
+            clip.width() - sub_w,
         );
         if let Some(s) = sub {
-            ui.painter().with_clip_rect(clip).text(
-                pos2(x + 28.0 + gw, rect.center().y + 1.0),
+            paint_fit(
+                ui,
+                pos2(nr.right() + 4.0, rect.center().y + 1.0),
                 Align2::LEFT_CENTER,
                 s,
-                FontId::proportional(12.0),
+                sub_font,
                 t.text3,
+                clip.right() - nr.right() - 4.0,
             );
         }
         if let Some(count) = trailing {
@@ -4533,7 +4515,45 @@ impl App {
             + if task.checklist.is_empty() { 0.0 } else { 42.0 }
             + 12.0
             + quick_w;
-        let max_name = (cols.left - x - after).max(60.0);
+        // tags follow the name: a name too long for the row leaves room for
+        // the first tag and a "+N" for the rest (or just "+N" when narrow)
+        let tag_font = FontId::proportional(11.5);
+        let tags: Vec<String> = if apps.tags {
+            task.tags
+                .iter()
+                .map(|tag| fit_text(ui.painter(), tag, &tag_font, 90.0))
+                .collect()
+        } else {
+            vec![]
+        };
+        let measure = ui.painter().clone();
+        let chip_w = |s: &str| {
+            measure
+                .layout_no_wrap(s.to_string(), tag_font.clone(), t.text)
+                .size()
+                .x
+                + 12.0
+        };
+        let plus_w = chip_w(&format!("+{}", tags.len().max(1)));
+        let room = cols.left - x - after;
+        let tag_room = match tags.len() {
+            0 => 0.0,
+            1 => chip_w(&tags[0]) + 4.0,
+            _ => chip_w(&tags[0]) + 4.0 + plus_w + 4.0,
+        };
+        let name_w = measure
+            .layout_no_wrap(task.name.clone(), FontId::proportional(14.0), t.text)
+            .size()
+            .x;
+        let tag_room = if tags.is_empty() || name_w <= room {
+            // the whole name fits: tags take what is left after it
+            0.0
+        } else if room - tag_room >= 240.0 {
+            tag_room
+        } else {
+            plus_w + 4.0
+        };
+        let max_name = (room - tag_room).max(60.0);
         if renaming {
             let nr = Rect::from_min_max(
                 pos2(x - 4.0, rect.top() + 4.0),
@@ -4588,20 +4608,42 @@ impl App {
             self.row_quick_actions(ui, rect, x, cols.left - 8.0, task);
             x += quick_w;
         }
-        for tag in task.tags.iter().take(if apps.tags { 2 } else { 0 }) {
-            let col = tag_color(tag);
+        // as many tags as fit, then "+N" for the rest (hover lists them all)
+        let tag_end = cols.left - 8.0;
+        let mut shown = 0;
+        for (k, (tag, full)) in tags.iter().zip(&task.tags).enumerate() {
+            let rest = tags.len() - k - 1;
+            let w = chip_w(tag);
+            let need = if rest > 0 { w + 4.0 + plus_w } else { w };
+            if x + need > tag_end {
+                break;
+            }
+            let col = tag_color(full);
             let g = ui
                 .painter()
-                .layout_no_wrap(tag.clone(), FontId::proportional(11.5), col);
-            let r = Rect::from_min_size(
-                pos2(x, rect.center().y - 9.0),
-                vec2(g.size().x + 12.0, 18.0),
-            );
-            if r.right() < cols.left - 8.0 {
-                ui.painter().rect_filled(r, 9.0, col.gamma_multiply(0.16));
-                ui.painter().galley(r.center() - g.size() / 2.0, g, col);
-            }
+                .layout_no_wrap(tag.clone(), tag_font.clone(), col);
+            let r = Rect::from_min_size(pos2(x, rect.center().y - 9.0), vec2(w, 18.0));
+            ui.painter().rect_filled(r, 9.0, col.gamma_multiply(0.16));
+            ui.painter().galley(r.center() - g.size() / 2.0, g, col);
             x = r.right() + 4.0;
+            shown += 1;
+        }
+        if shown < tags.len() && x + plus_w <= tag_end {
+            let more = format!("+{}", tags.len() - shown);
+            let r = Rect::from_min_size(pos2(x, rect.center().y - 9.0), vec2(plus_w, 18.0));
+            ui.painter().rect_filled(r, 9.0, t.hover);
+            ui.painter().text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                more,
+                tag_font.clone(),
+                t.text2,
+            );
+            if ui.rect_contains_pointer(r) {
+                egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), id.with("tags_tip"), |ui| {
+                    ui.label(task.tags.join(", "))
+                });
+            }
         }
         let icon_col = Color32::from_rgb(160, 160, 160);
         // assignee
@@ -4831,6 +4873,20 @@ impl App {
         let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let refs: Vec<&Task> = tasks.iter().collect();
         let groups = self.groups(&refs, true);
+        // closed tasks are hidden by default: their columns say how many
+        // instead of a plain 0
+        let mut hidden_closed: HashMap<String, usize> = HashMap::new();
+        if !self.show_closed {
+            self.show_closed = true;
+            for x in self.filtered() {
+                if self.data.is_closed(x) {
+                    *hidden_closed
+                        .entry(self.data.status_of(x).name.clone())
+                        .or_default() += 1;
+                }
+            }
+            self.show_closed = false;
+        }
         let mut dropped: Option<(u64, usize)> = None;
         egui::ScrollArea::horizontal()
             .auto_shrink([false, false])
@@ -4902,11 +4958,25 @@ impl App {
                                     }
                                     return;
                                 }
+                                let hidden = g
+                                    .status
+                                    .as_ref()
+                                    .filter(|_| g.tasks.is_empty())
+                                    .and_then(|s| hidden_closed.get(&s.name))
+                                    .copied()
+                                    .unwrap_or(0);
                                 ui.horizontal(|ui| {
                                     self.group_pill(ui, g);
-                                    ui.label(
-                                        RichText::new(g.tasks.len().to_string()).color(accent),
-                                    );
+                                    if hidden > 0 {
+                                        ui.label(
+                                            RichText::new(trf!("{} hidden", hidden)).color(t.text3),
+                                        )
+                                        .on_hover_text(tr("Closed tasks are hidden"));
+                                    } else {
+                                        ui.label(
+                                            RichText::new(g.tasks.len().to_string()).color(accent),
+                                        );
+                                    }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let b = ui
                                             .add(ghost(egui::Button::new(
@@ -4934,6 +5004,20 @@ impl App {
                                                 if resp.clicked() {
                                                     self.actions.push(Action::Open(task.id));
                                                 }
+                                            }
+                                        }
+                                        if hidden > 0 {
+                                            let label = if hidden == 1 {
+                                                tr("Show 1 closed task").to_string()
+                                            } else {
+                                                trf!("Show {} closed tasks", hidden)
+                                            };
+                                            let b = ui.add(ghost(egui::Button::new(
+                                                RichText::new(label).color(t.text2),
+                                            )));
+                                            name_it(&b, &format!("Show closed in {}", g.label));
+                                            if b.clicked() {
+                                                self.show_closed = true;
                                             }
                                         }
                                         self.board_add_task(ui, g, col_w - 16.0, accent);

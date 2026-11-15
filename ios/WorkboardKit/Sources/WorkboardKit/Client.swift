@@ -653,9 +653,11 @@ public final class SyncClient {
             retryTask?.cancel()
             retryTask = nil
             pendingSignIn = nil
-            if wasIn || helloUsedToken { tokens.setToken(nil, for: settings.server) }
-            // a server that signed this device out dropped its notifications too
-            if let sent = settings.pushSentTo, ServerAddress.same(sent, settings.server) { settings.pushSentTo = nil }
+            if wasIn || helloUsedToken {
+                tokens.setToken(nil, for: settings.server)
+                // a server that signed this device out dropped its notifications too
+                if let sent = settings.pushSentTo, ServerAddress.same(sent, settings.server) { settings.pushSentTo = nil }
+            }
             clearAdmin()
             if settings.meFromServer {
                 settings.me = nil

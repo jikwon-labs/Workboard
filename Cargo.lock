@@ -5338,6 +5338,7 @@ version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "tungstenite 0.30.0",
 ]
 
@@ -5944,11 +5945,13 @@ version = "0.1.1"
 dependencies = [
  "axum",
  "chrono",
+ "futures-util",
  "hmac",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
+ "tokio-util",
  "wb-net",
  "wb-sync",
 ]

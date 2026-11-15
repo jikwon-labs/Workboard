@@ -11,7 +11,7 @@
 
 ## 지금 상태 (2026-11-15)
 
-- **1~4단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상까지 들어갔다. `cargo test --workspace` 160개 통과.
+- **1~5단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부까지 들어갔다. `cargo test --workspace` 173개와 재생 테스트(`tests/player.rs`) 통과.
 - **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. 아직 **비어 있다**: 처음 초대 코드 없이 연결하는 사람이 owner 가 된다.
 - **재부팅 자동 복구 확인:** 2026-11-15 03:37 macOS 업데이트(27.0.1 → 27.2.1) 재시동 뒤 Tailscale, 두 서버, Docker 와 컨테이너, ngrok, hermes, branchport 가 모두 저절로 다시 떴다(`deploy/check-after-boot.sh` 기록).
 - **실제 목소리:** 사용자가 확인했다("목소리 잘 나오더라").
@@ -24,6 +24,7 @@
 2. **공증된 앱의 권한 창.** 서명·공증된 `.app` 을 처음 쓸 때 마이크·카메라 권한 창이 뜨는지. Developer ID 가 있는 Mac 에서 확인한다.
 
 **운영**
+- **Mac mini 서버 다시 빌드(첨부).** 채팅 사진·영상은 서버의 `/files` 가 있어야 한다. 옛 서버면 앱이 "The server doesn't take pictures and videos yet" 라고 알린다. Mac mini 에서 `deploy/install-launchd.sh` 를 다시 돌린다.
 3. **새 앱 배포.** 앱이 크게 바뀌었다. 팀 전체가 같은 버전을 써야 한다(1단계에서 변경 시각을 밀리초로 바꿔서, 예전 버전과 섞이면 예전 쪽 수정이 늘 진다). 절차: `docs/release/README.md`.
 4. **owner 등록과 팀원 초대.** 실제 서버에 처음 연결 → People 에서 초대 코드 → 팀원은 Tailscale 초대도 받아야 한다. 순서: `deploy/README.md`.
 
@@ -41,7 +42,8 @@
   [ 사용자 Mac: Workboard.app ] ┘                        ▼
   ┌──────────────────────────── Mac mini ─────────────────────────────┐
   │ workboard-server  100.121.190.50:8787  WebSocket /ws, /health,      │
-  │                   /updates (앱 업데이트), 정본·기기·백업            │
+  │                   /updates (앱 업데이트), /files (채팅 사진·영상),  │
+  │                   정본·기기·백업                                    │
   │ livekit-server    100.121.190.50:7880, 7882/udp  음성·영상 중계     │
   │ launchd           둘 다 로그인 시 시작, 죽으면 10초 안에 다시 시작   │
   └────────────────────────────────────────────────────────────────────┘
@@ -52,11 +54,13 @@
 | 위치 | 하는 일 |
 |---|---|
 | `crates/wb-sync` | 작업공간 합치기(변경 시각, 지움·되살림 기록). 앱·서버·공유 폴더가 같이 쓴다. |
-| `crates/wb-net` | WebSocket 메시지(`Msg`)와 앱 쪽 연결(별도 스레드, 다시 연결, 거절되면 멈춤) |
+| `crates/wb-net` | WebSocket 메시지(`Msg`)와 앱 쪽 연결(별도 스레드, 다시 연결, 거절되면 멈춤), `/files` 올리기·받기(`files.rs`, 직접 쓴 HTTP/1.1) |
 | `crates/wb-voice` | LiveKit 통화(마이크·스피커, 카메라, 받은 영상 → RGBA). 별도 스레드 + 자체 tokio |
 | `server/` | `workboard-server`: 정본 보관·합치기·배포, 로그인·권한, 백업, 통화 토큰, 관리 명령 |
 | `src/app/together.rs` | 함께 쓰기 창, 서버 연결, 토큰(키체인), People 화면 |
 | `src/app/huddle.rs` | 허들 막대, 영상 칸 |
+| `src/app/files.rs` | 채팅 사진·영상: 캐시, 올리기·받기 스레드, 입력창 칸, 메시지 칸, 크게 보기·재생 창 |
+| `src/media.rs` | macOS 기본 기능(ImageIO, AVFoundation, AppKit)으로 사진 크기·축소, 영상 길이·첫 장면·재생, 파일 선택 창, 클립보드 |
 | `third_party/nokhwa-bindings-macos` | 카메라 잠금 버그를 고친 사본(`[patch.crates-io]`) |
 | `deploy/` | LaunchAgent 설치, 전원 설정, 재부팅 점검 스크립트 |
 | `.cargo/config.toml` | macOS `-ObjC` 링크 옵션(libwebrtc 에 필요) |
@@ -82,6 +86,7 @@
 - `backups/` 매시간 48개, 매일 30개, 되돌리기 전 사본
 - `livekit.yaml`, `livekit.json` LiveKit 설정과 키(권한 600, 레포에 없음)
 - `updates/` 앱 업데이트(appcast, zip)
+- `files/` 채팅 사진·영상. 이름은 내용의 sha256, 옆에 `<sha256>.type`(올릴 때 받은 Content-Type). 백업에 들어가지 않는다
 - 로그: `~/Library/Logs/workboard-server.log`, `livekit-server.log`, `workboard-boot-check.log`
 
 ## 정해 둔 원칙
@@ -90,7 +95,7 @@
 - 비밀 값(LiveKit 키, 기기 토큰)은 레포나 data.json 에 넣지 않는다. 앱의 토큰은 macOS 키체인에 둔다.
 - data.json 형식을 깨지 않는다. 새 필드는 기본값으로 예전 파일도 읽힌다.
 - 공유 폴더 방식(서버 없이)은 계속 동작한다.
-- 일부러 안 하기로 한 기능(다시 제안하지 않는다): AI·Clips·외부 통합처럼 외부 서버가 필요한 기능, Follow task, 첨부, 의존 관계, 날짜의 시간, 저장된 필터, nested filter, Timeline / Workload / Mind Map 보기, App Center, Template Center, 작업 유형·사용자 필드·템플릿 선택, 스페이스 권한, 사이드바 너비 조절, 비밀번호·2FA·결제.
+- 일부러 안 하기로 한 기능(다시 제안하지 않는다): AI·Clips·외부 통합처럼 외부 서버가 필요한 기능, Follow task, 작업·문서 첨부, 의존 관계, 날짜의 시간, 저장된 필터, nested filter, Timeline / Workload / Mind Map 보기, App Center, Template Center, 작업 유형·사용자 필드·템플릿 선택, 스페이스 권한, 사이드바 너비 조절, 비밀번호·2FA·결제.
 
 ## 단계별 구현 기록
 
@@ -159,6 +164,19 @@
 - **허들이 대화상자를 가리던 것.** 허들 막대와 영상 칸이 가장 위 층에 그려져 함께 쓰기 창을 덮었다(손 검증에서 발견). 이제 대화상자와 같은 층에 두고, 대화상자가 열려 있으면 그 위로 다시 올린다.
 - 전원: `deploy/setup-power.sh`(잠자기 끄기, 정전 뒤 자동 켜짐). FileVault 는 켜 두기로 했다.
 - 재부팅 점검: `deploy/check-after-boot.sh`. `--install` 하면 다음 로그인 3분 뒤 한 번 점검하고 스스로 지워진다. 실제 재부팅에서 모두 저절로 다시 뜨는 것을 확인했다.
+
+### 5단계: 채팅 사진·영상 (2026-11-15)
+
+사용자가 첨부를 빼기로 했던 결정을 바꿨다: 채팅에서 사진과 영상을 똑같이 올리고 볼 수 있어야 한다. 정한 것: 영상은 앱 안에서 재생, 파일 하나 500MB 까지, 올리기는 + 버튼·끌어다 놓기·붙여넣기(Cmd+V) 셋 다.
+
+- **저장.** 파일 내용은 작업공간 JSON 에 넣지 않는다(통째로 동기화하므로). 서버 폴더 `files/<sha256>` 에 두고, 메시지에는 `attachments` 로 무엇인지만 적는다(`file` = sha256, `name`, `kind` Image/Video, `bytes`, `w`, `h`, `secs`). 공유 폴더 방식이면 `<폴더>/files/<sha256>`, 혼자 쓰면 각 컴퓨터의 캐시(`<앱 폴더>/files/`)만 쓴다.
+- **`attachments` 원소에 `id` 키를 두지 않는다.** wb-sync 는 원소마다 `id` 가 있는 배열을 항목 단위로 추적하는데, 그러면 첨부를 모르는 예전 앱(0.1.4)이 그 id 들을 지운 것으로 기록해서 모두에게서 첨부가 사라진다. `id` 가 없으면 보통 필드라서 서버 정본의 값이 남는다(서버 통합 테스트 `attachments_survive_an_app_that_does_not_know_them`, `id` 를 넣으면 실패하는 것도 확인).
+- **서버 `/files`.** `PUT /files/<sha256>`(내용이 이름과 맞아야 저장, 500MB 넘으면 413, 이미 있으면 받지 않음), `GET`/`HEAD`(Range 지원: 이어받기). 모든 요청에 `Authorization: Bearer <기기 id>:<토큰>` (로그인 토큰과 같은 것, 접속을 끊으면 같이 막힌다). 이름은 64자리 hex 만 받는다. 파일은 지우지 않는다(메시지를 지워도 남는다).
+- **앱.** 입력창에 넣으면 작업 스레드가 종류·크기를 확인하고 해시를 구해 캐시에 복사한 뒤 서버로 올린다. 다 올라가야 보낼 수 있다(글자 없이 사진만도 된다). 입력창의 첨부는 글자 초안처럼 채널·스레드마다 따로 남는다. 받는 쪽은 메시지가 화면에 보일 때 받아서 보여 준다.
+- **macOS 기능.** 사진은 ImageIO(HEIC 포함 모든 형식), 영상은 AVFoundation(길이·크기·첫 장면, `AVPlayer` + `AVPlayerItemVideoOutput` 으로 앱 안 재생, 소리는 AVPlayer 가 낸다). 캐시 파일은 확장자가 없는데 AVFoundation 은 확장자로 형식을 정하므로, 영상은 `<sha256>.<확장자>` 하드 링크를 만들어 쓴다(손 검증에서 발견).
+- **붙여넣기.** egui 는 클립보드에 글자가 있을 때만 붙여넣기를 넘긴다. 그래서 `raw_input_hook` 에서 입력창에 초점이 있을 때 Cmd+V 를 보고 클립보드를 직접 읽는다: Finder 에서 복사한 파일은 그 파일을(같이 오는 파일 이름 글자는 버림), 그림만 있으면 V 키를 뗄 때 PNG 로.
+- **검증:** 서버 통합 5개(올리기·받기·Range, 토큰·내용 확인, 크기 제한, 이어받기, 예전 앱), 앱 5개(서버를 거쳐 다른 컴퓨터에 사진, 채널별 초안·붙여넣기·스레드 답장, 공유 폴더, 영상 첫 장면, UI: 끌어다 놓기 → 보내기 → 크게 보기), 미디어 단위 3개, 재생 테스트(`tests/player.rs`, AVPlayer 는 메인 스레드가 필요해서 harness 없이 따로 돈다). 손 검증(로컬 앱): 붙여넣기로 사진, Finder 복사로 영상, 함께 보내기, 첫 장면과 길이 표시, 앱 안 재생·되감기, 사진 크게 보기와 넘기기.
+- **알려진 한계:** 서버의 파일은 지우지 않는다. 영상은 원본 그대로 올린다(변환·압축 없음). 작업 댓글·문서 첨부는 없다.
 
 ## 부록 A: 처음 설계 (2026-11-14, 기록용)
 

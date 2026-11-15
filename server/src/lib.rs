@@ -13,6 +13,8 @@
 //   updates/              app updates: appcast.xml and the Workboard-*.zip it
 //                         lists, served at /updates/<file> for Sparkle
 //                         (scripts/publish-update.sh puts them here)
+//   files/                pictures and videos for chat messages, named by
+//                         the sha256 of their contents (see files.rs)
 // Everything is written to a temporary file first and then renamed, at most
 // a second after a change, and once more when the server stops.
 //
@@ -38,6 +40,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use wb_net::{Backup, Msg, Person, Role, CODE_AUTH, CODE_DENIED};
+
+mod files;
+pub use files::{file_name_ok, parse_range, FILES_DIR, MAX_FILE};
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
@@ -370,6 +375,8 @@ struct Hub {
     access: broadcast::Sender<()>,
     stop: watch::Receiver<bool>,
     connections: AtomicUsize,
+    /// the largest file /files takes
+    max_file: u64,
 }
 
 impl Hub {
@@ -840,8 +847,26 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
     let _ = socket.send(Message::Close(None)).await;
 }
 
+/// Settings that tests change; `Options::default()` is what the real server uses.
+#[derive(Clone, Debug)]
+pub struct Options {
+    /// The largest picture or video an app may upload.
+    pub max_file: u64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { max_file: MAX_FILE }
+    }
+}
+
 /// Serve on `listener` until `shutdown` finishes, keeping the copy in `home`.
 pub async fn serve(listener: tokio::net::TcpListener, home: PathBuf, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
+    serve_with(listener, home, Options::default(), shutdown).await
+}
+
+/// `serve` with other settings.
+pub async fn serve_with(listener: tokio::net::TcpListener, home: PathBuf, options: Options, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
     std::fs::create_dir_all(&home)?;
     let canon = read_json(&home.join(WORKSPACE_FILE))?;
     let saved = load_saved(&home)?;
@@ -854,6 +879,7 @@ pub async fn serve(listener: tokio::net::TcpListener, home: PathBuf, shutdown: i
         access: broadcast::channel(16).0,
         stop: stop_rx,
         connections: AtomicUsize::new(0),
+        max_file: options.max_file,
     });
     // a request left while the server was off
     hub.admin_file();
@@ -876,7 +902,11 @@ pub async fn serve(listener: tokio::net::TcpListener, home: PathBuf, shutdown: i
             }
         })
     };
-    let app = Router::new().route(wb_net::PATH, get(ws_route)).route("/health", get(health)).route("/updates/{file}", get(update_route)).with_state(hub.clone());
+    let app = Router::new().route(wb_net::PATH, get(ws_route)).route("/health", get(health)).route("/updates/{file}", get(update_route))
+        // get() also answers HEAD. Uploads are read as a stream, which axum's
+        // body limit doesn't cover; put_file enforces max_file itself.
+        .route("/files/{file}", get(files::get_file).put(files::put_file))
+        .with_state(hub.clone());
     let res = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.await;

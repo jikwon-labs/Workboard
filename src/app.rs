@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 mod chat;
 mod docs;
+mod files;
 mod hubs;
 mod huddle;
 mod menus;
@@ -158,21 +159,43 @@ struct QuickAdd {
     tag_text: String,
 }
 
-/// Unsent text per place: `swap` puts the current text away when the place
-/// changes and brings back what was written there before.
-#[derive(Default)]
-struct DraftBox {
-    on: Option<u64>,
-    saved: HashMap<u64, String>,
+/// What a draft holds (text, or pictures waiting to go) and whether it's empty.
+trait Blank: Default {
+    fn blank(&self) -> bool;
 }
 
-impl DraftBox {
-    fn swap(&mut self, now: Option<u64>, text: &mut String) {
+impl Blank for String {
+    fn blank(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T> Blank for Vec<T> {
+    fn blank(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+/// Unsent text (or attachments) per place: `swap` puts the current one away
+/// when the place changes and brings back what was there before.
+struct DraftBox<T = String> {
+    on: Option<u64>,
+    saved: HashMap<u64, T>,
+}
+
+impl<T> Default for DraftBox<T> {
+    fn default() -> Self {
+        DraftBox { on: None, saved: HashMap::new() }
+    }
+}
+
+impl<T: Blank> DraftBox<T> {
+    fn swap(&mut self, now: Option<u64>, text: &mut T) {
         if self.on == now {
             return;
         }
         if let Some(old) = self.on {
-            if text.is_empty() {
+            if text.blank() {
                 self.saved.remove(&old);
             } else {
                 self.saved.insert(old, std::mem::take(text));
@@ -187,6 +210,8 @@ impl DraftBox {
 struct Drafts {
     chat: DraftBox,
     thread: DraftBox,
+    chat_files: DraftBox<Vec<files::Pending>>,
+    thread_files: DraftBox<Vec<files::Pending>>,
 }
 
 pub struct App {
@@ -302,6 +327,16 @@ pub struct App {
     /// Unsent messages and replies of the channels and threads not on
     /// screen, by channel / message id (kept until the app quits).
     drafts: Drafts,
+    /// Pictures and videos waiting in the channel and thread message boxes.
+    chat_files: Vec<files::Pending>,
+    thread_files: Vec<files::Pending>,
+    files: files::Files,
+    /// A picture or video opened large.
+    viewer: Option<files::Viewer>,
+    /// Files or a picture pasted into a message box (see raw_input_hook).
+    pasted: Option<crate::media::Pasted>,
+    /// egui pasted text for the Cmd+V being held.
+    paste_text_seen: bool,
     new_channel: Option<String>,
     /// Tasks ticked for bulk editing.
     selected: HashSet<u64>,
@@ -491,6 +526,12 @@ impl App {
             thread_open: None,
             thread_text: String::new(),
             drafts: Drafts::default(),
+            chat_files: vec![],
+            thread_files: vec![],
+            files: files::Files::new(if persist { Data::dir().join("files") } else { std::env::temp_dir().join(format!("wb-files-{:x}", wb_sync::random_u64())) }),
+            viewer: None,
+            pasted: None,
+            paste_text_seen: false,
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
@@ -3026,6 +3067,9 @@ impl App {
         self.menu_was_open = any_menu_was_open(ctx);
         self.drafts.chat.swap(self.chat_open, &mut self.chat_text);
         self.drafts.thread.swap(self.thread_open, &mut self.thread_text);
+        self.drafts.chat_files.swap(self.chat_open, &mut self.chat_files);
+        self.drafts.thread_files.swap(self.thread_open, &mut self.thread_files);
+        self.files_tick(Some(ctx));
         self.personal_list_defaults();
         if let Ok(p) = std::env::var("WORKBOARD_EVENT_LOG") {
             let evs: Vec<String> = ctx.input(|i| i.raw.events.iter().filter(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_))).map(|e| format!("{:?}", e)).collect());
@@ -3062,6 +3106,7 @@ impl App {
         self.task_window(ctx);
         self.dialogs(ctx);
         self.modals(ctx);
+        self.media_viewer(ctx);
         self.notepad(ctx);
         self.new_message_window(ctx);
         self.bulk_bar(ctx);
@@ -3178,6 +3223,10 @@ impl eframe::App for App {
         #[cfg(not(target_os = "macos"))]
         let _ = frame;
         self.ui_frame(ctx);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.catch_paste(ctx, raw_input);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

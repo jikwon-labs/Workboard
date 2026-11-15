@@ -8,8 +8,10 @@ wb-sync = { path = "../crates/wb-sync" }
 wb-net = { path = "../crates/wb-net" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs", "io-util"] }
 axum = { version = "0.8", features = ["ws", "json"] }
 sha2 = "0.11"
 hmac = "0.13"
 chrono = "0.4"
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }

@@ -15,11 +15,13 @@ pub(super) enum ChatAction {
     CloseThread,
     Save { ch: u64, msg: u64 },
     Task { ch: u64, msg: u64 },
-    Send { ch: u64, text: String, parent: Option<u64> },
+    Send { ch: u64, text: String, parent: Option<u64>, files: Vec<Attachment> },
     NewChannel(String),
     Dm(u64),
-    SendPost { ch: u64, title: String, text: String },
+    SendPost { ch: u64, title: String, text: String, files: Vec<Attachment> },
     Pin { ch: u64, msg: u64 },
+    /// Open a message's picture or video large.
+    OpenMedia { ch: u64, msg: u64, index: usize },
 }
 
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
@@ -118,9 +120,10 @@ impl App {
         };
 
         // ---- thread panel
+        let mut thread_rect: Option<Rect> = None;
         if let Some(tid) = self.thread_open {
             if let Some(parent) = channel.messages.iter().find(|m| m.id == tid).cloned() {
-                egui::SidePanel::right("thread")
+                let panel = egui::SidePanel::right("thread")
                     .exact_width(360.0)
                     .resizable(false)
                     .frame(egui::Frame::new().fill(t.column_bg).inner_margin(egui::Margin::symmetric(14, 10)))
@@ -135,7 +138,8 @@ impl App {
                             });
                         });
                         ui.separator();
-                        let composer_h = 96.0;
+                        // one row of tiles when pictures wait in the box
+                        let composer_h = 96.0 + if self.thread_files.is_empty() { 0.0 } else { 76.0 };
                         egui::ScrollArea::vertical().id_salt("thread_scroll").max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
                             self.message_row(ui, cid, &parent, false, &mut acts);
                             ui.horizontal(|ui| {
@@ -147,12 +151,16 @@ impl App {
                                 self.message_row(ui, cid, r, false, &mut acts);
                             }
                         });
-                        if let Some(text) = self.composer(ui, "Reply...", true) {
-                            acts.push(ChatAction::Send { ch: cid, text, parent: Some(tid) });
+                        if let Some((text, files)) = self.composer(ui, "Reply...", true) {
+                            acts.push(ChatAction::Send { ch: cid, text, parent: Some(tid), files });
                         }
                     });
+                thread_rect = Some(panel.response.rect);
             }
         }
+        // pictures and videos dragged in from Finder
+        self.take_dropped(ui.ctx(), thread_rect);
+        let dragging = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
 
         // ---- conversation (header with tabs, side panel, messages, composer)
         let ws_name = self.data.workspace.clone();
@@ -271,7 +279,7 @@ impl App {
                     }
                 }
             });
-            let composer_h = 140.0;
+            let composer_h = 140.0 + if self.chat_files.is_empty() { 0.0 } else { 76.0 };
             let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
             let panel = self.channel_panel;
             let shown: Vec<Message> = channel
@@ -363,14 +371,21 @@ impl App {
                     ChannelKind::Channel => if channel.name == "general" { "General".to_string() } else { channel.name.clone() },
                     ChannelKind::Direct => self.channel_label(&channel),
                 };
-                if let Some((text, title)) = self.channel_composer(ui, &target) {
+                if let Some((text, title, files)) = self.channel_composer(ui, &target) {
                     match title {
-                        Some(tt) => acts.push(ChatAction::SendPost { ch: cid, title: tt, text }),
-                        None => acts.push(ChatAction::Send { ch: cid, text, parent: None }),
+                        Some(tt) => acts.push(ChatAction::SendPost { ch: cid, title: tt, text, files }),
+                        None => acts.push(ChatAction::Send { ch: cid, text, parent: None, files }),
                     }
                 }
             });
         });
+        if dragging {
+            let r = ui.max_rect();
+            let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop_hint")));
+            p.rect_filled(r.shrink(8.0), 12.0, t.primary.gamma_multiply(0.12));
+            p.rect_stroke(r.shrink(8.0), 12.0, Stroke::new(2.0, t.primary), egui::StrokeKind::Inside);
+            p.text(r.center(), Align2::CENTER_CENTER, "Drop pictures or videos to send", FontId::proportional(18.0), t.text);
+        }
 
         // mark as read
         let now = now_ts();
@@ -385,8 +400,9 @@ impl App {
         self.apply_chat(acts);
     }
 
-    /// Channel message box with Message / Post / Ask tabs. Returns (text, post title).
-    fn channel_composer(&mut self, ui: &mut Ui, target: &str) -> Option<(String, Option<String>)> {
+    /// Channel message box with Message / Post / Ask tabs. Returns (text, post
+    /// title, attachments).
+    fn channel_composer(&mut self, ui: &mut Ui, target: &str) -> Option<(String, Option<String>, Vec<Attachment>)> {
         let t = self.t();
         let mut out = None;
         ui.horizontal(|ui| {
@@ -403,7 +419,7 @@ impl App {
                 }
             }
         });
-        let text_id = egui::Id::new("chat_composer_text");
+        let text_id = egui::Id::new(super::files::CHAT_BOX);
         let bg_id = egui::Id::new("chat_composer_bg");
         let frame_resp = egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::symmetric(12, 8)).fill(t.card).show(ui, |ui| {
             // a click anywhere on the box (not on its buttons) puts the cursor in the message
@@ -417,6 +433,7 @@ impl App {
                     ui.memory_mut(|m| m.request_focus(text_id));
                 }
             }
+            self.pending_strip(ui, false);
             if self.composer_mode == 1 {
                 ui.add(egui::TextEdit::singleline(&mut self.post_title).hint_text("Title").font(FontId::proportional(15.0)).frame(false).desired_width(f32::INFINITY));
             }
@@ -425,9 +442,12 @@ impl App {
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer"));
             let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
             ui.horizontal(|ui| {
-                for (g, tip) in [("+", "Add"), ("@", "Mention someone"), ("\u{263A}", "Emoji"), ("\u{2611}", "Create task")] {
-                    if ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tip).clicked() {
+                for (g, tip) in [("+", "Add pictures or videos"), ("@", "Mention someone"), ("\u{263A}", "Emoji"), ("\u{2611}", "Create task")] {
+                    let b = ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tip);
+                    b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+                    if b.clicked() {
                         match g {
+                            "+" => self.pick_media(false),
                             "@" => self.chat_text.push('@'),
                             "\u{263A}" => self.chat_text.push_str("\u{1F44D}"),
                             "\u{2611}" => self.open_quick_add(None),
@@ -437,15 +457,17 @@ impl App {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let label = if self.composer_mode == 1 { "Post" } else { "\u{27A4}" };
-                    let ready = !self.chat_text.trim().is_empty() || (self.composer_mode == 1 && !self.post_title.trim().is_empty());
+                    let (files_ok, files) = self.pending_ready(false);
+                    let ready = files_ok && (!self.chat_text.trim().is_empty() || !files.is_empty() || (self.composer_mode == 1 && !self.post_title.trim().is_empty()));
                     let b = egui::Button::new(RichText::new(label).color(if ready { Color32::WHITE } else { t.text3 })).fill(if ready { t.primary } else { t.hover }).corner_radius(6).min_size(vec2(34.0, 28.0));
                     if (ui.add(b).clicked() || enter) && ready {
                         let text = self.chat_text.trim().to_string();
                         let title = if self.composer_mode == 1 { Some(if self.post_title.trim().is_empty() { "Update".to_string() } else { self.post_title.trim().to_string() }) } else { None };
-                        out = Some((text, title));
+                        out = Some((text, title, files));
                         self.chat_text.clear();
                         self.post_title.clear();
-                    } else if enter {
+                        self.chat_files.clear();
+                    } else if enter && files_ok && self.chat_files.is_empty() {
                         self.chat_text.clear();
                     }
                 });
@@ -455,26 +477,46 @@ impl App {
         out
     }
 
-    /// The message box; returns the text when Enter (without Shift) or Send is pressed.
-    fn composer(&mut self, ui: &mut Ui, hint: &str, thread: bool) -> Option<String> {
+    /// The thread's message box; returns the text and attachments when Enter
+    /// (without Shift) or Send is pressed.
+    fn composer(&mut self, ui: &mut Ui, hint: &str, thread: bool) -> Option<(String, Vec<Attachment>)> {
         let t = self.t();
         let mut out = None;
-        let text = if thread { &mut self.thread_text } else { &mut self.chat_text };
         egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(8)).fill(t.card).show(ui, |ui| {
-            let r = ui.add(egui::TextEdit::multiline(text).hint_text(hint).frame(false).desired_rows(2).desired_width(f32::INFINITY));
+            self.pending_strip(ui, thread);
+            let (files_ok, files) = self.pending_ready(thread);
+            let has_files = !(if thread { &self.thread_files } else { &self.chat_files }).is_empty();
+            let id = egui::Id::new(if thread { super::files::THREAD_BOX } else { super::files::CHAT_BOX });
+            let text = if thread { &mut self.thread_text } else { &mut self.chat_text };
+            let r = ui.add(egui::TextEdit::multiline(text).id(id).hint_text(hint).frame(false).desired_rows(2).desired_width(f32::INFINITY));
             r.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, if thread { "Reply composer" } else { "Message composer" }));
             let enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+            let mut pick = false;
             ui.horizontal(|ui| {
+                let b = ui.add(egui::Button::new(RichText::new("+").color(t.text2)).frame(false)).on_hover_text("Add pictures or videos");
+                b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Add pictures or videos to the reply"));
+                pick = b.clicked();
                 ui.label(RichText::new("Enter to send, Shift+Enter for a new line").small().color(t.text3));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if (primary_button(ui, &t, "Send").clicked() || enter) && !text.trim().is_empty() {
-                        out = Some(text.trim().to_string());
+                    let ready = files_ok && (!text.trim().is_empty() || !files.is_empty());
+                    if (primary_button(ui, &t, "Send").clicked() || enter) && ready {
+                        out = Some((text.trim().to_string(), files));
                         text.clear();
-                    } else if enter {
+                    } else if enter && !has_files {
                         text.clear();
                     }
                 });
             });
+            if out.is_some() {
+                if thread {
+                    self.thread_files.clear();
+                } else {
+                    self.chat_files.clear();
+                }
+            }
+            if pick {
+                self.pick_media(thread);
+            }
         });
         out
     }
@@ -523,6 +565,9 @@ impl App {
                 }
                 if !m.text.is_empty() {
                     ui.add(egui::Label::new(self.mention_text(&m.text, 14.0)).wrap());
+                }
+                if let Some(index) = self.attachment_tiles(ui, m) {
+                    acts.push(ChatAction::OpenMedia { ch: cid, msg: m.id, index });
                 }
                 if let Some(ch) = m.call.as_deref().and_then(super::huddle::huddle_channel) {
                     let here = self.huddle.channel == Some(ch);
@@ -702,9 +747,9 @@ impl App {
                         }
                     }
                 }
-                ChatAction::SendPost { ch, title, text } => {
+                ChatAction::SendPost { ch, title, text, files } => {
                     let id = self.data.new_id();
-                    let m = Message { id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
+                    let m = Message { attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         c.messages.push(m);
                         c.last_read = now_ts();
@@ -741,9 +786,12 @@ impl App {
                     }
                     self.dirty = true;
                 }
-                ChatAction::Send { ch, text, parent } => {
+                ChatAction::OpenMedia { ch, msg, index } => {
+                    self.viewer = Some(super::files::Viewer::new(ch, msg, index));
+                }
+                ChatAction::Send { ch, text, parent, files } => {
                     let id = self.data.new_id();
-                    let m = Message { id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
+                    let m = Message { attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         match parent {
                             Some(pid) => {

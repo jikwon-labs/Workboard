@@ -13,6 +13,8 @@ struct Ui1 {
     tree: Vec<(String, egui::Rect)>,
     size: egui::Vec2,
     shapes: Vec<egui::epaint::ClippedShape>,
+    /// files dropped on the window in the next frame
+    dropped: Vec<egui::DroppedFile>,
 }
 
 impl Ui1 {
@@ -24,7 +26,7 @@ impl Ui1 {
     fn sized(w: f32, h: f32) -> Self {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        let mut h = Ui1 { ctx, app: App::build(None, Some(Data::seed())), time: 0.0, tree: vec![], size: vec2(w, h), shapes: vec![] };
+        let mut h = Ui1 { ctx, app: App::build(None, Some(Data::seed())), time: 0.0, tree: vec![], size: vec2(w, h), shapes: vec![], dropped: vec![] };
         h.frame(vec![]);
         h.frame(vec![]);
         h
@@ -36,6 +38,7 @@ impl Ui1 {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
             time: Some(self.time),
             events,
+            dropped_files: std::mem::take(&mut self.dropped),
             ..Default::default()
         };
         let app = &mut self.app;
@@ -574,6 +577,9 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.has(&format!("Signed in as {} (Owner)", my_name)));
     assert!(h.has("People"));
     assert!(h.has("Make admin") && h.has("Remove access") && h.has("New code"));
+    // row buttons leave room around the text, all the same height
+    let heights: Vec<f32> = ["Make admin", "Remove access", "New code"].iter().map(|n| h.tree.iter().find(|(t, _)| t == n).unwrap().1.height()).collect();
+    assert!(heights.iter().all(|&ht| ht >= 26.0 && (ht - heights[0]).abs() < 0.5), "row button heights {:?}", heights);
     assert!(h.has(&format!("Code for {}: ABCD-EFGH-JKMN", other.name)));
     h.click("Copy");
     // the owner can go back to a backup, with a second click to confirm
@@ -620,7 +626,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     let my_name = h.app.data.member(me).unwrap().name.clone();
     // a huddle message in chat has a Join button
     let id = h.app.data.new_id();
-    h.app.data.channels[0].messages.push(Message { id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
+    h.app.data.channels[0].messages.push(Message { attachments: vec![], id, author: other.id, text: "Started a huddle".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)) });
     h.app.section = Section::Chat;
     h.app.chat_open = Some(ch);
     h.settle();
@@ -1872,4 +1878,75 @@ fn narrow_task_window_has_no_blank_rows_when_fields_are_off() {
     let step = h.rect("\u{1F464}  Assignees").center().y - h.rect("\u{25CE}  Status").center().y;
     assert!(est.center().y - dates.center().y < step * 1.5, "no gap after Dates: {:?} {:?} (row step {})", dates, est, step);
     assert!(tags.center().y - est.center().y < step * 1.5, "no gap after Time estimate: {:?} {:?}", est, tags);
+}
+
+/// A picture file for attachment tests.
+fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("wb-ui-pic-{:x}", crate::sync::random_u64()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut img = image::RgbaImage::new(w, h);
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        *p = image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 160, 255]);
+    }
+    let p = dir.join(name);
+    img.save(&p).unwrap();
+    p
+}
+
+#[test]
+fn drop_a_picture_send_it_and_open_it_large() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    let n = h.app.data.channels.iter().find(|c| c.id == cid).unwrap().messages.len();
+    // dragging over the window says where to drop
+    let pic = test_picture("beach.png", 600, 400);
+    h.frame(vec![]);
+    // dropped from Finder: it waits in the message box until it's ready
+    h.dropped = vec![egui::DroppedFile { path: Some(pic.clone()), ..Default::default() }];
+    h.frame(vec![]);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !(h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty()) && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.settle();
+    assert!(h.has("Attachment beach.png"), "a tile in the message box");
+    // a picture alone can be sent: Enter in the empty box
+    h.click("Message composer");
+    h.key(egui::Key::Enter);
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert_eq!(ch.messages.len(), n + 1, "sent");
+    let m = ch.messages.last().unwrap().clone();
+    assert_eq!(m.text, "");
+    assert_eq!(m.attachments.len(), 1);
+    assert_eq!((m.attachments[0].w, m.attachments[0].h, m.attachments[0].kind), (600, 400, MediaKind::Image));
+    assert!(h.app.chat_files.is_empty(), "the box is empty again");
+    assert!(!h.has("Attachment beach.png"));
+    // it shows in the conversation; clicking opens it large, Esc closes
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.app.files.texture(&m.attachments[0].file, super::files::THUMB).is_none() && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(h.app.files.texture(&m.attachments[0].file, super::files::THUMB).is_some(), "the picture was decoded for the screen");
+    h.click("Picture beach.png");
+    assert!(h.app.viewer.is_some());
+    assert!(h.has("Large beach.png") && h.has("Show in Finder") && h.has("Save to Downloads"));
+    h.key(egui::Key::Escape);
+    assert!(h.app.viewer.is_none());
+    // a file that isn't a picture or video is refused in the box
+    let txt = pic.with_file_name("notes.txt");
+    std::fs::write(&txt, "hi").unwrap();
+    h.dropped = vec![egui::DroppedFile { path: Some(txt), ..Default::default() }];
+    h.frame(vec![]);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.app.chat_files.first().is_some_and(|p| p.error.is_none()) && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(h.app.chat_files[0].error.as_deref().unwrap_or("").contains("isn't a picture or a video"));
+    assert!(!h.app.pending_ready(false).0, "can't send with a refused file");
+    h.click("Remove notes.txt");
+    assert!(h.app.chat_files.is_empty());
 }

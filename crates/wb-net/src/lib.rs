@@ -20,6 +20,9 @@ use std::time::{Duration, Instant};
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
+mod files;
+pub use files::{download, remote_size, sha256_file, upload, Auth, FileError};
+
 pub const DEFAULT_PORT: u16 = 8787;
 pub const PATH: &str = "/ws";
 /// A whole workspace travels in one message, so allow big ones.

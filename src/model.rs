@@ -287,6 +287,34 @@ pub struct Message {
     /// A call someone started; others join from this link.
     #[serde(default)]
     pub call: Option<String>,
+    /// Pictures and videos. The files live on the team server (or in the
+    /// shared folder); the message only says which ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+}
+
+pub use crate::media::MediaKind;
+
+/// One picture or video in a message. There is deliberately no `id` key:
+/// wb-sync tracks arrays of objects with ids item by item, so an app that
+/// doesn't know attachments would mark them deleted for everyone. Without
+/// ids the array is a plain field and survives such an app.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Attachment {
+    /// sha256 of the contents (hex); also the file's name on the server.
+    pub file: String,
+    pub name: String,
+    #[serde(default)]
+    pub kind: MediaKind,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub w: u32,
+    #[serde(default)]
+    pub h: u32,
+    /// Length of a video in seconds; 0 for a picture.
+    #[serde(default)]
+    pub secs: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -1262,6 +1290,7 @@ impl Data {
             post_type: String::new(),
             pinned: false,
             call: None,
+            attachments: vec![],
         };
         let c1 = d.new_id();
         let mut m1 = msg(&mut d, 2, "Morning everyone! The new homepage mockups are in the Website Redesign list.", 3 * 3600);

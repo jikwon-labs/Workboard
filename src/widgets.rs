@@ -506,6 +506,17 @@ pub fn primary_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
     )
 }
 
+/// A small action button in a list row: room around the text, rounded like
+/// the rest (egui's small_button has no vertical padding, so the text touched
+/// the outline).
+pub fn row_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = vec2(10.0, 3.0);
+        ui.add(egui::Button::new(text).corner_radius(6).min_size(vec2(0.0, 26.0)))
+    })
+    .inner
+}
+
 pub fn chip(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let font = FontId::proportional(11.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);

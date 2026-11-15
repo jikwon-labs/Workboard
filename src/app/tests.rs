@@ -246,7 +246,7 @@ fn chat_send_react_pin_thread_post_and_task() {
     let mut a = app();
     let cid = a.data.channels.iter().find(|c| c.name == "general").unwrap().id;
     let before = a.data.channels.iter().find(|c| c.id == cid).unwrap().messages.len();
-    a.apply_chat(vec![ChatAction::Send { ch: cid, text: "Hello team".into(), parent: None }]);
+    a.apply_chat(vec![ChatAction::Send { ch: cid, text: "Hello team".into(), parent: None, files: vec![] }]);
     let ch = a.data.channels.iter().find(|c| c.id == cid).unwrap();
     assert_eq!(ch.messages.len(), before + 1);
     let mid = ch.messages.last().unwrap().id;
@@ -260,10 +260,10 @@ fn chat_send_react_pin_thread_post_and_task() {
     a.apply_chat(vec![ChatAction::Pin { ch: cid, msg: mid }]);
     assert!(a.data.channels.iter().find(|c| c.id == cid).unwrap().messages.last().unwrap().pinned);
     // thread reply
-    a.apply_chat(vec![ChatAction::Send { ch: cid, text: "Reply".into(), parent: Some(mid) }]);
+    a.apply_chat(vec![ChatAction::Send { ch: cid, text: "Reply".into(), parent: Some(mid), files: vec![] }]);
     assert_eq!(a.data.channels.iter().find(|c| c.id == cid).unwrap().messages.last().unwrap().replies.len(), 1);
     // post
-    a.apply_chat(vec![ChatAction::SendPost { ch: cid, title: "Launch".into(), text: "We ship Friday".into() }]);
+    a.apply_chat(vec![ChatAction::SendPost { ch: cid, title: "Launch".into(), text: "We ship Friday".into(), files: vec![] }]);
     assert_eq!(a.data.channels.iter().find(|c| c.id == cid).unwrap().messages.last().unwrap().post_title.as_deref(), Some("Launch"));
     // message -> task
     let tasks = a.data.tasks.len();
@@ -483,7 +483,7 @@ fn two_computers_work_in_one_shared_folder() {
 
     // both work at the same time
     let ch = b.data.channels.iter().find(|c| c.name == "general").unwrap().id;
-    b.apply_chat(vec![ChatAction::Send { ch, text: "hi from Bora".into(), parent: None }]);
+    b.apply_chat(vec![ChatAction::Send { ch, text: "hi from Bora".into(), parent: None, files: vec![] }]);
     b.sync_note_change();
     b.write_shared();
     let list = a.data.first_list().unwrap();
@@ -855,7 +855,7 @@ fn two_computers_work_through_a_server() {
 
     // chat from B reaches A
     let ch = b.data.channels.iter().find(|c| c.name == "general").unwrap().id;
-    b.apply_chat(vec![ChatAction::Send { ch, text: "hi through the server".into(), parent: None }]);
+    b.apply_chat(vec![ChatAction::Send { ch, text: "hi through the server".into(), parent: None, files: vec![] }]);
     b.sync_note_change();
     b.write_shared();
     net_until(&mut a, "B's message at A", |a| a.data.channels.iter().find(|c| c.id == ch).is_some_and(|c| c.messages.last().is_some_and(|m| m.text == "hi through the server")));
@@ -1023,4 +1023,181 @@ fn without_a_server_the_huddle_button_still_opens_a_browser_call() {
     assert!(a.huddle.channel.is_none());
     a.join_huddle(ch);
     assert!(a.huddle.channel.is_none(), "can't join an in-app huddle without the server");
+}
+
+fn picture_file(name: &str, w: u32, h: u32) -> std::path::PathBuf {
+    let dir = temp_folder("pic");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut img = image::RgbaImage::new(w, h);
+    for (x, _, p) in img.enumerate_pixels_mut() {
+        *p = image::Rgba([if x < w / 2 { 200 } else { 30 }, 90, 40, 255]);
+    }
+    let p = dir.join(name);
+    img.save(&p).unwrap();
+    p
+}
+
+/// Tick until the message box's attachments are ready (or fail the test).
+fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < end {
+        a.files_tick(None);
+        a.net_tick(None);
+        let (ok, files) = a.pending_ready(thread);
+        let list = if thread { &a.thread_files } else { &a.chat_files };
+        if let Some(e) = list.iter().find_map(|p| p.error.clone()) {
+            panic!("attachment refused: {}", e);
+        }
+        if ok && !files.is_empty() {
+            return files;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("attachments never got ready: {:?}", a.chat_files);
+}
+
+#[test]
+fn a_picture_goes_through_the_server_to_the_other_computer() {
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| a.data.extra.shared.is_some());
+    net_until(&mut a, "A sees the people list", |a| a.sync_rt.people.iter().any(|p| p.member == 3));
+    a.access_request(wb_net::Msg::CreateInvite { member: 3, role: wb_net::Role::Member });
+    net_until(&mut a, "invite code", |a| a.sync_rt.people.iter().any(|p| p.member == 3 && p.invite.is_some()));
+    let code = a.sync_rt.people.iter().find(|p| p.member == 3).unwrap().invite.clone().unwrap();
+    let mut b = App::build(None, Some(Data::blank("Theirs", Member { id: 1, name: "B".into(), ..Default::default() })));
+    b.connect_server(&addr, &code).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+
+    // A puts a picture in the message box: it's checked, then sent to the server
+    let ch = a.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    let pic = picture_file("sunset.png", 320, 200);
+    a.add_media(false, Some(pic.clone()), None);
+    let files = until_ready(&mut a, false);
+    assert_eq!(files.len(), 1);
+    let att = files[0].clone();
+    assert_eq!((att.name.as_str(), att.kind, att.w, att.h), ("sunset.png", MediaKind::Image, 320, 200));
+    assert_eq!(att.bytes, std::fs::metadata(&pic).unwrap().len());
+    assert_eq!(std::fs::read(server.home.join(workboard_server::FILES_DIR).join(&att.file)).unwrap(), std::fs::read(&pic).unwrap(), "on the server under its hash");
+    a.apply_chat(vec![ChatAction::Send { ch, text: "look at this".into(), parent: None, files }]);
+    a.sync_note_change();
+    a.write_shared();
+
+    // B gets the message, and the picture when it comes on screen
+    net_until(&mut b, "A's picture message at B", |b| b.data.channels.iter().any(|c| c.messages.iter().any(|m| m.text == "look at this" && m.attachments.len() == 1)));
+    let m = b.data.channels.iter().flat_map(|c| c.messages.iter()).find(|m| m.text == "look at this").unwrap().clone();
+    assert_eq!(m.attachments[0], att, "the same attachment details");
+    assert!(b.files.local(&att.file).is_none(), "not fetched before it's shown");
+    let remote = b.media_remote();
+    assert!(matches!(remote, super::files::Remote::Server { .. }));
+    b.files.want(&att, super::files::THUMB);
+    let sha = att.file.clone();
+    // the screen asks again every frame while the message is visible
+    b.files.settle(&remote, |f| {
+        f.want(&att, super::files::THUMB);
+        f.local(&sha).is_some() && f.decoded(&sha, super::files::THUMB)
+    });
+    assert_eq!(std::fs::read(b.files.local(&att.file).unwrap()).unwrap(), std::fs::read(&pic).unwrap());
+}
+
+#[test]
+fn attachments_wait_with_their_channel_and_only_media_goes() {
+    let mut a = app();
+    let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).take(2).collect();
+    a.section = Section::Chat;
+    a.chat_open = Some(chans[0]);
+    a.drafts.chat_files.swap(a.chat_open, &mut a.chat_files);
+    // no server, no folder: the picture is ready once it's in the cache
+    assert_eq!(a.media_remote(), super::files::Remote::None);
+    a.add_media(false, Some(picture_file("one.png", 50, 40)), None);
+    let files = until_ready(&mut a, false);
+    assert!(a.files.local(&files[0].file).is_some());
+    // another channel has its own (empty) box; coming back brings the picture back
+    a.chat_open = Some(chans[1]);
+    a.drafts.chat_files.swap(a.chat_open, &mut a.chat_files);
+    assert!(a.chat_files.is_empty());
+    a.chat_open = Some(chans[0]);
+    a.drafts.chat_files.swap(a.chat_open, &mut a.chat_files);
+    assert_eq!(a.chat_files.len(), 1);
+    assert_eq!(a.chat_files[0].att.as_ref().map(|x| x.file.clone()), Some(files[0].file.clone()));
+    // a pasted screenshot arrives as PNG bytes
+    let png = std::fs::read(picture_file("shot.png", 30, 20)).unwrap();
+    a.add_media(false, None, Some(png));
+    let files = until_ready(&mut a, false);
+    assert_eq!(files.len(), 2);
+    assert_eq!((files[1].name.as_str(), files[1].w, files[1].h), ("Pasted image.png", 30, 20));
+    // a thread reply can carry a picture too
+    a.apply_chat(vec![ChatAction::Send { ch: chans[0], text: String::new(), parent: None, files: files.clone() }]);
+    let mid = a.data.channels.iter().find(|c| c.id == chans[0]).unwrap().messages.last().unwrap().id;
+    a.apply_chat(vec![ChatAction::Send { ch: chans[0], text: "reply".into(), parent: Some(mid), files: files[..1].to_vec() }]);
+    let m = a.data.channels.iter().find(|c| c.id == chans[0]).unwrap().messages.last().unwrap().clone();
+    assert_eq!(m.attachments.len(), 2);
+    assert_eq!(m.replies[0].attachments.len(), 1);
+    // messages without attachments don't grow a field in data.json
+    let json = serde_json::to_value(&a.data).unwrap();
+    let plain = json["channels"].as_array().unwrap().iter().flat_map(|c| c["messages"].as_array().unwrap().iter()).find(|m| m["attachments"].is_null());
+    assert!(plain.is_some());
+    // things that aren't pictures or videos are refused
+    let doc = temp_folder("doc").join("plan.pdf");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, b"%PDF").unwrap();
+    a.chat_files.clear();
+    a.add_media(false, Some(doc), None);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while a.chat_files[0].error.is_none() && std::time::Instant::now() < end {
+        a.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(a.chat_files[0].error.as_deref().unwrap().contains("isn't a picture or a video"));
+}
+
+#[test]
+fn in_a_shared_folder_pictures_go_into_its_files_folder() {
+    let folder = temp_folder("shared-files");
+    let mut a = app();
+    a.share_here(&folder.to_string_lossy()).unwrap();
+    assert_eq!(a.media_remote(), super::files::Remote::Folder(folder.clone()));
+    a.add_media(false, Some(picture_file("team.png", 40, 40)), None);
+    let files = until_ready(&mut a, false);
+    assert!(folder.join("files").join(&files[0].file).is_file(), "copied into the shared folder");
+    // the folder sync ignores it (only *.workboard.json files are read)
+    assert!(crate::sync::other_files(&folder, "nobody").iter().all(|(p, _)| p.extension().is_some_and(|e| e == "json")));
+    // another computer copies it from there into its own cache
+    let b = App::build(None, Some(Data::seed()));
+    let mut bf = super::files::Files::new(temp_folder("b-cache"));
+    let remote = super::files::Remote::Folder(folder.clone());
+    bf.want(&files[0], super::files::THUMB);
+    let sha = files[0].file.clone();
+    bf.settle(&remote, |f| f.local(&sha).is_some());
+    drop(b);
+}
+
+#[test]
+fn a_video_shows_a_still_from_the_cache() {
+    let Some(ffmpeg) = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].into_iter().find(|p| std::path::Path::new(p).exists()) else {
+        eprintln!("skipped: ffmpeg isn't installed");
+        return;
+    };
+    let dir = temp_folder("video");
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("Holiday.MP4");
+    let ok = std::process::Command::new(ffmpeg).args(["-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=2:size=640x360:rate=30", "-pix_fmt", "yuv420p", "-c:v", "libx264"]).arg(&clip).output().unwrap().status.success();
+    assert!(ok);
+    let mut a = app();
+    a.add_media(false, Some(clip), None);
+    let files = until_ready(&mut a, false);
+    let v = files[0].clone();
+    assert_eq!((v.kind, v.w, v.h), (MediaKind::Video, 640, 360));
+    assert!((v.secs - 2.0).abs() < 0.1, "{}", v.secs);
+    // the cache names files by hash alone; the still must come out anyway
+    let remote = a.media_remote();
+    let sha = v.file.clone();
+    a.files.settle(&remote, |f| {
+        f.want(&v, super::files::THUMB);
+        f.decoded(&sha, super::files::THUMB) || f.broken(&sha, super::files::THUMB)
+    });
+    assert!(a.files.decoded(&sha, super::files::THUMB), "a still from the video");
+    assert!(a.files.playable(&v).unwrap().to_string_lossy().ends_with(".mp4"));
 }

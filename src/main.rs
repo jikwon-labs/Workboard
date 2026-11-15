@@ -2,6 +2,7 @@ mod app;
 mod model;
 use wb_sync as sync;
 mod theme;
+mod media;
 mod updater;
 mod widgets;
 

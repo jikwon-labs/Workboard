@@ -18,6 +18,10 @@ struct Server {
 
 impl Server {
     fn start(home: &PathBuf, port: u16) -> Server {
+        Self::start_with(home, port, workboard_server::Options::default())
+    }
+
+    fn start_with(home: &PathBuf, port: u16, options: workboard_server::Options) -> Server {
         let home = home.clone();
         let (port_tx, port_rx) = std::sync::mpsc::channel();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -38,7 +42,7 @@ impl Server {
                     }
                 };
                 port_tx.send(listener.local_addr().unwrap().port()).unwrap();
-                workboard_server::serve(listener, home, async {
+                workboard_server::serve_with(listener, home, options, async {
                     let _ = stop_rx.await;
                 })
                 .await
@@ -606,6 +610,195 @@ fn the_owner_restores_a_backup_from_the_app() {
     b.wait("the task is back at B", |d| task_names(d) == ["Plan", "Ship"]);
     a.wait("and at A", |d| task_names(d) == ["Plan", "Ship"]);
     assert!(!workboard_server::backup_files(&dir, "before-restore").is_empty(), "the copy from before is kept");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------------------------ files
+
+fn auth(app: &App) -> wb_net::Auth {
+    wb_net::Auth { device: app.device.clone(), token: app.token.clone().expect("signed in with a token") }
+}
+
+/// A file of `n` bytes that isn't all the same byte.
+fn some_file(dir: &PathBuf, name: &str, n: usize) -> (PathBuf, String, Vec<u8>) {
+    std::fs::create_dir_all(dir).unwrap();
+    let bytes: Vec<u8> = (0..n).map(|i| (i * 31 % 251) as u8).collect();
+    let path = dir.join(name);
+    std::fs::write(&path, &bytes).unwrap();
+    let (sha, len) = wb_net::sha256_file(&path).unwrap();
+    assert_eq!(len as usize, n);
+    (path, sha, bytes)
+}
+
+fn no_progress() -> impl FnMut(u64, u64) -> bool {
+    |_, _| true
+}
+
+#[test]
+fn a_picture_goes_up_from_a_and_comes_down_at_b() {
+    let home = temp_home("files");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.until("A has a token", |a| a.token.is_some());
+    b.until("B has a token", |b| b.token.is_some());
+    let addr = format!("127.0.0.1:{}", server.port);
+    let work = home.join("work");
+    let (path, sha, bytes) = some_file(&work, "photo.jpg", 3 << 20);
+
+    assert_eq!(wb_net::remote_size(&addr, &auth(&a), &sha).unwrap(), None, "not there yet");
+    let mut seen = vec![];
+    wb_net::upload(&addr, &auth(&a), &sha, &path, "image/jpeg", &mut |d, t| {
+        seen.push((d, t));
+        true
+    })
+    .unwrap();
+    assert!(seen.len() > 1 && seen.last() == Some(&(bytes.len() as u64, bytes.len() as u64)), "progress up to the whole file");
+    assert_eq!(wb_net::remote_size(&addr, &auth(&a), &sha).unwrap(), Some(bytes.len() as u64));
+    assert_eq!(std::fs::read(home.join("files").join(&sha)).unwrap(), bytes, "stored under its sha256");
+
+    // B fetches it, checked against the name
+    let dest = work.join("b-cache").join(&sha);
+    wb_net::download(&addr, &auth(&b), &sha, &dest, &mut no_progress()).unwrap();
+    assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+
+    // the same file again isn't sent again
+    let mut calls = 0;
+    wb_net::upload(&addr, &auth(&b), &sha, &path, "image/jpeg", &mut |_, _| {
+        calls += 1;
+        true
+    })
+    .unwrap();
+    assert_eq!(calls, 1, "only the final progress report, nothing streamed");
+    let stored: Vec<_> = std::fs::read_dir(home.join("files")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    assert_eq!(stored.len(), 2, "one file and its type: {:?}", stored);
+
+    // a range, for seeking in a video
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    let t = auth(&a);
+    s.write_all(format!("GET /files/{} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}:{}\r\nRange: bytes=10-19\r\nConnection: close\r\n\r\n", sha, t.device, t.token).as_bytes()).unwrap();
+    let mut out = vec![];
+    s.read_to_end(&mut out).unwrap();
+    let split = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&out[..split]).to_lowercase();
+    assert!(head.starts_with("http/1.1 206"), "{}", head);
+    assert!(head.contains(&format!("content-range: bytes 10-19/{}", bytes.len())), "{}", head);
+    assert!(head.contains("content-type: image/jpeg"), "{}", head);
+    assert_eq!(&out[split + 4..], &bytes[10..20]);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn files_need_a_valid_token_and_honest_contents() {
+    let home = temp_home("files-auth");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.until("A has a token", |a| a.token.is_some());
+    b.until("B has a token", |b| b.token.is_some());
+    let addr = format!("127.0.0.1:{}", server.port);
+    let (path, sha, _) = some_file(&home.join("work"), "clip.mov", 4096);
+
+    // no token, a made-up token
+    let (head, _) = http_get(server.port, &format!("/files/{}", sha));
+    assert!(head.starts_with("HTTP/1.1 401"), "{}", head);
+    let fake = wb_net::Auth { device: a.device.clone(), token: "0".repeat(64) };
+    assert_eq!(wb_net::upload(&addr, &fake, &sha, &path, "video/quicktime", &mut no_progress()), Err(wb_net::FileError::NotSignedIn));
+
+    // contents that don't match the name are refused
+    let wrong = "a".repeat(64);
+    match wb_net::upload(&addr, &auth(&a), &wrong, &path, "video/quicktime", &mut no_progress()) {
+        Err(wb_net::FileError::Other(e)) => assert!(e.contains("don't match"), "{}", e),
+        other => panic!("expected a refusal, got {:?}", other),
+    }
+    assert!(!home.join("files").join(&wrong).exists());
+    assert_eq!(wb_net::download(&addr, &auth(&a), &wrong, &home.join("work/x"), &mut no_progress()), Err(wb_net::FileError::Missing));
+    // not a file name at all
+    let (head, _) = http_get(server.port, "/files/..%2Fworkspace.json");
+    assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
+
+    // once B's access is removed, B's token stops working for files too
+    wb_net::upload(&addr, &auth(&a), &sha, &path, "video/quicktime", &mut no_progress()).unwrap();
+    let b_auth = auth(&b);
+    a.client.send(Msg::Revoke { member: 2 });
+    b.wait_status(|s| matches!(s, Status::Refused(_)), "B is signed out");
+    assert_eq!(wb_net::download(&addr, &b_auth, &sha, &home.join("work/b"), &mut no_progress()), Err(wb_net::FileError::NotSignedIn));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn files_over_the_limit_are_refused() {
+    let home = temp_home("files-big");
+    let server = Server::start_with(&home, 0, workboard_server::Options { max_file: 64 << 10 });
+    let (mut a, _b) = two_apps(server.port);
+    a.until("A has a token", |a| a.token.is_some());
+    let addr = format!("127.0.0.1:{}", server.port);
+    let (path, sha, _) = some_file(&home.join("work"), "long.mp4", 1 << 20);
+    assert_eq!(wb_net::upload(&addr, &auth(&a), &sha, &path, "video/mp4", &mut no_progress()), Err(wb_net::FileError::TooLarge));
+    let leftovers = std::fs::read_dir(home.join("files")).map(|r| r.flatten().count()).unwrap_or(0);
+    assert_eq!(leftovers, 0, "nothing half-written stays behind");
+    // a small one still goes
+    let (small, sha2, _) = some_file(&home.join("work"), "short.mp4", 1000);
+    wb_net::upload(&addr, &auth(&a), &sha2, &small, "video/mp4", &mut no_progress()).unwrap();
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_broken_download_continues_where_it_stopped() {
+    let home = temp_home("files-resume");
+    let server = Server::start(&home, 0);
+    let (mut a, _b) = two_apps(server.port);
+    a.until("A has a token", |a| a.token.is_some());
+    let addr = format!("127.0.0.1:{}", server.port);
+    let (path, sha, bytes) = some_file(&home.join("work"), "movie.mp4", 1 << 20);
+    wb_net::upload(&addr, &auth(&a), &sha, &path, "video/mp4", &mut no_progress()).unwrap();
+    // half of it arrived last time
+    let dest = home.join("cache").join(&sha);
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::fs::write(dest.with_extension("part"), &bytes[..bytes.len() / 2]).unwrap();
+    let mut first = None;
+    wb_net::download(&addr, &auth(&a), &sha, &dest, &mut |d, t| {
+        first.get_or_insert((d, t));
+        true
+    })
+    .unwrap();
+    let (d, t) = first.unwrap();
+    assert!(d > (bytes.len() / 2) as u64 && t == bytes.len() as u64, "counted on from the half: {} of {}", d, t);
+    assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+    assert!(!dest.with_extension("part").exists());
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// An app from before attachments (0.1.4) reads messages without the field
+/// and edits them. The attachments must survive: they are a plain array (no
+/// ids), so the server keeps them from its own copy.
+#[test]
+fn attachments_survive_an_app_that_does_not_know_them() {
+    let home = temp_home("files-old-app");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let pic = json!([{"file": "ab".repeat(32), "name": "photo.jpg", "kind": "Image", "bytes": 1234, "w": 640, "h": 480, "secs": 0.0}]);
+    let p2 = pic.clone();
+    a.change(move |d| {
+        d["channels"][0]["messages"].as_array_mut().unwrap().push(json!({"id": 4001, "author": 1, "text": "look", "ts": now(), "attachments": p2}));
+    });
+    b.wait("the picture message at B", |d| texts(d).contains(&"look".to_string()));
+    // B is the old app: it never keeps the field, and it reacts to the message
+    b.change(|d| {
+        for m in d["channels"][0]["messages"].as_array_mut().unwrap() {
+            m.as_object_mut().unwrap().remove("attachments");
+            if m["id"] == 4001 {
+                m["reactions"] = json!([{"emoji": "👍", "users": [2]}]);
+            }
+        }
+    });
+    a.wait("B's reaction at A", |d| d["channels"][0]["messages"].as_array().unwrap().iter().any(|m| m["id"] == 4001 && m["reactions"][0]["users"] == json!([2])));
+    let at_a = a.data["channels"][0]["messages"].as_array().unwrap().iter().find(|m| m["id"] == 4001).unwrap().clone();
+    assert_eq!(at_a["attachments"], pic, "the picture is still there");
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

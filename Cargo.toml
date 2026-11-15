@@ -36,3 +36,7 @@ nokhwa-bindings-macos = { path = "third_party/nokhwa-bindings-macos" }
 
 [profile.release]
 opt-level = 2
+
+[[test]]
+name = "player"
+harness = false

@@ -568,7 +568,7 @@ impl App {
         let id = self.data.new_id();
         let me = self.data.me;
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-            c.messages.push(Message { id, author: me, text: "Started a call".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(link.clone()) });
+            c.messages.push(Message { attachments: vec![], id, author: me, text: "Started a call".into(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: Some(link.clone()) });
             c.last_read = now_ts();
         }
         self.section = Section::Chat;
@@ -647,13 +647,13 @@ impl App {
                     ui.label(RichText::new(format!("{} KB", b.bytes.div_ceil(1024))).small().color(t.text3));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if confirm.as_deref() == Some(b.name.as_str()) {
-                            if ui.small_button("Cancel").clicked() {
+                            if row_button(ui, "Cancel").clicked() {
                                 confirm = None;
                             }
-                            if ui.small_button(RichText::new("Yes, restore").color(t.danger)).clicked() {
+                            if row_button(ui, RichText::new("Yes, restore").color(t.danger)).clicked() {
                                 req = Some(NetMsg::Restore { name: b.name.clone() });
                             }
-                        } else if ui.small_button("Restore").on_hover_text(format!("Go back to {}", b.label())).clicked() {
+                        } else if row_button(ui, "Restore").on_hover_text(format!("Go back to {}", b.label())).clicked() {
                             confirm = Some(b.name.clone());
                         }
                     });
@@ -684,19 +684,19 @@ impl App {
                     ui.label(RichText::new(match p.devices { 0 => "not signed in".to_string(), 1 => "1 computer".to_string(), n => format!("{} computers", n) }).small().color(t.text3));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if p.role != Role::Owner && p.member != me {
-                            if ui.small_button(RichText::new("Remove access").color(t.danger)).on_hover_text(format!("Sign out {}'s computers", name)).clicked() {
+                            if row_button(ui, RichText::new("Remove access").color(t.danger)).on_hover_text(format!("Sign out {}'s computers", name)).clicked() {
                                 req = Some(NetMsg::Revoke { member: p.member });
                             }
                             if my_role.manages() {
                                 let (label, role) = if p.role == Role::Admin { ("Make member", Role::Member) } else { ("Make admin", Role::Admin) };
-                                if ui.small_button(label).clicked() {
+                                if row_button(ui, label).clicked() {
                                     req = Some(NetMsg::SetRole { member: p.member, role });
                                 }
                             }
                         }
                         // a code for the owner signs in as the owner: only the owner makes one
                         let may_invite = p.member != me && (p.role != Role::Owner || my_role == Role::Owner);
-                        if may_invite && ui.small_button(if p.invite.is_some() { "New code" } else { "Invite code" }).clicked() {
+                        if may_invite && row_button(ui, if p.invite.is_some() { "New code" } else { "Invite code" }).clicked() {
                             req = Some(NetMsg::CreateInvite { member: p.member, role: Role::Member });
                         }
                     });
@@ -705,7 +705,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.add_space(12.0);
                         ui.label(RichText::new(format!("Code for {}: {}", name, code)).monospace().color(t.text));
-                        if ui.small_button("Copy").clicked() {
+                        if row_button(ui, "Copy").clicked() {
                             ui.ctx().copy_text(code.clone());
                             self.toast = Some(("Invite code copied".into(), now_ts()));
                         }

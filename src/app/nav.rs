@@ -176,14 +176,7 @@ impl App {
         };
         let mut out = vec![];
         for task in &self.data.tasks {
-            // a task I made (or made as a copy of another) is mine like one I'm assigned to
-            let mine = task.assignees.contains(&me)
-                || task.activity.iter().any(|a| {
-                    a.author == me
-                        && !a.comment
-                        && (a.text == "created this task"
-                            || a.text.starts_with("duplicated this task from "))
-                });
+            let mine = self.my_task(task);
             for a in &task.activity {
                 if a.author == me {
                     continue;
@@ -282,6 +275,20 @@ impl App {
             }
         }
         out
+    }
+
+    /// A task whose comments are for me (the Inbox's Primary tab and
+    /// desktop notifications): one I'm assigned to, or one I made, as new
+    /// or as a copy of another.
+    pub(super) fn my_task(&self, t: &Task) -> bool {
+        let me = self.data.me;
+        t.assignees.contains(&me)
+            || t.activity.iter().any(|a| {
+                a.author == me
+                    && !a.comment
+                    && (a.text == "created this task"
+                        || a.text.starts_with("duplicated this task from "))
+            })
     }
 
     /// The Inbox badge: the Primary rows (not cleared, not saved for later)

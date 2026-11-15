@@ -130,14 +130,6 @@ impl App {
             .unwrap_or_else(|| tr("Someone").into())
     }
 
-    fn my_task(&self, t: &Task) -> bool {
-        let me = self.data.me;
-        t.assignees.contains(&me)
-            || t.activity
-                .iter()
-                .any(|a| a.author == me && !a.comment && a.text == "created this task")
-    }
-
     fn i_manage(&self) -> bool {
         self.data
             .member(self.data.me)

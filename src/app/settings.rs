@@ -237,11 +237,23 @@ impl App {
             });
         });
         ui.add_space(8.0);
+        if spaces.is_empty() {
+            ui.label(
+                RichText::new(tr(
+                    "No spaces yet. A Space holds your Lists and their tasks: make one with + New Space.",
+                ))
+                .color(t.text3),
+            );
+        }
         egui::Grid::new("spaces_table")
             .num_columns(5)
             .striped(true)
             .spacing(vec2(24.0, 10.0))
             .show(ui, |ui| {
+                // no header over an empty table
+                if spaces.is_empty() {
+                    return;
+                }
                 for h in ["Name", "Lists", "Tasks", "", ""] {
                     ui.label(RichText::new(tr(h)).small().color(t.text3));
                 }

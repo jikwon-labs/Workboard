@@ -166,3 +166,16 @@ fn workload_bars_say_what_they_compare_and_go_away_when_alone() {
     assert!(!h.has(caption));
     assert!(h.texts().iter().any(|x| x == "1 open"));
 }
+
+#[test]
+fn settings_spaces_with_none_says_so_and_offers_new_space() {
+    let mut h = with(no_space(), 1440.0, 900.0);
+    h.app.open_settings("Spaces");
+    h.settle();
+    assert!(h.has(
+        "No spaces yet. A Space holds your Lists and their tasks: make one with + New Space."
+    ));
+    assert!(!h.has("Lists"), "no table header over nothing");
+    h.click("+ New Space");
+    assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
+}

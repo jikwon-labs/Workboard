@@ -172,6 +172,7 @@ pub const T: &[(&str, &str)] = &[
     ("{} Spaces", "스페이스 {}개"),
     ("+ New Space", "+ 새 스페이스"),
     ("Show in sidebar", "사이드바에 표시"),
+    ("No spaces yet. A Space holds your Lists and their tasks: make one with + New Space.", "아직 스페이스가 없습니다. 스페이스에 목록과 작업이 들어갑니다. + 새 스페이스로 만드세요."),
     ("Nothing is archived. Archived Spaces and Lists show here so you can restore them.", "보관된 항목이 없습니다. 보관한 스페이스와 목록은 여기에 표시되며 다시 복원할 수 있습니다."),
     ("You can send up to {} pictures or videos in one message.", "메시지 하나에 사진이나 동영상을 {}개까지 보낼 수 있습니다."),
     ("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard.", "팀의 변경 사항을 읽지 못했습니다. 누군가 더 새 버전의 앱을 쓰고 있을 수 있으니 Workboard를 업데이트하세요."),

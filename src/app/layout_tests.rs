@@ -509,3 +509,32 @@ fn board_closed_column_says_how_many_are_hidden() {
     assert!(h.app.show_closed);
     assert!(h.has(&format!("Card {}", first)));
 }
+
+#[test]
+fn task_picker_says_how_many_it_does_not_list() {
+    let mut h = Ui1::new();
+    let base = task_named(&h, "Write copy for landing page").clone();
+    for k in 0..250 {
+        let mut x = base.clone();
+        x.id = 40_000 + k;
+        x.name = format!("Filler {}", k);
+        x.parent = None;
+        h.app.data.tasks.push(x);
+    }
+    let tid = base.id;
+    let total = h.app.pick_candidates(tid, TaskPick::Linked).len();
+    assert!(total > super::super::taskfields::PICK_ROWS);
+    h.app.modal = Some(Modal::PickTask {
+        task: tid,
+        mode: TaskPick::Linked,
+        query: String::new(),
+    });
+    h.settle();
+    let more = total - super::super::taskfields::PICK_ROWS;
+    assert!(
+        !h.painted_text(&trf!("{} more not shown. Search to find them.", more))
+            .is_empty(),
+        "{} more",
+        more
+    );
+}

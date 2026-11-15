@@ -28,6 +28,7 @@ use livekit::webrtc::video_source::VideoResolution;
 use livekit::webrtc::video_stream::native::NativeVideoStream;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -212,8 +213,25 @@ fn put_picture(pictures: &Pictures, id: &str, p: Picture) {
     g.insert(id.to_string(), (n, p));
 }
 
-/// Turn received frames into pictures (at most video::FPS a second).
-async fn watch(track: RemoteVideoTrack, identity: String, pictures: Pictures) {
+/// Who is being watched: a flag the watcher checks under the pictures lock,
+/// and its task.
+type Watchers = HashMap<String, (Arc<AtomicBool>, tokio::task::JoinHandle<()>)>;
+
+/// Stop watching someone and drop their picture. The flag is cleared under the
+/// same lock the watcher takes to put a picture, so a frame that was being
+/// decoded at that moment can't bring the picture back.
+fn unwatch(watchers: &mut Watchers, pictures: &Pictures, id: &str) {
+    let mut g = pictures.lock().unwrap();
+    if let Some((alive, task)) = watchers.remove(id) {
+        alive.store(false, Ordering::SeqCst);
+        task.abort();
+    }
+    g.remove(id);
+}
+
+/// Turn received frames into pictures (at most video::FPS a second), until
+/// the stream ends or `alive` is cleared.
+async fn watch(track: RemoteVideoTrack, identity: String, pictures: Pictures, alive: Arc<AtomicBool>) {
     let mut stream = NativeVideoStream::new(track.rtc_track());
     let gap = Duration::from_millis(1000 / video::FPS);
     let mut last = std::time::Instant::now() - gap;
@@ -222,10 +240,18 @@ async fn watch(track: RemoteVideoTrack, identity: String, pictures: Pictures) {
             continue;
         }
         last = std::time::Instant::now();
-        let i420 = frame.buffer.to_i420();
-        put_picture(&pictures, &identity, video::i420_to_picture(&i420));
+        let pic = video::i420_to_picture(&frame.buffer.to_i420());
+        let mut g = pictures.lock().unwrap();
+        if !alive.load(Ordering::SeqCst) {
+            return;
+        }
+        let n = g.get(&identity).map_or(1, |(n, _)| n + 1);
+        g.insert(identity.clone(), (n, pic));
     }
-    pictures.lock().unwrap().remove(&identity);
+    let mut g = pictures.lock().unwrap();
+    if alive.load(Ordering::SeqCst) {
+        g.remove(&identity);
+    }
 }
 
 fn people(room: &Room, levels: &HashMap<String, f32>, speaking: &[String], camera_on: bool) -> Vec<Person> {
@@ -298,6 +324,7 @@ async fn run(join: Join, audio: Audio, video: Video, crx: Receiver<Cmd>, etx: &S
     let mut speaking: Vec<String> = vec![];
     // the camera while it's on: what's published and what feeds it
     let mut camera: Option<(LocalTrackPublication, video::Feed)> = None;
+    let mut watchers: Watchers = HashMap::new();
     let mut last_people: Vec<Person> = vec![];
     let mut tick = tokio::time::interval(Duration::from_millis(200));
     let why = loop {
@@ -314,15 +341,19 @@ async fn run(join: Join, audio: Audio, video: Video, crx: Receiver<Cmd>, etx: &S
                     }
                 }
                 Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(t), participant, .. }) => {
-                    tokio::spawn(watch(t, participant.identity().to_string(), pictures.clone()));
+                    let id = participant.identity().to_string();
+                    unwatch(&mut watchers, &pictures, &id);
+                    let alive = Arc::new(AtomicBool::new(true));
+                    let task = tokio::spawn(watch(t, id.clone(), pictures.clone(), alive.clone()));
+                    watchers.insert(id, (alive, task));
                 }
                 Some(RoomEvent::TrackUnsubscribed { track: RemoteTrack::Video(_), participant, .. }) | Some(RoomEvent::TrackUnpublished { participant, .. }) => {
                     if !participant.track_publications().values().any(|t| t.source() == TrackSource::Camera && t.is_subscribed()) {
-                        pictures.lock().unwrap().remove(&participant.identity().to_string());
+                        unwatch(&mut watchers, &pictures, &participant.identity().to_string());
                     }
                 }
                 Some(RoomEvent::ParticipantDisconnected(p)) => {
-                    pictures.lock().unwrap().remove(&p.identity().to_string());
+                    unwatch(&mut watchers, &pictures, &p.identity().to_string());
                 }
                 Some(_) => {}
             },

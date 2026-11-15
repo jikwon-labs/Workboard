@@ -208,7 +208,12 @@ impl App {
                 }
             }
         }
-        let mut ids: Vec<String> = self.huddle.textures.keys().cloned().collect();
+        // only people still in the call: a picture can outlive its sender by a frame
+        let mut ids: Vec<String> = self.huddle.textures.keys().filter(|id| *id == ME || self.huddle.people.iter().any(|p| &p.identity == *id)).cloned().collect();
+        if ids.is_empty() {
+            self.huddle.focus = None;
+            return;
+        }
         ids.sort_by_key(|id| (id == ME, id.clone()));
         let names: Vec<(String, String)> = ids
             .iter()

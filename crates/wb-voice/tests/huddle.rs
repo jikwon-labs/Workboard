@@ -281,9 +281,18 @@ fn two_people_hear_each_other_in_a_huddle() {
     b.until("Ann's video is gone", |t| t.other().is_some_and(|p| !p.camera) && t.their_picture().is_none());
     a.until("and her own preview too", |t| !t.pictures.contains_key(ME));
 
-    // Bo leaves
+    // Bo leaves with his camera still on: his picture goes away and stays away
+    let bo_id = a.other().unwrap().identity.clone();
+    assert!(a.pictures.contains_key(&bo_id));
     b.call.leave();
     a.until("only Ann is left", |t| t.people.len() == 1);
+    a.until("Bo's picture is gone", |t| !t.pictures.contains_key(&bo_id));
+    let settle = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < settle {
+        a.until("still in the call", |_| true);
+        assert!(!a.pictures.contains_key(&bo_id), "Bo's picture came back after he left");
+        std::thread::sleep(Duration::from_millis(100));
+    }
     drop(a);
     drop(server);
     let _ = std::fs::remove_dir_all(&home);

@@ -1168,7 +1168,7 @@ impl App {
                 let space = self.current_space();
                 if card_on(self, "Docs") {
                 self.ov_card(ui, cw, "Docs", |s, ui| {
-                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
+                    let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none() && !d.archived).map(|d| (d.id, d.title.clone())).collect();
                     if docs.is_empty() {
                         ui.label(RichText::new("There are no Docs in this location yet.").color(s.t().text2));
                     }

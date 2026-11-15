@@ -855,7 +855,7 @@ impl App {
         self.matches_search(&s.name)
             || s.folders.iter().any(|f| self.matches_search(&f.name) || f.lists.iter().any(|l| !l.archived && self.matches_search(&l.name)))
             || s.lists.iter().any(|l| !l.archived && self.matches_search(&l.name))
-            || self.data.docs.iter().any(|d| d.space == Some(s.id) && d.parent.is_none() && self.matches_search(&d.title))
+            || self.data.docs.iter().any(|d| d.space == Some(s.id) && d.parent.is_none() && !d.archived && self.matches_search(&d.title))
     }
 
     pub(super) fn sidebar(&mut self, ui: &mut Ui) {
@@ -1446,7 +1446,7 @@ impl App {
         for l in shown {
             self.list_row(ui, 14.0, l);
         }
-        let docs: Vec<(u64, String)> = self.data.docs.iter().filter(|d| d.space == Some(s.id) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
+        let docs: Vec<(u64, String)> = self.data.docs.iter().filter(|d| d.space == Some(s.id) && d.parent.is_none() && !d.archived).map(|d| (d.id, d.title.clone())).collect();
         for (id, title) in docs {
             if !self.matches_search(&title) {
                 continue;
@@ -1464,6 +1464,7 @@ impl App {
                 self.doc_open = Some(id);
                 self.section = Section::Docs;
             }
+            r.context_menu(|ui| self.doc_menu(ui, id, true));
         }
     }
 

@@ -370,6 +370,9 @@ pub struct App {
     comment_drafts: HashMap<u64, String>,
     /// The task `comment_text` belongs to.
     comment_for: Option<u64>,
+    /// The Docs hub's own search box and tag filter (not the task list's).
+    docs_search: String,
+    docs_tag: Option<String>,
 }
 
 impl App {
@@ -567,6 +570,8 @@ impl App {
             settings_state: None,
             comment_drafts: HashMap::new(),
             comment_for: None,
+            docs_search: String::new(),
+            docs_tag: None,
         }
     }
 

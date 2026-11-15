@@ -76,6 +76,7 @@ pub const T: &[(&str, &str)] = &[
     ("Channel settings", "채널 설정"),
     ("Add bookmark", "북마크 추가"),
     ("Switch person", "사람 전환"),
+    ("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", "이 컴퓨터는 팀 서버에 {}(으)로 로그인되어 있습니다. 사람마다 자기 컴퓨터에서 자기 계정으로 Workboard를 씁니다."),
     ("Who are you?", "누구신가요?"),
     ("Start a call", "통화 시작"),
     ("Create List", "목록 만들기"),

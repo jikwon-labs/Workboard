@@ -2880,14 +2880,52 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
 }
 
 #[test]
-fn short_window_profile_menu_scrolls_to_trash_and_log_out() {
+fn switch_person_on_a_team_server_does_not_become_someone_else() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let my_name = h.app.data.member(me).unwrap().name.clone();
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.id != me)
+        .unwrap()
+        .name
+        .clone();
+    let count = |h: &Ui1| h.tree.iter().filter(|(n, _)| *n == other).count();
+    let before = count(&h);
+    // on this computer only: pick anyone
+    h.click("Profile menu");
+    h.click("Switch person");
+    assert!(count(&h) > before);
+    h.key(egui::Key::Escape);
+    // on a server the person is who signed in
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-switch".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.click("Profile menu");
+    h.click("Switch person");
+    assert!(matches!(h.app.modal, Some(Modal::SwitchUser)));
+    assert!(h.has(&format!("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", my_name)));
+    assert_eq!(count(&h), before, "no other member to switch to");
+    h.click("Work together");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    assert_eq!(h.app.data.me, me);
+}
+
+#[test]
+fn short_window_profile_menu_scrolls_to_trash_and_switch_person() {
     let mut h = Ui1::sized(900.0, 560.0);
     h.click("Profile menu");
     h.settle();
     let menu_top = h.rect("Settings").top();
     // the menu does not run off the window: its bottom row is reached by
     // scrolling inside the menu
-    for name in ["Trash", "Log out"] {
+    for name in ["Trash", "Switch person"] {
         h.scroll_into_view(name);
         let r = h.rect(name);
         assert!(
@@ -2897,7 +2935,7 @@ fn short_window_profile_menu_scrolls_to_trash_and_log_out() {
             r
         );
     }
-    h.click("Log out");
+    h.click("Switch person");
     assert!(
         matches!(h.app.modal, Some(Modal::SwitchUser)),
         "the bottom row of the menu works"

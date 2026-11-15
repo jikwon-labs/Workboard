@@ -699,7 +699,8 @@ impl App {
             self.modal = Some(Modal::Trash);
             close_popup(ui);
         }
-        if menu_item(ui, &t, "\u{21AA}", tr("Log out"), "")
+        // it changes who uses the app on this computer; nobody signs out
+        if menu_item(ui, &t, "\u{21AA}", tr("Switch person"), "")
             .on_hover_text(tr("Switch to another person on this computer"))
             .clicked()
         {
@@ -2540,6 +2541,27 @@ impl App {
                     });
                     self.dirty = true;
                     close = true;
+                }
+            }
+            Modal::SwitchUser
+                if self
+                    .data
+                    .extra
+                    .shared
+                    .as_ref()
+                    .is_some_and(|c| c.server.is_some()) =>
+            {
+                // the server knows this computer as the person who signed in
+                // on it: being someone else takes their sign-in
+                let name = self
+                    .data
+                    .member(self.data.me)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_default();
+                ui.label(crate::trf!("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", name));
+                ui.add_space(6.0);
+                if ui.link(tr("Work together")).clicked() {
+                    self.modal = Some(self.together_modal());
                 }
             }
             Modal::SwitchUser => {

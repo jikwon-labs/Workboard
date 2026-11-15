@@ -2575,6 +2575,7 @@ impl App {
             .find(|c| c.0 == *ch)
             .map(|c| c.1.clone())
             .unwrap_or_else(|| tr("Choose").into());
+        // as wide as the link field below it
         egui::ComboBox::from_id_salt("call_in")
             .selected_text(cur)
             .width(300.0)
@@ -2591,7 +2592,7 @@ impl App {
         );
         ui.add(
             field(link)
-                .hint_text("https://...")
+                .hint_text(tr("https://..."))
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(10.0);

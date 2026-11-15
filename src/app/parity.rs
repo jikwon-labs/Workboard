@@ -501,6 +501,7 @@ impl App {
                 None => s.1.clone(),
             }
         });
+        // as wide as the name field above it
         egui::ComboBox::from_id_salt("new_list_space")
             .width(ui.available_width() - 10.0)
             .selected_text(cur.unwrap_or_else(|| tr("Choose a Space").into()))

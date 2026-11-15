@@ -5954,3 +5954,59 @@ fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
     wait(&|| dest.is_file());
     assert!(dest.is_file(), "the picture is back in the shared folder");
 }
+
+/// Every sentence the team server can send an app (refusals, sign-in and
+/// account errors) and the ones its client adds read in Korean, numbers
+/// included. Texts only the server's command line prints are left out.
+#[test]
+fn server_refusals_are_shown_in_the_interface_language() {
+    use super::together::server_text;
+    const CLI_ONLY: [&str; 4] = [
+        "Invite code for member {} as {}: {}  (works once, for {} days)",
+        "No member with id {} in the workspace (see `workboard-server people`).",
+        "Restored {}. Everyone's app gets it now (the copy from before is in {}/before-restore-*.json).",
+        "This address takes Workboard's WebSocket connection.",
+    ];
+    let sentences = |src: &str| -> Vec<String> {
+        let src = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let mut out = vec![];
+        // each `"` followed by a capital letter, up to the next `"`
+        let starts = src.match_indices('"').map(|(i, _)| i + 1);
+        for part in starts.filter_map(|i| src[i..].split('"').next()) {
+            let long = part.chars().count() > 10;
+            if long
+                && part.starts_with(|c: char| c.is_ascii_uppercase())
+                && part.ends_with(['.', '?', '!', ')'])
+                && !part.contains('\\')
+                && !CLI_ONLY.contains(&part)
+            {
+                out.push(part.to_string());
+            }
+        }
+        out
+    };
+    let mut all = sentences(include_str!("../../server/src/lib.rs"));
+    all.extend(sentences(include_str!("../../crates/wb-net/src/lib.rs")));
+    all.extend(sentences(include_str!("../../crates/wb-net/src/files.rs")));
+    assert!(all.len() > 30, "found the texts: {}", all.len());
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown: Vec<(String, String)> = all
+        .iter()
+        .map(|s| {
+            let filled = s.replace("{}", "5");
+            (filled.clone(), server_text(&filled))
+        })
+        .collect();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let english: Vec<&String> = shown
+        .iter()
+        .filter(|(en, ko)| en == ko || !ko.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c)))
+        .map(|(en, _)| en)
+        .collect();
+    assert!(english.is_empty(), "no Korean for: {:#?}", english);
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let tries =
+        server_text("Too many wrong tries. Wait 15 minutes and try again, or use Forgot password.");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(tries.contains("15분"), "{}", tries);
+}

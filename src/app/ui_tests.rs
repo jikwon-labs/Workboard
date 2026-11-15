@@ -6539,3 +6539,48 @@ fn an_owner_without_a_server_manages_someone_elses_channel() {
         .members
         .contains(&3));
 }
+
+#[test]
+fn an_admin_sees_code_buttons_only_for_members_without_a_password() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    let me = h.app.data.me;
+    let others: Vec<u64> = h
+        .app
+        .data
+        .members
+        .iter()
+        .map(|m| m.id)
+        .filter(|id| *id != me)
+        .take(3)
+        .collect();
+    let person = |member, role, account| wb_net::Person {
+        member,
+        role,
+        devices: 0,
+        invite: None,
+        account,
+    };
+    h.app.sync_rt.people = vec![
+        person(me, wb_net::Role::Admin, true),
+        person(others[0], wb_net::Role::Admin, false),
+        person(others[1], wb_net::Role::Member, true),
+        person(others[2], wb_net::Role::Member, false),
+    ];
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    let codes = |h: &Ui1| h.tree.iter().filter(|(n, _)| n == "Invite code").count();
+    assert_eq!(codes(&h), 1, "only the member without a password");
+    // the owner makes codes for everyone else
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.sync_rt.people[0].role = wb_net::Role::Owner;
+    h.settle();
+    assert_eq!(codes(&h), 3);
+}

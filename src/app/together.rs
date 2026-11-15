@@ -288,14 +288,34 @@ pub(super) fn forget_token(addr: &str, device: &str) {
     }
 }
 
+/// What the team server (or its client) said, in the interface language:
+/// the server sends English, and some of it carries a number inside.
+pub(super) fn server_text(s: &str) -> String {
+    const WITH_VALUES: [&str; 5] = [
+        "Choose a password of at least {} characters.",
+        "Too many wrong tries. Wait {} minutes and try again, or use Forgot password.",
+        "That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.",
+        "The server answered {}.",
+        "Couldn't reach the server: {}",
+    ];
+    for pattern in WITH_VALUES {
+        if let Some(values) = super::files::fill_back(pattern, s) {
+            return crate::i18n::fill(tr(pattern), &values);
+        }
+    }
+    tr(s).to_string()
+}
+
 /// How the server connection is doing, in words.
 pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>) -> String {
     match (net, s) {
         (false, _) => tr("Disconnected").into(),
         (true, None) | (true, Some(NetStatus::Connecting)) => tr("Connecting\u{2026}").into(),
         (true, Some(NetStatus::Connected)) => tr("Connected").into(),
-        (true, Some(NetStatus::Reconnecting(why))) => trf!("Reconnecting\u{2026} {}", why),
-        (true, Some(NetStatus::Refused(why))) => trf!("Not signed in. {}", why),
+        (true, Some(NetStatus::Reconnecting(why))) => {
+            trf!("Reconnecting\u{2026} {}", server_text(why))
+        }
+        (true, Some(NetStatus::Refused(why))) => trf!("Not signed in. {}", server_text(why)),
     }
 }
 
@@ -683,11 +703,11 @@ impl App {
                 }
                 NetEvent::Denied(why) => {
                     self.huddle_denied_unnamed();
-                    self.toast = Some((tr(&why).to_string(), now_ts()));
+                    self.toast = Some((server_text(&why), now_ts()));
                 }
                 NetEvent::CallDenied { channel, why } => {
                     self.huddle_denied(channel);
-                    self.toast = Some((why, now_ts()));
+                    self.toast = Some((server_text(&why), now_ts()));
                 }
                 NetEvent::CallToken {
                     channel,
@@ -1392,9 +1412,11 @@ impl App {
                                     }
                                 }
                             }
-                            // a code for the owner signs in as the owner: only the owner makes one
-                            let may_invite =
-                                p.member != me && (p.role != Role::Owner || my_role == Role::Owner);
+                            // a code signs in as its person: the owner makes any, an
+                            // admin only for members without a password (as the server)
+                            let may_invite = p.member != me
+                                && (my_role == Role::Owner
+                                    || (p.role == Role::Member && !p.account));
                             if may_invite
                                 && row_button(
                                     ui,
@@ -1661,7 +1683,7 @@ impl App {
             }
         }
         if !form.note.is_empty() {
-            ui.label(RichText::new(&form.note).color(t.danger));
+            ui.label(RichText::new(server_text(&form.note)).color(t.danger));
         }
         ui.add_space(6.0);
         let shown = form.mode != Mode::Forgot || form.sent;
@@ -1826,7 +1848,7 @@ impl App {
             }
         }
         if !form.note.is_empty() {
-            ui.label(RichText::new(&form.note).color(t.danger));
+            ui.label(RichText::new(server_text(&form.note)).color(t.danger));
         }
         self.sync_rt.acct = form;
         if let Some(m) = send {

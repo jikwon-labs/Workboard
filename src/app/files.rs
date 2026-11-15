@@ -1859,7 +1859,7 @@ impl App {
 
 /// The values in `text` that fill the "{}"s of `pattern`, when it was made
 /// from it.
-fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
+pub(super) fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
     let parts: Vec<&str> = pattern.split("{}").collect();
     let mut rest = text.strip_prefix(parts[0])?;
     let mut values = vec![];

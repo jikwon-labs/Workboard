@@ -122,4 +122,5 @@ pub const T: &[(&str, &str)] = &[
     ("The server answered {}.", "서버가 {}(으)로 응답했습니다."),
     ("The server said no.", "서버가 거절했습니다."),
     ("This server can't reset passwords yet. Update workboard-server, or ask the owner or an admin for a new invite code.", "이 서버는 아직 비밀번호를 재설정할 수 없습니다. workboard-server를 업데이트하거나, 소유자나 관리자에게 새 초대 코드를 받으세요."),
+    ("Some changes were put back because that space is shared with you at a level that doesn't allow them.", "공유받은 권한으로는 그 스페이스에서 할 수 없는 변경이라 되돌렸습니다."),
 ];

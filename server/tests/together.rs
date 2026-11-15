@@ -112,6 +112,8 @@ struct App {
     invites: Vec<(u64, String)>,
     people: Vec<Person>,
     denied: Vec<String>,
+    /// changes in this app's copy the server turned down and put back
+    put_back: Vec<String>,
     backups: Option<Vec<wb_net::Backup>>,
     restored: Vec<String>,
     /// account email from the welcome, then from `account` answers
@@ -176,6 +178,7 @@ impl App {
             invites: vec![],
             people: vec![],
             denied: vec![],
+            put_back: vec![],
             backups: None,
             restored: vec![],
             email: None,
@@ -313,6 +316,7 @@ impl App {
                     self.role = Some(role);
                 }
                 Event::Denied(why) | Event::CallDenied { why, .. } => self.denied.push(why),
+                Event::PutBack(why) => self.put_back.push(why),
                 Event::CallToken { .. } => {}
                 Event::Backups(b) => self.backups = Some(b),
                 Event::Restored(n) => self.restored.push(n),
@@ -3031,6 +3035,423 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
     b.wait("the owner deleted Bo's channel", |d| {
         channel(d, 60).is_none()
     });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ---- spaces shared with chosen people
+
+/// A team space and "Plans", shared with Bo (2) at `level` only, with a
+/// list, a folder with a list, tasks (one with Ann's comment), a doc with a
+/// sub page, a dashboard and a form in it.
+fn plans_workspace(level: &str) -> Value {
+    let mut ws = workspace();
+    ws["spaces"] = json!([
+        {"id": 60, "name": "Team", "color": [1, 2, 3], "statuses": [], "folders": [], "lists": [{"id": 61, "name": "Team list"}]},
+        {"id": 70, "name": "Plans", "color": [1, 2, 3], "statuses": [], "lists": [{"id": 71, "name": "Secret list"}],
+         "folders": [{"id": 73, "name": "Plan folder", "lists": [{"id": 74, "name": "Folder list"}]}],
+         "sharing": {"everyone": false, "people": [{"member": 2, "level": level}]}}
+    ]);
+    let tasks = ws["tasks"].as_array_mut().unwrap();
+    tasks.push(
+        json!({"id": 72, "list_id": 71, "name": "Secret task", "updated": 0,
+        "activity": [{"id": 76, "ts": 1, "author": 1, "text": "secret comment", "comment": true}]}),
+    );
+    tasks.push(json!({"id": 75, "list_id": 74, "name": "Folder task", "activity": []}));
+    tasks.push(json!({"id": 62, "list_id": 61, "name": "Team task", "activity": []}));
+    ws["docs"] = json!([
+        {"id": 90, "owner": 1, "space": 70, "title": "Secret doc", "body": "plans", "created": 0, "updated": 0},
+        {"id": 91, "owner": 1, "parent": 90, "title": "Secret page", "body": "more", "created": 0, "updated": 0}
+    ]);
+    ws["extra"]["dashboards"] = json!([{"id": 95, "name": "Secret board", "space": 70}]);
+    ws["extra"]["forms"] =
+        json!([{"id": 96, "name": "Secret form", "list_id": 74, "description": "", "fields": []}]);
+    ws
+}
+
+const SECRETS: [&str; 10] = [
+    "Secret list",
+    "Folder list",
+    "Plan folder",
+    "Secret task",
+    "Folder task",
+    "secret comment",
+    "Secret doc",
+    "Secret page",
+    "Secret board",
+    "Secret form",
+];
+
+/// Ann (the owner) with `ws` on the server, Bo (2) and Cy (3) joined.
+fn ann_bo_cy(port: u16, ws: Value) -> (App, App, App) {
+    let mut a = App::connect(port, Some(ws));
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let mut joined = vec![];
+    for m in [2, 3] {
+        let code = a.invite(m, Role::Member);
+        let mut x = App::join(port, &code);
+        x.wait("the team's copy", |d| {
+            task_names(d).contains(&"Team task".to_string())
+        });
+        joined.push(x);
+    }
+    let c = joined.pop().unwrap();
+    let b = joined.pop().unwrap();
+    (a, b, c)
+}
+
+fn find<'a>(d: &'a Value, path: &str, id: u64) -> Option<&'a Value> {
+    path.split('.')
+        .try_fold(d, |v, p| v.get(p))?
+        .as_array()?
+        .iter()
+        .find(|x| x["id"] == id)
+}
+
+fn find_mut<'a>(d: &'a mut Value, path: &str, id: u64) -> &'a mut Value {
+    let mut cur = d;
+    for p in path.split('.') {
+        cur = cur.get_mut(p).unwrap();
+    }
+    cur.as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|x| x["id"] == id)
+        .unwrap()
+}
+
+fn has_all(d: &Value) -> bool {
+    let text = d.to_string();
+    SECRETS.iter().all(|s| text.contains(s))
+}
+
+fn has_none(d: &Value) -> bool {
+    let text = d.to_string();
+    SECRETS.iter().all(|s| !text.contains(s)) && find(d, "spaces", 70).is_none()
+}
+
+/// A marker message from `from` that `to` waits for: everything `from`
+/// sent before it has been merged.
+fn round_trip(from: &mut App, to: &mut App, text: &str, id: u64) {
+    from.change(say(text, id));
+    to.wait(text, |d| texts(d).contains(&text.to_string()));
+}
+
+/// Nothing of Plans (or anything in it) reaches Cy, who it isn't shared
+/// with; Bo gets it all. An admin sees it too.
+#[test]
+fn a_space_shared_with_chosen_people_reaches_only_them() {
+    let home = temp_home("sharehide");
+    let server = Server::start(&home, 0);
+    let (mut a, b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
+    assert!(has_all(&b.data), "Bo gets Plans: {}", b.data);
+    assert!(has_none(&c.data), "Cy gets none of it: {}", c.data);
+    assert!(c.data.to_string().contains("Team list"));
+    // what Cy sends doesn't touch it
+    c.change(|d| {
+        d["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 72, "list_id": 71, "name": "Cy's", "activity": []}));
+        d["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 9001, "list_id": 71, "name": "Cy's new", "activity": []}));
+    });
+    round_trip(&mut c, &mut a, "after Cy", 3001);
+    assert_eq!(find(&a.data, "tasks", 72).unwrap()["name"], "Secret task");
+    assert!(
+        find(&a.data, "tasks", 9001).is_none(),
+        "nothing new in a space closed to Cy"
+    );
+    c.wait("Cy's new task leaves Cy's copy", |d| {
+        find(d, "tasks", 9001).is_none()
+    });
+    assert!(!c.put_back.is_empty(), "Cy is told");
+    // an admin sees every shared space
+    a.client.send(Msg::SetRole {
+        member: 3,
+        role: Role::Admin,
+    });
+    c.wait("Cy, now an admin, gets Plans", has_all);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Bo may only view Plans: renames, new and deleted tasks, list and doc
+/// changes, comments and a change to who it's shared with all stay out of
+/// the team's copy, and Bo's own copy goes back to the team's version.
+/// Opening a doc (his own view of it) still counts.
+#[test]
+fn a_view_only_member_changes_nothing_and_gets_the_teams_version_back() {
+    let home = temp_home("shareview");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("view"));
+    b.change(|d| {
+        find_mut(d, "tasks", 72)["name"] = json!("Bo was here");
+        find_mut(d, "tasks", 72)["activity"]
+            .as_array_mut()
+            .unwrap()
+            .push(
+                json!({"id": 9002, "ts": 5, "author": 2, "text": "Bo's comment", "comment": true}),
+            );
+        d["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 9001, "list_id": 71, "name": "Bo's new", "activity": []}));
+        d["tasks"].as_array_mut().unwrap().retain(|t| t["id"] != 75);
+        let sp = find_mut(d, "spaces", 70);
+        sp["lists"][0]["name"] = json!("Bo's list");
+        sp["name"] = json!("Bo's space");
+        sp["sharing"]["people"] =
+            json!([{"member": 2, "level": "full"}, {"member": 3, "level": "full"}]);
+        find_mut(d, "docs", 90)["body"] = json!("changed by Bo");
+        d["docs"].as_array_mut().unwrap().retain(|x| x["id"] != 91);
+        find_mut(d, "extra.dashboards", 95)["name"] = json!("Bo's board");
+    });
+    assert!(b.meta().tombs.contains_key(&75));
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    b.wait("Bo's copy is the team's again", |d| {
+        let sp = find(d, "spaces", 70);
+        find(d, "tasks", 72)
+            .is_some_and(|t| t["name"] == "Secret task" && !t.to_string().contains("Bo's comment"))
+            && find(d, "tasks", 9001).is_none()
+            && find(d, "tasks", 75).is_some()
+            && find(d, "docs", 91).is_some()
+            && find(d, "docs", 90).is_some_and(|x| x["body"] == "plans")
+            && find(d, "extra.dashboards", 95).is_some_and(|x| x["name"] == "Secret board")
+            && sp.is_some_and(|s| {
+                s["name"] == "Plans"
+                    && s["lists"][0]["name"] == "Secret list"
+                    && s["sharing"]["people"] == json!([{"member": 2, "level": "view"}])
+            })
+    });
+    round_trip(&mut b, &mut a, "after Bo", 3002);
+    let ws = plans_workspace("view");
+    for (path, id) in [
+        ("tasks", 72),
+        ("tasks", 75),
+        ("docs", 90),
+        ("docs", 91),
+        ("spaces", 70),
+        ("extra.dashboards", 95),
+    ] {
+        assert_eq!(
+            find(&a.data, path, id).map(wb_sync::own_fields),
+            find(&ws, path, id).map(wb_sync::own_fields),
+            "{} {} as Ann made it",
+            path,
+            id
+        );
+    }
+    assert!(find(&a.data, "tasks", 9001).is_none());
+    assert!(!a.data.to_string().contains("Bo's comment"));
+    // opening a doc notes Bo's own view of it
+    b.put_back.clear();
+    b.change(|d| {
+        find_mut(d, "docs", 90)["views"] = json!([{"id": 9003, "member": 2, "at": [5]}]);
+    });
+    a.wait("Bo's view of the doc", |d| {
+        find(d, "docs", 90).is_some_and(|x| x["views"][0]["member"] == 2)
+    });
+    round_trip(&mut b, &mut a, "after the view", 3003);
+    b.pump();
+    assert!(
+        b.put_back.is_empty(),
+        "nothing turned down: {:?}",
+        b.put_back
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Bo may comment in Plans: his comments reach the team and he may edit and
+/// delete them, but not Ann's comment or the task itself.
+#[test]
+fn a_comment_member_comments_but_changes_nothing_else() {
+    let home = temp_home("sharecomment");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("comment"));
+    let comment = |d: &Value, id: u64| -> Option<Value> {
+        find(d, "tasks", 72)?["activity"]
+            .as_array()?
+            .iter()
+            .find(|x| x["id"] == id)
+            .cloned()
+    };
+    // a comment moves the task's `updated`, as the app does
+    b.change(|d| {
+        let t = find_mut(d, "tasks", 72);
+        t["updated"] = json!(999);
+        t["activity"].as_array_mut().unwrap().push(
+            json!({"id": 9010, "ts": 5, "author": 2, "text": "Bo's comment", "comment": true}),
+        );
+    });
+    a.wait("Bo's comment at Ann", |d| comment(d, 9010).is_some());
+    assert_eq!(find(&a.data, "tasks", 72).unwrap()["updated"], 0);
+    round_trip(&mut b, &mut a, "after the comment", 3010);
+    b.pump();
+    assert!(b.put_back.is_empty(), "a comment is fine: {:?}", b.put_back);
+    // his own comment: edited, then deleted
+    b.change(|d| {
+        let t = find_mut(d, "tasks", 72);
+        let c = t["activity"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|x| x["id"] == 9010)
+            .unwrap();
+        c["text"] = json!("Bo's comment, edited");
+    });
+    a.wait("the edit at Ann", |d| {
+        comment(d, 9010).is_some_and(|c| c["text"] == "Bo's comment, edited")
+    });
+    b.change(|d| {
+        find_mut(d, "tasks", 72)["activity"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|x| x["id"] != 9010);
+    });
+    a.wait("the delete at Ann", |d| comment(d, 9010).is_none());
+    // Ann's comment and the task stay hers
+    b.change(|d| {
+        let t = find_mut(d, "tasks", 72);
+        t["name"] = json!("Renamed by Bo");
+        t["activity"][0]["text"] = json!("Bo rewrote Ann");
+        t["activity"][0]["author"] = json!(2);
+    });
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    b.wait("Bo's copy is the team's again", |d| {
+        find(d, "tasks", 72).is_some_and(|t| t["name"] == "Secret task")
+            && comment(d, 76).is_some_and(|c| c["text"] == "secret comment" && c["author"] == 1)
+    });
+    round_trip(&mut b, &mut a, "after the rename", 3011);
+    assert_eq!(find(&a.data, "tasks", 72).unwrap()["name"], "Secret task");
+    assert_eq!(comment(&a.data, 76).unwrap()["text"], "secret comment");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Bo may edit in Plans: tasks yes, but the space's settings, who it's
+/// shared with and deleting it need Full (or an owner or admin). Once Ann
+/// gives him Full, he shares it with Cy.
+#[test]
+fn only_full_members_and_admins_change_a_spaces_sharing() {
+    let home = temp_home("sharefull");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b, mut c) = ann_bo_cy(server.port, plans_workspace("edit"));
+    b.change(|d| {
+        find_mut(d, "tasks", 72)["name"] = json!("Edited by Bo");
+        d["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 9020, "list_id": 71, "name": "Bo's task", "activity": []}));
+        find_mut(d, "spaces", 70)["lists"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 9021, "name": "Bo's list"}));
+    });
+    a.wait("Bo's edits at Ann", |d| {
+        find(d, "tasks", 72).is_some_and(|t| t["name"] == "Edited by Bo")
+            && find(d, "tasks", 9020).is_some()
+            && d.to_string().contains("Bo's list")
+    });
+    // his own sharing change and a rename of the space go back
+    b.change(|d| {
+        let sp = find_mut(d, "spaces", 70);
+        sp["name"] = json!("Bo's space");
+        sp["sharing"]["people"] =
+            json!([{"member": 2, "level": "full"}, {"member": 3, "level": "view"}]);
+    });
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    b.wait("Bo's copy has the team's sharing again", |d| {
+        find(d, "spaces", 70).is_some_and(|s| {
+            s["name"] == "Plans"
+                && s["sharing"]["people"] == json!([{"member": 2, "level": "edit"}])
+        })
+    });
+    round_trip(&mut b, &mut a, "after the sharing change", 3020);
+    assert_eq!(find(&a.data, "spaces", 70).unwrap()["name"], "Plans");
+    round_trip(&mut a, &mut c, "Cy hears", 2020);
+    assert!(find(&c.data, "spaces", 70).is_none(), "still not Cy's");
+    // deleting the space: it comes back with everything in it
+    b.change(|d| {
+        d["spaces"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|s| s["id"] != 70);
+        d["tasks"].as_array_mut().unwrap().retain(|t| t["id"] != 72);
+    });
+    assert!(b.meta().tombs.contains_key(&70));
+    b.wait("Plans back in Bo's copy", |d| {
+        find(d, "spaces", 70).is_some_and(|s| s.to_string().contains("Secret list"))
+            && find(d, "tasks", 72).is_some()
+    });
+    round_trip(&mut b, &mut a, "after the delete", 3021);
+    assert!(find(&a.data, "spaces", 70).is_some() && find(&a.data, "tasks", 72).is_some());
+    // with Full he may share it
+    a.change(|d| {
+        find_mut(d, "spaces", 70)["sharing"]["people"] = json!([{"member": 2, "level": "full"}]);
+    });
+    b.wait("Bo has Full", |d| {
+        find(d, "spaces", 70).is_some_and(|s| s["sharing"]["people"][0]["level"] == "full")
+    });
+    b.change(|d| {
+        find_mut(d, "spaces", 70)["sharing"]["people"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"member": 3, "level": "view"}));
+    });
+    c.wait("Cy gets Plans", |d| {
+        find(d, "spaces", 70).is_some() && find(d, "tasks", 72).is_some()
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// When Ann takes Plans away from Bo it leaves his copy without being
+/// deleted: his copies without it (and a stale one that deletes it) take
+/// nothing from the team, and he gets it all back when it's shared again.
+#[test]
+fn losing_access_to_a_space_deletes_nothing() {
+    let home = temp_home("sharelose");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("edit"));
+    let stale = b.data.clone();
+    a.change(|d| find_mut(d, "spaces", 70)["sharing"]["people"] = json!([]));
+    b.wait("Plans leaves Bo's copy", has_none);
+    let m = b.meta();
+    for id in [70, 71, 72, 73, 74, 75, 90, 91, 95, 96] {
+        assert!(!m.tombs.contains_key(&id), "{} isn't deleted", id);
+    }
+    round_trip(&mut b, &mut a, "Bo without Plans", 3030);
+    assert!(has_all(&a.data), "everything stays: {}", a.data);
+    // a stale copy that still has Plans, edits it, then deletes it
+    b.data["spaces"] = stale["spaces"].clone();
+    b.data["tasks"] = stale["tasks"].clone();
+    b.data["docs"] = stale["docs"].clone();
+    b.change(|d| find_mut(d, "tasks", 72)["name"] = json!("Bo, from before"));
+    b.change(|d| {
+        d["spaces"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|s| s["id"] != 70);
+        d["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|t| t["id"] != 72 && t["id"] != 75);
+        d["docs"] = json!([]);
+    });
+    assert!(b.meta().tombs.contains_key(&72));
+    round_trip(&mut b, &mut a, "after the stale copy", 3031);
+    assert!(has_all(&a.data), "still everything: {}", a.data);
+    assert_eq!(find(&a.data, "tasks", 72).unwrap()["name"], "Secret task");
+    // shared again: back in Bo's copy
+    a.change(|d| {
+        find_mut(d, "spaces", 70)["sharing"]["people"] = json!([{"member": 2, "level": "view"}])
+    });
+    b.wait("Plans back at Bo", has_all);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

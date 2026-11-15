@@ -497,7 +497,8 @@ impl App {
             .is_some_and(|c| c.server.is_some());
         let gone = if on_server {
             let mut ids = hidden.to_vec();
-            ids.extend(sync::hidden_from(&v, me));
+            let manages = self.sync_rt.role.is_some_and(|r| r.manages());
+            ids.extend(sync::hidden_from(&v, me, manages));
             sync::hide(&mut v, &ids)
         } else {
             vec![]
@@ -726,6 +727,10 @@ impl App {
                 }
                 NetEvent::Denied(why) => {
                     self.huddle_denied_unnamed();
+                    self.toast = Some((server_text(&why), now_ts()));
+                }
+                NetEvent::PutBack(why) => {
+                    // the team's version of what was put back comes with the next update
                     self.toast = Some((server_text(&why), now_ts()));
                 }
                 NetEvent::CallDenied { channel, why } => {

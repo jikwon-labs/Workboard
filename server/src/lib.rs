@@ -65,6 +65,7 @@ pub mod mail;
 pub use mail::{load_mail, MailCfg, MAIL_FILE, OUTBOX_DIR};
 pub mod push;
 pub use push::{load_apns, ApnsCfg, APNS_FILE};
+pub mod spaces;
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
@@ -649,15 +650,17 @@ fn drop_ids(meta: Option<&mut Value>, keys: &[&str], ids: &[u64]) {
     }
 }
 
-/// What `member` gets of the team's copy, and the ids of the items left out
-/// of it: DMs and private channels they aren't in, other people's Personal
-/// spaces (with their tasks) and private docs (see `wb_sync::hidden_from`),
+/// What `member` (an owner or admin when `manages`) gets of the team's copy,
+/// and the ids of the items left out of it: DMs and private channels they
+/// aren't in, spaces closed to them (other people's Personal spaces, spaces
+/// shared with chosen people without them) with what's in them, and other
+/// people's private docs (see `wb_sync::hidden_from`),
 /// with their change stamps. None when nothing is left out. Tombstones stay,
 /// so deletes still reach everyone; an app never treats an item missing here
 /// as deleted (only a tombstone deletes), and the ids tell it to take its
 /// own copy of them away without deleting them (`wb_sync::hide`).
-fn copy_for(canon: &Value, member: u64) -> Option<(Value, Vec<u64>)> {
-    let hidden = wb_sync::hidden_from(canon, member);
+fn copy_for(canon: &Value, member: u64, manages: bool) -> Option<(Value, Vec<u64>)> {
+    let hidden = wb_sync::hidden_from(canon, member, manages);
     if hidden.is_empty() {
         return None;
     }
@@ -747,10 +750,18 @@ fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
 /// the team has them. Their version of one (say, a private channel with
 /// themselves added to its members) is swapped for the team's, and their
 /// stamps, tombstones, revivals and moves for anything in it are dropped,
-/// so they can't change, join or delete it.
-fn guard_push(canon: &Value, data: &mut Value, member: u64, role: Role) {
+/// so they can't change, join or delete it. Before that, what they may not
+/// change in spaces (shared with them, or closed to them) is put back (see
+/// spaces.rs); the result says what to do to the team's copy after the merge.
+fn guard_push(canon: &Value, data: &mut Value, member: u64, role: Role) -> spaces::PutBack {
     guard_channels(canon, data, member, role);
-    let hidden = wb_sync::hidden_from(canon, member);
+    let fix = spaces::guard(canon, data, member, role.manages(), now_ms());
+    swap_hidden(canon, data, member, role);
+    fix
+}
+
+fn swap_hidden(canon: &Value, data: &mut Value, member: u64, role: Role) {
+    let hidden = wb_sync::hidden_from(canon, member, role.manages());
     if hidden.is_empty() {
         return;
     }
@@ -984,6 +995,13 @@ enum Reply {
     Denied(String),
 }
 
+/// What an app hears when changes in its copy were turned down: a space
+/// shared with its person at a level that doesn't allow them (spaces.rs).
+const PUT_BACK: &str =
+    "Some changes were put back because that space is shared with you at a level that doesn't allow them.";
+/// How long after telling that a connection isn't told again.
+const PUT_BACK_QUIET_SECS: u64 = 10;
+
 /// A new team copy for every connection; each one sends what its person may see.
 struct Canon {
     data: Value,
@@ -992,10 +1010,12 @@ struct Canon {
     json: String,
     /// what changed since the last revision (None: send the whole copy)
     delta: Option<Value>,
+    /// owners and admins when it was made (they see every shared space)
+    managers: Vec<u64>,
 }
 
 impl Canon {
-    fn new(data: &Value, rev: u64, delta: Option<Value>) -> Canon {
+    fn new(data: &Value, rev: u64, delta: Option<Value>, saved: &Saved) -> Canon {
         Canon {
             json: Msg::Update {
                 data: data.clone(),
@@ -1006,12 +1026,18 @@ impl Canon {
             data: data.clone(),
             rev,
             delta,
+            managers: saved
+                .roles
+                .iter()
+                .filter(|(_, r)| r.manages())
+                .map(|(m, _)| *m)
+                .collect(),
         }
     }
 
     /// The whole copy `member` gets, and what is hidden from them.
     fn update_for(&self, member: u64) -> (String, Vec<u64>) {
-        match copy_for(&self.data, member) {
+        match copy_for(&self.data, member, self.managers.contains(&member)) {
             Some((data, hidden)) => (
                 Msg::Update {
                     data,
@@ -1030,7 +1056,7 @@ impl Canon {
     /// may see again. None when this revision goes whole.
     fn delta_for(&self, member: u64, was_hidden: &[u64]) -> Option<(String, Vec<u64>)> {
         let mut d = self.delta.clone()?;
-        let hidden = wb_sync::hidden_from(&self.data, member);
+        let hidden = wb_sync::hidden_from(&self.data, member, self.managers.contains(&member));
         wb_sync::hide(&mut d, &hidden);
         let back: Vec<u64> = was_hidden
             .iter()
@@ -1152,7 +1178,7 @@ impl Hub {
             g.summary = Some(wb_sync::Summary::of(c));
             let _ = self
                 .updates
-                .send(Arc::new(Canon::new(c, g.saved.rev, delta)));
+                .send(Arc::new(Canon::new(c, g.saved.rev, delta, &g.saved)));
         }
     }
 
@@ -1515,10 +1541,11 @@ impl Hub {
     ) -> (String, Vec<u64>) {
         let g = self.inner.lock().unwrap();
         let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
+        let manages = g.saved.role_of(member).manages();
         let (snapshot, hidden) = match g
             .canon
             .as_ref()
-            .map(|c| copy_for(c, member).unwrap_or_else(|| (c.clone(), vec![])))
+            .map(|c| copy_for(c, member, manages).unwrap_or_else(|| (c.clone(), vec![])))
         {
             Some((s, h)) => (Some(s), h),
             None => (None, vec![]),
@@ -1541,14 +1568,15 @@ impl Hub {
     }
 
     /// Merge the copy `member` sent from `device` into the team's copy; tell
-    /// everyone when it changed.
-    fn push(self: &Arc<Self>, member: u64, device: &str, data: Value) {
+    /// everyone when it changed. True when some of its changes were turned
+    /// down (and put back), to tell its sender.
+    fn push(self: &Arc<Self>, member: u64, device: &str, data: Value) -> bool {
         if !copy_shape_ok(&data) {
             eprintln!(
                 "ignored a copy from member {} that isn't a workspace",
                 member
             );
-            return;
+            return false;
         }
         let mut data = wb_sync::shareable(&data);
         let mut g = self.inner.lock().unwrap();
@@ -1561,9 +1589,10 @@ impl Hub {
             }
             _ => None,
         };
-        if let Some(c) = &g.canon {
-            guard_push(c, &mut data, member, g.saved.role_of(member));
-        }
+        let fix = match &g.canon {
+            Some(c) => guard_push(c, &mut data, member, g.saved.role_of(member)),
+            None => spaces::PutBack::default(),
+        };
         let claimer = g.saved.devices.contains_key(device);
         let changed = match g.canon.as_mut() {
             // the workspace comes from the computer that claimed the server
@@ -1590,7 +1619,9 @@ impl Hub {
                 if changed {
                     *c = wb_sync::shareable(c);
                 }
-                changed
+                // what was turned down goes back to its sender with everyone's update
+                spaces::put_back(c, &fix);
+                changed || !fix.is_empty()
             }
         };
         if changed {
@@ -1605,6 +1636,7 @@ impl Hub {
                 let _ = self.access.send(());
             }
         }
+        fix.refused
     }
 
     /// Send `notes` to the devices of their members that have a push token
@@ -1670,7 +1702,9 @@ impl Hub {
     fn latest(&self, member: u64) -> Option<(String, Vec<u64>)> {
         let g = self.inner.lock().unwrap();
         g.canon.as_ref().map(|c| {
-            let (data, hidden) = copy_for(c, member).unwrap_or_else(|| (c.clone(), vec![]));
+            let manages = g.saved.role_of(member).manages();
+            let (data, hidden) =
+                copy_for(c, member, manages).unwrap_or_else(|| (c.clone(), vec![]));
             (
                 Msg::Update {
                     data,
@@ -2324,6 +2358,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
         return;
     }
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
+    let mut told_put_back: Option<std::time::Instant> = None;
     loop {
         tokio::select! {
             m = tokio::time::timeout(silent, socket.next()) => {
@@ -2343,8 +2378,13 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                     Some(Msg::Push { data }) => {
                         let (hub2, device2) = (hub.clone(), device.clone());
                         // merging can take a moment on a big workspace
-                        let _ = tokio::task::spawn_blocking(move || hub2.push(member, &device2, data)).await;
-                        None
+                        let refused = tokio::task::spawn_blocking(move || hub2.push(member, &device2, data)).await.unwrap_or(false);
+                        // said once in a while, as an app may send again before the update reaches it
+                        let quiet = told_put_back.is_some_and(|t| t.elapsed() < Duration::from_secs(PUT_BACK_QUIET_SECS));
+                        (refused && !quiet).then(|| {
+                            told_put_back = Some(std::time::Instant::now());
+                            Msg::put_back(PUT_BACK).to_json()
+                        })
                     }
                     Some(Msg::Ping) => Some(Msg::Pong.to_json()),
                     // it missed a revision: the whole copy again

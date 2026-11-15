@@ -407,6 +407,11 @@ pub enum Msg {
         /// Set when a call_join for this conversation was turned down.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel: Option<u64>,
+        /// Set when changes in a pushed copy were turned down and the team's
+        /// version goes back to the app (code "denied", so older apps show it
+        /// like any refusal).
+        #[serde(default, skip_serializing_if = "is_false")]
+        put_back: bool,
     },
 }
 
@@ -424,6 +429,7 @@ impl Msg {
             message: message.to_string(),
             code: code.map(|c| c.to_string()),
             channel: None,
+            put_back: false,
         }
     }
 
@@ -433,6 +439,17 @@ impl Msg {
             message: message.to_string(),
             code: Some(CODE_DENIED.to_string()),
             channel: Some(channel),
+            put_back: false,
+        }
+    }
+
+    /// Changes in a pushed copy turned down; the team's version follows.
+    pub fn put_back(message: &str) -> Msg {
+        Msg::Error {
+            message: message.to_string(),
+            code: Some(CODE_DENIED.to_string()),
+            channel: None,
+            put_back: true,
         }
     }
 
@@ -571,6 +588,10 @@ pub enum Event {
     },
     /// A request was turned down; the connection stays.
     Denied(String),
+    /// Changes in the copy this app sent were turned down (a space shared
+    /// with it at a level that doesn't allow them); the team's version of
+    /// them comes back with the next update.
+    PutBack(String),
     /// The huddle of this conversation was turned down (not in it, voice
     /// not set up...); the connection stays.
     CallDenied {
@@ -1014,8 +1035,10 @@ fn session(
                         message,
                         code,
                         channel,
+                        put_back,
                     }) => match code.as_deref() {
                         Some(CODE_AUTH) => Err(End::Refused(message)),
+                        Some(CODE_DENIED) if put_back => emit(Event::PutBack(message)),
                         Some(CODE_DENIED) => match channel {
                             Some(channel) => emit(Event::CallDenied {
                                 channel,
@@ -1199,6 +1222,19 @@ mod tests {
     fn roles_order_from_member_to_owner() {
         assert!(Role::Owner.manages() && Role::Admin.manages() && !Role::Member.manages());
         assert!(Role::Owner > Role::Admin && Role::Admin > Role::Member);
+    }
+
+    #[test]
+    fn a_put_back_refusal_reads_as_denied_to_older_apps() {
+        let text = Msg::put_back("no").to_json();
+        assert_eq!(
+            text,
+            r#"{"type":"error","message":"no","code":"denied","put_back":true}"#
+        );
+        // an app from before reads the same text as a plain refusal
+        let old: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(old["code"], CODE_DENIED);
+        assert_eq!(Msg::parse(&text), Some(Msg::put_back("no")));
     }
 
     #[test]

@@ -1572,11 +1572,102 @@ pub fn closed_to(ch: &Value, member: u64) -> bool {
     restricted && !members.is_empty() && !members.contains(&member)
 }
 
+/// How much someone may do in a space shared with chosen people: read it,
+/// also comment on its tasks, also change what is in it (lists, folders,
+/// tasks, docs), or also change the space itself and who it's shared with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    View,
+    Comment,
+    Edit,
+    Full,
+}
+
+impl Level {
+    pub const ALL: [Level; 4] = [Level::Full, Level::Edit, Level::Comment, Level::View];
+
+    /// A level as the file keeps it. A word this version doesn't know (from
+    /// a newer app) reads as View, so it never gives more than meant.
+    pub fn parse(s: &str) -> Level {
+        match s {
+            "full" => Level::Full,
+            "edit" => Level::Edit,
+            "comment" => Level::Comment,
+            _ => Level::View,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Level::Full => "full",
+            Level::Edit => "edit",
+            Level::Comment => "comment",
+            Level::View => "view",
+        }
+    }
+}
+
+/// A space shared with chosen people only: it has `sharing` and that
+/// doesn't say `"everyone": true`. Spaces from before sharing existed have
+/// no `sharing` and are everyone's.
+pub fn chosen_only(space: &Value) -> bool {
+    space
+        .get("sharing")
+        .and_then(|s| s.as_object())
+        .is_some_and(|s| s.get("everyone").and_then(|e| e.as_bool()) != Some(true))
+}
+
+/// What `member` may do in a space; None when it is closed to them.
+/// Someone's Personal space (`private_owner`) is only theirs. A space for
+/// everyone gives everyone Full, as before sharing existed. A space shared
+/// with chosen people gives each the level in `sharing.people`, and owners
+/// and admins (`manages`) always Full.
+pub fn space_level(space: &Value, member: u64, manages: bool) -> Option<Level> {
+    if let Some(owner) = space.get("private_owner").and_then(|o| o.as_u64()) {
+        return (owner == member).then_some(Level::Full);
+    }
+    if manages || !chosen_only(space) {
+        return Some(Level::Full);
+    }
+    space["sharing"]
+        .get("people")
+        .and_then(|p| p.as_array())
+        .into_iter()
+        .flatten()
+        .find(|p| p.get("member").and_then(|m| m.as_u64()) == Some(member))
+        .map(|p| Level::parse(p.get("level").and_then(|l| l.as_str()).unwrap_or("")))
+}
+
+/// The id of an item and of every item inside it (a space's folders and lists).
+pub fn ids_within(item: &Value) -> Vec<u64> {
+    let mut inner = BTreeMap::new();
+    walk(&Value::Array(vec![item.clone()]), None, false, &mut inner);
+    inner.into_keys().collect()
+}
+
+/// An item's own fields: without the items inside it and without each
+/// person's own fields (what a change stamp covers).
+pub fn own_fields(item: &Value) -> Map<String, Value> {
+    let mut own = Map::new();
+    for (k, v) in item.as_object().into_iter().flatten() {
+        if LOCAL_KEYS.contains(&k.as_str())
+            || v.as_array().is_some_and(|a| a.is_empty())
+            || is_id_array(v)
+        {
+            continue;
+        }
+        own.insert(k.clone(), v.clone());
+    }
+    own
+}
+
 /// The top-level items of a team's copy that `member` doesn't get (and
-/// can't change): DMs and private channels they aren't in, other people's
-/// Personal spaces with the tasks, docs, dashboards and forms in them, and
-/// other people's private docs (with their sub pages) and dashboards.
-pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
+/// can't change): DMs and private channels they aren't in, spaces closed to
+/// them (other people's Personal spaces, spaces shared with chosen people
+/// that leave them out; see `space_level`, `manages` for owners and admins)
+/// with the tasks, docs, dashboards and forms in them, and other people's
+/// private docs (with their sub pages) and dashboards.
+pub fn hidden_from(data: &Value, member: u64, manages: bool) -> Vec<u64> {
     let arr = |path: &str| {
         get_path(data, path)
             .and_then(|v| v.as_array())
@@ -1591,8 +1682,7 @@ pub fn hidden_from(data: &Value, member: u64) -> Vec<u64> {
     let mut spaces = vec![];
     let mut lists = std::collections::HashSet::new();
     for s in arr("spaces") {
-        let owner = s.get("private_owner").and_then(|o| o.as_u64());
-        if owner.is_none_or(|o| o == member) {
+        if space_level(s, member, manages).is_some() {
             continue;
         }
         let Some(id) = id_of(s) else { continue };
@@ -2418,7 +2508,7 @@ mod tests {
             "tasks": [{"id": 52, "list_id": 51, "name": "secret task"}, {"id": 62, "list_id": 61, "name": "own"}, {"id": 72, "list_id": 71, "name": "team"}],
             "docs": [{"id": 80, "owner": 1, "private": true}, {"id": 81, "owner": 1, "private": false, "parent": 80}, {"id": 82, "owner": 2, "private": true}, {"id": 83, "owner": 0, "private": true}, {"id": 84, "owner": 3, "private": false}, {"id": 85, "owner": 3, "space": 50}],
             "extra": {"sync": {}}});
-        let mut hidden = hidden_from(&d, 2);
+        let mut hidden = hidden_from(&d, 2, false);
         hidden.sort();
         assert_eq!(hidden, vec![20, 30, 50, 52, 80, 81, 85]);
         stamp(&d.clone(), &mut m, 10);
@@ -2968,11 +3058,11 @@ mod tests {
                           {"id": 101, "name": "y", "list_id": 54},
                           {"id": 102, "name": "z", "list_id": 61},
                           {"id": 103, "name": "w", "list_id": 71}]}});
-        let mut hidden = hidden_from(&d, 2);
+        let mut hidden = hidden_from(&d, 2, false);
         hidden.sort();
         assert_eq!(hidden, vec![50, 90, 94, 100, 101]);
         // the owner of the Personal space and maker of the dashboard sees them
-        let mut theirs = hidden_from(&d, 1);
+        let mut theirs = hidden_from(&d, 1, false);
         theirs.sort();
         assert_eq!(theirs, vec![60, 91, 102]);
         let mut out = d.clone();
@@ -3011,5 +3101,61 @@ mod tests {
         assert_eq!(out["extra"]["dashboards"][0]["name"], "D");
         assert_eq!(out["extra"]["workspace_color"], json!([1, 2, 3]));
         assert_eq!(out["tasks"], d["tasks"]);
+    }
+
+    #[test]
+    fn spaces_shared_with_chosen_people_are_hidden_from_everyone_else() {
+        let shared = |people: Value, everyone: bool| {
+            json!({"id": 70, "name": "Plans", "folders": [{"id": 73, "name": "F", "lists": [{"id": 74, "name": "In folder"}]}], "lists": [{"id": 71, "name": "L"}],
+                   "sharing": {"everyone": everyone, "people": people}})
+        };
+        let people = json!([{"member": 2, "level": "view"}, {"member": 3, "level": "comment"}, {"member": 4, "level": "edit"}, {"member": 5, "level": "full"}, {"member": 6, "level": "someday"}]);
+        let s = shared(people.clone(), false);
+        assert!(chosen_only(&s));
+        let lv = |m: u64, manages: bool| space_level(&s, m, manages);
+        assert_eq!(lv(2, false), Some(Level::View));
+        assert_eq!(lv(3, false), Some(Level::Comment));
+        assert_eq!(lv(4, false), Some(Level::Edit));
+        assert_eq!(lv(5, false), Some(Level::Full));
+        assert_eq!(
+            lv(6, false),
+            Some(Level::View),
+            "an unknown level gives the least"
+        );
+        assert_eq!(lv(7, false), None);
+        assert_eq!(
+            lv(7, true),
+            Some(Level::Full),
+            "owners and admins see every shared space"
+        );
+        // back to everyone (the people stay for next time), and spaces from before sharing
+        let open = shared(people, true);
+        assert!(!chosen_only(&open));
+        assert_eq!(space_level(&open, 7, false), Some(Level::Full));
+        assert_eq!(
+            space_level(&json!({"id": 1, "name": "Old"}), 7, false),
+            Some(Level::Full)
+        );
+        // a Personal space stays its owner's, even for admins
+        let personal = json!({"id": 1, "private_owner": 2});
+        assert_eq!(space_level(&personal, 1, true), None);
+        assert_eq!(space_level(&personal, 2, false), Some(Level::Full));
+
+        let d = json!({"workspace": "W", "members": [], "channels": [],
+            "spaces": [shared(json!([{"member": 2, "level": "view"}]), false), space(80, json!([]), json!([list(81)]))],
+            "tasks": [{"id": 72, "list_id": 71, "name": "secret"}, {"id": 75, "list_id": 74, "name": "in folder"}, {"id": 82, "list_id": 81, "name": "open"}],
+            "docs": [{"id": 90, "owner": 2, "space": 70}, {"id": 91, "owner": 1, "parent": 90}, {"id": 92, "owner": 1}],
+            "extra": {"sync": {}, "dashboards": [{"id": 93, "name": "d", "space": 70}], "forms": [{"id": 94, "name": "f", "list_id": 74}]}});
+        let mut hidden = hidden_from(&d, 3, false);
+        hidden.sort();
+        assert_eq!(hidden, vec![70, 72, 75, 90, 91, 93, 94]);
+        assert!(
+            hidden_from(&d, 2, false).is_empty(),
+            "a chosen person sees it"
+        );
+        assert!(hidden_from(&d, 3, true).is_empty(), "so does an admin");
+        assert_eq!(ids_within(&d["spaces"][0]), vec![70, 71, 73, 74]);
+        let own = own_fields(&d["spaces"][0]);
+        assert!(own.contains_key("sharing") && !own.contains_key("lists"));
     }
 }

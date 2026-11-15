@@ -179,3 +179,22 @@ fn settings_spaces_with_none_says_so_and_offers_new_space() {
     h.click("+ New Space");
     assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
 }
+
+#[test]
+fn teams_page_alone_leads_with_inviting_people() {
+    let mut h = with(solo(), 1440.0, 900.0);
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 0;
+    h.settle();
+    assert!(h.has("Invite people to make teams"));
+    assert_eq!(h.count_named("Create Team"), 1, "one create button");
+    h.click("Invite people");
+    assert!(matches!(h.app.modal, Some(Modal::Invite { .. })));
+    // with other people in the workspace the usual page shows
+    let mut h = Ui1::new();
+    h.app.data.extra.teams.clear();
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 0;
+    h.settle();
+    assert!(h.has("Manage teams and see their work"));
+}

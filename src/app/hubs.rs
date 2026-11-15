@@ -1515,6 +1515,18 @@ impl App {
                 let teams: Vec<Team> = self.data.extra.teams.iter().filter(|x| !mine || x.members.contains(&me)).cloned().collect();
                 if teams.is_empty() && mine && !self.data.extra.teams.is_empty() {
                     ui.label(RichText::new(tr("You're not in any team yet")).color(t.text3));
+                } else if teams.is_empty() && self.data.solo() {
+                    // alone: a team of one means nothing yet, so invite first;
+                    // Create Team stays in the bar above
+                    ui.add_space(60.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(tr("Invite people to make teams")).size(24.0));
+                        ui.label(RichText::new(tr("You're the only one in this workspace. Invite the people you work with, then group them into teams.")).color(t.text2));
+                        ui.add_space(12.0);
+                        if primary_button(ui, &t, tr("Invite people")).clicked() {
+                            self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
+                        }
+                    });
                 } else if teams.is_empty() {
                     ui.add_space(60.0);
                     ui.vertical_centered(|ui| {

@@ -8815,3 +8815,34 @@ fn a_slack_decision_made_before_sharing_stays_one_after() {
     assert_eq!(slack_next(&a, "UX"), Some(Assign::New));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A plain import that only accepts what matching found for a Slack id an
+/// older version left on two members doesn't write it into the shared map
+/// either, so deleting that member later still falls back to the other one.
+#[test]
+fn importing_a_slack_id_on_two_older_lists_keeps_it_out_of_the_map() {
+    use super::slack::{plan, Assign};
+    let mut a = app();
+    let (alex, sam) = (2, 3);
+    for id in [alex, sam] {
+        a.data
+            .members
+            .iter_mut()
+            .find(|m| m.id == id)
+            .unwrap()
+            .slack = vec!["UX".into()];
+    }
+    let (u, c) = slack_moves(&[(1, "UX")]);
+    let p = plan(&a.data, u, c);
+    assert_eq!(p.assign.get("UX"), Some(&Assign::Member(alex)));
+    a.import_slack(&p);
+    assert_eq!(a.data.extra.slack_map.get("UX"), None);
+    a.data.members.retain(|m| m.id != alex);
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(sam)));
+    // choosing a member in the dialog is a decision and goes in the map
+    let (u, c) = slack_moves(&[(2, "UX")]);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UX".into(), Assign::Member(4));
+    a.import_slack(&p);
+    assert_eq!(a.data.extra.slack_map.get("UX"), Some(&4));
+}

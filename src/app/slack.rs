@@ -904,6 +904,20 @@ impl App {
                         .sync
                         .values
                         .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+                // a Slack person an older version left on two members stays
+                // with those lists until someone decides (see
+                // `Data::fold_legacy_slack`): only matching found them here
+                let on_two = self
+                    .data
+                    .members
+                    .iter()
+                    .filter(|m| m.slack.iter().any(|x| x == sid))
+                    .count()
+                    > 1;
+                if !decided && fresh && on_two {
+                    continue;
+                }
+                let ex = &mut self.data.extra;
                 ex.slack_map.insert(sid.clone(), target);
                 if !decided && fresh {
                     crate::sync::carry_map_entry(

@@ -1342,7 +1342,10 @@ impl App {
                 // wrapped: in a plain row the long note pushed the dialog past its width
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(note).small().color(t.text2));
-                    if ui.link(RichText::new(tr("Work together")).small()).clicked() {
+                    if ui
+                        .link(RichText::new(tr("Work together")).small())
+                        .clicked()
+                    {
                         self.modal = Some(self.together_modal());
                     }
                 });

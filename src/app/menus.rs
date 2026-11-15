@@ -2798,6 +2798,7 @@ impl App {
                 role: role.to_string(),
                 invited: true,
                 status_text: String::new(),
+                slack: vec![],
             });
             // on a server: ask for their invite code (emailed by the server) once it has them
             if self

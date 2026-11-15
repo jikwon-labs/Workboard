@@ -8824,6 +8824,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
         role: "Member".into(),
         invited: false,
         status_text: String::new(),
+        slack: vec![],
     });
     h.click("general");
     let before: Vec<egui::Rect> = h
@@ -10102,4 +10103,64 @@ fn an_entry_taken_away_elsewhere_mid_edit_closes_the_editor_with_a_note() {
         .unwrap_or_default();
     assert!(note.contains("closed without saving"), "{}", note);
     assert!(h.app.data.tasks[i].time_entries.is_empty(), "nothing saved");
+}
+
+#[test]
+fn the_slack_matching_picker_tells_members_of_one_name_apart() {
+    let mut h = Ui1::new();
+    let sam2 = h.app.data.new_id();
+    h.app.data.members.push(Member {
+        id: sam2,
+        name: "Sam Lee".into(),
+        color: [1, 2, 3],
+        role: "Guest".into(),
+        ..Default::default()
+    });
+    h.app.section = Section::Chat;
+    h.settle();
+    let root = std::env::temp_dir().join(format!("wb-ui-slack3-{:x}", crate::sync::random_u64()));
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(
+        ex.join("users.json"),
+        r#"[{"id":"U1","name":"sam","real_name":"Sam Lee","profile":{}}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":["U1"]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","user":"U1","text":"hello","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    assert!(std::process::Command::new("/usr/bin/ditto")
+        .args(["-c", "-k"])
+        .arg(&ex)
+        .arg(&zip)
+        .status()
+        .unwrap()
+        .success());
+    h.app.open_slack_export(&zip);
+    h.settle();
+    h.click("Messages from Sam Lee");
+    assert!(
+        h.has("Sam Lee (sam@example.com)"),
+        "the email next to the name"
+    );
+    assert!(h.has("Sam Lee (Guest)"), "no email: the role");
+    h.click("Sam Lee (Guest)");
+    match &h.app.modal {
+        Some(Modal::SlackImport(p)) => {
+            assert_eq!(
+                p.assign.get("U1"),
+                Some(&super::slack::Assign::Member(sam2))
+            )
+        }
+        _ => panic!("the dialog stays open"),
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }

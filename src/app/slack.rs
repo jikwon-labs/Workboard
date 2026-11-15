@@ -4,11 +4,15 @@
 // The export holds users.json (the people), channels.json (public
 // channels; groups.json holds private ones when the export has them) and a
 // folder per channel with one JSON file per day: [{"user", "text", "ts",
-// "thread_ts", "files", ...}]. People are matched to members by email, then
-// by a name only one member has; two Slack people are never matched to the
-// same member on their own. The dialog shows the matching and each person
-// can be pointed at a member, added as a new member, or brought in under my
-// name (their name in front of their messages). Messages keep their times,
+// "thread_ts", "files", ...}]. People are matched to members first by the
+// Slack id an earlier import remembered on the member (`Member::slack`, so a
+// renamed member or a teammate's import still finds them), then by email,
+// then by a name only one member has; two Slack people are never matched to
+// the same member on their own. The dialog shows the matching and each person
+// can be pointed at a member (listed with their email, so two of one name
+// differ), added as a new member, or brought in under my name (their name in
+// front of their messages). A new member is made only when a message of
+// theirs actually comes in. Messages keep their times,
 // thread replies go under their message, files come in as links (the files
 // themselves need a Slack sign-in to fetch). Imported messages are marked
 // (`Message::imported`, with Slack's unique ts) so they aren't news for
@@ -382,17 +386,28 @@ pub(super) fn plain_text(text: &str, names: &HashMap<String, String>) -> String 
         .replace("&amp;", "&")
 }
 
-/// Match the people in an export to members: by email, then by a name only
-/// one member has. A member two Slack people would both match is left
-/// unmatched for both (the dialog lets someone choose), so nobody's messages
-/// end up under somebody else without anyone deciding so. Unmatched people
-/// who wrote something are added as new members unless changed.
+/// Match the people in an export to members: first the member an earlier
+/// import brought each Slack person in as (`Member::slack`, kept in the shared
+/// workspace so a teammate's import finds it too, after a rename or with no
+/// email), then by email, then by a name only one member has. A member two
+/// Slack people would both match by email or name is left unmatched for both
+/// (the dialog lets someone choose), so nobody's messages end up under
+/// somebody else without anyone deciding so. Unmatched people who wrote
+/// something are added as new members unless changed.
 pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChannel>) -> SlackPlan {
     let low = |x: &str| x.trim().to_lowercase();
+    // decided at an earlier import
+    let mut known: HashMap<String, u64> = HashMap::new();
+    for u in &users {
+        if let Some(m) = data.members.iter().find(|m| m.slack.contains(&u.id)) {
+            known.insert(u.id.clone(), m.id);
+        }
+    }
+    let taken = |m: u64| known.values().any(|x| *x == m);
     // Slack id -> a member, each way
     let mut by_mail: HashMap<String, u64> = HashMap::new();
     let mut by_name: HashMap<String, u64> = HashMap::new();
-    for u in &users {
+    for u in users.iter().filter(|u| !known.contains_key(&u.id)) {
         if !u.email.trim().is_empty() {
             if let Some(m) = data.members.iter().find(|m| low(&m.email) == low(&u.email)) {
                 by_mail.insert(u.id.clone(), m.id);
@@ -416,15 +431,16 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
         }
     }
     let count = |map: &HashMap<String, u64>, m: u64| map.values().filter(|x| **x == m).count();
-    let mut matched: HashMap<String, u64> = HashMap::new();
+    let mut matched: HashMap<String, u64> = known.clone();
     for (id, m) in &by_mail {
-        if count(&by_mail, *m) == 1 {
+        // not a member an earlier import gave to another Slack person
+        if count(&by_mail, *m) == 1 && !taken(*m) {
             matched.insert(id.clone(), *m);
         }
     }
     for (id, m) in &by_name {
         // not a member someone else matched by email, and nobody else by name
-        if count(&by_mail, *m) == 0 && count(&by_name, *m) == 1 {
+        if count(&by_mail, *m) == 0 && count(&by_name, *m) == 1 && !taken(*m) {
             matched.insert(id.clone(), *m);
         }
     }
@@ -528,6 +544,45 @@ fn new_message(id: u64, author: u64, text: String, ts: i64) -> Message {
     }
 }
 
+/// Each member as the matching dialog lists them: the name, with the email
+/// next to it so two members of one name can be told apart; a member of a
+/// name others share and no email gets their role, and if that is still the
+/// same, the end of their id.
+pub(super) fn member_choices(members: &[Member]) -> Vec<(u64, String)> {
+    let low = |x: &str| x.trim().to_lowercase();
+    let shared = |m: &Member| {
+        members
+            .iter()
+            .filter(|x| low(&x.name) == low(&m.name))
+            .count()
+            > 1
+    };
+    let first: Vec<(u64, String)> = members
+        .iter()
+        .map(|m| {
+            let name = m.name.trim();
+            let label = if !m.email.trim().is_empty() {
+                format!("{} ({})", name, m.email.trim())
+            } else if shared(m) && !m.role.trim().is_empty() {
+                format!("{} ({})", name, tr(m.role.trim()))
+            } else {
+                name.to_string()
+            };
+            (m.id, label)
+        })
+        .collect();
+    first
+        .iter()
+        .map(|(id, label)| {
+            if first.iter().filter(|(_, l)| low(l) == low(label)).count() > 1 {
+                (*id, format!("{} #{:04}", label, id % 10_000))
+            } else {
+                (*id, label.clone())
+            }
+        })
+        .collect()
+}
+
 /// The name a channel from Slack gets here, and the one it gets when a
 /// channel of the other kind (public or private) already has that name.
 fn channel_names(sc: &SlackChannel) -> (String, String) {
@@ -566,8 +621,11 @@ impl App {
         plan: &SlackPlan,
     ) -> ((usize, usize), Vec<String>) {
         let me = self.data.me;
-        // Slack id -> member; people under my name aren't in it
+        // Slack id -> member; people under my name aren't in it, and people
+        // who get a new member only once a message of theirs comes in (an
+        // import that adds nothing makes no one)
         let mut people: HashMap<String, u64> = HashMap::new();
+        let mut to_make: Vec<String> = vec![];
         for id in &plan.people {
             match plan.assign.get(id).copied().unwrap_or(Assign::New) {
                 Assign::Member(m) if self.data.member(m).is_some() => {
@@ -575,23 +633,14 @@ impl App {
                 }
                 Assign::Member(_) | Assign::Me => {}
                 Assign::New => {
-                    let Some(u) = plan.user(id) else { continue };
-                    let mid = self.data.new_id();
-                    let color = STATUS_PALETTE[1 + (mid as usize % 13)];
-                    self.data.members.push(Member {
-                        id: mid,
-                        name: u.shown(),
-                        color,
-                        email: u.email.trim().to_string(),
-                        role: "Member".into(),
-                        invited: false,
-                        status_text: String::new(),
-                    });
-                    people.insert(id.clone(), mid);
+                    if plan.user(id).is_some() {
+                        to_make.push(id.clone());
+                    }
                 }
             }
         }
-        // names for @mentions: the member's name here, else Slack's
+        // names for @mentions: the member's name here, else Slack's (which
+        // is also the name a new member gets)
         let names: HashMap<String, String> = plan
             .users
             .iter()
@@ -631,7 +680,7 @@ impl App {
                     if members.is_empty() {
                         if sc.private {
                             // nobody to share it with: only me, not everyone
-                            alone.push(name.clone());
+                            alone.push((name.clone(), id));
                         } else {
                             members = self.data.members.iter().map(|m| m.id).collect();
                         }
@@ -663,8 +712,11 @@ impl App {
             let mut parents: HashMap<String, u64> = HashMap::new();
             let mut added = 0;
             for m in &sc.messages {
+                // a new member still to make: the message counts as theirs
+                let unmade = !people.contains_key(&m.user) && to_make.contains(&m.user);
                 let (author, prefix) = match people.get(&m.user) {
                     Some(id) => (*id, String::new()),
+                    None if unmade => (0, String::new()),
                     None => {
                         let who = plan
                             .user(&m.user)
@@ -698,7 +750,7 @@ impl App {
                 let same = |x: &Message| match &x.imported {
                     Some(k) => *k == key,
                     // imported before messages kept where they came from
-                    None => x.ts == ts && x.author == author && x.text == text,
+                    None => x.ts == ts && (unmade || x.author == author) && x.text == text,
                 };
                 // already here (imported before)
                 let found = ch.messages.iter().find_map(|x| {
@@ -711,6 +763,34 @@ impl App {
                     parents.insert(m.ts.clone(), id);
                     continue;
                 }
+                let author = if unmade {
+                    let Some(u) = plan.user(&m.user) else {
+                        continue;
+                    };
+                    let mid = self.data.new_id();
+                    let color = STATUS_PALETTE[1 + (mid as usize % 13)];
+                    self.data.members.push(Member {
+                        id: mid,
+                        name: u.shown(),
+                        color,
+                        email: u.email.trim().to_string(),
+                        role: "Member".into(),
+                        invited: false,
+                        status_text: String::new(),
+                        slack: vec![],
+                    });
+                    people.insert(m.user.clone(), mid);
+                    if existing.is_none() {
+                        // a channel made by this import: they're in it
+                        let ch = &mut self.data.channels[ci];
+                        if !ch.members.contains(&mid) {
+                            ch.members.push(mid);
+                        }
+                    }
+                    mid
+                } else {
+                    author
+                };
                 let id = self.data.new_id();
                 let mut msg = new_message(id, author, text, ts);
                 msg.imported = Some(key);
@@ -732,6 +812,31 @@ impl App {
                 touched.push(ch.id);
             }
             count += added;
+        }
+        // remember whose messages went to which member, for the next import
+        // (here or on a teammate's computer)
+        for (sid, mid) in &people {
+            if let Some(mem) = self.data.members.iter_mut().find(|x| x.id == *mid) {
+                if !mem.slack.contains(sid) {
+                    mem.slack.push(sid.clone());
+                    self.dirty = true;
+                }
+            }
+        }
+        // people who came in with their messages joined some of them
+        let alone: Vec<String> = alone
+            .into_iter()
+            .filter(|(_, id)| {
+                self.data
+                    .channels
+                    .iter()
+                    .find(|c| c.id == *id)
+                    .is_some_and(|c| c.members.iter().all(|m| *m == me))
+            })
+            .map(|(n, _)| n)
+            .collect();
+        if count == 0 && chans == 0 {
+            return ((0, 0), alone);
         }
         // old messages coming in aren't news
         for id in touched {
@@ -767,12 +872,7 @@ impl App {
         if !plan.people.is_empty() {
             ui.add_space(6.0);
             ui.label(tr("Whose messages go where:"));
-            let mut members: Vec<(u64, String)> = self
-                .data
-                .members
-                .iter()
-                .map(|m| (m.id, m.name.clone()))
-                .collect();
+            let mut members = member_choices(&self.data.members);
             members.sort_by_key(|m| m.1.to_lowercase());
             egui::ScrollArea::vertical()
                 .id_salt("slack_people")

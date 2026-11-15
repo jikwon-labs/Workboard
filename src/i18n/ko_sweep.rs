@@ -173,8 +173,8 @@ pub const T: &[(&str, &str)] = &[
     ("Team", "팀"),
     // replies and inbox
     (
-        "Comments assigned to someone, or that @mention them, until resolved",
-        "누군가에게 할당되었거나 @멘션한 댓글 (해결될 때까지)",
+        "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
+        "누군가에게 할당되었거나 @멘션한 작업 댓글 (해결될 때까지). 채팅 @멘션은 받은 편지함에 있습니다.",
     ),
     ("{} commented: {}", "{}님의 댓글: {}"),
     ("{} replied: {}", "{}님의 답장: {}"),

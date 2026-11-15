@@ -4188,7 +4188,7 @@ impl App {
                     1 => ("Replies", "Comments from others on tasks and chat replies"),
                     2 => (
                         "Assigned Comments",
-                        "Comments assigned to someone, or that @mention them, until resolved",
+                        "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
                     ),
                     _ => ("Inbox", "Recent activity across your workspace"),
                 };

@@ -216,7 +216,12 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
  "channel": 301, "parent": 311}
 ```
 
-- **푸시를 실제로 켜려면:** 실제 번들 ID 에 Push Notifications capability 를 켜고, `Config/Workboard.entitlements` 를 빌드 설정 `CODE_SIGN_ENTITLEMENTS` 에 연결한다. 그다음 서버에 APNs 키(.p8)를 둔다. 지금은 연결하지 않았다(임시 번들 ID 로는 프로비저닝이 안 됨).
+- **서버 쪽(2026-11-16):** workboard-server 가 `push_token` 을 기기별로 저장하고, 새 메시지·멘션·DM 이 오면 위 모양으로 APNs 에 보낸다(답글이면 `parent` 와 `"subtitle": "Thread reply"` 도). 보낸 사람 자신의 기기와 **지금 서버에 연결된 기기**에는 보내지 않는다. 연결된 앱은 로컬 알림을 띄우므로 "그 대화를 보고 있는 기기" 를 이것으로 대신했다. 규칙 전체는 `server/src/push.rs` 맨 위와 `docs/server-design.md` 7단계.
+- **푸시를 실제로 켜려면(남은 일):**
+  1. 실제 번들 ID 를 정한다(지금 `com.example.workboard.temporary`).
+  2. Apple Developer 에서 그 App ID 에 Push Notifications capability 를 켜고, `Config/Workboard.entitlements`(`aps-environment`)를 빌드 설정 `CODE_SIGN_ENTITLEMENTS` 에 연결한다.
+  3. Apple Developer > Keys 에서 APNs 키(.p8)를 만들어 Mac mini 서버 폴더에 두고 `apns.json` 을 쓴다(`docs/macmini/README.md`). `topic` 은 1번의 번들 ID.
+  4. 실기기에서 앱을 끄거나 백그라운드로 보낸 뒤 다른 사람이 DM 을 보내 배너가 뜨는지 본다. Xcode 로 설치한 개발 빌드는 `env: "development"` 라 sandbox 로 간다.
 - **확인한 것:** 권한 허용 -> 다른 탭에서 메시지 도착 -> 배너 -> 눌러서 #general 열기(UI 테스트).
 - **확인 못 한 것:** `xcrun simctl push` 로 원격 페이로드를 보냈을 때 배너가 뜨는 것은 이 시뮬레이터에서 확인하지 못했다. 추측: 테스트가 끝난 뒤 권한 상태가 바뀌었거나, 이 iOS 27 시뮬레이터의 동작 차이일 수 있다. 실기기에서 다시 확인해야 한다.
 
@@ -238,7 +243,7 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 {"type":"update",       "data":{...}, "rev":13}
 {"type":"set_password", "email":"a@b.c", "password":"...", "old_password":"..."}
 {"type":"account",      "email":"a@b.c"}
-{"type":"push_token",   "token":"<hex>", "platform":"ios", "env":"development" | "production"}   // 실제 서버는 모르는 type 이라 무시
+{"type":"push_token",   "token":"<hex>", "platform":"ios", "env":"development" | "production"}   // 서버가 기기별로 저장, APNs 로 알림(apns.json 이 있을 때)
 {"type":"error",        "message":"...", "code":"auth" | "denied"}          // code 없을 수 있음
 {"type":"ping"} / {"type":"pong"}
 ```
@@ -260,14 +265,14 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 
 ## 서버 세션에 바라는 점
 
-1. **`push_token` 받기.** 지금 실제 서버는 모르는 type 이라 무시한다. 아래 8번 푸시와 같이 필요하다.
+1. ~~**`push_token` 받기.**~~ 2026-11-16 완료: 기기별로 `server.json` 에 저장한다(재시작 뒤에도 유지, APNs 가 410·BadDeviceToken 이면 지움).
 2. **합친 결과가 같으면 `update` 를 보내지 않기.** iOS 는 연결할 때마다 사본 전체를 push 한다.
 3. **push 확인(ack) 또는 번호.** 지금은 stamp 비교로 "기다리는 변경"을 지우지만, `update {acked: seq}` 가 있으면 더 정확하다.
 4. **변경분 전송.** 셀룰러에서 전체 사본은 부담이 된다.
 5. **받은 push 를 합친 뒤 모양 검사.** 맥 앱은 읽히지 않는 사본을 조용히 버린다.
 6. **같은 기기에는 같은 tag.**
 7. **통화:** `/call-token` 응답에 `url`, `token`, `room` 을 담고, LiveKit identity 를 `member-<id>`, 이름을 멤버 이름으로 하기. 채널에 진행 중인 통화가 있다는 표시(예: `update` 와 별도로 `call_state {channel, participants}`)가 있으면 iOS 에서 "참여" 버튼을 보여 줄 수 있다.
-8. **푸시:** `push_token` 을 기기별로 저장하고, 새 메시지·멘션·DM 때 위 페이로드 모양으로 APNs 에 보내기. 보낸 사람 자신의 기기와, 그 대화를 지금 보고 있는 기기에는 보내지 않기.
+8. ~~**푸시:**~~ 2026-11-16 완료(서버 쪽): DM 은 매번, 채널은 `@이름` 멘션과 내가 시작했거나 쓴 스레드의 답글. 보낸 사람 기기와 지금 연결된 기기에는 보내지 않는다. 실제 발송은 위 "알림" 의 남은 일(번들 ID, capability, entitlements, .p8 키)이 끝나야 확인할 수 있다.
 
 ## 통신과 보안
 
@@ -297,7 +302,7 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 ## 아직 안 된 것
 
 - **실제 workboard-server 로 손 검증:** 서버 코드는 생겼지만 이메일·비밀번호 계정은 다른 세션이 넣는 중이라 아직 붙여 보지 않았다. 위 "실제 서버와 아직 다른 점" 참고.
-- **실제 LiveKit 음성·영상, 원격 푸시:** 실기기, livekit-server, APNs 설정이 필요하다.
+- **실제 LiveKit 음성·영상, 원격 푸시:** 실기기, livekit-server, APNs 설정이 필요하다. 푸시는 서버 코드가 들어갔고, 번들 ID·Push capability·entitlements·.p8 키가 남았다(위 "알림").
 - **iOS 17·18 런타임 실행 확인:** 이 맥에 런타임이 없다. 배포 대상은 17.0.
 - **반복 작업, 자동화, 체크리스트, 하위 작업 만들기, 채널·DM 만들기, 메시지 고치기·지우기:** 화면에 없다.
 - **iPad:** 깨지지 않는 정도.

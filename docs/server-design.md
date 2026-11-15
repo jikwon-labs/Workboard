@@ -11,7 +11,7 @@
 
 ## 지금 상태 (2026-11-15)
 
-- **1~5단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부까지 들어갔다. `cargo test --workspace` 173개와 재생 테스트(`tests/player.rs`) 통과.
+- **1~5단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부까지 들어갔다. 그 뒤 6단계(계정·초대 메일), 7단계(iPhone 푸시 알림, 실제 APNs 발송은 미확인)가 더해졌다. `cargo test --workspace` 173개와 재생 테스트(`tests/player.rs`) 통과.
 - **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. 아직 **비어 있다**: 처음 초대 코드 없이 연결하는 사람이 owner 가 된다.
 - **재부팅 자동 복구 확인:** 2026-11-15 03:37 macOS 업데이트(27.0.1 → 27.2.1) 재시동 뒤 Tailscale, 두 서버, Docker 와 컨테이너, ngrok, hermes, branchport 가 모두 저절로 다시 떴다(`deploy/check-after-boot.sh` 기록).
 - **실제 목소리:** 사용자가 확인했다("목소리 잘 나오더라").
@@ -198,6 +198,17 @@
 - **초대 링크.** `workboard://join?server=&code=&email=`. 번들에 URL 스킴을 등록하고(`scripts/bundle.sh`), `src/links.rs` 가 Apple 이벤트(GURL)로 받아 Join 화면을 채워서 연다. 이미 다른 서버에 붙어 있으면 바꾸지 않고 알려 준다. Gmail 같은 메일 앱은 사용자 정의 스킴 링크를 누를 수 없게 만들 때가 있어서, 메일에는 서버의 `http://.../join` 페이지 링크를 넣고 그 페이지에서 앱을 연다.
 - **검증:** 서버 단위(PBKDF2 벡터, 계정 규칙) + 통합 4개(메일 초대 → 비밀번호 → 다른 기기 로그인·잠금·revoke 로 계정 삭제·이메일 중복, 비밀번호 재설정, 나중에 비밀번호 정하기·바꾸기, join 페이지), wb-net(링크 만들기·읽기), 앱 통합 1개(owner 가 비밀번호로 서버 생성 → 두 번째 Mac 이 이메일로 → 초대 메일 → 코드 + 비밀번호로 합류 → 변경 → revoke 뒤 새 코드), 앱 UI 4개(로그인 탭·검증, 첫 실행, 링크 열기·붙여넣기, 계정 칸).
 - **알려진 한계:** 실제 SMTP 발송은 이 세션에서 보내 보지 않았다(`folder` 로만 확인). 메일 설정 전까지 비밀번호 찾기는 "관리자에게 새 코드" 로 안내된다. 이메일 소유 확인(가입 확인 메일)은 없다: 초대 코드를 받은 사람이 그 멤버라고 본다.
+
+### 7단계: iPhone 푸시 알림 (2026-11-16)
+
+iPhone 앱이 연결돼 있지 않을 때도 새 메시지·멘션·DM 을 알린다. 코드는 `server/src/push.rs`(맨 위에 규칙과 설정 형식).
+
+- **토큰.** iOS 가 welcome 뒤마다 보내는 `push_token {token, platform: "ios", env}` 를 받는다(`wb_net::Msg::PushToken`). `server.json` 의 `push`(기기 id → 토큰·env)에 저장하고, 같은 값이면 다시 쓰지 않는다. 같은 토큰이 새 기기 id 로 오면 예전 것은 지운다. 빈 토큰은 그 기기의 알림을 끈다. hex 가 아니거나 `platform` 이 ios 가 아니면 무시한다. `revoke` 는 그 사람 기기의 토큰도 지운다. 예전 앱(토큰을 안 보냄)은 그대로 동작하고, 예전 서버는 이 메시지를 모르는 type 으로 무시한다.
+- **누구에게.** push 를 합친 뒤 정본에 새로 생긴 메시지·답글만 본다. DM 은 작성자 말고 그 DM 의 모두에게 매번. 채널은 본문에 `@이름` 이 있는 사람(맥 앱 Inbox 와 같은 규칙), 스레드 답글이면 그 스레드를 시작했거나 답글을 쓴 사람도. 비공개 채널은 멤버에게만. 작성자와 그 copy 를 보낸 사람에게는 보내지 않는다. **지금 연결된 기기에는 보내지 않는다**(그 앱이 로컬 알림을 띄운다). 하루보다 오래된 메시지(오래 꺼져 있던 컴퓨터가 올린 것)는 알리지 않는다. 한 번 합칠 때 기기마다 최대 3개, 넘으면 최근 2개와 "N more new messages" 하나.
+- **보내기.** APNs 토큰 인증(JWT ES256, `kid` = 키 id, `iss` = 팀 id, 50분마다 새로 서명, `ring`). 기기가 보낸 env 로 `api.sandbox.push.apple.com`(development) 또는 `api.push.apple.com`(production). 헤더 `apns-topic`(번들 ID), `apns-push-type: alert`. APNs 는 HTTP/2 만 받는데 빌드에 있는 HTTP 라이브러리(reqwest 0.12)는 h2 가 빠진 채로 들어와 있어서 macOS 의 `/usr/bin/curl --http2` 로 보낸다. JWT 와 페이로드는 curl 인자가 아니라 표준 입력(curl 설정)으로 넘겨 프로세스 목록에 보이지 않게 했다. 410, `BadDeviceToken`, `Unregistered` 면 토큰을 지운다.
+- **설정.** 서버 폴더의 `apns.json`(`key`: .p8 경로, `key_id`, `team_id`, `topic`) 또는 환경 변수 `WB_APNS_KEY`, `WB_APNS_KEY_ID`, `WB_APNS_TEAM_ID`, `WB_APNS_TOPIC`(변수가 이긴다). LaunchAgent plist 는 환경 변수를 넘기지 않으므로 Mac mini 에서는 `apns.json` 을 쓴다. 넷 중 하나라도 없으면 푸시는 꺼지고, 서버가 시작할 때 로그에 "iPhone notifications off: ..." 를 한 번 찍는다. 시작할 때 읽으므로 바꾼 뒤에는 서버를 다시 켠다.
+- **검증:** 단위(받는 사람 규칙: DM·멘션·스레드·비공개·작성자·오래된 메시지, 묶기, 페이로드 모양, JWT 서명 검증과 재사용, curl 설정 따옴표, APNs 응답 해석, 설정 없으면 꺼짐) + 통합 2개(가짜 sender: 토큰 저장과 재시작 뒤 유지, DM → 상대 폰에 문서의 페이로드, 채널 멘션 → 멘션된 사람만, 스레드 답글 → 스레드 사람, 작성자 제외, 연결된 폰 제외, gone 이면 토큰 삭제 / 설정 없는 서버는 토큰만 저장하고 그대로 동작, hex 아닌 토큰 무시).
+- **알려진 한계:** 실제 APNs 로는 한 번도 보내 보지 않았다. 실제 번들 ID, Push capability, entitlements, .p8 키가 있어야 확인할 수 있다(`docs/ios-design.md` "알림"). "연결된 기기 제외" 는 서버가 연결이 끊긴 걸 알아챌 때까지(앱이 정지된 뒤 최대 약 90초) 푸시가 가지 않는다는 뜻이기도 하다. 그 사이 온 메시지는 iOS 가 앱을 깨워 주지 않으면 알림이 없다. 알림마다 curl 을 한 번 띄운다(작은 팀에는 충분).
 
 ## 부록 A: 처음 설계 (2026-11-14, 기록용)
 

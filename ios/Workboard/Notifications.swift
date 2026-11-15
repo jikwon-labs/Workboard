@@ -7,8 +7,9 @@
 //
 // Remote (APNs): after permission is given the app registers for remote
 // notifications and sends the device token to the server (`push_token`).
-// The server side and the aps-environment entitlement are not set up yet; see
-// docs/ios-design.md. The payload the app understands:
+// The server sends them once its apns.json is set up (server/src/push.rs);
+// the aps-environment entitlement is not set up yet, see docs/ios-design.md.
+// The payload the app understands:
 //   {"aps": {"alert": {"title": "...", "body": "..."}, "thread-id": "ch-301"},
 //    "channel": 301, "parent": 311}
 // ("parent" only for thread replies). Tapping it opens the conversation.

@@ -82,7 +82,10 @@ impl FilterRow {
 
 fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
     let td = today();
-    let week_start = td - Duration::days(td.weekday().num_days_from_monday() as i64);
+    // weeks start on Sunday as in the calendar, or Monday with the Labs option
+    let monday = data.extra.labs.iter().any(|l| l == "week_monday");
+    let back = if monday { td.weekday().num_days_from_monday() } else { td.weekday().num_days_from_sunday() };
+    let week_start = td - Duration::days(back as i64);
     match due {
         1 => t.due.map_or(false, |d| d < td) && !data.is_closed(t),
         2 => t.due == Some(td),
@@ -640,8 +643,10 @@ impl App {
                     let mut e = task.clone();
                     if on {
                         e.assignees.retain(|a| *a != m.id);
-                    } else {
+                    } else if self.data.extra.apps.multiple_assignees {
                         e.assignees.push(m.id);
+                    } else {
+                        e.assignees = vec![m.id];
                     }
                     self.actions.push(Action::Replace(e));
                     close_any(ui);
@@ -1372,7 +1377,12 @@ impl App {
                             }
                         }
                         if let Some(a) = pick_asg {
-                            if !e.assignees.contains(&a) {
+                            if !self.data.extra.apps.multiple_assignees {
+                                if e.assignees != [a] {
+                                    e.assignees = vec![a];
+                                    ch = true;
+                                }
+                            } else if !e.assignees.contains(&a) {
                                 e.assignees.push(a);
                                 ch = true;
                             }
@@ -1446,6 +1456,9 @@ impl App {
             new.start = Some(s + shift);
         }
         new.status = first;
+        // it's open again: no Date done / Date closed until it next closes
+        new.done_at = None;
+        new.closed_at = None;
         new.activity.push(Activity { ts: now_ts(), author: self.data.me, text: format!("completed a {} repeat; next due {}", r, crate::i18n::in_english(|| fmt_date(next))), comment: false, ..Default::default() });
         for c in &mut new.checklist {
             c.done = false;

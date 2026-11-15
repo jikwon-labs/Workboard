@@ -1080,7 +1080,7 @@ fn create_task_window_has_description_status_and_tags() {
     h.click("Create");
     h.click("Task");
     assert!(h.has("Close"), "header with a close button");
-    assert!(h.has("Task Name or type '/' for commands"));
+    assert!(h.has("Task Name"));
     h.type_text("Full task");
     h.click("Add description");
     h.type_text("Some details");

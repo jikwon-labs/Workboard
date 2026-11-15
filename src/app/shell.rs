@@ -769,7 +769,7 @@ impl App {
     // ---------------------------------------------------------------- sidebar
 
     pub(super) fn count_open(&self, list: u64) -> usize {
-        self.data.tasks.iter().filter(|t| t.list_id == list && t.parent.is_none() && !self.data.is_closed(t)).count()
+        self.data.tasks.iter().filter(|t| t.list_id == list && t.parent.is_none() && !t.archived && !self.data.is_closed(t)).count()
     }
 
     fn side_row(&self, ui: &mut Ui, indent: f32, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2), label: &str, sub: Option<&str>, trailing: Option<String>, muted: bool) -> Response {
@@ -1023,7 +1023,7 @@ impl App {
                                         self.actions.push(Action::Go(Location::MyTasks));
                                     }
                                     let me = self.data.me;
-                                    let td = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && x.due.map(|d| d <= today()).unwrap_or(false) && !self.data.is_closed(x)).count();
+                                    let td = self.data.tasks.iter().filter(|x| x.assignees.contains(&me) && x.due.map(|d| d <= today()).unwrap_or(false) && self.task_visible(x) && !self.data.is_closed(x)).count();
                                     let pl = self.personal_list_id();
                                     let subs: [(&str, Location, Option<String>); 3] = [
                                         ("Assigned to me", Location::MyTasks, None),
@@ -1423,11 +1423,20 @@ impl App {
                 p.rect_stroke(rr, 2.0, Stroke::new(1.2, tc), egui::StrokeKind::Inside);
                 p.line_segment([rr.left_top() + vec2(0.0, 2.5), rr.left_top() + vec2(5.0, 2.5)], Stroke::new(1.2, tc));
             }, &f.name, None, None, false);
-            if fr.clicked() {
-                self.actions.push(Action::Go(floc));
+            // the folder icon is the expand arrow (as on spaces); clicking the
+            // rest of the row opens the folder and expands it
+            let ficon = Rect::from_center_size(fr.rect.left_center() + vec2(30.0, 0.0), vec2(20.0, 20.0));
+            let fir = ui.interact(ficon, ui.id().with(("ficon", f.id)), Sense::click());
+            if fir.hovered() {
+                ui.painter().rect_filled(ficon, 5.0, t.sidebar);
+                paint_triangle(ui.painter(), ficon.center(), fexp, t.text2);
+            }
+            if fir.clicked() {
                 self.actions.push(Action::ToggleFolder(f.id));
-                if !fexp {
-                    // opening also expands
+            } else if fr.clicked() {
+                self.actions.push(Action::Go(floc));
+                if !f.expanded {
+                    self.actions.push(Action::ToggleFolder(f.id));
                 }
             }
             let fid = f.id;
@@ -1686,7 +1695,7 @@ impl App {
                                     close_popup(ui);
                                 }
                                 if ui.button(tr("Export to CSV")).clicked() {
-                                    self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
+                                    self.toast = Some((self.export_csv(), now_ts()));
                                     close_popup(ui);
                                 }
                                 if ui.button(RichText::new(tr("Delete list")).color(t.danger)).clicked() {
@@ -1733,7 +1742,8 @@ impl App {
                     self.chat_open = Some(id);
                 }
                 ui.add_space(8.0);
-                let is_list = matches!(self.loc, Location::List(_) | Location::MyTasks);
+                // Overview only covers a space or a folder
+                let is_list = !matches!(self.loc, Location::Space(_) | Location::Folder(_));
                 if is_list && self.view == ViewKind::Overview {
                     self.view = ViewKind::List;
                 }
@@ -2393,6 +2403,13 @@ impl App {
                     }
                     GroupBy::Priority => task.priority = g.priority.unwrap_or(0),
                     GroupBy::Assignee => task.assignees = g.assignee.into_iter().collect(),
+                    // the DONE column closes the task and keeps its date
+                    GroupBy::DueDate if g.key == "d:done" => {
+                        let own = self.data.statuses_for_list(task.list_id);
+                        if let Some(s) = own.iter().find(|s| s.kind == StatusKind::Done).or_else(|| own.iter().find(|s| s.kind == StatusKind::Closed)) {
+                            task.status = s.name.clone();
+                        }
+                    }
                     GroupBy::DueDate => task.due = g.due,
                     GroupBy::None => {}
                 }

@@ -14,7 +14,8 @@ impl Ui1 {
                 egui::Shape::Text(ts) => {
                     let r = ts.visual_bounding_rect();
                     let text = ts.galley.text().trim();
-                    if text.is_empty() || !area.contains(r.center()) {
+                    // where it shows decides whether it is in the area
+                    if text.is_empty() || !area.contains(r.intersect(clip).center()) {
                         return;
                     }
                     // scrolled out of view is fine; partly in view is cut
@@ -685,5 +686,28 @@ fn org_chart_cards_in_a_row_line_up() {
         "Sam {:?} and Jordan {:?} on one line",
         sam[0].0,
         jordan[0].0
+    );
+}
+
+#[test]
+fn sidebar_shortens_long_names_with_an_ellipsis() {
+    let mut h = Ui1::sized(1440.0, 1200.0);
+    heavy(&mut h);
+    h.app.data.workspace = "A workspace whose name is far too long for the sidebar row".into();
+    h.settle();
+    let side = h.rect("Team Space");
+    let area = Rect::from_min_max(pos2(side.left(), 40.0), pos2(side.right(), h.size.y));
+    let cut = h.cut_texts(area);
+    assert!(cut.is_empty(), "cut in the sidebar: {:?}", cut);
+    assert!(h.has(LONG_LIST), "the long list is in the sidebar");
+    assert!(
+        h.painted_text(LONG_LIST).is_empty(),
+        "not drawn past the row"
+    );
+    let r = h.rect(LONG_LIST);
+    assert!(
+        h.texts_in(r).iter().any(|(t, _)| t.ends_with('\u{2026}')
+            && LONG_LIST.starts_with(t.trim_end_matches('\u{2026}'))),
+        "shortened with an ellipsis"
     );
 }

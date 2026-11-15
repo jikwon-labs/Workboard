@@ -1469,22 +1469,35 @@ impl App {
             pos2(x + 24.0, rect.top()),
             pos2(rect.right() - 28.0, rect.bottom()),
         );
-        let g = ui
-            .painter()
-            .layout_no_wrap(shown.to_string(), FontId::proportional(14.0), col);
-        let gw = g.size().x;
-        ui.painter().with_clip_rect(clip).galley(
-            pos2(x + 24.0, rect.center().y - g.size().y / 2.0),
-            g,
+        // too long for the row: shortened with an ellipsis, whole on hover;
+        // the grey note after the name keeps up to 40% of the room
+        let sub_font = FontId::proportional(12.0);
+        let sub_w = sub.map_or(0.0, |s| {
+            let w = ui
+                .painter()
+                .layout_no_wrap(s.to_string(), sub_font.clone(), t.text3)
+                .size()
+                .x;
+            (w + 4.0).min(clip.width() * 0.4)
+        });
+        let nr = paint_fit(
+            ui,
+            pos2(x + 24.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            shown,
+            FontId::proportional(14.0),
             col,
+            clip.width() - sub_w,
         );
         if let Some(s) = sub {
-            ui.painter().with_clip_rect(clip).text(
-                pos2(x + 28.0 + gw, rect.center().y + 1.0),
+            paint_fit(
+                ui,
+                pos2(nr.right() + 4.0, rect.center().y + 1.0),
                 Align2::LEFT_CENTER,
                 s,
-                FontId::proportional(12.0),
+                sub_font,
                 t.text3,
+                clip.right() - nr.right() - 4.0,
             );
         }
         if let Some(count) = trailing {

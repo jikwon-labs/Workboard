@@ -538,7 +538,7 @@ public final class FakeServer: @unchecked Sendable {
             break
         case var .push(s):
             if let before = snapshot, keepTeamVersions(&s, before) {
-                send(.error(code: "denied", message: Self.putBackMessage), to: p)
+                send(.error(code: "denied", message: Self.putBackMessage, putBack: true), to: p)
             }
             onPush(s)
             if deltas, var snap = snapshot {

@@ -203,7 +203,49 @@ extension SyncClient {
         guard ok else { return nil }
         if case .nowhere = result { return result }
         setTrash(trash.filter { $0.id != id })
+        reuploadFiles(of: item)
         return result
+    }
+
+    /// Items came back from Trash: their pictures, videos and stills (the
+    /// ones this iPhone has) go back where the team can get them, checking
+    /// with the server rather than trusting it still has them (the Mac's
+    /// reupload_files). Kept in the settings until the server could be
+    /// asked, so a restore made offline sends them after the next connect.
+    func reuploadFiles(of item: TrashItem) {
+        let shas = FileAPI.files(inPayload: item.payload).filter { !settings.reuploads.contains($0) }
+        guard !shas.isEmpty else { return }
+        settings.reuploads += shas
+        storage.save(settings)
+        flushReuploads()
+    }
+
+    /// Try the files waiting to go back up (see reuploadFiles).
+    func flushReuploads() {
+        let shas = settings.reuploads.filter { !reuploading.contains($0) }
+        guard !shas.isEmpty else { return }
+        reuploading.formUnion(shas)
+        let (server, auth, folder) = (settings.server, fileAuth, fileCache)
+        lastReupload = Task { [weak self] in
+            var sent = 0
+            for sha in shas {
+                // the server's answer settles it, whatever it was; no answer: next connect
+                let done: Bool
+                do {
+                    if try await FileAPI.reupload(server: server, auth: auth, sha: sha, folder: folder) { sent += 1 }
+                    done = true
+                } catch {
+                    done = false
+                }
+                guard let self else { continue }
+                self.reuploading.remove(sha)
+                if done, self.settings.server == server {
+                    self.settings.reuploads.removeAll { $0 == sha }
+                    self.storage.save(self.settings)
+                }
+            }
+            return sent
+        }
     }
 
     /// Delete a Trash item for good (only this iPhone's copy).
@@ -214,11 +256,26 @@ extension SyncClient {
     public func emptyTrash() { setTrash([]) }
 
     func addToTrash(_ item: TrashItem) {
+        // Trash belongs to whoever deleted the items
+        if trash.isEmpty || settings.trashOwner != settings.me { trash = [] }
+        settings.trashOwner = settings.me
+        storage.save(settings)
         setTrash(trash + [item])
     }
 
     func setTrash(_ items: [TrashItem]) {
         trash = items
         storage.save(trash: items)
+        if items.isEmpty, settings.trashOwner != nil {
+            settings.trashOwner = nil
+            storage.save(settings)
+        }
+    }
+
+    /// Someone else is signed in now (or picked by hand): what the one
+    /// before deleted isn't theirs to see or restore.
+    func trashFollowsMe() {
+        guard !trash.isEmpty, let me = settings.me, settings.trashOwner != me else { return }
+        setTrash([])
     }
 }

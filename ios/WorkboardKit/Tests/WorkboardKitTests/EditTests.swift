@@ -530,3 +530,51 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(m2.attachments.map(\.thumb), [nil, nil])
     }
 }
+
+/// Round 4: the @ list in the iPhone's message box.
+final class MentionPickTests: XCTestCase {
+    func data() -> JSON {
+        [
+            "members": [
+                ["id": 1, "name": "Jamie Park"], ["id": 2, "name": "Alex", "email": "alex@a.test"],
+                ["id": 5, "name": "Alex", "email": "alex@b.test"], ["id": 6, "name": "Alexis", "invited": true],
+            ],
+            "channels": [["id": 301, "name": "general", "kind": "Channel", "members": [], "messages": [
+                ["id": 311, "author": 1, "text": "hi", "ts": 1, "replies": []],
+            ]]],
+            "tasks": [["id": 201, "name": "T", "activity": []]],
+        ]
+    }
+
+    func testThePersonPickedFromTheListIsTheOneMentioned() {
+        var d = data()
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "@Alex look", picked: [5], me: 1, id: 900, ts: 2))
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "@Alex look", me: 1, id: 901, ts: 3))
+        XCTAssertTrue(Edits.sendReply(&d, channel: 301, to: 311, text: "@Alex you", picked: [2], me: 1, id: 902, ts: 4))
+        XCTAssertTrue(Edits.addComment(&d, task: 201, text: "@Alex here", picked: [5], me: 1, ts: 5))
+        let msgs = d["channels"]![0]!["messages"]!.array!
+        XCTAssertEqual(msgs.first { $0["id"] == 900 }!["mentions"], [5], "the picked Alex")
+        XCTAssertEqual(msgs.first { $0["id"] == 901 }!["mentions"], [2, 5], "typed by hand: both")
+        XCTAssertEqual(msgs.first { $0["id"] == 311 }!["replies"]![0]!["mentions"], [2])
+        XCTAssertEqual(d["tasks"]![0]!["activity"]![0]!["mentions"], [5])
+        // an edit keeps the pick (editMessage reads it back)
+        Edits.editMessage(&d, channel: 301, message: 900, text: "@Alex look again", me: 1, ts: 6)
+        XCTAssertEqual(d["channels"]![0]!["messages"]!.array!.first { $0["id"] == 900 }!["mentions"], [5])
+    }
+
+    func testTheListFollowsWhatIsTyped() {
+        XCTAssertEqual(Mentions.query(in: "@"), "")
+        XCTAssertEqual(Mentions.query(in: "hi @al"), "al")
+        XCTAssertEqual(Mentions.query(in: "hi @Alex K"), "Alex K")
+        XCTAssertNil(Mentions.query(in: "mail me@al"), "@ must start a word")
+        XCTAssertNil(Mentions.query(in: "hi @ al"))
+        XCTAssertNil(Mentions.query(in: "hi"))
+        XCTAssertNil(Mentions.query(in: "@al\nnext"))
+        let members = WorkspaceView(data()).members
+        XCTAssertEqual(Mentions.candidates("al", members: members, me: 1).map(\.id), [2, 5], "not the invited one")
+        XCTAssertEqual(Mentions.candidates("", members: members, me: 1).map(\.id), [2, 5], "not me")
+        XCTAssertEqual(Mentions.candidates("jam", members: members, me: 2).map(\.id), [1])
+        XCTAssertEqual(Mentions.complete("hi @al", with: "Alex"), "hi @Alex ")
+        XCTAssertEqual(Mentions.complete("@", with: "Jamie Park"), "@Jamie Park ")
+    }
+}

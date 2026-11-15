@@ -211,9 +211,9 @@ struct ConversationView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files in
+                Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
                     client.edit { d, me in
-                        Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, me: me, id: client.newId(), ts: nowTs())
+                        Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, me: me, id: client.newId(), ts: nowTs())
                     }
                 }
             }
@@ -276,9 +276,9 @@ struct ThreadView: View {
             }
             .defaultScrollAnchor(.bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Reply…", attachments: true) { text, files in
+                Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
                     client.edit { d, me in
-                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, me: me, id: client.newId(), ts: nowTs())
+                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, me: me, id: client.newId(), ts: nowTs())
                     }
                 }
             }
@@ -465,26 +465,40 @@ struct RepliesChip: View {
 /// The message box. Works offline too: messages wait and go up on reconnect.
 /// With `attachments`, a photo button adds pictures and videos: they go up
 /// to the server first (PUT /files) and the message names them.
+/// Typing "@" at the start of a word offers the people to mention; the ones
+/// picked go along with the text, so a name several people share mentions
+/// the person picked (the message's `mentions`).
 struct Composer: View {
     @Environment(SyncClient.self) private var client
     let placeholder: String
     let allowsAttachments: Bool
-    let send: (String, [JSON]) -> Bool
+    let send: (String, [JSON], [UInt64]) -> Bool
     @State private var text = ""
     @State private var picked: [PhotosPickerItem] = []
     @State private var pending: [PendingFile] = []
+    /// People chosen from the @ list for this message.
+    @State private var mentioned: [UInt64] = []
+    /// Where the "@" just completed from the list is (no list for it again).
+    @State private var completedAt: Int?
     @FocusState private var focused: Bool
 
-    init(placeholder: String, send: @escaping (String) -> Bool) {
+    init(placeholder: String, send: @escaping (String, [UInt64]) -> Bool) {
         self.placeholder = placeholder
         self.allowsAttachments = false
-        self.send = { text, _ in send(text) }
+        self.send = { text, _, picked in send(text, picked) }
     }
 
-    init(placeholder: String, attachments: Bool, send: @escaping (String, [JSON]) -> Bool) {
+    init(placeholder: String, attachments: Bool, send: @escaping (String, [JSON], [UInt64]) -> Bool) {
         self.placeholder = placeholder
         self.allowsAttachments = attachments
         self.send = send
+    }
+
+    /// The people the @ list shows now (none: no list).
+    var mentionChoices: [MemberView] {
+        guard let q = Mentions.query(in: text), let at = text.lastIndex(of: "@") else { return [] }
+        if text.distance(from: text.startIndex, to: at) == completedAt { return [] }
+        return Mentions.candidates(q, members: client.view.members, me: client.me)
     }
 
     var ready: [JSON] { pending.compactMap(\.attachment) }
@@ -493,6 +507,38 @@ struct Composer: View {
     var body: some View {
         let can = client.canEdit
         VStack(spacing: 6) {
+            let choices = mentionChoices
+            if !choices.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(choices) { m in
+                            Button {
+                                if let at = text.lastIndex(of: "@") { completedAt = text.distance(from: text.startIndex, to: at) }
+                                text = Mentions.complete(text, with: m.name)
+                                if !mentioned.contains(m.id) { mentioned.append(m.id) }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Avatar(member: m, size: 22)
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(m.name).font(.subheadline.weight(.medium))
+                                        // tells apart people with the same name
+                                        if !m.email.isEmpty { Text(m.email).font(.caption2).foregroundStyle(.secondary) }
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color(.secondarySystemBackground)))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Mention \(m.name)" + (m.email.isEmpty ? "" : ", \(m.email)"))
+                            .accessibilityIdentifier("mention-\(m.id)")
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+                .accessibilityIdentifier("mentionList")
+            }
             if !pending.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -519,9 +565,11 @@ struct Composer: View {
                     .disabled(!can)
                     .accessibilityIdentifier("composer")
                 Button {
-                    if send(text, ready) {
+                    if send(text, ready, mentioned) {
                         text = ""
                         pending = []
+                        mentioned = []
+                        completedAt = nil
                     }
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
@@ -552,17 +600,24 @@ struct Composer: View {
             do {
                 let a = try await MediaUpload.prepare(item)
                 defer { if let file = a.file { try? FileManager.default.removeItem(at: file) } }
-                // a video's still goes up first, so it's there when the message is
+                // a video's still goes up first, so it's there when the message
+                // is; it's only a preview, so the video goes without one when
+                // it can't (as on the Mac)
                 var thumb: String?
                 if let still = a.still {
-                    thumb = try await FileAPI.upload(server: server, auth: auth, data: still, contentType: "image/jpeg")
+                    thumb = try? await FileAPI.upload(server: server, auth: auth, data: still, contentType: "image/jpeg")
+                    if let thumb { FileAPI.keep(still, sha: thumb, ext: "jpg") }
                 }
                 let sha: String
+                let ext = (a.name as NSString).pathExtension.lowercased()
                 if let file = a.file {
                     // streamed from the file, never read whole
                     sha = try await FileAPI.upload(server: server, auth: auth, file: file, contentType: a.contentType)
+                    FileAPI.keep(file: file, sha: sha, ext: ext)
                 } else {
-                    sha = try await FileAPI.upload(server: server, auth: auth, data: a.data ?? Data(), contentType: a.contentType)
+                    let data = a.data ?? Data()
+                    sha = try await FileAPI.upload(server: server, auth: auth, data: data, contentType: a.contentType)
+                    FileAPI.keep(data, sha: sha, ext: ext)
                 }
                 f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.bytes, w: a.w, h: a.h, secs: a.secs, thumb: thumb)
                 f.preview = a.preview

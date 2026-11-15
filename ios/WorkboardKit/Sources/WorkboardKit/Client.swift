@@ -63,10 +63,15 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
     /// (they couldn't be reached at sign-out); their device tokens wait in
     /// the token store under `SyncClient.unregisterKey`.
     public var pushUnregister: [String] = []
+    /// Who deleted the items in this iPhone's Trash: someone else signing
+    /// in here doesn't get to see or restore them.
+    public var trashOwner: UInt64?
+    /// Files of items restored from Trash still to go back to the server.
+    public var reuploads: [String] = []
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case server, device, tag, lastId, me, meFromServer, waitingStamps, waitingTombs, pushToken, pushEnv, accountEmail, role, pushSentTo, pushUnregister }
+    enum CodingKeys: String, CodingKey { case server, device, tag, lastId, me, meFromServer, waitingStamps, waitingTombs, pushToken, pushEnv, accountEmail, role, pushSentTo, pushUnregister, trashOwner, reuploads }
 
     // every field optional, so settings from an older build still load
     public init(from decoder: Decoder) throws {
@@ -85,6 +90,8 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
         role = try c.decodeIfPresent(String.self, forKey: .role)
         pushSentTo = try c.decodeIfPresent(String.self, forKey: .pushSentTo)
         pushUnregister = try c.decodeIfPresent([String].self, forKey: .pushUnregister) ?? []
+        trashOwner = try c.decodeIfPresent(UInt64.self, forKey: .trashOwner)
+        reuploads = try c.decodeIfPresent([String].self, forKey: .reuploads) ?? []
     }
 }
 
@@ -187,8 +194,12 @@ public final class SyncClient {
     public internal(set) var backups: [Backup]?
     /// The newest invite code made here, with where it was emailed.
     public internal(set) var lastInvite: InviteResult?
-    /// An access or backup request is on its way.
-    public internal(set) var adminPending = 0
+    /// Requests whose answers are on their way, oldest first. The server
+    /// answers each request on a connection in the order they were sent,
+    /// so a refusal belongs to the oldest one (see `settle`).
+    public internal(set) var asks: [PendingAsk] = []
+    /// Access or backup requests on their way.
+    public var adminPending: Int { asks.filter(\.isAdmin).count }
     /// The last access or backup request the server turned down.
     public internal(set) var adminError: String?
     /// Said after a restore ("Restored the team's workspace to ...").
@@ -223,6 +234,11 @@ public final class SyncClient {
     @ObservationIgnored private var serverDeltas = false
     /// call_join requests waiting for the server's answer, by channel.
     @ObservationIgnored private var pendingCalls: [UInt64: [CheckedContinuation<CallGrant, Error>]] = [:]
+    /// Where pictures and videos are kept on this device (tests use their own).
+    @ObservationIgnored public var fileCache: URL = FileAPI.defaultCache
+    /// The latest re-upload after a restore from Trash (how many files went up).
+    @ObservationIgnored var lastReupload: Task<Int, Never>?
+    @ObservationIgnored var reuploading: Set<String> = []
     /// How long to wait for a call_token.
     @ObservationIgnored public var callTimeout: TimeInterval = 15
 
@@ -266,6 +282,8 @@ public final class SyncClient {
             self.view = WorkspaceView(snap)
         }
         self.trash = storage.loadTrash()
+        // a Trash from an older build belongs to whoever is signed in now
+        if !trash.isEmpty, settings.trashOwner == nil { settings.trashOwner = settings.me }
         storage.save(settings)
     }
 
@@ -308,6 +326,7 @@ public final class SyncClient {
             settings.meFromServer = false
             settings.waitingStamps = [:]
             settings.waitingTombs = [:]
+            settings.reuploads = []
             try? FileManager.default.removeItem(at: storage.snapshotURL)
             // Trash holds the other workspace's items
             setTrash([])
@@ -318,6 +337,7 @@ public final class SyncClient {
         pendingSignIn = nil
         signInMessage = nil
         storage.save(settings)
+        trashFollowsMe()
         disconnect()
         connect()
     }
@@ -327,6 +347,7 @@ public final class SyncClient {
         guard !settings.meFromServer else { return }
         settings.me = id
         storage.save(settings)
+        trashFollowsMe()
     }
 
     /// The APNs token for this install; sent now if connected, else after the next welcome.
@@ -433,7 +454,7 @@ public final class SyncClient {
                         ws.sendPing { e in if let e { c.resume(throwing: e) } else { c.resume() } }
                     }
                     return true
-                case let .error(code, _, _):
+                case let .error(code, _, _, _):
                     // signed out there for good (token unknown, access removed): the
                     // server dropped this device's notifications with it
                     return code == ServerErrorCode.auth.rawValue
@@ -476,6 +497,8 @@ public final class SyncClient {
         settings.role = nil
         clearAdmin()
         storage.save(settings)
+        // the next person to sign in here doesn't see what this one deleted
+        setTrash([])
         pendingSignIn = nil
         needsSignIn = true
         signInReason = .needed
@@ -496,6 +519,7 @@ public final class SyncClient {
         if settings.accountEmail != nil, (oldPassword ?? "").isEmpty { return "Type your current password." }
         guard state.isConnected, let ws = socket else { return "Connect to the server first." }
         accountRequest = .sending
+        asks.append(.password)
         send(.setPassword(email: e, password: password, oldPassword: oldPassword), on: ws)
         return nil
     }
@@ -577,6 +601,8 @@ public final class SyncClient {
         pushTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        // answers to what was asked on that connection won't come
+        asks = []
     }
 
     func send(_ m: ClientMessage, on ws: URLSessionWebSocketTask) {
@@ -624,6 +650,7 @@ public final class SyncClient {
                 settings.role = nil
             }
             storage.save(settings)
+            trashFollowsMe()
             self.rev = w.rev
             serverDeltas = w.deltas
             summary = w.deltas ? w.snapshot.map { SyncSummary(of: $0) } : nil
@@ -634,6 +661,7 @@ public final class SyncClient {
                 for old in settings.pushUnregister where ServerAddress.same(old, settings.server) { finishUnregister(old) }
             }
             sendPushToken(on: ws)
+            flushReuploads()
             // after (re)connecting our copy goes up (only what the server
             // doesn't have, when it takes deltas)
             if data != nil { pushNow() }
@@ -649,6 +677,7 @@ public final class SyncClient {
             self.rev = max(self.rev, rev)
             if data != nil { take(part, announce: true, hidden: hidden) }
         case let .account(email):
+            settle(m)
             settings.accountEmail = email
             storage.save(settings)
             accountRequest = .done
@@ -660,10 +689,14 @@ public final class SyncClient {
             send(.pong, on: ws)
         case .pong:
             break
-        case let .error(code, message, channel):
-            if let channel, pendingCalls[channel] != nil {
-                // a call_join turned down; the connection stays
+        case let .error(code, message, channel, putBack):
+            if let channel {
+                // a call_join turned down (one that timed out meanwhile is
+                // over already); the connection stays
                 finishCall(channel, .failure(CallAPI.meansNotSetUp(message) ? CallError.notAvailable : CallError.denied(message)))
+            } else if putBack || message == Self.updateNeeded {
+                // about pushed changes, not an answer to a request
+                notice = message
             } else {
                 handleError(code.flatMap(ServerErrorCode.init(rawValue:)), message: message)
             }
@@ -696,6 +729,8 @@ public final class SyncClient {
             settings.accountEmail = nil
             settings.role = nil
             storage.save(settings)
+            // signed out: whoever signs in next doesn't see this Trash
+            setTrash([])
             signInReason = wasAttempt ? .failed : (wasIn || helloUsedToken ? .signedOut : .needed)
             signInMessage = message.isEmpty ? "The server didn't let this device in." : message
             needsSignIn = true
@@ -703,13 +738,16 @@ public final class SyncClient {
             attempt = 0
         case .denied:
             let m = message.isEmpty ? "The server turned that down." : message
-            if accountRequest == .sending {
-                accountRequest = .failed(m)
-            } else if adminPending > 0 {
-                adminPending -= 1
-                adminError = m
-            } else {
+            // the answer to the oldest request still waiting; with none
+            // waiting it's a refusal of its own, shown briefly
+            guard !asks.isEmpty else {
                 notice = m
+                return
+            }
+            if asks.removeFirst() == .password {
+                accountRequest = .failed(m)
+            } else {
+                adminError = m
             }
         case nil:
             // no code: like losing the connection
@@ -752,9 +790,15 @@ public final class SyncClient {
         updatesReceived += 1
         refresh()
         if announce, let before, let after = data {
-            let fresh = Self.newMessages(before: before, after: after, me: settings.me)
+            let fresh = Self.newMessages(before: before, after: after, me: settings.me, now: nowTs())
             if !fresh.isEmpty { onIncoming(fresh) }
         }
+    }
+
+    /// Tests: handle a message as if it came over the connection.
+    func receiveForTests(_ m: ServerMessage) {
+        let ws = socket ?? session.webSocketTask(with: URL(string: "ws://127.0.0.1:9/ws")!)
+        handle(m, ws)
     }
 
     /// Drop the waiting marks the server has now shown back (or overtaken).
@@ -772,8 +816,23 @@ public final class SyncClient {
         if before != (settings.waitingStamps, settings.waitingTombs) { storage.save(settings) }
     }
 
-    /// Messages and replies by others that are in `after` but not in `before`.
-    nonisolated static func newMessages(before: JSON, after: JSON, me: UInt64?) -> [IncomingMessage] {
+    /// How old a message may be and still notify: it was just written.
+    /// Older ones showing up (a conversation shared with me now, a computer
+    /// that was offline) aren't news.
+    nonisolated static let notifyWindowSecs: Int64 = 10 * 60
+    /// A message in a conversation restored from Trash notifies only when
+    /// it was written at most this long before the conversation came back
+    /// (RESTORED_SLACK_SECS in server/src/push.rs).
+    nonisolated static let restoredSlackSecs: Int64 = 5 * 60
+
+    /// wb_net::UPDATE_NEEDED: the server takes no changes from this build.
+    nonisolated static let updateNeeded = "This version of Workboard is too old to send changes to your team's server. Update Workboard to keep working together; until then you only see what others change."
+
+    /// Messages and replies by others that are in `after` but not in
+    /// `before`, written within `notifyWindowSecs` of `now` (seconds), and
+    /// not brought back from Trash: the server's push rule (push::notes),
+    /// with a shorter age limit.
+    nonisolated static func newMessages(before: JSON, after: JSON, me: UInt64?, now: Int64) -> [IncomingMessage] {
         func ids(_ d: JSON) -> Set<UInt64> {
             var s = Set<UInt64>()
             for c in d["channels"]?.array ?? [] {
@@ -784,18 +843,28 @@ public final class SyncClient {
             }
             return s
         }
+        // seconds, also for a stamp in milliseconds (push.rs secs)
+        func secs(_ t: Int64) -> Int64 { t > 100_000_000_000 ? t / 1000 : t }
+        let revived = SyncMeta(of: after).revived
         let old = ids(before)
         var out: [IncomingMessage] = []
         for c in after["channels"]?.array ?? [] {
             let ch = c["id"]?.uint ?? 0
+            let backAt = revived[ch].map(secs)
+            func news(_ m: JSON) -> Bool {
+                let ts = secs(m["ts"]?.int ?? 0)
+                if let id = m["id"]?.uint, revived[id] != nil { return false }
+                if let at = backAt, ts < at - restoredSlackSecs { return false }
+                return now - ts <= notifyWindowSecs
+            }
             for m in c["messages"]?.array ?? [] {
                 let mid = m["id"]?.uint ?? 0
                 let author = m["author"]?.uint ?? 0
-                if !old.contains(mid), author != me { out.append(IncomingMessage(channel: ch, id: mid, parent: nil, author: author, text: m["text"]?.string ?? "")) }
+                if !old.contains(mid), author != me, news(m) { out.append(IncomingMessage(channel: ch, id: mid, parent: nil, author: author, text: m["text"]?.string ?? "")) }
                 for r in m["replies"]?.array ?? [] {
                     let rid = r["id"]?.uint ?? 0
                     let ra = r["author"]?.uint ?? 0
-                    if !old.contains(rid), ra != me { out.append(IncomingMessage(channel: ch, id: rid, parent: mid, author: ra, text: r["text"]?.string ?? "")) }
+                    if !old.contains(rid), ra != me, news(r) { out.append(IncomingMessage(channel: ch, id: rid, parent: mid, author: ra, text: r["text"]?.string ?? "")) }
                 }
             }
         }
@@ -807,7 +876,6 @@ public final class SyncClient {
         generation += 1
         closeSocket()
         if accountRequest == .sending { accountRequest = .failed(why) }
-        adminPending = 0
         if pendingSignIn != nil {
             // a sign-in attempt that couldn't reach the server: say so and
             // let the person try again, rather than retrying it on our own

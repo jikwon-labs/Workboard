@@ -22,6 +22,49 @@ public struct InviteResult: Equatable, Sendable {
     public var mailError: String?
 }
 
+/// A request sent to the server whose answer hasn't come yet. The server
+/// answers the requests on one connection one by one, in order, but it also
+/// sends access lists nobody asked for (after anyone's change) and refusals
+/// of pushed changes, so each answer is matched to what it can answer.
+public enum PendingAsk: Equatable, Sendable {
+    case password
+    case accessList
+    case invite(member: UInt64)
+    case setRole(member: UInt64, role: Role)
+    case revoke(member: UInt64)
+    case backups
+    case restore(name: String)
+
+    public var isAdmin: Bool { self != .password }
+
+    /// Whether `m` is this request's answer. An access list answers a
+    /// role change only when it shows that role, and a removal only when it
+    /// shows the person without access; a plain member's request is turned
+    /// down, so the empty list a member gets is never its answer.
+    func answered(by m: ServerMessage) -> Bool {
+        switch (self, m) {
+        case (.password, .account): return true
+        case let (.invite(who), .invite(member, _, _, _)): return who == member
+        case let (.accessList, .access(_, role)): return role.manages
+        case let (.setRole(who, r), .access(people, role)):
+            return role.manages && (people.first { $0.member == who }.map { $0.role == r } ?? true)
+        case let (.revoke(who), .access(people, role)):
+            return role.manages && (people.first { $0.member == who }.map { $0.devices == 0 && !$0.account && $0.invite == nil } ?? true)
+        case (.backups, .backups): return true
+        case let (.restore(name), .restored(n)): return name == n
+        default: return false
+        }
+    }
+
+    /// Answers the server only ever sends to the one who asked.
+    static func onlyAnswers(_ m: ServerMessage) -> Bool {
+        switch m {
+        case .account, .invite, .backups, .restored: return true
+        default: return false
+        }
+    }
+}
+
 /// What someone with `role` may do to `person` (the server's rules).
 public struct AccessRules: Sendable {
     public let role: Role
@@ -59,28 +102,28 @@ extension SyncClient {
     public var accessRules: AccessRules { AccessRules(role: myRole ?? .member, me: me) }
 
     /// Ask for everyone's access (owners and admins).
-    public func requestAccessList() { adminSend(.accessList) }
+    public func requestAccessList() { adminSend(.accessList, .accessList) }
 
     /// A fresh one-time code for `member` (replacing an earlier one); the
     /// server also emails it when it can.
     public func createInvite(member: UInt64) {
         lastInvite = nil
-        adminSend(.createInvite(member: member, role: .member))
+        adminSend(.createInvite(member: member, role: .member), .invite(member: member))
     }
 
-    public func setRole(member: UInt64, role: Role) { adminSend(.setRole(member: member, role: role)) }
+    public func setRole(member: UInt64, role: Role) { adminSend(.setRole(member: member, role: role), .setRole(member: member, role: role)) }
 
     /// Sign out every device of this person, cancel their code and remove
     /// their password.
-    public func revoke(member: UInt64) { adminSend(.revoke(member: member)) }
+    public func revoke(member: UInt64) { adminSend(.revoke(member: member), .revoke(member: member)) }
 
     /// The server's backups, newest first (owner only).
-    public func requestBackups() { adminSend(.backupList) }
+    public func requestBackups() { adminSend(.backupList, .backups) }
 
     /// Go back to a backup: deleted items come back, newer ones stay (owner only).
     public func restore(backup name: String) {
         adminNotice = nil
-        adminSend(.restore(name: name))
+        adminSend(.restore(name: name), .restore(name: name))
     }
 
     public func clearAdminMessages() {
@@ -88,14 +131,23 @@ extension SyncClient {
         adminNotice = nil
     }
 
-    private func adminSend(_ m: ClientMessage) {
+    private func adminSend(_ m: ClientMessage, _ ask: PendingAsk) {
         adminError = nil
         guard state.isConnected, let ws = socket else {
             adminError = "Connect to the server first."
             return
         }
-        adminPending += 1
+        asks.append(ask)
         send(m, on: ws)
+    }
+
+    /// Take the request `m` answers off the waiting list. Only the oldest
+    /// can be answered (answers come in order), except that an answer
+    /// only ever sent to the asker shows the ones before it were answered
+    /// too (by access lists that didn't look like their answers).
+    func settle(_ m: ServerMessage) {
+        guard let i = asks.firstIndex(where: { $0.answered(by: m) }) else { return }
+        if i == 0 || PendingAsk.onlyAnswers(m) { asks.removeFirst(i + 1) }
     }
 
     /// The server's answers (and the access lists it sends unasked after
@@ -103,7 +155,7 @@ extension SyncClient {
     func handleAdmin(_ m: ServerMessage) {
         switch m {
         case let .invite(member, code, emailed, mailError):
-            adminPending = max(0, adminPending - 1)
+            settle(m)
             lastInvite = InviteResult(member: member, code: code, emailed: emailed, mailError: mailError)
             if var list = people, let i = list.firstIndex(where: { $0.member == member }) {
                 list[i].invite = code
@@ -111,7 +163,7 @@ extension SyncClient {
             }
         case let .access(list, role):
             // also an answer to set_role, revoke and access_list
-            adminPending = max(0, adminPending - 1)
+            settle(m)
             people = list
             if settings.role != role.rawValue {
                 settings.role = role.rawValue
@@ -119,10 +171,10 @@ extension SyncClient {
             }
             if role != .owner { backups = nil }
         case let .backups(list):
-            adminPending = max(0, adminPending - 1)
+            settle(m)
             backups = list
         case let .restored(name):
-            adminPending = max(0, adminPending - 1)
+            settle(m)
             adminNotice = "Restored the team's workspace to \(Backup(name: name, bytes: 0).label). Everyone gets it now."
             // the copy from before the restore is a new backup
             requestBackups()
@@ -135,7 +187,7 @@ extension SyncClient {
         people = nil
         backups = nil
         lastInvite = nil
-        adminPending = 0
+        asks.removeAll { $0.isAdmin }
         adminError = nil
         adminNotice = nil
     }

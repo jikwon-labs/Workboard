@@ -35,12 +35,14 @@ public enum Edits {
     // MARK: chat
 
     /// `attachments` are Attachment objects ({file, name, kind, bytes, w, h,
-    /// secs}); a message may be only pictures, with no text.
+    /// secs}); a message may be only pictures, with no text. `picked`: the
+    /// people chosen from the @ list, so a name several people share
+    /// mentions the one picked (kept in `mentions`, as the Mac app does).
     @discardableResult
-    public static func sendMessage(_ data: inout JSON, channel: UInt64, text: String, attachments: [JSON] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
+    public static func sendMessage(_ data: inout JSON, channel: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return false }
-        let mentions = Mentions.ids(in: text, data: data)
+        let mentions = Mentions.ids(in: text, data: data, picked: picked)
         return data.updateItem(at: "channels", id: channel) { c in
             var msgs = c["messages"]?.array ?? []
             var m = message(id: id, author: me, text: text, ts: ts)
@@ -53,10 +55,10 @@ public enum Edits {
     }
 
     @discardableResult
-    public static func sendReply(_ data: inout JSON, channel: UInt64, to parent: UInt64, text: String, attachments: [JSON] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
+    public static func sendReply(_ data: inout JSON, channel: UInt64, to parent: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return false }
-        let mentions = Mentions.ids(in: text, data: data)
+        let mentions = Mentions.ids(in: text, data: data, picked: picked)
         var done = false
         data.updateItem(at: "channels", id: channel) { c in
             done = c.updateItem(at: "messages", id: parent) { m in
@@ -361,10 +363,10 @@ public enum Edits {
     /// A comment on a task (activity with comment = true; activity only grows,
     /// so comments from several devices are all kept by the merge).
     @discardableResult
-    public static func addComment(_ data: inout JSON, task: UInt64, text: String, me: UInt64, ts: Int64) -> Bool {
+    public static func addComment(_ data: inout JSON, task: UInt64, text: String, picked: [UInt64] = [], me: UInt64, ts: Int64) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return false }
-        let mentions = Mentions.ids(in: text, data: data)
+        let mentions = Mentions.ids(in: text, data: data, picked: picked)
         return data.updateItem(at: "tasks", id: task) { j in
             var act = j["activity"]?.array ?? []
             var line: JSON = ["ts": .int(ts), "author": .id(me), "text": .string(text), "comment": true, "post": false]

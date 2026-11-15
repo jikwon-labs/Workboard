@@ -51,6 +51,36 @@ public enum Mentions {
         ids(in: text, members: members(of: data), picked: picked)
     }
 
+    // MARK: the @ list in the message box
+
+    /// What is typed after an "@" that starts a word at the end of `text`
+    /// (the part of a name typed so far, maybe empty), or nil when the text
+    /// doesn't end in one. Names may hold spaces, so the query may too.
+    public static func query(in text: String) -> String? {
+        guard let at = text.lastIndex(of: "@") else { return nil }
+        if at > text.startIndex {
+            guard text[text.index(before: at)].isWhitespace else { return nil }
+        }
+        let q = text[text.index(after: at)...]
+        guard q.count <= 40, !q.contains(where: \.isNewline), !q.hasPrefix(" ") else { return nil }
+        return String(q)
+    }
+
+    /// The people the @ list offers for `query`: everyone but me and those
+    /// still invited (as the Mac app's list), whose name starts with it.
+    public static func candidates(_ query: String, members: [MemberView], me: UInt64?) -> [MemberView] {
+        let q = query.lowercased()
+        return members.filter { m in
+            m.id != me && !m.invited && !m.name.isEmpty && (q.isEmpty || m.name.lowercased().hasPrefix(q))
+        }
+    }
+
+    /// `text` with the "@query" it ends in replaced by "@<name> ".
+    public static func complete(_ text: String, with name: String) -> String {
+        guard query(in: text) != nil, let at = text.lastIndex(of: "@") else { return text + "@" + name + " " }
+        return String(text[..<at]) + "@" + name + " "
+    }
+
     /// Sets `mentions` on a message or comment, left out when empty (as the
     /// Mac app writes it: skip_serializing_if = "Vec::is_empty").
     static func put(_ ids: [UInt64], on j: inout JSON) {

@@ -290,8 +290,8 @@ struct TaskDetailView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Comment") { text in
-                    client.edit { d, me in Edits.addComment(&d, task: t.id, text: text, me: me, ts: nowTs()) }
+                Composer(placeholder: "Comment") { text, picked in
+                    client.edit { d, me in Edits.addComment(&d, task: t.id, text: text, picked: picked, me: me, ts: nowTs()) }
                 }
             }
             .navigationTitle("Task")

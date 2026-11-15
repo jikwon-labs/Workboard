@@ -167,6 +167,108 @@ public enum FileAPI {
         return o
     }
 
+    /// Keep a copy of a file sent from here in the cache, under the name a
+    /// download would give it, so it never comes down again and can go up
+    /// again after a restore from Trash.
+    public static func keep(_ data: Data, sha: String, ext: String = "", folder: URL = defaultCache) {
+        var dest = cached(sha, folder: folder)
+        if !ext.isEmpty { dest.appendPathExtension(ext) }
+        guard !FileManager.default.fileExists(atPath: dest.path) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? data.write(to: dest, options: .atomic)
+    }
+
+    /// keep(_:sha:ext:folder:) for a file on disk (a video), copied, not read.
+    public static func keep(file: URL, sha: String, ext: String = "", folder: URL = defaultCache) {
+        var dest = cached(sha, folder: folder)
+        if !ext.isEmpty { dest.appendPathExtension(ext) }
+        guard !FileManager.default.fileExists(atPath: dest.path) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? FileManager.default.copyItem(at: file, to: dest)
+    }
+
+    /// This device's copy of a file, whatever extension it was kept with.
+    public static func localCopy(_ sha: String, folder: URL = defaultCache) -> URL? {
+        guard isFileName(sha) else { return nil }
+        let plain = cached(sha, folder: folder)
+        if FileManager.default.fileExists(atPath: plain.path) { return plain }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names.first { $0.hasPrefix(sha + ".") }.map { folder.appendingPathComponent($0) }
+    }
+
+    /// The size of a file on the server, nil when it isn't there (HEAD,
+    /// like wb_net::files::remote_size).
+    public static func remoteSize(server: String, auth: String?, sha: String, session: URLSession = .shared) async throws -> Int? {
+        guard let url = url(server: server, sha: sha) else { throw FileError.failed("that server address doesn't look right") }
+        let resp: URLResponse
+        do {
+            (_, resp) = try await session.data(for: request(url, method: "HEAD", auth: auth))
+        } catch {
+            throw FileError.failed(error.localizedDescription)
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        switch status {
+        case 200:
+            let len = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Length").flatMap { Int($0) }
+            return len ?? Int(resp.expectedContentLength)
+        // HEAD has no body to tell a missing file from an older server
+        case 404: return nil
+        default: throw Self.error(status: status, body: Data())
+        }
+    }
+
+    /// Put a file this device has back on the server unless the server has
+    /// it (asked fresh every time: a file may have been cleaned up while
+    /// only someone's Trash named it). True when it went up.
+    @discardableResult
+    public static func reupload(server: String, auth: String?, sha: String, folder: URL = defaultCache, session: URLSession = .shared) async throws -> Bool {
+        guard let local = localCopy(sha, folder: folder) else { return false }
+        let size = (try? local.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+        if try await remoteSize(server: server, auth: auth, sha: sha, session: session) == size { return false }
+        let up = try await upload(server: server, auth: auth, file: local, contentType: contentType(ext: local.pathExtension), session: session)
+        return up == sha
+    }
+
+    static func contentType(ext: String) -> String {
+        switch ext.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "heic": return "image/heic"
+        case "webp": return "image/webp"
+        case "mov": return "video/quicktime"
+        case "mp4", "m4v": return "video/mp4"
+        default: return "application/octet-stream"
+        }
+    }
+
+    /// The files (and video stills) named by the attachments anywhere in
+    /// some JSON text, like trash_attachments in src/app/files.rs with
+    /// parts(): a Trash item's payload.
+    public static func files(inPayload payload: String) -> [String] {
+        guard let j = try? JSON(parsing: Data(payload.utf8)) else { return [] }
+        var out: [String] = []
+        func add(_ s: String?) { if let s, isFileName(s), !out.contains(s) { out.append(s) } }
+        func walk(_ v: JSON) {
+            if let o = v.object {
+                for (k, x) in o.sorted(by: { $0.key < $1.key }) {
+                    if k == "attachments", let list = x.array {
+                        for a in list {
+                            add(a["file"]?.string)
+                            add(a["thumb"]?.string)
+                        }
+                    } else {
+                        walk(x)
+                    }
+                }
+            } else if let a = v.array {
+                a.forEach(walk)
+            }
+        }
+        walk(j)
+        return out
+    }
+
     /// A sha256 in hex, the only names files have on the server.
     public static func isFileName(_ s: String) -> Bool {
         s.count == 64 && s.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }

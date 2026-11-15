@@ -244,8 +244,10 @@ public enum ServerMessage: Equatable, Sendable {
     case restored(name: String)
     case ping
     case pong
-    /// `channel` is set when a call_join for it was turned down.
-    case error(code: String?, message: String, channel: UInt64? = nil)
+    /// `channel` is set when a call_join for it was turned down; `putBack`
+    /// when changes pushed from here were turned down (not an answer to a
+    /// request, so never mixed up with one).
+    case error(code: String?, message: String, channel: UInt64? = nil, putBack: Bool = false)
     case unknown(String)
 
     public var json: JSON {
@@ -284,10 +286,11 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "restored", "name": .string(name)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
-        case let .error(code, m, channel):
+        case let .error(code, m, channel, putBack):
             var o: [String: JSON] = ["type": "error", "message": .string(m)]
             if let code { o["code"] = .string(code) }
             if let channel { o["channel"] = .id(channel) }
+            if putBack { o["put_back"] = true }
             return .object(o)
         case let .unknown(t): return ["type": .string(t)]
         }
@@ -334,7 +337,7 @@ public enum ServerMessage: Equatable, Sendable {
             self = .restored(name: j["name"]?.string ?? "")
         case "ping": self = .ping
         case "pong": self = .pong
-        case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint)
+        case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint, putBack: j["put_back"]?.bool ?? false)
         default: self = .unknown(type)
         }
     }

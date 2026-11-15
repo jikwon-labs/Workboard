@@ -172,4 +172,6 @@ pub const T: &[(&str, &str)] = &[
     ("Yearly", "매년"),
     // timers
     ("No Lists yet. Lists keep a Space's tasks together.", "아직 목록이 없습니다. 목록은 스페이스의 작업을 한데 모아 둡니다."),
+    ("Tasks live in a List. Make a Space first: it comes with one.", "작업은 목록 안에 들어갑니다. 먼저 스페이스를 만드세요. 목록이 함께 생깁니다."),
+    ("Tasks live in a List. Make one first.", "작업은 목록 안에 들어갑니다. 먼저 목록을 만드세요."),
 ];

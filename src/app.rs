@@ -1282,7 +1282,10 @@ impl App {
     /// The list new tasks go to from the current location.
     fn default_list(&self) -> Option<u64> {
         match self.loc {
-            Location::List(id) => Some(id),
+            // (a List that is gone: somewhere else)
+            Location::List(id) => (self.data.space_of_list(id).is_some())
+                .then_some(id)
+                .or_else(|| self.data.first_list()),
             _ => self
                 .data
                 .lists_in(self.loc)
@@ -1333,41 +1336,46 @@ impl App {
         }
     }
 
-    fn add_from_group(&mut self, g: &Group, name: String, open: bool) {
-        if let Some(list) = Self::group_list(g).or_else(|| self.default_list()) {
-            if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
-                self.pending_tags.push(tag.to_string());
-            }
-            let mut assignees = vec![];
-            if let Some(a) = g.assignee {
-                assignees.push(a);
-            }
-            // on the personal views a new task is mine (and due today on Today &
-            // Overdue), or it would leave the page as soon as it's made
-            let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
-            if personal && !assignees.contains(&self.data.me) {
-                // with Multiple Assignees off a task has one: me
-                if !self.data.extra.apps.multiple_assignees {
-                    assignees.clear();
-                }
-                assignees.push(self.data.me);
-            }
-            let due = if self.loc == Location::TodayOverdue {
-                g.due.filter(|d| *d <= today()).or(Some(today()))
-            } else {
-                g.due
-            };
-            self.actions.push(Action::Add {
-                list,
-                name,
-                status: g.status.as_ref().map(|s| s.name.clone()),
-                priority: g.priority.unwrap_or(0),
-                assignees,
-                due,
-                parent: None,
-                open,
-            });
+    /// Adds a task in the group; false (and the next step offered) when
+    /// there is no List for it.
+    fn add_from_group(&mut self, g: &Group, name: String, open: bool) -> bool {
+        let Some(list) = Self::group_list(g).or_else(|| self.default_list()) else {
+            self.need_a_list();
+            return false;
+        };
+        if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
+            self.pending_tags.push(tag.to_string());
         }
+        let mut assignees = vec![];
+        if let Some(a) = g.assignee {
+            assignees.push(a);
+        }
+        // on the personal views a new task is mine (and due today on Today &
+        // Overdue), or it would leave the page as soon as it's made
+        let personal = matches!(self.loc, Location::MyTasks | Location::TodayOverdue);
+        if personal && !assignees.contains(&self.data.me) {
+            // with Multiple Assignees off a task has one: me
+            if !self.data.extra.apps.multiple_assignees {
+                assignees.clear();
+            }
+            assignees.push(self.data.me);
+        }
+        let due = if self.loc == Location::TodayOverdue {
+            g.due.filter(|d| *d <= today()).or(Some(today()))
+        } else {
+            g.due
+        };
+        self.actions.push(Action::Add {
+            list,
+            name,
+            status: g.status.as_ref().map(|s| s.name.clone()),
+            priority: g.priority.unwrap_or(0),
+            assignees,
+            due,
+            parent: None,
+            open,
+        });
+        true
     }
 
     // ---------------------------------------------------------------- actions
@@ -2397,6 +2405,33 @@ impl App {
                 }
             }
             self.quick_add = Some(qa);
+        } else {
+            self.need_a_list();
+        }
+    }
+
+    /// No List a new task could go in: say why and open the next step, a
+    /// new List (or a new Space first, which comes with a List).
+    pub(super) fn need_a_list(&mut self) {
+        let msg = if self.open_spaces().is_empty() {
+            "Tasks live in a List. Make a Space first: it comes with one."
+        } else {
+            "Tasks live in a List. Make one first."
+        };
+        self.toast = Some((tr(msg).into(), now_ts()));
+        self.offer_new_list(self.current_space());
+    }
+
+    /// The New List dialog, or New Space when there is no Space to put a
+    /// List in yet (the Home Lists card does the same).
+    pub(super) fn offer_new_list(&mut self, space: Option<u64>) {
+        if self.open_spaces().is_empty() {
+            self.modal = Some(Modal::NewSpace {
+                name: String::new(),
+                color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
+            });
+        } else {
+            self.open_new_list(space, None);
         }
     }
 

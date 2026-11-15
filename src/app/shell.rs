@@ -4190,8 +4190,9 @@ impl App {
                 }
             });
             if submit && !text.trim().is_empty() {
-                self.add_from_group(g, text.clone(), false);
-                self.adding = Some((g.key.clone(), String::new()));
+                // no List to put it in: the name stays for after one is made
+                let added = self.add_from_group(g, text.clone(), false);
+                self.adding = Some((g.key.clone(), if added { String::new() } else { text }));
             } else if cancel || (submit && text.trim().is_empty()) {
                 self.adding = None;
             } else {
@@ -4842,8 +4843,9 @@ impl App {
                 });
             });
         if submit && !text.trim().is_empty() {
-            self.add_from_group(g, text.trim().to_string(), false);
-            self.adding = Some((key, String::new()));
+            // no List to put it in: the name stays for after one is made
+            let added = self.add_from_group(g, text.trim().to_string(), false);
+            self.adding = Some((key, if added { String::new() } else { text }));
         } else if cancel || submit {
             self.adding = None;
         } else {

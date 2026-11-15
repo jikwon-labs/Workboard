@@ -2979,21 +2979,26 @@ impl App {
             let name = text.trim().to_string();
             self.sweep.planner_add = None;
             if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.is_empty() {
-                if let Some(list) = self.default_list() {
-                    let me = self.data.me;
-                    self.actions.push(Action::Add {
-                        list,
-                        name,
-                        status: None,
-                        priority: 0,
-                        assignees: vec![me],
-                        due: Some(d),
-                        parent: None,
-                        open: false,
-                    });
-                }
+                let Some(list) = self.default_list() else {
+                    // no List to put it in: say why and keep the name typed
+                    self.sweep.planner_add = Some((d, name));
+                    self.need_a_list();
+                    return;
+                };
+                let me = self.data.me;
+                self.actions.push(Action::Add {
+                    list,
+                    name,
+                    status: None,
+                    priority: 0,
+                    assignees: vec![me],
+                    due: Some(d),
+                    parent: None,
+                    open: false,
+                });
             }
-        } else {
+        } else if self.modal.is_none() {
+            // (not over the dialog the next step opens)
             r.request_focus();
         }
     }

@@ -8207,3 +8207,88 @@ fn check_boxes_are_squares_that_fill_when_ticked() {
         outlined
     );
 }
+
+/// A workspace with no List a task could go in: no Spaces at all, or
+/// (with `keep_space`) a Space whose Lists are gone.
+fn no_list_workspace(keep_space: bool) -> Ui1 {
+    let mut h = Ui1::new();
+    if keep_space {
+        for s in h.app.data.spaces.iter_mut() {
+            s.lists.clear();
+            s.folders.clear();
+        }
+    } else {
+        h.app.data.spaces.retain(|s| s.private_owner.is_some());
+        for s in h.app.data.spaces.iter_mut() {
+            s.lists.clear();
+            s.folders.clear();
+        }
+    }
+    assert_eq!(h.app.data.first_list(), None);
+    h.settle();
+    h
+}
+
+#[test]
+fn add_task_without_a_list_says_why_and_offers_one() {
+    // the header "Add Task" on My Tasks: no Space yet, so New Space opens
+    let mut h = no_list_workspace(false);
+    h.click("My Tasks");
+    h.click("Add Task");
+    assert!(h.app.quick_add.is_none());
+    let toast = h.app.toast.clone().expect("a toast says why").0;
+    assert!(toast.contains("Make a Space first"), "{}", toast);
+    assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
+    // with a Space, the New List dialog opens instead (Everything, + Create > Task)
+    let mut h = no_list_workspace(true);
+    h.click("All Tasks");
+    h.click("Create");
+    h.click("Task");
+    assert!(h.app.quick_add.is_none());
+    assert!(h.app.toast.clone().unwrap().0.contains("Make one first"));
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+}
+
+#[test]
+fn inline_add_without_a_list_keeps_the_name() {
+    let mut h = no_list_workspace(true);
+    h.click("Today & Overdue");
+    let row = h
+        .tree
+        .iter()
+        .map(|(n, _)| n.clone())
+        .find(|n| n.starts_with("Add Task in "))
+        .expect("an inline add row");
+    h.click(&row);
+    h.type_text("Call the printer");
+    h.key(egui::Key::Enter);
+    assert!(h
+        .app
+        .data
+        .tasks
+        .iter()
+        .all(|t| t.name != "Call the printer"));
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+    assert_eq!(
+        h.app.adding.as_ref().map(|a| a.1.as_str()),
+        Some("Call the printer")
+    );
+}
+
+#[test]
+fn planner_add_without_a_list_keeps_the_name_and_says_why() {
+    let mut h = no_list_workspace(false);
+    h.app.section = Section::Planner;
+    h.settle();
+    let day = h.app.planner_week + Duration::days(2);
+    h.click(&format!("Add task on {}", day.format("%a %-d")));
+    h.type_text("Plan the trip");
+    h.key(egui::Key::Enter);
+    assert!(h.app.data.tasks.iter().all(|t| t.name != "Plan the trip"));
+    assert_eq!(
+        h.app.sweep.planner_add,
+        Some((day, "Plan the trip".to_string()))
+    );
+    assert!(h.app.toast.is_some());
+    assert!(matches!(h.app.modal, Some(Modal::NewSpace { .. })));
+}

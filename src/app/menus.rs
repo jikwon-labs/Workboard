@@ -838,8 +838,11 @@ impl App {
                     parent: None,
                     open: true,
                 });
+                self.create_text.clear();
+            } else {
+                // the text stays here for after the List is made
+                self.need_a_list();
             }
-            self.create_text.clear();
             close_popup(ui);
         }
         ui.separator();
@@ -3396,6 +3399,8 @@ impl App {
                             trf!("Task created in {}", self.data.list_name(list)),
                             now_ts(),
                         ));
+                    } else {
+                        self.need_a_list();
                     }
                 }
             });

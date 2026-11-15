@@ -1,7 +1,7 @@
 # Workboard
 
 A desktop work hub for small teams: spaces, lists and tasks (list, board,
-calendar, Gantt and table views), chat channels and direct messages, docs,
+calendar, Gantt, timeline and table views), chat channels and direct messages, docs,
 whiteboards, forms, goals, dashboards, timesheets, meetings, reminders and
 more. Built with Rust and egui for the Mac. Your data lives on your own
 computer, and a team server of your own (or a shared folder) lets the team

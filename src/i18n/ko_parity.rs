@@ -124,4 +124,5 @@ pub const T: &[(&str, &str)] = &[
     ("Clear selection", "선택 해제"),
     ("Move", "이동"),
     ("Duplicated {} tasks", "작업 {}개를 복제했습니다"),
+    ("Needs a Space to put the List in. Make one from + Create > Space.", "목록을 넣을 스페이스가 필요합니다. + 만들기 > 스페이스에서 만드세요."),
 ];

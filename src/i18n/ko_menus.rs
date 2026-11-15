@@ -303,4 +303,5 @@ pub const T: &[(&str, &str)] = &[
     ("Runs in the whole Workspace", "워크스페이스 전체에서 실행됩니다"),
     ("Runs in {}", "{}에서 실행됩니다"),
     ("in {}", "{}에서"),
+    ("Lists live in a Space. Make a Space first: it comes with a List.", "목록은 스페이스 안에 들어갑니다. 먼저 스페이스를 만드세요. 목록이 함께 생깁니다."),
 ];

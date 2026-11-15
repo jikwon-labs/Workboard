@@ -868,7 +868,14 @@ impl App {
         )
         .clicked()
         {
-            self.open_new_list(space, None);
+            // no Space to put it in: say so and make the Space first
+            if self.open_spaces().is_empty() {
+                self.toast = Some((
+                    tr("Lists live in a Space. Make a Space first: it comes with a List.").into(),
+                    now_ts(),
+                ));
+            }
+            self.offer_new_list(space);
             close_popup(ui);
         }
         if menu_item2(

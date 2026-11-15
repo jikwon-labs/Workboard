@@ -635,16 +635,27 @@ impl App {
         focus_once(ui, &r);
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(10.0);
-        for (on, label, help) in [
+        // a List needs a Space to go in: without one the switch is off and says so
+        let can_list = !self.open_spaces().is_empty();
+        if !can_list {
+            *add_list = false;
+        }
+        for (on, label, help, enabled) in [
             (
                 &mut *private,
                 "Make Private",
                 "Only invited people can find this channel.",
+                true,
             ),
             (
                 &mut *add_list,
                 "Add a List",
-                "Make a List with the same name, tied to this channel.",
+                if can_list {
+                    "Make a List with the same name, tied to this channel."
+                } else {
+                    "Needs a Space to put the List in. Make one from + Create > Space."
+                },
+                can_list,
             ),
         ] {
             ui.horizontal(|ui| {
@@ -653,7 +664,7 @@ impl App {
                     ui.label(RichText::new(tr(help)).small().color(t.text3));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    switch(ui, t, on, label);
+                    ui.add_enabled_ui(enabled, |ui| switch(ui, t, on, label));
                 });
             });
             ui.add_space(6.0);

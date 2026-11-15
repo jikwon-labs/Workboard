@@ -8395,3 +8395,37 @@ fn home_lists_card_tells_archived_lists_from_none_and_empty_lists_have_no_bar() 
     assert!(h.painted_text("0/0").is_empty());
     assert!(!h.painted_text("No tasks yet").is_empty());
 }
+
+#[test]
+fn create_list_or_channel_list_without_a_space_says_so() {
+    let mut h = no_list_workspace(false);
+    h.click("Create");
+    h.click("List");
+    assert!(
+        matches!(h.app.modal, Some(Modal::NewSpace { .. })),
+        "no Space to pick: New Space instead of a List dialog with nothing to pick"
+    );
+    assert!(h
+        .app
+        .toast
+        .clone()
+        .unwrap()
+        .0
+        .contains("Make a Space first"));
+    // the channel's "Add a List" switch is off and says why
+    h.app.modal = Some(Modal::NewChannel {
+        name: String::new(),
+        private: false,
+        add_list: true,
+    });
+    h.settle();
+    assert!(h.has("Needs a Space to put the List in. Make one from + Create > Space."));
+    h.click("Add a List");
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewChannel {
+            add_list: false,
+            ..
+        })
+    ));
+}

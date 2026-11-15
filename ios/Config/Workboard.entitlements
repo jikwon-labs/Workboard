@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Not wired into the build yet (CODE_SIGN_ENTITLEMENTS is unset): push
+	     needs a real bundle id with the Push Notifications capability and a
+	     provisioning profile. See docs/ios-design.md, "Push". -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

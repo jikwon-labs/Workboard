@@ -99,6 +99,8 @@ struct App {
     invites: Vec<(u64, String)>,
     people: Vec<Person>,
     denied: Vec<String>,
+    backups: Option<Vec<wb_net::Backup>>,
+    restored: Vec<String>,
 }
 
 impl App {
@@ -123,7 +125,7 @@ impl App {
         }
         let device = sign_in.device.clone();
         let client = Client::start(&format!("127.0.0.1:{}", port), sign_in, Arc::new(|| {}));
-        App { data, client, device, status: None, member: None, role: None, token: None, invites: vec![], people: vec![], denied: vec![] }
+        App { data, client, device, status: None, member: None, role: None, token: None, invites: vec![], people: vec![], denied: vec![], backups: None, restored: vec![] }
     }
 
     /// Ask for an invite code for `member` and wait for it.
@@ -211,6 +213,8 @@ impl App {
                 }
                 Event::Denied(why) => self.denied.push(why),
                 Event::CallToken { .. } => {}
+                Event::Backups(b) => self.backups = Some(b),
+                Event::Restored(n) => self.restored.push(n),
             }
         }
     }
@@ -559,6 +563,49 @@ fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
         winner.pump();
         std::thread::sleep(Duration::from_millis(50));
     }
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_owner_restores_a_backup_from_the_app() {
+    let home = temp_home("apprestore");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    // wait for the first backup (made within a minute of having a workspace)
+    let dir = home.join(workboard_server::BACKUP_DIR);
+    let until = Instant::now() + Duration::from_secs(10);
+    while workboard_server::backup_files(&dir, "hourly").is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    a.client.send(Msg::BackupList);
+    a.until("the owner sees the backups", |a| a.backups.as_ref().is_some_and(|l| l.iter().any(|b| b.name.starts_with("hourly-"))));
+    let hourly = a.backups.as_ref().unwrap().iter().find(|b| b.name.starts_with("hourly-")).unwrap().name.clone();
+
+    // a member may not look or restore
+    b.client.send(Msg::BackupList);
+    b.until("member can't list", |b| b.denied.iter().any(|d| d.contains("Only the owner")));
+    b.denied.clear();
+    b.client.send(Msg::Restore { name: hourly.clone() });
+    b.until("member can't restore", |b| b.denied.iter().any(|d| d.contains("Only the owner")));
+
+    // nothing outside the backups folder
+    for bad in ["../workspace.json", "/etc/hosts", "hourly-../../x.json", "server.json"] {
+        a.denied.clear();
+        a.client.send(Msg::Restore { name: bad.into() });
+        a.until("bad name refused", |a| a.denied.iter().any(|d| d.contains("isn't on the server")));
+    }
+
+    // a task is deleted by mistake; the owner restores the backup from the app
+    a.change(|d| {
+        d["tasks"].as_array_mut().unwrap().retain(|t| t["id"] != 101);
+    });
+    b.wait("delete reaches B", |d| task_names(d) == ["Plan"]);
+    a.client.send(Msg::Restore { name: hourly.clone() });
+    a.until("restored", |a| a.restored.contains(&hourly));
+    b.wait("the task is back at B", |d| task_names(d) == ["Plan", "Ship"]);
+    a.wait("and at A", |d| task_names(d) == ["Plan", "Ship"]);
+    assert!(!workboard_server::backup_files(&dir, "before-restore").is_empty(), "the copy from before is kept");
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

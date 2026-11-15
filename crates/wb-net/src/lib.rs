@@ -65,6 +65,38 @@ pub struct Person {
     pub invite: Option<String>,
 }
 
+/// A backup of the team's copy on the server.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Backup {
+    /// File name in the server's backups folder, e.g. hourly-20261115-03.json
+    pub name: String,
+    pub bytes: u64,
+}
+
+impl Backup {
+    /// "2026-11-15 03:00 (hourly)" from the file name.
+    pub fn label(&self) -> String {
+        let stem = self.name.trim_end_matches(".json");
+        let (kind, rest) = if let Some(r) = stem.strip_prefix("hourly-") {
+            ("hourly", r)
+        } else if let Some(r) = stem.strip_prefix("daily-") {
+            ("daily", r)
+        } else if let Some(r) = stem.strip_prefix("before-restore-") {
+            ("before a restore", r)
+        } else {
+            return self.name.clone();
+        };
+        let d: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
+        let date = if d.len() >= 8 { format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]) } else { rest.to_string() };
+        let time = match d.len() {
+            10 => format!(" {}:00", &d[8..10]),
+            14 => format!(" {}:{}:{}", &d[8..10], &d[10..12], &d[12..14]),
+            _ => String::new(),
+        };
+        format!("{}{} ({})", date, time, kind)
+    }
+}
+
 /// Why the server said no to signing in. The app stops trying.
 pub const CODE_AUTH: &str = "auth";
 /// A request the person isn't allowed to make. The connection stays.
@@ -128,6 +160,18 @@ pub enum Msg {
         member: u64,
     },
     AccessList,
+    /// Owner: the backups on the server, newest first.
+    BackupList,
+    Backups {
+        backups: Vec<Backup>,
+    },
+    /// Owner: go back to a backup (deleted items come back, newer ones stay).
+    Restore {
+        name: String,
+    },
+    Restored {
+        name: String,
+    },
     /// Join the voice huddle of a channel or DM.
     CallJoin {
         channel: u64,
@@ -227,6 +271,8 @@ pub enum Event {
     /// A request was turned down; the connection stays.
     Denied(String),
     CallToken { channel: u64, url: String, token: String },
+    Backups(Vec<Backup>),
+    Restored(String),
 }
 
 /// How this computer signs in.
@@ -444,6 +490,8 @@ fn session(ws: &mut WebSocket<TcpStream>, line: &Line, crx: &Receiver<Cmd>, sign
                     Some(Msg::Invite { member, code }) => emit(Event::Invite { member, code }),
                     Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),
                     Some(Msg::CallToken { channel, url, token }) => emit(Event::CallToken { channel, url, token }),
+                    Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
+                    Some(Msg::Restored { name }) => emit(Event::Restored(name)),
                     Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
                     Some(Msg::Error { message, code }) => match code.as_deref() {
                         Some(CODE_AUTH) => Err(End::Refused(message)),
@@ -494,6 +542,15 @@ mod tests {
         assert_eq!(Msg::parse(r#"{"type":"hello","device":"d1"}"#), Some(Msg::Hello { device: "d1".into(), tag: None, token: None, invite: None, claim: None }));
         assert_eq!(Msg::parse(r#"{"type":"ping"}"#), Some(Msg::Ping));
         assert_eq!(Msg::parse(r#"{"type":"set_role","member":5,"role":"admin"}"#), Some(Msg::SetRole { member: 5, role: Role::Admin }));
+    }
+
+    #[test]
+    fn backup_names_read_as_dates() {
+        let b = |n: &str| Backup { name: n.into(), bytes: 0 }.label();
+        assert_eq!(b("hourly-20261115-03.json"), "2026-11-15 03:00 (hourly)");
+        assert_eq!(b("daily-20261115.json"), "2026-11-15 (daily)");
+        assert_eq!(b("before-restore-20261115-031500.json"), "2026-11-15 03:15:00 (before a restore)");
+        assert_eq!(b("other.json"), "other.json");
     }
 
     #[test]

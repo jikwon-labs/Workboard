@@ -576,6 +576,16 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.has("Make admin") && h.has("Remove access") && h.has("New code"));
     assert!(h.has(&format!("Code for {}: ABCD-EFGH-JKMN", other.name)));
     h.click("Copy");
+    // the owner can go back to a backup, with a second click to confirm
+    assert!(h.has("Backups") && h.has("Show backups"));
+    h.app.sync_rt.backups = Some(vec![wb_net::Backup { name: "hourly-20261115-03.json".into(), bytes: 2048 }, wb_net::Backup { name: "daily-20261115.json".into(), bytes: 2048 }]);
+    h.settle();
+    assert!(h.has("2026-11-15 03:00 (hourly)") && h.has("2026-11-15 (daily)"));
+    h.click("Restore");
+    assert!(h.app.sync_rt.restore_confirm.is_some(), "asks first");
+    assert!(h.has("Yes, restore"));
+    h.click("Cancel");
+    assert!(h.app.sync_rt.restore_confirm.is_none() && !h.has("Yes, restore"));
     // an admin can't make a code for the owner
     h.app.sync_rt.role = Some(wb_net::Role::Admin);
     h.app.sync_rt.people[0].member = other.id;
@@ -639,6 +649,14 @@ fn huddle_bar_shows_people_mute_and_leave() {
     h.app.huddle.pictures.insert(format!("{}-dev2", other.id), (pic.clone(), true));
     h.settle();
     assert!(h.has(&format!("Video of {}", other.name)));
+    // clicking a video makes it large, clicking again makes it small
+    let small = h.rect(&format!("Video of {}", other.name));
+    h.click(&format!("Video of {}", other.name));
+    assert_eq!(h.app.huddle.focus.as_deref(), Some(format!("{}-dev2", other.id).as_str()));
+    let large = h.rect(&format!("Video of {}", other.name));
+    assert!(large.width() > small.width() * 1.5, "{:?} -> {:?}", small, large);
+    h.click(&format!("Video of {}", other.name));
+    assert!(h.app.huddle.focus.is_none());
     h.click("Video");
     assert!(h.app.huddle.camera);
     h.app.huddle.pictures.insert(wb_voice::ME.to_string(), (pic, true));

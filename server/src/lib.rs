@@ -37,7 +37,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
-use wb_net::{Msg, Person, Role, CODE_AUTH, CODE_DENIED};
+use wb_net::{Backup, Msg, Person, Role, CODE_AUTH, CODE_DENIED};
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
@@ -507,6 +507,19 @@ impl Hub {
 
     /// An access request from `member`.
     fn request(&self, member: u64, msg: Msg) -> Reply {
+        // backups: the owner only (a restore changes everyone's workspace)
+        if matches!(msg, Msg::BackupList | Msg::Restore { .. }) {
+            if self.inner.lock().unwrap().saved.role_of(member) != Role::Owner {
+                return Reply::Denied("Only the owner can see and restore backups.".into());
+            }
+            return match msg {
+                Msg::Restore { name } => match self.backup_path(&name).and_then(|p| self.restore(&p)) {
+                    Ok(()) => Reply::To(Msg::Restored { name }),
+                    Err(e) => Reply::Denied(e),
+                },
+                _ => Reply::To(Msg::Backups { backups: self.list_backups() }),
+            };
+        }
         let mut g = self.inner.lock().unwrap();
         let me = g.saved.role_of(member);
         if !me.manages() {
@@ -586,15 +599,40 @@ impl Hub {
         Ok(Msg::CallToken { channel, url: cfg.url, token })
     }
 
-    /// Requests from the `workboard-server` admin commands.
-    fn admin(&self, req: &Value) -> Value {
-        if let Some(file) = req.get("restore").and_then(|f| f.as_str()) {
-            let path = PathBuf::from(file);
-            let mut data = match read_json(&path) {
-                Ok(Some(v)) => v,
-                Ok(None) => return json!({"ok": false, "message": format!("{} doesn't exist", file)}),
-                Err(e) => return json!({"ok": false, "message": e.to_string()}),
-            };
+    /// Every backup, newest first.
+    fn list_backups(&self) -> Vec<Backup> {
+        let dir = self.home.join(BACKUP_DIR);
+        let mut all: Vec<(std::time::SystemTime, Backup)> = ["hourly", "daily", "before-restore"]
+            .iter()
+            .flat_map(|k| backup_files(&dir, k))
+            .filter_map(|p| {
+                let meta = std::fs::metadata(&p).ok()?;
+                Some((meta.modified().ok()?, Backup { name: p.file_name()?.to_string_lossy().to_string(), bytes: meta.len() }))
+            })
+            .collect();
+        all.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.name.cmp(&a.1.name)));
+        all.into_iter().map(|(_, b)| b).collect()
+    }
+
+    /// A backup by its file name, only from the backups folder.
+    fn backup_path(&self, name: &str) -> Result<PathBuf, String> {
+        let ok_name = !name.contains('/') && !name.contains('\\') && !name.contains("..") && name.ends_with(".json") && ["hourly-", "daily-", "before-restore-"].iter().any(|p| name.starts_with(p));
+        let path = self.home.join(BACKUP_DIR).join(name);
+        if !ok_name || !path.is_file() {
+            return Err("That backup isn't on the server.".into());
+        }
+        Ok(path)
+    }
+
+    /// Go back to a backup: its items win and deleted ones come back; things
+    /// made after it stay. The copy from before goes to backups/ first.
+    fn restore(&self, path: &Path) -> Result<(), String> {
+        let mut data = match read_json(path) {
+            Ok(Some(v)) => v,
+            Ok(None) => return Err(format!("{} doesn't exist", path.display())),
+            Err(e) => return Err(e.to_string()),
+        };
+        {
             mark_restored(&mut data, now_ms());
             let data = wb_sync::shareable(&data);
             let mut g = self.inner.lock().unwrap();
@@ -613,7 +651,17 @@ impl Hub {
                 None => g.canon = Some(data),
             }
             self.broadcast_canon(&mut g);
-            return json!({"ok": true, "message": format!("Restored {}. Everyone's app gets it now (the copy from before is in {}/before-restore-*.json).", file, BACKUP_DIR)});
+        }
+        Ok(())
+    }
+
+    /// Requests from the `workboard-server` admin commands.
+    fn admin(&self, req: &Value) -> Value {
+        if let Some(file) = req.get("restore").and_then(|f| f.as_str()) {
+            return match self.restore(Path::new(file)) {
+                Ok(()) => json!({"ok": true, "message": format!("Restored {}. Everyone's app gets it now (the copy from before is in {}/before-restore-*.json).", file, BACKUP_DIR)}),
+                Err(e) => json!({"ok": false, "message": e}),
+            };
         }
         if let Some(member) = req.get("invite").and_then(|m| m.as_u64()) {
             let role: Role = req.get("role").and_then(|r| serde_json::from_value(r.clone()).ok()).unwrap_or_default();
@@ -750,7 +798,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>) {
                         Ok(m) => m.to_json(),
                         Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
                     }),
-                    Some(m @ (Msg::CreateInvite { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList)) => match hub.request(member, m) {
+                    Some(m @ (Msg::CreateInvite { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. })) => match hub.request(member, m) {
                         Reply::To(r) => Some(r.to_json()),
                         Reply::Denied(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
                     },

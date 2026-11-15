@@ -32,6 +32,8 @@ pub struct HuddleRt {
     /// whether it still has to go to the screen.
     pub(super) pictures: HashMap<String, (Picture, bool)>,
     textures: HashMap<String, egui::TextureHandle>,
+    /// The video shown large (clicked), if any.
+    pub(super) focus: Option<String>,
 }
 
 impl Default for HuddleRt {
@@ -51,6 +53,7 @@ impl Default for HuddleRt {
             video: if cfg!(test) || std::env::var("WORKBOARD_TEST_VIDEO").is_ok_and(|v| v == "1") { Video::Pattern([200, 60, 60]) } else { Video::Camera },
             pictures: HashMap::new(),
             textures: HashMap::new(),
+            focus: None,
         }
     }
 }
@@ -214,24 +217,42 @@ impl App {
                 (id.clone(), name)
             })
             .collect();
-        // tiles get smaller when many people send video
-        let w = if ids.len() <= 2 { 320.0 } else if ids.len() <= 4 { 240.0 } else { 180.0 };
-        egui::Area::new(egui::Id::new("huddle_videos")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -210.0]).show(ctx, |ui| {
+        // a clicked video shows large and the rest small; otherwise tiles get
+        // smaller when many people send video
+        if self.huddle.focus.as_ref().is_some_and(|f| !ids.contains(f)) {
+            self.huddle.focus = None;
+        }
+        let focus = self.huddle.focus.clone();
+        let normal = if ids.len() <= 2 { 320.0 } else if ids.len() <= 4 { 240.0 } else { 180.0 };
+        let mut clicked: Option<String> = None;
+        egui::Area::new(egui::Id::new("huddle_videos")).order(egui::Order::Middle).anchor(Align2::CENTER_BOTTOM, [0.0, -210.0]).show(ctx, |ui| {
             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for (id, name) in &names {
                         let Some(tex) = self.huddle.textures.get(id) else { continue };
+                        let big = focus.as_ref() == Some(id);
+                        let w = match &focus {
+                            Some(_) if big => 560.0,
+                            Some(_) => 140.0,
+                            None => normal,
+                        };
                         let size = tex.size_vec2();
                         let h = w * size.y / size.x.max(1.0);
                         ui.vertical(|ui| {
-                            let r = ui.add(egui::Image::new((tex.id(), vec2(w, h))).corner_radius(8));
+                            let r = ui.add(egui::Image::new((tex.id(), vec2(w, h))).corner_radius(8).sense(Sense::click()));
                             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("Video of {}", name)));
+                            if r.on_hover_text(if big { "Click to make smaller" } else { "Click to make larger" }).clicked() {
+                                clicked = Some(id.clone());
+                            }
                             ui.label(RichText::new(name).small().color(t.text2));
                         });
                     }
                 });
             });
         });
+        if let Some(id) = clicked {
+            self.huddle.focus = if self.huddle.focus.as_ref() == Some(&id) { None } else { Some(id) };
+        }
     }
 
     fn huddle_name(&self, p: &Person) -> String {
@@ -249,7 +270,7 @@ impl App {
         let mut mute: Option<bool> = None;
         let mut camera: Option<bool> = None;
         self.huddle_videos(ctx, &t);
-        egui::Area::new(egui::Id::new("huddle_bar")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -132.0]).show(ctx, |ui| {
+        egui::Area::new(egui::Id::new("huddle_bar")).order(egui::Order::Middle).anchor(Align2::CENTER_BOTTOM, [0.0, -132.0]).show(ctx, |ui| {
             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(14, 10)).shadow(egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(40) }).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
@@ -295,6 +316,16 @@ impl App {
                 });
             });
         });
+        // the huddle floats over the page but under dialogs: put an open
+        // dialog (and its dimmed background) back on top
+        if self.modal.is_some() {
+            for id in ["modal_dim", "modal_window"] {
+                ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, egui::Id::new(id)));
+            }
+        }
+        if self.new_message_open {
+            ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, egui::Id::new("new_message_window")));
+        }
         if let Some(m) = mute {
             self.set_huddle_muted(m);
         }

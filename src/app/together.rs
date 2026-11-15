@@ -39,6 +39,10 @@ pub struct SyncRt {
     pub(super) people: Vec<Person>,
     /// Sign in again with this invite code (after access was removed).
     pub(super) reinvite: Option<String>,
+    /// The owner's view of the server's backups (None until asked for).
+    pub(super) backups: Option<Vec<wb_net::Backup>>,
+    /// The backup the owner clicked Restore on, waiting for "Yes, restore".
+    pub(super) restore_confirm: Option<String>,
 }
 
 // ---------------------------------------------------------------- tokens
@@ -302,6 +306,14 @@ impl App {
                     self.toast = Some((why, now_ts()));
                 }
                 NetEvent::CallToken { channel, url, token } => self.huddle_token(channel, url, token),
+                NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
+                NetEvent::Restored(name) => {
+                    let label = wb_net::Backup { name, bytes: 0 }.label();
+                    self.toast = Some((format!("Restored the team's workspace to {}. Everyone gets it now.", label), now_ts()));
+                    self.sync_rt.restore_confirm = None;
+                    // the copy from before the restore is a new backup
+                    self.access_request(NetMsg::BackupList);
+                }
             }
         }
         changed
@@ -612,6 +624,48 @@ impl App {
 
     // ------------------------------------------------------------ dialogs
 
+    /// The owner: go back to an earlier copy of the team's workspace.
+    fn backups_section(&mut self, ui: &mut Ui, t: &Theme) {
+        ui.label(RichText::new("Backups").strong());
+        ui.label(RichText::new("Go back to an earlier copy of the team's workspace. Deleted items come back; anything made since stays. The server keeps a copy from just before.").small().color(t.text3));
+        let Some(list) = self.sync_rt.backups.clone() else {
+            if ui.button("Show backups").clicked() {
+                self.access_request(NetMsg::BackupList);
+            }
+            return;
+        };
+        if list.is_empty() {
+            ui.label(RichText::new("No backups yet. The first one is made within a minute of the server having a workspace.").color(t.text2));
+            return;
+        }
+        let mut req: Option<NetMsg> = None;
+        let mut confirm = self.sync_rt.restore_confirm.clone();
+        egui::ScrollArea::vertical().id_salt("backups").max_height(160.0).show(ui, |ui| {
+            for b in list.iter().take(80) {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(b.label()).color(t.text));
+                    ui.label(RichText::new(format!("{} KB", b.bytes.div_ceil(1024))).small().color(t.text3));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if confirm.as_deref() == Some(b.name.as_str()) {
+                            if ui.small_button("Cancel").clicked() {
+                                confirm = None;
+                            }
+                            if ui.small_button(RichText::new("Yes, restore").color(t.danger)).clicked() {
+                                req = Some(NetMsg::Restore { name: b.name.clone() });
+                            }
+                        } else if ui.small_button("Restore").on_hover_text(format!("Go back to {}", b.label())).clicked() {
+                            confirm = Some(b.name.clone());
+                        }
+                    });
+                });
+            }
+        });
+        self.sync_rt.restore_confirm = confirm;
+        if let Some(m) = req {
+            self.access_request(m);
+        }
+    }
+
     /// Owners and admins: everyone's access, invite codes, roles.
     fn people_section(&mut self, ui: &mut Ui, t: &Theme) {
         ui.label(RichText::new("People").strong());
@@ -704,6 +758,10 @@ impl App {
             if connected && self.sync_rt.role.is_some_and(|r| r.manages()) {
                 ui.add_space(10.0);
                 self.people_section(ui, t);
+                if self.sync_rt.role == Some(Role::Owner) {
+                    ui.add_space(10.0);
+                    self.backups_section(ui, t);
+                }
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {

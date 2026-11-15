@@ -79,6 +79,8 @@ computer of theirs at once) in Work together > People.
     ~/.local/bin/workboard-server people              who has access
     ~/.local/bin/workboard-server backups             list backups
     ~/.local/bin/workboard-server restore FILE        go back to a backup
+                                                      (the owner can also do this in the app:
+                                                       Work together > Backups)
     ~/.local/bin/workboard-server invite ID --role owner
                                                       new owner code (owner lost their computer)
 

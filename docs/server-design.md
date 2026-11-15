@@ -11,7 +11,7 @@
 
 ## 지금 상태 (2026-11-15)
 
-- **1~4단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상까지 들어갔다. `cargo test --workspace` 158개 통과.
+- **1~4단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상까지 들어갔다. `cargo test --workspace` 160개 통과.
 - **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. 아직 **비어 있다**: 처음 초대 코드 없이 연결하는 사람이 owner 가 된다.
 - **재부팅 자동 복구 확인:** 2026-11-15 03:37 macOS 업데이트(27.0.1 → 27.2.1) 재시동 뒤 Tailscale, 두 서버, Docker 와 컨테이너, ngrok, hermes, branchport 가 모두 저절로 다시 떴다(`deploy/check-after-boot.sh` 기록).
 - **실제 목소리:** 사용자가 확인했다("목소리 잘 나오더라").
@@ -29,10 +29,9 @@
 
 **알려진 한계(급하지 않음)**
 5. 동기화할 때마다 작업공간 전체를 주고받는다. 작은 팀에는 충분하고, 커지면 변경분 전송으로 바꾼다.
-6. 백업 되돌리기는 Mac mini 의 관리 명령으로만 된다(앱 안에는 없다).
-7. 영상 화질은 고정(640px, 15fps)이다. 네트워크에 맞춘 조절, 크게 보기, 화면 공유는 없다.
-8. `third_party/nokhwa-bindings-macos` 는 한 줄 고친 사본이다. nokhwa 를 올릴 때 아직 필요한지 확인한다. 앱 실행 파일은 통화 라이브러리 때문에 약 37MB 다.
-9. 정전 뒤에는 FileVault 화면에서 누군가 암호를 한 번 넣어야 서버가 뜬다(FileVault 를 켜 두기로 했다). 계획된 재시작은 `sudo fdesetup authrestart`.
+6. 영상 화질은 고정(640px, 15fps)이다. 네트워크에 맞춘 화질 조절과 화면 공유는 없다.
+7. `third_party/nokhwa-bindings-macos` 는 한 줄 고친 사본이다(2026-11-15 확인: crates.io 최신이 아직 0.2.4 라 계속 필요). nokhwa 를 올릴 때 아직 필요한지 확인한다. 앱 실행 파일은 통화 라이브러리 때문에 약 37MB 다.
+8. 정전 뒤에는 FileVault 화면에서 누군가 암호를 한 번 넣어야 서버가 뜬다(FileVault 를 켜 두기로 했다). 계획된 재시작은 `sudo fdesetup authrestart`.
 
 ## 구조 (실제로 만든 것)
 
@@ -72,6 +71,7 @@
 | 서버 → 모두 | `update` | 합친 정본과 `rev` |
 | 앱 → 서버 | `create_invite` / `set_role` / `revoke` / `access_list` | owner·admin 만 |
 | 서버 → 앱 | `invite` / `access` | 만든 코드, 사람별 역할·컴퓨터 수·열린 코드 |
+| 앱 → 서버 | `backup_list` / `restore` | owner 만. 서버가 `backups`(목록) / `restored` 로 답한다 |
 | 앱 → 서버 | `call_join` | 대화 id → 서버가 `call_token`(LiveKit 주소와 JWT)으로 답한다 |
 | 서버 → 앱 | `error` | `code: "auth"` 면 앱이 다시 연결을 멈춘다, `"denied"` 는 요청만 거절 |
 | 양쪽 | `ping` / `pong` | 30초마다 |
@@ -154,6 +154,9 @@
 - 작업공간 전환 메뉴에 각 작업공간의 위치(Team server / Shared folder / This computer)를 표시한다. 합류한 팀 작업공간도 "My Workspace" 라는 같은 이름을 쓰는 경우가 많아서다.
 - 빈 서버에 두 사람이 동시에 처음 연결하면: 첫 등록만 받으므로 합쳐지지 않는다. 진 쪽에는 "Someone else is setting up this server right now" 가 뜬다(서버 통합 테스트로 확인).
 - LiveKit 이 Tailscale 밖(집 내부망 UDP, 모든 네트워크의 7881/tcp)에도 열려 있던 것을 막았다(위 3단계 참고).
+- **앱 안에서 백업 되돌리기(owner 만).** 함께 쓰기 창의 Backups 에서 목록을 보고 Restore → Yes, restore 로 되돌린다. 서버는 관리 명령 `restore` 와 같은 방식으로 합친다(지운 것은 돌아오고 새로 만든 것은 남음, 되돌리기 전 사본 보관). 백업 폴더 안의 `hourly-`/`daily-`/`before-restore-` 파일 이름만 받는다. owner 가 아니면 목록도 거절한다.
+- **영상 크게 보기.** 영상 칸을 누르면 그 칸이 560px 로 커지고 나머지는 작아진다. 다시 누르면 돌아온다.
+- **허들이 대화상자를 가리던 것.** 허들 막대와 영상 칸이 가장 위 층에 그려져 함께 쓰기 창을 덮었다(손 검증에서 발견). 이제 대화상자와 같은 층에 두고, 대화상자가 열려 있으면 그 위로 다시 올린다.
 - 전원: `deploy/setup-power.sh`(잠자기 끄기, 정전 뒤 자동 켜짐). FileVault 는 켜 두기로 했다.
 - 재부팅 점검: `deploy/check-after-boot.sh`. `--install` 하면 다음 로그인 3분 뒤 한 번 점검하고 스스로 지워진다. 실제 재부팅에서 모두 저절로 다시 뜨는 것을 확인했다.
 

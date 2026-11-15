@@ -442,6 +442,11 @@ impl App {
             t.timer_by = None;
             t.time_entries.clear();
             t.activity = vec![Activity { ts: now, author: app.data.me, text: format!("duplicated this task from {}", src.name), comment: false, ..Default::default() }];
+            // the copy's assignees hear about it like a new assignment
+            for &a in src.assignees.iter().filter(|a| **a != app.data.me) {
+                let line = app.about_line(app.data.me, "assigned to", a);
+                t.activity.push(line);
+            }
             t.order = src.order;
             app.data.tasks.push(t);
             let subs: Vec<u64> = app.data.tasks.iter().filter(|x| x.parent == Some(id)).map(|x| x.id).collect();

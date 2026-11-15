@@ -319,6 +319,9 @@ pub struct App {
     palette: Option<String>,
     quick_add: Option<QuickAdd>,
     comment_text: String,
+    /// People picked from the @mention list while writing a comment, so a
+    /// name two people share means the one picked.
+    comment_picked: Vec<u64>,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -570,6 +573,7 @@ impl App {
             palette: None,
             quick_add: None,
             comment_text: String::new(),
+            comment_picked: vec![],
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),
@@ -1028,6 +1032,13 @@ impl App {
         task.activity.push(Activity { ts: now_ts(), author: me, text, comment: false, ..Default::default() });
     }
 
+    /// A history line about one person ("assigned to <name>", "removed
+    /// assignee <name>") that keeps their id, so their Inbox finds it by id.
+    pub(super) fn about_line(&self, me: u64, what: &str, who: u64) -> Activity {
+        let name = self.data.member(who).map(|m| m.name.clone()).unwrap_or_default();
+        Activity { ts: now_ts(), author: me, text: format!("{} {}", what, name), comment: false, target: Some(who), ..Default::default() }
+    }
+
     /// Logs a change, or updates my own line about the same change if I made
     /// it in the last few minutes (`like` is part of that line).
     fn log_edit(task: &mut Task, me: u64, like: &str, text: String) {
@@ -1087,16 +1098,14 @@ impl App {
                         let s = new.start.map(fmt_date).unwrap_or_else(|| "none".into());
                         Self::log(&mut new, me, format!("changed start date to {}", s));
                     }
-                    for aid in new.assignees.clone().iter() {
-                        if !old.assignees.contains(aid) {
-                            let n = self.data.member(*aid).map(|m| m.name.clone()).unwrap_or_default();
-                            Self::log(&mut new, me, format!("assigned to {}", n));
+                    for aid in new.assignees.clone() {
+                        if !old.assignees.contains(&aid) {
+                            new.activity.push(self.about_line(me, "assigned to", aid));
                         }
                     }
-                    for aid in &old.assignees {
-                        if !new.assignees.contains(aid) {
-                            let n = self.data.member(*aid).map(|m| m.name.clone()).unwrap_or_default();
-                            Self::log(&mut new, me, format!("removed assignee {}", n));
+                    for &aid in &old.assignees {
+                        if !new.assignees.contains(&aid) {
+                            new.activity.push(self.about_line(me, "removed assignee", aid));
                         }
                     }
                     // typed fields change on every key press: while I keep typing,
@@ -1144,6 +1153,7 @@ impl App {
                                     if let Ok(uid) = a.value.parse::<u64>() {
                                         if !new.assignees.contains(&uid) {
                                             new.assignees.push(uid);
+                                            new.activity.push(self.about_line(me, "assigned to", uid));
                                         }
                                     }
                                 }
@@ -1160,7 +1170,7 @@ impl App {
                                         }
                                     }
                                 }
-                                _ => new.activity.push(Activity { ts: now_ts(), author: me, text: a.value.clone(), comment: true, ..Default::default() }),
+                                _ => new.activity.push(Activity { ts: now_ts(), author: me, text: a.value.clone(), comment: true, mentions: self.data.mentions_in(&a.value), ..Default::default() }),
                             }
                             Self::log(&mut new, me, format!("Automation ran: {}", self.describe_action(&a)));
                         }
@@ -1181,6 +1191,9 @@ impl App {
                 let status = status.unwrap_or_else(|| statuses[0].name.clone());
                 let order = self.data.tasks.iter().map(|t| t.order).max().unwrap_or(0) + 1;
                 let now = now_ts();
+                // people put on the task as it is made hear about it like a later assignment
+                let mut activity = vec![Activity { ts: now, author: me, text: "created this task".into(), comment: false, ..Default::default() }];
+                activity.extend(assignees.iter().filter(|a| **a != me).map(|a| self.about_line(me, "assigned to", *a)));
                 self.data.tasks.push(Task {
                     id,
                     list_id: list,
@@ -1194,7 +1207,7 @@ impl App {
                     due,
                     tags: vec![],
                     checklist: vec![],
-                    activity: vec![Activity { ts: now, author: me, text: "created this task".into(), comment: false, ..Default::default() }],
+                    activity,
                     time_entries: vec![],
                     timer_started: None,
                     timer_by: None,
@@ -3369,6 +3382,7 @@ impl App {
                             let ring = t.card;
                             if menu_row(ui, &t, name, false, |p, c| paint_avatar(p, c, 8.0, &m, ring)).clicked() {
                                 insert = Some(format!("@{} ", name));
+                                self.comment_picked.push(*id);
                                 close_popup(ui);
                             }
                         }
@@ -3397,8 +3411,11 @@ impl App {
                         name_it(&send, &format!("Send {}", label));
                         if (send.clicked() || send_key) && !self.comment_text.trim().is_empty() {
                             let id = self.data.new_id();
-                            task.activity.push(Activity { ts: now_ts(), author: self.data.me, text: self.comment_text.trim().to_string(), comment: true, post, id, ..Default::default() });
+                            let text = self.comment_text.trim().to_string();
+                            let mentions = crate::model::mentioned_ids(&text, &self.data.members, &self.comment_picked);
+                            task.activity.push(Activity { ts: now_ts(), author: self.data.me, text, comment: true, post, id, mentions, ..Default::default() });
                             self.comment_text.clear();
+                            self.comment_picked.clear();
                             close_popup(ui);
                         }
                     });

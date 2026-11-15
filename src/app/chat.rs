@@ -1046,7 +1046,8 @@ impl App {
                 }
                 ChatAction::SendPost { ch, title, text, files } => {
                     let id = self.data.new_id();
-                    let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
+                    let mentions = self.data.mentions_in(&text);
+                    let m = Message { edited: None, mentions, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(title), post_type: "Announcement".into(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         c.messages.push(m);
                         c.last_read = c.last_read.max(now_ts());
@@ -1095,8 +1096,10 @@ impl App {
                     if text.is_empty() {
                         continue;
                     }
+                    let members = self.data.members.clone();
                     if let Some(m) = self.data.channels.iter_mut().find(|c| c.id == ch).and_then(|c| find_msg(&mut c.messages, msg)) {
                         if m.author == me && m.text != text {
+                            m.mentions = crate::model::mentioned_ids(&text, &members, &m.mentions);
                             m.text = text;
                             m.edited = Some(now_ts());
                             self.dirty = true;
@@ -1170,7 +1173,8 @@ impl App {
                         self.chat_keep_unread = None;
                     }
                     let id = self.data.new_id();
-                    let m = Message { edited: None, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
+                    let mentions = self.data.mentions_in(&text);
+                    let m = Message { edited: None, mentions, attachments: files, id, author: me, text, ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: None, post_type: String::new(), pinned: false, call: None };
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         match parent {
                             Some(pid) => {

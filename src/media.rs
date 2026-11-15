@@ -423,7 +423,7 @@ mod mac {
             let _: () = msg_send![panel, setAllowsMultipleSelection: YES];
             let _: () = msg_send![panel, setCanChooseDirectories: NO];
             let _: () = msg_send![panel, setCanChooseFiles: YES];
-            let _: () = msg_send![panel, setMessage: ns("Choose pictures or videos to send")];
+            let _: () = msg_send![panel, setMessage: ns(crate::i18n::tr("Choose pictures or videos to send"))];
             let image: *mut Object = msg_send![class!(UTType), typeWithIdentifier: ns("public.image")];
             let movie: *mut Object = msg_send![class!(UTType), typeWithIdentifier: ns("public.movie")];
             if !image.is_null() && !movie.is_null() {

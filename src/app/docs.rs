@@ -97,13 +97,13 @@ impl App {
                 ui.painter().rect_filled(r, 6.0, t.hover);
             }
             let x = r.left() + 10.0 + depth as f32 * 14.0;
-            ui.painter().with_clip_rect(r.shrink(2.0)).text(pos2(x, r.center().y), Align2::LEFT_CENTER, if title.is_empty() { "Untitled" } else { &title }, FontId::proportional(13.0), if sel { t.selected_text } else { t.text });
+            ui.painter().with_clip_rect(r.shrink(2.0)).text(pos2(x, r.center().y), Align2::LEFT_CENTER, if title.is_empty() { tr("Untitled") } else { &title }, FontId::proportional(13.0), if sel { t.selected_text } else { t.text });
             let plus = Rect::from_center_size(r.right_center() - vec2(12.0, 0.0), vec2(18.0, 18.0));
             let pr = ui.interact(plus, ui.id().with(("subpage", id)), Sense::click());
             if resp.hovered() || pr.hovered() {
                 ui.painter().text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(14.0), t.text2);
             }
-            if pr.on_hover_text("Add sub page").clicked() {
+            if pr.on_hover_text(tr("Add sub page")).clicked() {
                 self.add_page(id);
             } else if resp.clicked() {
                 self.doc_open = Some(id);
@@ -125,9 +125,9 @@ impl App {
         ui.painter().vline(pages.right(), pages.y_range(), Stroke::new(1.0, t.border));
         let mut pui = ui.new_child(egui::UiBuilder::new().max_rect(pages.shrink(8.0)).layout(Layout::top_down(Align::Min)));
         pui.horizontal(|ui| {
-            ui.label(RichText::new("Pages").strong());
+            ui.label(RichText::new(tr("Pages")).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.small_button("+").on_hover_text("Add page").clicked() {
+                if ui.small_button("+").on_hover_text(tr("Add page")).clicked() {
                     self.add_page(root);
                 }
             });
@@ -143,13 +143,13 @@ impl App {
             } else if resp.hovered() {
                 ui.painter().rect_filled(r, 6.0, t.hover);
             }
-            ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, format!("\u{1F4C4} {}", if title.is_empty() { "Untitled" } else { &title }), FontId::proportional(13.0), if sel { t.selected_text } else { t.text });
+            ui.painter().with_clip_rect(r.shrink(2.0)).text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, format!("\u{1F4C4} {}", if title.is_empty() { tr("Untitled") } else { &title }), FontId::proportional(13.0), if sel { t.selected_text } else { t.text });
             if resp.clicked() {
                 self.doc_open = Some(root);
             }
             self.page_rows(ui, root, 1);
             ui.add_space(6.0);
-            if ui.add(egui::Button::new(RichText::new("+  Add page").color(t.text2)).frame(false)).clicked() {
+            if ui.add(egui::Button::new(RichText::new(tr("+  Add page")).color(t.text2)).frame(false)).clicked() {
                 self.add_page(root);
             }
         });
@@ -162,10 +162,10 @@ impl App {
         let mut pick: Option<&'static str> = None;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 6)).show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.selectable_label(!self.doc_preview, "Edit").clicked() {
+                if ui.selectable_label(!self.doc_preview, tr("Edit")).clicked() {
                     self.doc_preview = false;
                 }
-                if ui.selectable_label(self.doc_preview, "View").clicked() {
+                if ui.selectable_label(self.doc_preview, tr("View")).clicked() {
                     self.doc_preview = true;
                 }
                 ui.separator();
@@ -176,12 +176,12 @@ impl App {
                             "I" => RichText::new(short).italics(),
                             _ => RichText::new(short),
                         };
-                        if ui.add(egui::Button::new(txt).frame(false).min_size(vec2(26.0, 24.0))).on_hover_text(label).clicked() {
+                        if ui.add(egui::Button::new(txt).frame(false).min_size(vec2(26.0, 24.0))).on_hover_text(tr(label)).clicked() {
                             pick = Some(label);
                         }
                     }
                     ui.separator();
-                    let lr = ui.add(egui::Button::new("Link task").frame(false));
+                    let lr = ui.add(egui::Button::new(tr("Link task")).frame(false));
                     let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|t| t.parent.is_none() && !t.archived).map(|t| (t.id, t.name.clone())).collect();
                     popup(ui, &lr, ui.id().with("link_task"), 260.0, |ui| {
                         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
@@ -203,7 +203,7 @@ impl App {
                     let d = &self.data.docs[idx];
                     let words = d.body.split_whitespace().count();
                     let author = self.data.member(d.owner).map(|m| m.name.clone()).unwrap_or_default();
-                    ui.label(RichText::new(format!("{} \u{00B7} {} words", author, words)).small().color(t.text3));
+                    ui.label(RichText::new(trf!("{} \u{00B7} {} words", author, words)).small().color(t.text3));
                 });
             });
         });
@@ -222,7 +222,7 @@ impl App {
         egui::ScrollArea::vertical().id_salt(("doc_scroll", self.data.docs[idx].id)).auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(60, 24)).show(ui, |ui| {
                 let d = &mut self.data.docs[idx];
-                let r1 = ui.add(egui::TextEdit::singleline(&mut d.title).font(FontId::proportional(32.0)).frame(false).hint_text("Untitled").desired_width(f32::INFINITY));
+                let r1 = ui.add(egui::TextEdit::singleline(&mut d.title).font(FontId::proportional(32.0)).frame(false).hint_text(tr("Untitled")).desired_width(f32::INFINITY));
                 if r1.changed() {
                     d.updated = now_ts();
                     self.dirty = true;
@@ -235,7 +235,7 @@ impl App {
                 let d = &mut self.data.docs[idx];
                 let empty = d.body.is_empty();
                 let mut layouter = |ui: &Ui, s: &str, wrap: f32| ui.fonts(|f| f.layout_job(doc_layout_job(s, &t, wrap)));
-                let out = egui::TextEdit::multiline(&mut d.body).id(body_id).frame(false).hint_text("Start writing, or type '/' for commands").font(FontId::proportional(16.0)).desired_width(f32::INFINITY).desired_rows(if empty { 3 } else { 24 }).layouter(&mut layouter).show(ui);
+                let out = egui::TextEdit::multiline(&mut d.body).id(body_id).frame(false).hint_text(tr("Start writing, or type '/' for commands")).font(FontId::proportional(16.0)).desired_width(f32::INFINITY).desired_rows(if empty { 3 } else { 24 }).layouter(&mut layouter).show(ui);
                 name_field(&out.response, "Doc body");
                 if out.response.changed() {
                     d.updated = now_ts();
@@ -286,19 +286,19 @@ impl App {
                 if empty {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(RichText::new("Start writing").color(t.text2)).frame(false)).clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr("Start writing")).color(t.text2)).frame(false)).clicked() {
                             set_cursor(ui.ctx(), body_id, 0);
                         }
                     });
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Add new").small().color(t.text3));
+                    ui.label(RichText::new(tr("Add new")).small().color(t.text3));
                     let mut add_table = false;
                     let mut add_sub = false;
                     ui.horizontal(|ui| {
-                        if ui.button("\u{25A6}  Table").clicked() {
+                        if ui.button(tr("\u{25A6}  Table")).clicked() {
                             add_table = true;
                         }
-                        if ui.button("\u{1F4C4}  Subpage").clicked() {
+                        if ui.button(tr("\u{1F4C4}  Subpage")).clicked() {
                             add_sub = true;
                         }
                     });
@@ -341,9 +341,9 @@ impl App {
                     let area = egui::Area::new(body_id.with("slash")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
                             ui.set_width(200.0);
-                            ui.label(RichText::new("Basic blocks").small().color(t.text3));
+                            ui.label(RichText::new(tr("Basic blocks")).small().color(t.text3));
                             for (label, _, _) in BLOCKS.iter().take(9) {
-                                if ui.add(egui::Button::new(*label).frame(false).min_size(vec2(190.0, 22.0))).clicked() {
+                                if ui.add(egui::Button::new(tr(label)).frame(false).min_size(vec2(190.0, 22.0))).clicked() {
                                     chosen = Some(label);
                                 }
                             }
@@ -368,7 +368,7 @@ impl App {
                 let kids: Vec<(u64, String)> = self.data.docs.iter().filter(|x| x.parent == Some(self.data.docs[idx].id)).map(|x| (x.id, x.title.clone())).collect();
                 if !kids.is_empty() {
                     ui.add_space(16.0);
-                    ui.label(RichText::new("Sub pages").small().color(t.text3));
+                    ui.label(RichText::new(tr("Sub pages")).small().color(t.text3));
                     for (kid, title) in kids {
                         if ui.link(format!("\u{1F4C4} {}", title)).clicked() {
                             self.doc_open = Some(kid);
@@ -464,7 +464,8 @@ impl App {
                         if let Some(j) = s[i..].find(']') {
                             inline(ui, &s[..i], size, strong);
                             let id: u64 = s[i + 6..i + j].parse().unwrap_or(0);
-                            let name = self.task(id).map(|t| t.name.clone()).unwrap_or_else(|| "missing task".into());
+                            let name = self.task(id).map(|t| t.name.clone()).unwrap_or_else(|| tr("missing task").into());
+
                             if ui.link(RichText::new(format!("\u{2611} {}", name)).size(size)).clicked() {
                                 open_task = Some(id);
                             }

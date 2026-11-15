@@ -23,11 +23,8 @@ pub enum Unavailable {
 impl Unavailable {
     pub fn explain(&self) -> String {
         match self {
-            Unavailable::NotInstalled => format!("Workboard {} can only update itself when it runs as the installed app.", env!("CARGO_PKG_VERSION")),
-            Unavailable::NoServer => format!(
-                "Workboard {} gets its updates from your team's server. Connect to it in Settings > Work together, then try again.",
-                env!("CARGO_PKG_VERSION")
-            ),
+            Unavailable::NotInstalled => crate::trf!("Workboard {} can only update itself when it runs as the installed app.", env!("CARGO_PKG_VERSION")),
+            Unavailable::NoServer => crate::trf!("Workboard {} gets its updates from your team's server. Connect to it in Settings > Work together, then try again.", env!("CARGO_PKG_VERSION")),
         }
     }
 }

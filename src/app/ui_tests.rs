@@ -2083,3 +2083,6 @@ fn composer_mention_and_emoji_pickers() {
     h.click_side("Jordan Park", true);
     assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
+
+#[path = "i18n_tests.rs"]
+mod i18n_tests;

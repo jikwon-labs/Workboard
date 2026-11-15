@@ -34,8 +34,8 @@ fn gallery_card(ui: &mut Ui, t: &Theme, w: f32, color: [u8; 3], glyph: &str, tit
         ui.painter().text(c, Align2::CENTER_CENTER, glyph, FontId::proportional(15.0), rgb(color));
     }
     let tc = if ai { Color32::from_rgb(0x9b, 0x2d, 0xd6) } else { t.text };
-    ui.painter().text(r.left_top() + vec2(20.0, 82.0), Align2::LEFT_CENTER, title, FontId::proportional(15.0), tc);
-    let g = ui.painter().layout(sub.to_string(), FontId::proportional(13.0), t.text2, w - 40.0);
+    ui.painter().text(r.left_top() + vec2(20.0, 82.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(15.0), tc);
+    let g = ui.painter().layout(tr(sub).to_string(), FontId::proportional(13.0), t.text2, w - 40.0);
     ui.painter().galley(r.left_top() + vec2(20.0, 96.0), g, t.text2);
     resp
 }
@@ -49,13 +49,13 @@ impl App {
         egui::SidePanel::left(egui::Id::new(("hub", id))).exact_width(255.0).resizable(false).frame(hub_frame(&t)).show_inside(ui, |ui| {
             let w = ui.available_width();
             let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
-            ui.painter().text(hr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, title, FontId::proportional(17.0), t.text);
+            ui.painter().text(hr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(17.0), t.text);
             if create_button {
                 let br = Rect::from_min_size(pos2(hr.right() - 80.0, hr.center().y - 14.0), vec2(80.0, 28.0));
                 let b = ui.interact(br, ui.id().with("hub_create"), Sense::click());
                 name_it(&b, &format!("Create in {}", title));
                 ui.painter().rect_filled(br, 7.0, if b.hovered() { t.primary_hover } else { t.primary });
-                ui.painter().text(br.center(), Align2::CENTER_CENTER, "+  Create", FontId::proportional(14.0), Color32::WHITE);
+                ui.painter().text(br.center(), Align2::CENTER_CENTER, tr("+  Create"), FontId::proportional(14.0), Color32::WHITE);
                 plus |= b.clicked();
             } else {
                 let br = Rect::from_center_size(pos2(hr.right() - 14.0, hr.center().y), vec2(28.0, 28.0));
@@ -72,7 +72,7 @@ impl App {
                 ui.painter().rect_filled(cr, 5.0, t.row_selected);
             }
             ui.painter().text(cr.center(), Align2::CENTER_CENTER, "\u{00AB}", FontId::proportional(16.0), t.text2);
-            if c.on_hover_text("Back to Home").clicked() {
+            if c.on_hover_text(tr("Back to Home")).clicked() {
                 self.section = Section::Home;
             }
             ui.add_space(4.0);
@@ -93,7 +93,7 @@ impl App {
                 } else {
                     ui.painter().text(r.left_center() + vec2(16.0, 0.0), Align2::CENTER_CENTER, *icon, FontId::proportional(13.0), t.text2);
                 }
-                ui.painter().text(r.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, *label, FontId::proportional(14.0), if sel { t.text } else { t.text2 });
+                ui.painter().text(r.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), if sel { t.text } else { t.text2 });
                 if let Some(n) = count {
                     if *n > 0 {
                         ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, n.to_string(), FontId::proportional(12.0), t.text3);
@@ -107,7 +107,7 @@ impl App {
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.left() + 6.0..=r.right() - 6.0, r.top(), Stroke::new(1.0, t.border));
             ui.add_space(10.0);
-            ui.label(RichText::new("  Favorites").size(13.0).color(t.text2));
+            ui.label(RichText::new(tr("  Favorites")).size(13.0).color(t.text2));
             let prefix = match id {
                 "docs" => "doc:",
                 "wb" => "wb:",
@@ -117,14 +117,14 @@ impl App {
             };
             let stars: Vec<String> = self.data.extra.starred.iter().filter(|s| !prefix.is_empty() && s.starts_with(prefix)).cloned().collect();
             if stars.is_empty() {
-                let noun = match id {
-                    "docs" => "a Doc",
-                    "wb" => "a Whiteboard",
-                    "forms" => "a Form",
-                    _ => "a Dashboard",
+                let text = match id {
+                    "docs" => tr("Star a Doc to see it here"),
+                    "wb" => tr("Star a Whiteboard to see it here"),
+                    "forms" => tr("Star a Form to see it here"),
+                    _ => tr("Star a Dashboard to see it here"),
                 };
                 if id != "teams" {
-                    empty_card(ui, &t, "\u{2605}", &format!("Star {} to see it here", noun));
+                    empty_card(ui, &t, "\u{2605}", text);
                 }
             } else {
                 for st in stars {
@@ -149,14 +149,14 @@ impl App {
             }
             if id == "docs" {
                 ui.add_space(14.0);
-                ui.label(RichText::new("  Popular Wikis").size(13.0).color(t.text2));
-                empty_card(ui, &t, "\u{2714}", "Most viewed and active Wikis appear here");
+                ui.label(RichText::new(tr("  Popular Wikis")).size(13.0).color(t.text2));
+                empty_card(ui, &t, "\u{2714}", tr("Most viewed and active Wikis appear here"));
             }
             if id == "teams" {
                 ui.add_space(4.0);
                 let teams = self.data.extra.teams.clone();
                 if teams.is_empty() {
-                    empty_card(ui, &t, "\u{1F465}", "Once you join or create a Team you will see it here");
+                    empty_card(ui, &t, "\u{1F465}", tr("Once you join or create a Team you will see it here"));
                 }
                 for tm in teams {
                     let sel = self.team_open == Some(tm.id);
@@ -184,7 +184,7 @@ impl App {
         egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_height(28.0);
-                ui.label(RichText::new(title).size(15.5).color(t.text));
+                ui.label(RichText::new(tr(title)).size(15.5).color(t.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| right(self, ui));
             });
         });
@@ -236,16 +236,16 @@ impl App {
             let title = items[self.hub_filter.min(5) as usize].1;
             self.page_bar(ui, title, |s, ui| {
                 let tt = s.t();
-                if primary_button(ui, &tt, "New Doc").clicked() {
+                if primary_button(ui, &tt, tr("New Doc")).clicked() {
                     s.new_doc(s.current_space());
                 }
-                if ui.add(egui::Button::new("\u{2B07}  Import").min_size(vec2(0.0, 28.0))).clicked() {
+                if ui.add(egui::Button::new(tr("\u{2B07}  Import")).min_size(vec2(0.0, 28.0))).clicked() {
                     s.modal = Some(Modal::Import { path: String::new(), result: String::new() });
                 }
             });
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
-                    ui.label(RichText::new("Templates").color(t.text2));
+                    ui.label(RichText::new(tr("Templates")).color(t.text2));
                     ui.add_space(4.0);
                     let w = ui.available_width();
                     let cw = ((w - 24.0) / 3.0).min(430.0);
@@ -261,8 +261,8 @@ impl App {
                             let c = r.left_center() + vec2(32.0, 0.0);
                             ui.painter().circle_filled(c, 18.0, rgb(color).gamma_multiply(0.35));
                             ui.painter().text(c, Align2::CENTER_CENTER, glyph, FontId::proportional(14.0), rgb(color));
-                            ui.painter().text(r.left_center() + vec2(62.0, -10.0), Align2::LEFT_CENTER, name, FontId::proportional(15.0), t.text);
-                            ui.painter().with_clip_rect(r.shrink(4.0)).text(r.left_center() + vec2(62.0, 12.0), Align2::LEFT_CENTER, sub, FontId::proportional(12.5), t.text2);
+                            ui.painter().text(r.left_center() + vec2(62.0, -10.0), Align2::LEFT_CENTER, tr(name), FontId::proportional(15.0), t.text);
+                            ui.painter().with_clip_rect(r.shrink(4.0)).text(r.left_center() + vec2(62.0, 12.0), Align2::LEFT_CENTER, tr(sub), FontId::proportional(12.5), t.text2);
                             if resp.clicked() {
                                 self.new_doc(self.current_space());
                                 if let Some(d) = self.doc_open.and_then(|id| self.data.docs.iter_mut().find(|d| d.id == id)) {
@@ -275,22 +275,22 @@ impl App {
                     });
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
-                        let r = ui.add(egui::Button::new(if self.docs_mine { "\u{2261}  Filters \u{2022} 1" } else { "\u{2261}  Filters" }).corner_radius(13));
+                        let r = ui.add(egui::Button::new(if self.docs_mine { tr("\u{2261}  Filters \u{2022} 1") } else { tr("\u{2261}  Filters") }).corner_radius(13));
                         popup(ui, &r, ui.id().with("docs_filters"), 200.0, |ui| {
-                            ui.checkbox(&mut self.docs_mine, "Only Docs I created");
+                            ui.checkbox(&mut self.docs_mine, tr("Only Docs I created"));
                         });
-                        let sr = ui.add(egui::Button::new(format!("\u{21C5}  Sort: {}", ["Date updated", "Name", "Date created"][self.docs_sort as usize % 3])).corner_radius(13));
+                        let sr = ui.add(egui::Button::new(trf!("\u{21C5}  Sort: {}", tr(["Date updated", "Name", "Date created"][self.docs_sort as usize % 3]))).corner_radius(13));
                         popup(ui, &sr, ui.id().with("docs_sort"), 180.0, |ui| {
                             for (i, l) in ["Date updated", "Name", "Date created"].iter().enumerate() {
-                                if ui.selectable_label(self.docs_sort == i as u8, *l).clicked() {
+                                if ui.selectable_label(self.docs_sort == i as u8, tr(l)).clicked() {
                                     self.docs_sort = i as u8;
                                     close_popup(ui);
                                 }
                             }
                         });
-                        ui.label(RichText::new("|  Tags:").color(t.text2));
+                        ui.label(RichText::new(tr("|  Tags:")).color(t.text2));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("\u{1F50D} Search").desired_width(160.0));
+                            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text(tr("\u{1F50D} Search")).desired_width(160.0));
                         });
                     });
                     ui.add_space(8.0);
@@ -298,7 +298,7 @@ impl App {
                     let cols = [0.0, 0.42, 0.62, 0.76, 0.88];
                     let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
                     for (x, h) in cols.iter().zip(["Name", "Location", "Tags", "Date updated", "Sharing"]) {
-                        ui.painter().text(pos2(hr.left() + w * x + 30.0, hr.center().y), Align2::LEFT_CENTER, h, FontId::proportional(13.0), t.text2);
+                        ui.painter().text(pos2(hr.left() + w * x + 30.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
                     }
                     ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
                     let q = self.search.to_lowercase();
@@ -329,7 +329,7 @@ impl App {
                     }
                     if docs.is_empty() {
                         ui.add_space(20.0);
-                        ui.vertical_centered(|ui| ui.label(RichText::new("No Docs here yet").color(t.text3)));
+                        ui.vertical_centered(|ui| ui.label(RichText::new(tr("No Docs here yet")).color(t.text3)));
                     }
                     for d in docs {
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
@@ -346,7 +346,7 @@ impl App {
                             ui.painter().rect_filled(lr, 4.0, rgb(c));
                             ui.painter().text(pos2(r.left() + w * cols[1] + 52.0, r.center().y), Align2::LEFT_CENTER, n, FontId::proportional(14.0), t.text2);
                         } else {
-                            ui.painter().text(pos2(r.left() + w * cols[1] + 30.0, r.center().y), Align2::LEFT_CENTER, "Workspace", FontId::proportional(14.0), t.text2);
+                            ui.painter().text(pos2(r.left() + w * cols[1] + 30.0, r.center().y), Align2::LEFT_CENTER, tr("Workspace"), FontId::proportional(14.0), t.text2);
                         }
                         ui.painter().text(pos2(r.left() + w * cols[2] + 30.0, r.center().y), Align2::LEFT_CENTER, "\u{2013}", FontId::proportional(14.0), t.text3);
                         ui.painter().text(pos2(r.left() + w * cols[3] + 30.0, r.center().y), Align2::LEFT_CENTER, fmt_ago(d.updated), FontId::proportional(14.0), t.text2);
@@ -374,27 +374,27 @@ impl App {
         let mut delete = false;
         egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new("\u{2190}  All Docs").color(t.text2)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(tr("\u{2190}  All Docs")).color(t.text2)).frame(false)).clicked() {
                     self.doc_open = None;
                 }
-                let loc = self.data.docs[idx].space.and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid)).map(|s| s.name.clone()).unwrap_or_else(|| "Workspace".into());
+                let loc = self.data.docs[idx].space.and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid)).map(|s| s.name.clone()).unwrap_or_else(|| tr("Workspace").into());
                 ui.label(RichText::new(format!("/  {}", loc)).color(t.text3));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
                         delete = true;
                     }
                     let arch = if self.data.docs[idx].archived { "Unarchive" } else { "Archive" };
-                    if ui.add(egui::Button::new(arch).frame(false)).on_hover_text("Move to Archived and save a Markdown copy").clicked() {
+                    if ui.add(egui::Button::new(tr(arch)).frame(false)).on_hover_text(tr("Move to Archived and save a Markdown copy")).clicked() {
                         self.toggle_archive(id);
                     }
-                    if ui.add(egui::Button::new("Export").frame(false)).on_hover_text("Save as a Markdown file").clicked() {
+                    if ui.add(egui::Button::new(tr("Export")).frame(false)).on_hover_text(tr("Save as a Markdown file")).clicked() {
                         self.toast = Some(match self.export_doc(id) {
-                            Some(p) => (format!("Saved {}", p.display()), now_ts()),
-                            None => ("Couldn't save the file".into(), now_ts()),
+                            Some(p) => (trf!("Saved {}", p.display()), now_ts()),
+                            None => (tr("Couldn't save the file").into(), now_ts()),
                         });
                     }
                     let d = &mut self.data.docs[idx];
-                    if ui.add(egui::Button::new(if d.private { "\u{1F512} Private" } else { "\u{1F465} Shared" }).frame(false)).on_hover_text("Who can see this Doc").clicked() {
+                    if ui.add(egui::Button::new(if d.private { tr("\u{1F512} Private") } else { tr("\u{1F465} Shared") }).frame(false)).on_hover_text(tr("Who can see this Doc")).clicked() {
                         d.private = !d.private;
                         self.dirty = true;
                     }
@@ -407,7 +407,7 @@ impl App {
                         }
                         self.dirty = true;
                     }
-                    ui.label(RichText::new(format!("Last updated {}", fmt_ago(self.data.docs[idx].updated))).small().color(t.text3));
+                    ui.label(RichText::new(trf!("Last updated {}", fmt_ago(self.data.docs[idx].updated))).small().color(t.text3));
                 });
             });
         });
@@ -451,13 +451,13 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if !self.data.extra.dashboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new("Your Dashboards").size(15.0));
+                        ui.label(RichText::new(tr("Your Dashboards")).size(15.0));
                         for d in self.data.extra.dashboards.clone() {
                             if ui.add(egui::Button::new(format!("\u{1F4CA}  {}", d.name)).frame(false)).clicked() {
                                 self.dash_open = Some(d.id);
                             }
                         }
-                        if ui.add(egui::Button::new("\u{1F4CA}  Workspace overview").frame(false)).clicked() {
+                        if ui.add(egui::Button::new(tr("\u{1F4CA}  Workspace overview")).frame(false)).clicked() {
                             let id = self.data.new_id();
                             self.data.extra.dashboards.push(Dashboard { id, name: "Workspace overview".into(), space: None });
                             self.dash_open = Some(id);
@@ -465,7 +465,7 @@ impl App {
                         }
                     });
                 }
-                let choice = self.gallery(ui, "Choose a Dashboard template", "Get started with a Dashboard template or create a custom Dashboard\nto fit your exact needs.", &[
+                let choice = self.gallery(ui, tr("Choose a Dashboard template"), tr("Get started with a Dashboard template or create a custom Dashboard\nto fit your exact needs."), &[
                     ([0x44, 0x66, 0xff], "\u{1F4CA}", "Simple Dashboard", "Manage and prioritize tasks", false),
                     ([0xb6, 0x60, 0xe0], "\u{2728}", "AI Team Center", "View team activity with AI", true),
                     ([0x0f, 0x9d, 0x9f], "\u{23F1}", "Time Tracking", "View and report on time tracking metrics", false),
@@ -474,7 +474,7 @@ impl App {
                 ]);
                 if let Some(name) = choice {
                     if name.starts_with("AI ") {
-                        self.modal = Some(super::menus::unavailable(&name));
+                        self.modal = Some(super::menus::unavailable(tr(&name)));
                     } else {
                         let id = self.data.new_id();
                         let n = if name == "Start from scratch" { "New Dashboard".to_string() } else { name };
@@ -540,7 +540,7 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if !self.data.extra.whiteboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new("Your Whiteboards").size(15.0));
+                        ui.label(RichText::new(tr("Your Whiteboards")).size(15.0));
                         for w in self.data.extra.whiteboards.clone() {
                             if ui.add(egui::Button::new(format!("\u{1F3A8}  {}", w.name)).frame(false)).clicked() {
                                 self.wb_open = Some(w.id);
@@ -548,7 +548,7 @@ impl App {
                         }
                     });
                 }
-                let choice = self.gallery(ui, "Choose a Whiteboard template", "Create Whiteboards to map out project plans, brainstorm feature\nconcepts, or help remote co-workers work better together!", &[
+                let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans, brainstorm feature\nconcepts, or help remote co-workers work better together!"), &[
                     ([0xb6, 0x60, 0xe0], "\u{1F465}", "Organizational Chart", "Visualize your team structure", false),
                     ([0x0f, 0x9d, 0x9f], "\u{2630}", "Action Plan", "Turn goals into actionable steps", false),
                     ([0x10, 0x90, 0xe0], "\u{27A4}", "Customer Journey Map", "Optimize every customer touchpoint", false),
@@ -600,7 +600,7 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if !self.data.extra.forms.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new("Your Forms").size(15.0));
+                        ui.label(RichText::new(tr("Your Forms")).size(15.0));
                         for f in self.data.extra.forms.clone() {
                             if ui.add(egui::Button::new(format!("\u{1F4CB}  {}", f.name)).frame(false)).clicked() {
                                 self.form_open = Some(f.id);
@@ -608,7 +608,7 @@ impl App {
                         }
                     });
                 }
-                let choice = self.gallery(ui, "Choose a Form template", "Create forms to kick off projects, collect feedback, and supercharge\nyour productivity.", &[
+                let choice = self.gallery(ui, tr("Choose a Form template"), tr("Create forms to kick off projects, collect feedback, and supercharge\nyour productivity."), &[
                     ([0x0f, 0x9d, 0x9f], "\u{1F44D}", "Feedback Form", "Survey and collect feedback", false),
                     ([0xee, 0x5e, 0x99], "\u{1F4CB}", "Project Intake", "Streamline new project requests", false),
                     ([0x5f, 0x55, 0xee], "\u{1F4BC}", "Order Form", "Capture and process client orders", false),
@@ -648,9 +648,9 @@ impl App {
         ui.painter().rect_filled(r, egui::CornerRadius { nw: 8, ne: 8, sw: 8, se: 8 }, Color32::from_rgb(243, 244, 247));
         ui.add_space(110.0);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new("Make your goals a reality.").size(26.0).color(t.text2));
+            ui.label(RichText::new(tr("Make your goals a reality.")).size(26.0).color(t.text2));
             ui.add_space(8.0);
-            ui.label(RichText::new("Create Goals, break them down into measurable targets, and track progress in real-time.").size(16.0).color(t.text3));
+            ui.label(RichText::new(tr("Create Goals, break them down into measurable targets, and track progress in real-time.")).size(16.0).color(t.text3));
             ui.add_space(30.0);
             let (pr, _) = ui.allocate_exact_size(vec2(480.0, 300.0), Sense::hover());
             ui.painter().rect_filled(pr, 6.0, Color32::WHITE);
@@ -669,15 +669,15 @@ impl App {
             ui.painter().circle_stroke(pr.min + vec2(80.0, 60.0), 14.0, Stroke::new(3.0, Color32::WHITE));
             ui.painter().text(pr.min + vec2(80.0, 60.0), Align2::CENTER_CENTER, "30%", FontId::proportional(8.0), Color32::WHITE);
             ui.add_space(30.0);
-            if ui.add(egui::Button::new(RichText::new("Set a Goal").size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0))).clicked() {
+            if ui.add(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(Color32::WHITE)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0))).clicked() {
                 let id = self.data.new_id();
                 self.data.extra.goals.push(Goal { id, name: "New goal".into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
                 self.goal_open = Some(id);
                 self.dirty = true;
             }
             ui.add_space(8.0);
-            if ui.link(RichText::new("Learn more").color(t.text2)).clicked() {
-                self.modal = Some(Modal::Unavailable { title: "Goals".into(), body: "Create a Goal, add targets (a number, done / not done, or a set of tasks) and the progress bar fills in as you go.".into() });
+            if ui.link(RichText::new(tr("Learn more")).color(t.text2)).clicked() {
+                self.modal = Some(Modal::Unavailable { title: tr("Goals").into(), body: tr("Create a Goal, add targets (a number, done / not done, or a set of tasks) and the progress bar fills in as you go.").into() });
             }
         });
     }
@@ -719,7 +719,7 @@ impl App {
         let t = self.t();
         self.page_bar(ui, "All Teams", |s, ui| {
             let tt = s.t();
-            if primary_button(ui, &tt, "Create Team").clicked() {
+            if primary_button(ui, &tt, tr("Create Team")).clicked() {
                 s.new_team();
             }
         });
@@ -729,10 +729,10 @@ impl App {
                 if teams.is_empty() {
                     ui.add_space(60.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("Manage teams and see their work").size(24.0));
-                        ui.label(RichText::new("Coordinate teams, organize members and see the details of their work.").color(t.text2));
+                        ui.label(RichText::new(tr("Manage teams and see their work")).size(24.0));
+                        ui.label(RichText::new(tr("Coordinate teams, organize members and see the details of their work.")).color(t.text2));
                         ui.add_space(12.0);
-                        if primary_button(ui, &t, "Create Team").clicked() {
+                        if primary_button(ui, &t, tr("Create Team")).clicked() {
                             self.new_team();
                         }
                     });
@@ -744,7 +744,7 @@ impl App {
                             let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                             ui.painter().rect_filled(r, 5.0, rgb(tm.color));
                             ui.label(RichText::new(&tm.name).size(16.0));
-                            ui.label(RichText::new(format!("{} members", tm.members.len())).color(t.text2));
+                            ui.label(RichText::new(trf!("{} members", tm.members.len())).color(t.text2));
                             let (r, _) = ui.allocate_exact_size(vec2(90.0, 22.0), Sense::hover());
                             paint_avatars(ui.painter(), r.left_center(), 10.0, &tm.members, &self.data, t.card);
                         });
@@ -772,7 +772,7 @@ impl App {
             if ui.add(egui::TextEdit::singleline(&mut tm.name).font(FontId::proportional(24.0)).frame(false).desired_width(400.0)).changed() {
                 self.dirty = true;
             }
-            ui.label(RichText::new("Members").color(t.text2));
+            ui.label(RichText::new(tr("Members")).color(t.text2));
             ui.horizontal_wrapped(|ui| {
                 for m in &members {
                     let mut on = tm.members.contains(&m.id);
@@ -786,7 +786,7 @@ impl App {
                     }
                 }
             });
-            if ui.add(egui::Button::new(RichText::new("Delete team").color(t.danger)).frame(false)).clicked() {
+            if ui.add(egui::Button::new(RichText::new(tr("Delete team")).color(t.danger)).frame(false)).clicked() {
                 delete = true;
             }
         });
@@ -794,7 +794,7 @@ impl App {
         let ids = self.data.extra.teams[ti].members.clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 8)).show(ui, |ui| {
-                ui.label(RichText::new("What the team is working on").size(15.0));
+                ui.label(RichText::new(tr("What the team is working on")).size(15.0));
                 for id in ids {
                     let Some(m) = self.data.member(id).cloned() else { continue };
                     let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&id) && !self.data.is_closed(x)).cloned().collect();
@@ -802,7 +802,7 @@ impl App {
                         let (r, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
                         paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
                         ui.label(RichText::new(&m.name).strong());
-                        ui.label(RichText::new(format!("{} open tasks", open.len())).color(t.text2));
+                        ui.label(RichText::new(trf!("{} open tasks", open.len())).color(t.text2));
                     });
                     for task in open.iter().take(6) {
                         if ui.link(format!("      {}", task.name)).clicked() {
@@ -831,7 +831,13 @@ impl App {
                     if people.is_empty() {
                         continue;
                     }
-                    ui.label(RichText::new(format!("{}s", role)).color(t.text2));
+                    let heading = match role {
+                        "Owner" => tr("Owners"),
+                        "Admin" => tr("Admins"),
+                        "Guest" => tr("Guests"),
+                        _ => tr("Members"),
+                    };
+                    ui.label(RichText::new(heading).color(t.text2));
                     ui.horizontal_wrapped(|ui| {
                         for m in people {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
@@ -841,7 +847,7 @@ impl App {
                                     paint_avatar(ui.painter(), r.center(), 13.0, &m, t.card);
                                     ui.vertical(|ui| {
                                         ui.label(RichText::new(&m.name).strong());
-                                        ui.label(RichText::new(if m.invited { "Invited".to_string() } else { role.to_string() }).small().color(t.text3));
+                                        ui.label(RichText::new(if m.invited { tr("Invited") } else { tr(role) }).small().color(t.text3));
                                     });
                                 });
                             });
@@ -863,11 +869,11 @@ impl App {
         egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 6, bottom: 0 }).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_height(40.0);
-                ui.label(RichText::new("\u{23F1}  Timesheets").size(15.5));
+                ui.label(RichText::new(tr("\u{23F1}  Timesheets")).size(15.5));
                 ui.separator();
                 for (i, label) in ["My timesheet", "All timesheets", "Approvals"].iter().enumerate() {
                     let sel = self.hub_filter.min(2) == i as u8;
-                    let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(15.0), if sel { t.text } else { t.text3 });
+                    let g = ui.painter().layout_no_wrap(tr(label).to_string(), FontId::proportional(15.0), if sel { t.text } else { t.text3 });
                     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 16.0, 40.0), Sense::click());
                     name_it(&resp, label);
                     ui.painter().galley(r.center() - g.size() / 2.0, g, if sel { t.text } else { t.text3 });
@@ -879,7 +885,7 @@ impl App {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new("\u{2699}  Settings").min_size(vec2(0.0, 28.0))).clicked() {
+                    if ui.add(egui::Button::new(tr("\u{2699}  Settings")).min_size(vec2(0.0, 28.0))).clicked() {
                         self.modal = Some(Modal::ClickApps);
                     }
                 });
@@ -898,15 +904,15 @@ impl App {
                     if ui.add(egui::Button::new(RichText::new(">").size(16.0)).frame(false)).clicked() {
                         self.sheet_week = ws + Duration::days(7);
                     }
-                    let r = ui.add(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.format("%b %-d"), (ws + Duration::days(6)).format("%b %-d"))).size(20.0)).frame(false));
+                    let r = ui.add(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0)).frame(false));
                     if r.clicked() {
                         let td = today();
                         self.sheet_week = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
                     }
                     if self.hub_filter == 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.selectable_value(&mut self.sheet_entries, true, "\u{2630}  Time entries");
-                            ui.selectable_value(&mut self.sheet_entries, false, "\u{25A4}  Timesheet");
+                            ui.selectable_value(&mut self.sheet_entries, true, tr("\u{2630}  Time entries"));
+                            ui.selectable_value(&mut self.sheet_entries, false, tr("\u{25A4}  Timesheet"));
                         });
                     }
                 });
@@ -917,8 +923,8 @@ impl App {
                         egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(30)).show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.vertical_centered(|ui| {
-                                ui.label(RichText::new("No timesheets waiting for approval").size(16.0));
-                                ui.label(RichText::new("When people submit their week, it shows here for you to approve.").color(t.text2));
+                                ui.label(RichText::new(tr("No timesheets waiting for approval")).size(16.0));
+                                ui.label(RichText::new(tr("When people submit their week, it shows here for you to approve.")).color(t.text2));
                             });
                         });
                     }
@@ -929,7 +935,7 @@ impl App {
                                 ui.set_width(ui.available_width());
                                 ui.vertical_centered(|ui| {
                                     ui.label(RichText::new("\u{23F1}").size(44.0).color(t.text3));
-                                    ui.label(RichText::new("Add entries to this week's timesheet").size(17.0));
+                                    ui.label(RichText::new(tr("Add entries to this week's timesheet")).size(17.0));
                                     ui.add_space(14.0);
                                 });
                                 let w = ui.available_width();
@@ -943,7 +949,7 @@ impl App {
                                         let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
                                         ui.painter().rect_filled(ib, 6.0, t.hover);
                                         ui.painter().text(ib.center(), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
-                                        ui.painter().text(r.left_top() + vec2(14.0, 62.0), Align2::LEFT_CENTER, label, FontId::proportional(13.5), t.text);
+                                        ui.painter().text(r.left_top() + vec2(14.0, 62.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(13.5), t.text);
                                         if resp.clicked() {
                                             match label {
                                                 "All assigned tasks" => {
@@ -953,7 +959,7 @@ impl App {
                                                     let lw = ws - Duration::days(7);
                                                     self.sheet_rows = self.data.tasks.iter().filter(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - lw).num_days(); (0..7).contains(&i) })).map(|x| x.id).collect();
                                                     if self.sheet_rows.is_empty() {
-                                                        self.toast = Some(("No time was tracked last week".into(), now_ts()));
+                                                        self.toast = Some((tr("No time was tracked last week").into(), now_ts()));
                                                     }
                                                 }
                                                 "Individual tasks" => {
@@ -998,13 +1004,13 @@ impl App {
             let col = 92.0;
             let name_w = (w - col * 8.0).max(200.0);
             let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-            ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "Task", FontId::proportional(13.0), t.text2);
+            ui.painter().text(hr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr("Task"), FontId::proportional(13.0), t.text2);
             for i in 0..7 {
                 let d = ws + Duration::days(i);
                 let x = hr.left() + name_w + col * i as f32 + col / 2.0;
-                ui.painter().text(pos2(x, hr.center().y), Align2::CENTER_CENTER, d.format("%a %-d").to_string(), FontId::proportional(12.5), if d == today() { t.danger } else { t.text2 });
+                ui.painter().text(pos2(x, hr.center().y), Align2::CENTER_CENTER, d.text("%a %-d"), FontId::proportional(12.5), if d == today() { t.danger } else { t.text2 });
             }
-            ui.painter().text(pos2(hr.left() + name_w + col * 7.5, hr.center().y), Align2::CENTER_CENTER, "Total", FontId::proportional(12.5), t.text2);
+            ui.painter().text(pos2(hr.left() + name_w + col * 7.5, hr.center().y), Align2::CENTER_CENTER, tr("Total"), FontId::proportional(12.5), t.text2);
             ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
             let mut totals = [0i64; 7];
             for id in &ids {
@@ -1035,7 +1041,7 @@ impl App {
                         totals[i] += per[i];
                         sum += per[i];
                         let mut hours = per[i] as f64 / 3600.0;
-                        let r = ui.add_sized([col - 8.0, 26.0], egui::DragValue::new(&mut hours).range(0.0..=24.0).speed(0.05).max_decimals(2).suffix("h"));
+                        let r = ui.add_sized([col - 8.0, 26.0], egui::DragValue::new(&mut hours).range(0.0..=24.0).speed(0.05).max_decimals(2).suffix(tr("h")));
                         ui.add_space(8.0);
                         if r.changed() {
                             let tid = self.data.tasks[ti].id;
@@ -1048,7 +1054,7 @@ impl App {
             }
             let (fr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
             ui.painter().hline(fr.x_range(), fr.top(), Stroke::new(1.0, t.border));
-            ui.painter().text(fr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, "Total", FontId::proportional(13.5), t.text);
+            ui.painter().text(fr.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr("Total"), FontId::proportional(13.5), t.text);
             let mut all = 0;
             for (i, v) in totals.iter().enumerate() {
                 all += v;
@@ -1057,7 +1063,7 @@ impl App {
             ui.painter().text(pos2(fr.left() + name_w + col * 7.5, fr.center().y), Align2::CENTER_CENTER, fmt_duration(all), FontId::proportional(13.0), t.text);
             ui.horizontal(|ui| {
                 let tasks: Vec<(u64, String)> = self.data.tasks.iter().filter(|x| !ids.contains(&x.id)).map(|x| (x.id, x.name.clone())).collect();
-                ui.menu_button("+ Add task", |ui| {
+                ui.menu_button(tr("+ Add task"), |ui| {
                     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         for (id, n) in &tasks {
                             if ui.button(n).clicked() {
@@ -1099,7 +1105,7 @@ impl App {
             let mut remove = None;
             for (s, e, name, id, k) in &rows {
                 ui.horizontal(|ui| {
-                    let when = chrono::DateTime::from_timestamp(*s, 0).map(|d| d.with_timezone(&chrono::Local).format("%a %b %-d, %-I:%M %p").to_string()).unwrap_or_default();
+                    let when = chrono::DateTime::from_timestamp(*s, 0).map(|d| d.with_timezone(&chrono::Local).text("%a %b %-d, %-I:%M %p")).unwrap_or_default();
                     ui.label(RichText::new(when).color(t.text2));
                     if ui.link(name).clicked() {
                         self.actions.push(Action::Open(*id));
@@ -1113,7 +1119,8 @@ impl App {
                 });
             }
             if rows.is_empty() {
-                ui.label(RichText::new("No time entries this week").color(t.text3));
+                ui.label(RichText::new(tr("No time entries this week")).color(t.text3));
+
             }
             if let Some((id, k)) = remove {
                 if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == id) {

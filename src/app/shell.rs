@@ -103,7 +103,7 @@ fn paint_view_icon(p: &egui::Painter, c: Pos2, v: ViewKind) {
 }
 
 /// A rounded pill button with an outline, like the original's toolbar.
-fn pill(ui: &mut Ui, t: &Theme, text: &str, active: bool, accent: bool) -> Response {
+fn pill(ui: &mut Ui, t: &Theme, text: &str, shown: &str, active: bool, accent: bool) -> Response {
     let font = FontId::proportional(13.0);
     let (fg, bg, stroke) = if accent {
         (t.accent_text, t.accent_bg, t.accent_bg)
@@ -112,7 +112,7 @@ fn pill(ui: &mut Ui, t: &Theme, text: &str, active: bool, accent: bool) -> Respo
     } else {
         (t.text2, t.bg, t.border)
     };
-    let g = ui.painter().layout_no_wrap(text.to_string(), font, fg);
+    let g = ui.painter().layout_no_wrap(shown.to_string(), font, fg);
     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 20.0, 26.0), Sense::click());
     name_it(&resp, text);
     let fill = if resp.hovered() && !accent { t.hover } else { bg };
@@ -490,7 +490,7 @@ impl App {
                 }
                 paint_calendar_icon(ui.painter(), cr.center(), t.text2);
                 ui.painter().text(cr.center() + vec2(0.0, 2.0), Align2::CENTER_CENTER, today().day().to_string(), FontId::proportional(6.5), t.text2);
-                if cresp.on_hover_text("Planner").clicked() {
+                if cresp.on_hover_text(tr("Planner")).clicked() {
                     self.section = Section::Planner;
                 }
                 // back / forward + search with AI Chats
@@ -504,7 +504,7 @@ impl App {
                         ui.painter().rect_filled(ar, 5.0, t.hover);
                     }
                     ui.painter().text(ar.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(15.0), if enabled { t.text2 } else { Color32::from_rgb(190, 190, 190) });
-                    if a.on_hover_text(tip).clicked() && enabled {
+                    if a.on_hover_text(tr(tip)).clicked() && enabled {
                         if i == 0 {
                             self.go_back();
                         } else {
@@ -518,7 +518,7 @@ impl App {
                 ui.painter().rect_filled(sr, 14.0, if sresp.hovered() { t.hover } else { t.bg });
                 ui.painter().rect_stroke(sr, 14.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                 ui.painter().text(sr.left_center() + vec2(14.0, 0.0), Align2::LEFT_CENTER, "\u{1F50D}", FontId::proportional(12.0), t.text2);
-                let sg = ui.painter().layout_no_wrap("Search".into(), FontId::proportional(14.0), t.text3);
+                let sg = ui.painter().layout_no_wrap(tr("Search").into(), FontId::proportional(14.0), t.text3);
                 let sgw = sg.size().x;
                 ui.painter().galley(pos2(sr.left() + 32.0, sr.center().y - sg.size().y / 2.0), sg, t.text3);
                 ui.painter().text(pos2(sr.left() + 38.0 + sgw, sr.center().y), Align2::LEFT_CENTER, "\u{2318}J", FontId::proportional(11.5), Color32::from_rgb(170, 170, 170));
@@ -528,7 +528,7 @@ impl App {
                 let air = ui.interact(ai_r, ui.id().with("ai_chats"), Sense::click());
                 name_it(&air, "AI Chats");
                 ui.painter().rect_filled(ai_r, 10.0, if air.hovered() { t.hover } else { t.sidebar });
-                ui.painter().text(ai_r.center() - vec2(8.0, 0.0), Align2::CENTER_CENTER, "AI Chats", FontId::proportional(13.0), t.text2);
+                ui.painter().text(ai_r.center() - vec2(8.0, 0.0), Align2::CENTER_CENTER, tr("AI Chats"), FontId::proportional(13.0), t.text2);
                 ui.painter().text(ai_r.right_center() - vec2(10.0, 0.0), Align2::CENTER_CENTER, "\u{2728}", FontId::proportional(11.0), Color32::from_rgb(171, 74, 186));
                 if air.clicked() {
                     self.section = Section::Ai;
@@ -577,7 +577,7 @@ impl App {
                         if !line_icon(ui.painter(), kind, r.center(), t.text2) {
                             ui.painter().text(r.center(), Align2::CENTER_CENTER, *icon, FontId::proportional(13.0), t.text2);
                         }
-                        if resp.on_hover_text(*label).clicked() {
+                        if resp.on_hover_text(tr(label)).clicked() {
                             self.run_tool(tid);
                         }
                     }
@@ -588,7 +588,7 @@ impl App {
                     let b = egui::Button::new(RichText::new(txt).color(Color32::WHITE)).fill(t.danger).corner_radius(14);
                     let id = task.id;
                     ui.add_space(8.0);
-                    if ui.add(b).on_hover_text("Stop timer").clicked() {
+                    if ui.add(b).on_hover_text(tr("Stop timer")).clicked() {
                         self.actions.push(Action::ToggleTimer(id));
                     }
                     ctx.request_repaint_after(std::time::Duration::from_secs(1));
@@ -683,8 +683,8 @@ impl App {
                     if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
                         p.text(ibox.center(), Align2::CENTER_CENTER, icon_of(label), FontId::proportional(17.0), white);
                     }
-                    p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, label, FontId::proportional(11.0), white);
-                    if resp.on_hover_text(label.as_str()).clicked() {
+                    p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, tr(label), FontId::proportional(11.0), white);
+                    if resp.on_hover_text(tr(label)).clicked() {
                         self.open_app(label);
                         if label == "Home" {
                             self.section = Section::Home;
@@ -716,9 +716,10 @@ impl App {
                         if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
                             p.text(ibox.center(), Align2::CENTER_CENTER, icon_of(label), FontId::proportional(17.0), white);
                         }
-                        let short = if label.chars().count() > 8 { format!("{}..", label.chars().take(7).collect::<String>()) } else { label.to_string() };
+                        let shown = tr(label);
+                        let short = if shown.chars().count() > 8 { format!("{}..", shown.chars().take(7).collect::<String>()) } else { shown.to_string() };
                         p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, short, FontId::proportional(11.0), white);
-                        if resp.on_hover_text(label).clicked() {
+                        if resp.on_hover_text(tr(label)).clicked() {
                             self.section = ts;
                         }
                         y += 62.0;
@@ -736,7 +737,7 @@ impl App {
                     p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                 }
                 line_icon(&p, "more", ibox.center(), white);
-                p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, "More", FontId::proportional(11.0), white);
+                p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, tr("More"), FontId::proportional(11.0), white);
                 if self.force_menu.as_deref() == Some("more") { let pid = ui.id().with("more_pop"); ui.memory_mut(|m| m.open_popup(pid)); }
                 popup(ui, &resp, ui.id().with("more_pop"), 220.0, |ui| self.rail_more_menu(ui));
                 // bottom group: Invite (every 56 px); Labs, Upgrade and Install removed at the person's request
@@ -756,8 +757,8 @@ impl App {
                     } else if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
                         p.text(ibox.center(), Align2::CENTER_CENTER, icon, FontId::proportional(16.0), white);
                     }
-                    p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, label, FontId::proportional(11.0), white);
-                    if resp.on_hover_text(label).clicked() {
+                    p.text(pos2(cx, ibox.bottom() + 10.0), Align2::CENTER_CENTER, tr(label), FontId::proportional(11.0), white);
+                    if resp.on_hover_text(tr(label)).clicked() {
                         self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                     }
                     by += 56.0;
@@ -772,6 +773,17 @@ impl App {
     }
 
     fn side_row(&self, ui: &mut Ui, indent: f32, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2), label: &str, sub: Option<&str>, trailing: Option<String>, muted: bool) -> Response {
+        self.side_row_as(ui, indent, selected, lead, label, label, sub, trailing, muted)
+    }
+
+    /// A sidebar row with a fixed English name (named by it for the tests,
+    /// drawn in the interface language). Names people chose use `side_row`.
+    fn side_row_tr(&self, ui: &mut Ui, indent: f32, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2), label: &str, sub: Option<&str>, trailing: Option<String>, muted: bool) -> Response {
+        self.side_row_as(ui, indent, selected, lead, label, tr(label), sub, trailing, muted)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn side_row_as(&self, ui: &mut Ui, indent: f32, selected: bool, lead: impl FnOnce(&egui::Painter, Pos2), label: &str, shown: &str, sub: Option<&str>, trailing: Option<String>, muted: bool) -> Response {
         let t = self.t();
         let w = ui.available_width();
         let (rect, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -785,14 +797,14 @@ impl App {
         lead(ui.painter(), pos2(x + 8.0, rect.center().y));
         let col = if muted && !selected { t.text2 } else { t.text };
         let clip = Rect::from_min_max(pos2(x + 24.0, rect.top()), pos2(rect.right() - 28.0, rect.bottom()));
-        let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(14.0), col);
+        let g = ui.painter().layout_no_wrap(shown.to_string(), FontId::proportional(14.0), col);
         let gw = g.size().x;
         ui.painter().with_clip_rect(clip).galley(pos2(x + 24.0, rect.center().y - g.size().y / 2.0), g, col);
         if let Some(s) = sub {
             ui.painter().with_clip_rect(clip).text(pos2(x + 28.0 + gw, rect.center().y + 1.0), Align2::LEFT_CENTER, s, FontId::proportional(12.0), t.text3);
         }
-        if let Some(tr) = trailing {
-            ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, tr, FontId::proportional(12.0), t.text3);
+        if let Some(count) = trailing {
+            ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, count, FontId::proportional(12.0), t.text3);
         }
         resp
     }
@@ -800,7 +812,7 @@ impl App {
     fn add_row(&self, ui: &mut Ui, label: &str) -> Response {
         let t = self.t();
         let tc = t.text3;
-        self.side_row(ui, 0.0, false, |p, c| {
+        self.side_row_tr(ui, 0.0, false, |p, c| {
             p.text(c, Align2::CENTER_CENTER, "+", FontId::proportional(16.0), tc);
         }, label, None, None, true)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -811,7 +823,7 @@ impl App {
         ui.add_space(10.0);
         let w = ui.available_width();
         let (r, hresp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
-        ui.painter().text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, title, FontId::proportional(13.0), t.text2);
+        ui.painter().text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(13.0), t.text2);
         let hovered = hresp.hovered() || ui.rect_contains_pointer(r);
         let mut out = vec![];
         let mut x = r.right() - 13.0;
@@ -827,7 +839,7 @@ impl App {
             if boxed || hovered || resp.hovered() {
                 ui.painter().text(br.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(if *glyph == "+" { 15.0 } else { 13.0 }), t.text2);
             }
-            out.push(resp.on_hover_text(*tip));
+            out.push(resp.on_hover_text(tr(tip)));
             x -= 26.0;
         }
         out.reverse();
@@ -840,7 +852,11 @@ impl App {
 
     fn matches_search(&self, label: &str) -> bool {
         match &self.side_search {
-            Some(q) if !q.trim().is_empty() => label.to_lowercase().contains(&q.trim().to_lowercase()),
+            Some(q) if !q.trim().is_empty() => {
+                // built-in rows are found by the name shown (Korean) as well as the English one
+                let q = q.trim().to_lowercase();
+                label.to_lowercase().contains(&q) || tr(label).to_lowercase().contains(&q)
+            }
             _ => true,
         }
     }
@@ -862,7 +878,7 @@ impl App {
         let t = self.t();
         if self.sidebar_collapsed {
             egui::SidePanel::left("sidebar_c").exact_width(40.0).resizable(false).frame(egui::Frame::new().fill(t.sidebar).corner_radius(egui::CornerRadius { nw: 8, ne: 0, sw: 8, se: 0 }).inner_margin(egui::Margin::same(6))).show_inside(ui, |ui| {
-                if ui.add(egui::Button::new(RichText::new("\u{00BB}").size(16.0)).frame(false)).on_hover_text("Open sidebar").clicked() {
+                if ui.add(egui::Button::new(RichText::new("\u{00BB}").size(16.0)).frame(false)).on_hover_text(tr("Open sidebar")).clicked() {
                     self.sidebar_collapsed = false;
                 }
             });
@@ -878,12 +894,12 @@ impl App {
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
                 let hovered = ui.rect_contains_pointer(hr);
-                ui.painter().text(hr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, "Home", FontId::proportional(17.0), t.text);
+                ui.painter().text(hr.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, tr("Home"), FontId::proportional(17.0), t.text);
                 let create_r = Rect::from_min_size(pos2(hr.right() - 80.0, hr.center().y - 14.0), vec2(80.0, 28.0));
                 let cresp = ui.interact(create_r, ui.id().with("side_create"), Sense::click());
                 name_it(&cresp, "Create");
                 ui.painter().rect_filled(create_r, 7.0, if cresp.hovered() { t.primary_hover } else { t.primary });
-                ui.painter().text(create_r.center(), Align2::CENTER_CENTER, "+  Create", FontId::proportional(14.0), Color32::WHITE);
+                ui.painter().text(create_r.center(), Align2::CENTER_CENTER, tr("+  Create"), FontId::proportional(14.0), Color32::WHITE);
                 if self.force_menu.as_deref() == Some("create") { let pid = ui.id().with("create_pop"); ui.memory_mut(|m| m.open_popup(pid)); }
                 popup(ui, &cresp, ui.id().with("create_pop"), 400.0, |ui| self.create_menu(ui));
                 let icons: [(&str, &str); 3] = [("\u{1F50D}", "Search your sidebar"), ("\u{2261}", "Filter your sidebar"), ("\u{00AB}", "Close sidebar")];
@@ -898,7 +914,7 @@ impl App {
                     if hovered || active {
                         ui.painter().text(br.center(), Align2::CENTER_CENTER, *glyph, FontId::proportional(if i == 2 { 16.0 } else { 13.0 }), t.text2);
                     }
-                    if resp.on_hover_text(*tip).clicked() {
+                    if resp.on_hover_text(tr(tip)).clicked() {
                         match i {
                             0 => {
                                 self.side_search = if self.side_search.is_some() { None } else { Some(String::new()) };
@@ -910,7 +926,7 @@ impl App {
                     }
                 }
                 if let Some(mut q) = self.side_search.take() {
-                    let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search the sidebar").desired_width(f32::INFINITY));
+                    let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search the sidebar")).desired_width(f32::INFINITY));
                     if std::mem::take(&mut self.side_search_focus) {
                         r.request_focus();
                     }
@@ -921,7 +937,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         for (key, label) in [("space", "Space"), ("unread", "Unread"), ("dms", "DMs")] {
                             let on = f == key;
-                            let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(13.0), if on { Color32::WHITE } else { t.text2 });
+                            let g = ui.painter().layout_no_wrap(tr(label).to_string(), FontId::proportional(13.0), if on { Color32::WHITE } else { t.text2 });
                             let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 20.0, 24.0), Sense::click());
                             name_it(&resp, &format!("Sidebar filter {}", label));
                             ui.painter().rect_filled(r, 12.0, if on { t.primary } else if resp.hovered() { t.hover } else { t.bg });
@@ -964,7 +980,7 @@ impl App {
                                 "Meetings" => self.section == Section::Meetings,
                                 _ => false,
                             };
-                            let tr = if label == "Inbox" && inbox_n > 0 { Some(inbox_n.to_string()) } else { None };
+                            let badge = if label == "Inbox" && inbox_n > 0 { Some(inbox_n.to_string()) } else { None };
                             let kind = match label {
                                 "Inbox" => "inbox",
                                 "Replies" => "reply",
@@ -976,16 +992,16 @@ impl App {
                                 "My Tasks" => "person",
                                 _ => "dots",
                             };
-                            let r = self.side_row(ui, 0.0, sel, |p, c| {
+                            let r = self.side_row_tr(ui, 0.0, sel, |p, c| {
                                 if !line_icon(p, kind, c, tc) {
                                     p.text(c, Align2::CENTER_CENTER, icon, FontId::proportional(13.0), tc);
                                 }
-                            }, label, None, tr, true);
+                            }, label, None, badge, true);
                             match label {
                                 "More" => {
                                     popup(ui, &r, ui.id().with("side_more"), 220.0, |ui| {
                                         for (l, ic) in [("Overview", "\u{1F3E0}"), ("Docs", "\u{1F4C4}"), ("Dashboards", "\u{1F4CA}"), ("Whiteboards", "\u{1F3A8}"), ("Forms", "\u{1F4CB}"), ("Goals", "\u{1F3AF}"), ("Timesheets", "\u{23F1}"), ("People", "\u{1F465}")] {
-                                            if ui.add(egui::Button::new(format!("{}  {}", ic, l)).frame(false)).clicked() {
+                                            if ui.add(egui::Button::new(format!("{}  {}", ic, tr(l))).frame(false)).clicked() {
                                                 match l {
                                                     "Overview" => self.actions.push(Action::Go(Location::Home)),
                                                     "People" => self.section = Section::People,
@@ -995,7 +1011,7 @@ impl App {
                                             }
                                         }
                                         ui.separator();
-                                        if ui.add(egui::Button::new("\u{25A6}  Customize your sidebar").frame(false)).clicked() {
+                                        if ui.add(egui::Button::new(tr("\u{25A6}  Customize your sidebar")).frame(false)).clicked() {
                                             self.modal = Some(Modal::CustomizeSidebar);
                                             close_popup(ui);
                                         }
@@ -1014,11 +1030,11 @@ impl App {
                                         ("Today & Overdue", Location::TodayOverdue, if td > 0 { Some(format!("\u{2611} {}", td)) } else { None }),
                                         ("Personal List", pl.map(Location::List).unwrap_or(Location::MyTasks), None),
                                     ];
-                                    for (sl, loc, tr) in subs {
+                                    for (sl, loc, badge) in subs {
                                         let sel = self.section == Section::Home && self.loc == loc && !(sl == "Personal List" && pl.is_none());
                                         let mm = self.data.member(me).cloned();
                                         let bg = t.sidebar;
-                                        let r2 = self.side_row(ui, 14.0, sel, |p, c| {
+                                        let r2 = self.side_row_tr(ui, 14.0, sel, |p, c| {
                                             match sl {
                                                 "Assigned to me" => {
                                                     if let Some(m) = &mm {
@@ -1028,7 +1044,7 @@ impl App {
                                                 "Today & Overdue" => paint_calendar_icon(p, c, tc),
                                                 _ => paint_person_icon(p, c, tc),
                                             }
-                                        }, sl, None, tr, false);
+                                        }, sl, None, badge, false);
                                         if r2.clicked() {
                                             if sl == "Personal List" && pl.is_none() {
                                                 let id = self.create_personal_list();
@@ -1096,18 +1112,18 @@ impl App {
                     if filter.is_empty() || filter == "space" {
                         let hs = self.side_header(ui, "Spaces", &[("\u{22EF}", "Spaces settings"), ("+", "Create Space")]);
                         popup(ui, &hs[0], ui.id().with("spaces_settings"), 200.0, |ui| {
-                            if ui.button("Create Space").clicked() {
+                            if ui.button(tr("Create Space")).clicked() {
                                 self.modal = Some(Modal::NewSpace { name: String::new(), color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13] });
                                 close_popup(ui);
                             }
-                            if ui.button("Expand all").clicked() {
+                            if ui.button(tr("Expand all")).clicked() {
                                 for s in &mut self.data.spaces {
                                     s.expanded = true;
                                 }
                                 self.dirty = true;
                                 close_popup(ui);
                             }
-                            if ui.button("Collapse all").clicked() {
+                            if ui.button(tr("Collapse all")).clicked() {
                                 for s in &mut self.data.spaces {
                                     s.expanded = false;
                                 }
@@ -1121,7 +1137,7 @@ impl App {
                         let sub = format!("- {}", ws);
                         if self.matches_search("All Tasks") {
                             let sel = self.section == Section::Home && self.loc == Location::Everything;
-                            let r = self.side_row(ui, 0.0, sel, |p, c| {
+                            let r = self.side_row_tr(ui, 0.0, sel, |p, c| {
                                 p.rect_stroke(Rect::from_center_size(c, vec2(16.0, 16.0)), 4.0, Stroke::new(1.0, tc), egui::StrokeKind::Inside);
                                 p.text(c, Align2::CENTER_CENTER, "\u{2731}", FontId::proportional(9.0), tc);
                             }, "All Tasks", Some(&sub), None, false);
@@ -1165,7 +1181,7 @@ impl App {
                                 ui.painter().rect_filled(sr, 5.0, if sresp.hovered() { t.border } else { t.row_selected });
                                 ui.painter().text(sr.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(13.0), t.text2);
                             }
-                            if sresp.on_hover_text("Channel Settings").clicked() {
+                            if sresp.on_hover_text(tr("Channel Settings")).clicked() {
                                 self.modal = Some(Modal::ChannelSettings(id));
                             } else if r.clicked() {
                                 self.section = Section::Chat;
@@ -1177,7 +1193,7 @@ impl App {
                             let mut keep = true;
                             ui.horizontal(|ui| {
                                 ui.add_space(8.0);
-                                let r = ui.add(egui::TextEdit::singleline(&mut name).id(egui::Id::new("new_channel_input")).hint_text("channel-name").desired_width(170.0));
+                                let r = ui.add(egui::TextEdit::singleline(&mut name).id(egui::Id::new("new_channel_input")).hint_text(tr("channel-name")).desired_width(170.0));
                                 // focus once when the field appears, not every frame,
                                 // and bring it into view: it sits at the end of the
                                 // channel list, often below the bottom of the sidebar
@@ -1233,7 +1249,7 @@ impl App {
                             let unread = if muted { 0 } else { real_unread };
                             let (name, sub) = match &other {
                                 Some(m) => (m.name.clone(), None),
-                                None => (self.data.member(me).map(|m| m.name.clone()).unwrap_or_default(), Some("\u{2014} You".to_string())),
+                                None => (self.data.member(me).map(|m| m.name.clone()).unwrap_or_default(), Some(tr("\u{2014} You").to_string())),
                             };
                             if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                                 continue;
@@ -1254,7 +1270,7 @@ impl App {
                                 ui.painter().rect_filled(sr, 5.0, if sresp.hovered() { t.border } else { t.row_selected });
                                 ui.painter().text(sr.center(), Align2::CENTER_CENTER, "\u{22EF}", FontId::proportional(13.0), t.text2);
                             }
-                            if sresp.on_hover_text("DM Settings").clicked() {
+                            if sresp.on_hover_text(tr("DM Settings")).clicked() {
                                 self.modal = Some(Modal::ChannelSettings(id));
                             } else if r.clicked() {
                                 self.section = Section::Chat;
@@ -1350,9 +1366,9 @@ impl App {
         }
         let sid = s.id;
         popup(ui, &pr, ui.id().with(("splus_pop", s.id)), 220.0, |ui| {
-            ui.label(RichText::new("Create").small().color(t.text3));
+            ui.label(RichText::new(tr("Create")).small().color(t.text3));
             for (icon, label) in [("\u{2630}", "List"), ("\u{1F4C1}", "Folder"), ("\u{1F4C4}", "Doc"), ("\u{1F4CB}", "Form"), ("\u{1F4CA}", "Dashboard"), ("\u{1F3A8}", "Whiteboard")] {
-                if ui.add(egui::Button::new(format!("{}  {}", icon, label)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(format!("{}  {}", icon, tr(label))).frame(false)).clicked() {
                     match label {
                         "List" => self.open_new_list(Some(sid), None),
                         "Folder" => self.actions.push(Action::NewFolder(sid)),
@@ -1416,21 +1432,21 @@ impl App {
             }
             let fid = f.id;
             fr.context_menu(|ui| {
-                if ui.button("New List").clicked() {
+                if ui.button(tr("New List")).clicked() {
                     self.open_new_list(Some(sid), Some(fid));
                     ui.close_menu();
                 }
-                if ui.button("Rename").clicked() {
+                if ui.button(tr("Rename")).clicked() {
                     self.actions.push(Action::StartRename(Target::Folder(fid)));
                     ui.close_menu();
                 }
                 let fav = if self.data.favorites.contains(&floc) { "Remove from Favorites" } else { "Add to Favorites" };
-                if ui.button(fav).clicked() {
+                if ui.button(tr(fav)).clicked() {
                     self.actions.push(Action::ToggleFavorite(floc));
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button(RichText::new("Delete").color(t.danger)).clicked() {
+                if ui.button(RichText::new(tr("Delete")).color(t.danger)).clicked() {
                     self.actions.push(Action::AskDelete(Target::Folder(fid)));
                     ui.close_menu();
                 }
@@ -1513,8 +1529,8 @@ impl App {
                 let personal = self.on_personal_list();
                 match self.loc {
                     Location::List(_) if personal => {
-                        crumbs.push(("My Tasks".into(), 3, None));
-                        crumbs.push(("Personal List".into(), 2, None));
+                        crumbs.push((tr("My Tasks").into(), 3, None));
+                        crumbs.push((tr("Personal List").into(), 2, None));
                     }
                     Location::List(id) => {
                         if let Some(s) = self.data.space_of_list(id) {
@@ -1540,7 +1556,7 @@ impl App {
                             crumbs.push((s.name.clone(), 0, Some(s.color)));
                         }
                     }
-                    l => crumbs.push((self.data.location_name(l), 3, None)),
+                    l => crumbs.push((tr(&self.data.location_name(l)).to_string(), 3, None)),
                 }
                 let n = crumbs.len();
                 // the buttons on the right keep their room (their width is
@@ -1605,7 +1621,7 @@ impl App {
                         ui.label(text);
                     }
                     if last && personal {
-                        ui.label(RichText::new("\u{1F512}").size(12.0).color(t.text3)).on_hover_text("Private: only you can see this List");
+                        ui.label(RichText::new("\u{1F512}").size(12.0).color(t.text3)).on_hover_text(tr("Private: only you can see this List"));
                     }
                     if last {
                         let (cr, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
@@ -1620,7 +1636,7 @@ impl App {
                 let fav = self.data.favorites.contains(&self.loc);
                 if !matches!(self.loc, Location::MyTasks | Location::Everything) {
                     let star = RichText::new(if fav { "\u{2605}" } else { "\u{2606}" }).size(16.0).color(if fav { Color32::from_rgb(0xf8, 0xae, 0x00) } else { t.text2 });
-                    if ui.add(egui::Button::new(star).frame(false)).on_hover_text("Favorite").clicked() {
+                    if ui.add(egui::Button::new(star).frame(false)).on_hover_text(tr("Favorite")).clicked() {
                         self.actions.push(Action::ToggleFavorite(self.loc));
                     }
                 }
@@ -1634,7 +1650,7 @@ impl App {
                             t if t.contains("Automate") => ("robot", "Automate"),
                             _ => ("phone", ""),
                         };
-                        let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(14.5), t.text2);
+                        let g = ui.painter().layout_no_wrap(tr(label).to_string(), FontId::proportional(14.5), t.text2);
                         let w = if label.is_empty() { 40.0 } else { g.size().x + 32.0 };
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
                         name_it(&resp, if label.is_empty() { "Huddle" } else { label });
@@ -1652,28 +1668,28 @@ impl App {
                         resp
                     };
                     if matches!(self.loc, Location::List(_)) {
-                        let r = ui.add(egui::Button::new(RichText::new("Manage").size(14.0)).stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(0.0, 28.0)));
+                        let r = ui.add(egui::Button::new(RichText::new(tr("Manage")).size(14.0)).stroke(Stroke::new(1.0, t.border)).corner_radius(7).min_size(vec2(0.0, 28.0)));
                         if let Location::List(lid) = self.loc {
                             popup(ui, &r, ui.id().with("manage_pop"), 200.0, |ui| {
-                                if ui.button("Rename list").clicked() {
+                                if ui.button(tr("Rename list")).clicked() {
                                     self.actions.push(Action::StartRename(Target::List(lid)));
                                     close_popup(ui);
                                 }
                                 if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
-                                    if ui.button("Edit statuses").clicked() {
+                                    if ui.button(tr("Edit statuses")).clicked() {
                                         self.actions.push(Action::EditStatuses(sid));
                                         close_popup(ui);
                                     }
                                 }
-                                if ui.button("Custom Fields").clicked() {
+                                if ui.button(tr("Custom Fields")).clicked() {
                                     self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
                                     close_popup(ui);
                                 }
-                                if ui.button("Export to CSV").clicked() {
+                                if ui.button(tr("Export to CSV")).clicked() {
                                     self.modal = Some(Modal::Import { path: String::new(), result: String::new() });
                                     close_popup(ui);
                                 }
-                                if ui.button(RichText::new("Delete list").color(t.danger)).clicked() {
+                                if ui.button(RichText::new(tr("Delete list")).color(t.danger)).clicked() {
                                     self.actions.push(Action::AskDelete(Target::List(lid)));
                                     close_popup(ui);
                                 }
@@ -1689,7 +1705,7 @@ impl App {
                     if hb(ui, "\u{2699}  Automate").clicked() {
                         self.modal = Some(Modal::Automations { status: "complete".into(), action: "comment".into(), value: String::new() });
                     }
-                    if hb(ui, "\u{260E}").on_hover_text("Start a huddle").clicked() {
+                    if hb(ui, "\u{260E}").on_hover_text(tr("Start a huddle")).clicked() {
                         self.open_call_dialog();
                     }
                     let used = right_start - ui.min_rect().left();
@@ -1702,7 +1718,7 @@ impl App {
                 // "Add Channel": a chat channel for this location (not on the
                 // Personal List, as in the original)
                 let personal = self.on_personal_list();
-                let ac = if personal { ui.allocate_response(vec2(0.0, 0.0), Sense::hover()) } else { ui.add(egui::Button::new(RichText::new("Add Channel").size(13.5).color(t.text3)).stroke(Stroke::new(1.0, t.border)).corner_radius(6).min_size(vec2(0.0, 26.0))) };
+                let ac = if personal { ui.allocate_response(vec2(0.0, 0.0), Sense::hover()) } else { ui.add(egui::Button::new(RichText::new(tr("Add Channel")).size(13.5).color(t.text3)).stroke(Stroke::new(1.0, t.border)).corner_radius(6).min_size(vec2(0.0, 26.0))) };
                 if ac.clicked() {
                     let name = self.data.location_name(self.loc).to_lowercase().replace(' ', "-");
                     let existing = self.data.channels.iter().find(|c| c.kind == ChannelKind::Channel && c.name == name).map(|c| c.id);
@@ -1729,7 +1745,7 @@ impl App {
                         continue;
                     }
                     let sel = self.view == v;
-                    let g = ui.painter().layout_no_wrap(v.label().to_string(), FontId::proportional(14.0), if sel { t.text } else { t.text2 });
+                    let g = ui.painter().layout_no_wrap(tr(v.label()).to_string(), FontId::proportional(14.0), if sel { t.text } else { t.text2 });
                     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 32.0, 34.0), Sense::click());
                     name_it(&resp, &format!("View {}", v.label()));
                     if resp.hovered() && !sel {
@@ -1747,12 +1763,12 @@ impl App {
                     }
                 }
                 ui.add_space(6.0);
-                let vr = ui.add(egui::Button::new(RichText::new("+  View").size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0)));
+                let vr = ui.add(egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2)).frame(false).min_size(vec2(0.0, 30.0)));
                 popup(ui, &vr, ui.id().with("add_view"), 200.0, |ui| {
-                    ui.label(RichText::new("Views").small().color(t.text3));
+                    ui.label(RichText::new(tr("Views")).small().color(t.text3));
                     for v in ViewKind::ALL {
                         let mut on = !self.data.extra.hidden_views.iter().any(|h| h == v.label());
-                        if ui.checkbox(&mut on, v.label()).changed() {
+                        if ui.checkbox(&mut on, tr(v.label())).changed() {
                             if on {
                                 self.data.extra.hidden_views.retain(|h| h != v.label());
                             } else {
@@ -1787,47 +1803,56 @@ impl App {
                 let flabel = if nf > 0 { format!("\u{2261}  Filter \u{00B7} {}", nf) } else { "\u{2261}  Filter".to_string() };
                 let sort_arrow = if self.sort_desc && self.sort_by != SortBy::Manual { " \u{2193}" } else { "" };
                 let slabel = format!("\u{21C5}  Sort: {}{}", self.sort_by.label(), sort_arrow);
+                // the same labels in the interface language (the English ones name the chips)
+                let group_shown = trf!("\u{2261}  Group: {}", tr(self.group_by.label()));
+                let ashown = match self.assignee_filter.and_then(|a| self.data.member(a)) {
+                    Some(_) => alabel.clone(),
+                    None => tr("\u{1F464}  Assignee").to_string(),
+                };
+                let fshown = if nf > 0 { trf!("\u{2261}  Filter \u{00B7} {}", nf) } else { tr("\u{2261}  Filter").to_string() };
+                let sshown = trf!("\u{21C5}  Sort: {}{}", tr(self.sort_by.label()), sort_arrow);
                 let compact = {
                     let pw = |s: &str| ui.painter().layout_no_wrap(s.to_string(), FontId::proportional(13.0), t.text).size().x + 20.0 + 6.0;
-                    let mut need = pw(&alabel) + pw("\u{2714}  Closed") + pw(&flabel) + pw(&slabel) + 90.0 + 32.0 + 32.0;
+                    let mut need = pw(&ashown) + pw(tr("\u{2714}  Closed")) + pw(&fshown) + pw(&sshown) + 90.0 + 32.0 + 32.0;
                     if grouped {
-                        need += pw(&group_label) + pw("\u{2934}  Subtasks");
+                        need += pw(&group_shown) + pw(tr("\u{2934}  Subtasks"));
                     }
                     if self.view == ViewKind::List {
-                        need += pw("\u{25A5}  Columns");
+                        need += pw(tr("\u{25A5}  Columns"));
                     }
                     if self.show_search {
                         need += 186.0;
                     }
                     need > ui.available_width()
                 };
-                let chip = |ui: &mut Ui, full: &str, short: &str, active: bool, accent: bool| -> Response {
+                // `full` names the chip (English), `shown` is what it says
+                let chip = |ui: &mut Ui, full: &str, shown: &str, short: &str, active: bool, accent: bool| -> Response {
                     if compact {
-                        let r = pill(ui, &t, short, active, accent);
+                        let r = pill(ui, &t, short, short, active, accent);
                         name_it(&r, full);
-                        r.on_hover_text(full)
+                        r.on_hover_text(shown)
                     } else {
-                        pill(ui, &t, full, active, accent)
+                        pill(ui, &t, full, shown, active, accent)
                     }
                 };
                 if grouped {
-                    let r = chip(ui, &group_label, "\u{2261}", false, true);
+                    let r = chip(ui, &group_label, &group_shown, "\u{2261}", false, true);
                     popup(ui, &r, ui.id().with("group_pop"), 160.0, |ui| {
                         for g in [GroupBy::Status, GroupBy::Priority, GroupBy::Assignee, GroupBy::DueDate, GroupBy::None] {
-                            if ui.selectable_label(self.group_by == g, g.label()).clicked() {
+                            if ui.selectable_label(self.group_by == g, tr(g.label())).clicked() {
                                 self.group_by = g;
                                 close_popup(ui);
                             }
                         }
                     });
-                    if chip(ui, "\u{2934}  Subtasks", "\u{2934}", self.subtasks_open, false).on_hover_text("Show all subtasks").clicked() {
+                    if chip(ui, "\u{2934}  Subtasks", tr("\u{2934}  Subtasks"), "\u{2934}", self.subtasks_open, false).on_hover_text(tr("Show all subtasks")).clicked() {
                         self.subtasks_open = !self.subtasks_open;
                     }
                 }
                 if self.view == ViewKind::List {
                     let n = self.hidden_cols.iter().filter(|c| c.as_str() != "Date created" && !parity::PROPERTIES.contains(&c.as_str())).count();
                     let extra = parity::PROPERTIES.iter().filter(|p| self.col_on(p)).count();
-                    let cr = chip(ui, "\u{25A5}  Columns", "\u{25A5}", n > 0 || extra > 0 || self.fields_open, false);
+                    let cr = chip(ui, "\u{25A5}  Columns", tr("\u{25A5}  Columns"), "\u{25A5}", n > 0 || extra > 0 || self.fields_open, false);
                     if cr.clicked() {
                         self.fields_open = !self.fields_open;
                     }
@@ -1837,7 +1862,7 @@ impl App {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    let b = egui::Button::new(RichText::new("Add Task").color(Color32::WHITE).size(13.0)).fill(t.primary).corner_radius(6).min_size(vec2(0.0, 26.0));
+                    let b = egui::Button::new(RichText::new(tr("Add Task")).color(Color32::WHITE).size(13.0)).fill(t.primary).corner_radius(6).min_size(vec2(0.0, 26.0));
                     if ui.add(b).clicked() {
                         self.open_quick_add(None);
                     }
@@ -1849,7 +1874,7 @@ impl App {
                     }
                     ui.painter().text(sr.center(), Align2::CENTER_CENTER, "\u{1F50D}", FontId::proportional(12.0), t.text2);
                     name_it(&sresp, "Search tasks");
-                    if sresp.on_hover_text("Search tasks").clicked() {
+                    if sresp.on_hover_text(tr("Search tasks")).clicked() {
                         self.show_search = !self.show_search;
                         self.search_focus = self.show_search;
                         if !self.show_search {
@@ -1857,7 +1882,7 @@ impl App {
                         }
                     }
                     if self.show_search {
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search tasks...").desired_width(if compact { 110.0 } else { 180.0 }));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text(tr("Search tasks...")).desired_width(if compact { 110.0 } else { 180.0 }));
                         name_field(&r, "Search tasks...");
                         if std::mem::take(&mut self.search_focus) {
                             r.request_focus();
@@ -1870,14 +1895,14 @@ impl App {
                             ui.painter().circle_stroke(r.center(), 12.5, Stroke::new(1.5, t.text));
                         }
                         paint_avatar(ui.painter(), r.center(), 10.5, &m, t.bg);
-                        if resp.on_hover_text("Me mode: only my tasks").clicked() {
+                        if resp.on_hover_text(tr("Me mode: only my tasks")).clicked() {
                             self.me_mode = !self.me_mode;
                         }
                     }
-                    let ar = chip(ui, &alabel, "\u{1F464}", self.assignee_filter.is_some(), false);
+                    let ar = chip(ui, &alabel, &ashown, "\u{1F464}", self.assignee_filter.is_some(), false);
                     let data = self.data.clone();
                     popup(ui, &ar, ui.id().with("asg_filter"), 200.0, |ui| {
-                        if ui.selectable_label(self.assignee_filter.is_none(), "Everyone").clicked() {
+                        if ui.selectable_label(self.assignee_filter.is_none(), tr("Everyone")).clicked() {
                             self.assignee_filter = None;
                             close_popup(ui);
                         }
@@ -1888,21 +1913,21 @@ impl App {
                             }
                         }
                     });
-                    if chip(ui, "\u{2714}  Closed", "\u{2714}", self.show_closed, false).on_hover_text("Show closed tasks").clicked() {
+                    if chip(ui, "\u{2714}  Closed", tr("\u{2714}  Closed"), "\u{2714}", self.show_closed, false).on_hover_text(tr("Show closed tasks")).clicked() {
                         self.show_closed = !self.show_closed;
                     }
                     let fshort = if nf > 0 { format!("\u{2261} {}", nf) } else { "\u{2261}".to_string() };
-                    let fr = chip(ui, &flabel, &fshort, nf > 0 || self.filter_open, false);
+                    let fr = chip(ui, &flabel, &fshown, &fshort, nf > 0 || self.filter_open, false);
                     if fr.clicked() {
                         self.filter_open = !self.filter_open;
                     }
                     if self.filter_open {
                         self.filter_panel(ui.ctx(), fr.rect.left_bottom() + vec2(0.0, 6.0), fr.rect);
                     }
-                    let sr = chip(ui, &slabel, &format!("\u{21C5}{}", sort_arrow), self.sort_by != SortBy::Manual, false);
+                    let sr = chip(ui, &slabel, &sshown, &format!("\u{21C5}{}", sort_arrow), self.sort_by != SortBy::Manual, false);
                     popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
                         for s in [SortBy::Manual, SortBy::DueDate, SortBy::Priority, SortBy::Name, SortBy::Created] {
-                            if ui.selectable_label(self.sort_by == s, s.label()).clicked() {
+                            if ui.selectable_label(self.sort_by == s, tr(s.label())).clicked() {
                                 self.sort_by = s;
                                 close_popup(ui);
                             }
@@ -1910,10 +1935,10 @@ impl App {
                         if self.sort_by != SortBy::Manual {
                             ui.separator();
                             ui.horizontal(|ui| {
-                                if ui.selectable_label(!self.sort_desc, "Ascending").clicked() {
+                                if ui.selectable_label(!self.sort_desc, tr("Ascending")).clicked() {
                                     self.sort_desc = false;
                                 }
-                                if ui.selectable_label(self.sort_desc, "Descending").clicked() {
+                                if ui.selectable_label(self.sort_desc, tr("Descending")).clicked() {
                                     self.sort_desc = true;
                                 }
                             });
@@ -1937,23 +1962,23 @@ impl App {
         self.list_width = w;
         let cols = col_layout(hr, &self.hidden_cols, self.data.extra.apps.priorities);
         let p = ui.painter();
-        p.text(hr.left_center() + vec2(36.0, 0.0), Align2::LEFT_CENTER, "Name", FontId::proportional(13.0), t.text2);
+        p.text(hr.left_center() + vec2(36.0, 0.0), Align2::LEFT_CENTER, tr("Name"), FontId::proportional(13.0), t.text2);
         let show_pr = self.data.extra.apps.priorities;
         for (label, r) in [("Assignee", cols.assignee), ("Due date", cols.due), ("Priority", cols.priority), ("Status", cols.status), ("Comments", cols.comments), ("Date created", cols.created)] {
             if (label == "Priority" && !show_pr) || !self.col_on(label) || r.width() <= 0.0 {
                 continue;
             }
-            p.text(r.left_center(), Align2::LEFT_CENTER, label, FontId::proportional(13.0), t.text2);
+            p.text(r.left_center(), Align2::LEFT_CENTER, tr(label), FontId::proportional(13.0), t.text2);
         }
         for (label, r) in &cols.extra {
-            p.with_clip_rect(*r).text(r.left_center(), Align2::LEFT_CENTER, *label, FontId::proportional(13.0), t.text2);
+            p.with_clip_rect(*r).text(r.left_center(), Align2::LEFT_CENTER, tr(label), FontId::proportional(13.0), t.text2);
         }
         let plus = Rect::from_center_size(pos2(hr.right() - 20.0, hr.center().y), vec2(16.0, 16.0));
         p.circle_filled(plus.center(), 8.0, t.text);
         // the background color reads on the circle in both themes
         p.text(plus.center(), Align2::CENTER_CENTER, "+", FontId::proportional(13.0), t.bg);
         p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-        if ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click()).on_hover_text("Add a column (Custom Field)").clicked() {
+        if ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click()).on_hover_text(tr("Add a column (Custom Field)")).clicked() {
             self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
         }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -1971,24 +1996,24 @@ impl App {
                 ui.add_space(30.0);
                 ui.vertical_centered(|ui| {
                     if hidden > 0 {
-                        ui.label(RichText::new(if hidden == 1 { "All tasks here are done".to_string() } else { format!("All {} tasks here are done", hidden) }).size(16.0).color(t.text2));
+                        ui.label(RichText::new(if hidden == 1 { tr("All tasks here are done").to_string() } else { trf!("All {} tasks here are done", hidden) }).size(16.0).color(t.text2));
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.add_space((ui.available_width() - 230.0).max(0.0) / 2.0);
-                            let label = if hidden == 1 { "Show 1 closed task".to_string() } else { format!("Show {} closed tasks", hidden) };
+                            let label = if hidden == 1 { tr("Show 1 closed task").to_string() } else { trf!("Show {} closed tasks", hidden) };
                             if ui.add(egui::Button::new(label).stroke(Stroke::new(1.0, t.border)).corner_radius(6)).clicked() {
                                 self.show_closed = true;
                             }
-                            if primary_button(ui, &t, "Add Task").clicked() {
+                            if primary_button(ui, &t, tr("Add Task")).clicked() {
                                 self.open_quick_add(None);
                             }
                         });
                     } else if self.on_personal_list() {
                         // the inline "+ Add Task" row below is the empty state
                     } else {
-                        ui.label(RichText::new("No tasks here yet").size(16.0).color(t.text2));
+                        ui.label(RichText::new(tr("No tasks here yet")).size(16.0).color(t.text2));
                         ui.add_space(6.0);
-                        if primary_button(ui, &t, "Add Task").clicked() {
+                        if primary_button(ui, &t, tr("Add Task")).clicked() {
                             self.open_quick_add(None);
                         }
                     }
@@ -2033,7 +2058,7 @@ impl App {
         self.group_pill(&mut child, g);
         child.label(RichText::new(g.tasks.len().to_string()).color(t.text2));
         if hresp.hovered() || child.ui_contains_pointer() {
-            if child.add(egui::Button::new(RichText::new("+ Add Task").color(t.text3).size(12.5)).frame(false)).clicked() {
+            if child.add(egui::Button::new(RichText::new(tr("+ Add Task")).color(t.text3).size(12.5)).frame(false)).clicked() {
                 self.adding = Some((g.key.clone(), String::new()));
                 self.collapsed.remove(&g.key);
             }
@@ -2059,7 +2084,7 @@ impl App {
             let mut cancel = false;
             ui.horizontal(|ui| {
                 ui.add_space(36.0);
-                let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Task Name").desired_width((w - 240.0).max(200.0)));
+                let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(tr("Task Name")).desired_width((w - 240.0).max(200.0)));
                 focus_once(ui, &r);
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     submit = true;
@@ -2071,10 +2096,10 @@ impl App {
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     cancel = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     cancel = true;
                 }
-                if primary_button(ui, &t, "Save").clicked() {
+                if primary_button(ui, &t, tr("Save")).clicked() {
                     submit = true;
                 }
             });
@@ -2092,7 +2117,7 @@ impl App {
             if resp.hovered() {
                 ui.painter().rect_filled(r, 4.0, t.hover);
             }
-            ui.painter().text(r.left_center() + vec2(40.0, 0.0), Align2::LEFT_CENTER, "+ Add Task", FontId::proportional(13.5), t.text3);
+            ui.painter().text(r.left_center() + vec2(40.0, 0.0), Align2::LEFT_CENTER, tr("+ Add Task"), FontId::proportional(13.5), t.text3);
             if resp.clicked() {
                 self.adding = Some((g.key.clone(), String::new()));
             }
@@ -2210,7 +2235,7 @@ impl App {
             // Priorities are turned off in Apps
         } else if task.priority > 0 {
             paint_flag(&ui.painter_at(cols.priority), cols.priority.left_center() + vec2(4.0, 0.0), priority_color(task.priority, &t), 13.0);
-            ui.painter_at(cols.priority).text(cols.priority.left_center() + vec2(18.0, 0.0), Align2::LEFT_CENTER, PRIORITIES[task.priority as usize].label, FontId::proportional(13.5), t.text);
+            ui.painter_at(cols.priority).text(cols.priority.left_center() + vec2(18.0, 0.0), Align2::LEFT_CENTER, tr(PRIORITIES[task.priority as usize].label), FontId::proportional(13.5), t.text);
         } else {
             paint_outline_flag(&ui.painter_at(cols.priority), cols.priority.left_center() + vec2(8.0, 0.0), icon_col);
         }
@@ -2334,7 +2359,7 @@ impl App {
                                 if resp.hovered() {
                                     ui.painter().rect_filled(r, 6.0, Color32::from_black_alpha(8));
                                 }
-                                ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, "+  Add Task", FontId::proportional(14.0), accent);
+                                ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, tr("+  Add Task"), FontId::proportional(14.0), accent);
                                 if resp.clicked() {
                                     self.add_from_group(g, String::new(), true);
                                 }
@@ -2347,7 +2372,7 @@ impl App {
                 }
                 if self.group_by == GroupBy::Status {
                     if let Some(sid) = self.data.lists_in(self.loc).and_then(|l| l.first().copied()).and_then(|l| self.data.space_of_list(l)).map(|s| s.id) {
-                        if ui.add(egui::Button::new(RichText::new("+  Add group").color(t.text2).size(14.0)).frame(false)).on_hover_text("Edit statuses").clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr("+  Add group")).color(t.text2).size(14.0)).frame(false)).on_hover_text(tr("Edit statuses")).clicked() {
                             self.actions.push(Action::EditStatuses(sid));
                         }
                     }

@@ -27,19 +27,19 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("People").size(20.0));
+                    ui.label(RichText::new(tr("People")).size(20.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, &t, "Invite people").clicked() {
+                        if primary_button(ui, &t, tr("Invite people")).clicked() {
                             self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                         }
                     });
                 });
-                ui.label(RichText::new(format!("Manage who can access {}", self.data.workspace)).color(t.text2));
+                ui.label(RichText::new(trf!("Manage who can access {}", self.data.workspace)).color(t.text2));
                 ui.add_space(12.0);
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
                 for (x, h) in [(0.0, "Name"), (0.32, "Email"), (0.6, "Role"), (0.76, "Status")] {
-                    ui.painter().text(pos2(hr.left() + w * x + 8.0, hr.center().y), Align2::LEFT_CENTER, h, FontId::proportional(13.0), t.text2);
+                    ui.painter().text(pos2(hr.left() + w * x + 8.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
                 }
                 ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
                 let members = self.data.members.clone();
@@ -49,7 +49,7 @@ impl App {
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
-                    let name = if m.id == me { format!("{} (you)", m.name) } else { m.name.clone() };
+                    let name = if m.id == me { trf!("{} (you)", m.name) } else { m.name.clone() };
                     ui.painter().text(pos2(r.left() + 44.0, r.center().y - (if m.status_text.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, name, FontId::proportional(14.0), t.text);
                     if !m.status_text.is_empty() {
                         ui.painter().text(pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &m.status_text, FontId::proportional(12.0), t.text3);
@@ -59,11 +59,11 @@ impl App {
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
                     let mut role = if m.role.is_empty() { "Member".to_string() } else { m.role.clone() };
                     if m.role == "Owner" {
-                        child.label("Owner");
+                        child.label(tr("Owner"));
                     } else {
-                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(role.clone()).width(100.0).show_ui(&mut child, |ui| {
+                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(tr(&role).to_string()).width(100.0).show_ui(&mut child, |ui| {
                             for (n, _) in ROLES.iter().take(3) {
-                                ui.selectable_value(&mut role, n.to_string(), *n);
+                                ui.selectable_value(&mut role, n.to_string(), tr(n));
                             }
                         });
                         if role != m.role && !(m.role.is_empty() && role == "Member") {
@@ -74,10 +74,10 @@ impl App {
                         }
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
-                    ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col);
+                    ui.painter().text(pos2(r.left() + w * 0.76 + 8.0, r.center().y), Align2::LEFT_CENTER, tr(st), FontId::proportional(13.0), col);
                     if m.id != me && m.role != "Owner" {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
-                        if put_over(ui, br, egui::Button::new(RichText::new("Remove").color(t.danger)).frame(false)).clicked() {
+                        if put_over(ui, br, egui::Button::new(RichText::new(tr("Remove")).color(t.danger)).frame(false)).clicked() {
                             remove = Some(m.id);
                         }
                     }
@@ -93,7 +93,7 @@ impl App {
                     self.dirty = true;
                 }
                 ui.add_space(12.0);
-                ui.label(RichText::new("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.").small().color(t.text3));
+                ui.label(RichText::new(tr("Invited people get access when the shared server connects them. Until then they can use this computer through Log out \u{2192} Switch person.")).small().color(t.text3));
             });
         });
     }
@@ -106,10 +106,10 @@ impl App {
         let my_name = self.data.member(me).map(|m| format!("@{}", m.name)).unwrap_or_default();
         // tabs
         let w = ui.available_width();
-        let (tr, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
+        let (tabs_r, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
         let tw = (w - 20.0) / 4.0;
         for (i, (icon, label)) in [("\u{1F4E5}", "Primary"), ("\u{26A1}", "Other"), ("\u{23F0}", "Later"), ("\u{2714}", "Cleared")].iter().enumerate() {
-            let r = Rect::from_min_size(pos2(tr.left() + 10.0 + tw * i as f32, tr.top()), vec2(tw, 50.0));
+            let r = Rect::from_min_size(pos2(tabs_r.left() + 10.0 + tw * i as f32, tabs_r.top()), vec2(tw, 50.0));
             let resp = ui.interact(r, ui.id().with(("itab", i)), Sense::click());
             name_it(&resp, &format!("Inbox {}", label));
             let sel = self.inbox_tab == i as u8;
@@ -117,7 +117,7 @@ impl App {
                 ui.painter().rect_filled(r.shrink(4.0), 6.0, t.hover);
             }
             ui.painter().text(r.left_center() + vec2(26.0, 0.0), Align2::CENTER_CENTER, *icon, FontId::proportional(14.0), if sel { t.text } else { t.text2 });
-            ui.painter().text(r.left_center() + vec2(44.0, 0.0), Align2::LEFT_CENTER, *label, FontId::proportional(15.0), if sel { t.text } else { t.text2 });
+            ui.painter().text(r.left_center() + vec2(44.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(15.0), if sel { t.text } else { t.text2 });
             if sel {
                 ui.painter().rect_filled(Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), pos2(r.right() - 4.0, r.bottom())), 1.0, t.text);
             }
@@ -128,7 +128,7 @@ impl App {
                 self.inbox_tab = i as u8;
             }
         }
-        ui.painter().hline(tr.x_range(), tr.bottom(), Stroke::new(1.0, t.border));
+        ui.painter().hline(tabs_r.x_range(), tabs_r.bottom(), Stroke::new(1.0, t.border));
         // collect items
         let cleared = self.data.extra.inbox_cleared.clone();
         let later = self.data.extra.inbox_later.clone();
@@ -163,23 +163,23 @@ impl App {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(18, 10)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let label = ["\u{2261}  Filter", "\u{2261}  Comments", "\u{2261}  Mentions", "\u{2261}  Assigned"][self.inbox_filter as usize % 4];
-                let fr = ui.add(egui::Button::new(label).corner_radius(13));
+                let fr = ui.add(egui::Button::new(tr(label)).corner_radius(13));
                 popup(ui, &fr, ui.id().with("inbox_filter"), 180.0, |ui| {
                     for (i, l) in ["Everything", "Comments", "Mentions", "Assigned to me"].iter().enumerate() {
-                        if ui.selectable_label(self.inbox_filter == i as u8, *l).clicked() {
+                        if ui.selectable_label(self.inbox_filter == i as u8, tr(l)).clicked() {
                             self.inbox_filter = i as u8;
                             close_popup(ui);
                         }
                     }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add_enabled(!items.is_empty() && self.inbox_tab != 3, egui::Button::new("\u{2714}  Clear all").corner_radius(6)).clicked() {
+                    if ui.add_enabled(!items.is_empty() && self.inbox_tab != 3, egui::Button::new(tr("\u{2714}  Clear all")).corner_radius(6)).clicked() {
                         clear_all = true;
                     }
-                    if ui.add(egui::Button::new("\u{2699}").corner_radius(6)).on_hover_text("Notification settings").clicked() {
+                    if ui.add(egui::Button::new("\u{2699}").corner_radius(6)).on_hover_text(tr("Notification settings")).clicked() {
                         self.modal = Some(Modal::Notifications);
                     }
-                    if ui.add(egui::Button::new("\u{23F0}  Reminder").corner_radius(6)).clicked() {
+                    if ui.add(egui::Button::new(tr("\u{23F0}  Reminder")).corner_radius(6)).clicked() {
                         self.modal = Some(Modal::Reminder { text: String::new(), date: Some(today()), time: "09:00".into() });
                     }
                 });
@@ -212,11 +212,11 @@ impl App {
                         ui.painter().rect_stroke(r.shrink(2.0), 14.0, Stroke::new(1.5, t.border), egui::StrokeKind::Inside);
                         ui.painter().text(r.center(), Align2::CENTER_CENTER, "\u{1F465}", FontId::proportional(22.0), Color32::from_rgb(0x5f, 0x55, 0xee));
                         ui.add_space(10.0);
-                        ui.label(RichText::new(title).size(18.0).color(t.text));
-                        ui.label(RichText::new(sub).size(14.0).color(t.text2));
+                        ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
+                        ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
                         if self.inbox_tab == 0 {
                             ui.add_space(10.0);
-                            if ui.add(egui::Button::new(RichText::new("Invite people").size(15.0).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 38.0))).clicked() {
+                            if ui.add(egui::Button::new(RichText::new(tr("Invite people")).size(15.0).color(Color32::WHITE)).fill(t.primary).corner_radius(7).min_size(vec2(0.0, 38.0))).clicked() {
                                 self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                             }
                         }
@@ -234,20 +234,20 @@ impl App {
                     }
                     ui.painter().text(r.left_top() + vec2(48.0, 18.0), Align2::LEFT_CENTER, &tname, FontId::proportional(14.0), t.text);
                     let who = self.data.member(a.author).map(|m| m.name.clone()).unwrap_or_default();
-                    let line = if a.comment { format!("{} commented: {}", who, a.text) } else { format!("{} {}", who, a.text) };
+                    let line = if a.comment { trf!("{} commented: {}", who, a.text) } else { crate::i18n::history_line(&who, &a.text) };
                     ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()))).text(r.left_top() + vec2(48.0, 40.0), Align2::LEFT_CENTER, line, FontId::proportional(13.0), t.text2);
                     ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, fmt_ago(ts), FontId::proportional(12.0), t.text3);
                     let mut handled = false;
                     if resp.hovered() || ui.rect_contains_pointer(r) {
                         let lr = Rect::from_min_size(pos2(r.right() - 180.0, r.center().y - 13.0), vec2(56.0, 26.0));
                         let cr = Rect::from_min_size(pos2(r.right() - 120.0, r.center().y - 13.0), vec2(56.0, 26.0));
-                        if self.inbox_tab != 2 && put_over(ui, lr, egui::Button::new("Later").corner_radius(6)).clicked() {
+                        if self.inbox_tab != 2 && put_over(ui, lr, egui::Button::new(tr("Later")).corner_radius(6)).clicked() {
                             self.data.extra.inbox_later.push(key.clone());
                             self.dirty = true;
                             handled = true;
                         }
                         let ctext = if self.inbox_tab == 3 { "Restore" } else { "Clear" };
-                        if put_over(ui, cr, egui::Button::new(ctext).corner_radius(6)).clicked() {
+                        if put_over(ui, cr, egui::Button::new(tr(ctext)).corner_radius(6)).clicked() {
                             if self.inbox_tab == 3 {
                                 self.data.extra.inbox_cleared.retain(|x| x != &key);
                             } else {
@@ -270,9 +270,9 @@ impl App {
 
     pub(super) fn posts_page(&mut self, ui: &mut Ui) {
         let t = self.t();
-        self.page_bar(ui, "Posts", |s, ui| {
+        self.page_bar(ui, tr("Posts"), |s, ui| {
             let tt = s.t();
-            if primary_button(ui, &tt, "New Post").clicked() {
+            if primary_button(ui, &tt, tr("New Post")).clicked() {
                 s.post_title.clear();
                 s.post_body.clear();
             }
@@ -294,8 +294,8 @@ impl App {
                     ui.vertical(|ui| {
                     let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Channel:").color(t.text2));
-                        let cur = chans.iter().find(|c| c.0 == self.post_channel).map(|c| format!("# {}", c.1)).unwrap_or_else(|| "Select Channel".into());
+                        ui.label(RichText::new(tr("Channel:")).color(t.text2));
+                        let cur = chans.iter().find(|c| c.0 == self.post_channel).map(|c| format!("# {}", c.1)).unwrap_or_else(|| tr("Select Channel").into());
                         egui::ComboBox::from_id_salt("post_ch").selected_text(cur).show_ui(ui, |ui| {
                             for (id, n) in &chans {
                                 ui.selectable_value(&mut self.post_channel, *id, format!("# {}", n));
@@ -304,23 +304,23 @@ impl App {
                     });
                     ui.separator();
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Type:").color(t.text2));
-                        egui::ComboBox::from_id_salt("post_type").selected_text(format!("\u{1F4E2} {}", self.post_type)).show_ui(ui, |ui| {
+                        ui.label(RichText::new(tr("Type:")).color(t.text2));
+                        egui::ComboBox::from_id_salt("post_type").selected_text(format!("\u{1F4E2} {}", tr(&self.post_type))).show_ui(ui, |ui| {
                             for k in ["Announcement", "Update", "Idea", "Question"] {
-                                ui.selectable_value(&mut self.post_type, k.to_string(), k);
+                                ui.selectable_value(&mut self.post_type, k.to_string(), tr(k));
                             }
                         });
                     });
                     ui.separator();
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Title:").color(t.text2));
+                        ui.label(RichText::new(tr("Title:")).color(t.text2));
                         ui.add(egui::TextEdit::singleline(&mut self.post_title).frame(false).desired_width(f32::INFINITY));
                     });
                     ui.separator();
-                    ui.add(egui::TextEdit::multiline(&mut self.post_body).hint_text("Share an announcement...").frame(false).desired_rows(3).desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::multiline(&mut self.post_body).hint_text(tr("Share an announcement...")).frame(false).desired_rows(3).desired_width(f32::INFINITY));
                     ui.horizontal(|ui| {
                         for (g, tip) in [("+", "Create task"), ("@", "Mention someone"), ("\u{263A}", "Emoji"), ("\u{2611}", "Create task")] {
-                            if ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tip).clicked() {
+                            if ui.add(egui::Button::new(RichText::new(g).color(t.text2)).frame(false)).on_hover_text(tr(tip)).clicked() {
                                 match g {
                                     "@" => self.post_body.push('@'),
                                     "\u{263A}" => self.post_body.push_str("\u{1F44D}"),
@@ -330,8 +330,8 @@ impl App {
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let ready = !self.post_title.trim().is_empty() && self.post_channel != 0;
-                            let b = egui::Button::new(RichText::new("Post").color(if ready { Color32::WHITE } else { t.text3 })).fill(if ready { t.primary } else { t.hover }).corner_radius(6).min_size(vec2(56.0, 30.0));
-                            if ui.add(b).on_hover_text(if self.post_channel == 0 { "Select a channel first" } else { "" }).clicked() && ready {
+                            let b = egui::Button::new(RichText::new(tr("Post")).color(if ready { Color32::WHITE } else { t.text3 })).fill(if ready { t.primary } else { t.hover }).corner_radius(6).min_size(vec2(56.0, 30.0));
+                            if ui.add(b).on_hover_text(if self.post_channel == 0 { tr("Select a channel first") } else { "" }).clicked() && ready {
                                 let id = self.data.new_id();
                                 let me = self.data.me;
                                 let m = Message { edited: None, attachments: vec![], id, author: me, text: self.post_body.trim().to_string(), ts: now_ts(), reactions: vec![], replies: vec![], saved: false, task: None, post_title: Some(self.post_title.trim().to_string()), post_type: self.post_type.clone(), pinned: false, call: None };
@@ -354,15 +354,15 @@ impl App {
             ui.add_space(16.0);
             ui.horizontal(|ui| {
                 ui.add_space(pad);
-                let fol = egui::Button::new(RichText::new("\u{1F514}  Channels I'm Following").color(if self.post_following { t.accent_text } else { t.text2 })).fill(if self.post_following { t.accent_bg } else { t.bg }).corner_radius(13);
+                let fol = egui::Button::new(RichText::new(tr("\u{1F514}  Channels I'm Following")).color(if self.post_following { t.accent_text } else { t.text2 })).fill(if self.post_following { t.accent_bg } else { t.bg }).corner_radius(13);
                 if ui.add(fol).clicked() {
                     self.post_following = !self.post_following;
                 }
                 let chans: Vec<(u64, String)> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel).map(|c| (c.id, c.name.clone())).collect();
-                let cl = self.post_f_channel.and_then(|id| chans.iter().find(|c| c.0 == id)).map(|c| format!("#  {}", c.1)).unwrap_or_else(|| "#  Channel".into());
+                let cl = self.post_f_channel.and_then(|id| chans.iter().find(|c| c.0 == id)).map(|c| format!("#  {}", c.1)).unwrap_or_else(|| tr("#  Channel").into());
                 let cr = ui.add(egui::Button::new(cl).corner_radius(13));
                 popup(ui, &cr, ui.id().with("pf_ch"), 180.0, |ui| {
-                    if ui.selectable_label(self.post_f_channel.is_none(), "All channels").clicked() {
+                    if ui.selectable_label(self.post_f_channel.is_none(), tr("All channels")).clicked() {
                         self.post_f_channel = None;
                         close_popup(ui);
                     }
@@ -374,10 +374,10 @@ impl App {
                     }
                 });
                 let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.name.clone())).collect();
-                let al = self.post_f_author.and_then(|id| members.iter().find(|m| m.0 == id)).map(|m| format!("@  {}", m.1)).unwrap_or_else(|| "@  Author".into());
+                let al = self.post_f_author.and_then(|id| members.iter().find(|m| m.0 == id)).map(|m| format!("@  {}", m.1)).unwrap_or_else(|| tr("@  Author").into());
                 let ar = ui.add(egui::Button::new(al).corner_radius(13));
                 popup(ui, &ar, ui.id().with("pf_au"), 180.0, |ui| {
-                    if ui.selectable_label(self.post_f_author.is_none(), "Anyone").clicked() {
+                    if ui.selectable_label(self.post_f_author.is_none(), tr("Anyone")).clicked() {
                         self.post_f_author = None;
                         close_popup(ui);
                     }
@@ -388,25 +388,25 @@ impl App {
                         }
                     }
                 });
-                let tl = self.post_f_type.clone().map(|t| format!("\u{25A6}  {}", t)).unwrap_or_else(|| "\u{25A6}  Type".into());
-                let tr = ui.add(egui::Button::new(tl).corner_radius(13));
-                popup(ui, &tr, ui.id().with("pf_ty"), 180.0, |ui| {
-                    if ui.selectable_label(self.post_f_type.is_none(), "Any type").clicked() {
+                let tl = self.post_f_type.clone().map(|t| format!("\u{25A6}  {}", tr(&t))).unwrap_or_else(|| tr("\u{25A6}  Type").into());
+                let tyr = ui.add(egui::Button::new(tl).corner_radius(13));
+                popup(ui, &tyr, ui.id().with("pf_ty"), 180.0, |ui| {
+                    if ui.selectable_label(self.post_f_type.is_none(), tr("Any type")).clicked() {
                         self.post_f_type = None;
                         close_popup(ui);
                     }
                     for k in ["Announcement", "Update", "Idea", "Question"] {
-                        if ui.selectable_label(self.post_f_type.as_deref() == Some(k), k).clicked() {
+                        if ui.selectable_label(self.post_f_type.as_deref() == Some(k), tr(k)).clicked() {
                             self.post_f_type = Some(k.to_string());
                             close_popup(ui);
                         }
                     }
                 });
                 ui.add_space((cw - 520.0).max(10.0));
-                ui.label(RichText::new("Sort:").color(t.text2));
-                egui::ComboBox::from_id_salt("post_sort").selected_text(if self.post_sort_old { "Oldest" } else { "Newest" }).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.post_sort_old, false, "Newest");
-                    ui.selectable_value(&mut self.post_sort_old, true, "Oldest");
+                ui.label(RichText::new(tr("Sort:")).color(t.text2));
+                egui::ComboBox::from_id_salt("post_sort").selected_text(if self.post_sort_old { tr("Oldest") } else { tr("Newest") }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.post_sort_old, false, tr("Newest"));
+                    ui.selectable_value(&mut self.post_sort_old, true, tr("Oldest"));
                 });
             });
             ui.add_space(12.0);
@@ -437,7 +437,7 @@ impl App {
                     ui.painter().rect_stroke(r.shrink(2.0), 14.0, Stroke::new(1.5, t.border), egui::StrokeKind::Inside);
                     ui.painter().text(r.center(), Align2::CENTER_CENTER, "\u{1F4E2}", FontId::proportional(22.0), t.text2);
                     ui.add_space(10.0);
-                    ui.label(RichText::new("There are no Posts yet!").size(18.0).color(t.text));
+                    ui.label(RichText::new(tr("There are no Posts yet!")).size(18.0).color(t.text));
                 });
             }
             for (cname, cid, m) in posts {
@@ -451,9 +451,9 @@ impl App {
                                 paint_avatar(ui.painter(), r.center(), 12.0, a, t.card);
                                 ui.label(RichText::new(&a.name).strong());
                             }
-                            ui.label(RichText::new(format!("{} in # {} \u{2022} {}", if m.post_type.is_empty() { "Announcement" } else { &m.post_type }, cname, fmt_ago(m.ts))).small().color(t.text3));
+                            ui.label(RichText::new(trf!("{} in # {} \u{2022} {}", tr(if m.post_type.is_empty() { "Announcement" } else { &m.post_type }), cname, fmt_ago(m.ts))).small().color(t.text3));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.link("Open in channel").clicked() {
+                                if ui.link(tr("Open in channel")).clicked() {
                                     self.section = Section::Chat;
                                     self.chat_open = Some(cid);
                                 }
@@ -476,9 +476,9 @@ impl App {
         let t = self.t();
         egui::SidePanel::left("meet_list").exact_width(260.0).resizable(false).frame(list_panel_frame(&t)).show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Meetings").size(16.0));
+                ui.label(RichText::new(tr("Meetings")).size(16.0));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if primary_button(ui, &t, "+ Meeting").clicked() {
+                    if primary_button(ui, &t, tr("+ Meeting")).clicked() {
                         let id = self.data.new_id();
                         self.data.extra.meetings.push(Meeting { id, title: "New meeting".into(), date: today(), time: "10:00".into(), attendees: vec![self.data.me], agenda: String::new(), notes: String::new() });
                         self.meeting_open = Some(id);
@@ -505,13 +505,13 @@ impl App {
                 }
             }
             if ms.is_empty() {
-                ui.label(RichText::new("No meetings yet").color(t.text3));
+                ui.label(RichText::new(tr("No meetings yet")).color(t.text3));
             }
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(32, 20))).show_inside(ui, |ui| {
             let Some(idx) = self.meeting_open.and_then(|id| self.data.extra.meetings.iter().position(|m| m.id == id)) else {
                 ui.add_space(40.0);
-                ui.vertical_centered(|ui| ui.label(RichText::new("Pick a meeting or create one to keep the agenda and notes together.").color(t.text2)));
+                ui.vertical_centered(|ui| ui.label(RichText::new(tr("Pick a meeting or create one to keep the agenda and notes together.")).color(t.text2)));
                 return;
             };
             let members = self.data.members.clone();
@@ -530,16 +530,16 @@ impl App {
                             ch = true;
                         }
                     }
-                    ui.label("at");
+                    ui.label(tr("at"));
                     ch |= ui.add(egui::TextEdit::singleline(&mut m.time).desired_width(60.0)).changed();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
                             delete = true;
                         }
                     });
                 });
                 ui.add_space(6.0);
-                ui.label(RichText::new("Attendees").color(t.text2));
+                ui.label(RichText::new(tr("Attendees")).color(t.text2));
                 ui.horizontal_wrapped(|ui| {
                     for mem in &members {
                         let mut on = m.attendees.contains(&mem.id);
@@ -554,13 +554,13 @@ impl App {
                     }
                 });
                 ui.add_space(8.0);
-                ui.label(RichText::new("Agenda").color(t.text2));
-                ch |= ui.add(egui::TextEdit::multiline(&mut m.agenda).hint_text("What will you discuss?").desired_rows(4).desired_width(f32::INFINITY)).changed();
+                ui.label(RichText::new(tr("Agenda")).color(t.text2));
+                ch |= ui.add(egui::TextEdit::multiline(&mut m.agenda).hint_text(tr("What will you discuss?")).desired_rows(4).desired_width(f32::INFINITY)).changed();
                 ui.add_space(8.0);
-                ui.label(RichText::new("Notes").color(t.text2));
-                ch |= ui.add(egui::TextEdit::multiline(&mut m.notes).hint_text("Write notes. Lines starting with [ ] become action items.").desired_rows(10).desired_width(f32::INFINITY)).changed();
+                ui.label(RichText::new(tr("Notes")).color(t.text2));
+                ch |= ui.add(egui::TextEdit::multiline(&mut m.notes).hint_text(tr("Write notes. Lines starting with [ ] become action items.")).desired_rows(10).desired_width(f32::INFINITY)).changed();
                 let actions: Vec<String> = m.notes.lines().filter_map(|l| l.trim().strip_prefix("[ ]").map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect();
-                if !actions.is_empty() && ui.button(format!("Create {} tasks from action items", actions.len())).clicked() {
+                if !actions.is_empty() && ui.button(trf!("Create {} tasks from action items", actions.len())).clicked() {
                     make_tasks = actions;
                     m.notes = m.notes.replace("[ ]", "[x]");
                     ch = true;
@@ -575,7 +575,7 @@ impl App {
                     for n in make_tasks {
                         self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.iter().take(1).copied().collect(), due: None, parent: None, open: false });
                     }
-                    self.toast = Some(("Tasks created from the meeting notes".into(), now_ts()));
+                    self.toast = Some((tr("Tasks created from the meeting notes").into(), now_ts()));
                 }
             }
             if delete {
@@ -627,9 +627,9 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Goals").size(20.0));
+                    ui.label(RichText::new(tr("Goals")).size(20.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, &t, "+ New Goal").clicked() {
+                        if primary_button(ui, &t, tr("+ New Goal")).clicked() {
                             let id = self.data.new_id();
                             let color = STATUS_PALETTE[1 + self.data.extra.goals.len() % 13];
                             self.data.extra.goals.push(Goal { id, name: "New goal".into(), color, due: None, owner: self.data.me, targets: vec![] });
@@ -638,11 +638,11 @@ impl App {
                         }
                     });
                 });
-                ui.label(RichText::new("Track progress with targets: numbers, done / not done, or tasks").color(t.text2));
+                ui.label(RichText::new(tr("Track progress with targets: numbers, done / not done, or tasks")).color(t.text2));
                 ui.add_space(12.0);
                 let goals = self.data.extra.goals.clone();
                 if goals.is_empty() {
-                    ui.label(RichText::new("No goals yet.").color(t.text3));
+                    ui.label(RichText::new(tr("No goals yet.")).color(t.text3));
                 }
                 for g in &goals {
                     let p = self.goal_progress(g);
@@ -654,7 +654,7 @@ impl App {
                             ui.painter().circle_filled(r.center(), 6.0, rgb(g.color));
                             ui.label(RichText::new(&g.name).size(16.0));
                             if let Some(d) = g.due {
-                                ui.label(RichText::new(format!("Due {}", fmt_date(d))).small().color(date_color(d, p >= 1.0, &t)));
+                                ui.label(RichText::new(trf!("Due {}", fmt_date(d))).small().color(date_color(d, p >= 1.0, &t)));
                             }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.label(RichText::new(format!("{:.0}%", p * 100.0)).strong());
@@ -684,15 +684,15 @@ impl App {
             let g = &mut self.data.extra.goals[gi];
             let mut ch = false;
             ui.horizontal(|ui| {
-                ui.label("Name");
+                ui.label(tr("Name"));
                 ch |= ui.add(egui::TextEdit::singleline(&mut g.name).desired_width(260.0)).changed();
                 let mut d = g.due;
-                let r = ui.button(g.due.map(|d| format!("Due {}", fmt_date(d))).unwrap_or_else(|| "\u{1F4C5} Due date".into()));
+                let r = ui.button(g.due.map(|d| trf!("Due {}", fmt_date(d))).unwrap_or_else(|| tr("\u{1F4C5} Due date").into()));
                 if let Some(true) = popup(ui, &r, ui.id().with(("goal_due", gid)), 380.0, |ui| date_menu(ui, &t, ui.id().with(("goal_cal", gid)), &mut d)) {
                     g.due = d;
                     ch = true;
                 }
-                if ui.add(egui::Button::new(RichText::new("Delete goal").color(t.danger)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(tr("Delete goal")).color(t.danger)).frame(false)).clicked() {
                     delete = true;
                 }
             });
@@ -702,21 +702,21 @@ impl App {
                     ch |= ui.add(egui::TextEdit::singleline(&mut tg.name).desired_width(180.0)).changed();
                     match &mut tg.kind {
                         TargetKind::Number { start, target, current, unit } => {
-                            ui.label("now");
+                            ui.label(tr("now"));
                             ch |= ui.add(egui::DragValue::new(current).speed(1.0)).changed();
-                            ui.label("of");
+                            ui.label(tr("of"));
                             ch |= ui.add(egui::DragValue::new(target).speed(1.0)).changed();
-                            ui.label("from");
+                            ui.label(tr("from"));
                             ch |= ui.add(egui::DragValue::new(start).speed(1.0)).changed();
-                            ch |= ui.add(egui::TextEdit::singleline(unit).hint_text("unit").desired_width(50.0)).changed();
+                            ch |= ui.add(egui::TextEdit::singleline(unit).hint_text(tr("unit")).desired_width(50.0)).changed();
                         }
                         TargetKind::TrueFalse { done } => {
-                            ch |= ui.checkbox(done, "Done").changed();
+                            ch |= ui.checkbox(done, tr("Done")).changed();
                         }
                         TargetKind::Tasks { ids } => {
                             let n = ids.iter().filter(|id| closed.contains(id)).count();
-                            ui.label(format!("{}/{} tasks done", n, ids.len()));
-                            ui.menu_button("Pick tasks", |ui| {
+                            ui.label(trf!("{}/{} tasks done", n, ids.len()));
+                            ui.menu_button(tr("Pick tasks"), |ui| {
                                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                                     for (id, name) in &tasks {
                                         let mut on = ids.contains(id);
@@ -743,16 +743,16 @@ impl App {
                 ch = true;
             }
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Add target:").color(t.text2));
-                if ui.button("Number").clicked() {
+                ui.label(RichText::new(tr("Add target:")).color(t.text2));
+                if ui.button(tr("Number")).clicked() {
                     g.targets.push(GoalTarget { name: "Target".into(), kind: TargetKind::Number { start: 0.0, target: 100.0, current: 0.0, unit: String::new() } });
                     ch = true;
                 }
-                if ui.button("Done / not done").clicked() {
+                if ui.button(tr("Done / not done")).clicked() {
                     g.targets.push(GoalTarget { name: "Target".into(), kind: TargetKind::TrueFalse { done: false } });
                     ch = true;
                 }
-                if ui.button("Tasks").clicked() {
+                if ui.button(tr("Tasks")).clicked() {
                     g.targets.push(GoalTarget { name: "Finish tasks".into(), kind: TargetKind::Tasks { ids: vec![] } });
                     ch = true;
                 }
@@ -774,13 +774,13 @@ impl App {
         let t = self.t();
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(32, 20))).show_inside(ui, |ui| {
             let Some(fi) = self.form_open.and_then(|id| self.data.extra.forms.iter().position(|f| f.id == id)) else {
-                ui.label(RichText::new("Create a form to collect requests; each answer becomes a task.").color(t.text2));
+                ui.label(RichText::new(tr("Create a form to collect requests; each answer becomes a task.")).color(t.text2));
                 return;
             };
             let lists: Vec<(u64, String)> = self.data.spaces.iter().flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())).map(move |l| (l.id, format!("{} / {}", s.name, l.name)))).collect();
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.form_mode_fill, false, "\u{1F4DD} Edit");
-                ui.selectable_value(&mut self.form_mode_fill, true, "\u{1F441} Fill out");
+                ui.selectable_value(&mut self.form_mode_fill, false, tr("\u{1F4DD} Edit"));
+                ui.selectable_value(&mut self.form_mode_fill, true, tr("\u{1F441} Fill out"));
             });
             ui.separator();
             if !self.form_mode_fill {
@@ -790,8 +790,8 @@ impl App {
                 ch |= ui.add(egui::TextEdit::singleline(&mut f.name).font(FontId::proportional(24.0)).frame(false).desired_width(f32::INFINITY)).changed();
                 ch |= ui.add(egui::TextEdit::multiline(&mut f.description).desired_rows(2).desired_width(f32::INFINITY)).changed();
                 ui.horizontal(|ui| {
-                    ui.label("Answers create tasks in");
-                    let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone()).unwrap_or_else(|| "choose a list".into());
+                    ui.label(tr("Answers create tasks in"));
+                    let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone()).unwrap_or_else(|| tr("choose a list").into());
                     egui::ComboBox::from_id_salt("form_list_sel").selected_text(cur).show_ui(ui, |ui| {
                         for (id, n) in &lists {
                             ch |= ui.selectable_value(&mut f.list_id, *id, n).changed();
@@ -799,20 +799,20 @@ impl App {
                     });
                 });
                 ui.add_space(8.0);
-                ui.label(RichText::new("Questions").strong());
+                ui.label(RichText::new(tr("Questions")).strong());
                 let mut remove = None;
                 for (i, fld) in f.fields.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
                         ch |= ui.add(egui::TextEdit::singleline(&mut fld.label).desired_width(240.0)).changed();
                         egui::ComboBox::from_id_salt(("map", i)).selected_text(match fld.map.as_str() {
-                            "name" => "Task name",
-                            "description" => "Description",
-                            "priority" => "Priority",
-                            "due" => "Due date",
-                            _ => "Added to description",
+                            "name" => tr("Task name"),
+                            "description" => tr("Description"),
+                            "priority" => tr("Priority"),
+                            "due" => tr("Due date"),
+                            _ => tr("Added to description"),
                         }).show_ui(ui, |ui| {
                             for (k, n) in [("name", "Task name"), ("description", "Description"), ("priority", "Priority"), ("due", "Due date"), ("text", "Added to description")] {
-                                ch |= ui.selectable_value(&mut fld.map, k.to_string(), n).changed();
+                                ch |= ui.selectable_value(&mut fld.map, k.to_string(), tr(n)).changed();
                             }
                         });
                         if ui.add(egui::Button::new(RichText::new("\u{2716}").color(t.text3)).frame(false)).clicked() {
@@ -825,11 +825,11 @@ impl App {
                     ch = true;
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("+ Add question").clicked() {
+                    if ui.button(tr("+ Add question")).clicked() {
                         f.fields.push(FormField { label: "Question".into(), map: "text".into() });
                         ch = true;
                     }
-                    if ui.add(egui::Button::new(RichText::new("Delete form").color(t.danger)).frame(false)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)).frame(false)).clicked() {
                         delete = true;
                     }
                 });
@@ -853,9 +853,9 @@ impl App {
                         let v = self.form_fill.entry(i).or_default();
                         match fld.map.as_str() {
                             "priority" => {
-                                egui::ComboBox::from_id_salt(("fp", i)).selected_text(if v.is_empty() { "Choose".to_string() } else { v.clone() }).show_ui(ui, |ui| {
+                                egui::ComboBox::from_id_salt(("fp", i)).selected_text(if v.is_empty() { tr("Choose").to_string() } else { tr(v).to_string() }).show_ui(ui, |ui| {
                                     for p in ["Urgent", "High", "Normal", "Low"] {
-                                        ui.selectable_value(v, p.to_string(), p);
+                                        ui.selectable_value(v, p.to_string(), tr(p));
                                     }
                                 });
                             }
@@ -871,7 +871,7 @@ impl App {
                         }
                         ui.add_space(6.0);
                     }
-                    if primary_button(ui, &t, "Submit").clicked() {
+                    if primary_button(ui, &t, tr("Submit")).clicked() {
                         let mut name = String::new();
                         let mut desc = String::new();
                         let mut priority = 0u8;
@@ -897,7 +897,7 @@ impl App {
                             self.actions.push(Action::Add { list: f.list_id, name, status: None, priority, assignees: vec![], due, parent: None, open: false });
                             self.pending_description = Some(desc.trim().to_string());
                             self.form_fill.clear();
-                            self.toast = Some((format!("Submitted. A task was created in {}", self.data.list_name(f.list_id)), now_ts()));
+                            self.toast = Some((trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)), now_ts()));
                         }
                     }
                 });
@@ -916,7 +916,7 @@ impl App {
             ui.painter().rect_filled(r, 7.0, t.hover);
         }
         ui.painter().text(r.left_center() + vec2(14.0, 0.0), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), t.text2);
-        ui.painter().with_clip_rect(r).text(r.left_center() + vec2(30.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), t.text);
+        ui.painter().with_clip_rect(r).text(r.left_center() + vec2(30.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text);
         resp
     }
 
@@ -926,7 +926,7 @@ impl App {
         let t = self.t();
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::same(12))).show_inside(ui, |ui| {
             let Some(wi) = self.wb_open.and_then(|id| self.data.extra.whiteboards.iter().position(|w| w.id == id)) else {
-                ui.label(RichText::new("Create a whiteboard to sketch ideas and add sticky notes.").color(t.text2));
+                ui.label(RichText::new(tr("Create a whiteboard to sketch ideas and add sticky notes.")).color(t.text2));
                 return;
             };
             let mut delete = false;
@@ -935,9 +935,9 @@ impl App {
                     self.dirty = true;
                 }
                 ui.separator();
-                ui.selectable_value(&mut self.wb_tool, 0, "\u{1F4DD} Pen");
-                ui.selectable_value(&mut self.wb_tool, 1, "\u{1F4DD} Sticky note");
-                ui.selectable_value(&mut self.wb_tool, 2, "\u{270B} Move notes");
+                ui.selectable_value(&mut self.wb_tool, 0, tr("\u{1F4DD} Pen"));
+                ui.selectable_value(&mut self.wb_tool, 1, tr("\u{1F4DD} Sticky note"));
+                ui.selectable_value(&mut self.wb_tool, 2, tr("\u{270B} Move notes"));
                 for c in [[32, 32, 32], [0xd3, 0x3d, 0x44], [8, 128, 234], [41, 151, 100], [0xf8, 0xae, 0x00], [0x5f, 0x55, 0xee]] {
                     let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                     ui.painter().circle_filled(r.center(), 8.0, rgb(c));
@@ -949,16 +949,16 @@ impl App {
                     }
                 }
                 ui.separator();
-                if ui.button("Undo").clicked() {
+                if ui.button(tr("Undo")).clicked() {
                     self.data.extra.whiteboards[wi].strokes.pop();
                     self.dirty = true;
                 }
-                if ui.button("Clear").clicked() {
+                if ui.button(tr("Clear")).clicked() {
                     self.data.extra.whiteboards[wi].strokes.clear();
                     self.data.extra.whiteboards[wi].notes.clear();
                     self.dirty = true;
                 }
-                if ui.add(egui::Button::new(RichText::new("Delete").color(t.danger)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)).frame(false)).clicked() {
                     delete = true;
                 }
             });
@@ -1046,7 +1046,7 @@ impl App {
             return;
         }
         rs.sort_by_key(|r| r.due_ts);
-        ui.label(RichText::new("Reminders").strong());
+        ui.label(RichText::new(tr("Reminders")).strong());
         for r in rs {
             ui.horizontal(|ui| {
                 let mut done = false;
@@ -1057,7 +1057,7 @@ impl App {
                     }
                 }
                 ui.label(&r.text);
-                let when = chrono::DateTime::from_timestamp(r.due_ts, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %-d, %-I:%M %p").to_string()).unwrap_or_default();
+                let when = chrono::DateTime::from_timestamp(r.due_ts, 0).map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p")).unwrap_or_default();
                 ui.label(RichText::new(when).small().color(if r.due_ts < now { t.danger } else { t.text3 }));
             });
         }
@@ -1074,14 +1074,14 @@ impl App {
     pub(super) fn ai_page(&mut self, ui: &mut Ui) {
         let t = self.t();
         egui::Frame::new().inner_margin(egui::Margin::symmetric(40, 40)).show(ui, |ui| {
-            ui.label(RichText::new("\u{2728} AI").size(24.0));
+            ui.label(RichText::new(tr("\u{2728} AI")).size(24.0));
             ui.add_space(8.0);
-            ui.label(RichText::new("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.").color(t.text2));
-            ui.label(RichText::new("They will be connected together with the shared server. Everything else works now.").color(t.text2));
+            ui.label(RichText::new(tr("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.")).color(t.text2));
+            ui.label(RichText::new(tr("They will be connected together with the shared server. Everything else works now.")).color(t.text2));
             ui.add_space(16.0);
             // read-only rather than disabled: a disabled field fades its hint
             // to an unreadable grey on the dark theme
-            ui.add(egui::TextEdit::multiline(&mut String::new()).interactive(false).hint_text(RichText::new("Ask anything... (available with the server)").color(t.text3)).desired_rows(3).desired_width(600.0));
+            ui.add(egui::TextEdit::multiline(&mut String::new()).interactive(false).hint_text(RichText::new(tr("Ask anything... (available with the server)")).color(t.text3)).desired_rows(3).desired_width(600.0));
         });
     }
 
@@ -1095,10 +1095,10 @@ impl App {
             ui.add_space(4.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let hidden: Vec<String> = self.data.extra.hidden_cards.clone();
-                let add = ui.add_enabled(!hidden.is_empty(), egui::Button::new("+ Add card"));
+                let add = ui.add_enabled(!hidden.is_empty(), egui::Button::new(tr("+ Add card")));
                 popup(ui, &add, egui::Id::new("ov_add_card"), 180.0, |ui| {
                     for c in &hidden {
-                        let b = ui.button(c);
+                        let b = ui.button(tr(c));
                         name_it(&b, &format!("Add card {}", c));
                         if b.clicked() {
                             self.data.extra.hidden_cards.retain(|x| x != c);
@@ -1107,12 +1107,12 @@ impl App {
                         }
                     }
                 });
-                let cz = ui.button("\u{2699}  Customize");
+                let cz = ui.button(tr("\u{2699}  Customize"));
                 popup(ui, &cz, egui::Id::new("ov_customize"), 200.0, |ui| {
-                    ui.label(RichText::new("Cards").small().color(t.text3));
+                    ui.label(RichText::new(tr("Cards")).small().color(t.text3));
                     for c in OV_CARDS {
                         let mut on = !self.data.extra.hidden_cards.iter().any(|x| x == c);
-                        let cb = ui.checkbox(&mut on, c);
+                        let cb = ui.checkbox(&mut on, tr(c));
                         name_it(&cb, &format!("Card {}", c));
                         if cb.changed() {
                             if on {
@@ -1139,7 +1139,7 @@ impl App {
                     let tt = s.t();
                     let items = s.recent_items(Some(&lists));
                     if items.is_empty() {
-                        ui.label(RichText::new("Your recently opened items will appear here.").color(tt.text2));
+                        ui.label(RichText::new(tr("Your recently opened items will appear here.")).color(tt.text2));
                     }
                     for (kind, id, name, place) in items.into_iter().take(8) {
                         ui.horizontal(|ui| {
@@ -1159,7 +1159,7 @@ impl App {
                                     _ => s.actions.push(Action::Go(Location::List(id))),
                                 }
                             }
-                            ui.label(RichText::new(format!("\u{2022} in {}", place)).small().color(tt.text3));
+                            ui.label(RichText::new(trf!("\u{2022} in {}", place)).small().color(tt.text3));
                         });
                     }
                 });
@@ -1170,7 +1170,7 @@ impl App {
                 self.ov_card(ui, cw, "Docs", |s, ui| {
                     let docs: Vec<(u64, String)> = s.data.docs.iter().filter(|d| (space.is_none() || d.space == space) && d.parent.is_none()).map(|d| (d.id, d.title.clone())).collect();
                     if docs.is_empty() {
-                        ui.label(RichText::new("There are no Docs in this location yet.").color(s.t().text2));
+                        ui.label(RichText::new(tr("There are no Docs in this location yet.")).color(s.t().text2));
                     }
                     for (id, n) in docs {
                         if ui.link(format!("\u{1F4C4} {}", n)).clicked() {
@@ -1179,7 +1179,7 @@ impl App {
                         }
                     }
                     ui.add_space(6.0);
-                    if primary_button(ui, &s.t(), "Add a Doc").clicked() {
+                    if primary_button(ui, &s.t(), tr("Add a Doc")).clicked() {
                         s.new_doc(space);
                     }
                 });
@@ -1189,7 +1189,7 @@ impl App {
                 self.ov_card(ui, cw, "Bookmarks", |s, ui| {
                     let bms = s.data.extra.bookmarks.clone();
                     if bms.is_empty() {
-                        ui.label(RichText::new("Bookmarks make it easy to save items or any URL from around the web.").color(s.t().text2));
+                        ui.label(RichText::new(tr("Bookmarks make it easy to save items or any URL from around the web.")).color(s.t().text2));
                     }
                     let mut remove = None;
                     for b in &bms {
@@ -1207,7 +1207,7 @@ impl App {
                         s.dirty = true;
                     }
                     ui.add_space(6.0);
-                    if primary_button(ui, &s.t(), "Add Bookmark").clicked() {
+                    if primary_button(ui, &s.t(), tr("Add Bookmark")).clicked() {
                         s.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                     }
                 });
@@ -1222,18 +1222,18 @@ impl App {
             if matches!(self.loc, Location::Space(_)) && card_on(self, "Folders") {
                 self.ov_card(ui, w, "Folders", |s, ui| {
                     if folders.is_empty() {
-                        ui.label(RichText::new("Add new Folder to your Space").color(s.t().text2));
+                        ui.label(RichText::new(tr("Add new Folder to your Space")).color(s.t().text2));
                     }
                     ui.horizontal_wrapped(|ui| {
                         for (id, n, c) in &folders {
-                            if ui.add(egui::Button::new(format!("\u{1F4C1} {}  ({} lists)", n, c)).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
+                            if ui.add(egui::Button::new(trf!("\u{1F4C1} {}  ({} lists)", n, c)).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
                                 s.actions.push(Action::Go(Location::Folder(*id)));
                             }
                         }
                     });
                     if let Location::Space(sid) = s.loc {
                         ui.add_space(6.0);
-                        if primary_button(ui, &s.t(), "Add Folder").clicked() {
+                        if primary_button(ui, &s.t(), tr("Add Folder")).clicked() {
                             s.actions.push(Action::NewFolder(sid));
                         }
                     }
@@ -1252,7 +1252,7 @@ impl App {
         const COLS: [(f32, &str); 7] = [(0.0, "Name"), (0.28, "Color"), (0.36, "Progress"), (0.55, "Start"), (0.66, "End"), (0.77, "Priority"), (0.88, "Owner")];
         let (hr, _) = ui.allocate_exact_size(vec2(w, 24.0), Sense::hover());
         for (x, h) in COLS {
-            ui.painter().text(pos2(hr.left() + w * x, hr.center().y), Align2::LEFT_CENTER, h, FontId::proportional(12.5), tt.text2);
+            ui.painter().text(pos2(hr.left() + w * x, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(12.5), tt.text2);
         }
         let cell = |r: Rect, i: usize| {
             let x0 = r.left() + w * COLS[i].0;
@@ -1294,7 +1294,7 @@ impl App {
                         }
                     }
                 });
-                if ui.small_button("No color").clicked() {
+                if ui.small_button(tr("No color")).clicked() {
                     edited.color = None;
                     close_popup(ui);
                 }
@@ -1336,7 +1336,7 @@ impl App {
             name_it(&prr, &format!("Priority of {}", item.name));
             if item.priority > 0 {
                 paint_flag(&p, c5.left_center() + vec2(4.0, 0.0), priority_color(item.priority, &tt), 12.0);
-                p.text(c5.left_center() + vec2(16.0, 0.0), Align2::LEFT_CENTER, PRIORITIES[item.priority as usize].label, FontId::proportional(13.0), tt.text);
+                p.text(c5.left_center() + vec2(16.0, 0.0), Align2::LEFT_CENTER, tr(PRIORITIES[item.priority as usize].label), FontId::proportional(13.0), tt.text);
             } else {
                 p.text(c5.left_center(), Align2::LEFT_CENTER, "\u{2013}", FontId::proportional(13.0), tt.text3);
             }
@@ -1374,7 +1374,7 @@ impl App {
             }
         }
         ui.add_space(6.0);
-        if ui.add(egui::Button::new(RichText::new("+ New List").color(tt.text2)).frame(false)).clicked() {
+        if ui.add(egui::Button::new(RichText::new(tr("+ New List")).color(tt.text2)).frame(false)).clicked() {
             let space = self.current_space();
             let folder = if let Location::Folder(f) = self.loc { Some(f) } else { None };
             self.open_new_list(space, folder);
@@ -1387,7 +1387,8 @@ impl App {
             ui.vertical(|ui| {
                 ui.set_width(w - 34.0);
                 ui.set_min_height(150.0);
-                ui.label(RichText::new(title).size(15.0));
+                ui.label(RichText::new(tr(title)).size(15.0));
+
                 ui.add_space(8.0);
                 add(self, ui);
             });

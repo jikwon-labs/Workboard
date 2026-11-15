@@ -1,4 +1,5 @@
 mod app;
+mod i18n;
 mod model;
 use wb_sync as sync;
 mod theme;

@@ -8565,8 +8565,13 @@ fn slack_matches_from_an_earlier_version_move_into_the_map_without_an_edit() {
     let mut a = App::build(None, Some(a.data.clone()));
     assert_eq!(
         a.data.extra.slack_map,
-        [("UA".to_string(), alex), ("UB".to_string(), jordan)].into(),
-        "the first member wins, as matching picked before"
+        [("UB".to_string(), jordan)].into(),
+        "UA, on two members, stays with the older lists until someone decides"
+    );
+    assert_eq!(
+        a.data.slack_member("UA"),
+        Some(alex),
+        "the first member still wins"
     );
     let before = a.data.extra.sync.clone();
     slack_push(&mut a);
@@ -8760,11 +8765,11 @@ fn an_unfingerprinted_slack_match_is_not_an_edit_after_opening() {
 }
 
 /// An older version could leave one Slack id on two members. Opening the
-/// workspace carries the first into the shared map without anyone deciding
-/// it; when that member is deleted the other one the older lists name still
-/// counts, instead of a new member being made on the next import.
+/// workspace leaves that id out of the shared map (nobody decided it), so
+/// when the first member is deleted the other one the older lists name
+/// still counts, instead of a new member being made on the next import.
 #[test]
-fn a_carried_slack_match_falls_back_to_the_other_older_list() {
+fn a_slack_id_on_two_older_lists_falls_back_to_the_other_one() {
     use super::slack::Assign;
     let mut a = app();
     let (alex, sam) = (2, 3);
@@ -8776,18 +8781,37 @@ fn a_carried_slack_match_falls_back_to_the_other_older_list() {
             .unwrap()
             .slack = vec!["UX".into()];
     }
-    assert!(a.data.fold_legacy_slack());
-    assert_eq!(a.data.extra.slack_map.get("UX"), Some(&alex));
+    a.data.fold_legacy_slack();
+    assert_eq!(a.data.extra.slack_map.get("UX"), None, "not carried");
     assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(alex)));
     a.data.members.retain(|m| m.id != alex);
     assert_eq!(a.data.slack_member("UX"), Some(sam));
     assert_eq!(slack_next(&a, "UX"), Some(Assign::Member(sam)));
-    // a real decision for a member who is gone stays no decision
+}
+
+/// A Slack match decided before the workspace was shared stays a decision
+/// after sharing (sharing starts the sync bookkeeping afresh): an overturned
+/// match from an older version doesn't come back when its member is deleted.
+#[test]
+fn a_slack_decision_made_before_sharing_stays_one_after() {
+    use super::slack::{plan, Assign};
+    let dir = temp_folder("slack-share");
+    let mut a = app();
+    let (alex, sam) = (2, 3);
     a.data
-        .extra
-        .sync
-        .values
-        .insert(crate::sync::map_part(crate::model::SLACK_MAP, "UX"), 7);
-    a.data.extra.slack_map.insert("UX".into(), 99);
+        .members
+        .iter_mut()
+        .find(|m| m.id == alex)
+        .unwrap()
+        .slack = vec!["UX".into()];
+    let (u, c) = slack_moves(&[(1, "UX")]);
+    let mut p = plan(&a.data, u, c);
+    p.assign.insert("UX".into(), Assign::Member(sam));
+    a.import_slack(&p);
+    assert_eq!(a.data.extra.slack_map.get("UX"), Some(&sam));
+    a.share_here(dir.to_str().unwrap()).unwrap();
+    a.data.members.retain(|m| m.id != sam);
     assert_eq!(a.data.slack_member("UX"), None);
+    assert_eq!(slack_next(&a, "UX"), Some(Assign::New));
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -83,7 +83,7 @@ fn map_entry(part: &str) -> Option<(&'static str, &str)> {
         .find_map(|p| Some((*p, part.strip_prefix(p)?.strip_prefix('/')?)))
 }
 
-pub fn json_hash(v: &Value) -> u64 {
+fn json_hash(v: &Value) -> u64 {
     fnv(serde_json::to_string(v).unwrap_or_default().as_bytes())
 }
 

@@ -1602,29 +1602,24 @@ impl Data {
     /// lists stay as they were, for those versions, and may name a member
     /// a later decision moved them off): an entry for a member no longer
     /// here is no decision at all, and matching goes on by email or name.
-    /// An entry only carried over from those lists (nobody decided it) is
-    /// not a decision either: if its member is gone, the next member the
-    /// lists name still counts.
     pub fn slack_member(&self, sid: &str) -> Option<u64> {
-        let part = crate::sync::map_part(SLACK_MAP, sid);
-        let meta = &self.extra.sync;
-        let entry = self.extra.slack_map.get(sid).copied();
-        let stamped = meta.values.contains_key(&part);
-        // carried over from an older version's lists (`fold_legacy_slack`,
-        // or an import that only kept what matching found): fingerprinted
-        // but never stamped, so nobody decided it. A decision is stamped,
-        // or was made here and not stamped yet (its value no longer matches
-        // the fingerprint, or has none).
-        let carried = !stamped
-            && entry.is_some_and(|m| {
-                meta.value_hashes.get(&part) == Some(&crate::sync::json_hash(&serde_json::json!(m)))
-            });
-        if stamped || (entry.is_some() && !carried) {
-            return entry.filter(|m| self.member(*m).is_some());
+        let decided = self.extra.slack_map.contains_key(sid)
+            || self
+                .extra
+                .sync
+                .values
+                .contains_key(&crate::sync::map_part(SLACK_MAP, sid));
+        if decided {
+            return self
+                .extra
+                .slack_map
+                .get(sid)
+                .copied()
+                .filter(|m| self.member(*m).is_some());
         }
-        if let Some(m) = entry.filter(|m| self.member(*m).is_some()) {
-            return Some(m);
-        }
+        // an older version's lists; one could name a Slack person on two
+        // members (`fold_legacy_slack` leaves those out of the map), and the
+        // first member still here wins
         self.members
             .iter()
             .find(|m| m.slack.iter().any(|x| x == sid))
@@ -1637,12 +1632,31 @@ impl Data {
     /// decision (`sync::carry_map_entry`): opening the workspace in the new
     /// version isn't an edit, and any real decision, here or on a teammate's
     /// computer, wins over them. An older version could leave one Slack id
-    /// on two members; the first wins, as matching picked before. The
+    /// on two members; those stay out of the map (matching keeps reading the
+    /// lists, first member still here) until someone decides. The
     /// members keep their lists, for older versions. True when any came in.
     pub fn fold_legacy_slack(&mut self) -> bool {
         let mut folded = false;
+        // a Slack person an older version left on two members stays with
+        // those lists (first member still here wins) until someone decides:
+        // carrying one of them into the map would block the other if that
+        // member were deleted
+        let mut holders: std::collections::HashMap<&str, usize> = Default::default();
         for m in &self.members {
             for sid in &m.slack {
+                *holders.entry(sid.as_str()).or_default() += 1;
+            }
+        }
+        let ambiguous: std::collections::HashSet<String> = holders
+            .into_iter()
+            .filter(|(_, n)| *n > 1)
+            .map(|(k, _)| k.to_string())
+            .collect();
+        for m in &self.members {
+            for sid in &m.slack {
+                if ambiguous.contains(sid) {
+                    continue;
+                }
                 let decided = self
                     .extra
                     .sync

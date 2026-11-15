@@ -1517,7 +1517,7 @@ impl App {
                     ui.label(RichText::new(tr("You're not in any team yet")).color(t.text3));
                 } else if teams.is_empty() && self.data.solo() {
                     // alone: a team of one means nothing yet, so invite first;
-                    // Create Team stays in the bar above
+                    // Create team stays in the bar above
                     ui.add_space(60.0);
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new(tr("Invite people to make teams")).size(24.0));

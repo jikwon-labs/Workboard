@@ -201,7 +201,7 @@ fn teams_page_alone_leads_with_inviting_people() {
     h.app.hub_filter = 0;
     h.settle();
     assert!(h.has("Invite people to make teams"));
-    assert_eq!(h.count_named("Create Team"), 1, "one create button");
+    assert_eq!(h.count_named("Create team"), 1, "one create button");
     h.click("Invite people");
     assert!(matches!(h.app.modal, Some(Modal::Invite { .. })));
     // with other people in the workspace the usual page shows
@@ -334,7 +334,7 @@ fn empty_channel_alone_offers_invite_instead_of_add_people() {
     h.click("general");
     assert_eq!(h.app.section, Section::Chat);
     assert!(!h.has("+  Add People"), "nobody else to add");
-    h.click("+  Invite People");
+    h.click("+  Invite people");
     assert!(matches!(h.app.modal, Some(Modal::Invite { .. })));
     // with teammates it adds them to the channel as before
     let mut h = Ui1::new();
@@ -473,7 +473,7 @@ fn dark_mode_tag_chips_are_readable() {
     // and the chips really use it in the dark theme
     let mut h = Ui1::new();
     h.app.data.dark = true;
-    h.app.open_settings("Tag Manager");
+    h.app.open_settings("Tag manager");
     h.settle();
     let tag = h.app.data.tasks.iter().flat_map(|t| t.tags.clone()).next();
     let tag = tag.expect("the example data has tags");

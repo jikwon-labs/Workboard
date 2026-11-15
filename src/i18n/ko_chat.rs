@@ -37,7 +37,7 @@ pub const T: &[(&str, &str)] = &[
     ("Chat in {}", "{}에서 채팅"),
     ("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.", "작업과 대화를 오가며 자연스럽게 협업하세요. 팀과 채팅을 시작하거나 작업을 연결해 할 일을 놓치지 마세요."),
     ("+  Add People", "+  사람 추가"),
-    ("+  Invite People", "+  사람 초대"),
+    ("+  Invite people", "+  사람 초대"),
     ("\u{2728}  Import from Slack", "\u{2728}  Slack에서 가져오기"),
     ("Track Tasks", "작업 추적"),
     ("Manage tasks, bugs, people, and more", "작업, 버그, 사람 등을 관리합니다"),

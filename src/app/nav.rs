@@ -154,7 +154,7 @@ impl App {
                 1
             }
         };
-        let mentions = |text: &str| !my_at.is_empty() && text.contains(&my_at);
+        let mentions = |text: &str| !my_at.is_empty() && super::chat::mentions(text, &my_at[1..]);
         let mut out = vec![];
         for task in &self.data.tasks {
             let mine = task.assignees.contains(&me) || task.activity.iter().any(|a| a.author == me && !a.comment && a.text == "created this task");

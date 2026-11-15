@@ -430,6 +430,46 @@ pub struct Channel {
     /// The List made with "Add a List" and tied to this channel.
     #[serde(default)]
     pub list: Option<u64>,
+    /// Who made it (0: made before this was kept). Only they (or, for 0,
+    /// any member) and the server's owner and admins may delete it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub creator: u64,
+}
+
+/// The messages I've seen in a conversation, to tell new ones by id rather
+/// than by their clock: the newest `SeenIds::MAX` ids (sorted) and the time
+/// of the oldest of them. A message from `floor` on that isn't among `ids`
+/// is new, even when its author's clock was behind. Only on this computer.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SeenIds {
+    pub ids: Vec<u64>,
+    pub floor: i64,
+}
+
+impl SeenIds {
+    pub const MAX: usize = 300;
+
+    /// The newest MAX of these (id, time) pairs (all when there are fewer;
+    /// then everything counts as covered).
+    pub fn of(msgs: impl Iterator<Item = (u64, i64)>) -> SeenIds {
+        let mut v: Vec<(u64, i64)> = msgs.collect();
+        v.sort_by_key(|x| std::cmp::Reverse(x.1));
+        let floor = if v.len() > Self::MAX { v[Self::MAX - 1].1 } else { i64::MIN };
+        // (every message at the floor's time is kept, so none of them looks new)
+        let mut ids: Vec<u64> = v.into_iter().filter(|x| x.1 >= floor).map(|x| x.0).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        SeenIds { ids, floor }
+    }
+
+    pub fn has(&self, id: u64) -> bool {
+        self.ids.binary_search(&id).is_ok()
+    }
+
+    /// A message not seen, inside the time this covers.
+    pub fn is_new(&self, id: u64, ts: i64) -> bool {
+        ts >= self.floor && !self.has(id)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -794,6 +834,14 @@ pub struct Extra {
     /// until a message newer than that arrives (only on this computer).
     #[serde(default)]
     pub closed_dms: Vec<(u64, i64)>,
+    /// The messages each closed direct message had when I closed it: a new
+    /// one brings it back even when its author's clock is behind.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub closed_dm_seen: std::collections::BTreeMap<u64, SeenIds>,
+    /// The messages I've seen in each channel and direct message (by
+    /// channel id), so a late message still counts as unread.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub chat_seen: std::collections::BTreeMap<u64, SeenIds>,
     /// Tasks people added to their own timesheet with "+ Add task":
     /// [member, task] pairs.
     #[serde(default)]
@@ -839,6 +887,8 @@ impl Default for Extra {
             replies_read: vec![],
             welcome: false,
             closed_dms: vec![],
+            closed_dm_seen: Default::default(),
+            chat_seen: Default::default(),
             sheet_rows: vec![],
         }
     }

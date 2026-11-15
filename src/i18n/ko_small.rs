@@ -29,6 +29,18 @@ pub const T: &[(&str, &str)] = &[
     ("That video can't be opened.", "이 동영상을 열 수 없습니다."),
     ("That video can't be played on this Mac.", "이 Mac에서는 이 동영상을 재생할 수 없습니다."),
     ("Pictures and videos need macOS.", "사진과 동영상은 macOS에서만 쓸 수 있습니다."),
+    ("{} isn't a picture or a video.", "{}은(는) 사진이나 동영상이 아닙니다."),
+    ("{} can't be read.", "{}을(를) 읽을 수 없습니다."),
+    ("{} is larger than 500 MB.", "{}은(는) 500MB보다 큽니다."),
+    ("Couldn't put {} in the shared folder: {}", "{}을(를) 공유 폴더에 넣지 못했습니다: {}"),
+    ("Couldn't reach the server: {}", "서버에 연결하지 못했습니다: {}"),
+    ("The server said {} {}", "서버 응답: {} {}"),
+    ("You're not signed in to the server.", "서버에 로그인되어 있지 않습니다."),
+    ("The file is larger than the server takes (500 MB).", "파일이 서버가 받는 크기(500MB)보다 큽니다."),
+    ("The server doesn't have this file.", "서버에 이 파일이 없습니다."),
+    ("The server doesn't take pictures and videos yet. Update workboard-server.", "서버가 아직 사진과 동영상을 받지 않습니다. workboard-server를 업데이트하세요."),
+    ("Stopped.", "중단했습니다."),
+    ("The file arrived damaged. Try again.", "파일이 손상된 채로 도착했습니다. 다시 시도하세요."),
     // media
     ("Choose pictures or videos to send", "보낼 사진이나 동영상을 고르세요"),
     // huddle

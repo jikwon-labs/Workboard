@@ -2732,3 +2732,149 @@ fn an_older_servers_unnamed_refusal_ends_a_waiting_huddle() {
     a.huddle_denied_unnamed();
     assert!(a.huddle.channel.is_none());
 }
+
+
+#[test]
+fn seen_ids_keep_the_newest_and_cover_from_the_oldest_of_them() {
+    let few = SeenIds::of((1..=5).map(|i| (i, i as i64 * 10)));
+    assert_eq!(few.ids, vec![1, 2, 3, 4, 5]);
+    assert!(few.is_new(99, -1_000_000), "with few messages everything is covered");
+    let many = SeenIds::of((1..=400u64).map(|i| (i, i as i64)));
+    assert_eq!(many.ids.len(), SeenIds::MAX);
+    assert_eq!(many.floor, 101);
+    assert!(many.has(400) && !many.has(100));
+    assert!(many.is_new(999, 150) && !many.is_new(999, 50), "only inside what it covers");
+}
+
+#[test]
+fn a_late_message_or_one_from_a_clock_behind_counts_as_unread() {
+    let mut a = app();
+    let cid = a.data.channels.iter().find(|c| c.name == "general").unwrap().id;
+    a.mark_read(cid);
+    let get = |a: &App| a.data.channels.iter().find(|c| c.id == cid).unwrap().clone();
+    assert_eq!(a.unread(&get(&a)), 0);
+    // written an hour ago by its author's clock, arriving only now
+    let id = a.data.new_id();
+    let behind = get(&a).last_read - 3600;
+    a.data.channels.iter_mut().find(|c| c.id == cid).unwrap().messages.push(test_msg(id, 2, "late", behind));
+    assert_eq!(a.unread(&get(&a)), 1, "a message not seen yet is new whatever its time");
+    a.mark_read(cid);
+    assert_eq!(a.unread(&get(&a)), 0);
+    // "Mark unread" from a message on brings it and the later ones back
+    let ts = get(&a).messages.iter().filter(|m| m.author != 1).map(|m| m.ts).min().unwrap();
+    a.apply_chat(vec![ChatAction::MarkUnread { ch: cid, ts }]);
+    let others = get(&a).messages.iter().filter(|m| m.author != 1 && m.ts >= ts).count();
+    assert_eq!(a.unread(&get(&a)), others);
+}
+
+#[test]
+fn a_closed_dm_comes_back_for_a_new_message_from_a_clock_behind() {
+    let mut a = app();
+    let dm = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    let get = |a: &App| a.data.channels.iter().find(|c| c.id == dm).unwrap().clone();
+    a.close_dm(dm);
+    assert!(!a.listed(&get(&a)));
+    let id = a.data.new_id();
+    a.data.channels.iter_mut().find(|c| c.id == dm).unwrap().messages.push(test_msg(id, 2, "earlier by my clock", now_ts() - 86_400));
+    assert!(a.listed(&get(&a)), "a message that wasn't there when it was closed brings it back");
+}
+
+#[test]
+fn two_dms_that_both_have_messages_show_as_one_conversation() {
+    let mut a = app();
+    let older = a.data.channels.iter().find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2]).unwrap().id;
+    let newer = a.data.new_id();
+    let mid = a.data.new_id();
+    a.data.channels.push(Channel { id: newer, kind: ChannelKind::Direct, members: vec![2, 1], messages: vec![test_msg(mid, 2, "in the other copy", now_ts())], ..Default::default() });
+    let get = |a: &App, id: u64| a.data.channels.iter().find(|c| c.id == id).unwrap().clone();
+    assert!(a.listed(&get(&a, older)));
+    assert!(!a.listed(&get(&a, newer)));
+    assert_eq!(a.conversation(&get(&a, older)).len(), 2);
+    assert!(a.unread(&get(&a, older)) >= 1, "the other copy's messages count in the one shown");
+    // acting on a message from the other copy changes it where it is
+    a.apply_chat(vec![ChatAction::React { ch: older, msg: mid, emoji: "\u{1F44D}".into() }]);
+    assert_eq!(get(&a, newer).messages[0].reactions.len(), 1);
+    // new messages go to the older one; reading it reads both
+    a.apply_chat(vec![ChatAction::Send { ch: older, text: "hello".into(), parent: None, files: vec![] }]);
+    assert!(get(&a, older).messages.iter().any(|m| m.text == "hello"));
+    a.mark_read(older);
+    assert_eq!(a.unread(&get(&a, older)), 0);
+    assert!(a.data.extra.chat_seen.get(&newer).is_some_and(|s| s.has(mid)));
+}
+
+#[test]
+fn only_a_channels_maker_or_an_admin_may_delete_it() {
+    let mut a = app();
+    a.apply_chat(vec![ChatAction::NewChannel("mine".into())]);
+    let c = a.data.channels.iter().find(|c| c.name == "mine").unwrap().clone();
+    assert_eq!(c.creator, a.data.me);
+    assert!(a.may_manage_channel(&c));
+    let mut theirs = c.clone();
+    theirs.creator = 2;
+    assert!(!a.may_manage_channel(&theirs), "a member who didn't make it");
+    a.sync_rt.role = Some(wb_net::Role::Admin);
+    assert!(a.may_manage_channel(&theirs), "the server's admins may");
+    a.sync_rt.role = Some(wb_net::Role::Member);
+    let mut old = theirs.clone();
+    old.creator = 0;
+    assert!(a.may_manage_channel(&old), "from before makers were kept: any member");
+    old.members.retain(|m| *m != a.data.me);
+    assert!(!a.may_manage_channel(&old));
+    // the maker isn't saved when there is none, so older copies stay the same
+    assert!(!serde_json::to_string(&old).unwrap().contains("creator"));
+}
+
+#[test]
+fn a_mention_needs_the_whole_name() {
+    use super::chat::mentions;
+    assert!(mentions("hi @Bob", "Bob"));
+    assert!(mentions("@Bob, look", "Bob"));
+    assert!(mentions("(cc @Bob)", "Bob"));
+    assert!(!mentions("hi @Bobby", "Bob"));
+    assert!(!mentions("hi @Bob", "Bo"), "@Bo is not the start of @Bob");
+    assert!(mentions("hi @Alex Kim!", "Alex Kim"));
+    assert!(!mentions("hi @Bob", ""));
+}
+
+#[test]
+fn a_failed_upload_for_a_sent_message_is_tried_again_and_not_cancelled() {
+    let mut a = app();
+    a.add_media(false, Some(picture_file("again.png", 16, 16)), None);
+    let att = until_ready(&mut a, false).remove(0);
+    let sha = att.file.clone();
+    let remote = super::files::Remote::Server { addr: "127.0.0.1:9".into(), auth: wb_net::Auth { device: "d".into(), token: "t".into() } };
+    a.files.upload_soon(&att, &remote);
+    // removing the same file from a message box doesn't stop it
+    a.files.cancel_upload(&sha);
+    a.files.settle(&remote, |f| matches!(f.state(&sha), Some(super::files::Transfer::Failed(_))) && f.upload_tries(&sha) == Some((1, true)));
+    a.files.retry_due(&sha);
+    a.files.settle(&remote, |f| f.upload_tries(&sha).is_some_and(|(n, _)| n == 2));
+}
+
+#[test]
+fn a_picture_added_before_sharing_goes_up_when_the_message_is_sent() {
+    let mut a = app();
+    a.add_media(false, Some(picture_file("early.png", 16, 16)), None);
+    let files = until_ready(&mut a, false);
+    let sha = files[0].file.clone();
+    // now the workspace is on a server this computer is signed in to
+    a.data.extra.shared = Some(crate::sync::SharedCfg { folder: String::new(), device: "dev-early".into(), tag: 1, server: Some("127.0.0.1:9".into()) });
+    super::together::save_token("127.0.0.1:9", "dev-early", "tok");
+    let ch = a.data.channels[0].id;
+    a.apply_chat(vec![ChatAction::Send { ch, text: "made before sharing".into(), parent: None, files }]);
+    super::together::forget_token("127.0.0.1:9", "dev-early");
+    assert!(a.files.upload_tries(&sha).is_some(), "it is sent to the server (and tried again until it's there)");
+}
+
+#[test]
+fn file_errors_are_shown_in_the_interface_language() {
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    let shown = App::error_text("cat.gif isn't a picture or a video.");
+    let net = App::error_text("Couldn't reach the server: refused");
+    let plain = App::error_text("The server doesn't have this file.");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(shown, "cat.gif은(는) 사진이나 동영상이 아닙니다.");
+    assert_eq!(net, "서버에 연결하지 못했습니다: refused");
+    assert_eq!(plain, "서버에 이 파일이 없습니다.");
+    assert_eq!(App::error_text("Couldn't put a.png in the shared folder: full"), "Couldn't put a.png in the shared folder: full");
+}

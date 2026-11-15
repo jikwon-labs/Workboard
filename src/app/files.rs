@@ -11,7 +11,8 @@
 // Moving files runs on two lanes of two "workboard-files" threads each, one
 // lane for pictures and one for videos, so a big video never holds up a
 // picture; "workboard-media" prepares and decodes. A file that couldn't be
-// fetched is tried again later (see RETRY_SECS).
+// fetched is tried again later (see RETRY_SECS), as is one that a sent
+// message refers to but that didn't get to the server (`upload_soon`).
 
 use super::*;
 use crate::media::{self, Rgba};
@@ -112,6 +113,12 @@ pub(super) struct Files {
     wants: RefCell<Vec<(String, String, MediaKind, u32)>>,
     asked: HashSet<String>,
     fetches: HashMap<String, Fetch>,
+    /// files that must get to the server though no message box waits for
+    /// them (sent messages, earlier ones when sharing starts), tried again
+    /// like fetches until they're there
+    background: HashMap<String, (Attachment, Fetch)>,
+    /// "server\nsha" for each file known to be on a server
+    on_server: Arc<Mutex<HashSet<String>>>,
     /// uploads to stop (their attachment was taken out of the message box)
     cancelled: Arc<Mutex<HashSet<String>>>,
     /// the server sign-in last read from the keychain: (server, device,
@@ -135,6 +142,7 @@ impl Files {
         let (done_tx, done) = mpsc::channel::<Done>();
         let states: Arc<Mutex<HashMap<String, Transfer>>> = Default::default();
         let ctx: Arc<Mutex<Option<egui::Context>>> = Default::default();
+        let on_server: Arc<Mutex<HashSet<String>>> = Default::default();
         let wake = {
             let ctx = ctx.clone();
             move || {
@@ -146,11 +154,11 @@ impl Files {
         for rx in [net_rx, small_rx] {
             let rx = Arc::new(Mutex::new(rx));
             for _ in 0..2 {
-                let (dir, states, wake, rx, cancelled) = (dir.clone(), states.clone(), wake.clone(), rx.clone(), cancelled.clone());
+                let (dir, states, wake, rx, cancelled, on_server) = (dir.clone(), states.clone(), wake.clone(), rx.clone(), cancelled.clone(), on_server.clone());
                 let _ = std::thread::Builder::new().name("workboard-files".into()).spawn(move || loop {
                     let job = rx.lock().unwrap().recv();
                     match job {
-                        Ok(job) => move_file(&dir, job, &states, &cancelled, &wake),
+                        Ok(job) => move_file(&dir, job, &states, &cancelled, &on_server, &wake),
                         Err(_) => return,
                     }
                 });
@@ -172,7 +180,7 @@ impl Files {
                 }
             });
         }
-        Files { dir, small, net, work, done, states, wants: Default::default(), asked: Default::default(), fetches: Default::default(), cancelled, token: Default::default(), textures: Default::default(), ok: Default::default(), prepared: vec![], next_local: 1, ctx }
+        Files { dir, small, net, work, done, states, wants: Default::default(), asked: Default::default(), fetches: Default::default(), background: Default::default(), on_server, cancelled, token: Default::default(), textures: Default::default(), ok: Default::default(), prepared: vec![], next_local: 1, ctx }
     }
 
     /// The file in the cache, when it's there.
@@ -250,8 +258,34 @@ impl Files {
         }
     }
 
-    /// Stop sending a file (its tile was removed before it got there).
+    /// A file a sent message refers to (or one from before sharing started):
+    /// get it where the team can fetch it, and on a server keep trying
+    /// (after RETRY_SECS) until it's there. Only files this computer has.
+    pub fn upload_soon(&mut self, att: &Attachment, remote: &Remote) {
+        match remote {
+            Remote::None => {}
+            Remote::Folder(f) => self.to_folder(att, &f.join("files")),
+            Remote::Server { addr, .. } if self.is_on_server(addr, &att.file) => {}
+            Remote::Server { .. } | Remote::SignedOut => {
+                if self.local(&att.file).is_none() {
+                    return;
+                }
+                self.background.entry(att.file.clone()).or_insert_with(|| (att.clone(), Fetch { tries: 1, next: None }));
+                self.upload(att, remote);
+            }
+        }
+    }
+
+    fn is_on_server(&self, addr: &str, sha: &str) -> bool {
+        self.on_server.lock().unwrap().contains(&format!("{}\n{}", addr, sha))
+    }
+
+    /// Stop sending a file (its tile was removed before it got there),
+    /// unless a sent message or sharing still needs it on the server.
     pub fn cancel_upload(&self, sha: &str) {
+        if self.background.contains_key(sha) {
+            return;
+        }
         let mut s = self.states.lock().unwrap();
         if matches!(s.get(sha), Some(Transfer::Up(_))) {
             self.cancelled.lock().unwrap().insert(sha.to_string());
@@ -319,6 +353,7 @@ impl Files {
                 }
             }
         }
+        self.tick_background(ctx, remote);
         for (sha, ext, kind, max) in self.wants.take() {
             let k = key(&sha, max);
             if self.textures.contains_key(&k) || self.asked.contains(&k) {
@@ -358,6 +393,38 @@ impl Files {
         }
     }
 
+    /// Files that must get to the server: start the ones not sent there yet
+    /// (or waiting for a sign-in), and try failed ones again when due.
+    fn tick_background(&mut self, ctx: Option<&egui::Context>, remote: &Remote) {
+        let Remote::Server { addr, .. } = remote else { return };
+        let now = Instant::now();
+        let shas: Vec<String> = self.background.keys().cloned().collect();
+        for sha in shas {
+            if self.is_on_server(addr, &sha) {
+                self.background.remove(&sha);
+                continue;
+            }
+            let state = self.state(&sha);
+            if matches!(state, Some(Transfer::Up(_))) {
+                continue;
+            }
+            let Some((att, f)) = self.background.get_mut(&sha) else { continue };
+            if matches!(&state, Some(Transfer::Failed(e)) if e != NOT_SIGNED_IN) {
+                let at = *f.next.get_or_insert_with(|| now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)]));
+                if now < at {
+                    if let Some(c) = ctx {
+                        c.request_repaint_after(at - now);
+                    }
+                    continue;
+                }
+                f.tries += 1;
+                f.next = None;
+            }
+            let att = att.clone();
+            self.upload(&att, remote);
+        }
+    }
+
     /// Prepared results for the message boxes to pick up.
     pub fn take_prepared(&mut self) -> Vec<(u64, Result<Attachment, String>)> {
         std::mem::take(&mut self.prepared)
@@ -394,6 +461,16 @@ impl Files {
         if let Some(f) = self.fetches.get_mut(sha) {
             f.next = Some(Instant::now());
         }
+        if let Some((_, f)) = self.background.get_mut(sha) {
+            f.next = Some(Instant::now());
+        }
+    }
+
+    /// Tries so far at getting a file to the server, and whether the next
+    /// one waits (tests).
+    #[cfg(test)]
+    pub fn upload_tries(&self, sha: &str) -> Option<(usize, bool)> {
+        self.background.get(sha).map(|(_, f)| (f.tries, f.next.is_some_and(|n| n > Instant::now())))
     }
 }
 
@@ -472,7 +549,7 @@ fn prepare(dir: &Path, path: Option<&Path>, png: Option<Vec<u8>>, name: &str, fo
 }
 
 /// A files thread: one upload, download or folder copy.
-fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, cancelled: &Mutex<HashSet<String>>, wake: &impl Fn()) {
+fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, cancelled: &Mutex<HashSet<String>>, on_server: &Mutex<HashSet<String>>, wake: &impl Fn()) {
     let set = |sha: &str, t: Transfer| {
         states.lock().unwrap().insert(sha.to_string(), t);
         wake();
@@ -505,7 +582,10 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, ca
                 wb_net::upload(&addr, &auth, &sha, &path, &ctype, &mut progress)
             };
             match result {
-                Ok(()) => set(&sha, Transfer::Done),
+                Ok(()) => {
+                    on_server.lock().unwrap().insert(format!("{}\n{}", addr, sha));
+                    set(&sha, Transfer::Done)
+                }
                 Err(wb_net::FileError::Cancelled) => {
                     cancelled.lock().unwrap().remove(&sha);
                     states.lock().unwrap().remove(&sha);
@@ -517,7 +597,10 @@ fn move_file(dir: &Path, job: Job, states: &Mutex<HashMap<String, Transfer>>, ca
         Job::Download { sha, addr, auth } => {
             let mut progress = report(&sha, false);
             match wb_net::download(&addr, &auth, &sha, &dir.join(&sha), &mut progress) {
-                Ok(()) => set(&sha, Transfer::Done),
+                Ok(()) => {
+                    on_server.lock().unwrap().insert(format!("{}\n{}", addr, sha));
+                    set(&sha, Transfer::Done)
+                }
                 Err(e) => set(&sha, Transfer::Failed(e.explain())),
             }
         }
@@ -626,26 +709,49 @@ impl App {
     }
 
     /// Sharing just started: the pictures and videos earlier messages refer
-    /// to (the ones this computer has) go where the team can get them.
+    /// to (the ones this computer has), and the ones waiting in message boxes
+    /// (which were ready with nowhere to go), go where the team can get them;
+    /// failed uploads are tried again.
     pub(super) fn share_cached_files(&mut self) {
         let remote = self.media_remote();
         let mut seen = HashSet::new();
-        let atts: Vec<Attachment> = self
+        let mut atts: Vec<Attachment> = self
             .data
             .channels
             .iter()
             .flat_map(|c| c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter())))
             .flat_map(|m| m.attachments.iter())
-            .filter(|a| self.files.local(&a.file).is_some() && seen.insert(a.file.clone()))
             .cloned()
             .collect();
-        for a in &atts {
-            match &remote {
-                Remote::Server { .. } => self.files.upload(a, &remote),
-                Remote::Folder(f) => self.files.to_folder(a, &f.join("files")),
-                Remote::None | Remote::SignedOut => {}
+        atts.extend(self.boxed_attachments());
+        for a in atts.iter().filter(|a| seen.insert(a.file.clone())) {
+            self.files.upload_soon(a, &remote);
+        }
+    }
+
+    /// A message is going out: make sure its pictures and videos are where
+    /// the team can get them (one put in the box before sharing started was
+    /// ready without going anywhere).
+    pub(super) fn send_files(&mut self, files: &[Attachment]) {
+        if files.is_empty() {
+            return;
+        }
+        let remote = self.media_remote();
+        for a in files {
+            self.files.upload_soon(a, &remote);
+        }
+    }
+
+    /// Error text from the files and media threads, in the interface
+    /// language (some carry a file name or a reason inside).
+    pub(super) fn error_text(e: &str) -> String {
+        const WITH_VALUES: [&str; 6] = ["Couldn't reach the server: {}", "{} isn't a picture or a video.", "{} can't be read.", "{} is larger than 500 MB.", "Couldn't put {} in the shared folder: {}", "The server said {} {}"];
+        for pattern in WITH_VALUES {
+            if let Some(values) = fill_back(pattern, e) {
+                return crate::i18n::fill(tr(pattern), &values);
             }
         }
+        tr(e).to_string()
     }
 
     /// Put a file (or a pasted picture) in the channel or thread message box.
@@ -763,7 +869,7 @@ impl App {
                 if let Some(why) = &failed {
                     painter.rect_stroke(rect, 8.0, Stroke::new(2.0, t.danger), egui::StrokeKind::Inside);
                     painter.text(rect.center(), Align2::CENTER_CENTER, "!", FontId::proportional(18.0), t.danger);
-                    let r = resp.clone().on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN { format!("{}\n{}", tr(why), tr("Click to try again")) } else { tr(why).to_string() });
+                    let r = resp.clone().on_hover_text(if p.error.is_none() && why != NOT_SIGNED_IN { format!("{}\n{}", App::error_text(why), tr("Click to try again")) } else { App::error_text(why) });
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
@@ -792,9 +898,11 @@ impl App {
             let list = if thread { &mut self.thread_files } else { &mut self.chat_files };
             let gone = list.iter().find(|p| p.local == l).and_then(|p| p.att.clone());
             list.retain(|p| p.local != l);
-            // stop its upload, unless another message box has the same file
+            // stop its upload, unless another message box or a sent message
+            // has the same file
             if let Some(a) = gone {
-                if !self.boxed_attachments().iter().any(|x| x.file == a.file) {
+                let sent = self.data.channels.iter().flat_map(|c| c.messages.iter().flat_map(|m| std::iter::once(m).chain(m.replies.iter()))).any(|m| m.attachments.iter().any(|x| x.file == a.file));
+                if !sent && !self.boxed_attachments().iter().any(|x| x.file == a.file) {
                     self.files.cancel_upload(&a.file);
                 }
             }
@@ -845,7 +953,7 @@ impl App {
                         painter.rect_filled(rect, 8.0, t.hover);
                         let status = match self.files.state(&a.file) {
                             Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                            Some(Transfer::Failed(e)) => format!("{}\n{}", tr(&e), tr("Click to try again")),
+                            Some(Transfer::Failed(e)) => format!("{}\n{}", App::error_text(&e), tr("Click to try again")),
                             _ if self.files.broken(&a.file, THUMB) => tr("Can't show this file").into(),
                             _ => a.name.clone(),
                         };
@@ -973,7 +1081,7 @@ impl App {
                     }
                     let status = match self.files.state(&a.file) {
                         Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => format!("{}\n{}", tr(&e), tr("Click to try again")),
+                        Some(Transfer::Failed(e)) => format!("{}\n{}", App::error_text(&e), tr("Click to try again")),
                         _ => tr("Loading...").into(),
                     };
                     ui.painter().text(pic.center(), Align2::CENTER_CENTER, status, FontId::proportional(15.0), Color32::from_gray(200));
@@ -1058,7 +1166,7 @@ impl App {
                 } else {
                     let status = match self.files.state(&a.file) {
                         Some(Transfer::Down(f)) => trf!("Loading the video {}%", (f * 100.0) as u32),
-                        Some(Transfer::Failed(e)) => tr(&e).to_string(),
+                        Some(Transfer::Failed(e)) => App::error_text(&e),
                         _ if local.is_some() || v.unplayable.as_deref() == Some(a.file.as_str()) => tr("This video can't be played on this Mac.").into(),
                         _ => tr("Loading the video...").into(),
                     };
@@ -1079,6 +1187,28 @@ impl App {
             self.viewer = Some(v);
         }
     }
+}
+
+/// The values in `text` that fill the "{}"s of `pattern`, when it was made
+/// from it.
+fn fill_back(pattern: &str, text: &str) -> Option<Vec<String>> {
+    let parts: Vec<&str> = pattern.split("{}").collect();
+    let mut rest = text.strip_prefix(parts[0])?;
+    let mut values = vec![];
+    for (i, part) in parts.iter().enumerate().skip(1) {
+        let at = if i == parts.len() - 1 {
+            if part.is_empty() {
+                rest.len()
+            } else {
+                rest.strip_suffix(part)?.len()
+            }
+        } else {
+            rest.find(part)?
+        };
+        values.push(rest[..at].to_string());
+        rest = &rest[at + part.len()..];
+    }
+    Some(values)
 }
 
 /// The part of a texture that fills `size` without stretching (cropped).

@@ -377,7 +377,7 @@ impl App {
         } else {
             None
         };
-        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), private, list });
+        self.data.channels.push(Channel { id, name: clean, kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), private, list, creator: me });
         self.section = Section::Chat;
         self.chat_open = Some(id);
         self.thread_open = None;

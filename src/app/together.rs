@@ -383,8 +383,9 @@ impl App {
             self.sync_rt.pending = true;
         }
         let me = self.data.me;
-        let count_new = |d: &Data| d.channels.iter().flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
-        let before = count_new(&self.data);
+        // (only in conversations I may see)
+        let count_new = |a: &Self| a.data.channels.iter().filter(|c| a.can_see(c)).flat_map(|c| c.messages.iter()).map(|m| (m.author != me) as usize + m.replies.iter().filter(|r| r.author != me).count()).sum::<usize>();
+        let before = count_new(self);
         let seen: Vec<u64> = self.data.channels.iter().filter(|c| c.kind == ChannelKind::Channel && (!c.private || c.members.contains(&me))).map(|c| c.id).collect();
         let mut v = self.data_value();
         let mut changed = sync::merge(&mut v, others);
@@ -418,7 +419,7 @@ impl App {
             self.left_channel(ch);
         }
         if changed {
-            let n = count_new(&self.data).saturating_sub(before);
+            let n = count_new(self).saturating_sub(before);
             if n > 0 {
                 self.toast = Some((if n == 1 { tr("1 new message from your team").into() } else { trf!("{} new messages from your team", n) }, now_ts()));
             }

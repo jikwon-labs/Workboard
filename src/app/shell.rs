@@ -1061,6 +1061,40 @@ impl App {
                         self.avatar_menu(ui)
                     });
                 }
+                // a team server that can't be reached (or won't let this
+                // computer in): a quiet word here, Work together on click
+                if let Some(word) = self.server_trouble() {
+                    ui.add_space(4.0);
+                    let g = ui.painter().layout_no_wrap(
+                        word,
+                        FontId::proportional(12.5),
+                        super::together::WARN,
+                    );
+                    let (r, resp) =
+                        ui.allocate_exact_size(vec2(g.size().x + 26.0, 26.0), Sense::click());
+                    name_it(&resp, "Server connection");
+                    if resp.hovered() {
+                        ui.painter().rect_filled(r, 13.0, t.hover);
+                    }
+                    ui.painter().circle_filled(
+                        r.left_center() + vec2(11.0, 0.0),
+                        3.5,
+                        super::together::WARN,
+                    );
+                    ui.painter().galley(
+                        pos2(r.left() + 19.0, r.center().y - g.size().y / 2.0),
+                        g,
+                        super::together::WARN,
+                    );
+                    let tip = super::together::net_problem(self.sync_rt.net_status.as_ref())
+                        .unwrap_or_default();
+                    if resp
+                        .on_hover_text(format!("{}\n{}", tip, tr("Click for Work together.")))
+                        .clicked()
+                    {
+                        self.modal = Some(self.together_modal());
+                    }
+                }
                 ui.add_space(6.0);
                 let pinned = self.data.extra.pinned_tools.clone();
                 for id in pinned.iter().rev() {

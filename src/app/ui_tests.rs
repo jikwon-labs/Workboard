@@ -1014,6 +1014,68 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.app.data.extra.shared.is_none());
 }
 
+// a server workspace whose server can't be reached, waited on until the
+// app has tried and failed (nothing listens on port 1)
+fn server_down(h: &mut Ui1) {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-down".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !matches!(
+        h.app.sync_rt.net_status,
+        Some(wb_net::Status::Reconnecting(_))
+    ) && std::time::Instant::now() < until
+    {
+        // tests don't save, so the frame doesn't run the connection
+        h.app.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.settle();
+}
+
+#[test]
+fn the_top_bar_says_when_the_team_server_cannot_be_reached() {
+    let mut h = Ui1::new();
+    // working alone: nothing about a server
+    assert!(!h.has("Server connection"));
+    server_down(&mut h);
+    assert!(h.has("Server connection"), "a word beside the profile menu");
+    assert!(h
+        .painted_text("Reconnecting\u{2026}")
+        .iter()
+        .any(|(r, _)| r.top() < 40.0));
+    h.app.sync_rt.fails = super::together::FAILS_BEFORE_CANT_REACH;
+    h.settle();
+    assert!(h
+        .painted_text("Not connected")
+        .iter()
+        .any(|(r, _)| r.top() < 40.0));
+    // it sits left of the profile menu, inside the top bar
+    let word = h.rect("Server connection");
+    let profile = h.rect("Profile menu");
+    assert!(word.right() <= profile.left() + 1.0 && word.bottom() <= 40.0);
+    h.click("Server connection");
+    assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+    assert!(h.has("This workspace is on a server"));
+    h.key(egui::Key::Escape);
+    // signed out by the server: says so too
+    h.app.sync_rt.net_status = Some(wb_net::Status::Refused(
+        "Your access to this server was removed.".into(),
+    ));
+    h.settle();
+    assert!(h
+        .painted_text("Not signed in")
+        .iter()
+        .any(|(r, _)| r.top() < 40.0));
+    // connected: out of the way
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.settle();
+    assert!(!h.has("Server connection"));
+}
+
 #[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();

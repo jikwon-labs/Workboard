@@ -92,6 +92,8 @@ pub const T: &[(&str, &str)] = &[
     ("Can't find {}. Check the server address.", "{}을(를) 찾을 수 없습니다. 서버 주소를 확인하세요."),
     ("Something answered at this address, but not a Workboard server. Check the address and port.", "이 주소에서 응답은 있지만 Workboard 서버가 아닙니다. 주소와 포트를 확인하세요."),
     ("The connection to the server broke.", "서버와의 연결이 끊겼습니다."),
+    ("Not connected", "연결 안 됨"),
+    ("Click for Work together.", "누르면 함께 작업하기가 열립니다."),
     ("Couldn't write to the shared folder. Is it still there?", "공유 폴더에 쓰지 못했습니다. 폴더가 아직 있는지 확인하세요."),
     ("Restored the team's workspace to {}. Everyone gets it now.", "팀 워크스페이스를 {} 시점으로 복원했습니다. 모두에게 곧 반영됩니다."),
     ("Connected. This workspace is now on the server for your team.", "연결했습니다. 이제 이 워크스페이스는 팀 서버에 있습니다."),

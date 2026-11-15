@@ -651,6 +651,22 @@ impl App {
         self.toast = Some((trf!("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", name), now_ts()));
     }
 
+    /// What the top bar says about a team server that isn't working: can't
+    /// be reached, or won't let this computer in. None while connected,
+    /// connecting, or without a server.
+    pub(super) fn server_trouble(&self) -> Option<String> {
+        self.data.extra.shared.as_ref()?.server.as_ref()?;
+        self.sync_rt.net.as_ref()?;
+        match &self.sync_rt.net_status {
+            Some(NetStatus::Reconnecting(_)) if self.sync_rt.fails >= FAILS_BEFORE_CANT_REACH => {
+                Some(tr("Not connected").into())
+            }
+            Some(NetStatus::Reconnecting(_)) => Some(tr("Reconnecting\u{2026}").into()),
+            Some(NetStatus::Refused(_)) => Some(tr("Not signed in").into()),
+            _ => None,
+        }
+    }
+
     /// The server connection: start it when needed and take in what arrived.
     /// Returns true when the team's changes came in.
     pub(super) fn net_tick(&mut self, ctx: Option<&egui::Context>) -> bool {

@@ -1203,6 +1203,63 @@ fn people_says_why_roles_are_missing_offline_and_how_invited_people_join() {
 }
 
 #[test]
+fn inviting_while_the_server_is_down_says_the_codes_wait_and_the_dialog_stays_narrow() {
+    let window = |h: &Ui1| {
+        let m = h.app.modal.as_ref().unwrap();
+        h.ctx
+            .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
+            .unwrap()
+    };
+    let bookmark = || Modal::Bookmark {
+        title: String::new(),
+        url: String::new(),
+    };
+    // a small dialog's width when nothing wide was open before
+    let mut fresh = Ui1::new();
+    fresh.app.modal = Some(bookmark());
+    fresh.settle();
+    let small = window(&fresh).width();
+
+    let mut h = Ui1::new();
+    server_down(&mut h);
+    h.app.modal = Some(Modal::Invite {
+        emails: String::new(),
+        role: "Member".into(),
+    });
+    h.settle();
+    // no "Work together > People" while that isn't there; the link names the place
+    assert!(h.has("The team's server can't be reached right now. The invites are kept, and their invite codes are asked for once it's back."));
+    assert!(h.has("Work together") && !h.has("Sharing"));
+    let w = window(&h).width();
+    assert!(
+        w <= 640.0,
+        "the note wraps instead of widening the dialog: {}",
+        w
+    );
+    h.type_text("dana@example.com");
+    h.click("Send free invite");
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Invited 1 people. Their invite codes are asked for once the server is back.")
+    );
+    assert!(h
+        .app
+        .data
+        .members
+        .iter()
+        .any(|m| m.email == "dana@example.com" && m.invited));
+    // the next dialog opens at its own size
+    h.app.modal = Some(bookmark());
+    h.settle();
+    assert!(
+        (window(&h).width() - small).abs() < 2.0,
+        "{} vs {}",
+        window(&h).width(),
+        small
+    );
+}
+
+#[test]
 fn huddle_bar_shows_people_mute_and_leave() {
     let mut h = Ui1::new();
     let ch = h.app.data.channels[0].id;

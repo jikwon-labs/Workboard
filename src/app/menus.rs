@@ -266,6 +266,11 @@ fn section_label(ui: &mut Ui, t: &Theme, s: &str) {
     ui.label(RichText::new(s).size(12.5).color(t.text3));
 }
 
+/// The window a dialog of this kind is drawn in.
+pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
+    egui::Id::new(("modal_window", std::mem::discriminant(m)))
+}
+
 impl App {
     // ---------------------------------------------------------------- menus
 
@@ -1182,7 +1187,8 @@ impl App {
                     close = true;
                 }
             });
-        let win_id = egui::Id::new("modal_window");
+        // each kind of dialog sizes itself: a wide one doesn't leave the next wide
+        let win_id = modal_window_id(&modal);
         // the Template Center has a list beside its preview
         let wide = matches!(modal, Modal::TemplateCenter(_));
         let (min_w, max_w) = if wide { (800.0, 820.0) } else { (460.0, 620.0) };
@@ -1304,10 +1310,24 @@ impl App {
                     .shared
                     .as_ref()
                     .is_some_and(|c| c.server.is_some());
+                // codes are made by the server, by its owner and admins
+                let connected = self.sync_rt.net_status == Some(wb_net::Status::Connected);
+                let manages = self.sync_rt.role.is_some_and(|r| r.manages());
+                let note = if on_server && !connected {
+                    tr("The team's server can't be reached right now. The invites are kept, and their invite codes are asked for once it's back.")
+                } else if on_server && !manages {
+                    tr("This workspace is on a server. The owner or an admin gives each person their invite code.")
+                } else if on_server {
+                    tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.")
+                } else if shared {
+                    tr("This workspace is shared, so invited people can join it from the shared folder.")
+                } else {
+                    tr("To work with them, share this workspace in a folder first.")
+                };
                 // wrapped: in a plain row the long note pushed the dialog past its width
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(if on_server { tr("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.") } else if shared { tr("This workspace is shared, so invited people can join it from the shared folder.") } else { tr("To work with them, share this workspace in a folder first.") }).small().color(t.text2));
-                    if ui.link(RichText::new(if shared { tr("Sharing") } else { tr("Work together") }).small()).clicked() {
+                    ui.label(RichText::new(note).small().color(t.text2));
+                    if ui.link(RichText::new(tr("Work together")).small()).clicked() {
                         self.modal = Some(self.together_modal());
                     }
                 });
@@ -1319,8 +1339,7 @@ impl App {
                         let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send invite"))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
-                            let on_server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
-                            self.toast = Some((if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            self.toast = Some((if on_server && !connected { crate::trf!("Invited {} people. Their invite codes are asked for once the server is back.", valid.len()) } else if on_server && !manages { crate::trf!("Invited {} people. The owner or an admin gives them their invite codes.", valid.len()) } else if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
                             self.dirty = true;
                             close = true;
                         }

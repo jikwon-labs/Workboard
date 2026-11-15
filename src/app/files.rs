@@ -24,6 +24,8 @@ pub(super) const THUMB: u32 = 720;
 pub(super) const FULL: u32 = 2560;
 /// The server takes files up to this size.
 pub(super) const MAX_FILE: u64 = 500 << 20;
+/// Pictures and videos in one message.
+pub(super) const MAX_PER_MESSAGE: usize = 10;
 
 /// An attachment waiting in the message box.
 #[derive(Clone, Debug)]
@@ -471,7 +473,14 @@ impl App {
     }
 
     /// Put a file (or a pasted picture) in the channel or thread message box.
-    pub(super) fn add_media(&mut self, thread: bool, path: Option<PathBuf>, png: Option<Vec<u8>>) {
+    /// At most MAX_PER_MESSAGE per box: past that it says so and leaves the
+    /// file out (false).
+    pub(super) fn add_media(&mut self, thread: bool, path: Option<PathBuf>, png: Option<Vec<u8>>) -> bool {
+        let count = if thread { self.thread_files.len() } else { self.chat_files.len() };
+        if count >= MAX_PER_MESSAGE {
+            self.toast = Some((format!("You can send up to {} pictures or videos in one message.", MAX_PER_MESSAGE), now_ts()));
+            return false;
+        }
         let remote = self.media_remote();
         let p = self.files.add(path, png, &remote);
         if thread {
@@ -479,6 +488,7 @@ impl App {
         } else {
             self.chat_files.push(p);
         }
+        true
     }
 
     /// The file picker for the + button.

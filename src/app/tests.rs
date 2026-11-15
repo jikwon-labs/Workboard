@@ -944,7 +944,10 @@ fn huddle_until(a: &mut App, b: &mut App, what: &str, cond: impl Fn(&App, &App) 
     panic!("timed out waiting for: {} (A {:?} / B {:?})", what, a.huddle.people, b.huddle.people);
 }
 
+// WebRTC opens UDP on every network, so macOS asks about incoming connections
+// for each freshly built test binary. Run it on purpose: cargo test -- --ignored
 #[test]
+#[ignore = "opens WebRTC sockets; run with --ignored"]
 fn a_huddle_on_the_server_connects_two_computers() {
     let Some(lk) = test_livekit() else {
         eprintln!("skipped: livekit-server isn't installed");
@@ -1200,4 +1203,21 @@ fn a_video_shows_a_still_from_the_cache() {
     });
     assert!(a.files.decoded(&sha, super::files::THUMB), "a still from the video");
     assert!(a.files.playable(&v).unwrap().to_string_lossy().ends_with(".mp4"));
+}
+
+#[test]
+fn one_message_takes_at_most_ten_pictures() {
+    let mut a = app();
+    let pic = picture_file("many.png", 20, 20);
+    // twelve chosen at once: ten go in, the rest are left out with a note
+    let added: Vec<bool> = (0..12).map(|_| a.add_media(false, Some(pic.clone()), None)).collect();
+    assert_eq!(added.iter().filter(|x| **x).count(), 10);
+    assert_eq!(a.chat_files.len(), super::files::MAX_PER_MESSAGE);
+    assert!(a.toast.as_ref().is_some_and(|(t, _)| t.contains("up to 10")));
+    // the thread's box counts on its own
+    assert!(a.add_media(true, Some(pic.clone()), None));
+    // removing one makes room again
+    a.chat_files.pop();
+    assert!(a.add_media(false, Some(pic), None));
+    assert_eq!(a.chat_files.len(), 10);
 }

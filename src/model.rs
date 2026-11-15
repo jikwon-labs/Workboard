@@ -359,6 +359,9 @@ pub enum Location {
     List(u64),
 }
 
+/// See `Data::take_unreadable`.
+static UNREADABLE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Data {
     pub workspace: String,
@@ -727,7 +730,27 @@ impl Data {
 
     pub fn load_file(file: &str) -> Option<Self> {
         let s = std::fs::read_to_string(Self::dir().join(file)).ok()?;
-        serde_json::from_str(&s).ok()
+        let d = serde_json::from_str(&s).ok();
+        if d.is_none() {
+            Self::keep_unreadable(file, &s);
+        }
+        d
+    }
+
+    /// A saved workspace that couldn't be read is copied aside before
+    /// anything can save over it; the app tells the person where it went.
+    fn keep_unreadable(file: &str, text: &str) {
+        let stem = file.strip_suffix(".json").unwrap_or(file);
+        let p = Self::dir().join(format!("{}-unreadable-{}.json", stem, now_ts()));
+        eprintln!("workboard: couldn't read {}; a copy is kept at {}", file, p.display());
+        if std::fs::write(&p, text).is_ok() {
+            *UNREADABLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(p);
+        }
+    }
+
+    /// The copy of a workspace file that couldn't be read, once.
+    pub fn take_unreadable() -> Option<PathBuf> {
+        UNREADABLE.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
     pub fn save_file(&self, file: &str) {
@@ -811,6 +834,9 @@ impl Data {
                     d.channels.insert(0, Channel { id, name: "general".into(), kind: ChannelKind::Channel, topic: String::new(), members, messages: vec![], last_read: now_ts(), ..Default::default() });
                 }
                 return d;
+            }
+            if !s.trim().is_empty() {
+                Self::keep_unreadable("data.json", &s);
             }
         }
         Self::fresh()

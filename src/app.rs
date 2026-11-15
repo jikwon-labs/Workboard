@@ -499,7 +499,8 @@ impl App {
             subtasks_open: false,
             modal: start_modal,
             notepad_open: false,
-            toast: None,
+            // shown a little longer than usual, as the window may still be opening
+            toast: if persist { Data::take_unreadable().map(|p| (unreadable_note(&p), now_ts() + 10)) } else { None },
             sync_rt: Default::default(),
             huddle: Default::default(),
             ws_places: HashMap::new(),
@@ -3277,9 +3278,18 @@ impl eframe::App for App {
                     t.time_entries.push(TimeEntry { start: st, end: now });
                 }
             }
-            self.data.save();
+            if self.ws_file == "data.json" {
+                self.data.save();
+            } else {
+                self.data.save_file(&self.ws_file);
+            }
         }
     }
+}
+
+/// What to tell the person when a saved workspace couldn't be read.
+pub(crate) fn unreadable_note(copy: &std::path::Path) -> String {
+    trf!("A saved workspace couldn't be read, so a copy was kept as {}.", copy.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
 }
 
 /// Day offsets beyond this are grouped as "Future" (original: B$4 = 7).

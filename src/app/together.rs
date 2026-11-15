@@ -141,6 +141,8 @@ pub struct SyncRt {
     pub(super) backups: Option<Vec<wb_net::Backup>>,
     /// The backup the owner clicked Restore on, waiting for "Yes, restore".
     pub(super) restore_confirm: Option<String>,
+    /// The person was told the team's copy couldn't be read (said once).
+    told_unreadable: bool,
 }
 
 // ---------------------------------------------------------------- tokens
@@ -327,7 +329,15 @@ impl App {
         let changed = sync::merge(&mut v, others);
         match serde_json::from_value::<Data>(v) {
             Ok(d) => self.data = d,
-            Err(_) => return false,
+            Err(e) => {
+                // most likely saved by a newer version of the app
+                if !self.sync_rt.told_unreadable {
+                    eprintln!("workboard: couldn't take in the team's changes: {}", e);
+                    self.toast = Some((tr("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard.").into(), now_ts()));
+                    self.sync_rt.told_unreadable = true;
+                }
+                return false;
+            }
         }
         if changed {
             let n = count_new(&self.data).saturating_sub(before);
@@ -655,9 +665,13 @@ impl App {
 
     /// Open the team's copy as a new workspace on this computer.
     fn join_from(&mut self, base: serde_json::Value, cfg: SharedCfg) -> Result<(), String> {
-        let mut d: Data = serde_json::from_value(base).map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
-        // keep only the team's things; personal ones start empty
+        serde_json::from_value::<Data>(base.clone()).map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
+        // the team's things with this person's own settings (theme, notifications,
+        // pinned tools...) instead of the owner's
+        let mut d: Data = serde_json::from_value(sync::with_team_things(&self.data_value(), &base)).map_err(|_| tr("The shared workspace couldn't be read.").to_string())?;
+        // personal things that point into the old workspace start empty
         d.favorites.clear();
+        d.extra.recent.clear();
         d.extra.notepad.clear();
         d.extra.reminders.clear();
         d.extra.trash.clear();

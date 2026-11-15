@@ -311,6 +311,12 @@ impl App {
                     emailed,
                     mail_error,
                 } => {
+                    // like the Mac (together.rs): the answer is the only
+                    // word of it this connection gets, so the code goes
+                    // into the list it has
+                    if let Some(p) = self.people.iter_mut().find(|p| p.member == member) {
+                        p.invite = Some(code.clone());
+                    }
                     self.invites.push((member, code));
                     self.mailed.push((member, emailed, mail_error));
                 }
@@ -3617,6 +3623,94 @@ fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
         a.data["tasks"][0]["name"], "Plan",
         "the round-3 app's change was not taken"
     );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Everything a bare connection gets up to the pong for a ping sent now.
+fn until_pong(raw: &mut Raw) -> Vec<Value> {
+    raw.send(json!({"type": "ping"}));
+    let mut got = vec![];
+    loop {
+        let m = raw.0.read().expect("a message from the server");
+        if let tungstenite::Message::Text(t) = m {
+            let v: Value = serde_json::from_str(t.as_str()).unwrap();
+            if v["type"] == "pong" {
+                return got;
+            }
+            got.push(v);
+        }
+    }
+}
+
+/// Each access request gets one answer on its connection: the access list
+/// a change sends to every connection doesn't also go to the one whose
+/// request made it, so back-to-back requests can't take each other's
+/// answers. Answers say they are answers; the lists others get say they
+/// weren't asked for.
+#[test]
+fn each_access_request_gets_one_answer_on_its_connection() {
+    let home = temp_home("one-answer");
+    let server = Server::start(&home, 0);
+    let (a, _b) = two_apps(server.port);
+    let hello =
+        json!({"type": "hello", "device": a.device, "token": a.token, "sync": wb_sync::META_V});
+    let mut asker = Raw::connect(server.port, hello.clone());
+    assert_eq!(asker.next("welcome")["role"], "owner");
+    let first = asker.next("access");
+    assert_eq!(
+        first["answer"], false,
+        "the list after signing in wasn't asked for"
+    );
+    let mut other = Raw::connect(server.port, hello);
+    other.next("welcome");
+    other.next("access");
+    // whatever the other connection's sign-in sent has arrived
+    until_pong(&mut asker);
+    until_pong(&mut other);
+
+    asker.send(json!({"type": "set_role", "member": 2, "role": "admin"}));
+    asker.send(json!({"type": "revoke", "member": 1}));
+    asker.send(json!({"type": "access_list"}));
+    asker.send(json!({"type": "create_invite", "member": 2, "role": "member"}));
+    asker.send(json!({"type": "set_role", "member": 2, "role": "member"}));
+    let got: Vec<Value> = until_pong(&mut asker)
+        .into_iter()
+        .filter(|m| m["type"] != "update" && m["type"] != "delta")
+        .collect();
+    let kinds: Vec<&str> = got.iter().map(|m| m["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        ["access", "error", "access", "invite", "access"],
+        "one answer per request, in order: {:?}",
+        got
+    );
+    assert!(got[1]["message"].as_str().unwrap().contains("owner"));
+    assert_eq!(got[1]["code"], wb_net::CODE_DENIED);
+    for i in [0, 2, 4] {
+        assert_eq!(got[i]["answer"], true, "{}", got[i]);
+    }
+    let role_of_2 = |m: &Value| {
+        m["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["member"] == 2)
+            .unwrap()["role"]
+            .clone()
+    };
+    assert_eq!(role_of_2(&got[0]), "admin");
+    assert_eq!(role_of_2(&got[4]), "member");
+
+    // the owner's other connection hears each change once, unasked (the
+    // refusal and the plain list changed nothing)
+    let heard: Vec<Value> = until_pong(&mut other)
+        .into_iter()
+        .filter(|m| m["type"] == "access")
+        .collect();
+    assert_eq!(heard.len(), 3, "{:?}", heard);
+    assert!(heard.iter().all(|m| m["answer"] == false), "{:?}", heard);
+    assert_eq!(role_of_2(&heard[2]), "member");
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

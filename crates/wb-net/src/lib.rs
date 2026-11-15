@@ -401,6 +401,13 @@ pub enum Msg {
         people: Vec<Person>,
         /// The asker's own role (it may have just changed).
         role: Role,
+        /// True when this answers the connection's own access_list, set_role
+        /// or revoke; false when it was sent unasked after a change (another
+        /// connection's request, a sign-in, people added). Older servers
+        /// leave it out. A connection's own requests never send it an
+        /// unasked list as well, so each request gets one answer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<bool>,
     },
     Error {
         message: String,
@@ -1020,7 +1027,7 @@ fn session(
                         mail_error,
                     }),
                     Some(Msg::Account { email }) => emit(Event::Account(email)),
-                    Some(Msg::Access { people, role }) => emit(Event::Access { people, role }),
+                    Some(Msg::Access { people, role, .. }) => emit(Event::Access { people, role }),
                     Some(Msg::CallToken {
                         channel,
                         url,

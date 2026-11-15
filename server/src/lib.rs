@@ -50,7 +50,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
@@ -1099,8 +1099,10 @@ struct Hub {
     updates: broadcast::Sender<Arc<Canon>>,
     /// device ids whose access was just removed
     kicks: broadcast::Sender<Arc<Vec<String>>>,
-    /// roles or invites changed: each connection re-sends access info
-    access: broadcast::Sender<()>,
+    /// roles or invites changed: each connection re-sends access info,
+    /// except the connection whose request made the change (its answer
+    /// already says it); `EVERYONE` when no connection's request did
+    access: broadcast::Sender<u64>,
     stop: watch::Receiver<bool>,
     connections: AtomicUsize,
     /// the largest file /files takes
@@ -1405,7 +1407,7 @@ impl Hub {
         g.dirty = true;
         let role = g.saved.role_of(member);
         drop(g);
-        let _ = self.access.send(());
+        let _ = self.access.send(EVERYONE);
         (member, role, tag, Some(token))
     }
 
@@ -1462,7 +1464,7 @@ impl Hub {
         g.saved.invites.retain(|_, i| i.member != member);
         g.dirty = true;
         drop(g);
-        let _ = self.access.send(());
+        let _ = self.access.send(EVERYONE);
         Ok(Msg::Account {
             email: email.trim().to_string(),
         })
@@ -1654,7 +1656,7 @@ impl Hub {
             // someone added or removed people: owners and admins see the new list
             if member_ids(g.canon.as_ref()) != members_before {
                 drop(g);
-                let _ = self.access.send(());
+                let _ = self.access.send(EVERYONE);
             }
         }
         fix.refused
@@ -1739,7 +1741,8 @@ impl Hub {
         })
     }
 
-    fn access_for(&self, member: u64) -> Msg {
+    /// `answer`: whether it answers that connection's own request.
+    fn access_for(&self, member: u64, answer: bool) -> Msg {
         let g = self.inner.lock().unwrap();
         let role = g.saved.role_of(member);
         let people = if role.manages() {
@@ -1747,11 +1750,15 @@ impl Hub {
         } else {
             vec![]
         };
-        Msg::Access { people, role }
+        Msg::Access {
+            people,
+            role,
+            answer: Some(answer),
+        }
     }
 
     /// An access request from `member`.
-    fn request(&self, member: u64, msg: Msg) -> Reply {
+    fn request(&self, member: u64, from: u64, msg: Msg) -> Reply {
         // backups: the owner only (a restore changes everyone's workspace)
         if matches!(msg, Msg::BackupList | Msg::Restore { .. }) {
             if self.inner.lock().unwrap().saved.role_of(member) != Role::Owner {
@@ -1777,7 +1784,11 @@ impl Hub {
         let mut kicked: Vec<String> = vec![];
         let mut told = false;
         let reply = match msg {
-            Msg::AccessList => None,
+            // nothing changed: only the asker hears
+            Msg::AccessList => {
+                told = true;
+                None
+            }
             Msg::CreateInvite { member: who, role } => {
                 if role == Role::Owner {
                     return Reply::Denied(
@@ -1817,7 +1828,7 @@ impl Hub {
                 g.dirty = true;
                 // their apps hear the new role before the copy it lets them
                 // see (an app goes by its role for what it may see)
-                let _ = self.access.send(());
+                let _ = self.access.send(from);
                 told = true;
                 let relabeled = g.canon.as_mut().is_some_and(|c| label_role(c, who, role));
                 if relabeled {
@@ -1852,7 +1863,7 @@ impl Hub {
                 // removing access also takes back admin rights
                 g.saved.set_role(who, Role::Member);
                 g.dirty = true;
-                let _ = self.access.send(());
+                let _ = self.access.send(from);
                 told = true;
                 if g.canon
                     .as_mut()
@@ -1869,11 +1880,11 @@ impl Hub {
             let _ = self.kicks.send(Arc::new(kicked));
         }
         if !told {
-            let _ = self.access.send(());
+            let _ = self.access.send(from);
         }
         match reply {
             Some(m) => Reply::To(m),
-            None => Reply::To(self.access_for(member)),
+            None => Reply::To(self.access_for(member, true)),
         }
     }
 
@@ -2026,7 +2037,7 @@ impl Hub {
             let code = g.saved.make_invite(member, role);
             g.dirty = true;
             drop(g);
-            let _ = self.access.send(());
+            let _ = self.access.send(EVERYONE);
             return json!({"ok": true, "message": format!("Invite code for member {} as {}: {}  (works once, for {} days)", member, role.label(), code, INVITE_DAYS), "code": code});
         }
         json!({"ok": false, "message": "unknown request"})
@@ -2303,6 +2314,11 @@ impl Drop for Online {
     }
 }
 
+/// An access broadcast no connection's request caused: every connection
+/// re-sends its list. Connections are numbered from 1.
+const EVERYONE: u64 = 0;
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
+
 async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) {
     hub.connections.fetch_add(1, Ordering::Relaxed);
     let _count = Counted(hub.clone());
@@ -2381,11 +2397,13 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     let mut updates = hub.updates.subscribe();
     let mut kicks = hub.kicks.subscribe();
     let mut access = hub.access.subscribe();
+    // this connection's requests don't bring it the access broadcast too
+    let conn = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
     let (welcome, mut was_hidden) = hub.welcome(tag, member, role, token);
     if !send(&mut socket, &welcome).await {
         return;
     }
-    if role.manages() && !send(&mut socket, &hub.access_for(member).to_json()).await {
+    if role.manages() && !send(&mut socket, &hub.access_for(member, false).to_json()).await {
         return;
     }
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
@@ -2406,7 +2424,13 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                 }
             }
             a = access.recv() => {
-                if a.is_ok() && !send(&mut socket, &hub.access_for(member).to_json()).await {
+                // fell behind: the list now says it all the same
+                let tell = match a {
+                    Ok(from) => from != conn,
+                    Err(broadcast::error::RecvError::Lagged(_)) => true,
+                    Err(broadcast::error::RecvError::Closed) => false,
+                };
+                if tell && !send(&mut socket, &hub.access_for(member, false).to_json()).await {
                     break;
                 }
             }
@@ -2457,7 +2481,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                             Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
                         })
                     }
-                    Some(m @ (Msg::CreateInvite { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. })) => match hub.request(member, m) {
+                    Some(m @ (Msg::CreateInvite { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. })) => match hub.request(member, conn, m) {
                         Reply::To(Msg::Invite { member: who, code, .. }) => {
                             // email it when the server can (sending takes a moment)
                             let (h, c, at) = (hub.clone(), code.clone(), host.clone());
@@ -3193,6 +3217,7 @@ mod tests {
         let hub = test_hub(&home, Some(canon), saved);
         let ask = |from: u64, who: u64| match hub.request(
             from,
+            EVERYONE,
             Msg::CreateInvite {
                 member: who,
                 role: Role::Member,

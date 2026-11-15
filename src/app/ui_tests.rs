@@ -262,11 +262,7 @@ impl Ui1 {
 
     /// Whether the soft hover fill (`widgets::hover_fill`) is painted under `pos`.
     fn hover_fill_at(&self, pos: Pos2) -> bool {
-        let fill = if self.ctx.style().visuals.dark_mode {
-            Color32::from_white_alpha(22)
-        } else {
-            Color32::from_black_alpha(14)
-        };
+        let fill = crate::widgets::hover_fill_for(self.ctx.style().visuals.dark_mode);
         self.shapes.iter().any(|c| match &c.shape {
             egui::Shape::Rect(r) => r.fill == fill && r.rect.contains(pos),
             _ => false,

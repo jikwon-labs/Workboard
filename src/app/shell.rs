@@ -4862,7 +4862,7 @@ impl App {
             ui.painter().rect_stroke(
                 drawn,
                 8.0,
-                Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color),
+                Stroke::new(1.0, hover_line(ui)),
                 egui::StrokeKind::Inside,
             );
         }

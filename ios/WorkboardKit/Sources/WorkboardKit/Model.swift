@@ -134,6 +134,7 @@ public struct TaskView: Identifiable, Hashable, Sendable {
     /// only when there is a due date.
     public let dueTime: String?
     public let tags: [String]
+    public let checklist: [CheckItemView]
     public let activity: [ActivityView]
     public let order: Int64
     public let archived: Bool
@@ -151,10 +152,25 @@ public struct TaskView: Identifiable, Hashable, Sendable {
         due = j["due"]?.string
         dueTime = due == nil ? nil : j["due_time"]?.string.flatMap(TaskView.hhmm)
         tags = (j["tags"]?.array ?? []).compactMap(\.string)
+        checklist = (j["checklist"]?.array ?? []).map(CheckItemView.init)
         activity = (j["activity"]?.array ?? []).map(ActivityView.init)
         order = j["order"]?.int ?? 0
         archived = j["archived"]?.bool ?? false
         updated = j["updated"]?.int ?? 0
+    }
+}
+
+/// One checklist line (CheckItem in src/model.rs).
+public struct CheckItemView: Hashable, Sendable {
+    public let text: String
+    public let done: Bool
+    /// The one person this item is for (set on the Mac).
+    public let assignee: UInt64?
+
+    init(_ j: JSON) {
+        text = j["text"]?.string ?? ""
+        done = j["done"]?.bool ?? false
+        assignee = j["assignee"]?.uint
     }
 }
 

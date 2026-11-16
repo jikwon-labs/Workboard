@@ -335,8 +335,9 @@ public enum Edits {
 
     /// Like Action::Add: the list's first status, "created this task" logged,
     /// and "assigned to <name>" (with the person's id in "target", which the
-    /// Mac app's Inbox goes by) for everyone else put on it.
-    public static func addTask(_ data: inout JSON, list: UInt64, name: String, assignees: [UInt64], me: UInt64, id: UInt64, ts: Int64) {
+    /// Mac app's Inbox goes by) for everyone else put on it. With `parent` it
+    /// is a subtask, in its parent's list (the Mac app's "Add subtask").
+    public static func addTask(_ data: inout JSON, list: UInt64, name: String, assignees: [UInt64], parent: UInt64? = nil, me: UInt64, id: UInt64, ts: Int64) {
         let view = WorkspaceView(data)
         var activity: [JSON] = [["ts": .int(ts), "author": .id(me), "text": "created this task", "comment": false, "post": false]]
         for who in assignees where who != me {
@@ -347,7 +348,7 @@ public enum Edits {
         let order = ((data["tasks"]?.array ?? []).compactMap { $0["order"]?.int }.max() ?? 0) + 1
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let task: JSON = [
-            "id": .id(id), "list_id": .id(list), "parent": nil,
+            "id": .id(id), "list_id": .id(list), "parent": parent.map(JSON.id) ?? .null,
             "name": .string(clean.isEmpty ? "Untitled task" : clean),
             "description": "", "status": .string(status), "priority": 0,
             "assignees": .array(assignees.map(JSON.id)),
@@ -567,6 +568,80 @@ public enum Edits {
             "private": .bool(isPrivate), "list": nil, "creator": .id(me),
         ])
         return true
+    }
+
+    /// Like ChatAction::Dm in src/app/chat.rs: the direct message I already
+    /// have with this person, or a new one with the two of us. Of several
+    /// copies (two devices that started it while apart) it is the one the Mac
+    /// app shows: one with messages, then the oldest. Returns its id, or nil
+    /// for myself or someone not in the workspace.
+    public static func openDM(_ data: inout JSON, with other: UInt64, me: UInt64, id: UInt64, ts: Int64) -> UInt64? {
+        guard other != me, (data["members"]?.array ?? []).contains(where: { $0["id"]?.uint == other }) else { return nil }
+        let people = [me, other].sorted()
+        let existing = (data["channels"]?.array ?? [])
+            .filter { c in
+                c["kind"]?.string == "Direct"
+                    && Array(Set((c["members"]?.array ?? []).compactMap(\.uint))).sorted() == people
+            }
+            .min { a, b in
+                let ae = (a["messages"]?.array ?? []).isEmpty, be = (b["messages"]?.array ?? []).isEmpty
+                return ae != be ? !ae : (a["id"]?.uint ?? 0) < (b["id"]?.uint ?? 0)
+            }
+        if let found = existing?["id"]?.uint { return found }
+        // no "creator": the Mac app leaves it out for a direct message (0)
+        data.append(at: "channels", [
+            "id": .id(id), "name": "", "kind": "Direct", "topic": "",
+            "members": .array([me, other].map(JSON.id)), "messages": [], "last_read": .int(ts),
+            "private": false, "list": nil,
+        ])
+        return id
+    }
+
+    // MARK: checklist
+
+    /// Changes a task's checklist (CheckItem {text, done, assignee?} in
+    /// src/model.rs) and marks the task updated, as the Mac task window does.
+    /// The Mac app logs no history line for checklist changes.
+    private static func changeChecklist(_ data: inout JSON, task: UInt64, ts: Int64, _ change: (inout [JSON]) -> Bool) -> Bool {
+        var changed = false
+        data.updateItem(at: "tasks", id: task) { j in
+            var items = j["checklist"]?.array ?? []
+            guard change(&items) else { return }
+            j["checklist"] = .array(items)
+            j["updated"] = .int(ts)
+            changed = true
+        }
+        return changed
+    }
+
+    /// "+ Add item": a new unticked item at the end.
+    @discardableResult
+    public static func addCheckItem(_ data: inout JSON, task: UInt64, text: String, ts: Int64) -> Bool {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        return changeChecklist(&data, task: task, ts: ts) { items in
+            items.append(["text": .string(clean), "done": false])
+            return true
+        }
+    }
+
+    /// Ticks or unticks item `index`; other fields (assignee) stay.
+    @discardableResult
+    public static func setCheckItem(_ data: inout JSON, task: UInt64, index: Int, done: Bool, ts: Int64) -> Bool {
+        changeChecklist(&data, task: task, ts: ts) { items in
+            guard items.indices.contains(index), items[index]["done"]?.bool != done else { return false }
+            items[index]["done"] = .bool(done)
+            return true
+        }
+    }
+
+    @discardableResult
+    public static func removeCheckItem(_ data: inout JSON, task: UInt64, index: Int, ts: Int64) -> Bool {
+        changeChecklist(&data, task: task, ts: ts) { items in
+            guard items.indices.contains(index) else { return false }
+            items.remove(at: index)
+            return true
+        }
     }
 
     // MARK: docs

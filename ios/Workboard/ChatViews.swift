@@ -6,6 +6,7 @@ struct ChatListView: View {
     @Environment(SyncClient.self) private var client
     @Environment(Notifier.self) private var notifier
     @State private var newChannel = false
+    @State private var newDM = false
 
     var body: some View {
         let me = client.me ?? 0
@@ -55,9 +56,59 @@ struct ChatListView: View {
                     .accessibilityLabel("New channel")
                     .accessibilityIdentifier("newChannelButton")
             }
+            ToolbarItem(placement: .topBarLeading) {
+                Button { newDM = true } label: { Image(systemName: "person.crop.circle.badge.plus") }
+                    .disabled(!client.canEdit)
+                    .accessibilityLabel("New message")
+                    .accessibilityIdentifier("newDMButton")
+            }
             ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
         }
         .sheet(isPresented: $newChannel) { NewChannelSheet() }
+        .sheet(isPresented: $newDM) { NewDMSheet() }
+    }
+}
+
+/// Picks a person to message, like the Mac app's direct message list
+/// (ChatAction::Dm): opens the conversation with them, starting it if needed.
+struct NewDMSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let me = client.me ?? 0
+        let people = client.view.members.filter { !$0.invited && $0.id != me }.sorted { $0.name < $1.name }
+        NavigationStack {
+            List {
+                if people.isEmpty {
+                    EmptyNote(title: "No one else is here yet", systemImage: "person.2").listRowBackground(Color.clear)
+                }
+                ForEach(people) { m in
+                    Button { open(m.id) } label: {
+                        HStack(spacing: 12) {
+                            Avatar(member: m, size: 32)
+                            Text(m.name).foregroundStyle(.primary)
+                        }
+                    }
+                    .accessibilityIdentifier("dmPerson-\(m.id)")
+                }
+            }
+            .navigationTitle("New Message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+    }
+
+    func open(_ person: UInt64) {
+        let newId = client.newId()
+        var opened: UInt64?
+        let ok = client.edit { d, me in opened = Edits.openDM(&d, with: person, me: me, id: newId, ts: nowTs()) }
+        guard ok, let id = opened else { return }
+        dismiss()
+        nav.chat.append(Nav.Route.channel(id))
     }
 }
 

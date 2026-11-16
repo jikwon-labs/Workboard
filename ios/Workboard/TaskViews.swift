@@ -169,9 +169,11 @@ struct TaskDetailView: View {
     @State private var name = ""
     @State private var desc = ""
     @State private var loaded = false
+    @State private var newSubtask = ""
+    @State private var newCheck = ""
     @FocusState private var focus: Field?
 
-    enum Field { case name, desc }
+    enum Field { case name, desc, subtask, check }
 
     var body: some View {
         let v = client.view
@@ -265,9 +267,67 @@ struct TaskDetailView: View {
                         .accessibilityIdentifier("taskDescription")
                 }
                 let subs = v.subtasks(of: t.id)
-                if !subs.isEmpty {
+                if !subs.isEmpty || can {
                     Section("Subtasks") {
-                        ForEach(subs) { s in NavigationLink(value: Nav.Route.task(s.id)) { TaskRow(task: s) } }
+                        ForEach(subs) { s in
+                            NavigationLink(value: Nav.Route.task(s.id)) { TaskRow(task: s) }
+                                .accessibilityIdentifier("subtask-\(s.id)")
+                        }
+                        if can {
+                            TextField("Add subtask", text: $newSubtask)
+                                .focused($focus, equals: .subtask)
+                                .submitLabel(.done)
+                                .onSubmit { addSubtask(t) }
+                                .accessibilityIdentifier("newSubtaskField")
+                        }
+                    }
+                }
+                if !t.checklist.isEmpty || can {
+                    Section {
+                        ForEach(Array(t.checklist.enumerated()), id: \.offset) { i, item in
+                            Button {
+                                client.edit { d, _ in Edits.setCheckItem(&d, task: t.id, index: i, done: !item.done, ts: nowTs()) }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(item.done ? Color.green : Color.secondary)
+                                    Text(item.text)
+                                        .strikethrough(item.done)
+                                        .foregroundStyle(item.done ? .secondary : .primary)
+                                    Spacer(minLength: 0)
+                                    if let who = item.assignee, let m = v.member(who) {
+                                        Avatar(member: m, size: 20)
+                                    }
+                                }
+                            }
+                            .disabled(!can)
+                            .accessibilityLabel(item.text)
+                            .accessibilityValue(item.done ? "Done" : "Not done")
+                            .accessibilityIdentifier("checkItem-\(i)")
+                            .swipeActions {
+                                if can {
+                                    Button("Delete", role: .destructive) {
+                                        client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
+                                    }
+                                }
+                            }
+                        }
+                        if can {
+                            TextField(t.checklist.isEmpty ? "Create checklist" : "Add item", text: $newCheck)
+                                .focused($focus, equals: .check)
+                                .submitLabel(.done)
+                                .onSubmit { addCheck(t) }
+                                .accessibilityIdentifier("newCheckItemField")
+                        }
+                    } header: {
+                        HStack {
+                            Text("Checklist")
+                            if !t.checklist.isEmpty {
+                                Text("\(t.checklist.filter(\.done).count)/\(t.checklist.count)")
+                                    .monospacedDigit()
+                                    .accessibilityIdentifier("checklistCount")
+                            }
+                        }
                     }
                 }
                 Section {
@@ -346,6 +406,25 @@ struct TaskDetailView: View {
         case 2: return .orange
         case 3: return .blue
         default: return .secondary
+        }
+    }
+
+    /// Like the Mac app's "Add subtask": in the parent's list, under it.
+    func addSubtask(_ t: TaskView) {
+        let n = newSubtask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { focus = nil; return }
+        let id = client.newId()
+        if client.edit({ d, me in Edits.addTask(&d, list: t.listId, name: n, assignees: [], parent: t.id, me: me, id: id, ts: nowTs()) }) {
+            newSubtask = ""
+            focus = .subtask // keep typing the next one
+        }
+    }
+
+    func addCheck(_ t: TaskView) {
+        guard !newCheck.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { focus = nil; return }
+        if client.edit({ d, _ in Edits.addCheckItem(&d, task: t.id, text: newCheck, ts: nowTs()) }) {
+            newCheck = ""
+            focus = .check
         }
     }
 

@@ -426,6 +426,89 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(d["channels"]!.array!.last!["creator"], 2)
     }
 
+    func testDMReusesTheOneTheMacShowsOrStartsANewOne() {
+        var d = SampleWorkspace.make()
+        // 303 is Jamie (1) and Alex (2), with messages
+        XCTAssertEqual(Edits.openDM(&d, with: 2, me: 1, id: 9600, ts: 5), 303)
+        XCTAssertEqual(Edits.openDM(&d, with: 1, me: 2, id: 9601, ts: 5), 303, "the same conversation from the other side")
+        let before = d["channels"]!.array!.count
+        XCTAssertEqual(Edits.openDM(&d, with: 3, me: 1, id: 9602, ts: 6), 9602)
+        XCTAssertEqual(d["channels"]!.array!.count, before + 1)
+        let c = d["channels"]!.array!.last!
+        for k in ["id", "name", "kind", "topic", "members", "messages"] { XCTAssertNotNil(c[k], k) }
+        XCTAssertEqual(c["kind"], "Direct")
+        XCTAssertNil(c["creator"], "the Mac app leaves creator out of a direct message")
+        let v = WorkspaceView(d)
+        XCTAssertEqual(v.channels.last!.members, [1, 3])
+        XCTAssertTrue(v.visibleChannels(me: 3).contains { $0.id == 9602 })
+        XCTAssertFalse(v.visibleChannels(me: 2).contains { $0.id == 9602 }, "only the two people in it see it")
+        XCTAssertEqual(Edits.openDM(&d, with: 3, me: 1, id: 9603, ts: 7), 9602, "started once, then reused")
+        XCTAssertNil(Edits.openDM(&d, with: 1, me: 1, id: 9604, ts: 7), "not with myself")
+        XCTAssertNil(Edits.openDM(&d, with: 99, me: 1, id: 9605, ts: 7), "not with someone who isn't here")
+        XCTAssertEqual(d["channels"]!.array!.count, before + 1)
+    }
+
+    func testDMPicksTheCopyWithMessagesThenTheOldest() {
+        var d = SampleWorkspace.make()
+        let empty: JSON = ["id": 9700, "name": "", "kind": "Direct", "topic": "", "members": [3, 1], "messages": [], "last_read": 0]
+        let older: JSON = ["id": 9701, "name": "", "kind": "Direct", "topic": "", "members": [1, 3], "messages": [], "last_read": 0]
+        d.append(at: "channels", empty)
+        d.append(at: "channels", older)
+        XCTAssertEqual(Edits.openDM(&d, with: 3, me: 1, id: 9800, ts: 1), 9700, "no messages anywhere: the oldest")
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 9701, text: "hi", me: 3, id: 9801, ts: 2))
+        XCTAssertEqual(Edits.openDM(&d, with: 3, me: 1, id: 9802, ts: 3), 9701, "the one with messages")
+        // a group conversation with the same two people and someone else isn't it
+        let group: JSON = ["id": 9500, "name": "", "kind": "Direct", "topic": "", "members": [1, 2, 3], "messages": [], "last_read": 0]
+        d.append(at: "channels", group)
+        XCTAssertEqual(Edits.openDM(&d, with: 3, me: 1, id: 9803, ts: 4), 9701)
+    }
+
+    func testSubtaskGoesInItsParentsListUnderIt() {
+        var d = SampleWorkspace.make()
+        let parent = WorkspaceView(d).tasks.first { $0.id == 201 }!
+        Edits.addTask(&d, list: parent.listId, name: " Write copy ", assignees: [], parent: 201, me: 1, id: 9900, ts: 40)
+        let t = d["tasks"]!.array!.last!
+        for k in taskRequired { XCTAssertNotNil(t[k], k) }
+        XCTAssertEqual(t["parent"], 201)
+        XCTAssertEqual(t["list_id"], .id(parent.listId))
+        let v = WorkspaceView(d)
+        XCTAssertEqual(v.subtasks(of: 201).map(\.id), [9900])
+        XCTAssertEqual(v.subtasks(of: 201).first?.name, "Write copy")
+        XCTAssertFalse(v.tasks(inList: parent.listId).contains { $0.id == 9900 }, "a subtask shows under its parent, not in the list")
+        Edits.addTask(&d, list: 111, name: "top", assignees: [], me: 1, id: 9901, ts: 41)
+        XCTAssertEqual(d["tasks"]!.array!.last!["parent"], .null, "a task without a parent keeps parent: null")
+    }
+
+    func testChecklistAddTickAndRemove() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.addCheckItem(&d, task: 201, text: "  Draft  ", ts: 10))
+        XCTAssertTrue(Edits.addCheckItem(&d, task: 201, text: "Review", ts: 11))
+        XCTAssertFalse(Edits.addCheckItem(&d, task: 201, text: "   ", ts: 12), "an empty item isn't added")
+        XCTAssertFalse(Edits.addCheckItem(&d, task: 99999, text: "x", ts: 12), "no such task")
+        func task() -> JSON { d["tasks"]!.array!.first { $0["id"] == 201 }! }
+        XCTAssertEqual(task()["checklist"], [["text": "Draft", "done": false], ["text": "Review", "done": false]])
+        XCTAssertEqual(task()["updated"], 11)
+
+        XCTAssertTrue(Edits.setCheckItem(&d, task: 201, index: 1, done: true, ts: 13))
+        XCTAssertFalse(Edits.setCheckItem(&d, task: 201, index: 1, done: true, ts: 14), "already ticked: nothing changes")
+        XCTAssertFalse(Edits.setCheckItem(&d, task: 201, index: 5, done: true, ts: 14))
+        XCTAssertEqual(task()["updated"], 13)
+        let v = WorkspaceView(d).tasks.first { $0.id == 201 }!
+        XCTAssertEqual(v.checklist.map(\.text), ["Draft", "Review"])
+        XCTAssertEqual(v.checklist.map(\.done), [false, true])
+
+        // an item the Mac app gave a person keeps them when ticked here
+        d.updateItem(at: "tasks", id: 201) { $0["checklist"] = [["text": "Call", "done": false, "assignee": 2]] }
+        XCTAssertTrue(Edits.setCheckItem(&d, task: 201, index: 0, done: true, ts: 15))
+        XCTAssertEqual(task()["checklist"], [["text": "Call", "done": true, "assignee": 2]])
+        XCTAssertEqual(WorkspaceView(d).tasks.first { $0.id == 201 }!.checklist.first?.assignee, 2)
+
+        XCTAssertTrue(Edits.removeCheckItem(&d, task: 201, index: 0, ts: 16))
+        XCTAssertFalse(Edits.removeCheckItem(&d, task: 201, index: 0, ts: 17))
+        XCTAssertEqual(task()["checklist"], [])
+        XCTAssertEqual(task()["updated"], 16)
+    }
+
     func testDeletedTaskGoesToTrashAndComesBack() {
         var d = SampleWorkspace.make()
         Edits.addTask(&d, list: 111, name: "Sub", assignees: [], me: 1, id: 9100, ts: 10)

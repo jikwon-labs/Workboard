@@ -2,7 +2,9 @@
 
 2026-11-16 작성. 이메일 + 비밀번호 로그인, 초대 메일, 비밀번호 찾기(커밋 `248a7d5`)를 실제 서버에 적용하는 순서다. 위에서부터 차례로 하면 된다.
 
-## 지금 상태 (2026-11-16 확인)
+## 작업 시작 당시 상태 (2026-11-16 기록)
+
+아래 표는 초기 기록이다. 이후 서버 설치·공개 주소 이전 현황은 `README.md`의 "끝난 일"을 따른다.
 
 | 항목 | 상태 |
 |---|---|
@@ -40,13 +42,13 @@ Mac mini 터미널에서:
 2. Google 계정 > 보안 > 앱 비밀번호에서 새 비밀번호를 만든다 (이름은 Workboard 정도).
 3. 16자리 비밀번호를 복사해 둔다. 평소 비밀번호는 SMTP 에 쓸 수 없다.
 
-### 2-2. Mac mini 의 MagicDNS 이름 확인
+### 2-2. 메일 링크의 공개 주소 확인
 
-메일 속 링크가 가리킬 주소다. iPhone 앱은 `*.ts.net` 이름으로만 http 접속이 되므로 IP 대신 이름을 쓴다.
+Cloudflare 이전 후에는 `https://wb.wlrnjs.xyz`를 쓴다. 0.1.8 이상 앱은 이 HTTPS 주소로 접속하며, 팀원에게 Tailscale 설치나 MagicDNS 이름이 필요하지 않다.
 
-    tailscale status | head -1
+    curl -s -m 10 https://wb.wlrnjs.xyz/health
 
-두 번째 칸이 이름이다(예: `macmini`). 전체 이름은 `macmini.<tailnet 이름>.ts.net` 이고, Tailscale 관리 콘솔 > DNS 에서 tailnet 이름을 볼 수 있다.
+`{"ok":true}`를 확인하고 아래 `public_address`에도 같은 HTTPS 주소를 넣는다. Cloudflare 없이 Tailscale 전용으로 운영할 때만 `macmini.<tailnet 이름>.ts.net:8787` 같은 MagicDNS 이름을 쓴다. 관리자 SSH·배포용 Tailscale은 그대로 유지한다.
 
 ### 2-3. mail.json 만들기
 
@@ -61,7 +63,7 @@ Mac mini 터미널에서:
       "username": "보내는주소@gmail.com",
       "password": "앱 비밀번호 16자리",
       "from": "Workboard <보내는주소@gmail.com>",
-      "public_address": "macmini.<tailnet 이름>.ts.net:8787"
+      "public_address": "https://wb.wlrnjs.xyz"
     }
 
 저장: `Ctrl+O`, Enter, `Ctrl+X`. 그다음 나만 읽을 수 있게 한다:
@@ -80,7 +82,7 @@ Mac mini 터미널에서:
 
 ## 3. 지금 있는 사람들 비밀번호 정하기
 
-**먼저 필요한 것:** 새 기능이 들어간 Mac 앱. 지금 배포된 0.1.6 에는 로그인 화면이 없다. 새 버전 배포는 MacBook 에서 한다(`docs/release/README.md`). Mac mini 에서 할 일은 아니다.
+**먼저 필요한 것:** 로그인 기능이 들어간 새 Mac 앱(공개 HTTPS 주소는 0.1.8 이상). 옛 0.1.6에는 로그인 화면이 없다. 앱 배포는 MacBook에서 하는 별도 작업이다(`docs/release/README.md`).
 
 새 앱으로 업데이트한 뒤 각자:
 
@@ -89,12 +91,12 @@ Mac mini 터미널에서:
 
 그다음부터 다른 컴퓨터·iPhone 에서는 서버 주소 + 이메일 + 비밀번호로 들어온다. 누가 정했는지는 아래 `people` 의 account 칸에서 보인다.
 
-## 4. 팀원 초대 (메일 설정 뒤)
+## 4. 팀원 초대
 
-1. Tailscale 에 그 사람을 초대한다 (관리 콘솔 > Users > Invite, 또는 Machines > Mac mini > Share).
-2. Workboard 에서 초대(Invite)에 그 사람 이메일을 넣는다.
-3. 서버가 초대 코드와 링크를 메일로 보낸다. 앱에 "초대 코드를 ...(으)로 보냈습니다" 가 뜬다.
-4. 받은 사람은 Tailscale 과 Workboard 를 설치하고 메일의 링크를 연다. 비밀번호를 정하면 끝.
+1. Workboard에서 초대(Invite)에 그 사람 이메일을 넣는다.
+2. 메일 설정이 있으면 서버가 초대 코드와 링크를 메일로 보낸다. 메일을 설정하지 않았다면 초대 코드와 `https://wb.wlrnjs.xyz`를 받는 사람에게 직접 전달한다.
+3. 받는 사람은 새 Workboard 앱에서 공개 HTTPS 주소와 초대 코드를 사용해 비밀번호를 정한다. 메일 링크가 있다면 링크를 열어 진행한다. **Cloudflare 공개 주소 사용자는 Tailscale을 설치하거나 초대받을 필요가 없다.**
+4. Cloudflare 없이 Tailscale 전용 주소로 운영하는 경우에만 먼저 Tailscale에 초대하고 접속하게 한다. 관리자 SSH·배포를 위한 Tailscale 설정은 바꾸지 않는다.
 
 코드는 7일 동안 한 번만 쓸 수 있다. 다시 보내려면 함께 작업하기 > 사람 > 새 코드.
 

@@ -896,15 +896,24 @@ fn session(
     let mut rev: u64 = 0;
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
+    // the app let go: what it pushed or sent just before still goes, then the
+    // connection closes (logging out or quitting right after a change)
+    let mut stopping = false;
     loop {
         loop {
             match crx.try_recv() {
                 Ok(Cmd::Push(v)) => *pending = Some(v),
                 Ok(Cmd::Send(m)) if welcomed => queued.push(m),
                 Ok(Cmd::Send(m)) => queue(queued, m),
-                Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => return End::Stop,
+                Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => {
+                    stopping = true;
+                    break;
+                }
                 Err(TryRecvError::Empty) => break,
             }
+        }
+        if stopping && !welcomed {
+            return End::Stop;
         }
         if welcomed {
             // the copy first, so a conversation made a moment ago is on the
@@ -935,6 +944,9 @@ fn session(
                     return End::Lost(e);
                 }
             }
+        }
+        if stopping {
+            return End::Stop;
         }
         if last_ping.elapsed() >= Duration::from_secs(PING_SECS) {
             last_ping = Instant::now();

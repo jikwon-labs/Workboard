@@ -309,3 +309,81 @@ fn sign_in_fields_become_the_hello() {
     assert!(together::new_password_problem("12345678", "12345679").is_some());
     assert!(together::new_password_problem("12345678", "12345678").is_none());
 }
+
+#[test]
+fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back() {
+    let server = Server::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = computer("Ours");
+    a.connect_with(
+        &addr,
+        How::Claim {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut a, "A on the server", |a| {
+        a.data.extra.shared.is_some() && connected(a)
+    });
+    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file() {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // the owner's laptop signs in, writes something and logs out at once
+    let mut b = computer("Laptop");
+    b.connect_with(
+        &addr,
+        How::Account {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut b, "the laptop joins", |b| {
+        b.data.extra.shared.is_some() && connected(b)
+    });
+    let device = b.data.extra.shared.as_ref().unwrap().device.clone();
+    assert!(together::load_token(&addr, &device).is_some());
+    let said = "sent just before logging out";
+    let has = |d: &Data| {
+        d.channels
+            .iter()
+            .any(|c| c.messages.iter().any(|m| m.text == said))
+    };
+    let ch = b
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    b.apply_chat(vec![super::chat::ChatAction::Send {
+        ch,
+        text: said.into(),
+        parent: None,
+        files: vec![],
+    }]);
+    b.log_out();
+    assert!(b.data.extra.shared.is_none() && b.login.is_some());
+    assert!(together::load_token(&addr, &device).is_none());
+    assert!(!has(&b.data), "the laptop's copy is gone");
+    // what was written last still reached the team
+    until(&mut a, "the last message at A", |a| has(&a.data));
+
+    // signing in again brings the team's workspace back
+    b.connect_with(
+        &addr,
+        How::Account {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut b, "the laptop back in", |b| {
+        b.data.extra.shared.is_some() && connected(b)
+    });
+    assert!(b.login.is_none() && !b.data.extra.welcome);
+    assert!(has(&b.data));
+}

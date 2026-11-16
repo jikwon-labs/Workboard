@@ -2,11 +2,11 @@
 // keeps in step, or a workboard-server the app stays connected to (see
 // crate::sync and wb_net). Signing in to a server: an account's email and
 // password, an invite code (choosing a password at the same time), a code
-// from a password-reset mail, or setting up an empty server. Also the
-// first-start welcome, invite links (workboard://join), choosing who you are
-// after joining a folder, calls
-// that open in the browser with a Join button posted in chat, and a Markdown
-// archive for documents.
+// from a password-reset mail, or setting up an empty server (the sign-in
+// screen itself is in login.rs). Also invite links (workboard://join),
+// choosing who you are after joining a folder, calls that open in the
+// browser with a Join button posted in chat, and a Markdown archive for
+// documents.
 
 use super::*;
 use crate::sync::{self, SharedCfg};
@@ -16,12 +16,6 @@ use wb_net::{Event as NetEvent, Msg as NetMsg, Person, Role, SignIn, Status as N
 
 /// How often teammates' copies are looked at (folder), and how often ours is
 /// written (folder) or sent (server).
-/// The Welcome dialog's step for joining a team from the workspace menu or
-/// an invite link when this computer already has a workspace: the same form
-/// as the first start's "Join my team", without going back to the choices.
-/// The team's workspace opens as a new one and the others stay as they are.
-pub(super) const JOIN_ANOTHER: u8 = 4;
-
 const POLL_SECS: f64 = 2.0;
 const WRITE_SECS: f64 = 1.5;
 
@@ -918,6 +912,33 @@ impl App {
         changed
     }
 
+    /// Joined a server or set one up: the sign-in screen and the dialog
+    /// that asked are done, and the server is filled in next time.
+    fn signed_in_now(&mut self) {
+        self.login = None;
+        if self.data.extra.welcome {
+            self.data.extra.welcome = false;
+            self.save_local();
+        }
+        if matches!(
+            self.modal,
+            Some(Modal::Together { .. } | Modal::JoinTeam { .. })
+        ) {
+            self.modal = None;
+        }
+        if self.persist {
+            if let Some(addr) = self
+                .data
+                .extra
+                .shared
+                .as_ref()
+                .and_then(|c| c.server.clone())
+            {
+                super::login::set_last_server(&addr);
+            }
+        }
+    }
+
     /// The server answered: finish joining, or catch up after a reconnect.
     fn net_welcome(
         &mut self,
@@ -958,12 +979,7 @@ impl App {
                         tr("Connected. This workspace is now on the server for your team.").into(),
                         now_ts(),
                     ));
-                    if matches!(
-                        self.modal,
-                        Some(Modal::Together { .. } | Modal::Welcome { .. })
-                    ) {
-                        self.modal = None;
-                    }
+                    self.signed_in_now();
                 }
                 Some(base) => match self.join_from(base, cfg) {
                     Ok(()) => {
@@ -993,12 +1009,7 @@ impl App {
                             crate::i18n::particles(&trf!("Joined as {}.", name)),
                             now_ts(),
                         ));
-                        if matches!(
-                            self.modal,
-                            Some(Modal::Together { .. } | Modal::Welcome { .. })
-                        ) {
-                            self.modal = None;
-                        }
+                        self.signed_in_now();
                     }
                     Err(e) => {
                         self.sync_rt.net = None;
@@ -1112,7 +1123,6 @@ impl App {
     /// Open what a workboard://join link (or a pasted invite) asks for.
     pub(super) fn open_join_link(&mut self, text: &str) {
         let j = wb_net::parse_join(text);
-        self.data.extra.welcome = false;
         let form = &mut self.sync_rt.form;
         form.mode = Mode::Invite;
         form.code = j.code.clone();
@@ -1124,23 +1134,17 @@ impl App {
             .shared
             .as_ref()
             .is_some_and(|c| c.server.is_some());
-        if on_server && matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
+        let addr = j.server.unwrap_or_default();
+        if self.login.is_some() {
+            // on the sign-in screen: it fills in the invite there
+            self.open_login(super::login::LoginPage::SignIn, &addr);
+        } else if on_server && matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
             // this workspace's server let it go: the code is to sign back in
             self.modal = Some(self.together_modal());
-        } else if on_server {
-            // another team (or the same one as someone else): it opens as a
-            // new workspace and this one stays on its server
-            self.modal = Some(Modal::Welcome {
-                step: JOIN_ANOTHER,
-                name: String::new(),
-                addr: j.server.unwrap_or_default(),
-            });
         } else {
-            self.modal = Some(Modal::Welcome {
-                step: 2,
-                name: String::new(),
-                addr: j.server.unwrap_or_default(),
-            })
+            // another team (or the same one as someone else): it opens as a
+            // new workspace and this one stays as it is
+            self.modal = Some(Modal::JoinTeam { addr });
         }
     }
 
@@ -1154,11 +1158,7 @@ impl App {
                 ..Default::default()
             };
         }
-        self.modal = Some(Modal::Welcome {
-            step: JOIN_ANOTHER,
-            name: String::new(),
-            addr,
-        });
+        self.modal = Some(Modal::JoinTeam { addr });
     }
 
     /// Send an access request to the server (owners and admins).
@@ -1299,6 +1299,7 @@ impl App {
         d.extra.slack_carried.clear();
         d.note_carried_slack(&Default::default());
         d.extra.shared = Some(cfg);
+        d.extra.welcome = false;
         d.extra.sync.hashes.clear();
         d.extra.sync.field_hashes.clear();
         d.me = 0;
@@ -1307,6 +1308,8 @@ impl App {
         // on the joined workspace, where it would put its names on a space
         // of the same id
         self.finish_status_edit();
+        // the workspace left was chosen past the sign-in screen
+        self.data.extra.welcome = false;
         if self.persist {
             self.data.save_file(&self.ws_file);
             let mut list = Data::workspaces();
@@ -1735,7 +1738,14 @@ impl App {
 
     /// Server address, sign-in fields, and Connect (or the connection's
     /// progress and Cancel while it tries).
-    fn server_form(&mut self, ui: &mut Ui, t: &Theme, addr: &mut String, modes: &[Mode]) {
+    pub(super) fn server_form(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        addr: &mut String,
+        modes: &[Mode],
+        button: &str,
+    ) {
         ui.label(RichText::new(tr("Server")).color(t.text2));
         let r = ui.add(
             field(addr)
@@ -1777,7 +1787,7 @@ impl App {
             return;
         }
         ui.add_space(6.0);
-        if let Some(how) = self.login_form(ui, t, addr, modes, "Connect") {
+        if let Some(how) = self.login_form(ui, t, addr, modes, button) {
             if let Err(e) = self.connect_with(addr, how) {
                 self.sync_rt.form.note = e;
             }
@@ -1987,14 +1997,6 @@ impl App {
                         }),
                     )
                     .clicked();
-                    // the first-start dialog's Back goes beside the button
-                    // instead of on a line of its own below
-                    let back_id = egui::Id::new(LOGIN_BACK);
-                    if ui.data(|d| d.get_temp::<bool>(back_id)).unwrap_or(false)
-                        && ui.button(tr("Back")).clicked()
-                    {
-                        ui.data_mut(|d| d.insert_temp(back_id.with("clicked"), true));
-                    }
                 });
             });
         }
@@ -2153,176 +2155,20 @@ impl App {
         }
     }
 
-    /// The first start: work alone on this Mac, join a team, or set up a
-    /// team server. `step`: 0 the choice, 1 your name, 2 join, 3 new server.
-    pub(super) fn welcome_body(
-        &mut self,
-        ui: &mut Ui,
-        t: &Theme,
-        step: &mut u8,
-        name: &mut String,
-        addr: &mut String,
-    ) -> bool {
-        let mut close = false;
-        match *step {
-            0 => {
-                ui.label(
-                    RichText::new(tr(
-                        "Tasks, chat and docs for you and your team. How do you want to start?",
-                    ))
-                    .color(t.text2),
-                );
-                ui.add_space(10.0);
-                let choices = [
-                    (
-                        1u8,
-                        "Use it on this Mac",
-                        "Start your own workspace. You can share it with your team later.",
-                    ),
-                    (
-                        2,
-                        "Join my team",
-                        "Sign in with your email, or use the invite code someone sent you.",
-                    ),
-                    (
-                        3,
-                        "Set up a server for my team",
-                        "Put this workspace on your team's Workboard server and become its owner.",
-                    ),
-                ];
-                for (to, title, desc) in choices {
-                    // a card: the title, then the description smaller and grey,
-                    // with room inside the border (one button's text ran both
-                    // together at one size against the edge)
-                    let w = ui.available_width();
-                    let tg = ui.painter().layout_no_wrap(
-                        tr(title).to_string(),
-                        FontId::proportional(14.5),
-                        t.text,
-                    );
-                    let dg = ui.painter().layout(
-                        tr(desc).to_string(),
-                        FontId::proportional(12.5),
-                        t.text2,
-                        w - 32.0,
-                    );
-                    let h = 12.0 + tg.size().y + 3.0 + dg.size().y + 12.0;
-                    let (cr, r) = ui.allocate_exact_size(vec2(w, h), Sense::click());
-                    name_it(&r, title);
-                    ui.painter().rect(
-                        cr,
-                        8.0,
-                        if r.hovered() { t.hover } else { t.bg },
-                        Stroke::new(
-                            1.0,
-                            if r.hovered() {
-                                hover_line(ui)
-                            } else {
-                                t.border
-                            },
-                        ),
-                        egui::StrokeKind::Inside,
-                    );
-                    let tx = cr.left() + 16.0;
-                    ui.painter()
-                        .galley(pos2(tx, cr.top() + 12.0), tg.clone(), t.text);
-                    ui.painter()
-                        .galley(pos2(tx, cr.top() + 12.0 + tg.size().y + 3.0), dg, t.text2);
-                    if r.clicked() {
-                        *step = to;
-                        self.sync_rt.form = Form {
-                            mode: if to == 3 {
-                                Mode::NewServer
-                            } else {
-                                Mode::Account
-                            },
-                            ..Default::default()
-                        };
-                        if to == 1 && name.is_empty() {
-                            *name = self
-                                .data
-                                .member(self.data.me)
-                                .map(|m| m.name.clone())
-                                .unwrap_or_default();
-                        }
-                    }
-                    ui.add_space(6.0);
-                }
-            }
-            1 => {
-                // only "Use it on this Mac" comes here: no team yet
-                ui.label(RichText::new(tr("What should we call you?")).color(t.text2));
-                let r = ui.add(
-                    field(name)
-                        .hint_text(tr("Your name"))
-                        .desired_width(f32::INFINITY),
-                );
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Your name entry")
-                });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button(tr("Back")).clicked() {
-                        *step = 0;
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, t, tr("Start")).clicked() {
-                            let me = self.data.me;
-                            if let Some(m) = self
-                                .data
-                                .members
-                                .iter_mut()
-                                .find(|m| m.id == me)
-                                .filter(|_| !name.trim().is_empty())
-                            {
-                                m.name = name.trim().to_string();
-                            }
-                            self.dirty = true;
-                            close = true;
-                        }
-                    });
-                });
-            }
-            _ => {
-                let modes: &[Mode] = if *step == 3 {
-                    &[Mode::NewServer]
-                } else {
-                    &[Mode::Account, Mode::Invite]
-                };
-                ui.label(RichText::new(tr(if *step == 3 {
-                    "Type the address of the Mac running workboard-server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale)."
-                } else {
-                    "Type your team's server address. Then sign in with your email and password, or use the invite code you were sent."
-                })).color(t.text2));
-                if *step == JOIN_ANOTHER {
-                    ui.label(
-                        RichText::new(tr("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are."))
-                            .small()
-                            .color(t.text3),
-                    );
-                }
-                ui.add_space(4.0);
-                let back_id = egui::Id::new(LOGIN_BACK);
-                // joining from the workspace menu: there are no first-start
-                // choices to go back to
-                let can_back = self.sync_rt.joining.is_none() && *step != JOIN_ANOTHER;
-                ui.data_mut(|d| {
-                    d.insert_temp(back_id, can_back);
-                    d.remove::<bool>(back_id.with("clicked"));
-                });
-                self.server_form(ui, t, addr, modes);
-                let back = ui.data_mut(|d| {
-                    d.remove::<bool>(back_id);
-                    d.remove_temp::<bool>(back_id.with("clicked"))
-                        .unwrap_or(false)
-                });
-                if back {
-                    *step = 0;
-                    self.sync_rt.form = Form::default();
-                }
-            }
-        }
-        close
+    /// Joining a team while this computer already has a workspace (the
+    /// workspace menu's "Join a team", or an invite link): the server
+    /// address and sign-in or invite code. The team's workspace opens as a
+    /// new one and the others stay as they are.
+    pub(super) fn join_team_body(&mut self, ui: &mut Ui, t: &Theme, addr: &mut String) -> bool {
+        ui.label(RichText::new(tr("Type your team's server address. Then sign in with your email and password, or use the invite code you were sent.")).color(t.text2));
+        ui.label(
+            RichText::new(tr("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are."))
+                .small()
+                .color(t.text3),
+        );
+        ui.add_space(4.0);
+        self.server_form(ui, t, addr, &[Mode::Account, Mode::Invite], "Connect");
+        false
     }
 
     /// The Work together dialog, filled in with what this workspace uses.
@@ -2596,7 +2442,13 @@ impl App {
             ui.label(RichText::new(tr("Or connect to your team's server")).strong());
             ui.label(RichText::new(tr("A Workboard server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.")).color(t.text2));
             let _ = code;
-            self.server_form(ui, t, addr, &[Mode::Account, Mode::Invite, Mode::NewServer]);
+            self.server_form(
+                ui,
+                t,
+                addr,
+                &[Mode::Account, Mode::Invite, Mode::NewServer],
+                "Connect",
+            );
         }
         if !result.is_empty() {
             ui.label(RichText::new(result.as_str()).color(t.text2));
@@ -2778,7 +2630,3 @@ impl App {
         });
     }
 }
-
-/// Set while the first-start dialog draws the sign-in form, which then puts
-/// a Back button beside its own button.
-const LOGIN_BACK: &str = "__wb_login_back";

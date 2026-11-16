@@ -409,13 +409,12 @@ fn inbox_alone_with_due_work_points_to_today_and_overdue() {
 #[test]
 fn welcome_on_this_mac_asks_for_a_name_without_a_team() {
     let mut h = with(Data::fresh(), 1440.0, 900.0);
-    h.app.modal = Some(Modal::Welcome {
-        step: 0,
-        name: String::new(),
-        addr: String::new(),
-    });
+    h.app.login = Some(crate::app::login::LoginScreen::new(
+        crate::app::login::LoginPage::SignIn,
+        "",
+    ));
     h.settle();
-    h.click("Use it on this Mac");
+    h.click("Use it on this Mac without an account");
     assert!(h.has("What should we call you?"));
     assert!(!h.has("What should your team call you?"));
 }

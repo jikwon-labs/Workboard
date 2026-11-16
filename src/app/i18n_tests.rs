@@ -474,18 +474,25 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.filter_open = true;
         }),
     ));
-    // signing in: the first start, each sign-in tab, the account section
+    // signing in: the sign-in screen's pages, each sign-in tab, the
+    // account section, logging out
+    use super::login::{LoginPage, LoginScreen};
     use super::together::{Form, Mode};
-    for step in 0..4u8 {
+    for (name, page, mode) in [
+        ("sign in", LoginPage::SignIn, Mode::Account),
+        ("invite", LoginPage::SignIn, Mode::Invite),
+        ("new server", LoginPage::NewServer, Mode::NewServer),
+        ("on this mac", LoginPage::OnThisMac, Mode::Account),
+    ] {
         v.push((
-            format!("welcome {}", step),
+            format!("login screen {}", name),
             Box::new(move |a: &mut App| {
-                a.sync_rt.form = Form::default();
-                a.modal = Some(Modal::Welcome {
-                    step,
-                    name: String::new(),
-                    addr: String::new(),
-                });
+                a.modal = None;
+                a.sync_rt.form = Form {
+                    mode,
+                    ..Default::default()
+                };
+                a.login = Some(LoginScreen::new(page, ""));
             }),
         ));
     }
@@ -498,6 +505,7 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         v.push((
             format!("sign in {}", name),
             Box::new(move |a: &mut App| {
+                a.login = None;
                 a.sync_rt.form = Form {
                     mode,
                     sent,
@@ -544,6 +552,12 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.sync_rt.net_status = Some(wb_net::Status::Refused("x".into()));
             a.sync_rt.form = Form::default();
             a.modal = Some(a.together_modal());
+        }),
+    ));
+    v.push((
+        "log out".into(),
+        Box::new(move |a: &mut App| {
+            a.modal = Some(Modal::LogOut);
         }),
     ));
     v.push((

@@ -924,7 +924,7 @@ impl App {
                 .hint_text(tr("Search tasks..."))
                 .desired_width(f32::INFINITY),
         );
-        name_field(&r, "Search tasks");
+        name_field(&r, "Search tasks to pick");
         focus_once(ui, &r);
         ui.add_space(4.0);
         let q = query.trim().to_lowercase();

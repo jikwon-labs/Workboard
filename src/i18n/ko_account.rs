@@ -1,26 +1,33 @@
-// Korean text for signing in to a team server, accounts, the first-start
-// welcome and invite links (src/app/together.rs; see src/i18n.rs).
+// Korean text for signing in to a team server, accounts, the sign-in screen,
+// logging out and invite links (src/app/together.rs, src/app/login.rs; see
+// src/i18n.rs).
 // Terms: account 계정, password 비밀번호, sign in 로그인, invite code 초대 코드,
 // reset code 재설정 코드.
 
 pub const T: &[(&str, &str)] = &[
-    // welcome
-    ("Welcome to Workboard", "Workboard에 오신 것을 환영합니다"),
-    ("Join your team", "팀에 참가"),
+    // joining another team from the workspace menu or an invite link
     ("Join a team", "팀에 참가하기"),
     ("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are.", "팀 워크스페이스는 새 워크스페이스로 열립니다. 지금 있는 워크스페이스는 그대로 워크스페이스 메뉴에 남습니다."),
+    // the sign-in screen (src/app/login.rs)
+    ("Tasks, chat and docs for you and your team.", "나와 팀을 위한 작업, 채팅, 문서."),
+    ("Sign in to your team", "팀에 로그인"),
     ("Set up your team's server", "팀 서버 설정"),
-    ("Tasks, chat and docs for you and your team. How do you want to start?", "나와 팀을 위한 작업, 채팅, 문서. 어떻게 시작할까요?"),
-    ("Use it on this Mac", "이 Mac에서 쓰기"),
-    ("Start your own workspace. You can share it with your team later.", "내 워크스페이스로 시작합니다. 나중에 팀과 공유할 수 있습니다."),
-    ("Join my team", "팀에 참가하기"),
-    ("Sign in with your email, or use the invite code someone sent you.", "이메일로 로그인하거나 받은 초대 코드를 쓰세요."),
+    ("Set up server", "서버 설정"),
+    ("No team server yet?", "아직 팀 서버가 없나요?"),
     ("Set up a server for my team", "팀 서버 만들기"),
-    ("Put this workspace on your team's Workboard server and become its owner.", "이 워크스페이스를 팀의 Workboard 서버에 올리고 소유자가 됩니다."),
+    ("Use it on this Mac without an account", "계정 없이 이 Mac에서 쓰기"),
+    ("Use it on this Mac", "이 Mac에서 쓰기"),
+    ("Start your own workspace without an account. You can share it with your team later.", "계정 없이 내 워크스페이스로 시작합니다. 나중에 팀과 공유할 수 있습니다."),
     ("What should we call you?", "이름을 어떻게 표시할까요?"),
     ("Your name", "내 이름"),
     ("Start", "시작"),
-    ("Back", "뒤로"),
+    // logging out
+    ("Sign this computer out of the team server", "이 컴퓨터를 팀 서버에서 로그아웃합니다"),
+    ("Log out of {}?", "{}에서 로그아웃할까요?"),
+    ("This computer's copy of the team workspace is deleted. Everything stays on the server and comes back when you sign in again.", "이 컴퓨터에 있는 팀 워크스페이스 사본을 지웁니다. 모든 내용은 서버에 남아 있고, 다시 로그인하면 돌아옵니다."),
+    ("This computer isn't connected to the server right now. Changes you made while it was offline haven't gone up and will be lost.", "지금 이 컴퓨터는 서버에 연결되어 있지 않습니다. 연결이 끊긴 동안 바꾼 내용은 아직 올라가지 않았고, 로그아웃하면 사라집니다."),
+    ("Pictures and videos not on the server yet: {}. They will be lost.", "아직 서버에 올라가지 않은 사진과 동영상: {}개. 로그아웃하면 사라집니다."),
+    ("Logged out", "로그아웃했습니다"),
     ("Type the address of the Mac running workboard-server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale).", "workboard-server가 실행 중인 Mac의 주소를 입력하세요 (예: https://wb.example.com, 또는 팀이 Tailscale로 접속하는 Mac mini)."),
     ("Type your team's server address. Then sign in with your email and password, or use the invite code you were sent.", "팀 서버 주소를 입력한 뒤 이메일과 비밀번호로 로그인하거나 받은 초대 코드를 쓰세요."),
     // sign-in form

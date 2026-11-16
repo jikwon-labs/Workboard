@@ -100,14 +100,6 @@ pub enum Modal {
         name: String,
         email: String,
     },
-    /// The first start. `step`: 0 the choice, 1 your name, 2 join a team,
-    /// 3 set up a team server; `addr`: the server address typed in. Also
-    /// joining another team later (`together::JOIN_ANOTHER`).
-    Welcome {
-        step: u8,
-        name: String,
-        addr: String,
-    },
     Call {
         ch: u64,
         link: String,
@@ -155,6 +147,14 @@ pub enum Modal {
         id: u64,
         name: String,
     },
+    /// Joining a team from the workspace menu or an invite link while this
+    /// computer already has a workspace: the team's opens as a new one.
+    /// `addr`: the server address typed in.
+    JoinTeam {
+        addr: String,
+    },
+    /// Asking before logging out of the team server (login.rs).
+    LogOut,
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -748,12 +748,21 @@ impl App {
             self.modal = Some(Modal::Trash);
             close_popup(ui);
         }
-        // it changes who uses the app on this computer; nobody signs out
-        if menu_item(ui, &t, "logout", tr("Switch person"), "")
+        // it changes who uses the app on this computer without signing out
+        if menu_item(ui, &t, "person", tr("Switch person"), "")
             .on_hover_text(tr("Switch to another person on this computer"))
             .clicked()
         {
             self.modal = Some(Modal::SwitchUser);
+            close_popup(ui);
+        }
+        // signs this computer out of the team server (login.rs)
+        if self.on_team_server()
+            && menu_item(ui, &t, "logout", tr("Log out"), "")
+                .on_hover_text(tr("Sign this computer out of the team server"))
+                .clicked()
+        {
+            self.modal = Some(Modal::LogOut);
             close_popup(ui);
         }
     }
@@ -1205,13 +1214,8 @@ impl App {
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
-            Modal::Welcome { step: 2, .. } => tr("Join your team").into(),
-            Modal::Welcome {
-                step: super::together::JOIN_ANOTHER,
-                ..
-            } => tr("Join a team").into(),
-            Modal::Welcome { step: 3, .. } => tr("Set up your team's server").into(),
-            Modal::Welcome { .. } => tr("Welcome to Workboard").into(),
+            Modal::JoinTeam { .. } => tr("Join a team").into(),
+            Modal::LogOut => tr("Log out").into(),
             Modal::Call { .. } => tr("Start a call").into(),
             Modal::NewList { .. } => tr("Create List").into(),
             Modal::NewSpace { .. } => tr("Create a Space").into(),
@@ -1270,7 +1274,7 @@ impl App {
                 // the server and sign-in dialogs can be taller than a small
                 // window: the title stays put and the rest scrolls (the
                 // others are short, or scroll their own lists)
-                if matches!(modal, Modal::Together { .. } | Modal::Welcome { .. }) {
+                if matches!(modal, Modal::Together { .. } | Modal::JoinTeam { .. }) {
                     let tall = (screen.height() - 140.0).max(200.0);
                     egui::ScrollArea::vertical()
                         .id_salt("modal_body")
@@ -1304,9 +1308,8 @@ impl App {
                 result,
             } => close = self.together_body(ui, t, path, addr, code, result),
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
-            Modal::Welcome { step, name, addr } => {
-                close = self.welcome_body(ui, t, step, name, addr)
-            }
+            Modal::JoinTeam { addr } => close = self.join_team_body(ui, t, addr),
+            Modal::LogOut => close = self.log_out_body(ui, t),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList {
                 name,

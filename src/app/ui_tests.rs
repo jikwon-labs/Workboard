@@ -875,9 +875,7 @@ fn a_workspace_on_a_server_can_still_join_another_team() {
     h.settle();
     h.click("Workspace menu");
     h.click("Join a team");
-    assert!(
-        matches!(&h.app.modal, Some(Modal::Welcome { step, .. }) if *step == together::JOIN_ANOTHER)
-    );
+    assert!(matches!(&h.app.modal, Some(Modal::JoinTeam { .. })));
     assert!(h.has("Join a team") && h.has("Server address") && h.has("Email entry"));
     assert!(h.has("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are."));
     assert!(!h.has("Back"), "no first-start choices to go back to");
@@ -5254,7 +5252,7 @@ fn task_window_picker_sets_parent_and_adds_existing_subtask() {
         !h.has("Pick Wireframe hero section"),
         "its own subtasks can't be its parent"
     );
-    h.click("Search tasks");
+    h.click("Search tasks to pick");
     h.type_text("q1");
     h.click("Pick Plan Q1 campaign");
     let q1 = h
@@ -5274,7 +5272,7 @@ fn task_window_picker_sets_parent_and_adds_existing_subtask() {
     assert!(h.app.modal.is_none());
     // the reverse: put an existing task under this one
     h.click("+  Add existing task");
-    h.click("Search tasks");
+    h.click("Search tasks to pick");
     h.type_text("passport");
     h.click("Pick Renew passport");
     let p = h
@@ -5293,7 +5291,7 @@ fn relationships_waiting_on_blocking_and_linked() {
     let id = open_design_task(&mut h);
     h.click("+  Add relationship");
     h.click("Waiting on");
-    h.click("Search tasks");
+    h.click("Search tasks to pick");
     h.type_text("analytics");
     h.click("Pick Set up analytics dashboard");
     let other = h
@@ -5310,7 +5308,7 @@ fn relationships_waiting_on_blocking_and_linked() {
     assert_eq!(h.app.relations(other).1, vec![id]);
     h.click("+  Add relationship");
     h.click("Link a task");
-    h.click("Search tasks");
+    h.click("Search tasks to pick");
     h.type_text("newsletter");
     h.click("Pick Newsletter draft");
     assert!(h.has("Link a task Newsletter draft"));
@@ -6396,12 +6394,19 @@ mod template_tests;
 #[path = "wording_tests.rs"]
 mod wording_tests;
 
+fn sign_in_screen(h: &mut Ui1, addr: &str) {
+    h.app.login = Some(super::login::LoginScreen::new(
+        super::login::LoginPage::SignIn,
+        addr,
+    ));
+    h.settle();
+}
+
 #[test]
-fn the_first_start_offers_working_alone_joining_or_a_new_server() {
-    let mut h = Ui1::new();
+fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
     assert!(
         Data::fresh().extra.welcome,
-        "a first start shows the welcome"
+        "a first start shows the sign-in screen"
     );
     let old: Data = serde_json::from_str(
         &serde_json::to_string(&Data::seed())
@@ -6410,46 +6415,24 @@ fn the_first_start_offers_working_alone_joining_or_a_new_server() {
     )
     .unwrap();
     assert!(!old.extra.welcome, "files from before don't");
-    h.app.modal = Some(Modal::Welcome {
-        step: 0,
-        name: String::new(),
-        addr: String::new(),
-    });
-    h.settle();
+    let mut h = Ui1::new();
+    sign_in_screen(&mut h, "");
+    // the screen fills the window: none of the app shows, and it doesn't close
     assert!(
-        h.has("Use it on this Mac")
-            && h.has("Join my team")
-            && h.has("Set up a server for my team")
-    );
-
-    // alone: just a name
-    h.click("Use it on this Mac");
-    assert!(h.has("Your name entry"));
-    let me = h.app.data.me;
-    h.app.modal = Some(Modal::Welcome {
-        step: 1,
-        name: "Jiwon".into(),
-        addr: String::new(),
-    });
-    h.settle();
-    h.click("Start");
-    assert!(h.app.modal.is_none());
-    assert_eq!(h.app.data.member(me).unwrap().name, "Jiwon");
-
-    // join: server, then email and password or an invite code
-    h.app.modal = Some(Modal::Welcome {
-        step: 0,
-        name: String::new(),
-        addr: String::new(),
-    });
-    h.settle();
-    h.click("Join my team");
-    assert!(
-        h.has("Join your team")
+        h.has("Sign in to your team")
             && h.has("Server address")
             && h.has("Email entry")
+            && h.has("Password entry")
             && h.has("Invite code")
+            && h.has("Set up a server for my team")
+            && h.has("Use it on this Mac without an account")
     );
+    assert!(!h.has("Workspace menu") && !h.has("Profile menu"));
+    h.key(egui::Key::Escape);
+    h.key_with(egui::Key::N, egui::Modifiers::COMMAND);
+    assert!(h.app.login.is_some() && h.app.quick_add.is_none());
+
+    // email and password
     h.click("Server address");
     h.type_text("127.0.0.1:1");
     h.click("Email entry");
@@ -6457,8 +6440,9 @@ fn the_first_start_offers_working_alone_joining_or_a_new_server() {
     h.click("Password entry");
     h.type_text("secret-pass");
     h.settle();
-    h.click("Connect");
+    h.click("Sign in");
     let j = h.app.sync_rt.joining.as_ref().expect("connecting");
+    assert_eq!(j.addr, "127.0.0.1:1");
     assert_eq!(
         j.how,
         together::How::Account {
@@ -6466,27 +6450,59 @@ fn the_first_start_offers_working_alone_joining_or_a_new_server() {
             password: "secret-pass".into()
         }
     );
-    assert!(h.has("Cancel"));
+    assert!(
+        !h.has("Set up a server for my team"),
+        "the other ways wait while it connects"
+    );
     h.click("Cancel");
+    assert!(h.app.sync_rt.joining.is_none() && h.app.login.is_some());
 
     // a new server: the owner's email and password
-    h.click("Back");
     h.click("Set up a server for my team");
     assert!(
         h.has("Set up your team's server")
             && h.has("Repeat password entry")
             && !h.has("Invite code entry")
     );
+    assert_eq!(
+        h.app.sync_rt.form.email, "me@team.io",
+        "the email carries over"
+    );
+    h.click("Back to sign in");
+    assert!(h.has("Sign in to your team"));
+
+    // alone on this Mac: just a name, then the app
+    h.click("Use it on this Mac without an account");
+    assert!(h.has("What should we call you?") && h.has("Your name entry"));
+    let me = h.app.data.me;
+    h.app.login.as_mut().unwrap().name = "Jiwon".into();
+    h.settle();
+    h.click("Start");
+    assert!(h.app.login.is_none());
+    assert!(
+        !h.app.data.extra.welcome,
+        "no sign-in screen at the next start"
+    );
+    assert_eq!(h.app.data.member(me).unwrap().name, "Jiwon");
+    assert!(h.has("Workspace menu"));
 }
 
 #[test]
 fn an_invite_link_opens_the_join_form_filled_in() {
     let mut h = Ui1::new();
+    // working on this computer only: the team's workspace opens beside it
+    h.app
+        .open_join_link("workboard://join?server=macmini&code=ABCD-EFGH-JKMN");
+    assert!(matches!(&h.app.modal, Some(Modal::JoinTeam { addr }) if addr == "macmini"));
+    h.app.modal = None;
+    // on the sign-in screen (a first start): it fills in the invite there
+    sign_in_screen(&mut h, "");
     h.app.open_join_link("workboard://join?server=mac-mini.tail1.ts.net%3A8787&code=ABCD-EFGH-JKMN&email=bo%40team.io");
     h.settle();
     assert!(
-        matches!(&h.app.modal, Some(Modal::Welcome { step: 2, addr, .. }) if addr == "mac-mini.tail1.ts.net:8787")
+        matches!(&h.app.login, Some(l) if l.addr == "mac-mini.tail1.ts.net:8787" && l.page == super::login::LoginPage::SignIn)
     );
+    assert!(h.app.modal.is_none());
     assert_eq!(h.app.sync_rt.form.mode, together::Mode::Invite);
     assert_eq!(
         (
@@ -6498,11 +6514,7 @@ fn an_invite_link_opens_the_join_form_filled_in() {
     assert!(h.has("Invite code entry") && h.has("Choose a password entry"));
 
     // a whole invite mail pasted into the code field fills in the server too
-    h.app.modal = Some(Modal::Welcome {
-        step: 2,
-        name: String::new(),
-        addr: String::new(),
-    });
+    sign_in_screen(&mut h, "");
     h.app.sync_rt.form = together::Form {
         mode: together::Mode::Invite,
         ..Default::default()
@@ -6513,7 +6525,8 @@ fn an_invite_link_opens_the_join_form_filled_in() {
     h.settle();
     h.settle();
     assert_eq!(h.app.sync_rt.form.code, "WXYZ-2345-6789");
-    assert!(matches!(&h.app.modal, Some(Modal::Welcome { addr, .. }) if addr == "macmini"));
+    assert!(matches!(&h.app.login, Some(l) if l.addr == "macmini"));
+    h.app.login = None;
 
     // already on a server: the other team opens beside it, this one stays
     h.app.data.extra.shared = Some(crate::sync::SharedCfg {
@@ -6525,9 +6538,7 @@ fn an_invite_link_opens_the_join_form_filled_in() {
     h.app.toast = None;
     h.app
         .open_join_link("workboard://join?server=other&code=ABCD-EFGH-JKMN");
-    assert!(
-        matches!(&h.app.modal, Some(Modal::Welcome { step, addr, .. }) if *step == together::JOIN_ANOTHER && addr == "other")
-    );
+    assert!(matches!(&h.app.modal, Some(Modal::JoinTeam { addr }) if addr == "other"));
     assert_eq!(h.app.sync_rt.form.code, "ABCD-EFGH-JKMN");
     assert!(h.app.toast.is_none(), "no telling them to stop sharing");
 
@@ -6536,6 +6547,58 @@ fn an_invite_link_opens_the_join_form_filled_in() {
     h.app
         .open_join_link("workboard://join?server=127.0.0.1:1&code=ABCD-EFGH-JKMN");
     assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
+}
+
+#[test]
+fn log_out_asks_first_then_deletes_the_team_copy_and_shows_the_sign_in_screen() {
+    let mut h = Ui1::new();
+    // working on this computer only: there is nothing to log out of
+    h.click("Profile menu");
+    assert!(h.has("Switch person") && !h.has("Log out"));
+    h.key(egui::Key::Escape);
+
+    let addr = "127.0.0.1:1";
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-out".into(),
+        tag: 5,
+        server: Some(addr.into()),
+    });
+    together::save_token(addr, "dev-out", "token-1");
+    h.app.sync_rt.account = Some("me@team.io".into());
+    let team_task = h.app.data.tasks[0].name.clone();
+    h.click("Profile menu");
+    h.click("Log out");
+    assert!(matches!(h.app.modal, Some(Modal::LogOut)));
+    assert!(h.has("Log out of 127.0.0.1:1?"));
+    // not connected: it says what would be lost
+    assert!(h.has("This computer isn't connected to the server right now. Changes you made while it was offline haven't gone up and will be lost."));
+    h.click("Cancel");
+    assert!(h.app.modal.is_none() && h.app.data.extra.shared.is_some());
+
+    h.click("Profile menu");
+    h.click("Log out");
+    h.click("Log out");
+    assert!(h.app.data.extra.shared.is_none());
+    assert!(
+        !h.app.data.tasks.iter().any(|t| t.name == team_task),
+        "this computer's copy of the team workspace is gone"
+    );
+    assert!(together::load_token(addr, "dev-out").is_none());
+    assert!(
+        h.app.data.extra.welcome,
+        "the sign-in screen again at the next start"
+    );
+    assert!(matches!(&h.app.login, Some(l) if l.addr == addr));
+    assert_eq!(
+        h.app.sync_rt.form.email, "me@team.io",
+        "ready to sign in again"
+    );
+    assert!(h.has("Sign in to your team") && !h.has("Profile menu"));
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Logged out")
+    );
 }
 
 #[test]

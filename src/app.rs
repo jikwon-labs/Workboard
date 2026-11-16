@@ -24,6 +24,7 @@ mod hubs;
 mod huddle;
 mod icons;
 mod listview;
+mod login;
 mod menus;
 mod more;
 mod nav;
@@ -431,6 +432,8 @@ pub struct App {
     side_search_focus: bool,
     subtasks_open: bool,
     modal: Option<Modal>,
+    /// The sign-in screen, filling the window in place of the app (see login.rs).
+    login: Option<login::LoginScreen>,
     notepad_open: bool,
     toast: Option<(String, i64)>,
     sync_rt: together::SyncRt,
@@ -660,6 +663,16 @@ impl App {
         } else {
             None
         };
+        // the sign-in screen: a first start, or logged out last time
+        // (--modal welcome / join show it for screenshots)
+        let start_login = match arg("--modal").as_deref() {
+            Some("welcome" | "join") => Some(login::LoginScreen::new(login::LoginPage::SignIn, "")),
+            _ if persist && data.extra.welcome => Some(login::LoginScreen::new(
+                login::LoginPage::SignIn,
+                &login::last_server(),
+            )),
+            _ => None,
+        };
         let start_modal = match arg("--modal").as_deref() {
             Some("invite") => Some(Modal::Invite {
                 emails: String::new(),
@@ -682,16 +695,6 @@ impl App {
                 addr: String::new(),
                 code: String::new(),
                 result: String::new(),
-            }),
-            Some("welcome") => Some(Modal::Welcome {
-                step: 0,
-                name: String::new(),
-                addr: String::new(),
-            }),
-            Some("join") => Some(Modal::Welcome {
-                step: 2,
-                name: String::new(),
-                addr: String::new(),
             }),
             Some("call") => Some(Modal::Call {
                 ch: data.channels.first().map(|c| c.id).unwrap_or(0),
@@ -770,6 +773,7 @@ impl App {
             side_search_focus: false,
             subtasks_open: false,
             modal: start_modal,
+            login: start_login,
             notepad_open: false,
             // shown a little longer than usual, as the window may still be opening
             toast: if persist {
@@ -6507,10 +6511,13 @@ impl App {
         }
         let t = self.t();
         theme::apply(ctx, &t);
-        // shortcuts
-        if ctx.input(|i| {
-            i.modifiers.command && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::J))
-        }) {
+        // shortcuts (none on the sign-in screen)
+        let signing_in = self.login.is_some();
+        if !signing_in
+            && ctx.input(|i| {
+                i.modifiers.command && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::J))
+            })
+        {
             self.palette = if self.palette.is_some() {
                 None
             } else {
@@ -6519,26 +6526,33 @@ impl App {
         }
         // Option+T types a character in a text field: only a shortcut outside one
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
-        if ctx.input(|i| {
-            (i.modifiers.command && i.key_pressed(egui::Key::N))
-                || (!typing && i.modifiers.alt && i.key_pressed(egui::Key::T))
-        }) {
+        if !signing_in
+            && ctx.input(|i| {
+                (i.modifiers.command && i.key_pressed(egui::Key::N))
+                    || (!typing && i.modifiers.alt && i.key_pressed(egui::Key::T))
+            })
+        {
             self.open_quick_add(None);
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::G)) {
+        if !signing_in && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::G)) {
             self.new_message_open = true;
         }
-        self.single_key_shortcuts(ctx);
-        self.top_bar(ctx);
-        self.rail(ctx);
-        self.content(ctx);
-        self.task_window(ctx);
-        self.dialogs(ctx);
-        self.modals(ctx);
-        self.media_viewer(ctx);
-        self.notepad(ctx);
-        self.new_message_window(ctx);
-        self.bulk_bar(ctx);
+        if signing_in {
+            // signing in: nothing of the app until then
+            self.login_screen(ctx);
+        } else {
+            self.single_key_shortcuts(ctx);
+            self.top_bar(ctx);
+            self.rail(ctx);
+            self.content(ctx);
+            self.task_window(ctx);
+            self.dialogs(ctx);
+            self.modals(ctx);
+            self.media_viewer(ctx);
+            self.notepad(ctx);
+            self.new_message_window(ctx);
+            self.bulk_bar(ctx);
+        }
         self.toast_ui(ctx);
         // an invite link opened in a browser or mail
         // (other workboard:// links, such as Copy link, open what they point to).
@@ -6576,16 +6590,6 @@ impl App {
         self.huddle_tick(Some(ctx));
         self.notify_tick(Some(ctx));
         self.huddle_bar(ctx);
-        // the first start: how do you want to start?
-        if self.data.extra.welcome && self.persist && self.modal.is_none() {
-            self.data.extra.welcome = false;
-            self.dirty = true;
-            self.modal = Some(Modal::Welcome {
-                step: 0,
-                name: String::new(),
-                addr: String::new(),
-            });
-        }
         // a joined workspace needs to know who you are
         // (on a server the invite code says who you are)
         if self

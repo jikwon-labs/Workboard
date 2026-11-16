@@ -171,6 +171,9 @@ struct TaskDetailView: View {
     @State private var loaded = false
     @State private var newSubtask = ""
     @State private var newCheck = ""
+    /// Counts comments sent here, to bring the newest into view (the
+    /// subtask and checklist sections can push Activity below the fold).
+    @State private var commented = 0
     @FocusState private var focus: Field?
 
     enum Field { case name, desc, subtask, check }
@@ -180,178 +183,186 @@ struct TaskDetailView: View {
         if let t = v.tasks.first(where: { $0.id == taskId }) {
             let status = v.status(of: t)
             let can = client.canEdit
-            Form {
-                Section {
-                    TextField("Task name", text: $name, axis: .vertical)
-                        .font(.title3.weight(.semibold))
-                        .focused($focus, equals: .name)
-                        .disabled(!can)
-                        .submitLabel(.done)
-                        .onChange(of: name) {
-                            // a return key ends the edit, like the Mac app's one-line name
-                            if name.contains("\n") {
-                                name = name.replacingOccurrences(of: "\n", with: "")
-                                focus = nil
-                            }
-                        }
-                        .accessibilityIdentifier("taskName")
-                    if let l = v.list(t.listId) {
-                        LabeledContent("List", value: l.name)
-                    }
-                }
-                Section {
-                    Menu {
-                        ForEach(v.statuses(forList: t.listId), id: \.name) { st in
-                            Button {
-                                client.edit { d, me in Edits.setStatus(&d, task: t.id, to: st.name, me: me, ts: nowTs()) }
-                            } label: {
-                                if st.name == t.status { Label(st.name.uppercased(), systemImage: "checkmark") } else { Text(st.name.uppercased()) }
-                            }
-                        }
-                    } label: {
-                        LabeledContent("Status") {
-                            HStack(spacing: 6) {
-                                StatusDot(status: status, size: 10)
-                                Text(status.name.uppercased()).font(.subheadline.weight(.semibold)).foregroundStyle(Color(rgb: status.color))
-                            }
-                        }
-                    }
-                    .disabled(!can)
-                    .accessibilityIdentifier("statusMenu")
-                    Button {
-                        client.edit { d, me in Edits.setDone(&d, task: t.id, done: !status.isClosed, me: me, ts: nowTs()) }
-                    } label: {
-                        Label(status.isClosed ? "Reopen" : "Mark complete", systemImage: status.isClosed ? "arrow.uturn.backward.circle" : "checkmark.circle")
-                    }
-                    .disabled(!can)
-                    .accessibilityIdentifier("completeButton")
-                    Menu {
-                        ForEach(v.members.filter { !$0.invited }) { m in
-                            Button {
-                                client.edit { d, me in Edits.toggleAssignee(&d, task: t.id, member: m.id, me: me, ts: nowTs()) }
-                            } label: {
-                                if t.assignees.contains(m.id) { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
-                            }
-                        }
-                    } label: {
-                        LabeledContent("Assignees") {
-                            Text(t.assignees.isEmpty ? "None" : t.assignees.compactMap { v.member($0)?.name }.joined(separator: ", "))
-                                .lineLimit(1)
-                        }
-                    }
-                    .disabled(!can)
-                    .accessibilityIdentifier("assigneeMenu")
-                    DueRow(task: t, enabled: can)
-                    Menu {
-                        ForEach(0..<5) { p in
-                            Button {
-                                client.edit { d, me in Edits.setPriority(&d, task: t.id, to: p, me: me, ts: nowTs()) }
-                            } label: {
-                                if t.priority == p { Label(Edits.priorityLabels[p], systemImage: "checkmark") } else { Text(Edits.priorityLabels[p]) }
-                            }
-                        }
-                    } label: {
-                        LabeledContent("Priority") {
-                            Label(Edits.priorityLabels[min(max(t.priority, 0), 4)], systemImage: t.priority == 0 ? "flag" : "flag.fill")
-                                .foregroundStyle(priorityColor(t.priority))
-                        }
-                    }
-                    .disabled(!can)
-                    .accessibilityIdentifier("priorityMenu")
-                }
-                Section("Description") {
-                    TextField("Add a description", text: $desc, axis: .vertical)
-                        .lineLimit(3...)
-                        .focused($focus, equals: .desc)
-                        .disabled(!can)
-                        .accessibilityIdentifier("taskDescription")
-                }
-                let subs = v.subtasks(of: t.id)
-                if !subs.isEmpty || can {
-                    Section("Subtasks") {
-                        ForEach(subs) { s in
-                            NavigationLink(value: Nav.Route.task(s.id)) { TaskRow(task: s) }
-                                .accessibilityIdentifier("subtask-\(s.id)")
-                        }
-                        if can {
-                            TextField("Add subtask", text: $newSubtask)
-                                .focused($focus, equals: .subtask)
-                                .submitLabel(.done)
-                                .onSubmit { addSubtask(t) }
-                                .accessibilityIdentifier("newSubtaskField")
-                        }
-                    }
-                }
-                if !t.checklist.isEmpty || can {
+            ScrollViewReader { proxy in
+                Form {
                     Section {
-                        ForEach(Array(t.checklist.enumerated()), id: \.offset) { i, item in
-                            Button {
-                                client.edit { d, _ in Edits.setCheckItem(&d, task: t.id, index: i, done: !item.done, ts: nowTs()) }
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(item.done ? Color.green : Color.secondary)
-                                    Text(item.text)
-                                        .strikethrough(item.done)
-                                        .foregroundStyle(item.done ? .secondary : .primary)
-                                    Spacer(minLength: 0)
-                                    if let who = item.assignee, let m = v.member(who) {
-                                        Avatar(member: m, size: 20)
-                                    }
+                        TextField("Task name", text: $name, axis: .vertical)
+                            .font(.title3.weight(.semibold))
+                            .focused($focus, equals: .name)
+                            .disabled(!can)
+                            .submitLabel(.done)
+                            .onChange(of: name) {
+                                // a return key ends the edit, like the Mac app's one-line name
+                                if name.contains("\n") {
+                                    name = name.replacingOccurrences(of: "\n", with: "")
+                                    focus = nil
                                 }
                             }
-                            .disabled(!can)
-                            .accessibilityLabel(item.text)
-                            .accessibilityValue(item.done ? "Done" : "Not done")
-                            .accessibilityIdentifier("checkItem-\(i)")
-                            .swipeActions {
-                                if can {
-                                    Button("Delete", role: .destructive) {
-                                        client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
-                                    }
+                            .accessibilityIdentifier("taskName")
+                        if let l = v.list(t.listId) {
+                            LabeledContent("List", value: l.name)
+                        }
+                    }
+                    Section {
+                        Menu {
+                            ForEach(v.statuses(forList: t.listId), id: \.name) { st in
+                                Button {
+                                    client.edit { d, me in Edits.setStatus(&d, task: t.id, to: st.name, me: me, ts: nowTs()) }
+                                } label: {
+                                    if st.name == t.status { Label(st.name.uppercased(), systemImage: "checkmark") } else { Text(st.name.uppercased()) }
+                                }
+                            }
+                        } label: {
+                            LabeledContent("Status") {
+                                HStack(spacing: 6) {
+                                    StatusDot(status: status, size: 10)
+                                    Text(status.name.uppercased()).font(.subheadline.weight(.semibold)).foregroundStyle(Color(rgb: status.color))
                                 }
                             }
                         }
-                        if can {
-                            TextField(t.checklist.isEmpty ? "Create checklist" : "Add item", text: $newCheck)
-                                .focused($focus, equals: .check)
-                                .submitLabel(.done)
-                                .onSubmit { addCheck(t) }
-                                .accessibilityIdentifier("newCheckItemField")
+                        .disabled(!can)
+                        .accessibilityIdentifier("statusMenu")
+                        Button {
+                            client.edit { d, me in Edits.setDone(&d, task: t.id, done: !status.isClosed, me: me, ts: nowTs()) }
+                        } label: {
+                            Label(status.isClosed ? "Reopen" : "Mark complete", systemImage: status.isClosed ? "arrow.uturn.backward.circle" : "checkmark.circle")
+                        }
+                        .disabled(!can)
+                        .accessibilityIdentifier("completeButton")
+                        Menu {
+                            ForEach(v.members.filter { !$0.invited }) { m in
+                                Button {
+                                    client.edit { d, me in Edits.toggleAssignee(&d, task: t.id, member: m.id, me: me, ts: nowTs()) }
+                                } label: {
+                                    if t.assignees.contains(m.id) { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                                }
+                            }
+                        } label: {
+                            LabeledContent("Assignees") {
+                                Text(t.assignees.isEmpty ? "None" : t.assignees.compactMap { v.member($0)?.name }.joined(separator: ", "))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .disabled(!can)
+                        .accessibilityIdentifier("assigneeMenu")
+                        DueRow(task: t, enabled: can)
+                        Menu {
+                            ForEach(0..<5) { p in
+                                Button {
+                                    client.edit { d, me in Edits.setPriority(&d, task: t.id, to: p, me: me, ts: nowTs()) }
+                                } label: {
+                                    if t.priority == p { Label(Edits.priorityLabels[p], systemImage: "checkmark") } else { Text(Edits.priorityLabels[p]) }
+                                }
+                            }
+                        } label: {
+                            LabeledContent("Priority") {
+                                Label(Edits.priorityLabels[min(max(t.priority, 0), 4)], systemImage: t.priority == 0 ? "flag" : "flag.fill")
+                                    .foregroundStyle(priorityColor(t.priority))
+                            }
+                        }
+                        .disabled(!can)
+                        .accessibilityIdentifier("priorityMenu")
+                    }
+                    Section("Description") {
+                        TextField("Add a description", text: $desc, axis: .vertical)
+                            .lineLimit(3...)
+                            .focused($focus, equals: .desc)
+                            .disabled(!can)
+                            .accessibilityIdentifier("taskDescription")
+                    }
+                    let subs = v.subtasks(of: t.id)
+                    if !subs.isEmpty || can {
+                        Section("Subtasks") {
+                            ForEach(subs) { s in
+                                NavigationLink(value: Nav.Route.task(s.id)) { TaskRow(task: s) }
+                                    .accessibilityIdentifier("subtask-\(s.id)")
+                            }
+                            if can {
+                                TextField("Add subtask", text: $newSubtask)
+                                    .focused($focus, equals: .subtask)
+                                    .submitLabel(.done)
+                                    .onSubmit { addSubtask(t) }
+                                    .accessibilityIdentifier("newSubtaskField")
+                            }
+                        }
+                    }
+                    if !t.checklist.isEmpty || can {
+                        Section {
+                            ForEach(Array(t.checklist.enumerated()), id: \.offset) { i, item in
+                                Button {
+                                    client.edit { d, _ in Edits.setCheckItem(&d, task: t.id, index: i, done: !item.done, ts: nowTs()) }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(item.done ? Color.green : Color.secondary)
+                                        Text(item.text)
+                                            .strikethrough(item.done)
+                                            .foregroundStyle(item.done ? .secondary : .primary)
+                                        Spacer(minLength: 0)
+                                        if let who = item.assignee, let m = v.member(who) {
+                                            Avatar(member: m, size: 20)
+                                        }
+                                    }
+                                }
+                                .disabled(!can)
+                                .accessibilityLabel(item.text)
+                                .accessibilityValue(item.done ? "Done" : "Not done")
+                                .accessibilityIdentifier("checkItem-\(i)")
+                                .swipeActions {
+                                    if can {
+                                        Button("Delete", role: .destructive) {
+                                            client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
+                                        }
+                                    }
+                                }
+                            }
+                            if can {
+                                TextField(t.checklist.isEmpty ? "Create checklist" : "Add item", text: $newCheck)
+                                    .focused($focus, equals: .check)
+                                    .submitLabel(.done)
+                                    .onSubmit { addCheck(t) }
+                                    .accessibilityIdentifier("newCheckItemField")
+                            }
+                        } header: {
+                            HStack {
+                                Text("Checklist")
+                                if !t.checklist.isEmpty {
+                                    Text("\(t.checklist.filter(\.done).count)/\(t.checklist.count)")
+                                        .monospacedDigit()
+                                        .accessibilityIdentifier("checklistCount")
+                                }
+                            }
+                        }
+                    }
+                    Section {
+                        ForEach(Array(t.activity.suffix(30).reversed().enumerated()), id: \.offset) { i, a in
+                            HStack(alignment: .top, spacing: 10) {
+                                Avatar(member: v.member(a.author), size: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if a.comment {
+                                        Text(v.member(a.author)?.name ?? "Someone").font(.caption.weight(.semibold))
+                                    }
+                                    Text(a.comment ? a.text : "\(v.member(a.author)?.name ?? "Someone") \(a.text)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(a.comment ? .primary : .secondary)
+                                    Text(Fmt.relative(a.ts)).font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                            .id(i == 0 ? "latestActivity" : "activity-\(i)")
                         }
                     } header: {
-                        HStack {
-                            Text("Checklist")
-                            if !t.checklist.isEmpty {
-                                Text("\(t.checklist.filter(\.done).count)/\(t.checklist.count)")
-                                    .monospacedDigit()
-                                    .accessibilityIdentifier("checklistCount")
-                            }
-                        }
+                        Text("Activity")
                     }
                 }
-                Section {
-                    ForEach(Array(t.activity.suffix(30).reversed().enumerated()), id: \.offset) { _, a in
-                        HStack(alignment: .top, spacing: 10) {
-                            Avatar(member: v.member(a.author), size: 22)
-                            VStack(alignment: .leading, spacing: 2) {
-                                if a.comment {
-                                    Text(v.member(a.author)?.name ?? "Someone").font(.caption.weight(.semibold))
-                                }
-                                Text(a.comment ? a.text : "\(v.member(a.author)?.name ?? "Someone") \(a.text)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(a.comment ? .primary : .secondary)
-                                Text(Fmt.relative(a.ts)).font(.caption2).foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Activity")
+                .onChange(of: commented) {
+                    withAnimation { proxy.scrollTo("latestActivity", anchor: .top) }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Composer(placeholder: "Comment") { text, picked in
-                    client.edit { d, me in Edits.addComment(&d, task: t.id, text: text, picked: picked, me: me, ts: nowTs()) }
+                    let ok = client.edit { d, me in Edits.addComment(&d, task: t.id, text: text, picked: picked, me: me, ts: nowTs()) }
+                    if ok { commented += 1 }
+                    return ok
                 }
             }
             .navigationTitle("Task")

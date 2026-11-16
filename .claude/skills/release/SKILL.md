@@ -52,9 +52,9 @@ Mac mini 계정은 `seojigwon` 이다(`jikwon` 아님).
 
 ## 5. 확인
 
-    curl -s http://macmini:8787/updates/appcast.xml | grep -c '<버전>'
+    curl -s https://wb.wlrnjs.xyz/updates/appcast.xml | grep -c '<버전>'
 
-1 이상이어야 한다. 서버는 다시 띄울 필요 없다.
+1 이상이어야 한다. 서버는 다시 띄울 필요 없다. (Tailscale 을 뺀 뒤로 `macmini:8787` 은 이 MacBook 에서 닿지 않는다. 팀원 앱이 쓰는 터널 주소로 확인한다.)
 
 ## 6. 정리·보고
 

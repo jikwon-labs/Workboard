@@ -9,7 +9,7 @@
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
   - [ ] 서버 코드 받고 다시 설치: `git pull` → `deploy/install-launchd.sh` → 로그에 `listening on ws://100.121.190.50:8787/ws and ws://127.0.0.1:8787/ws` 가 보이는지 (`tail ~/Library/Logs/workboard-server.log`)
   - [ ] cloudflared 설치: `brew install cloudflared` → `TUNNEL_TOKEN='<토큰>' deploy/install-cloudflared.sh` (토큰은 Cloudflare 대시보드에서. 먼저 도메인·터널 설정이 끝나 있어야 한다) → `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}`
-  - [ ] 허들을 LiveKit Cloud 로: `LIVEKIT_URL=... LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` → 앱 두 대로 허들 들어가서 서로 들리는지
+  - [ ] 허들을 LiveKit Cloud 로: `LIVEKIT_URL=wss://workboard-ngm979eq.livekit.cloud LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` (프로젝트 `workboard` 는 2026-11-16 에 만들어 둠. 키와 시크릿은 LiveKit Cloud > Settings > API keys 의 기본 키에서 복사) → 앱 두 대로 허들 들어가서 서로 들리는지
   - [ ] 메일을 쓴다면 `mail.json` 의 `public_address` 를 `"https://wb.wlrnjs.xyz"` 로 → `workboard-server mail-test <내 메일>`
   - [ ] 재부팅 점검에 cloudflared 가 나오는지: `deploy/check-after-boot.sh`
 - [ ] **메일 설정**: Gmail 앱 비밀번호 → MagicDNS 이름 확인 → `mail.json` 작성·`chmod 600` → `workboard-server mail-test` 로 시험 메일 (`accounts-and-mail.md` 2)

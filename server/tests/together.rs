@@ -683,12 +683,17 @@ fn only_invited_people_get_in_and_only_admins_invite() {
 }
 
 fn http_get(port: u16, path: &str) -> (String, Vec<u8>) {
+    http_get_with(port, path, "Host: x\r\n")
+}
+
+/// http_get with these header lines (each ending in \r\n) in place of "Host: x".
+fn http_get_with(port: u16, path: &str, headers: &str) -> (String, Vec<u8>) {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.write_all(
         format!(
-            "GET {} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
-            path
+            "GET {} HTTP/1.1\r\n{}Connection: close\r\n\r\n",
+            path, headers
         )
         .as_bytes(),
     )
@@ -3886,6 +3891,54 @@ fn a_front_with_a_certificate_nobody_trusts_is_refused() {
     )
     .unwrap_err();
     assert!(matches!(err, wb_net::FileError::Net(_)), "{:?}", err);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// What Cloudflare Tunnel adds to a request it passes on from the internet.
+const VIA_TUNNEL: &str = "Host: wb.example.com\r\nX-Forwarded-Proto: https\r\nX-Forwarded-For: 203.0.113.9\r\nCf-Connecting-Ip: 203.0.113.9\r\n";
+
+#[test]
+fn through_the_tunnel_links_are_https_and_health_says_little() {
+    let home = temp_home("via-tunnel");
+    let server = Server::start(&home, 0);
+
+    // the join page gives the address the browser came to, as https
+    let (_, body) = http_get_with(server.port, "/join?code=ABCD-EFGH-JKMN", VIA_TUNNEL);
+    let body = String::from_utf8(body).unwrap();
+    assert!(
+        body.contains(
+            r#"href="workboard://join?server=https%3A%2F%2Fwb.example.com&amp;code=ABCD-EFGH-JKMN""#
+        ),
+        "{}",
+        body
+    );
+    assert!(body.contains("<dd>https://wb.example.com</dd>"), "{}", body);
+    let link = wb_net::parse_join(
+        "workboard://join?server=https%3A%2F%2Fwb.example.com&code=ABCD-EFGH-JKMN",
+    );
+    assert_eq!(
+        wb_net::server_url(link.server.as_deref().unwrap())
+            .unwrap()
+            .2,
+        "wss://wb.example.com/ws",
+        "the app takes the link's server as the secure address"
+    );
+
+    // from the internet /health says it is up and nothing more
+    let (head, body) = http_get_with(server.port, "/health", VIA_TUNNEL);
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v, json!({"ok": true}));
+    // asked on the Mac mini itself: everything, as before
+    let (_, body) = http_get(server.port, "/health");
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["ok"], true);
+    assert!(
+        v.get("devices").is_some() && v.get("rev").is_some(),
+        "{}",
+        v
+    );
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

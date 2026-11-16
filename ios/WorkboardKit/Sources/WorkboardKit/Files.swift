@@ -23,7 +23,7 @@ public enum FileError: Error, Equatable, Sendable {
     public var explanation: String {
         switch self {
         case .notSignedIn: return "You're not signed in to the server."
-        case .tooLarge: return "The file is larger than the server takes (500 MB)."
+        case .tooLarge: return "The file is larger than the server takes (90 MB)."
         case .missing: return "The server doesn't have this file."
         case .unsupported: return "The server doesn't take pictures and videos yet."
         case .failed(let why): return "Couldn't reach the server: \(why)"
@@ -33,7 +33,7 @@ public enum FileError: Error, Equatable, Sendable {
 
 public enum FileAPI {
     /// The largest file the server takes (MAX_FILE).
-    public static let maxBytes = 500 << 20
+    public static let maxBytes = 90 << 20
 
     public static func url(server: String, sha: String) -> URL? {
         ServerAddress.http(server, path: "/files/" + sha)

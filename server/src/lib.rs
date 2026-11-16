@@ -2080,10 +2080,7 @@ fn accept_key(key: &[u8]) -> String {
 async fn ws_route(State(hub): State<Arc<Hub>>, mut req: axum::extract::Request) -> Response {
     let h = req.headers();
     // the address this app reached us at, for links in invite mails
-    let host = h
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .map(|h| h.to_string());
+    let host = reached_at(h);
     let has = |name: header::HeaderName, want: &str| {
         h.get_all(name).iter().any(|v| {
             v.to_str()
@@ -2154,17 +2151,42 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Whether a request came through a proxy in front of the server
+/// (Cloudflare Tunnel says who asked in these headers; a request made
+/// straight to the server has neither).
+fn through_proxy(h: &axum::http::HeaderMap) -> bool {
+    h.contains_key("cf-connecting-ip") || h.contains_key("x-forwarded-for")
+}
+
+/// The server's address as the asking app or browser typed it: the Host
+/// header, as an https address when a front in between says the request
+/// came over https (X-Forwarded-Proto), since an app then needs the
+/// secure address to get here.
+fn reached_at(h: &axum::http::HeaderMap) -> Option<String> {
+    let host = h
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())?
+        .trim()
+        .to_string();
+    let https = h
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("https"));
+    Some(if https {
+        format!("https://{}", host.strip_suffix(":443").unwrap_or(&host))
+    } else {
+        host
+    })
+}
+
 /// GET /join?code=...&email=...: the page an invite mail links to. It opens
 /// the app with everything filled in, and shows what to type otherwise.
 async fn join_route(
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let host = headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("")
-        .to_string();
+    let host = reached_at(&headers).unwrap_or_default();
     let code = q
         .get("code")
         .map(|c| c.trim().to_string())
@@ -2261,7 +2283,11 @@ async fn update_route(
     }
 }
 
-async fn health(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
+async fn health(State(hub): State<Arc<Hub>>, headers: axum::http::HeaderMap) -> Response {
+    // from the internet (through the tunnel): only that it is up
+    if through_proxy(&headers) {
+        return Json(json!({ "ok": true })).into_response();
+    }
     let g = hub.inner.lock().unwrap();
     let backups = backup_files(&hub.home.join(BACKUP_DIR), "hourly")
         .last()
@@ -2274,6 +2300,7 @@ async fn health(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
         "connections": hub.connections.load(Ordering::Relaxed),
         "latest_backup": backups,
     }))
+    .into_response()
 }
 
 async fn send(socket: &mut WebSocket, text: &str) -> bool {

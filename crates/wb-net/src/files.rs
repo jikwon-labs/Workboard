@@ -38,7 +38,7 @@ impl FileError {
     pub fn explain(&self) -> String {
         match self {
             FileError::NotSignedIn => "You're not signed in to the server.".into(),
-            FileError::TooLarge => "The file is larger than the server takes (500 MB).".into(),
+            FileError::TooLarge => "The file is larger than the server takes (90 MB).".into(),
             FileError::Missing => "The server doesn't have this file.".into(),
             FileError::Unsupported => {
                 "The server doesn't take pictures and videos yet. Update workboard-server.".into()

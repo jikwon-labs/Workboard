@@ -41,8 +41,9 @@ use std::time::{Duration, Instant, SystemTime};
 pub(super) const THUMB: u32 = 720;
 /// Longer side of a picture opened large.
 pub(super) const FULL: u32 = 2560;
-/// The server takes files up to this size.
-pub(super) const MAX_FILE: u64 = 500 << 20;
+/// The server takes files up to this size (MAX_FILE in server/src/files.rs:
+/// under the 100 MB Cloudflare passes on its free plan).
+pub(super) const MAX_FILE: u64 = 90 << 20;
 /// Pictures and videos in one message.
 pub(super) const MAX_PER_MESSAGE: usize = 10;
 /// Waits before fetching a missing file again: after the first failure, the
@@ -1132,7 +1133,7 @@ fn prepare(
             .map_err(|_| format!("{} can't be read.", name))?
             .len();
         if bytes > MAX_FILE {
-            return Err(format!("{} is larger than 500 MB.", name));
+            return Err(format!("{} is larger than 90 MB.", name));
         }
         let (w, h, secs) = media::probe(&src, kind)?;
         let (sha, bytes) =
@@ -1499,7 +1500,7 @@ impl App {
         const WITH_VALUES: [&str; 5] = [
             "{} isn't a picture or a video.",
             "{} can't be read.",
-            "{} is larger than 500 MB.",
+            "{} is larger than 90 MB.",
             "Couldn't put {} in the shared folder: {}",
             "The server said {} {}",
         ];

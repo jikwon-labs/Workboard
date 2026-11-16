@@ -24,8 +24,10 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 pub const FILES_DIR: &str = "files";
-/// The largest file an app may put here.
-pub const MAX_FILE: u64 = 500 << 20;
+/// The largest file an app may put here. Under the 100 MB a request may
+/// carry through Cloudflare (Tunnel) on its free plan, so a server behind
+/// it takes the same files as one reached directly.
+pub const MAX_FILE: u64 = 90 << 20;
 /// A file nothing names anymore is deleted only after this long unchanged
 /// and this long since anything last named it.
 pub const FILE_KEEP_DAYS: u64 = 60;

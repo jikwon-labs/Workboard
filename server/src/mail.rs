@@ -10,9 +10,12 @@
 //     "username": "team@example.com",
 //     "password": "app password",
 //     "from": "Workboard <team@example.com>",
-//     "public_address": "mac-mini.tail1.ts.net:8787"   (optional: the address
-//                                            people use in links; else the
-//                                            address the inviter connected to)
+//     "public_address": "https://wb.example.com"   (optional: the address
+//                                            people use in links, such as
+//                                            "mac-mini.tail1.ts.net:8787" or an
+//                                            https address before the server;
+//                                            else the address the inviter
+//                                            connected to)
 //   }
 //
 // Without mail.json nothing is emailed: invite codes are handed over by hand
@@ -108,6 +111,22 @@ pub fn send(home: &Path, cfg: &MailCfg, mail: &Mail) -> Result<(), String> {
         .map_err(|e| format!("The mail server said: {}", e))
 }
 
+/// The web address of a server address as people type it: an https
+/// address stays as it is, anything else is plain http.
+pub fn web_base(server: &str) -> String {
+    let s = server.trim().trim_end_matches('/');
+    let lower = s.to_ascii_lowercase();
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        s.to_string()
+    } else if let Some(rest) = lower.strip_prefix("wss://") {
+        format!("https://{}", &s[s.len() - rest.len()..])
+    } else if let Some(rest) = lower.strip_prefix("ws://") {
+        format!("http://{}", &s[s.len() - rest.len()..])
+    } else {
+        format!("http://{}", s)
+    }
+}
+
 /// The address links in mails point at.
 pub fn link_address(cfg: &MailCfg, connected_to: Option<&str>) -> Option<String> {
     cfg.public_address
@@ -140,8 +159,8 @@ pub fn invite_mail(
     );
     if let Some(s) = server {
         body.push_str(&format!(
-            "Open this link on a computer or phone that can reach your team's server (Tailscale on):\n\n  http://{}/join?code={}&email={}\n\nOr open Workboard, choose \"Join my team\" and type:\n\n  Server:       {}\n  Invite code:  {}\n",
-            s,
+            "Open this link on a computer or phone that can reach your team's server:\n\n  {}/join?code={}&email={}\n\nOr open Workboard, choose \"Join my team\" and type:\n\n  Server:       {}\n  Invite code:  {}\n",
+            web_base(s),
             code,
             pct(to),
             s,
@@ -182,4 +201,40 @@ fn pct(s: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_in_mails_follow_the_servers_address() {
+        assert_eq!(web_base("macmini:8787"), "http://macmini:8787");
+        assert_eq!(
+            web_base("https://wb.example.com/"),
+            "https://wb.example.com"
+        );
+        assert_eq!(web_base("wss://wb.example.com"), "https://wb.example.com");
+        assert_eq!(web_base("ws://10.0.0.2:8787"), "http://10.0.0.2:8787");
+        let m = invite_mail(
+            "bo@team.io",
+            "Team",
+            "Ann",
+            "ABCD-EFGH-JKMN",
+            Some("https://wb.example.com"),
+            7,
+        );
+        assert!(
+            m.body
+                .contains("https://wb.example.com/join?code=ABCD-EFGH-JKMN&email=bo%40team.io"),
+            "{}",
+            m.body
+        );
+        assert!(
+            m.body.contains("Server:       https://wb.example.com"),
+            "{}",
+            m.body
+        );
+        assert!(!m.body.contains("Tailscale"), "{}", m.body);
+    }
 }

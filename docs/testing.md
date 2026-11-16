@@ -16,8 +16,8 @@
 
     swift test --package-path ios/WorkboardKit
 
-- 2026-11-16 기준 67개. 합치기 규칙, 서버 클라이언트, 로그인, 통화 토큰 같은 iPhone 앱의 로직을 가짜 서버로 확인한다.
-- 시뮬레이터에서 앱을 직접 누르는 UI 테스트 17개는 따로 돌린다. 가짜 서버를 먼저 띄우는 순서와 명령은 [`docs/ios-design.md`](ios-design.md) "실행 방법" 의 테스트.
+- 2026-11-16 기준 139개. 합치기 규칙, 서버 클라이언트, 로그인, 통화 토큰 같은 iPhone 앱의 로직을 가짜 서버로 확인한다.
+- 시뮬레이터에서 앱을 직접 누르는 UI 테스트 26개는 따로 돌린다. 가짜 서버를 먼저 띄우는 순서와 명령은 [`docs/ios-design.md`](ios-design.md) "실행 방법" 의 테스트.
 
 ### push 전 검증 (`scripts/wt verify`)
 

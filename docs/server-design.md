@@ -12,7 +12,7 @@
 ## 지금 상태 (2026-11-16)
 
 - **1~7단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부, 계정·초대 메일, iPhone 푸시 알림(실제 APNs 발송은 미확인)까지 들어갔다. 2026-11-16 에 허들 화면 공유와 화질 조절도 들어갔고, 결함 수정 1~3차로 서버 로그인 잠금, 초대 코드·파일 저장 강화, 사람별로 보이는 대화·개인 공간 거르기가 더해졌다. `cargo test --workspace` 498개(손으로 돌리는 `--ignored` 2개 빼고)와 재생 테스트(`tests/player.rs`) 통과.
-- **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. owner(Jikwon)와 멤버 한 명이 들어와 있고, 아직 아무도 비밀번호(계정)가 없다. 돌고 있는 서버 코드는 `8fee0c6`(5단계, 사진·영상 전송까지)라서 6단계 이후는 아직 들어가지 않았다(2026-11-16 확인, [`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md)).
+- **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. owner(Jikwon)와 멤버 한 명이 들어와 있고, 아직 아무도 비밀번호(계정)가 없다. 돌고 있는 서버 코드는 `ee1e990`(7단계와 결함 수정까지, 2026-11-16 재설치)이고, APNs 키를 두어 iPhone 알림이 켜져 있다. 앱은 0.1.7(빌드 329)을 배포했다. 메일은 아직 설정하지 않았다([`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md)).
 - **재부팅 자동 복구 확인:** 2026-11-15 03:37 macOS 업데이트(27.0.1 → 27.2.1) 재시동 뒤 Tailscale, 두 서버, Docker 와 컨테이너, ngrok, hermes, branchport 가 모두 저절로 다시 떴다(`deploy/check-after-boot.sh` 기록).
 - **실제 목소리:** 사용자가 확인했다("목소리 잘 나오더라").
 - **실제 카메라 그림:** 아직 확인 못 했다(아래 "남은 일").
@@ -22,11 +22,11 @@
 **확인해야 할 것**
 1. **실제 카메라.** 카메라가 있는 Mac 에서 허들 Video 로 얼굴이 상대에게 보이는지, Stop video 뒤 Workboard 를 켠 채로 다른 앱(Photo Booth, FaceTime)이 카메라를 바로 쓸 수 있는지(고친 nokhwa 를 실제 장치로 처음 확인하는 것). Mac mini 의 유일한 카메라인 아이폰 연속성 카메라는 아이폰이 근처에 있고 깨어 있을 때만 보이는데, 재부팅 뒤 아이폰을 옆에 두어도 목록에 나타나지 않았다(Mac 쪽 블루투스·Wi-Fi·`ContinuityCaptureAgent` 는 정상, 카메라·마이크 권한 허용 상태). 방법: [`docs/testing.md`](testing.md) "다른 Mac 에서".
 2. **공증된 앱의 권한 창.** 서명·공증된 `.app` 을 처음 쓸 때 마이크·카메라 권한 창이 뜨는지. Developer ID 가 있는 Mac 에서 확인한다.
-- **실제 메일과 실제 푸시.** SMTP 메일(6단계)과 APNs 푸시(7단계)는 테스트 대역으로만 확인했다. 메일 설정과 APNs 키를 둔 뒤 실제로 보내 본다.
+- **실제 메일과 실제 푸시.** SMTP 메일(6단계)과 APNs 푸시(7단계)는 테스트 대역으로만 확인했다. APNs 키는 2026-11-16 에 두었으니 iPhone 실기기에서 배너를 확인하고, 메일은 설정한 뒤 실제로 보내 본다.
 
 **운영** (사람이 할 일의 순서와 명령은 [`docs/macmini/README.md`](macmini/README.md), [`docs/macbook/README.md`](macbook/README.md) 체크리스트)
-- **Mac mini 서버 다시 설치.** 6·7단계와 결함 수정이 서버에 들어가려면 Mac mini 에서 `git pull && deploy/install-launchd.sh` 를 다시 돌린다.
-3. **새 앱 배포.** 팀 전체가 같은 버전을 써야 한다(1단계에서 변경 시각을 밀리초로 바꿔서, 예전 버전과 섞이면 예전 쪽 수정이 늘 진다). 절차: `/release` 스킬, `docs/release/README.md`.
+- ~~**Mac mini 서버 다시 설치.**~~ 2026-11-16 완료(`ee1e990`). 서버 코드를 바꾸면 다시 `git pull && deploy/install-launchd.sh`.
+3. ~~**새 앱 배포.**~~ 2026-11-16 0.1.7 배포. 팀 전체가 같은 버전을 써야 한다(1단계에서 변경 시각을 밀리초로 바꿔서, 예전 버전과 섞이면 예전 쪽 수정이 늘 진다). 절차: `/release` 스킬, `docs/release/README.md`.
 4. **메일 설정, 비밀번호, 팀원 초대.** `mail.json` 을 두고, 지금 있는 사람은 비밀번호를 정하고, 팀원은 Invite 로 이메일을 넣어 메일로 코드를 받는다. 팀원은 Tailscale 초대도 받아야 한다. 순서: [`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md), `deploy/README.md` "Setting up and inviting".
 
 **알려진 한계(급하지 않음)**

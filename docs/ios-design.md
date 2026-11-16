@@ -15,7 +15,7 @@ SwiftUI 앱(iOS 17+)이 workboard-server 에 WebSocket 으로 붙어 채팅·작
 | 1+. 빠졌던 편집 | 작업 댓글, 담당자·마감일·우선순위, 새 문서, 메시지 리액션 | swift test, UI 테스트 |
 | 오프라인 편집 | 끊긴 동안에도 편집 가능. "N changes waiting" 표시. 다시 붙으면 자동으로 올라감 | swift test(두 기기 오프라인 편집 포함), UI 테스트 |
 | 2. 로그인 | 실제 서버 프로토콜: 이메일+비밀번호, 초대 코드+새 비밀번호, 비밀번호 찾기(재설정 코드), 설정에서 비밀번호 만들기·바꾸기, 초대 링크(`workboard://join`). 기기 토큰은 Keychain, 서버가 정해 주는 "나", 로그아웃, 취소되면 로그인 화면으로 | swift test, UI 테스트(가짜 서버). 실제 서버로는 미확인 |
-| 3·4. 통화 | LiveKit Swift SDK 로 음성 Huddle, 영상 켜기, 참가자·말하는 사람 표시, 음소거, 나가기. `POST /call-token` 으로 입장 토큰. 통화가 없는 서버면 맥 앱처럼 Jitsi 링크 메시지 | swift test(토큰 요청·서명), UI 테스트(실패 표시, 링크 대체). 실제 LiveKit 서버로는 미확인 |
+| 3·4. 통화 | LiveKit Swift SDK 로 음성 Huddle, 영상 켜기, 참가자·말하는 사람 표시, 음소거, 나가기. 입장 토큰은 실제 서버처럼 WebSocket `call_join` → `call_token` 으로 받는다. 통화가 없는 서버면 맥 앱처럼 Jitsi 링크 메시지 | swift test(토큰 요청·서명), UI 테스트(실패 표시, 링크 대체). 실제 LiveKit 서버로는 미확인 |
 | 알림 | 다른 사람 메시지가 오면 로컬 알림(보고 있는 대화는 제외), 알림을 누르면 그 대화 열기, APNs 기기 토큰을 서버에 등록 | UI 테스트(배너, 눌러서 이동). 원격 푸시는 미확인 |
 
 ## 폴더 구성
@@ -33,7 +33,7 @@ ios/
   WorkboardUITests/        시뮬레이터에서 앱을 직접 조작하는 UI 테스트 24개
   Workboard.xcodeproj      손으로 쓴 프로젝트(폴더 동기화 그룹, objectVersion 77)
   Config/Info.plist        ATS 예외, 마이크·카메라 문구, 백그라운드 모드, workboard:// URL 스킴
-  Config/Workboard.entitlements  푸시용(아직 빌드에 연결 안 함, 아래 "푸시" 참고)
+  Config/Workboard.entitlements  푸시용(`CODE_SIGN_ENTITLEMENTS` 에 연결됨, 아래 "알림" 참고)
   scripts/make_ios_icon.swift  앱 아이콘 생성
   screenshots/             시뮬레이터 스크린샷(라이트·다크)
 ```
@@ -71,14 +71,14 @@ swift run wb-cli ws://127.0.0.1:8787 watch
 테스트:
 
 ```sh
-cd ios/WorkboardKit && swift test          # 129개 (2026-11-16)
+cd ios/WorkboardKit && swift test          # 139개 (2026-11-16)
 
 # UI 테스트용 가짜 서버 3개
 swift run wb-fake-server --port 18787 &
 swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev &
 swift run wb-fake-server --port 18789 --admin-http &
 xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
-  -destination 'platform=iOS Simulator,name=iPhone 17' test   # 24개 (2026-11-16)
+  -destination 'platform=iOS Simulator,name=iPhone 17' test   # 26개 (2026-11-16)
 #   이 맥에는 "iPhone 17" 이 런타임별로 두 개 있어서 id 로 골랐다:
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
@@ -229,7 +229,7 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **푸시 설정(2026-11-16):**
   1. 번들 ID 는 `com.seojigwon.workboard`(UI 테스트는 `com.seojigwon.workboard.uitests`), 팀은 `K6599UJ4KM` 이다. Apple Developer 의 App ID 에 Push Notifications capability 를 켰고, `Config/Workboard.entitlements`(`aps-environment`)를 `CODE_SIGN_ENTITLEMENTS` 에 연결했다.
   2. APNs 키는 "Workboard APNs"(Key ID `7NH56246WD`, Team Scoped, Sandbox & Production). `.p8` 파일은 비밀이라 레포에 넣지 않는다. Mac mini 서버 폴더에 두고 `apns.json` 을 쓴다(`docs/macmini/README.md`). `topic` 은 위 번들 ID.
-  3. 남은 일: Mac mini 에 키를 두고, 실기기에서 앱을 끄거나 백그라운드로 보낸 뒤 다른 사람이 DM 을 보내 배너가 뜨는지 본다. Xcode 로 설치한 개발 빌드는 `env: "development"` 라 sandbox 로, 그 밖의 빌드는 `"production"` 으로 간다.
+  3. Mac mini 에 키와 `apns.json` 을 두었고, 서버가 APNs 를 켠 로그를 확인했다(2026-11-16). 남은 일: 실기기에서 앱을 끄거나 백그라운드로 보낸 뒤 다른 사람이 DM 을 보내 배너가 뜨는지 본다. Xcode 로 설치한 개발 빌드는 `env: "development"` 라 sandbox 로, 그 밖의 빌드는 `"production"` 으로 간다.
 - **확인한 것:** 권한 허용 -> 다른 탭에서 메시지 도착 -> 배너 -> 눌러서 #general 열기(UI 테스트).
 - **확인 못 한 것:** `xcrun simctl push` 로 원격 페이로드를 보냈을 때 배너가 뜨는 것은 이 시뮬레이터에서 확인하지 못했다. 추측: 테스트가 끝난 뒤 권한 상태가 바뀌었거나, 이 iOS 27 시뮬레이터의 동작 차이일 수 있다. 실기기에서 다시 확인해야 한다.
 
@@ -268,6 +268,15 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **가짜 서버:** 실제 서버처럼 요청한 연결에는 변경 알림을 보내지 않고 `answer` 를 붙인다. `dropNextAnswer()` 대신 `lateNextAnswer(after:)`(다음 관리 요청의 답을 N초 늦게, 그동안 그 연결로 가는 것도 붙잡음)가 있다. `meddleBeforeNextAnswer` 는 다른 관리자의 목록을 내 답보다 먼저 보낸다. 비밀번호를 정하면 실제 서버처럼 모든 연결에 `access` 를 보낸다.
 - **실제 서버를 바꿨다:** Mac mini 에서 서버를 다시 설치해야 한다. 그 전까지 예전 서버에서는 잇달아 보낸 관리 요청의 거절이 화면 위 알림으로 갈 수 있다(앱은 그대로 동작한다).
 
+## 새 대화·하위 작업·체크리스트 (2026-11-16)
+
+메시지 고치기·지우기·고정, 채널 만들기는 2차 고침 때 들어갔다(`MessageActionsUITests`). 이번에 남은 일상 편집을 더했다.
+
+- **새 DM:** Chat 위 "New message" 버튼 → 사람 고르기 → 그 사람과의 대화가 열린다(`Edits.openDM`, 맥의 `ChatAction::Dm`). 이미 있으면 그 대화를 연다. 두 기기가 따로 만든 사본이 여럿이면 맥이 보여 주는 것(메시지가 있는 것, 그다음 오래된 것)을 고른다. 정확히 두 사람인 대화만 같은 것으로 본다(맥은 두 사람이 다 들어 있으면 같다고 본다). 새 DM 에는 맥처럼 `creator` 를 쓰지 않는다.
+- **하위 작업:** 작업 화면 Subtasks 의 "Add subtask" 칸. 부모의 목록에, 담당자 없이 만든다(맥의 "Add subtask"). `Edits.addTask(parent:)`.
+- **체크리스트:** 작업 화면에 "완료/전체" 개수와 항목. 추가, 눌러서 체크, 밀어서 지우기. 맥에서 정한 항목 담당자는 그대로 두고 아바타로 보여 준다. 바꾸면 작업의 `updated` 만 바꾸고 기록 줄은 남기지 않는다(맥 작업 창과 같다).
+- **검증:** `EditTests` 4개(DM 재사용·사본 고르기·하위 작업·체크리스트), UI 테스트 `NewItemsUITests` 2개(DM 시작 후 같은 대화 다시 열기, 하위 작업 추가·체크리스트 추가·체크·지우기·하위 작업 열기).
+
 ## 설계와 달라진 점
 
 1. **merge 도 Swift 로 옮겼다(1단계 설계 6번 변경).** 프로토콜에 "push 가 반영됐다"는 확인이 없어서, 다시 얹을 변경을 언제 지울지 알 수 없었다. 이제 iOS 는 맥 앱처럼 `merge(내 것, [정본])` 을 한다. Rust 정적 라이브러리 방식은 크로스 컴파일과 FFI 부담에 비해 이득이 적어 쓰지 않았다.
@@ -293,16 +302,13 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 
 - `push` 는 예전에 `snapshot` 필드로 보냈는데 실제 서버는 `data` 를 읽는다. 지금은 `data` 로 보낸다.
 - owner·admin 용 메시지도 쓴다(설정 > Team, `Admin.swift`). 보내는 것: `access_list`, `create_invite {member, role}`, `set_role {member, role}`, `revoke {member}`, `backup_list`, `restore {name}`. 받는 것: `access {people, role, answer}`(`answer: true` 면 이 연결의 요청에 대한 답, `false` 면 다른 곳의 변경 뒤에 온 것. 내 역할도 여기서 갱신), `invite {member, code, emailed?, mail_error?}`, `backups {backups}`, `restored {name}`, 거절은 `error {code: "denied"}`. 답은 요청 순서로 맞추고 15초(초대·되돌리기 60초) 안에 안 오면 놓아 주되, 늦게 온 답은 그 요청의 것으로 받는다("5차 고침", "6차 고침" 참고). 일반 멤버에게는 Team 화면이 없다.
-- HTTP(같은 host:port): `GET /health`, `POST /auth/forgot`. 통화용 `POST /call-token` 은 가짜 서버에만 있다(아래 "실제 서버와 아직 다른 점").
+- HTTP(같은 host:port): `GET /health`, `POST /auth/forgot`, 사진·영상 `PUT`/`GET /files/<sha256>`(`Authorization: Bearer <device>:<token>`). 통화 토큰은 HTTP 가 아니라 WebSocket `call_join` → `call_token` 으로 받는다.
 - 30초마다 ping, 75초 동안 아무것도 없으면 다시 연결한다. 간격은 1, 2, 4, 8, 16, 30... 초.
 - WebSocket 메시지 최대 크기를 64MB 로 늘렸다(URLSession 기본은 1MB).
 
 ## 실제 서버와 아직 다른 점
 
-로그인·push 는 실제 서버에 맞췄지만, 아래는 아직 가짜 서버에서만 맞는다. 실제 서버로 붙여 본 적은 없다.
-
-- **통화:** iOS 는 `POST /call-token` (HTTP, `Authorization: Bearer <기기 토큰>`)을 쓴다. 실제 서버에는 이 경로가 없고, WebSocket 으로 `call_join {channel}` 을 보내면 `call_token {channel, url, token}` 이 온다. 실제 서버에서는 404 가 나서 지금은 Jitsi 링크 메시지로 대체된다.
-- **사진·영상 파일:** 실제 서버의 `/files/<sha256>` 은 `Authorization: Bearer <device>:<token>` 을 받는다. iOS 는 아직 파일을 올리거나 받지 않는다.
+로그인·push 에 이어 통화(`call_join` → `call_token`, `Calls.swift`)와 사진·영상(`/files/<sha256>` 에 `Authorization: Bearer <device>:<token>`, `Files.swift`)도 실제 서버 방식으로 바꿨고, 가짜 서버도 같은 방식으로 답한다. 남은 차이는 아래뿐이다. iPhone 을 실제 서버에 붙여 본 기록은 아직 없다.
 - **주소:** 실제 서버는 `/ws` 에서만 WebSocket 을 받는다. iOS 는 경로가 없으면 `/ws` 를 붙이므로 맞다. 가짜 서버는 경로를 보지 않는다.
 - **가짜 서버의 계정 규칙**(이메일 소문자 비교, 재설정 코드는 같은 이메일의 이전 코드를 지움, 짧은 비밀번호면 초대 코드를 쓰지 않고 거절)은 실제 서버 구현을 보지 않고 정했다. 실제 서버의 메시지 문구도 다를 수 있다. 앱은 서버 메시지를 그대로 보여 주므로 문구가 달라도 동작은 같다.
 
@@ -314,7 +320,7 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 4. **변경분 전송.** 셀룰러에서 전체 사본은 부담이 된다.
 5. **받은 push 를 합친 뒤 모양 검사.** 맥 앱은 읽히지 않는 사본을 조용히 버린다.
 6. **같은 기기에는 같은 tag.**
-7. **통화:** `/call-token` 응답에 `url`, `token`, `room` 을 담고, LiveKit identity 를 `member-<id>`, 이름을 멤버 이름으로 하기. 채널에 진행 중인 통화가 있다는 표시(예: `update` 와 별도로 `call_state {channel, participants}`)가 있으면 iOS 에서 "참여" 버튼을 보여 줄 수 있다.
+7. **통화:** ~~입장 토큰~~ 실제 서버의 `call_join` → `call_token` 으로 맞췄다. 남은 바람: 채널에 진행 중인 통화가 있다는 표시(예: `update` 와 별도로 `call_state {channel, participants}`)가 있으면 iOS 에서 "참여" 버튼을 보여 줄 수 있다.
 8. ~~**푸시:**~~ 2026-11-16 완료(서버 쪽): DM 은 매번, 채널은 `@이름` 멘션과 내가 시작했거나 쓴 스레드의 답글. 보낸 사람 기기와 지금 연결된 기기에는 보내지 않는다. 실제 발송은 위 "알림" 의 남은 일(번들 ID, capability, entitlements, .p8 키)이 끝나야 확인할 수 있다.
 
 ## 통신과 보안
@@ -344,10 +350,10 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - 스크린샷(`ios/screenshots/`)은 예전 초대 코드 화면 그대로다. 새 로그인 화면은 아직 찍지 않았다.
 ## 아직 안 된 것
 
-- **실제 workboard-server 로 손 검증:** 서버 코드는 생겼지만 이메일·비밀번호 계정은 다른 세션이 넣는 중이라 아직 붙여 보지 않았다. 위 "실제 서버와 아직 다른 점" 참고.
-- **실제 LiveKit 음성·영상, 원격 푸시:** 실기기, livekit-server, APNs 설정이 필요하다. 푸시는 서버 코드가 들어갔고, 번들 ID·Push capability·entitlements·.p8 키가 남았다(위 "알림").
+- **실제 workboard-server 로 손 검증:** 계정까지 들어간 서버가 Mac mini 에 설치돼 있지만(2026-11-16, `ee1e990`) iPhone 으로 붙여 보지는 않았다. 위 "실제 서버와 아직 다른 점" 참고.
+- **실제 LiveKit 음성·영상, 원격 푸시:** 실기기가 필요하다. 푸시는 번들 ID·Push capability·entitlements·.p8 키·서버 설정까지 끝났고 실기기에서 배너를 확인하는 일만 남았다(위 "알림").
 - **iOS 17·18 런타임 실행 확인:** 이 맥에 런타임이 없다. 배포 대상은 17.0.
-- **반복 작업, 자동화, 체크리스트, 하위 작업 만들기, 채널·DM 만들기, 메시지 고치기·지우기:** 화면에 없다.
+- **반복 설정, 자동화 편집, 체크리스트 항목 이름 바꾸기·담당자 정하기, 여럿이 하는 대화 만들기:** 화면에 없다. 맥에서 정한다. 반복·자동화 규칙은 iPhone 에서 상태를 바꿀 때도 실행된다(`Edits.setStatus`).
 - **iPad:** 깨지지 않는 정도.
 
 ## 사용자가 정할 것

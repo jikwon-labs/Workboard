@@ -40,6 +40,10 @@ impl Ui1 {
             dropped: vec![],
             cursor: egui::CursorIcon::Default,
         };
+        // no notices on the wall clock: after 09:00 the seed's tasks due
+        // today put a toast over the bottom of the window, so a test would
+        // pass or fail by the time of day (notify_tests move the clock)
+        h.app.notify_rt.last_clock = i64::MAX;
         h.frame(vec![]);
         h.frame(vec![]);
         h

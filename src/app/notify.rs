@@ -69,7 +69,9 @@ pub struct NotifyRt {
     pub(super) seeded: bool,
     /// The team's changes came in: look for news on the next frame.
     pub(super) pending: bool,
-    last_clock: i64,
+    /// When the clock was last looked at (`i64::MAX`: never again, for UI
+    /// tests that must not depend on the time of day).
+    pub(super) last_clock: i64,
     /// The window is not in front (as of the last frame).
     pub(super) away: bool,
     /// Everything announced, newest last (kept short; tests read it).

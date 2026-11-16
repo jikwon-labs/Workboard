@@ -89,6 +89,26 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 
 앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbTab home|chat|tasks|docs`, `-wbOpen channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | settings`, `-wbOpenURL workboard://join?...`, `-wbAskTimeout 2`(관리 요청의 답을 기다리는 초, 기본 15), `-wbNoPasswordAutoFill YES`(로그인 칸에 저장된 비밀번호·강한 비밀번호를 내놓지 않는다. iOS 의 "Use Strong Password" 시트가 타이핑 도중 키보드를 가로채서 UI 테스트가 흔들렸다. 모든 UI 테스트가 이것으로 띄운다).
 
+## TestFlight
+
+iPhone 에 설치하는 길은 TestFlight 하나로 둔다. App Store Connect 의 앱 이름은 `Workboard Team` 이다(`Workboard` 는 다른 개발자가 이미 쓰고 있었다). 홈 화면에는 `CFBundleDisplayName` 대로 `Workboard` 로 나온다. 2026-11-17 에 0.1.0 첫 빌드를 올렸다.
+
+```sh
+# 저장소 루트에서. 산출물은 레포 밖(예: /tmp/wb-ios)에 둔다
+xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard -configuration Release \
+  -destination 'generic/platform=iOS' -archivePath /tmp/wb-ios/Workboard.xcarchive \
+  -allowProvisioningUpdates archive
+xcodebuild -exportArchive -archivePath /tmp/wb-ios/Workboard.xcarchive \
+  -exportOptionsPlist ios/Config/ExportOptions.plist -exportPath /tmp/wb-ios/export \
+  -allowProvisioningUpdates
+```
+
+- Xcode > Settings > Accounts 에 팀 `K6599UJ4KM` 계정이 들어 있어야 한다. 배포 인증서와 프로필은 자동 서명이 만든다.
+- 빌드 번호는 App Store Connect 가 다음 번호를 정한다(`ExportOptions.plist` 의 `manageAppVersionAndBuildNumber`). 사용자에게 보이는 버전을 올릴 때만 `MARKETING_VERSION` 을 바꾼다.
+- `ITSAppUsesNonExemptEncryption = NO` 를 Info.plist 에 넣었다. 앱의 암호화는 HTTPS·WSS 같은 표준 TLS 뿐이라 면제 대상이고, 이게 있으면 빌드마다 수출 규정 질문에 답하지 않아도 된다.
+- 올린 뒤 10~30분 처리되면 App Store Connect 의 TestFlight 탭에 빌드가 보인다. 내부 테스터(팀 계정 사용자)를 넣으면 iPhone 의 TestFlight 앱에서 설치할 수 있다. 외부 테스터는 베타 심사를 거친다.
+- TestFlight 빌드는 푸시가 `production` 으로 간다(위 "알림").
+
 ## 데이터 다루는 방식
 
 - **정본은 원본 JSON 트리 그대로** (`JSON.swift`). 정수, u64(`hashes`), 실수를 구분해 보관한다. 화면용 구조체는 읽기 전용이고, 편집(`Edits.swift`)은 해당 필드만 바꾼다. 그래서 iOS 가 모르는 필드는 남는다.

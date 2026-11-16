@@ -18,8 +18,14 @@ pub enum Modal {
     WorkspaceSettings {
         name: String,
     },
+    /// A new workspace, set up a step at a time: its name, the apps on the
+    /// left bar, then the people to invite (skippable).
     NewWorkspace {
+        step: u8,
         name: String,
+        apps: Vec<String>,
+        emails: String,
+        role: String,
     },
     Profile {
         name: String,
@@ -264,6 +270,37 @@ fn section_label(ui: &mut Ui, t: &Theme, s: &str) {
 }
 
 /// The window a dialog of this kind is drawn in.
+/// The apps that can be pinned to the left bar, in the order offered.
+const RAIL_APPS: [&str; 10] = [
+    "Planner",
+    "AI",
+    "Teams",
+    "Chat",
+    "Docs",
+    "Dashboards",
+    "Whiteboards",
+    "Forms",
+    "Goals",
+    "Timesheets",
+];
+
+/// How many steps the new-workspace dialog has.
+const NEW_WS_STEPS: u8 = 3;
+
+impl Modal {
+    /// The new-workspace dialog at its first step, with the apps a new
+    /// workspace pins by default already chosen.
+    pub(super) fn new_workspace() -> Modal {
+        Modal::NewWorkspace {
+            step: 0,
+            name: String::new(),
+            apps: Extra::default().rail_items,
+            emails: String::new(),
+            role: "Member".into(),
+        }
+    }
+}
+
 pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
     egui::Id::new(("modal_window", std::mem::discriminant(m)))
 }
@@ -418,9 +455,7 @@ impl App {
             )
             .clicked()
         {
-            self.modal = Some(Modal::NewWorkspace {
-                name: String::new(),
-            });
+            self.modal = Some(Modal::new_workspace());
             close_popup(ui);
         }
         // someone else's team: it opens as another workspace here, and the
@@ -1416,7 +1451,7 @@ impl App {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let valid: Vec<String> = emails.split(|c: char| c == ',' || c.is_whitespace()).map(|s| s.trim().to_string()).filter(|s| s.contains('@') && s.contains('.')).collect();
+                        let valid = emails_in(emails);
                         let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send invite"))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
@@ -1492,44 +1527,160 @@ impl App {
                     close = true;
                 }
             }
-            Modal::NewWorkspace { name } => {
-                ui.label(tr("Name your workspace"));
-                let r = ui.add(
-                    field(name)
-                        .hint_text(tr("e.g. Acme Inc."))
-                        .desired_width(f32::INFINITY),
-                );
-                r.request_focus();
-                ui.label(
-                    RichText::new(tr(
-                        "You'll be its Owner. Switch between workspaces from the workspace menu.",
-                    ))
-                    .small()
-                    .color(t.text2),
-                );
-                ui.add_space(8.0);
-                if primary_button(ui, t, tr("Create Workspace")).clicked()
-                    && !name.trim().is_empty()
-                {
-                    let mut list = Data::workspaces();
-                    if list.is_empty() {
-                        list.push(WsEntry {
-                            name: self.data.workspace.clone(),
-                            file: self.ws_file.clone(),
-                        });
+            Modal::NewWorkspace {
+                step,
+                name,
+                apps,
+                emails,
+                role,
+            } => {
+                // where the setup is: one bar per step, filled up to this one
+                ui.horizontal(|ui| {
+                    let gap = 6.0;
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let n = NEW_WS_STEPS as f32;
+                    let w = (ui.available_width() - gap * (n - 1.0)) / n;
+                    for i in 0..NEW_WS_STEPS {
+                        let (r, _) = ui.allocate_exact_size(vec2(w, 4.0), Sense::hover());
+                        let c = if i <= *step { t.primary } else { t.border };
+                        ui.painter().rect_filled(r, 2.0, c);
                     }
-                    let file = format!("workspace-{}.json", now_ts());
-                    let mut owner = self.data.member(self.data.me).cloned().unwrap_or_default();
-                    owner.id = 1;
-                    owner.role = "Owner".into();
-                    let d = Data::blank(name.trim(), owner);
-                    d.save_file(&file);
-                    list.push(WsEntry {
-                        name: name.trim().to_string(),
-                        file: file.clone(),
+                });
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(crate::trf!("Step {} of {}", *step + 1, NEW_WS_STEPS))
+                        .small()
+                        .color(t.text2),
+                );
+                ui.add_space(2.0);
+                let mut enter = false;
+                match *step {
+                    0 => {
+                        ui.label(RichText::new(tr("Name your workspace")).size(15.0).strong());
+                        ui.add_space(4.0);
+                        let r = ui.add(
+                            field(name)
+                                .hint_text(tr("e.g. Acme Inc."))
+                                .desired_width(f32::INFINITY),
+                        );
+                        enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        r.request_focus();
+                        ui.label(
+                            RichText::new(tr(
+                                "You'll be its Owner. Switch between workspaces from the workspace menu.",
+                            ))
+                            .small()
+                            .color(t.text2),
+                        );
+                    }
+                    1 => {
+                        ui.label(
+                            RichText::new(tr("Which apps do you want on the left bar?"))
+                                .size(15.0)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(tr(
+                                "You can change them later from Customize navigation.",
+                            ))
+                            .small()
+                            .color(t.text2),
+                        );
+                        ui.add_space(4.0);
+                        egui::Grid::new("new_ws_apps")
+                            .num_columns(2)
+                            .spacing([24.0, 6.0])
+                            .show(ui, |ui| {
+                                for (i, label) in RAIL_APPS.iter().enumerate() {
+                                    let mut on = apps.iter().any(|a| a == label);
+                                    if check(ui, &mut on, tr(label)).changed() {
+                                        // kept in the order the bar shows them
+                                        let mut chosen: Vec<String> = RAIL_APPS
+                                            .iter()
+                                            .filter(|a| {
+                                                if *a == label {
+                                                    on
+                                                } else {
+                                                    apps.iter().any(|x| x == *a)
+                                                }
+                                            })
+                                            .map(|a| a.to_string())
+                                            .collect();
+                                        std::mem::swap(apps, &mut chosen);
+                                    }
+                                    if i % 2 == 1 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                    }
+                    _ => {
+                        ui.label(
+                            RichText::new(tr("Invite people to your workspace"))
+                                .size(15.0)
+                                .strong(),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(tr("Email")).color(t.text2));
+                        let r = ui.add(
+                            field(emails)
+                                .hint_text(tr("Enter email, comma or space separated"))
+                                .desired_width(f32::INFINITY),
+                        );
+                        r.request_focus();
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(tr("Invite as")).color(t.text2));
+                        egui::ComboBox::from_id_salt("new_ws_role")
+                            .selected_text(role_text(role))
+                            .show_ui(ui, |ui| {
+                                // no Guest: nothing limits what a guest can see yet
+                                for (n, _) in ROLES.iter().take(2) {
+                                    ui.selectable_value(role, n.to_string(), role_text(n));
+                                }
+                            });
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(tr(
+                                "The new workspace is on this computer only. To work with them, share it from Work together once it's made.",
+                            ))
+                            .small()
+                            .color(t.text2),
+                        );
+                    }
+                }
+                ui.add_space(8.0);
+                ui.separator();
+                let last = *step + 1 == NEW_WS_STEPS;
+                let mut finish: Option<Vec<String>> = None;
+                ui.horizontal(|ui| {
+                    if *step > 0 && secondary_button(ui, tr("Back")).clicked() {
+                        *step -= 1;
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if last {
+                            let invite = emails_in(emails);
+                            let label = if invite.is_empty() {
+                                tr("Create Workspace")
+                            } else {
+                                tr("Create and invite")
+                            };
+                            if primary_button(ui, t, label).clicked() {
+                                finish = Some(invite);
+                            }
+                            if ui.button(tr("Skip for now")).clicked() {
+                                finish = Some(vec![]);
+                            }
+                        } else {
+                            let ready = *step > 0 || !name.trim().is_empty();
+                            let next = ui.add_enabled(ready, Tint(primary_btn(t, tr("Next"))));
+                            if ready && (next.clicked() || enter) {
+                                *step += 1;
+                            }
+                        }
                     });
-                    Data::save_workspaces(&list);
-                    self.switch_workspace(&file);
+                });
+                if let Some(invite) = finish {
+                    self.create_workspace(name.trim(), apps, &invite, role);
                     close = true;
                 }
             }
@@ -2429,18 +2580,7 @@ impl App {
             }
             Modal::CustomizeNav => {
                 ui.label(tr("Choose the apps pinned to the left bar."));
-                for label in [
-                    "Planner",
-                    "AI",
-                    "Teams",
-                    "Chat",
-                    "Docs",
-                    "Dashboards",
-                    "Whiteboards",
-                    "Forms",
-                    "Goals",
-                    "Timesheets",
-                ] {
+                for label in RAIL_APPS {
                     let mut on = self.data.extra.rail_items.iter().any(|r| r == label);
                     if check(ui, &mut on, tr(label)).changed() {
                         if on {
@@ -2801,6 +2941,52 @@ impl App {
 
     /// Adds invited people (skipping emails already in the Workspace); they join #general.
     /// Returns how many were added.
+    /// Makes a workspace on this computer owned by me, opens it, pins
+    /// `apps` to its left bar and invites `invite` there.
+    pub(super) fn create_workspace(
+        &mut self,
+        name: &str,
+        apps: &[String],
+        invite: &[String],
+        role: &str,
+    ) {
+        let mut list = Data::workspaces();
+        if list.is_empty() {
+            list.push(WsEntry {
+                name: self.data.workspace.clone(),
+                file: self.ws_file.clone(),
+            });
+        }
+        let file = format!("workspace-{}.json", now_ts());
+        let mut owner = self.data.member(self.data.me).cloned().unwrap_or_default();
+        owner.id = 1;
+        owner.role = "Owner".into();
+        let mut d = Data::blank(name, owner);
+        d.extra.rail_items = apps.to_vec();
+        d.save_file(&file);
+        list.push(WsEntry {
+            name: name.to_string(),
+            file: file.clone(),
+        });
+        Data::save_workspaces(&list);
+        self.switch_workspace(&file);
+        // the invites belong to the new one: none if it didn't open
+        let invited = if self.ws_file == file {
+            self.invite_people(invite, role)
+        } else {
+            0
+        };
+        if invited > 0 {
+            self.toast = Some((
+                crate::trf!(
+                    "Invited {} people. Share the workspace (Work together) so they can join.",
+                    invited
+                ),
+                now_ts(),
+            ));
+        }
+    }
+
     pub(super) fn invite_people(&mut self, emails: &[String], role: &str) -> usize {
         let mut added = 0;
         for e in emails {
@@ -3798,4 +3984,12 @@ pub(super) fn parse_csv(text: &str) -> Vec<Vec<String>> {
         rows.push(row);
     }
     rows
+}
+
+/// The email addresses in what was typed, split at commas and spaces.
+fn emails_in(s: &str) -> Vec<String> {
+    s.split(|c: char| c == ',' || c.is_whitespace())
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.contains('@') && s.contains('.'))
+        .collect()
 }

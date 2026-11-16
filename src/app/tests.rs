@@ -781,7 +781,7 @@ fn custom_field_values_are_kept_per_task() {
 
 /// Tests that point HOME at a folder of their own (to save workspace files)
 /// take turns: HOME is one for the whole test run.
-static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn workspaces_can_be_created_and_switched() {

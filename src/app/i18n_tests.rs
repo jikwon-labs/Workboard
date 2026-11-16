@@ -209,10 +209,27 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
                 role: "Member".into(),
             }),
         ),
+        ("new workspace", Box::new(move || Modal::new_workspace())),
         (
-            "new workspace",
-            Box::new(move || Modal::NewWorkspace {
-                name: String::new(),
+            "new workspace apps",
+            Box::new(move || {
+                let mut m = Modal::new_workspace();
+                if let Modal::NewWorkspace { step, name, .. } = &mut m {
+                    *step = 1;
+                    *name = "Acme".into();
+                }
+                m
+            }),
+        ),
+        (
+            "new workspace invite",
+            Box::new(move || {
+                let mut m = Modal::new_workspace();
+                if let Modal::NewWorkspace { step, name, .. } = &mut m {
+                    *step = 2;
+                    *name = "Acme".into();
+                }
+                m
             }),
         ),
         (

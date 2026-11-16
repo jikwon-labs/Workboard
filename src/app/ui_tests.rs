@@ -10705,3 +10705,128 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
     assert_eq!(t.on_primary, Color32::WHITE);
     assert!(contrast(t.on_primary, t.primary) >= 4.5);
 }
+
+/// Points HOME at a new folder for a test that saves workspace files; the
+/// guard keeps the other such tests waiting until it's done.
+fn own_home(tag: &str) -> std::sync::MutexGuard<'static, ()> {
+    let guard = super::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home =
+        std::env::temp_dir().join(format!("wb-home-{}-{:x}", tag, crate::sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    guard
+}
+
+#[test]
+fn new_workspace_steps_through_name_apps_and_invites() {
+    let _home = own_home("wizard");
+    let mut h = Ui1::new();
+    let before = h.app.ws_file.clone();
+    h.click("Workspace menu");
+    h.click("+  Create Workspace");
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewWorkspace { step: 0, .. })
+    ));
+    assert!(h.has("Step 1 of 3"));
+    // step 1: the name
+    h.type_text("Side Biz");
+    h.click("Next");
+    assert!(h.has("Step 2 of 3"));
+    // step 2: the apps on the left bar, the default ones already chosen
+    h.click("Chat");
+    h.click("AI");
+    h.click("Next");
+    assert!(h.has("Step 3 of 3"));
+    // step 3: the people
+    h.type_text("lee.jiwoo@team.kr, park.minsu@team.kr");
+    h.click("Create and invite");
+    h.settle();
+    assert!(h.app.modal.is_none(), "the dialog closes when it's made");
+    assert_ne!(h.app.ws_file, before, "the new workspace is open");
+    assert_eq!(h.app.data.workspace, "Side Biz");
+    assert_eq!(
+        h.app.data.extra.rail_items,
+        vec!["Planner", "Teams", "Chat"],
+        "the chosen apps, in the bar's order"
+    );
+    let invited: Vec<(&str, &str)> = h
+        .app
+        .data
+        .members
+        .iter()
+        .filter(|m| m.invited)
+        .map(|m| (m.email.as_str(), m.role.as_str()))
+        .collect();
+    assert_eq!(
+        invited,
+        vec![
+            ("lee.jiwoo@team.kr", "Member"),
+            ("park.minsu@team.kr", "Member")
+        ]
+    );
+    let me = h.app.data.member(h.app.data.me).unwrap();
+    assert_eq!(me.role, "Owner");
+    // the workspace menu lists both
+    let list = Data::workspaces();
+    assert!(list.iter().any(|w| w.file == before));
+    assert!(list
+        .iter()
+        .any(|w| w.name == "Side Biz" && w.file == h.app.ws_file));
+}
+
+#[test]
+fn new_workspace_needs_a_name_goes_back_and_skips_invites() {
+    let _home = own_home("wizard-skip");
+    let mut h = Ui1::new();
+    let members_before = h.app.data.members.len();
+    h.click("Workspace menu");
+    h.click("+  Create Workspace");
+    // no name yet: Next does nothing
+    h.click("Next");
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewWorkspace { step: 0, .. })
+    ));
+    h.type_text("Acme");
+    // Enter in the name moves on, like Next
+    h.key(egui::Key::Enter);
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewWorkspace { step: 1, .. })
+    ));
+    h.click("Next");
+    h.type_text("someone@acme.io");
+    // back two steps: what was typed is still there
+    h.click("Back");
+    h.click("Back");
+    match &h.app.modal {
+        Some(Modal::NewWorkspace {
+            step, name, emails, ..
+        }) => {
+            assert_eq!(*step, 0);
+            assert_eq!(name, "Acme");
+            assert_eq!(emails, "someone@acme.io");
+        }
+        _ => panic!("the dialog is still open"),
+    }
+    h.click("Next");
+    h.click("Next");
+    h.click("Skip for now");
+    h.settle();
+    assert!(h.app.modal.is_none());
+    assert_eq!(h.app.data.workspace, "Acme");
+    assert!(
+        h.app.data.members.iter().all(|m| !m.invited),
+        "skipped: nobody invited"
+    );
+    assert_eq!(h.app.data.members.len(), 1, "only me in the new one");
+    assert!(members_before > 1, "the seed had others");
+    assert_eq!(
+        h.app.data.extra.rail_items,
+        Extra::default().rail_items,
+        "untouched apps stay the default"
+    );
+}

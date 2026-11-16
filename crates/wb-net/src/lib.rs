@@ -29,14 +29,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::ErrorKind;
-use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
+mod conn;
 mod files;
+pub use conn::{trust_certificate, Conn};
 pub use files::{download, forgot_password, remote_size, sha256_file, upload, Auth, FileError};
 
 pub const DEFAULT_PORT: u16 = 8787;
@@ -492,22 +493,27 @@ impl Msg {
 }
 
 /// Turn what a person typed ("macmini", "100.1.2.3", "host:9000",
-/// "ws://host:8787/ws") into (host, port, url).
+/// "ws://host:8787/ws", "https://wb.example.com") into (host, port, url).
+/// A wss:// or https:// address is a secure connection (port 443 unless
+/// it says otherwise), for a server behind an HTTPS front such as
+/// Cloudflare Tunnel; anything else is plain ws on port 8787 by default.
 pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
     let a = addr.trim().trim_end_matches('/');
     if a.is_empty() {
         return Err("Type the server's address first.".into());
     }
-    if a.starts_with("wss://") || a.starts_with("https://") {
-        return Err(
-            "Secure (wss) addresses aren't supported. Use the server's Tailscale name or address."
-                .into(),
-        );
-    }
-    let rest = a
-        .strip_prefix("ws://")
-        .or_else(|| a.strip_prefix("http://"))
-        .unwrap_or(a);
+    let lower = a.to_ascii_lowercase();
+    let (secure, rest) = if lower.starts_with("wss://") {
+        (true, &a[6..])
+    } else if lower.starts_with("https://") {
+        (true, &a[8..])
+    } else if lower.starts_with("ws://") {
+        (false, &a[5..])
+    } else if lower.starts_with("http://") {
+        (false, &a[7..])
+    } else {
+        (false, a)
+    };
     let (hostport, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, PATH),
@@ -533,25 +539,43 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
     if host.is_empty() || host.contains(char::is_whitespace) {
         return Err("That address doesn't look right.".into());
     }
-    let port = port.unwrap_or(DEFAULT_PORT);
+    let port = port.unwrap_or(if secure { 443 } else { DEFAULT_PORT });
+    let base = origin(&host, port, secure);
+    let scheme = if secure { "wss" } else { "ws" };
+    Ok((host, port, format!("{}://{}{}", scheme, base, path)))
+}
+
+/// host[:port] as it goes into a URL or a Host header: IPv6 in brackets,
+/// the port left out when it is the secure default.
+fn origin(host: &str, port: u16, secure: bool) -> String {
     let shown = if host.contains(':') {
         format!("[{}]", host)
     } else {
-        host.clone()
+        host.to_string()
     };
-    Ok((host, port, format!("ws://{}:{}{}", shown, port, path)))
+    if secure && port == 443 {
+        shown
+    } else {
+        format!("{}:{}", shown, port)
+    }
+}
+
+/// Whether a server_url() url is a secure (TLS) one.
+pub fn is_secure(url: &str) -> bool {
+    url.starts_with("wss://")
 }
 
 /// Where the server publishes app updates for Sparkle (see the server's
-/// /updates route): http on the same host and port as the sync connection.
+/// /updates route): the same host and port as the sync connection, over
+/// https when that is secure.
 pub fn updates_url(addr: &str) -> Result<String, String> {
-    let (host, port, _) = server_url(addr)?;
-    let shown = if host.contains(':') {
-        format!("[{}]", host)
-    } else {
-        host
-    };
-    Ok(format!("http://{}:{}/updates/appcast.xml", shown, port))
+    let (host, port, url) = server_url(addr)?;
+    let secure = is_secure(&url);
+    Ok(format!(
+        "{}://{}/updates/appcast.xml",
+        if secure { "https" } else { "http" },
+        origin(&host, port, secure)
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -699,35 +723,36 @@ impl Line {
     }
 }
 
-fn connect(addr: &str) -> Result<WebSocket<TcpStream>, String> {
+fn connect(addr: &str) -> Result<WebSocket<Conn>, String> {
     let (host, port, url) = server_url(addr)?;
-    let addrs: Vec<_> = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|e| format!("Can't find {}: {}", host, e))?
-        .collect();
-    let mut last = format!("Can't find {}", host);
-    for sa in addrs {
-        match TcpStream::connect_timeout(&sa, Duration::from_secs(5)) {
-            Ok(stream) => {
-                let _ = stream.set_nodelay(true);
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .map_err(|e| e.to_string())?;
-                let cfg = WebSocketConfig::default()
-                    .max_message_size(Some(MAX_MESSAGE))
-                    .max_frame_size(Some(MAX_MESSAGE));
-                let (ws, _) =
-                    tungstenite::client::client_with_config(url.as_str(), stream, Some(cfg))
-                        .map_err(|e| format!("The server didn't answer like Workboard: {}", e))?;
-                ws.get_ref()
-                    .set_read_timeout(Some(Duration::from_millis(100)))
-                    .map_err(|e| e.to_string())?;
-                return Ok(ws);
+    let stream = conn::dial(&host, port, is_secure(&url), Duration::from_secs(5))?;
+    stream
+        .tcp()
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .map_err(|e| e.to_string())?;
+    let cfg = WebSocketConfig::default()
+        .max_message_size(Some(MAX_MESSAGE))
+        .max_frame_size(Some(MAX_MESSAGE));
+    let (ws, _) = tungstenite::client::client_with_config(url.as_str(), stream, Some(cfg))
+        .map_err(|e| match e {
+            tungstenite::HandshakeError::Failure(e) => e,
+            tungstenite::HandshakeError::Interrupted(_) => {
+                tungstenite::Error::Io(ErrorKind::TimedOut.into())
             }
-            Err(e) => last = format!("Can't reach {}:{}: {}", host, port, e),
-        }
-    }
-    Err(last)
+        })
+        .map_err(|e| match e {
+            // rustls reports a certificate it doesn't trust as InvalidData
+            tungstenite::Error::Io(e) if e.kind() == ErrorKind::InvalidData => {
+                format!("The secure connection to {} failed: {}", host, e)
+            }
+            tungstenite::Error::Io(e) => format!("Can't reach {}:{}: {}", host, port, e),
+            e => format!("The server didn't answer like Workboard: {}", e),
+        })?;
+    ws.get_ref()
+        .tcp()
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .map_err(|e| e.to_string())?;
+    Ok(ws)
 }
 
 /// Said when the connection broke while sending a request that isn't sent
@@ -835,7 +860,7 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
 }
 
 fn session(
-    ws: &mut WebSocket<TcpStream>,
+    ws: &mut WebSocket<Conn>,
     line: &Line,
     crx: &Receiver<Cmd>,
     sign_in: &mut SignIn,
@@ -843,7 +868,7 @@ fn session(
     queued: &mut Vec<Msg>,
     tries: &mut u64,
 ) -> End {
-    let send = |ws: &mut WebSocket<TcpStream>, m: &Msg| {
+    let send = |ws: &mut WebSocket<Conn>, m: &Msg| {
         ws.send(Message::text(m.to_json()))
             .map_err(|e| e.to_string())
     };
@@ -1109,7 +1134,39 @@ mod tests {
         assert_eq!(server_url("http://h:1/ws").unwrap().2, "ws://h:1/ws");
         assert_eq!(server_url("[::1]:8787").unwrap().2, "ws://[::1]:8787/ws");
         assert!(server_url("").is_err());
-        assert!(server_url("wss://x").is_err());
+        assert!(server_url("h:port").is_err() && server_url("https://h:port").is_err());
+
+        // behind an HTTPS front (Cloudflare Tunnel): TLS on 443 unless said
+        assert_eq!(
+            server_url("https://wb.example.com").unwrap(),
+            (
+                "wb.example.com".into(),
+                443,
+                "wss://wb.example.com/ws".into()
+            )
+        );
+        assert_eq!(
+            server_url("WSS://wb.example.com/").unwrap().2,
+            "wss://wb.example.com/ws"
+        );
+        assert_eq!(
+            server_url("wss://wb.example.com:8443/ws").unwrap(),
+            (
+                "wb.example.com".into(),
+                8443,
+                "wss://wb.example.com:8443/ws".into()
+            )
+        );
+        assert!(is_secure(&server_url("https://wb.example.com").unwrap().2));
+        assert!(!is_secure(&server_url("macmini").unwrap().2));
+        assert_eq!(
+            updates_url("https://wb.example.com").unwrap(),
+            "https://wb.example.com/updates/appcast.xml"
+        );
+        assert_eq!(
+            updates_url("wss://wb.example.com:8443").unwrap(),
+            "https://wb.example.com:8443/updates/appcast.xml"
+        );
         assert!(server_url("h:port").is_err());
     }
 

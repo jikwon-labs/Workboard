@@ -1,13 +1,14 @@
 // Moving pictures and videos to and from the server's /files route (see
-// server/src/files.rs): plain HTTP/1.1 over a TcpStream, one request per
-// connection, so there is no extra client library. Every call blocks; the
+// server/src/files.rs): plain HTTP/1.1 over a TcpStream (in TLS for an
+// https server), one request per connection, so there is no extra client
+// library. Every call blocks; the
 // app runs them on its own thread and reports progress through a callback.
 
-use crate::server_url;
+use crate::conn::{self, Conn};
+use crate::{is_secure, server_url};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::time::Duration;
 
@@ -73,30 +74,94 @@ struct Head {
     status: u16,
     len: Option<u64>,
     range_total: Option<u64>,
+    /// The body comes in chunks (Transfer-Encoding: chunked), as a proxy in
+    /// front of the server may send it; `len` is None then.
+    chunked: bool,
 }
 
-fn open(addr: &str) -> Result<(TcpStream, String), FileError> {
-    let (host, port, _) = server_url(addr).map_err(FileError::Other)?;
-    let shown = if host.contains(':') {
-        format!("[{}]", host)
+/// Reads a chunked body as the bytes it carries.
+struct Chunked<R> {
+    inner: R,
+    /// Bytes left in the current chunk.
+    left: u64,
+    done: bool,
+}
+
+impl<R: BufRead> Chunked<R> {
+    fn new(inner: R) -> Self {
+        Chunked {
+            inner,
+            left: 0,
+            done: false,
+        }
+    }
+
+    fn line(&mut self) -> std::io::Result<String> {
+        let mut l = String::new();
+        if self.inner.read_line(&mut l)? == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        Ok(l)
+    }
+}
+
+impl<R: BufRead> Read for Chunked<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.done || buf.is_empty() {
+            return Ok(0);
+        }
+        if self.left == 0 {
+            let l = self.line()?;
+            let size = l.trim().split(';').next().unwrap_or("");
+            self.left = u64::from_str_radix(size.trim(), 16)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad chunk"))?;
+            if self.left == 0 {
+                // trailers until the empty line
+                while !self.line()?.trim().is_empty() {}
+                self.done = true;
+                return Ok(0);
+            }
+        }
+        let want = buf.len().min(self.left as usize);
+        let k = self.inner.read(&mut buf[..want])?;
+        if k == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        self.left -= k as u64;
+        if self.left == 0 {
+            // the line break after the chunk
+            self.line()?;
+        }
+        Ok(k)
+    }
+}
+
+/// The body after `head`, whichever way it comes.
+fn body<'a, R: BufRead>(r: &'a mut R, head: &Head) -> Box<dyn Read + 'a> {
+    if head.chunked {
+        Box::new(Chunked::new(r))
     } else {
-        host.clone()
-    };
-    let sock = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|e| FileError::Net(e.to_string()))?
-        .next()
-        .ok_or_else(|| FileError::Net("no address".into()))?;
-    let s = TcpStream::connect_timeout(&sock, Duration::from_secs(10))
-        .map_err(|e| FileError::Net(e.to_string()))?;
-    let _ = s.set_read_timeout(Some(Duration::from_secs(60)));
-    let _ = s.set_write_timeout(Some(Duration::from_secs(60)));
-    let _ = s.set_nodelay(true);
-    Ok((s, format!("{}:{}", shown, port)))
+        Box::new(r.take(head.len.unwrap_or(u64::MAX)))
+    }
+}
+
+fn open(addr: &str) -> Result<(Conn, String), FileError> {
+    let (host, port, url) = server_url(addr).map_err(FileError::Other)?;
+    let secure = is_secure(&url);
+    let s = conn::dial(&host, port, secure, Duration::from_secs(10)).map_err(FileError::Net)?;
+    let _ = s.tcp().set_read_timeout(Some(Duration::from_secs(60)));
+    let _ = s.tcp().set_write_timeout(Some(Duration::from_secs(60)));
+    // the Host header: what the URL had (a proxy in front picks the server by it)
+    let start = url.find("://").map(|i| i + 3).unwrap_or(0);
+    let end = url[start..]
+        .find('/')
+        .map(|i| start + i)
+        .unwrap_or(url.len());
+    Ok((s, url[start..end].to_string()))
 }
 
 fn request(
-    s: &mut TcpStream,
+    s: &mut Conn,
     method: &str,
     host: &str,
     auth: &Auth,
@@ -128,6 +193,7 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
         status,
         len: None,
         range_total: None,
+        chunked: false,
     };
     loop {
         line.clear();
@@ -145,6 +211,7 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
         let v = v.trim();
         match k.trim().to_ascii_lowercase().as_str() {
             "content-length" => head.len = v.parse().ok(),
+            "transfer-encoding" => head.chunked = v.to_ascii_lowercase().contains("chunked"),
             // bytes a-b/total
             "content-range" => {
                 head.range_total = v.rsplit_once('/').and_then(|(_, t)| t.parse().ok())
@@ -156,11 +223,14 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
 }
 
 fn read_text(r: &mut impl BufRead, head: &Head) -> String {
-    let mut body = String::new();
-    let _ = r
-        .take(head.len.unwrap_or(0).min(4096))
-        .read_to_string(&mut body);
-    body
+    let mut text = String::new();
+    let limit = if head.chunked {
+        4096
+    } else {
+        head.len.unwrap_or(0).min(4096)
+    };
+    let _ = body(r, head).take(limit).read_to_string(&mut text);
+    text
 }
 
 fn fail(status: u16, body: &str) -> FileError {
@@ -312,8 +382,9 @@ pub fn download(
     let want = head.len.unwrap_or(u64::MAX);
     let mut got = 0u64;
     let mut buf = vec![0u8; 256 << 10];
+    let mut b = body(&mut r, &head);
     while got < want {
-        let k = r
+        let k = b
             .read(&mut buf)
             .map_err(|e| FileError::Net(e.to_string()))?;
         if k == 0 {
@@ -327,6 +398,7 @@ pub fn download(
             return Err(FileError::Cancelled);
         }
     }
+    drop(b);
     out.flush().map_err(|e| FileError::Other(e.to_string()))?;
     drop(out);
     if head.len.is_some_and(|n| got < n) {
@@ -348,22 +420,21 @@ pub fn download(
 /// this server can't send email.
 pub fn forgot_password(addr: &str, email: &str) -> Result<bool, String> {
     let (mut s, host) = open(addr).map_err(|e| e.explain())?;
-    let body = serde_json::json!({ "email": email.trim() }).to_string();
-    let req = format!("POST /auth/forgot HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", host, body.len(), body);
+    let payload = serde_json::json!({ "email": email.trim() }).to_string();
+    let req = format!("POST /auth/forgot HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", host, payload.len(), payload);
     s.write_all(req.as_bytes())
         .map_err(|e| format!("Couldn't reach the server: {}", e))?;
-    let mut text = String::new();
-    s.read_to_string(&mut text)
+    let mut r = BufReader::new(s);
+    let head = read_head(&mut r).map_err(|e| e.explain())?;
+    let status = head.status;
+    let mut json = String::new();
+    body(&mut r, &head)
+        .take(64 << 10)
+        .read_to_string(&mut json)
         .map_err(|e| format!("Couldn't reach the server: {}", e))?;
-    let status: u16 = text
-        .split_whitespace()
-        .nth(1)
-        .and_then(|c| c.parse().ok())
-        .unwrap_or(0);
     if status == 404 || status == 405 {
         return Err("This server can't reset passwords yet. Update workboard-server, or ask the owner or an admin for a new invite code.".into());
     }
-    let json = text.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
     let v: serde_json::Value = serde_json::from_str(json.trim())
         .map_err(|_| format!("The server answered {}.", status))?;
     if status != 200 {
@@ -374,4 +445,35 @@ pub fn forgot_password(addr: &str, email: &str) -> Result<bool, String> {
             .to_string());
     }
     Ok(v.get("mail").and_then(|m| m.as_bool()).unwrap_or(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chunked_answer_reads_as_its_bytes() {
+        // how a proxy in front (Cloudflare) may pass a body on
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n7;x=1\r\n, world\r\n0\r\nX-Trailer: y\r\n\r\n";
+        let mut r = BufReader::new(&raw[..]);
+        let head = read_head(&mut r).unwrap();
+        assert!(head.chunked && head.len.is_none());
+        let mut out = String::new();
+        body(&mut r, &head).read_to_string(&mut out).unwrap();
+        assert_eq!(out, "hello, world");
+
+        let raw = b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 17\r\n\r\nfile is too large";
+        let mut r = BufReader::new(&raw[..]);
+        let head = read_head(&mut r).unwrap();
+        assert_eq!(read_text(&mut r, &head), "file is too large");
+
+        let raw = b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n3\r\nab";
+        let mut r = BufReader::new(&raw[..]);
+        let head = read_head(&mut r).unwrap();
+        let mut out = vec![];
+        assert!(
+            body(&mut r, &head).read_to_end(&mut out).is_err(),
+            "a body that breaks off is an error, not a short file"
+        );
+    }
 }

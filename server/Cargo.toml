@@ -29,3 +29,5 @@ ring = "0.17"
 [dev-dependencies]
 # a bare connection for protocol tests (the same version wb-net uses)
 tungstenite = "0.30"
+# a TLS front before the server in tests, like Cloudflare Tunnel's
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

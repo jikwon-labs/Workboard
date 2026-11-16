@@ -1204,15 +1204,13 @@ fn work_together_on_a_server_that_is_down_leads_with_working_offline_and_can_cha
     h.click("Change address");
     h.click("Server address");
     h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
-    h.type_text("wss://team.example");
+    h.type_text("https://team.example:web");
     h.click("Save and reconnect");
     assert_eq!(
         h.app.data.extra.shared.as_ref().unwrap().server.as_deref(),
         Some("127.0.0.1:2")
     );
-    assert!(h.has(
-        "Secure (wss) addresses aren't supported. Use the server's Tailscale name or address."
-    ));
+    assert!(h.has("That port isn't a number."));
     h.click("Cancel");
     assert!(!h.has("Save and reconnect"));
     // connected: the usual words, and no address to change

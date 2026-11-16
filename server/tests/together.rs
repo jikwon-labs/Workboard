@@ -144,6 +144,22 @@ impl App {
         )
     }
 
+    /// connect(), to an address as typed in the app.
+    fn connect_at(addr: &str, mut d: Value) -> App {
+        let mut meta = SyncMeta::default();
+        wb_sync::stamp(&d, &mut meta, now());
+        d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+        let me = d["me"].as_u64();
+        Self::start_at(
+            addr,
+            d,
+            SignIn {
+                claim: me,
+                ..Default::default()
+            },
+        )
+    }
+
     /// Someone joining with an invite code: they take whatever the server has.
     fn join(port: u16, code: &str) -> App {
         Self::start(
@@ -156,7 +172,12 @@ impl App {
         )
     }
 
-    fn start(port: u16, data: Value, mut sign_in: SignIn) -> App {
+    fn start(port: u16, data: Value, sign_in: SignIn) -> App {
+        Self::start_at(&format!("127.0.0.1:{}", port), data, sign_in)
+    }
+
+    /// Connect to the server as typed in the app (`addr`).
+    fn start_at(addr: &str, data: Value, mut sign_in: SignIn) -> App {
         if sign_in.device.is_empty() {
             sign_in.device = format!("dev{:x}", wb_sync::random_u64());
         }
@@ -168,7 +189,7 @@ impl App {
             sign_in.app = None;
         }
         let device = sign_in.device.clone();
-        let client = Client::start(&format!("127.0.0.1:{}", port), sign_in, Arc::new(|| {}));
+        let client = Client::start(addr, sign_in, Arc::new(|| {}));
         App {
             data,
             client,
@@ -3711,6 +3732,160 @@ fn each_access_request_gets_one_answer_on_its_connection() {
     assert_eq!(heard.len(), 3, "{:?}", heard);
     assert!(heard.iter().all(|m| m["answer"] == false), "{:?}", heard);
     assert_eq!(role_of_2(&heard[2]), "member");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------- behind an HTTPS front
+
+/// A TLS front before the server, the way Cloudflare Tunnel puts one there:
+/// apps reach https://localhost:<port>, it passes the bytes on to the
+/// server's plain port. `cert`/`key` are DER files in tests/tls.
+fn tls_front(server_port: u16, cert: &str, key: &str) -> u16 {
+    use tokio_rustls::rustls;
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/tls");
+    let cert = rustls::pki_types::CertificateDer::from(std::fs::read(dir.join(cert)).unwrap());
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(std::fs::read(dir.join(key)).unwrap().into());
+    let cfg = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(vec![cert], key)
+    .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(cfg));
+    let (port_tx, port_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let l = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
+            port_tx.send(l.local_addr().unwrap().port()).unwrap();
+            loop {
+                let Ok((sock, _)) = l.accept().await else {
+                    return;
+                };
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut tls) = acceptor.accept(sock).await else {
+                        return;
+                    };
+                    let Ok(mut back) =
+                        tokio::net::TcpStream::connect(("127.0.0.1", server_port)).await
+                    else {
+                        return;
+                    };
+                    let _ = tokio::io::copy_bidirectional(&mut tls, &mut back).await;
+                    use tokio::io::AsyncWriteExt;
+                    let _ = tls.shutdown().await;
+                });
+            }
+        });
+    });
+    port_rx.recv_timeout(Duration::from_secs(10)).unwrap()
+}
+
+fn trust_test_certificate() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/tls");
+        wb_net::trust_certificate(std::fs::read(dir.join("cert.der")).unwrap());
+    });
+}
+
+#[test]
+fn apps_work_through_an_https_front() {
+    trust_test_certificate();
+    let home = temp_home("https-front");
+    let server = Server::start(&home, 0);
+    let front = tls_front(server.port, "cert.der", "key.der");
+    let addr = format!("https://localhost:{}", front);
+
+    // the owner sets up the server through the front, B joins through it
+    let mut d = workspace();
+    let mut meta = SyncMeta::default();
+    wb_sync::stamp(&d, &mut meta, now());
+    d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    let mut a = App::start_at(
+        &addr,
+        d,
+        SignIn {
+            claim: Some(1),
+            ..Default::default()
+        },
+    );
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::start_at(
+        &addr,
+        Value::Null,
+        SignIn {
+            invite: Some(code),
+            ..Default::default()
+        },
+    );
+    b.wait("B gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    a.change(say("over TLS", 500));
+    b.wait("A's message reaches B", |d| {
+        texts(d).contains(&"over TLS".to_string())
+    });
+
+    // a picture goes up and comes down through the front too
+    a.until("A has a token", |a| a.token.is_some());
+    b.until("B has a token", |b| b.token.is_some());
+    let (path, sha, bytes) = some_file(&home.join("work"), "photo.jpg", 2 << 20);
+    wb_net::upload(
+        &addr,
+        &auth(&a),
+        &sha,
+        &path,
+        "image/jpeg",
+        &mut no_progress(),
+    )
+    .unwrap();
+    assert_eq!(
+        wb_net::remote_size(&addr, &auth(&b), &sha).unwrap(),
+        Some(bytes.len() as u64)
+    );
+    let dest = home.join("work").join("b-cache").join(&sha);
+    wb_net::download(&addr, &auth(&b), &sha, &dest, &mut no_progress()).unwrap();
+    assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+    assert_eq!(
+        wb_net::forgot_password(&addr, "nobody@team.io"),
+        Ok(false),
+        "no mail set up on this server"
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_front_with_a_certificate_nobody_trusts_is_refused() {
+    trust_test_certificate();
+    let home = temp_home("https-untrusted");
+    let server = Server::start(&home, 0);
+    let front = tls_front(server.port, "untrusted-cert.der", "untrusted-key.der");
+    let addr = format!("https://localhost:{}", front);
+    let mut a = App::connect_at(&addr, workspace());
+    a.until("refused or retrying", |a| {
+        matches!(&a.status, Some(Status::Reconnecting(why)) if why.contains("secure connection"))
+    });
+    assert_eq!(a.role, None, "never signed in");
+    let err = wb_net::remote_size(
+        &addr,
+        &wb_net::Auth {
+            device: "d".into(),
+            token: "t".into(),
+        },
+        "00",
+    )
+    .unwrap_err();
+    assert!(matches!(err, wb_net::FileError::Net(_)), "{:?}", err);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

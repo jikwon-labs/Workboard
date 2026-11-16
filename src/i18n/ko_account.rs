@@ -118,7 +118,6 @@ pub const T: &[(&str, &str)] = &[
     ("Your access to this server was removed.", "이 서버에 대한 접근 권한이 없어졌습니다."),
     ("Your account changed in the meantime. Try again.", "그동안 계정이 바뀌었습니다. 다시 시도하세요."),
     ("Your current password isn't right.", "현재 비밀번호가 맞지 않습니다."),
-    ("Secure (wss) addresses aren't supported. Use the server's Tailscale name or address.", "보안(wss) 주소는 지원하지 않습니다. 서버의 Tailscale 이름이나 주소를 쓰세요."),
     ("That address doesn't look right.", "주소가 올바르지 않은 것 같습니다."),
     ("That port isn't a number.", "포트가 숫자가 아닙니다."),
     ("The server closed the connection.", "서버가 연결을 끊었습니다."),

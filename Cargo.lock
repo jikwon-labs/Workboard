@@ -5461,6 +5461,8 @@ dependencies = [
 name = "wb-net"
 version = "0.1.1"
 dependencies = [
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2",
@@ -6086,6 +6088,7 @@ dependencies = [
  "sha1 0.10.7",
  "sha2",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
  "tokio-util",
  "tungstenite 0.30.0",

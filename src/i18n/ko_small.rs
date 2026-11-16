@@ -106,6 +106,7 @@ pub const T: &[(&str, &str)] = &[
     ("Nothing answers at {}. Check that workboard-server is running there.", "{}에서 응답이 없습니다. 그 컴퓨터에서 workboard-server가 켜져 있는지 확인하세요."),
     ("Can't reach {}. Check the address and that this computer is on the team's network.", "{}에 닿지 않습니다. 주소가 맞는지, 이 컴퓨터가 팀 네트워크에 연결되어 있는지 확인하세요."),
     ("Can't find {}. Check the server address.", "{}을(를) 찾을 수 없습니다. 서버 주소를 확인하세요."),
+    ("Couldn't make a secure connection to {}. Check the address: the certificate there isn't one this computer trusts for it.", "{}에 보안 연결을 맺지 못했습니다. 주소를 확인하세요. 그곳의 인증서를 이 컴퓨터가 신뢰하지 않습니다."),
     ("Something answered at this address, but not a Workboard server. Check the address and port.", "이 주소에서 응답은 있지만 Workboard 서버가 아닙니다. 주소와 포트를 확인하세요."),
     ("The connection to the server broke.", "서버와의 연결이 끊겼습니다."),
     ("Not connected", "연결 안 됨"),

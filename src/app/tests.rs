@@ -6396,6 +6396,7 @@ fn a_server_that_cannot_be_reached_is_said_plainly() {
         reach_text("IO error: Connection reset by peer (os error 54)"),
         reach_text("The server didn't answer like Workboard: HTTP error: 404 Not Found"),
         reach_text("The server stopped answering."),
+        reach_text("The secure connection to wb.example.com failed: invalid peer certificate: UnknownIssuer"),
     ];
     let first = net_status_text(true, Some(&lost), 1);
     let later = net_status_text(true, Some(&lost), FAILS_BEFORE_CANT_REACH);
@@ -6413,6 +6414,7 @@ fn a_server_that_cannot_be_reached_is_said_plainly() {
     }
     assert!(said[0].contains("127.0.0.1:9") && said[0].contains("workboard-server"));
     assert!(said[1].contains("macmini:8787") && said[2].contains("macmini"));
+    assert!(said[6].contains("wb.example.com") && !said[6].contains("UnknownIssuer"));
     // after a few failed tries it no longer says it is about to reconnect
     assert_eq!(first, "다시 연결하는 중\u{2026}");
     assert_eq!(later, "서버에 연결할 수 없음");

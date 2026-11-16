@@ -343,6 +343,12 @@ pub(super) fn reach_text(why: &str) -> String {
     {
         return trf!("Can't find {}. Check the server address.", v[0]);
     }
+    if let Some(v) = fill_back("The secure connection to {} failed: {}", why) {
+        return trf!(
+            "Couldn't make a secure connection to {}. Check the address: the certificate there isn't one this computer trusts for it.",
+            v[0]
+        );
+    }
     if why.starts_with("The server didn't answer like Workboard") {
         return tr("Something answered at this address, but not a Workboard server. Check the address and port.").into();
     }

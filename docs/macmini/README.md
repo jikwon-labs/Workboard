@@ -10,6 +10,7 @@
   - [ ] **앱 실사용 확인**: 앱 서버 주소를 `https://wb.wlrnjs.xyz`로 바꿔 로그인·동기화되고, 앱 두 대의 허들에서 양쪽 소리가 들리는지 사용자 확인이 필요하다. LiveKit Cloud 서버 설정과 API 인증은 완료했지만 이것만으로 실제 통화 성공을 뜻하지 않는다.
 - [ ] **노출된 터널 토큰 교체 확인** (보안 후속): 앞서 채팅에 노출된 토큰을 Cloudflare에서 교체하고 새 토큰으로 설치했는지 사용자에게 확인한다. 토큰 값은 기록하지 않는다.
 - [ ] **메일 설정** (별도 작업): Gmail 앱 비밀번호 → `mail.json`의 `public_address`를 `https://wb.wlrnjs.xyz`로 작성·`chmod 600` → `workboard-server mail-test`로 시험 메일 (`accounts-and-mail.md` 2). 현재 메일 설정은 없으며 이번 이전에서는 만들지 않았다.
+  - Mac mini 에서 Claude Code 로 할 때: `git pull` 후 [`prompts/mail-setup.md`](prompts/mail-setup.md) 를 새 세션의 첫 프롬프트로 붙여 넣는다. 앱 비밀번호는 사람이 `nano` 로 직접 넣는다.
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
 - [ ] **팀원 초대**: Workboard 초대에 이메일 → 메일을 설정했다면 코드·HTTPS 링크 발송, 미설정이면 초대 코드와 `https://wb.wlrnjs.xyz`를 직접 전달 (`accounts-and-mail.md` 4). 공개 주소로 접속하는 팀원은 Tailscale 초대가 필요 없다. 관리자 SSH·배포용 Tailscale은 유지한다.
 - [ ] **외장 디스크에 Time Machine 백업 켜기** (다른 일과 상관없이 먼저 해도 된다)

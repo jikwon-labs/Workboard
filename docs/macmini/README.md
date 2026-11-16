@@ -33,6 +33,8 @@
 
 ## 끝난 일
 
+- [x] **요청한 서버 업데이트 재설치** (2026-11-17, 설치 기준 `b0f121d`): `git pull` 뒤 `deploy/install-launchd.sh`를 실행했다. 최신 스크립트 기본값은 loopback 전용이나, 앱 실사용·Cloudflare SSH 확인 전에는 기존 Tailscale 연결을 유지하도록 `BIND=100.121.190.50,127.0.0.1`을 명시했다. 설치 종료 코드 0, 새 PID, 설치 바이너리와 release 빌드 해시 일치, 새 로그의 두 주소 수신 및 APNs on을 확인했다. 서버 단위 34개·통합 53개 테스트 통과. 공개·loopback·Tailscale health 및 공개 `/join` 모두 200, 종합 점검의 터널 응답 정상이다. 기존 비밀 설정 파일의 수정 시각·크기·권한도 유지됐다. 이는 위 **Tailscale 빼기**의 loopback 전용 전환 완료가 아니며 해당 항목은 열어 둔다. Mac 재부팅·클라이언트 앱 배포·메일 설정은 하지 않았다.
+
 - [x] **Mac mini DNS 경로 재확인·도메인 한정 조치** (2026-11-17): 시스템 해석 경로의 간헐적 실패는 과거 기록에서 확인되지만 정확한 원인은 미확정이다. 추측: 초기 NXDOMAIN 캐시 또는 리졸버 경로의 캐시 상태. 앞서 사용자 승인으로 `/etc/resolver/wlrnjs.xyz`에 Cloudflare DNS 조회만 추가했고 전역 DNS·Tailscale·네임서버는 유지했다. 후속 읽기 전용 A·AAAA 비교 50회 정상, 기본 curl은 00:31:20·00:33:20·00:35:20 KST에 연속 HTTP 200이었다. 점검의 터널 줄도 정상이다. [진단 근거·가설 한계·원복 방법](dns-verification-2026-11-17.md).
 
 - [x] **LiveKit Cloud 서버 설정** (2026-11-17): 사용자 숨김 입력 후 읽기 전용 Cloud API 인증 HTTP 200을 확인하고 제공 스크립트로 적용했다. `livekit.json` 권한 600, 요청한 Cloud 주소 일치, 로컬 LiveKit LaunchAgent·plist 제거를 확인했다. 키와 시크릿은 출력·커밋하지 않았다. 실제 두 사람의 양방향 음성 확인은 위 미완료 항목으로 남긴다.

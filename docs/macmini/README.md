@@ -8,8 +8,7 @@
 
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
   - [ ] Mac mini의 기본 DNS 경로 재확인: 관리자 캐시 갱신 뒤 일반 `curl` HTTP 200을 확인했으나 이후 다시 DNS 해석 실패가 관찰됐다. 외부 조회와 공개 IPv4를 지정한 TLS 검증 유지 요청은 정상이다. 시스템 조회에는 Tailscale·통신사 DNS가 함께 등록돼 있었지만 원인은 아직 확정하지 않았다. 전역 DNS 설정은 변경하지 않았다.
-  - [ ] 허들을 LiveKit Cloud 로: `LIVEKIT_URL=wss://workboard-ngm979eq.livekit.cloud LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` (프로젝트 `workboard` 는 2026-11-16 에 만들어 둠. 키와 시크릿은 LiveKit Cloud > Settings > API keys 의 기본 키에서 복사) → 앱 두 대로 허들 들어가서 서로 들리는지
-  - [ ] 재부팅 점검에 cloudflared 가 나오는지: `deploy/check-after-boot.sh`
+  - [ ] **앱 실사용 확인**: 앱 서버 주소를 `https://wb.wlrnjs.xyz`로 바꿔 로그인·동기화되고, 앱 두 대의 허들에서 양쪽 소리가 들리는지 사용자 확인이 필요하다. LiveKit Cloud 서버 설정과 API 인증은 완료했지만 이것만으로 실제 통화 성공을 뜻하지 않는다.
 - [ ] **메일 설정**: Gmail 앱 비밀번호 → MagicDNS 이름 확인 → `mail.json` 작성·`chmod 600` → `workboard-server mail-test` 로 시험 메일 (`accounts-and-mail.md` 2)
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
 - [ ] **팀원 초대**: Tailscale 초대 → Workboard 초대에 이메일 → 메일로 코드·링크 (`accounts-and-mail.md` 4). Cloudflare Tunnel 로 옮긴 뒤에는 Tailscale 초대 없이 Workboard 초대만 하면 된다.
@@ -28,6 +27,9 @@
 
 
 ## 끝난 일
+
+- [x] **LiveKit Cloud 서버 설정** (2026-11-17): 사용자 숨김 입력 후 읽기 전용 Cloud API 인증 HTTP 200을 확인하고 제공 스크립트로 적용했다. `livekit.json` 권한 600, 요청한 Cloud 주소 일치, 로컬 LiveKit LaunchAgent·plist 제거를 확인했다. 키와 시크릿은 출력·커밋하지 않았다. 실제 두 사람의 양방향 음성 확인은 위 미완료 항목으로 남긴다.
+- [x] **Cloudflare 이전 후 점검 스크립트 실행** (2026-11-17): `deploy/check-after-boot.sh` 종료 코드 0 및 cloudflared·Workboard running 확인. loopback·Tailscale health 정상. Cloud 전환으로 로컬 LiveKit NOT LOADED/로컬 7880 응답 없음은 예상된 상태다. 터널 URL 항목의 DNS 실패는 아직 남았으므로 전체 점검 정상으로 판정하지 않는다. Mac 재부팅은 하지 않았다.
 
 - [x] **Cloudflare 이전: 메일 링크 변경 조건 확인** (2026-11-17): 서버 데이터 폴더에 `mail.json`이 없어 지침대로 주소 변경과 시험 메일을 생략했다. 새 메일 설정은 하지 않았다.
 

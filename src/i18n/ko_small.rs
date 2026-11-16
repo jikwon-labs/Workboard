@@ -182,9 +182,7 @@ pub const T: &[(&str, &str)] = &[
     ("Share this workspace here", "여기에 이 워크스페이스 공유"),
     ("Shared. Now share the folder with your teammates in your sync app.", "공유했습니다. 이제 동기화 앱에서 팀원과 폴더를 공유하세요."),
     ("Or connect to your team's server", "또는 팀 서버에 연결"),
-    ("A Workboard server (for example a Mac mini your team reaches through Tailscale). To join your team, type the invite code you were given. Setting up a new, empty server? Leave the code empty: this workspace goes up and you become its owner.", "Workboard 서버입니다 (예: 팀이 Tailscale로 접속하는 Mac mini). 팀에 참가하려면 받은 초대 코드를 입력하세요. 비어 있는 새 서버를 설정한다면 코드를 비워 두세요. 이 워크스페이스가 올라가고 내가 소유자가 됩니다."),
     ("Server", "서버"),
-    ("macmini or 100.101.102.103", "macmini 또는 100.101.102.103"),
     ("XXXX-XXXX-XXXX (empty for a new server)", "XXXX-XXXX-XXXX (새 서버는 비워 두기)"),
     ("Connect", "연결"),
     // together: who am I

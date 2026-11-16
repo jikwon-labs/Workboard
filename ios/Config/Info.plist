@@ -3,13 +3,12 @@
 <plist version="1.0">
 <dict>
 	<!-- Merged with the generated Info.plist (GENERATE_INFOPLIST_FILE).
-	     Plain http:// and ws:// are allowed to any address, like the Mac app:
-	     the team server is plain HTTP on the tailnet, reached by a Tailscale
-	     IP (100.x.y.z), a short MagicDNS name ("macmini") or a *.ts.net name,
-	     and ATS exceptions can't name IP addresses or short names. Tailscale
-	     already encrypts that traffic. Only NSAllowsArbitraryLoads is set:
-	     iOS ignores it when NSAllowsLocalNetworking or exception domains are
-	     present too. -->
+	     The team server is https through Cloudflare Tunnel, which needs no
+	     exception. Plain http:// and ws:// stay allowed to any address, like
+	     the Mac app, for a server reached without https (the simulator tests'
+	     local fake server, a LAN address); ATS exceptions can't name IP
+	     addresses. Only NSAllowsArbitraryLoads is set: iOS ignores it when
+	     NSAllowsLocalNetworking or exception domains are present too. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

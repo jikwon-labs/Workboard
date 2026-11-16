@@ -3945,7 +3945,7 @@ fn through_the_tunnel_links_are_https_and_health_says_little() {
 
 #[test]
 fn one_server_answers_on_two_addresses_as_one_team() {
-    // the Tailscale address and 127.0.0.1 (for cloudflared) on the Mac mini
+    // --bind with two addresses (say 127.0.0.1 for cloudflared and a LAN one)
     let home = temp_home("two-addresses");
     let (ports_tx, ports_rx) = std::sync::mpsc::channel();
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();

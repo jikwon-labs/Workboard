@@ -58,13 +58,7 @@ limit() {
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S')  ($([ "${1:-}" = "--after-boot" ] && echo "after login" || echo "by hand"))"
   echo "booted: $(sysctl -n kern.boottime | sed 's/.*} //')   uptime: $(uptime | sed 's/.*up //; s/,.*//')"
-  TS=""
-  for t in tailscale /usr/local/bin/tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
-    if command -v "$t" >/dev/null 2>&1 || [ -x "$t" ]; then TS="$t"; break; fi
-  done
-  IP="$([ -n "$TS" ] && "$TS" ip -4 2>/dev/null | head -1)"
-  echo "tailscale: ${IP:-NOT UP}"
-  for l in com.jikwon-labs.workboard-server com.jikwon-labs.livekit-server com.jikwon-labs.cloudflared com.ngrok.metabase io.github.wlrnjs.branchport ai.hermes.gateway; do
+  for l in com.jikwon-labs.workboard-server com.jikwon-labs.cloudflared com.ngrok.metabase io.github.wlrnjs.branchport ai.hermes.gateway; do
     st="$(launchctl print "gui/$(id -u)/$l" 2>/dev/null | grep -m1 -E '^\s*state =' | awk '{print $3}')"
     echo "agent $l: ${st:-NOT LOADED}"
   done
@@ -74,11 +68,6 @@ limit() {
   if [ -f "$HOME/Library/LaunchAgents/com.jikwon-labs.cloudflared.plist" ]; then
     echo "workboard via tunnel: $(curl -s -m 10 "${WB_PUBLIC_URL:-https://wb.wlrnjs.xyz}/health" || echo FAILED)"
   fi
-  if [ -n "$IP" ]; then
-    echo "workboard /health: $(curl -s -m 5 "http://$IP:8787/health" || echo FAILED)"
-    echo "livekit http: $(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$IP:7880/" || echo FAILED)"
-  fi
-  echo "livekit listening: $(lsof -nP -iUDP -iTCP -sTCP:LISTEN 2>/dev/null | awk '$1 ~ /livekit/ {print $9}' | sort -u | tr '\n' ' ')"
   if command -v docker >/dev/null 2>&1; then
     echo "docker: $(limit 20 docker ps --format '{{.Names}}={{.Status}}' 2>/dev/null | tr '\n' ' ' || echo 'not running')"
   fi

@@ -5,12 +5,9 @@
 #   deploy/install-launchd.sh            build, install, (re)start
 #   deploy/install-launchd.sh uninstall  stop and remove
 #
-# It listens on 127.0.0.1 (where cloudflared, Cloudflare Tunnel's connector
-# on this Mac, reaches it) and, when Tailscale is up now, on this Mac's
-# Tailscale address too (looked up now and written into the plist). If
-# Tailscale isn't up yet at login, the server exits and launchd tries again
-# every 10 seconds. BIND=127.0.0.1 deploy/install-launchd.sh leaves Tailscale
-# out (run it that way after taking Tailscale off this Mac).
+# It listens on 127.0.0.1 only, where cloudflared (Cloudflare Tunnel's
+# connector on this Mac) reaches it; the team comes in through the tunnel.
+# BIND=a,b deploy/install-launchd.sh listens on other specific addresses too.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -30,19 +27,7 @@ if [ "${1:-}" = "uninstall" ]; then
   exit 0
 fi
 
-if [ -z "${BIND:-}" ]; then
-  TS=""
-  for t in tailscale /usr/local/bin/tailscale /opt/homebrew/bin/tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
-    if command -v "$t" >/dev/null 2>&1 || [ -x "$t" ]; then TS="$t"; break; fi
-  done
-  IP="$([ -n "$TS" ] && "$TS" ip -4 2>/dev/null | head -1 || true)"
-  if [ -n "$IP" ]; then
-    BIND="$IP,127.0.0.1"
-  else
-    echo "Tailscale isn't up: listening on 127.0.0.1 only (for Cloudflare Tunnel)"
-    BIND="127.0.0.1"
-  fi
-fi
+BIND="${BIND:-127.0.0.1}"
 
 cargo build --release -p workboard-server
 mkdir -p "$BIN_DIR" "$HOME/Library/LaunchAgents" "$(dirname "$LOG")"

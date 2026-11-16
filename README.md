@@ -20,7 +20,8 @@ Notifications).
 
 Workspace menu > Work together offers two ways:
 
-- **A team server** (for example a Mac mini reached through Tailscale), under
+- **A team server** (for example a Mac mini behind Cloudflare Tunnel at an
+  https address), under
   "Or connect to your team's server":
   - **New server**: the first person types the server address, their email
     and a password. Their workspace goes up and they become the owner.

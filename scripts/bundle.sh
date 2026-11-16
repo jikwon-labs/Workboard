@@ -62,8 +62,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>SUPublicEDKey</key><string>DL5Ve/iIbEju0K4LeI9lffHyXPGWwExhA7/X0GZ8Y28=</string>
   <key>SUEnableAutomaticChecks</key><true/>
   <key>SUVerifyUpdateBeforeExtraction</key><true/>
-  <!-- 팀 서버는 Tailscale 안의 http 다(IP 주소, 짧은 이름, *.ts.net). ATS 예외 도메인은 IP 주소를 받지 않아서
-       100.x 주소로 붙으면 업데이트 확인이 막혔다(-1022). 그래서 http 를 전부 허용한다. 업데이트 파일은 EdDSA 서명으로 확인한다.
+  <!-- 팀 서버는 Cloudflare Tunnel 의 https 라 예외가 필요 없다. 다만 https 없이 붙는 서버(로컬 시험, IP 주소)에서도
+       업데이트 확인이 되도록 http 를 전부 허용해 둔다. ATS 예외 도메인은 IP 주소를 받지 않는다(-1022). 업데이트 파일은 EdDSA 서명으로 확인한다.
        NSAllowsLocalNetworking 을 같이 두면 NSAllowsArbitraryLoads 가 무시되므로 넣지 않는다. -->
   <key>NSAppTransportSecurity</key>
   <dict>

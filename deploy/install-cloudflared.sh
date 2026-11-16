@@ -1,6 +1,6 @@
 #!/bin/bash
 # Connect this Mac to Cloudflare Tunnel, so the team reaches workboard-server
-# at an https address (like https://wb.example.com) without Tailscale.
+# at an https address (like https://wb.example.com).
 #
 #   TUNNEL_TOKEN=<token> deploy/install-cloudflared.sh   install, (re)start
 #   deploy/install-cloudflared.sh                        restart with the saved token

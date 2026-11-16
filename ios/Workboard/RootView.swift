@@ -203,7 +203,7 @@ struct SetupView: View {
                     .padding(.vertical, 8)
                 }
                 Section {
-                    TextField("ws://mac-mini.your-tailnet.ts.net:8787", text: $address)
+                    TextField("https://wb.example.com", text: $address)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

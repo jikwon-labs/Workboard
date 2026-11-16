@@ -142,7 +142,7 @@ impl App {
                             .size(18.0)
                             .color(t.text),
                     );
-                    ui.label(RichText::new(tr("Type the address of the Mac running workboard-server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale).")).color(t.text2));
+                    ui.label(RichText::new(tr("Type the address of your workboard-server (for example https://wb.example.com).")).color(t.text2));
                     ui.add_space(8.0);
                     self.server_form(ui, t, &mut login.addr, &[Mode::NewServer], "Set up server");
                     if !joining {

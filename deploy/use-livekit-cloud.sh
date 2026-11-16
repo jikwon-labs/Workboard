@@ -9,10 +9,9 @@
 # The three values come from cloud.livekit.io > the project > Settings > Keys
 # (create a key: it shows the URL, API key and secret once). They go into
 # livekit.json in the server's data folder (mode 600), which the server reads
-# for each huddle, so it needs no restart. The local livekit-server, if this
-# Mac has one, is stopped and removed (deploy/install-livekit.sh brings it
-# back; it makes its own new keys only when livekit.json has none, so delete
-# livekit.json first if you go back).
+# for each huddle, so it needs no restart. A local livekit-server left on
+# this Mac from before (LaunchAgent com.jikwon-labs.livekit-server) is
+# stopped and removed.
 set -euo pipefail
 
 HOME_DIR="${WORKBOARD_SERVER_HOME:-$HOME/Library/Application Support/WorkboardServer}"
@@ -39,6 +38,9 @@ mkdir -p "$HOME_DIR"
 chmod 600 "$JSON"
 echo "huddles now use $URL (written to $JSON)"
 
-if [ -f "$HOME/Library/LaunchAgents/com.jikwon-labs.livekit-server.plist" ]; then
-  "$(dirname "$0")/install-livekit.sh" uninstall
+LK_PLIST="$HOME/Library/LaunchAgents/com.jikwon-labs.livekit-server.plist"
+if [ -f "$LK_PLIST" ]; then
+  launchctl bootout "gui/$(id -u)/com.jikwon-labs.livekit-server" 2>/dev/null || true
+  rm -f "$LK_PLIST"
+  echo "removed the local livekit-server"
 fi

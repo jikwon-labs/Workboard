@@ -28,7 +28,7 @@ pub const T: &[(&str, &str)] = &[
     ("This computer isn't connected to the server right now. Changes you made while it was offline haven't gone up and will be lost.", "지금 이 컴퓨터는 서버에 연결되어 있지 않습니다. 연결이 끊긴 동안 바꾼 내용은 아직 올라가지 않았고, 로그아웃하면 사라집니다."),
     ("Pictures and videos not on the server yet: {}. They will be lost.", "아직 서버에 올라가지 않은 사진과 동영상: {}개. 로그아웃하면 사라집니다."),
     ("Logged out", "로그아웃했습니다"),
-    ("Type the address of the Mac running workboard-server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale).", "workboard-server가 실행 중인 Mac의 주소를 입력하세요 (예: https://wb.example.com, 또는 팀이 Tailscale로 접속하는 Mac mini)."),
+    ("Type the address of your workboard-server (for example https://wb.example.com).", "workboard-server 주소를 입력하세요 (예: https://wb.example.com)."),
     ("Type your team's server address. Then sign in with your email and password, or use the invite code you were sent.", "팀 서버 주소를 입력한 뒤 이메일과 비밀번호로 로그인하거나 받은 초대 코드를 쓰세요."),
     // sign-in form
     ("Email and password", "이메일과 비밀번호"),
@@ -67,7 +67,7 @@ pub const T: &[(&str, &str)] = &[
     ("The two passwords aren't the same.", "두 비밀번호가 같지 않습니다."),
     // connected / signed out
     ("Sign this computer in again with your email and password, or with a new invite code from the owner or an admin.", "이메일과 비밀번호, 또는 소유자나 관리자에게 받은 새 초대 코드로 이 컴퓨터를 다시 로그인하세요."),
-    ("A Workboard server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.", "Workboard 서버입니다 (예: https://wb.example.com, 또는 팀이 Tailscale로 접속하는 Mac mini). 이메일과 비밀번호로 로그인하거나 받은 초대 코드로 참가하세요. 비어 있는 새 서버를 설정하면 이 워크스페이스가 올라가고 내가 소유자가 됩니다."),
+    ("A Workboard server (for example https://wb.example.com). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.", "Workboard 서버입니다 (예: https://wb.example.com). 이메일과 비밀번호로 로그인하거나 받은 초대 코드로 참가하세요. 비어 있는 새 서버를 설정하면 이 워크스페이스가 올라가고 내가 소유자가 됩니다."),
     ("Your account", "내 계정"),
     ("You sign in with {} on your other computers and phones.", "다른 컴퓨터와 휴대폰에서는 {}(으)로 로그인합니다."),
     ("Change password", "비밀번호 변경"),

@@ -27,7 +27,7 @@ Mac mini 터미널에서:
 
 확인:
 
-    curl -s -o /dev/null -w %{http_code} http://100.121.190.50:8787/join; echo
+    curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8787/join; echo
     ~/.local/bin/workboard-server --help | grep mail-test
 
 `200` 이 나오고 `mail-test` 줄이 보이면 새 버전이다.
@@ -44,11 +44,11 @@ Mac mini 터미널에서:
 
 ### 2-2. 메일 링크의 공개 주소 확인
 
-Cloudflare 이전 후에는 `https://wb.wlrnjs.xyz`를 쓴다. 0.1.8 이상 앱은 이 HTTPS 주소로 접속하며, 팀원에게 Tailscale 설치나 MagicDNS 이름이 필요하지 않다.
+공개 주소는 `https://wb.wlrnjs.xyz`다. 0.1.8 이상 앱은 이 HTTPS 주소로 접속한다.
 
     curl -s -m 10 https://wb.wlrnjs.xyz/health
 
-`{"ok":true}`를 확인하고 아래 `public_address`에도 같은 HTTPS 주소를 넣는다. Cloudflare 없이 Tailscale 전용으로 운영할 때만 `macmini.<tailnet 이름>.ts.net:8787` 같은 MagicDNS 이름을 쓴다. 관리자 SSH·배포용 Tailscale은 그대로 유지한다.
+`{"ok":true}`를 확인하고 아래 `public_address`에도 같은 HTTPS 주소를 넣는다.
 
 ### 2-3. mail.json 만들기
 
@@ -95,8 +95,7 @@ Cloudflare 이전 후에는 `https://wb.wlrnjs.xyz`를 쓴다. 0.1.8 이상 앱�
 
 1. Workboard에서 초대(Invite)에 그 사람 이메일을 넣는다.
 2. 메일 설정이 있으면 서버가 초대 코드와 링크를 메일로 보낸다. 메일을 설정하지 않았다면 초대 코드와 `https://wb.wlrnjs.xyz`를 받는 사람에게 직접 전달한다.
-3. 받는 사람은 새 Workboard 앱에서 공개 HTTPS 주소와 초대 코드를 사용해 비밀번호를 정한다. 메일 링크가 있다면 링크를 열어 진행한다. **Cloudflare 공개 주소 사용자는 Tailscale을 설치하거나 초대받을 필요가 없다.**
-4. Cloudflare 없이 Tailscale 전용 주소로 운영하는 경우에만 먼저 Tailscale에 초대하고 접속하게 한다. 관리자 SSH·배포를 위한 Tailscale 설정은 바꾸지 않는다.
+3. 받는 사람은 새 Workboard 앱에서 공개 HTTPS 주소와 초대 코드를 사용해 비밀번호를 정한다. 메일 링크가 있다면 링크를 열어 진행한다. Workboard 앱 말고 따로 설치할 것은 없다.
 
 코드는 7일 동안 한 번만 쓸 수 있다. 다시 보내려면 함께 작업하기 > 사람 > 새 코드.
 
@@ -105,7 +104,7 @@ Cloudflare 이전 후에는 `https://wb.wlrnjs.xyz`를 쓴다. 0.1.8 이상 앱�
     ~/.local/bin/workboard-server people            사람, 역할, 컴퓨터 수, 계정 이메일, 열린 코드
     ~/.local/bin/workboard-server backups           백업 목록
     ~/.local/bin/workboard-server mail-test 주소    메일 설정 확인
-    curl http://100.121.190.50:8787/health          서버 상태
+    curl http://127.0.0.1:8787/health               서버 상태
     tail -50 ~/Library/Logs/workboard-server.log    서버 로그 (메일 실패도 여기 남는다)
 
 ## 6. 문제가 생겼을 때

@@ -1,6 +1,6 @@
 # Cloudflare Tunnel 로 팀 서버 열기
 
-팀원이 Tailscale 없이 `https://wb.wlrnjs.xyz` 로 Mac mini 의 workboard-server 에 붙게 한다. 허들(음성·영상)은 LiveKit Cloud 로 옮긴다. 2026-11-16 에 코드를 넣었다.
+팀원이 `https://wb.wlrnjs.xyz` 로 Mac mini 의 workboard-server 에 붙게 한다. 허들(음성·영상)은 LiveKit Cloud 로 옮긴다. 2026-11-16 에 코드를 넣었고, 2026-11-17 에 Tailscale 을 완전히 빼기로 했다(아래 "Tailscale 빼기").
 
 ## 구조
 
@@ -8,11 +8,10 @@
           │  https://wb.wlrnjs.xyz  (wss, TLS 는 Cloudflare 가 처리)
           ▼
     [ Cloudflare ] ── 터널 ──▶ [ Mac mini: cloudflared ] ──▶ http://127.0.0.1:8787  workboard-server
-                                                            (Tailscale 주소:8787 도 계속 연다)
 
     [ 허들 ] 앱 ──wss──▶ LiveKit Cloud   (서버는 입장 토큰만 만든다)
 
-- **서버가 듣는 주소:** Tailscale 주소와 `127.0.0.1`. cloudflared 는 같은 Mac 에서 `127.0.0.1:8787` 로 붙는다. 옮기는 동안 Tailscale 로 붙던 앱도 그대로 된다. `0.0.0.0` 으로는 여전히 열지 않는다.
+- **서버가 듣는 주소:** `127.0.0.1` 하나(2026-11-17 코드부터. 옮기는 동안에는 Tailscale 주소도 열었다). cloudflared 는 같은 Mac 에서 `127.0.0.1:8787` 로 붙는다. `0.0.0.0` 으로는 열지 않는다.
 - **허들:** 터널은 HTTP·WebSocket 만 넘긴다. LiveKit 의 음성·영상(UDP)은 못 지나가서 Mac mini 의 livekit-server 대신 LiveKit Cloud 를 쓴다.
 - **파일 한도 90MB:** Cloudflare 무료 플랜은 요청 하나에 100MB 까지만 받는다. 그래서 서버·Mac 앱·iPhone 앱 모두 90MB 로 낮췄다.
 - **공개 인터넷에 열린다.** 그래서 다음을 확인해 두었다.
@@ -36,9 +35,17 @@
 | 8 | Mac mini | 나 | `LIVEKIT_URL=... LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` |
 | 9 | Mac mini | 나 | `mail.json` 의 `public_address` 를 `"https://wb.wlrnjs.xyz"` 로 (메일을 쓴다면) |
 | 10 | 각자 앱 | 팀원 모두 | 서버 주소를 `https://wb.wlrnjs.xyz` 로 바꾸기 (아래 "앱에서 주소 바꾸기") |
-| 11 | (나중에, 선택) | 나 | Tailscale 을 아예 뺄 때: Mac mini 에서 `BIND=127.0.0.1 deploy/install-launchd.sh` |
+| 11 | 아래 "Tailscale 빼기" | 나 | Tailscale 을 완전히 뺀다 |
 
-11번 전에 알아 둘 것: 배포(`scripts/publish-update.sh` 의 `seojigwon@macmini`)와 SSH 는 지금 Tailscale 이름으로 Mac mini 에 붙는다. Tailscale 을 빼려면 배포·SSH 경로를 먼저 따로 마련한다. 나와 Mac mini 만 Tailscale 에 남겨 두는 게 가장 간단하다(무료 플랜으로 충분).
+## Tailscale 빼기 (2026-11-17 결정)
+
+**순서를 지킨다.** 서버 설치 설정에는 Tailscale 주소가 들어가 있어서, 서버를 다시 설치하기 전에 Tailscale 을 지우면 서버가 그 주소에 붙지 못하고 계속 다시 시작한다(팀 전체가 끊긴다). 배포·SSH 도 지금은 Tailscale 이름 `macmini` 로 간다.
+
+1. 팀원 모두 앱 주소가 `https://wb.wlrnjs.xyz` 인지 확인한다(위 10번). Tailscale 주소로 남은 사람은 4번에서 끊긴다.
+2. SSH 를 Cloudflare 로 옮긴다: `deploy/README.md` "SSH". Tailscale 이 켜진 채로 `ssh macmini hostname` 이 터널로 되는지 먼저 확인한다.
+3. Mac mini 에서 `git pull` 후 `deploy/install-launchd.sh`. 이제 기본이 `127.0.0.1` 하나다. 서버 로그 시작 줄에 `127.0.0.1:8787` 만 있고 `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}` 인지 본다.
+4. Mac mini·MacBook·iPhone 에서 Tailscale 을 로그아웃하고 지운다. Tailscale 관리 화면에서 기기도 지운다.
+5. Mac mini 를 한 번 재부팅하고 `deploy/check-after-boot.sh`. MagicDNS 가 빠지면서 DNS 경로가 바뀌므로 `wb.wlrnjs.xyz` 조회가 계속 되는지 본다(`/etc/resolver/wlrnjs.xyz` 는 그대로 둔다, `docs/macmini/dns-verification-2026-11-17.md`).
 
 ## Cloudflare 설정
 
@@ -115,7 +122,7 @@
 - `crates/wb-net/src/conn.rs`: wss/https 주소면 TLS(rustls, macOS 가 신뢰하는 인증서)로 붙는다. `server_url` 은 https 주소의 기본 포트를 443 으로 본다.
 - `crates/wb-net/src/files.rs`: 파일 전송도 TLS. 프록시가 보내는 chunked 응답을 읽는다.
 - `server/src/lib.rs`: `X-Forwarded-Proto: https` 로 온 요청이면 초대 메일과 `/join` 링크를 https 주소로 만든다. 터널을 거친 `/health` 는 `ok` 만 답한다. `serve_on` 으로 여러 주소를 동시에 듣는다.
-- `server/src/main.rs`: `--bind a,b`. 기본값은 Tailscale 주소와 `127.0.0.1`.
+- `server/src/main.rs`: `--bind a,b`. 기본값은 `127.0.0.1`(2026-11-17 전에는 Tailscale 주소도).
 - `crates/wb-voice`: livekit 에 TLS 기능을 켜서 `wss://` LiveKit 에 붙는다.
 - `deploy/install-cloudflared.sh`, `deploy/use-livekit-cloud.sh`: 새 스크립트.
 - 테스트: `server/tests/together.rs` 의 `apps_work_through_an_https_front`(TLS 중계 뒤에서 접속·채팅·파일), `a_front_with_a_certificate_nobody_trusts_is_refused`, `through_the_tunnel_links_are_https_and_health_says_little`, `one_server_answers_on_two_addresses_as_one_team`. 테스트용 인증서는 `server/tests/tls/` (localhost 용 자체 서명, 2126년까지).

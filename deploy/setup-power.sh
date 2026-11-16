@@ -8,7 +8,7 @@
 #   - never sleep, never spin disks down, wake for network access
 #   - power on by itself when electricity comes back (autorestart)
 #   - log in automatically at startup, so the LaunchAgents (workboard-server,
-#     livekit-server) start without anyone at the keyboard
+#     cloudflared) start without anyone at the keyboard
 #
 # Automatic login is impossible while FileVault is on (macOS refuses it).
 # With FileVault on, the script still sets the power options and explains
@@ -50,4 +50,4 @@ else
 fi
 echo
 echo "Done. Test it once: restart the Mac mini and check"
-echo "  curl http://\$(tailscale ip -4):8787/health"
+echo "  curl https://wb.wlrnjs.xyz/health"

@@ -1,6 +1,6 @@
 # Mac mini 에서 할 일
 
-팀 서버 Mac mini(`seojigwon@macmini`, Tailscale `100.121.190.50`)에서 사람이 해야 하는 일. 운영 전반은 `deploy/README.md`.
+팀 서버 Mac mini(`seojigwon@macmini`, 공개 주소 `https://wb.wlrnjs.xyz`)에서 사람이 해야 하는 일. 운영 전반은 `deploy/README.md`.
 
 **규칙:** 위에서부터 한다. 하나 끝나면 바로 `[ ]` 를 `[x]` 로 바꾸고 날짜를 붙인 뒤 다음으로 넘어간다. Mac mini 에서 할 일이 새로 생기면 `[ ]` 로 아래에 더한다.
 
@@ -8,11 +8,15 @@
 
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
   - [ ] **앱 실사용 확인**: 앱 서버 주소를 `https://wb.wlrnjs.xyz`로 바꿔 로그인·동기화되고, 앱 두 대의 허들에서 양쪽 소리가 들리는지 사용자 확인이 필요하다. LiveKit Cloud 서버 설정과 API 인증은 완료했지만 이것만으로 실제 통화 성공을 뜻하지 않는다.
+- [ ] **Tailscale 빼기** (2026-11-17 결정, 순서와 이유: `docs/cloudflare-tunnel.md` "Tailscale 빼기"). 위 "앱 실사용 확인"과 MacBook 의 "SSH 를 Cloudflare 로" 가 끝난 뒤에 한다. 순서를 바꾸면 서버가 끊긴다.
+  - [ ] 서버 다시 설치: `git pull` 후 `deploy/install-launchd.sh` (기본이 `127.0.0.1` 하나로 바뀐 서버 코드). 로그 시작 줄에 `127.0.0.1:8787` 만 있고 `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}` 인지 확인
+  - [ ] Tailscale 로그아웃·삭제, Tailscale 관리 화면에서 이 기기 지우기
+  - [ ] 재부팅 뒤 `deploy/check-after-boot.sh` 와 `wb.wlrnjs.xyz` DNS 조회 확인(`/etc/resolver/wlrnjs.xyz` 는 그대로)
 - [ ] **노출된 터널 토큰 교체 확인** (보안 후속): 앞서 채팅에 노출된 토큰을 Cloudflare에서 교체하고 새 토큰으로 설치했는지 사용자에게 확인한다. 토큰 값은 기록하지 않는다.
 - [ ] **메일 설정** (별도 작업): Gmail 앱 비밀번호 → `mail.json`의 `public_address`를 `https://wb.wlrnjs.xyz`로 작성·`chmod 600` → `workboard-server mail-test`로 시험 메일 (`accounts-and-mail.md` 2). 현재 메일 설정은 없으며 이번 이전에서는 만들지 않았다.
   - Mac mini 에서 Claude Code 로 할 때: `git pull` 후 [`prompts/mail-setup.md`](prompts/mail-setup.md) 를 새 세션의 첫 프롬프트로 붙여 넣는다. 앱 비밀번호는 사람이 `nano` 로 직접 넣는다.
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
-- [ ] **팀원 초대**: Workboard 초대에 이메일 → 메일을 설정했다면 코드·HTTPS 링크 발송, 미설정이면 초대 코드와 `https://wb.wlrnjs.xyz`를 직접 전달 (`accounts-and-mail.md` 4). 공개 주소로 접속하는 팀원은 Tailscale 초대가 필요 없다. 관리자 SSH·배포용 Tailscale은 유지한다.
+- [ ] **팀원 초대**: Workboard 초대에 이메일 → 메일을 설정했다면 코드·HTTPS 링크 발송, 미설정이면 초대 코드와 `https://wb.wlrnjs.xyz`를 직접 전달 (`accounts-and-mail.md` 4).
 - [ ] **외장 디스크에 Time Machine 백업 켜기** (다른 일과 상관없이 먼저 해도 된다)
   - 왜: 서버 백업(`backups/`)이 정본과 같은 디스크에 있어서 Mac mini 디스크가 고장 나면 같이 사라진다. 채팅 사진·영상(`files/`)은 서버 백업에 아예 안 들어간다. 2026-11-16 확인 때 `tmutil destinationinfo` 가 "No destinations configured" 였다.
   - 디스크: 데이터 폴더가 지금 약 100MB(대부분 `updates/`)라 작은 외장 SSD·HDD 면 충분하다. Mac mini 에 계속 꽂아 둔다.
@@ -51,4 +55,4 @@
 ## 문서
 
 - `accounts-and-mail.md`: 계정 로그인·초대 메일 적용 순서, 확인 명령, 문제가 생겼을 때
-- `../cloudflare-tunnel.md`: Tailscale 없이 팀이 https 주소로 붙게 하는 설정(Cloudflare·가비아·LiveKit Cloud 포함)
+- `../cloudflare-tunnel.md`: 팀이 https 주소로 붙게 하는 설정(Cloudflare·가비아·LiveKit Cloud 포함)

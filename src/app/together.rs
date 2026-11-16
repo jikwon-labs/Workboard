@@ -1749,7 +1749,7 @@ impl App {
         ui.label(RichText::new(tr("Server")).color(t.text2));
         let r = ui.add(
             field(addr)
-                .hint_text(tr("macmini or 100.101.102.103"))
+                .hint_text("https://wb.example.com")
                 .desired_width(f32::INFINITY),
         );
         r.widget_info(|| {
@@ -2267,7 +2267,7 @@ impl App {
                 ui.label(RichText::new(tr("New server address")).color(t.text2));
                 let r = ui.add(
                     egui::TextEdit::singleline(addr)
-                        .hint_text(tr("macmini or 100.101.102.103"))
+                        .hint_text("https://wb.example.com")
                         .desired_width(f32::INFINITY),
                 );
                 r.widget_info(|| {
@@ -2440,7 +2440,7 @@ impl App {
             ui.separator();
             ui.add_space(4.0);
             ui.label(RichText::new(tr("Or connect to your team's server")).strong());
-            ui.label(RichText::new(tr("A Workboard server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.")).color(t.text2));
+            ui.label(RichText::new(tr("A Workboard server (for example https://wb.example.com). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.")).color(t.text2));
             let _ = code;
             self.server_form(
                 ui,

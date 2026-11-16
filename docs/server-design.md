@@ -1,6 +1,6 @@
 # Workboard 팀 서버 (Mac mini): 설계와 현재 상태
 
-사용자의 Mac mini 한 대가 팀의 Workboard 서버가 되어, Tailscale 로 접속한 팀원들이 채팅·작업·문서를 실시간으로 함께 쓰고 앱 안에서 음성·영상 통화(Huddle)를 한다. 2026-11-14 에 처음 설계했고 2026-11-15 에 1~5단계, 2026-11-16 에 6·7단계를 만들었다.
+사용자의 Mac mini 한 대가 팀의 Workboard 서버가 되어, Cloudflare Tunnel(`https://wb.wlrnjs.xyz`)로 접속한 팀원들이 채팅·작업·문서를 실시간으로 함께 쓰고 앱 안에서 음성·영상 통화(Huddle)를 한다. 2026-11-14 에 처음 설계했고 2026-11-15 에 1~5단계, 2026-11-16 에 6·7단계를 만들었다.
 
 - 레포: GitHub `jikwon-labs/Workboard` (`main`)
 - 운영 방법(설치·자동 실행·관리 명령): [`deploy/README.md`](../deploy/README.md)
@@ -12,7 +12,7 @@
 ## 지금 상태 (2026-11-16)
 
 - **1~7단계 완료.** 실시간 동기화, 로그인·권한·백업, 음성 Huddle, 영상, 채팅 사진·영상 첨부, 계정·초대 메일, iPhone 푸시 알림(실제 APNs 발송은 미확인)까지 들어갔다. 2026-11-16 에 허들 화면 공유와 화질 조절도 들어갔고, 결함 수정 1~3차로 서버 로그인 잠금, 초대 코드·파일 저장 강화, 사람별로 보이는 대화·개인 공간 거르기가 더해졌다. `cargo test --workspace` 498개(손으로 돌리는 `--ignored` 2개 빼고)와 재생 테스트(`tests/player.rs`) 통과.
-- **실제 서버:** Mac mini(Tailscale `100.121.190.50`)에서 workboard-server(8787)와 livekit-server(7880, 7882/udp)가 LaunchAgent 로 돌고 있다. owner(Jikwon)와 멤버 한 명이 들어와 있고, 아직 아무도 비밀번호(계정)가 없다. 돌고 있는 서버 코드는 `ee1e990`(7단계와 결함 수정까지, 2026-11-16 재설치)이고, APNs 키를 두어 iPhone 알림이 켜져 있다. 앱은 0.1.7(빌드 329)을 배포했다. 메일은 아직 설정하지 않았다([`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md)).
+- **실제 서버:** Mac mini 에서 workboard-server(8787)와 cloudflared 가 LaunchAgent 로 돌고, 허들은 LiveKit Cloud 를 쓴다(2026-11-17 전환). 2026-11-17 에 Tailscale 을 빼기로 했다: 서버는 `127.0.0.1` 에만 열고, 관리자 SSH 도 Cloudflare Access 로 옮긴다(`deploy/README.md` "SSH"). 아래 이 줄의 나머지는 2026-11-16 기준이다. owner(Jikwon)와 멤버 한 명이 들어와 있고, 아직 아무도 비밀번호(계정)가 없다. 돌고 있는 서버 코드는 `ee1e990`(7단계와 결함 수정까지, 2026-11-16 재설치)이고, APNs 키를 두어 iPhone 알림이 켜져 있다. 앱은 0.1.7(빌드 329)을 배포했다. 메일은 아직 설정하지 않았다([`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md)).
 - **재부팅 자동 복구 확인:** 2026-11-15 03:37 macOS 업데이트(27.0.1 → 27.2.1) 재시동 뒤 Tailscale, 두 서버, Docker 와 컨테이너, ngrok, hermes, branchport 가 모두 저절로 다시 떴다(`deploy/check-after-boot.sh` 기록).
 - **실제 목소리:** 사용자가 확인했다("목소리 잘 나오더라").
 - **실제 카메라 그림:** 아직 확인 못 했다(아래 "남은 일").
@@ -27,7 +27,7 @@
 **운영** (사람이 할 일의 순서와 명령은 [`docs/macmini/README.md`](macmini/README.md), [`docs/macbook/README.md`](macbook/README.md) 체크리스트)
 - ~~**Mac mini 서버 다시 설치.**~~ 2026-11-16 완료(`ee1e990`). 서버 코드를 바꾸면 다시 `git pull && deploy/install-launchd.sh`.
 3. ~~**새 앱 배포.**~~ 2026-11-16 0.1.7 배포. 팀 전체가 같은 버전을 써야 한다(1단계에서 변경 시각을 밀리초로 바꿔서, 예전 버전과 섞이면 예전 쪽 수정이 늘 진다). 절차: `/release` 스킬, `docs/release/README.md`.
-4. **메일 설정, 비밀번호, 팀원 초대.** `mail.json` 을 두고, 지금 있는 사람은 비밀번호를 정하고, 팀원은 Invite 로 이메일을 넣어 메일로 코드를 받는다. 팀원은 Tailscale 초대도 받아야 한다. 순서: [`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md), `deploy/README.md` "Setting up and inviting".
+4. **메일 설정, 비밀번호, 팀원 초대.** `mail.json` 을 두고, 지금 있는 사람은 비밀번호를 정하고, 팀원은 Invite 로 이메일을 넣어 메일로 코드를 받는다. 순서: [`docs/macmini/accounts-and-mail.md`](macmini/accounts-and-mail.md), `deploy/README.md` "Setting up and inviting".
 
 **알려진 한계(급하지 않음)**
 5. ~~동기화할 때마다 작업공간 전체를 주고받는다.~~ 해결: 처음 전체 사본(welcome) 뒤로는 바뀐 항목만 오간다(아래 "변경분(delta)"). 예전 앱이나 예전 서버와는 전체 사본으로 주고받는다.
@@ -37,16 +37,17 @@
 ## 구조 (실제로 만든 것)
 
 ```
-  [ 팀원 Mac: Workboard.app ] ──┐
-  [ 팀원 Mac: Workboard.app ] ──┼── Tailscale (사설망) ──┐
-  [ 사용자 Mac: Workboard.app ] ┘                        ▼
-  ┌──────────────────────────── Mac mini ─────────────────────────────┐
-  │ workboard-server  100.121.190.50:8787  WebSocket /ws, /health,      │
-  │                   /updates (앱 업데이트), /files (채팅 사진·영상),  │
-  │                   정본·기기·백업                                    │
-  │ livekit-server    100.121.190.50:7880, 7882/udp  음성·영상 중계     │
-  │ launchd           둘 다 로그인 시 시작, 죽으면 10초 안에 다시 시작   │
-  └────────────────────────────────────────────────────────────────────┘
+  [ 팀원 Mac / iPhone: Workboard ] ──┐
+  [ 사용자 Mac: Workboard.app ] ─────┼── https://wb.wlrnjs.xyz (Cloudflare) ──┐
+                                     │                                         ▼
+                                     │   ┌──────────────────── Mac mini ─────────────────────┐
+                                     │   │ cloudflared       터널 → 127.0.0.1:8787            │
+                                     │   │ workboard-server  127.0.0.1:8787  WebSocket /ws,   │
+                                     │   │                   /health, /updates, /files,       │
+                                     │   │                   정본·기기·백업, 통화 토큰        │
+                                     │   │ launchd           둘 다 로그인 시 시작, 재시작     │
+                                     │   └────────────────────────────────────────────────────┘
+                                     └── 허들(음성·영상) ──▶ LiveKit Cloud
 ```
 
 **코드**
@@ -106,7 +107,7 @@
 
 ## 정해 둔 원칙
 
-- 서버는 Tailscale 주소와 `127.0.0.1` 에만 연다. `0.0.0.0` 으로 열지 않는다(서버가 거부한다). 공개 인터넷에서는 Cloudflare Tunnel 을 거쳐서만 닿는다(2026-11-16 부터, `docs/cloudflare-tunnel.md`). Mac mini 의 LiveKit 을 쓸 때는 Tailscale 대역만 쓴다.
+- 서버는 `127.0.0.1` 에만 연다(2026-11-17 부터, 그 전에는 Tailscale 주소도). `0.0.0.0` 으로 열지 않는다(서버가 거부한다). 밖에서는 Cloudflare Tunnel 을 거쳐서만 닿는다(`docs/cloudflare-tunnel.md`).
 - 비밀 값(LiveKit 키, 기기 토큰)은 레포나 data.json 에 넣지 않는다. 앱의 토큰은 macOS 키체인에 둔다.
 - data.json 형식을 깨지 않는다. 새 필드는 기본값으로 예전 파일도 읽힌다.
 - 공유 폴더 방식(서버 없이)은 계속 동작한다.
@@ -302,6 +303,7 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 
 1. **접속망 = Tailscale.** 초대한 사람만 들어오고 트래픽이 암호화된다. 포트포워딩·도메인·인증서가 필요 없다. 음성·영상이 쓰는 UDP 도 지나간다. 서버 주소는 Tailscale 이 주는 이름(MagicDNS, 예: `mac-mini.<tailnet>.ts.net`)을 쓴다. Cloudflare Tunnel 은 WebSocket 은 되지만 WebRTC 의 UDP 미디어에 맞지 않아 쓰지 않는다.
    - **2026-11-16 바뀜: Cloudflare Tunnel 추가.** 팀원마다 Tailscale 을 설치·초대하는 게 번거로워서, 동기화·파일·업데이트는 Cloudflare Tunnel(`https://wb.wlrnjs.xyz`)로도 연다. 위에서 걸렸던 UDP 문제는 허들을 LiveKit Cloud 로 옮겨서 피한다. 서버는 Tailscale 주소와 `127.0.0.1`(cloudflared 용)을 함께 듣는다. 절차·이유: [`docs/cloudflare-tunnel.md`](cloudflare-tunnel.md).
+   - **2026-11-17 바뀜: Tailscale 제거.** 팀원 모두 https 주소로 옮겨서 Tailscale 을 뺀다. 서버 기본 주소는 `127.0.0.1` 하나, 관리자 SSH·업데이트 올리기는 같은 터널의 `ssh.wlrnjs.xyz`(Cloudflare Access 로 나만)로 간다. `deploy/install-livekit.sh` 는 지웠다(허들은 LiveKit Cloud).
 2. **동기화 서버 = Rust (tokio + axum WebSocket).** 앱과 같은 언어라서 `sync.rs` 의 합치기 코드를 그대로 쓴다. 서버가 작업공간 정본 하나를 들고 있고, 각 앱이 보낸 사본을 정본에 합친 뒤 모두에게 돌려준다.
 3. **음성·영상 = LiveKit.** 직접 띄우는 오픈소스 WebRTC 중계 서버(macOS 단일 실행 파일, Homebrew `livekit`). 앱에는 LiveKit Rust SDK(`livekit` 크레이트)를 붙인다. 통화 입장 토큰은 workboard-server 가 발급하고, LiveKit 키는 서버 설정에만 둔다.
 4. **공유 폴더 방식은 남긴다.** 서버 없이 쓰고 싶은 사람을 위한 대안이다. 앱은 "공유 폴더"와 "서버" 중 하나로 연결한다.

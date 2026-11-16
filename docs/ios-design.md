@@ -325,10 +325,9 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 
 ## 통신과 보안
 
-- `URLSessionWebSocketTask` 를 쓴다. ATS 예외는 `*.ts.net`(Tailscale MagicDNS) 의 `ws://`/`http://` 와 로컬 네트워크(시뮬레이터 테스트용)뿐이다. 그 밖의 주소는 `wss://`/`https://` 만 된다.
-- 추측: Tailscale IP(100.x.y.z)를 직접 쓰면 ATS 가 막을 수 있다. MagicDNS 이름을 권한다.
+- `URLSessionWebSocketTask` 를 쓴다. 팀 서버는 Cloudflare Tunnel 의 `https://wb.wlrnjs.xyz`(`wss://`)다. `Info.plist` 는 `NSAllowsArbitraryLoads` 로 `ws://`/`http://` 도 허용한다(시뮬레이터 테스트의 로컬 가짜 서버, IP 주소용).
 - 기기 토큰은 Keychain(`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), 서버 주소별로 하나. 레포와 작업공간 사본에는 비밀 값이 없다.
-- 비밀번호는 기기에 저장하지 않는다. hello 나 `set_password` 에 실어 보내고 끝이다. 그래서 `ws://` 로 붙으면 비밀번호가 평문으로 간다. Tailscale(`*.ts.net`) 안이나 `wss://` 에서만 쓰는 것을 전제로 한다.
+- 비밀번호는 기기에 저장하지 않는다. hello 나 `set_password` 에 실어 보내고 끝이다. 그래서 `ws://` 로 붙으면 비밀번호가 평문으로 간다. `wss://`(또는 시험용 로컬 서버)에서만 쓰는 것을 전제로 한다.
 
 ## 검증 결과 (2026-11-16, Xcode 27.2, iPhone 17 / iOS 27.0 시뮬레이터)
 

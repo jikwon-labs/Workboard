@@ -10,7 +10,8 @@
 #    같은 폴더에 Workboard-<버전>-arm64.html 이 있으면 업데이트 창에 릴리즈 노트로 보인다.
 # 2. UPDATES_DEST 가 있으면 build/updates/ 를 서버 폴더의 updates/ 로 복사한다(rsync).
 #    Mac mini 로:  UPDATES_DEST='seojigwon@macmini:Library/Application Support/WorkboardServer/updates'
-#                  (Tailscale 호스트 macmini, 계정 seojigwon. 경로는 그 계정의 홈 기준)
+#                  (SSH 호스트 macmini 는 ~/.ssh/config 에서 Cloudflare Tunnel 로 간다: deploy/README.md "SSH".
+#                   계정 seojigwon, 경로는 그 계정의 홈 기준)
 #    이 맥이 서버:  UPDATES_DEST="$HOME/Library/Application Support/WorkboardServer/updates"
 #    서버는 그 폴더를 GET /updates/<파일> 로 내준다. 서버를 다시 띄울 필요는 없다.
 #

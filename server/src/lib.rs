@@ -73,7 +73,7 @@ pub const BACKUP_DIR: &str = "backups";
 pub const UPDATES_DIR: &str = "updates";
 pub const REQUEST_FILE: &str = "admin-request.json";
 pub const RESULT_FILE: &str = "admin-result.json";
-/// LiveKit address and keys for voice huddles (written by deploy/install-livekit.sh).
+/// LiveKit address and keys for voice huddles (written by deploy/use-livekit-cloud.sh).
 pub const LIVEKIT_FILE: &str = "livekit.json";
 /// How long a call token lets someone into a huddle.
 pub const CALL_TOKEN_SECS: i64 = 6 * 3600;
@@ -208,7 +208,7 @@ fn normalize_code(c: &str) -> String {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LiveKitCfg {
-    /// What apps connect to, e.g. ws://100.101.102.103:7880
+    /// What apps connect to, e.g. wss://<project>.livekit.cloud
     pub url: String,
     pub key: String,
     pub secret: String,
@@ -2601,8 +2601,8 @@ pub async fn serve_with(
     serve_on(vec![listener], home, options, shutdown).await
 }
 
-/// `serve_with` on several addresses at once (the Tailscale address and
-/// 127.0.0.1 for Cloudflare Tunnel's connector on the same Mac), one team.
+/// `serve_with` on several addresses at once, one team (for example
+/// 127.0.0.1 for Cloudflare Tunnel's connector and a LAN address).
 pub async fn serve_on(
     listeners: Vec<tokio::net::TcpListener>,
     home: PathBuf,
@@ -2707,31 +2707,6 @@ pub fn admin_request(home: &Path, req: &Value, wait: Duration) -> std::io::Resul
         std::thread::sleep(Duration::from_millis(100));
     }
     Ok(None)
-}
-
-/// The address to listen on by default: this Mac's Tailscale address, else
-/// only this computer.
-pub fn default_bind() -> String {
-    for exe in [
-        "tailscale",
-        "/usr/local/bin/tailscale",
-        "/opt/homebrew/bin/tailscale",
-        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-    ] {
-        if let Ok(out) = std::process::Command::new(exe).args(["ip", "-4"]).output() {
-            if out.status.success() {
-                if let Some(ip) = String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .next()
-                    .map(|l| l.trim().to_string())
-                    .filter(|l| l.parse::<std::net::Ipv4Addr>().is_ok())
-                {
-                    return ip;
-                }
-            }
-        }
-    }
-    "127.0.0.1".into()
 }
 
 #[cfg(test)]

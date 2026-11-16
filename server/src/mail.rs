@@ -12,8 +12,8 @@
 //     "from": "Workboard <team@example.com>",
 //     "public_address": "https://wb.example.com"   (optional: the address
 //                                            people use in links, such as
-//                                            "mac-mini.tail1.ts.net:8787" or an
-//                                            https address before the server;
+//                                            the https address of the tunnel
+//                                            in front of the server;
 //                                            else the address the inviter
 //                                            connected to)
 //   }

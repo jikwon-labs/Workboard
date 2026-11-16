@@ -31,7 +31,7 @@ Sparkle 은 `scripts/fetch-sparkle.sh` 가 `vendor/Sparkle` 에 받는다(버전
 
        UPDATES_DEST='seojigwon@macmini:Library/Application Support/WorkboardServer/updates' scripts/publish-update.sh
 
-   - Mac mini 접속은 Tailscale 호스트 `macmini`, 계정 `seojigwon` 이다(`ssh seojigwon@macmini` 가 되어야 한다). 경로는 그 계정의 홈 기준이다.
+   - Mac mini 접속은 SSH 호스트 `macmini`, 계정 `seojigwon` 이다(`ssh seojigwon@macmini` 가 되어야 한다). `macmini` 는 `~/.ssh/config` 에서 Cloudflare Tunnel 로 간다(`deploy/README.md` "SSH"). 경로는 그 계정의 홈 기준이다.
 
    - zip 을 `build/updates/` 에 모으고, Sparkle 키로 서명해 `appcast.xml` 을 다시 만든 뒤, 그 폴더를 서버의 `updates/` 로 복사한다(rsync over ssh).
    - Mac mini 에서 직접 돌릴 때는 `UPDATES_DEST="$HOME/Library/Application Support/WorkboardServer/updates"`.
@@ -39,7 +39,7 @@ Sparkle 은 `scripts/fetch-sparkle.sh` 가 `vendor/Sparkle` 에 받는다(버전
    - 공증 안 된 zip 은 거절한다. 시험할 때만 `ALLOW_UNNOTARIZED=1`.
 4. 확인한다.
 
-       curl http://<tailscale 주소>:8787/updates/appcast.xml
+       curl https://wb.wlrnjs.xyz/updates/appcast.xml
 
    서버는 다시 띄울 필요 없다. GitHub Releases 에도 올리려면 같은 zip 을 올린다.
 

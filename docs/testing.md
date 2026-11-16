@@ -36,7 +36,7 @@
 
       target/release/workboard-server --port 8797 --home <임시 폴더>
 
-  `--bind` 를 주지 않으면 Tailscale 주소에 연다.
+  `--bind` 를 주지 않으면 `127.0.0.1` 에만 연다(Mac mini 안에서만 닿는다).
 - **앱 사본:** `WORKBOARD_HOME=<임시 폴더> target/release/workboard` 로 띄우면 그 폴더에 데이터를 둔다(원래 `~/Library/Application Support/Workboard` 는 건드리지 않는다). 사본을 두 개 띄우면 두 사람처럼 시험할 수 있다. 이때 서버 토큰은 키체인 대신 그 폴더의 `server-tokens.json` 에 저장된다.
 - **화면 캡처:** `WORKBOARD_HOME` 으로 띄운 앱은 그 폴더에 `snap-request` 파일을 만들면 `snapshot.png` 로 화면을 저장한다(잠금 화면에서도 된다).
 - **카메라 없이 영상 확인:** `WORKBOARD_TEST_VIDEO=1` 로 띄우면 카메라 대신 색 패턴을 보낸다.
@@ -54,7 +54,7 @@
 
 **1. 준비 (그 Mac 에서 한 번)**
 
-- Tailscale 을 설치하고 Mac mini 와 같은 계정으로 로그인한다. 확인: `curl http://100.121.190.50:8787/health` 에 `"ok":true`.
+- 서버에 닿는지 확인: `curl https://wb.wlrnjs.xyz/health` 에 `"ok":true`. 따로 설치할 것은 없다.
 - 최신 앱을 받는다. 둘 중 하나:
   - 소스로 빌드(간단):
 
@@ -68,7 +68,7 @@
 
 **2. 서버에 연결**
 
-- Workspace menu > Work together > "Or connect to your team's server" 에 서버 주소 `100.121.190.50` 을 넣고, 아래 탭 셋 중 하나로 Connect 한다.
+- Workspace menu > Work together > "Or connect to your team's server" 에 서버 주소 `https://wb.wlrnjs.xyz` 를 넣고, 아래 탭 셋 중 하나로 Connect 한다.
   - **New server**: 실제 서버가 아직 비어 있을 때. 이메일과 비밀번호를 넣으면 팀 서버의 첫 등록이 되어 owner 가 되고, 그때 열려 있던 작업공간이 팀 작업공간으로 올라간다. 개인 작업공간을 올리고 싶지 않으면 먼저 Create Workspace 로 팀용 작업공간을 만들고 연결한다.
   - **Invite code**: 이미 owner 가 있는 서버에 처음 들어올 때. owner·admin 이 Invite 로 이메일을 넣으면 메일로 코드와 링크가 온다(메일 설정 전이면 owner 가 People 에서 코드를 복사해 건넨다). 코드와 함께 비밀번호를 정한다.
   - **Email and password**: 이미 계정이 있을 때. 다른 컴퓨터나 폰에서 새 코드 없이 들어온다.
@@ -98,4 +98,4 @@
     deploy/check-after-boot.sh            # 지금 점검
     deploy/check-after-boot.sh --install  # 다음 로그인 3분 뒤 한 번 점검
 
-결과는 `~/Library/Logs/workboard-boot-check.log`. Tailscale 주소, 각 LaunchAgent, workboard `/health`, LiveKit, Docker 컨테이너, ngrok 터널, 카메라 목록을 남긴다.
+결과는 `~/Library/Logs/workboard-boot-check.log`. 각 LaunchAgent, workboard `/health`(127.0.0.1 과 터널), Docker 컨테이너, ngrok 터널, 카메라 목록을 남긴다.

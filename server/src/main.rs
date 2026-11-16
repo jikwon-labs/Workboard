@@ -1,9 +1,9 @@
 // workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
 // workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER]
 //
-// Listens on this Mac's Tailscale address and 127.0.0.1 by default (only
-// 127.0.0.1 when Tailscale isn't running), port 8787. 127.0.0.1 is where
-// Cloudflare Tunnel's connector (cloudflared) on the same Mac reaches it.
+// Listens on 127.0.0.1 port 8787 by default. That is where Cloudflare
+// Tunnel's connector (cloudflared) on the same Mac reaches it; the team
+// comes in through the tunnel's https address.
 // It never listens on every network (0.0.0.0): pick specific addresses.
 
 use serde_json::json;
@@ -15,7 +15,7 @@ const USAGE: &str = "usage:
   workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
       run the server
       --bind   addresses to listen on, separated by commas
-               (default: this Mac's Tailscale address and 127.0.0.1)
+               (default: 127.0.0.1, where cloudflared reaches it)
       --port   port (default 8787)
       --home   folder that keeps the team's copy
                (default: $WORKBOARD_SERVER_HOME, else ~/Library/Application Support/WorkboardServer)
@@ -120,25 +120,16 @@ fn mail_test(home: &std::path::Path, to: &str) {
 }
 
 fn serve(bind: Option<String>, port: u16, home: PathBuf) {
-    let bind = bind.unwrap_or_else(|| {
-        let ts = workboard_server::default_bind();
-        if ts == "127.0.0.1" {
-            ts
-        } else {
-            format!("{},127.0.0.1", ts)
-        }
-    });
+    let bind = bind.unwrap_or_else(|| "127.0.0.1".into());
     let mut addrs: Vec<SocketAddr> = vec![];
     for b in bind.split(',').map(str::trim).filter(|b| !b.is_empty()) {
         let ip: IpAddr = b
             .trim_start_matches('[')
             .trim_end_matches(']')
             .parse()
-            .unwrap_or_else(|_| {
-                fail("--bind needs IP addresses, like 100.101.102.103 or 127.0.0.1")
-            });
+            .unwrap_or_else(|_| fail("--bind needs IP addresses, like 127.0.0.1 or 192.168.0.10"));
         if ip.is_unspecified() {
-            fail("Listening on every network (0.0.0.0) isn't allowed. Use the Tailscale address (tailscale ip -4) or 127.0.0.1.");
+            fail("Listening on every network (0.0.0.0) isn't allowed. Use 127.0.0.1 (Cloudflare Tunnel) or a specific address.");
         }
         let a = SocketAddr::new(ip, port);
         if !addrs.contains(&a) {
@@ -146,7 +137,7 @@ fn serve(bind: Option<String>, port: u16, home: PathBuf) {
         }
     }
     if addrs.is_empty() {
-        fail("--bind needs IP addresses, like 100.101.102.103 or 127.0.0.1");
+        fail("--bind needs IP addresses, like 127.0.0.1 or 192.168.0.10");
     }
     let rt = tokio::runtime::Runtime::new().expect("start runtime");
     rt.block_on(async move {

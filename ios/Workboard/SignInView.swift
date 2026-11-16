@@ -232,7 +232,7 @@ struct SignInView: View {
     var serverSection: some View {
         Section {
             if editServer {
-                TextField("ws://mac-mini.your-tailnet.ts.net:8787", text: $address)
+                TextField("https://wb.example.com", text: $address)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

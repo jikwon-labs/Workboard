@@ -7,9 +7,8 @@
 ## 할 일
 
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
-  - [ ] Mac mini의 기본 DNS 경로 확인: 터널 자체와 외부 웹 조회는 정상이나, Mac mini 시스템 조회가 IPv6 주소만 반환해 일반 `curl https://wb.wlrnjs.xyz/health`는 실패했다. 공개 DNS의 IPv4를 지정한 TLS 검증 유지 요청은 HTTP 200이었다. 일반 DNS 캐시 갱신만으로는 해결되지 않았고 mDNSResponder 캐시 갱신에는 로컬 관리자 승인이 필요하다. 전역 DNS 설정은 바꾸지 않았다.
+  - [ ] Mac mini의 기본 DNS 경로 재확인: 관리자 캐시 갱신 뒤 일반 `curl` HTTP 200을 확인했으나 이후 다시 DNS 해석 실패가 관찰됐다. 외부 조회와 공개 IPv4를 지정한 TLS 검증 유지 요청은 정상이다. 시스템 조회에는 Tailscale·통신사 DNS가 함께 등록돼 있었지만 원인은 아직 확정하지 않았다. 전역 DNS 설정은 변경하지 않았다.
   - [ ] 허들을 LiveKit Cloud 로: `LIVEKIT_URL=wss://workboard-ngm979eq.livekit.cloud LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` (프로젝트 `workboard` 는 2026-11-16 에 만들어 둠. 키와 시크릿은 LiveKit Cloud > Settings > API keys 의 기본 키에서 복사) → 앱 두 대로 허들 들어가서 서로 들리는지
-  - [ ] 메일을 쓴다면 `mail.json` 의 `public_address` 를 `"https://wb.wlrnjs.xyz"` 로 → `workboard-server mail-test <내 메일>`
   - [ ] 재부팅 점검에 cloudflared 가 나오는지: `deploy/check-after-boot.sh`
 - [ ] **메일 설정**: Gmail 앱 비밀번호 → MagicDNS 이름 확인 → `mail.json` 작성·`chmod 600` → `workboard-server mail-test` 로 시험 메일 (`accounts-and-mail.md` 2)
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
@@ -29,6 +28,8 @@
 
 
 ## 끝난 일
+
+- [x] **Cloudflare 이전: 메일 링크 변경 조건 확인** (2026-11-17): 서버 데이터 폴더에 `mail.json`이 없어 지침대로 주소 변경과 시험 메일을 생략했다. 새 메일 설정은 하지 않았다.
 
 - [x] **Cloudflare 터널 서비스 설치·공개 응답 확인** (2026-11-16): 설치 종료 코드 0, `com.jikwon-labs.cloudflared` running 확인. 토큰과 LaunchAgent 설정은 사용자 승인에 따라 권한 600으로 보관했다. 공개 `/health`는 외부 웹 조회에서 최소 응답을 반환하고 IPv4 지정 요청은 HTTP 200이었다. loopback·Tailscale health도 각각 200이다. Mac mini 기본 DNS 경로 문제와 앱 실사용 확인은 아직 남아 있으므로 전체 이전은 미완료로 둔다.
 

@@ -56,4 +56,4 @@ git 훅은 `CLAUDECODE` 환경 변수가 있을 때(Claude Code 세션)만 동�
 - **UI 변경**은 `src/app/ui_tests.rs` 처럼 실제 입력으로 누르는 테스트를 같이 둔다.
 - **커밋 메시지**: 영어, 무엇이 달라지는지 쉬운 문장으로 ("Send pictures and videos in chat"). 본문에는 이유와 사용자에게 보이는 변화.
 - **버전 올리기·배포**는 요청이 있을 때만 한다. `/release` 스킬(`.claude/skills/release/SKILL.md`)이 버전 올리기부터 Mac mini 업로드까지 한다. 배경은 `docs/release/README.md`.
-- 서버 코드(`server/`)를 바꾸면 Mac mini 에서 `deploy/install-launchd.sh` 를 다시 돌려야 한다. `docs/macmini/README.md` 에 `[ ]` 로 더하고 보고에도 적는다.
+- 서버 코드(`server/`, `crates/wb-sync`, `crates/wb-net`)를 바꾸면: Mac mini 에 자동 업데이트(`deploy/install-autoupdate.sh`)가 켜져 있으면 main 에 들어간 뒤 5분쯤 안에 테스트를 거쳐 저절로 설치된다. 보고에 "Mac mini 에 자동 반영됨, 결과는 `~/Library/Logs/workboard-autoupdate.log`" 라고 적는다. 아직 켜기 전이면 Mac mini 에서 `deploy/install-launchd.sh` 를 다시 돌려야 하니 `docs/macmini/README.md` 에 `[ ]` 로 더하고 보고에도 적는다. 켜졌는지는 `docs/macmini/README.md` 의 "서버 자동 업데이트 켜기" 항목으로 안다.

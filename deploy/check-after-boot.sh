@@ -58,11 +58,15 @@ limit() {
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S')  ($([ "${1:-}" = "--after-boot" ] && echo "after login" || echo "by hand"))"
   echo "booted: $(sysctl -n kern.boottime | sed 's/.*} //')   uptime: $(uptime | sed 's/.*up //; s/,.*//')"
-  for l in com.jikwon-labs.workboard-server com.jikwon-labs.cloudflared com.ngrok.metabase io.github.wlrnjs.branchport ai.hermes.gateway; do
+  for l in com.jikwon-labs.workboard-server com.jikwon-labs.workboard-autoupdate com.jikwon-labs.cloudflared com.ngrok.metabase io.github.wlrnjs.branchport ai.hermes.gateway; do
     st="$(launchctl print "gui/$(id -u)/$l" 2>/dev/null | grep -m1 -E '^\s*state =' | awk '{print $3}')"
     echo "agent $l: ${st:-NOT LOADED}"
   done
   echo "workboard /health (127.0.0.1): $(curl -s -m 5 "http://127.0.0.1:8787/health" || echo FAILED)"
+  # the server's own updates from main (deploy/install-autoupdate.sh)
+  if [ -f "$HOME/Library/Logs/workboard-autoupdate.log" ]; then
+    echo "server auto-update, last: $(tail -1 "$HOME/Library/Logs/workboard-autoupdate.log")"
+  fi
   # through Cloudflare Tunnel, when this Mac has one (the hostname is the
   # tunnel's public one; WB_PUBLIC_URL overrides it)
   if [ -f "$HOME/Library/LaunchAgents/com.jikwon-labs.cloudflared.plist" ]; then

@@ -20,6 +20,33 @@ again after pulling new code.
 - Data: `~/Library/Application Support/WorkboardServer/` (`workspace.json`, `server.json`)
 - Stop and remove: `deploy/install-launchd.sh uninstall`
 
+## Follow main by itself
+
+    deploy/install-autoupdate.sh
+
+Once this is set up, nobody runs `git pull && deploy/install-launchd.sh` by
+hand: within about 5 minutes of a push to main that changes the server, the
+Mac mini builds it, runs the server, sync and network tests, installs it on
+the same address and port and checks `/health`.
+
+- It keeps its own checkout in `~/.local/src/Workboard` (background jobs
+  can't read `~/Documents`). Nobody edits it; updates stop if someone does.
+  The first run builds from that new checkout and installs the server from
+  main once, even when the code is the same (a few seconds' restart).
+- The LaunchAgent `com.jikwon-labs.workboard-autoupdate` runs
+  `deploy/auto-update.sh` from that checkout every 5 minutes. Pushes that
+  don't change the server binary (app, docs) only log `server unchanged`.
+- Failing tests leave the running server alone. A new server that doesn't
+  answer `/health` within 60 seconds is replaced by the previous binary.
+  Either way that build isn't tried again; the next change is.
+- The Mac mini has to fetch the repository without a prompt (try
+  `git -C ~/.local/src/Workboard fetch` after setting up).
+- Log: `~/Library/Logs/workboard-autoupdate.log` (one line per change on
+  main, plus failures)
+- Run once now: `~/.local/src/Workboard/deploy/auto-update.sh --now`
+- Stop: `deploy/install-autoupdate.sh uninstall`
+- Tests for the script: `deploy/test-auto-update.sh`
+
 ## Cloudflare Tunnel (how the team reaches the server)
 
     brew install cloudflared

@@ -11,6 +11,10 @@
 - [ ] **Tailscale 빼기** (2026-11-17 결정, 순서와 이유: `docs/cloudflare-tunnel.md` "Tailscale 빼기"). 위 "앱 실사용 확인"과 MacBook 의 "SSH 를 Cloudflare 로" 가 끝난 뒤에 한다. 순서를 바꾸면 서버가 끊긴다.
   - [ ] Tailscale 로그아웃·삭제, Tailscale 관리 화면에서 이 기기 지우기
   - [ ] 재부팅 뒤 `deploy/check-after-boot.sh` 와 `wb.wlrnjs.xyz` DNS 조회 확인(`/etc/resolver/wlrnjs.xyz` 는 그대로)
+- [ ] **서버 자동 업데이트 켜기** (다른 일과 상관없이 해도 된다. 켜 두면 서버 코드가 바뀔 때마다 `git pull && deploy/install-launchd.sh` 를 손으로 돌리지 않아도 된다. 설명: `deploy/README.md` "Follow main by itself")
+  - 서버를 설치한 체크아웃에서 `git pull` 후 `deploy/install-autoupdate.sh`. `~/.local/src/Workboard` 에 업데이트 전용 체크아웃을 만들고, 첫 빌드·테스트·설치를 바로 한 번 한다(처음엔 몇 분 걸리고, 서버가 몇 초 재시작된다).
+  - GitHub 에서 묻지 않고 받아 올 수 있어야 한다. 막히면 스크립트가 그렇게 말하고 멈춘다(그때는 `gh auth login` 이나 읽기 전용 deploy key 를 먼저 둔다).
+  - 확인: 출력 끝에 `installed com.jikwon-labs.workboard-autoupdate`, `tail ~/Library/Logs/workboard-autoupdate.log` 마지막 줄이 `installed, /health answers` 또는 `server unchanged`, `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}`.
 - [ ] **노출된 터널 토큰 교체 확인** (보안 후속): 앞서 채팅에 노출된 토큰을 Cloudflare에서 교체하고 새 토큰으로 설치했는지 사용자에게 확인한다. 토큰 값은 기록하지 않는다.
 - [ ] **메일 설정** (별도 작업): Gmail 앱 비밀번호 → `mail.json`의 `public_address`를 `https://wb.wlrnjs.xyz`로 작성·`chmod 600` → `workboard-server mail-test`로 시험 메일 (`accounts-and-mail.md` 2). 현재 메일 설정은 없으며 이번 이전에서는 만들지 않았다.
   - Mac mini 에서 Claude Code 로 할 때: `git pull` 후 [`prompts/mail-setup.md`](prompts/mail-setup.md) 를 새 세션의 첫 프롬프트로 붙여 넣는다. 앱 비밀번호는 사람이 `nano` 로 직접 넣는다.

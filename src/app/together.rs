@@ -2239,7 +2239,7 @@ impl App {
                     &[Mode::Account, Mode::Invite]
                 };
                 ui.label(RichText::new(tr(if *step == 3 {
-                    "Type the address of the Mac running workboard-server (for example a Mac mini your team reaches through Tailscale)."
+                    "Type the address of the Mac running workboard-server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale)."
                 } else {
                     "Type your team's server address. Then sign in with your email and password, or use the invite code you were sent."
                 })).color(t.text2));
@@ -2534,7 +2534,7 @@ impl App {
             ui.separator();
             ui.add_space(4.0);
             ui.label(RichText::new(tr("Or connect to your team's server")).strong());
-            ui.label(RichText::new(tr("A Workboard server (for example a Mac mini your team reaches through Tailscale). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.")).color(t.text2));
+            ui.label(RichText::new(tr("A Workboard server (for example https://wb.example.com, or a Mac mini your team reaches through Tailscale). Sign in with your email and password, or join with the invite code you were given. Setting up a new, empty server? This workspace goes up and you become its owner.")).color(t.text2));
             let _ = code;
             self.server_form(ui, t, addr, &[Mode::Account, Mode::Invite, Mode::NewServer]);
         }

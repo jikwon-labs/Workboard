@@ -10,9 +10,11 @@ Mac): `docs/testing.md`. App releases: `docs/release/README.md`.
 
 Builds the server, copies it to `~/.local/bin/workboard-server` and installs
 the LaunchAgent `com.jikwon-labs.workboard-server`: it starts when this user
-logs in and restarts within 10 seconds if it stops. It listens only on this
-Mac's Tailscale address, port 8787 (`PORT=9000 deploy/install-launchd.sh` for
-another port). Run the script again after pulling new code.
+logs in and restarts within 10 seconds if it stops. It listens on this
+Mac's Tailscale address and on 127.0.0.1 (for Cloudflare Tunnel, below),
+port 8787 (`PORT=9000 deploy/install-launchd.sh` for another port;
+`BIND=127.0.0.1` to leave Tailscale out). Run the script again after
+pulling new code.
 
 - Status: `launchctl print gui/$(id -u)/com.jikwon-labs.workboard-server | grep state`
 - Log: `~/Library/Logs/workboard-server.log`
@@ -32,6 +34,26 @@ The first run makes an API key and secret and keeps them in the data folder
 (`livekit.yaml`, `livekit.json`, mode 600); workboard-server reads
 `livekit.json` to hand out call tokens. Log: `~/Library/Logs/livekit-server.log`.
 Stop and remove: `deploy/install-livekit.sh uninstall`.
+
+## Cloudflare Tunnel (no Tailscale for the team)
+
+    brew install cloudflared
+    TUNNEL_TOKEN='<token>' deploy/install-cloudflared.sh
+
+The team reaches the server at an https address (https://wb.wlrnjs.xyz)
+through Cloudflare Tunnel; cloudflared runs as the LaunchAgent
+`com.jikwon-labs.cloudflared` and passes requests to 127.0.0.1:8787. The
+token comes from the Cloudflare dashboard and is kept in the data folder
+(`cloudflared-token`, mode 600). Log: `~/Library/Logs/cloudflared.log`.
+Stop and remove: `deploy/install-cloudflared.sh uninstall`.
+
+Huddles can't go through the tunnel (UDP), so they move to LiveKit Cloud:
+
+    LIVEKIT_URL='wss://<project>.livekit.cloud' LIVEKIT_KEY='<key>' LIVEKIT_SECRET='<secret>' deploy/use-livekit-cloud.sh
+
+It writes `livekit.json` and removes the local livekit-server. The whole
+move, in order (Cloudflare, the domain, LiveKit Cloud, the apps):
+[docs/cloudflare-tunnel.md](../docs/cloudflare-tunnel.md).
 
 ## iPhone notifications (APNs)
 
@@ -86,6 +108,9 @@ tunnel, the camera). The `--install` form runs a copy from `~/.local/bin`
    server address > Invite code), and choose a password. On their other
    computers and phones they sign in with their email and that password.
 
+With Cloudflare Tunnel set up (above), skip the Tailscale steps: the server
+address is https://wb.wlrnjs.xyz and teammates install only Workboard.
+
 Forgot password: the sign-in screen's "Forgot password?" mails a reset code
 (needs email set up). Without email, give them a new invite code instead.
 
@@ -128,7 +153,8 @@ computer of theirs at once) in Work together > People.
                                                       new owner code (owner lost their computer)
 
 Backups: `backups/` in the data folder, hourly (48 kept) and daily (30 kept).
-Health: `curl http://<tailscale address>:8787/health`
+Health: `curl http://127.0.0.1:8787/health` on the Mac mini (everything), or
+`curl https://wb.wlrnjs.xyz/health` from anywhere (only `{"ok":true}`)
 
 ## App updates
 

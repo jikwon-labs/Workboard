@@ -106,7 +106,7 @@
 
 ## 정해 둔 원칙
 
-- 서버는 Tailscale 주소에만 연다. `0.0.0.0`·공개 인터넷에 열지 않는다(서버가 거부한다). LiveKit 도 Tailscale 대역만 쓴다.
+- 서버는 Tailscale 주소와 `127.0.0.1` 에만 연다. `0.0.0.0` 으로 열지 않는다(서버가 거부한다). 공개 인터넷에서는 Cloudflare Tunnel 을 거쳐서만 닿는다(2026-11-16 부터, `docs/cloudflare-tunnel.md`). Mac mini 의 LiveKit 을 쓸 때는 Tailscale 대역만 쓴다.
 - 비밀 값(LiveKit 키, 기기 토큰)은 레포나 data.json 에 넣지 않는다. 앱의 토큰은 macOS 키체인에 둔다.
 - data.json 형식을 깨지 않는다. 새 필드는 기본값으로 예전 파일도 읽힌다.
 - 공유 폴더 방식(서버 없이)은 계속 동작한다.
@@ -300,6 +300,7 @@ Workboard(Rust + egui 0.31 데스크톱 앱)는 지금 "공유 폴더"로만 여
 ```
 
 1. **접속망 = Tailscale.** 초대한 사람만 들어오고 트래픽이 암호화된다. 포트포워딩·도메인·인증서가 필요 없다. 음성·영상이 쓰는 UDP 도 지나간다. 서버 주소는 Tailscale 이 주는 이름(MagicDNS, 예: `mac-mini.<tailnet>.ts.net`)을 쓴다. Cloudflare Tunnel 은 WebSocket 은 되지만 WebRTC 의 UDP 미디어에 맞지 않아 쓰지 않는다.
+   - **2026-11-16 바뀜: Cloudflare Tunnel 추가.** 팀원마다 Tailscale 을 설치·초대하는 게 번거로워서, 동기화·파일·업데이트는 Cloudflare Tunnel(`https://wb.wlrnjs.xyz`)로도 연다. 위에서 걸렸던 UDP 문제는 허들을 LiveKit Cloud 로 옮겨서 피한다. 서버는 Tailscale 주소와 `127.0.0.1`(cloudflared 용)을 함께 듣는다. 절차·이유: [`docs/cloudflare-tunnel.md`](cloudflare-tunnel.md).
 2. **동기화 서버 = Rust (tokio + axum WebSocket).** 앱과 같은 언어라서 `sync.rs` 의 합치기 코드를 그대로 쓴다. 서버가 작업공간 정본 하나를 들고 있고, 각 앱이 보낸 사본을 정본에 합친 뒤 모두에게 돌려준다.
 3. **음성·영상 = LiveKit.** 직접 띄우는 오픈소스 WebRTC 중계 서버(macOS 단일 실행 파일, Homebrew `livekit`). 앱에는 LiveKit Rust SDK(`livekit` 크레이트)를 붙인다. 통화 입장 토큰은 workboard-server 가 발급하고, LiveKit 키는 서버 설정에만 둔다.
 4. **공유 폴더 방식은 남긴다.** 서버 없이 쓰고 싶은 사람을 위한 대안이다. 앱은 "공유 폴더"와 "서버" 중 하나로 연결한다.

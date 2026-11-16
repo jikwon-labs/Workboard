@@ -64,10 +64,16 @@ limit() {
   done
   IP="$([ -n "$TS" ] && "$TS" ip -4 2>/dev/null | head -1)"
   echo "tailscale: ${IP:-NOT UP}"
-  for l in com.jikwon-labs.workboard-server com.jikwon-labs.livekit-server com.ngrok.metabase io.github.wlrnjs.branchport ai.hermes.gateway; do
+  for l in com.jikwon-labs.workboard-server com.jikwon-labs.livekit-server com.jikwon-labs.cloudflared com.ngrok.metabase io.github.wlrnjs.branchport ai.hermes.gateway; do
     st="$(launchctl print "gui/$(id -u)/$l" 2>/dev/null | grep -m1 -E '^\s*state =' | awk '{print $3}')"
     echo "agent $l: ${st:-NOT LOADED}"
   done
+  echo "workboard /health (127.0.0.1): $(curl -s -m 5 "http://127.0.0.1:8787/health" || echo FAILED)"
+  # through Cloudflare Tunnel, when this Mac has one (the hostname is the
+  # tunnel's public one; WB_PUBLIC_URL overrides it)
+  if [ -f "$HOME/Library/LaunchAgents/com.jikwon-labs.cloudflared.plist" ]; then
+    echo "workboard via tunnel: $(curl -s -m 10 "${WB_PUBLIC_URL:-https://wb.wlrnjs.xyz}/health" || echo FAILED)"
+  fi
   if [ -n "$IP" ]; then
     echo "workboard /health: $(curl -s -m 5 "http://$IP:8787/health" || echo FAILED)"
     echo "livekit http: $(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$IP:7880/" || echo FAILED)"

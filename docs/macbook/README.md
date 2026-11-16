@@ -6,6 +6,9 @@
 
 ## 할 일
 
+- [ ] **Cloudflare Tunnel 전환이 든 새 버전 배포 (0.1.8)**: `/release`. 옛 버전 앱은 https 주소에 붙지 못하고 업데이트도 Tailscale 주소로 받으므로, **Mac mini 설정과 주소 변경보다 먼저** 한다. 팀원이 모두 업데이트했는지 확인한 뒤 `docs/macmini/README.md` 의 "Cloudflare Tunnel 로 옮기기" 로 넘어간다. 전체 순서: `docs/cloudflare-tunnel.md`.
+- [ ] **웹에서 할 일 (Cloudflare·가비아·LiveKit)**: `docs/cloudflare-tunnel.md` 의 "Cloudflare 설정" 1~4 와 "LiveKit Cloud" 1~2. 가비아 네임서버 변경은 반영에 몇 시간 걸릴 수 있으니 배포와 같이 미리 해 둬도 된다.
+- [ ] **내 앱 주소 바꾸기**: Mac 과 iPhone 에서 서버 주소를 `https://wb.wlrnjs.xyz` 로 (`docs/cloudflare-tunnel.md` "앱에서 주소 바꾸기"). 팀원에게도 알린다.
 - [ ] **데스크톱 알림 직접 확인 (설치된 앱에서)**: 알림 배너는 서명된 `Workboard.app` 으로 실행해야 앱 아이콘으로 뜨고, 눌렀을 때 해당 대화·작업이 열린다(`cargo run` 으로는 스크립트 편집기 이름으로 뜨고 눌러도 안 열린다). 새 버전 배포 뒤 확인: 첫 알림 때 권한 창이 뜨는지, 설정 > 알림의 "테스트 알림 보내기", 다른 계정에서 DM을 보내 창이 뒤에 있을 때 배너·소리·Dock 튀기기·Dock 숫자가 나오는지, 배너를 누르면 그 DM이 열리는지.
 
 ## 끝난 일

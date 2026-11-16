@@ -6,9 +6,15 @@
 
 ## 할 일
 
+- [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
+  - [ ] 서버 코드 받고 다시 설치: `git pull` → `deploy/install-launchd.sh` → 로그에 `listening on ws://100.121.190.50:8787/ws and ws://127.0.0.1:8787/ws` 가 보이는지 (`tail ~/Library/Logs/workboard-server.log`)
+  - [ ] cloudflared 설치: `brew install cloudflared` → `TUNNEL_TOKEN='<토큰>' deploy/install-cloudflared.sh` (토큰은 Cloudflare 대시보드에서. 먼저 도메인·터널 설정이 끝나 있어야 한다) → `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}`
+  - [ ] 허들을 LiveKit Cloud 로: `LIVEKIT_URL=... LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` → 앱 두 대로 허들 들어가서 서로 들리는지
+  - [ ] 메일을 쓴다면 `mail.json` 의 `public_address` 를 `"https://wb.wlrnjs.xyz"` 로 → `workboard-server mail-test <내 메일>`
+  - [ ] 재부팅 점검에 cloudflared 가 나오는지: `deploy/check-after-boot.sh`
 - [ ] **메일 설정**: Gmail 앱 비밀번호 → MagicDNS 이름 확인 → `mail.json` 작성·`chmod 600` → `workboard-server mail-test` 로 시험 메일 (`accounts-and-mail.md` 2)
 - [ ] **기존 사람 비밀번호 정하기**: MacBook 에서 로그인 기능이 들어간 새 버전을 배포한 뒤(`docs/macbook/README.md`), 각자 함께 작업하기 > 내 계정 (`accounts-and-mail.md` 3)
-- [ ] **팀원 초대**: Tailscale 초대 → Workboard 초대에 이메일 → 메일로 코드·링크 (`accounts-and-mail.md` 4)
+- [ ] **팀원 초대**: Tailscale 초대 → Workboard 초대에 이메일 → 메일로 코드·링크 (`accounts-and-mail.md` 4). Cloudflare Tunnel 로 옮긴 뒤에는 Tailscale 초대 없이 Workboard 초대만 하면 된다.
 - [ ] **외장 디스크에 Time Machine 백업 켜기** (다른 일과 상관없이 먼저 해도 된다)
   - 왜: 서버 백업(`backups/`)이 정본과 같은 디스크에 있어서 Mac mini 디스크가 고장 나면 같이 사라진다. 채팅 사진·영상(`files/`)은 서버 백업에 아예 안 들어간다. 2026-11-16 확인 때 `tmutil destinationinfo` 가 "No destinations configured" 였다.
   - 디스크: 데이터 폴더가 지금 약 100MB(대부분 `updates/`)라 작은 외장 SSD·HDD 면 충분하다. Mac mini 에 계속 꽂아 둔다.
@@ -36,3 +42,4 @@
 ## 문서
 
 - `accounts-and-mail.md`: 계정 로그인·초대 메일 적용 순서, 확인 명령, 문제가 생겼을 때
+- `../cloudflare-tunnel.md`: Tailscale 없이 팀이 https 주소로 붙게 하는 설정(Cloudflare·가비아·LiveKit Cloud 포함)

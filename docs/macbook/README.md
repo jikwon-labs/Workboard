@@ -7,7 +7,6 @@
 ## 할 일
 
 - [ ] **내 앱 주소 바꾸기**: Mac 과 iPhone 에서 서버 주소를 `https://wb.wlrnjs.xyz` 로 (`docs/cloudflare-tunnel.md` "앱에서 주소 바꾸기"). 팀원에게도 알린다.
-- [ ] **MacBook·iPhone 의 Tailscale 지우기**: Mac mini 쪽 "Tailscale 빼기"(`docs/macmini/README.md`)가 끝난 뒤. 이 MacBook 의 Tailscale 은 이미 꺼져 있다(2026-11-17 확인). 지운 뒤 `ssh macmini hostname` 을 다시 확인
 - [ ] **데스크톱 알림 직접 확인 (설치된 앱에서)**: 알림 배너는 서명된 `Workboard.app` 으로 실행해야 앱 아이콘으로 뜨고, 눌렀을 때 해당 대화·작업이 열린다(`cargo run` 으로는 스크립트 편집기 이름으로 뜨고 눌러도 안 열린다). 새 버전 배포 뒤 확인: 첫 알림 때 권한 창이 뜨는지, 설정 > 알림의 "테스트 알림 보내기", 다른 계정에서 DM을 보내 창이 뒤에 있을 때 배너·소리·Dock 튀기기·Dock 숫자가 나오는지, 배너를 누르면 그 DM이 열리는지.
 
 ## 끝난 일

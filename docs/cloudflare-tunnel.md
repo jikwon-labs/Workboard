@@ -44,8 +44,8 @@
 1. 팀원 모두 앱 주소가 `https://wb.wlrnjs.xyz` 인지 확인한다(위 10번). Tailscale 주소로 남은 사람은 4번에서 끊긴다.
 2. SSH 를 Cloudflare 로 옮긴다: `deploy/README.md` "SSH". Tailscale 이 켜진 채로 `ssh macmini hostname` 이 터널로 되는지 먼저 확인한다.
 3. Mac mini 에서 `git pull` 후 `deploy/install-launchd.sh`. 이제 기본이 `127.0.0.1` 하나다. 서버 로그 시작 줄에 `127.0.0.1:8787` 만 있고 `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}` 인지 본다.
-4. Mac mini·MacBook·iPhone 에서 Tailscale 을 로그아웃하고 지운다. Tailscale 관리 화면에서 기기도 지운다.
-5. Mac mini 를 한 번 재부팅하고 `deploy/check-after-boot.sh`. MagicDNS 가 빠지면서 DNS 경로가 바뀌므로 `wb.wlrnjs.xyz` 조회가 계속 되는지 본다(`/etc/resolver/wlrnjs.xyz` 는 그대로 둔다, `docs/macmini/dns-verification-2026-11-17.md`).
+4. (선택, 2026-11-17 에는 하지 않기로 함) Mac mini·MacBook·iPhone 에서 Tailscale 을 로그아웃하고 지운다. 3번까지로 서버·배포·SSH 는 Tailscale 에 기대지 않는다.
+5. 4번을 했다면 Mac mini 를 한 번 재부팅하고 `deploy/check-after-boot.sh`. MagicDNS 가 빠지면서 DNS 경로가 바뀌므로 `wb.wlrnjs.xyz` 조회가 계속 되는지 본다(`/etc/resolver/wlrnjs.xyz` 는 그대로 둔다, `docs/macmini/dns-verification-2026-11-17.md`).
 
 ## Cloudflare 설정
 

@@ -681,7 +681,16 @@ impl App {
             ("help", "Help"),
         ];
         for (icon, label) in rows {
-            if menu_item(ui, &t, icon, tr(label), "").clicked() {
+            let resp = menu_item(ui, &t, icon, tr(label), "");
+            if label == "Check for updates" && crate::updater::update_available() {
+                // a newer version is waiting on the team's server
+                ui.painter().circle_filled(
+                    resp.rect.right_center() - vec2(14.0, 0.0),
+                    4.0,
+                    t.danger,
+                );
+            }
+            if resp.clicked() {
                 if label == "Settings" {
                     self.open_settings("My settings");
                     close_popup(ui);

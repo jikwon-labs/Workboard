@@ -6717,6 +6717,7 @@ impl eframe::App for App {
         place_traffic_lights(frame);
         #[cfg(not(target_os = "macos"))]
         let _ = frame;
+        crate::updater::tick(ctx);
         self.ui_frame(ctx);
     }
 

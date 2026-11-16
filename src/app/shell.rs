@@ -699,6 +699,12 @@ impl App {
                             Color32::from_rgb(48, 164, 108)
                         },
                     );
+                    if crate::updater::update_available() {
+                        // a newer version is waiting: "Check for updates" in this menu
+                        let d = c + vec2(9.0, -9.0);
+                        ui.painter().circle_filled(d, 4.5, t.app_bg);
+                        ui.painter().circle_filled(d, 3.5, t.danger);
+                    }
                     let cv = r.right_center() - vec2(8.0, 1.0);
                     ui.painter().line_segment(
                         [cv + vec2(-3.0, -1.5), cv + vec2(0.0, 1.5)],

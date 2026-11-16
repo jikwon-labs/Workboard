@@ -685,6 +685,50 @@ fn check_for_updates_explains_why_it_cannot_run_outside_the_installed_app() {
     assert!(h.app.modal.is_none());
 }
 
+/// Red dots (the theme's danger color) painted inside the control named `name`.
+fn red_dots_in(h: &Ui1, name: &str) -> usize {
+    let danger = h.app.t().danger;
+    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
+        return 0;
+    };
+    fn count(s: &egui::Shape, rect: egui::Rect, danger: Color32) -> usize {
+        match s {
+            egui::Shape::Circle(c) if c.fill == danger && rect.contains(c.center) => 1,
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, danger)).sum(),
+            _ => 0,
+        }
+    }
+    h.shapes
+        .iter()
+        .map(|c| count(&c.shape, *rect, danger))
+        .sum()
+}
+
+#[test]
+fn a_waiting_update_puts_a_red_dot_on_the_profile_and_check_for_updates() {
+    let mut h = Ui1::new();
+    // nothing waiting: no dots
+    crate::updater::pretend_update_available(false);
+    h.settle();
+    assert_eq!(red_dots_in(&h, "Profile menu"), 0);
+    h.click("Profile menu");
+    assert_eq!(red_dots_in(&h, "Check for updates"), 0);
+    h.key(egui::Key::Escape);
+
+    // the server has a newer version
+    crate::updater::pretend_update_available(true);
+    h.settle();
+    assert_eq!(red_dots_in(&h, "Profile menu"), 1, "the profile shows it");
+    h.click("Profile menu");
+    assert_eq!(
+        red_dots_in(&h, "Check for updates"),
+        1,
+        "the menu row says where to go"
+    );
+    assert_eq!(red_dots_in(&h, "Settings"), 0, "only that row");
+    crate::updater::pretend_update_available(false);
+}
+
 #[test]
 fn an_online_only_tool_says_workboard_has_no_such_service() {
     let mut h = Ui1::new();

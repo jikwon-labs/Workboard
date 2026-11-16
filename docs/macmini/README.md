@@ -7,8 +7,7 @@
 ## 할 일
 
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
-  - [ ] 서버 코드 받고 다시 설치: `git pull` → `deploy/install-launchd.sh` → 로그에 `listening on ws://100.121.190.50:8787/ws and ws://127.0.0.1:8787/ws` 가 보이는지 (`tail ~/Library/Logs/workboard-server.log`)
-  - [ ] cloudflared 설치: `brew install cloudflared` → `TUNNEL_TOKEN='<토큰>' deploy/install-cloudflared.sh` (토큰은 Cloudflare 대시보드에서. 먼저 도메인·터널 설정이 끝나 있어야 한다) → `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}`
+  - [ ] cloudflared 연결·공개 HTTPS 확인: (2026-11-16) cloudflared 2026.11.0 바이너리 설치 완료. 로컬 터미널의 숨김 입력으로 터널 토큰을 받아 서비스 설치·`https://wb.wlrnjs.xyz/health` 검증을 마쳐야 한다. 사용자는 토큰의 서버 데이터 폴더·LaunchAgent 설정 내 권한 600 보관을 허용했다. 토큰을 채팅·로그·레포에는 남기지 않는다.
   - [ ] 허들을 LiveKit Cloud 로: `LIVEKIT_URL=wss://workboard-ngm979eq.livekit.cloud LIVEKIT_KEY=... LIVEKIT_SECRET=... deploy/use-livekit-cloud.sh` (프로젝트 `workboard` 는 2026-11-16 에 만들어 둠. 키와 시크릿은 LiveKit Cloud > Settings > API keys 의 기본 키에서 복사) → 앱 두 대로 허들 들어가서 서로 들리는지
   - [ ] 메일을 쓴다면 `mail.json` 의 `public_address` 를 `"https://wb.wlrnjs.xyz"` 로 → `workboard-server mail-test <내 메일>`
   - [ ] 재부팅 점검에 cloudflared 가 나오는지: `deploy/check-after-boot.sh`
@@ -30,6 +29,8 @@
 
 
 ## 끝난 일
+
+- [x] **Cloudflare 이전 준비: 서버 다시 설치** (2026-11-16, 설치 기준 `3f6df35`, `90e289b` 포함): 전원 앱 0.1.8 업데이트 완료와 Cloudflare Active를 사용자에게 확인한 뒤 진행했다. 서버 시작 로그의 Tailscale 주소·127.0.0.1 동시 수신, 양쪽 `/health` HTTP 200, Cloudflare 전달 헤더를 넣은 로컬 `/health`의 최소 응답을 확인했다. Tailscale은 유지하고 APNs 설정은 변경하지 않았다. 원래 Documents 체크아웃의 파일 읽기가 멈춰 별도 공식 체크아웃에서 빌드했고, 별도 Terminal.app 작업으로 설치했다.
 
 - [x] **서버 코드 받고 다시 설치** (2026-11-16, 설치 기준 `ee1e990`): owner 외 등록 기기는 테스트 계정임을 사용자에게 확인한 뒤 진행했다. release 빌드·설치·LaunchAgent 재등록(`ProcessType Standard`) 및 `/health`·`/join` HTTP 200을 확인했다. 감독된 에이전트 안의 서비스 갱신 제한을 지키기 위해 빌드 결과물만 문서 폴더 밖에 준비하고 실제 Terminal.app에서 설치했다. APNs 설정 전 `iPhone notifications off: not set up ...` 시작 로그도 확인했다.
 - [x] **서버 다시 설치(스페이스 공유와 권한)** (2026-11-16, `ee1e990`): 위 재설치 한 번에 함께 반영했다.

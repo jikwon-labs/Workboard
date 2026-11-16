@@ -60,13 +60,12 @@
 
 ### 3. 터널 만들기 (웹)
 
-1. Cloudflare 대시보드 > **Zero Trust** (처음이면 팀 이름을 정하고 Free 플랜 선택. 결제 정보를 물어도 무료 플랜은 청구되지 않는다).
-2. **Networks > Tunnels > Create a tunnel** → **Cloudflared** → 이름 `workboard`.
-3. 설치 명령 화면에서 OS 는 아무거나 골라도 된다. 명령 끝의 긴 `eyJ...` 문자열이 **토큰**이다. 복사해 둔다. 이 화면의 설치 명령은 쓰지 않는다(Mac mini 에서는 `deploy/install-cloudflared.sh` 로 설치한다).
-4. **Public Hostname** 추가:
+1. Cloudflare 대시보드 > **Networking > Tunnels > Create Tunnel** → 이름 `workboard`. Zero Trust 가입은 필요 없다(2026-11-16 화면 기준).
+2. 설치 명령 화면에서 OS 는 아무거나 골라도 된다. 명령 끝의 긴 `eyJ...` 문자열이 **토큰**이다. 이 화면의 설치 명령은 쓰지 않는다(Mac mini 에서는 `deploy/install-cloudflared.sh` 로 설치한다). 토큰은 나중에 이 터널 화면에서 다시 볼 수 있다.
+3. 아래 "Continue" 는 터널이 연결돼야 눌린다. 기다리지 말고 터널 목록에서 `workboard` > **Routes > Add route > Published application**:
    - Subdomain `wb`, Domain `wlrnjs.xyz`
-   - Service: Type `HTTP`, URL `127.0.0.1:8787`
-5. 저장하면 `wb.wlrnjs.xyz` DNS 레코드가 저절로 생긴다.
+   - Service URL `http://127.0.0.1:8787`
+4. 저장하면 `wb.wlrnjs.xyz` CNAME 레코드가 저절로 생긴다.
 
 **토큰은 비밀번호처럼 다룬다.** 채팅·레포·문서에 붙여 넣지 않는다. 새어 나가면 대시보드에서 터널을 지우고 새로 만든다.
 

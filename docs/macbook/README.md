@@ -7,14 +7,12 @@
 ## 할 일
 
 - [ ] **내 앱 주소 바꾸기**: Mac 과 iPhone 에서 서버 주소를 `https://wb.wlrnjs.xyz` 로 (`docs/cloudflare-tunnel.md` "앱에서 주소 바꾸기"). 팀원에게도 알린다.
-- [ ] **SSH 를 Cloudflare 로** (Tailscale 빼기 전에 꼭, `deploy/README.md` "SSH"): 지금 `ssh seojigwon@macmini` 와 업데이트 올리기(`scripts/publish-update.sh`)가 Tailscale 이름으로 간다.
-  - [ ] Cloudflare Zero Trust 가입(Free), 터널 `workboard` 에 경로 `ssh.wlrnjs.xyz` → `ssh://localhost:22`
-  - [ ] **경로를 쓰기 전에** Access 앱 `ssh.wlrnjs.xyz` 를 만들고 내 이메일만 허용(빠뜨리면 Mac mini SSH 가 인터넷에 열린다)
-  - [ ] `brew install cloudflared`, `~/.ssh/config` 에 `Host macmini` 블록 추가, Tailscale 이 켜진 채로 `ssh macmini hostname` 이 되는지 확인
-  - [ ] Mac mini 쪽 "Tailscale 빼기"(`docs/macmini/README.md`)가 끝나면 이 MacBook 과 iPhone 의 Tailscale 도 지우고, `ssh macmini hostname` 을 다시 확인
+- [ ] **MacBook·iPhone 의 Tailscale 지우기**: Mac mini 쪽 "Tailscale 빼기"(`docs/macmini/README.md`)가 끝난 뒤. 이 MacBook 의 Tailscale 은 이미 꺼져 있다(2026-11-17 확인). 지운 뒤 `ssh macmini hostname` 을 다시 확인
 - [ ] **데스크톱 알림 직접 확인 (설치된 앱에서)**: 알림 배너는 서명된 `Workboard.app` 으로 실행해야 앱 아이콘으로 뜨고, 눌렀을 때 해당 대화·작업이 열린다(`cargo run` 으로는 스크립트 편집기 이름으로 뜨고 눌러도 안 열린다). 새 버전 배포 뒤 확인: 첫 알림 때 권한 창이 뜨는지, 설정 > 알림의 "테스트 알림 보내기", 다른 계정에서 DM을 보내 창이 뒤에 있을 때 배너·소리·Dock 튀기기·Dock 숫자가 나오는지, 배너를 누르면 그 DM이 열리는지.
 
 ## 끝난 일
+
+- [x] **SSH 를 Cloudflare 로** (2026-11-17): Zero Trust Free 가입(팀 이름 `royal-sun-4d00`, 결제 수단 등록은 직접), Access 앱 `ssh`(ssh.wlrnjs.xyz, Cloudflare 가입 이메일만 Allow) 를 먼저 만든 뒤 터널 `workboard` 에 `ssh.wlrnjs.xyz` → `ssh://localhost:22` 경로 추가. 로그인 없이 `https://ssh.wlrnjs.xyz` 는 Access 로그인으로 302. `brew install cloudflared`, `~/.ssh/config` 에 `Host macmini` 블록(`HostKeyAlias macmini` 포함). Tailscale 이 꺼진 상태에서 `ssh macmini hostname` 이 Mac mini 이름을 답하고, 호스트 키가 예전 Tailscale 때 저장한 키와 같았다. 업데이트 폴더 rsync dry-run(47개 파일, 복사 0)도 됐다.
 
 - [x] **팀원 0.1.8 업데이트·Cloudflare Active 확인** (2026-11-17): Mac mini 세션이 사용자에게 확인한 뒤 서버 재설치·터널 설치를 마쳤다. MacBook 에서 `https://wb.wlrnjs.xyz/health` 가 `{"ok":true}`, `/updates/appcast.xml` 이 HTTP 200.
 

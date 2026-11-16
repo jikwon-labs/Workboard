@@ -50,23 +50,35 @@ SSH to the Mac mini, and with it `scripts/publish-update.sh` (rsync), goes
 through the same tunnel, behind Cloudflare Access so only you can reach it.
 Remote Login stays on on the Mac mini (System Settings > General > Sharing).
 
-1. Cloudflare Zero Trust (<https://one.dash.cloudflare.com>): pick a team
-   name and the Free plan (it may ask for a payment method).
-2. Tunnel `workboard` > Routes > Add route > Published application:
-   subdomain `ssh`, domain `wlrnjs.xyz`, Service URL `ssh://localhost:22`.
-3. **Before using it**, Access > Applications > Add > Self-hosted: domain
-   `ssh.wlrnjs.xyz`, a policy that allows only your email. Without this the
-   Mac mini's SSH is open to the whole internet.
+1. Cloudflare Zero Trust (<https://one.dash.cloudflare.com>): the Free plan
+   (up to 50 users, $0) still asks for a payment method; then a team name.
+2. **First** Zero Trust > Access controls > Applications > Create new
+   application > Self-hosted and private > Public DNS: subdomain `ssh`,
+   domain `wlrnjs.xyz`, and a new policy: Allow, Include > Emails > your
+   email. Do this before the route: a route without it opens the Mac mini's
+   SSH to the whole internet.
+3. Then Networking > Tunnels > `workboard` > Add route > Published
+   application: subdomain `ssh`, domain `wlrnjs.xyz`, Service URL
+   `ssh://localhost:22`. The DNS record is made for you. Check:
+   `curl -sI https://ssh.wlrnjs.xyz` answers 302 to `...cloudflareaccess.com`.
 4. On the MacBook: `brew install cloudflared`, then in `~/.ssh/config`:
 
         Host macmini
           HostName ssh.wlrnjs.xyz
           User seojigwon
+          HostKeyAlias macmini
           ProxyCommand /opt/homebrew/bin/cloudflared access ssh --hostname %h
 
-5. `ssh macmini hostname` opens a browser once for the Access login, then
-   answers with the Mac mini's name. `ssh seojigwon@macmini` and
-   `UPDATES_DEST='seojigwon@macmini:...'` keep working unchanged.
+   `HostKeyAlias macmini` checks the Mac mini's key under the name it was
+   saved with before (Tailscale days), so there is no "unknown host" prompt
+   and a different machine behind the name would be refused.
+5. `cloudflared access login https://ssh.wlrnjs.xyz` opens a browser for the
+   Access login (a one-time code mailed to that email), then
+   `ssh macmini hostname` answers with the Mac mini's name.
+   `ssh seojigwon@macmini` and `UPDATES_DEST='seojigwon@macmini:...'` keep
+   working unchanged. The login lasts for the Access session (24 hours by
+   default); when it runs out ssh opens the browser again, so run
+   `ssh macmini true` before `scripts/publish-update.sh`.
 
 ## iPhone notifications (APNs)
 

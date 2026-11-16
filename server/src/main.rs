@@ -1,9 +1,10 @@
 // workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
 // workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER]
 //
-// Listens on this Mac's Tailscale address by default (127.0.0.1 when
-// Tailscale isn't running), port 8787. It never listens on every network
-// (0.0.0.0): pick a specific address.
+// Listens on this Mac's Tailscale address and 127.0.0.1 by default (only
+// 127.0.0.1 when Tailscale isn't running), port 8787. 127.0.0.1 is where
+// Cloudflare Tunnel's connector (cloudflared) on the same Mac reaches it.
+// It never listens on every network (0.0.0.0): pick specific addresses.
 
 use serde_json::json;
 use std::net::{IpAddr, SocketAddr};
@@ -13,7 +14,8 @@ use std::time::Duration;
 const USAGE: &str = "usage:
   workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
       run the server
-      --bind   address to listen on (default: this Mac's Tailscale address, else 127.0.0.1)
+      --bind   addresses to listen on, separated by commas
+               (default: this Mac's Tailscale address and 127.0.0.1)
       --port   port (default 8787)
       --home   folder that keeps the team's copy
                (default: $WORKBOARD_SERVER_HOME, else ~/Library/Application Support/WorkboardServer)
@@ -118,38 +120,68 @@ fn mail_test(home: &std::path::Path, to: &str) {
 }
 
 fn serve(bind: Option<String>, port: u16, home: PathBuf) {
-    let bind = bind.unwrap_or_else(workboard_server::default_bind);
-    let ip: IpAddr = bind
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .unwrap_or_else(|_| fail("--bind needs an IP address, like 100.101.102.103 or 127.0.0.1"));
-    if ip.is_unspecified() {
-        fail("Listening on every network (0.0.0.0) isn't allowed. Use the Tailscale address (tailscale ip -4) or 127.0.0.1.");
+    let bind = bind.unwrap_or_else(|| {
+        let ts = workboard_server::default_bind();
+        if ts == "127.0.0.1" {
+            ts
+        } else {
+            format!("{},127.0.0.1", ts)
+        }
+    });
+    let mut addrs: Vec<SocketAddr> = vec![];
+    for b in bind.split(',').map(str::trim).filter(|b| !b.is_empty()) {
+        let ip: IpAddr = b
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse()
+            .unwrap_or_else(|_| {
+                fail("--bind needs IP addresses, like 100.101.102.103 or 127.0.0.1")
+            });
+        if ip.is_unspecified() {
+            fail("Listening on every network (0.0.0.0) isn't allowed. Use the Tailscale address (tailscale ip -4) or 127.0.0.1.");
+        }
+        let a = SocketAddr::new(ip, port);
+        if !addrs.contains(&a) {
+            addrs.push(a);
+        }
     }
-    let addr = SocketAddr::new(ip, port);
+    if addrs.is_empty() {
+        fail("--bind needs IP addresses, like 100.101.102.103 or 127.0.0.1");
+    }
     let rt = tokio::runtime::Runtime::new().expect("start runtime");
     rt.block_on(async move {
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .unwrap_or_else(|e| fail(&format!("couldn't listen on {}: {}", addr, e)));
+        let mut listeners = vec![];
+        for addr in &addrs {
+            listeners.push(
+                tokio::net::TcpListener::bind(addr)
+                    .await
+                    .unwrap_or_else(|e| fail(&format!("couldn't listen on {}: {}", addr, e))),
+            );
+        }
+        let shown: Vec<String> = addrs
+            .iter()
+            .map(|a| format!("ws://{}{}", a, wb_net::PATH))
+            .collect();
         println!(
-            "workboard-server listening on ws://{}{}  (data: {})",
-            addr,
-            wb_net::PATH,
+            "workboard-server listening on {}  (data: {})",
+            shown.join(" and "),
             home.display()
         );
-        let res = workboard_server::serve(listener, home, async {
-            let mut term =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("signal");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = term.recv() => {}
-            }
-            println!("stopping");
-        })
+        let res = workboard_server::serve_on(
+            listeners,
+            home,
+            workboard_server::Options::default(),
+            async {
+                let mut term =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("signal");
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+                println!("stopping");
+            },
+        )
         .await;
         if let Err(e) = res {
             fail(&e.to_string());

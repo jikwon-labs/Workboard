@@ -5,9 +5,12 @@
 #   deploy/install-launchd.sh            build, install, (re)start
 #   deploy/install-launchd.sh uninstall  stop and remove
 #
-# It listens on this Mac's Tailscale address only (looked up now and written
-# into the plist). If Tailscale isn't up yet at login, the server exits and
-# launchd tries again every 10 seconds.
+# It listens on 127.0.0.1 (where cloudflared, Cloudflare Tunnel's connector
+# on this Mac, reaches it) and, when Tailscale is up now, on this Mac's
+# Tailscale address too (looked up now and written into the plist). If
+# Tailscale isn't up yet at login, the server exits and launchd tries again
+# every 10 seconds. BIND=127.0.0.1 deploy/install-launchd.sh leaves Tailscale
+# out (run it that way after taking Tailscale off this Mac).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -27,13 +30,19 @@ if [ "${1:-}" = "uninstall" ]; then
   exit 0
 fi
 
-TS=""
-for t in tailscale /usr/local/bin/tailscale /opt/homebrew/bin/tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
-  if command -v "$t" >/dev/null 2>&1 || [ -x "$t" ]; then TS="$t"; break; fi
-done
-[ -n "$TS" ] || { echo "Tailscale isn't installed" >&2; exit 1; }
-IP="$("$TS" ip -4 | head -1)"
-[ -n "$IP" ] || { echo "Tailscale has no address. Log in to Tailscale first." >&2; exit 1; }
+if [ -z "${BIND:-}" ]; then
+  TS=""
+  for t in tailscale /usr/local/bin/tailscale /opt/homebrew/bin/tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
+    if command -v "$t" >/dev/null 2>&1 || [ -x "$t" ]; then TS="$t"; break; fi
+  done
+  IP="$([ -n "$TS" ] && "$TS" ip -4 2>/dev/null | head -1 || true)"
+  if [ -n "$IP" ]; then
+    BIND="$IP,127.0.0.1"
+  else
+    echo "Tailscale isn't up: listening on 127.0.0.1 only (for Cloudflare Tunnel)"
+    BIND="127.0.0.1"
+  fi
+fi
 
 cargo build --release -p workboard-server
 mkdir -p "$BIN_DIR" "$HOME/Library/LaunchAgents" "$(dirname "$LOG")"
@@ -53,7 +62,7 @@ cat > "$PLIST" <<PL
   <key>ProgramArguments</key>
   <array>
     <string>$BIN</string>
-    <string>--bind</string><string>$IP</string>
+    <string>--bind</string><string>$BIND</string>
     <string>--port</string><string>$PORT</string>
   </array>
   <key>RunAtLoad</key><true/>
@@ -73,4 +82,4 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 launchctl bootstrap "$DOMAIN" "$PLIST"
-echo "installed $LABEL: ws://$IP:$PORT/ws  (log: $LOG)"
+echo "installed $LABEL: listening on $BIND, port $PORT  (log: $LOG)"

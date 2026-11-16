@@ -3942,3 +3942,56 @@ fn through_the_tunnel_links_are_https_and_health_says_little() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn one_server_answers_on_two_addresses_as_one_team() {
+    // the Tailscale address and 127.0.0.1 (for cloudflared) on the Mac mini
+    let home = temp_home("two-addresses");
+    let (ports_tx, ports_rx) = std::sync::mpsc::channel();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let h = home.clone();
+    let thread = std::thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let one = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                    .await
+                    .unwrap();
+                let two = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                    .await
+                    .unwrap();
+                ports_tx
+                    .send((
+                        one.local_addr().unwrap().port(),
+                        two.local_addr().unwrap().port(),
+                    ))
+                    .unwrap();
+                workboard_server::serve_on(vec![one, two], h, Default::default(), async {
+                    let _ = stop_rx.await;
+                })
+                .await
+                .unwrap();
+            });
+    });
+    let (one, two) = ports_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let mut a = App::connect(one, Some(workspace()));
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(two, &code);
+    b.wait("B, on the other address, gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    b.change(say("from the other side", 600));
+    a.wait("B's message reaches A", |d| {
+        texts(d).contains(&"from the other side".to_string())
+    });
+    let _ = stop_tx.send(());
+    thread.join().unwrap();
+    assert!(
+        std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE))
+            .unwrap()
+            .contains("from the other side"),
+        "saved when it stopped"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}

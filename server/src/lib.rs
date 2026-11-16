@@ -2598,11 +2598,23 @@ pub async fn serve_with(
     options: Options,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
+    serve_on(vec![listener], home, options, shutdown).await
+}
+
+/// `serve_with` on several addresses at once (the Tailscale address and
+/// 127.0.0.1 for Cloudflare Tunnel's connector on the same Mac), one team.
+pub async fn serve_on(
+    listeners: Vec<tokio::net::TcpListener>,
+    home: PathBuf,
+    options: Options,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
     std::fs::create_dir_all(&home)?;
     let canon = read_json(&home.join(WORKSPACE_FILE))?;
     let saved = load_saved(&home)?;
     let pusher = options.push.clone().or_else(|| apns_sender(&home));
     let (stop_tx, stop_rx) = watch::channel(false);
+    let stopping = stop_rx.clone();
     let hub = Arc::new(Hub {
         home,
         inner: Mutex::new(Inner {
@@ -2658,13 +2670,22 @@ pub async fn serve_with(
         .route("/auth/forgot", axum::routing::post(forgot_route))
         .route("/join", get(join_route))
         .with_state(hub.clone());
-    let res = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.await;
-            // open connections end themselves when they see this
-            let _ = stop_tx.send(true);
-        })
-        .await;
+    tokio::spawn(async move {
+        shutdown.await;
+        // open connections end themselves when they see this
+        let _ = stop_tx.send(true);
+    });
+    let serving = listeners.into_iter().map(|listener| {
+        let mut stopping = stopping.clone();
+        std::future::IntoFuture::into_future(
+            axum::serve(listener, app.clone()).with_graceful_shutdown(async move {
+                let _ = stopping.wait_for(|s| *s).await;
+            }),
+        )
+    });
+    let res = futures_util::future::try_join_all(serving)
+        .await
+        .map(|_| ());
     worker.abort();
     hub.flush();
     hub.backup_now();

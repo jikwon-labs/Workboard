@@ -1137,7 +1137,7 @@ impl App {
         let addr = j.server.unwrap_or_default();
         if self.login.is_some() {
             // on the sign-in screen: it fills in the invite there
-            self.open_login(super::login::LoginPage::SignIn, &addr);
+            self.open_login(super::login::LoginPage::Invite, &addr);
         } else if on_server && matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
             // this workspace's server let it go: the code is to sign back in
             self.modal = Some(self.together_modal());
@@ -1755,6 +1755,20 @@ impl App {
         r.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Server address")
         });
+        if self.join_progress(ui, t) {
+            return;
+        }
+        ui.add_space(6.0);
+        if let Some(how) = self.login_form(ui, t, addr, modes, button, false) {
+            if let Err(e) = self.connect_with(addr, how) {
+                self.sync_rt.form.note = e;
+            }
+        }
+    }
+
+    /// While connecting from a sign-in form: how it goes, and Cancel. True
+    /// while it connects; a refusal goes back to the form with the reason.
+    pub(super) fn join_progress(&mut self, ui: &mut Ui, t: &Theme) -> bool {
         if self.sync_rt.joining.is_some() {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1784,26 +1798,24 @@ impl App {
                 self.sync_rt.net_status = None;
                 self.sync_rt.form.note = why;
             }
-            return;
+            return self.sync_rt.joining.is_some();
         }
-        ui.add_space(6.0);
-        if let Some(how) = self.login_form(ui, t, addr, modes, button) {
-            if let Err(e) = self.connect_with(addr, how) {
-                self.sync_rt.form.note = e;
-            }
-        }
+        false
     }
 
     /// The sign-in fields for one of `modes` (with tabs when there are
     /// several, and "Forgot password?" under the password). The way to sign
-    /// in when `button` is clicked and everything needed is there.
-    fn login_form(
+    /// in when `button` is clicked and everything needed is there. `big`:
+    /// the sign-in screen's look (bold names, tall fields, a button as wide
+    /// as the fields, "Forgot password?" beside the password's name).
+    pub(super) fn login_form(
         &mut self,
         ui: &mut Ui,
         t: &Theme,
         addr: &mut String,
         modes: &[Mode],
         button: &str,
+        big: bool,
     ) -> Option<How> {
         let mut form = std::mem::take(&mut self.sync_rt.form);
         if !modes.contains(&form.mode)
@@ -1833,28 +1845,66 @@ impl App {
             });
             ui.add_space(4.0);
         }
-        let field = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
-            // a gap above each name, so a name groups with its own field
-            ui.add_space(4.0);
-            ui.label(RichText::new(tr(label)).color(t.text2));
-            let r = ui.add(
-                field(text)
-                    .hint_text(tr(hint))
-                    .password(secret)
-                    .desired_width(f32::INFINITY),
-            );
+        let ctx = ui.ctx().clone();
+        let name_text = |label: &str| {
+            if big {
+                RichText::new(tr(label))
+                    .font(super::bold_font(&ctx, 15.0))
+                    .color(t.text)
+            } else {
+                RichText::new(tr(label)).color(t.text2)
+            }
+        };
+        let edit = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
+            let mut te = field(text)
+                .hint_text(tr(hint))
+                .password(secret)
+                .desired_width(f32::INFINITY);
+            if big {
+                te = te
+                    .font(FontId::proportional(17.0))
+                    .margin(egui::Margin::symmetric(14, 12))
+                    .min_size(vec2(0.0, super::login::FIELD_H));
+            }
+            let r = ui.add(te);
             let name = format!("{} entry", label);
             r.widget_info(move || {
                 egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name)
             });
+        };
+        let field = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
+            // a gap above each name, so a name groups with its own field
+            ui.add_space(if big { 12.0 } else { 4.0 });
+            ui.label(name_text(label));
+            if big {
+                ui.add_space(2.0);
+            }
+            edit(ui, text, label, hint, secret);
         };
         let mut go = false;
         let mut how = None;
         match form.mode {
             Mode::Account => {
                 field(ui, &mut form.email, "Email", "you@company.com", false);
-                field(ui, &mut form.password, "Password", "", true);
-                if ui.link(tr("Forgot password?")).clicked() {
+                let forgot = if big {
+                    ui.add_space(12.0);
+                    let forgot = ui
+                        .horizontal(|ui| {
+                            ui.label(name_text("Password"));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.link(tr("Forgot password?")).clicked()
+                            })
+                            .inner
+                        })
+                        .inner;
+                    ui.add_space(2.0);
+                    edit(ui, &mut form.password, "Password", "", true);
+                    forgot
+                } else {
+                    field(ui, &mut form.password, "Password", "", true);
+                    ui.link(tr("Forgot password?")).clicked()
+                };
+                if forgot {
                     form.mode = Mode::Forgot;
                     form.sent = false;
                     form.note.clear();
@@ -1980,23 +2030,22 @@ impl App {
             }
         }
         if !form.note.is_empty() {
+            ui.add_space(if big { 8.0 } else { 0.0 });
             ui.label(RichText::new(server_text(&form.note)).color(t.danger));
         }
-        ui.add_space(6.0);
+        ui.add_space(if big { 20.0 } else { 6.0 });
         let shown = form.mode != Mode::Forgot || form.sent;
-        if shown {
+        let label = tr(if form.mode == Mode::Forgot {
+            "Set password and sign in"
+        } else {
+            button
+        });
+        if shown && big {
+            go = super::login::big_button(ui, t, label).clicked();
+        } else if shown {
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    go = primary_button(
-                        ui,
-                        t,
-                        tr(if form.mode == Mode::Forgot {
-                            "Set password and sign in"
-                        } else {
-                            button
-                        }),
-                    )
-                    .clicked();
+                    go = primary_button(ui, t, label).clicked();
                 });
             });
         }
@@ -2247,9 +2296,14 @@ impl App {
                 ui.add_space(6.0);
                 ui.label(RichText::new(tr("Sign this computer in again with your email and password, or with a new invite code from the owner or an admin.")).color(t.text2));
                 let mut at = server.clone();
-                if let Some(how) =
-                    self.login_form(ui, t, &mut at, &[Mode::Account, Mode::Invite], "Sign in")
-                {
+                if let Some(how) = self.login_form(
+                    ui,
+                    t,
+                    &mut at,
+                    &[Mode::Account, Mode::Invite],
+                    "Sign in",
+                    false,
+                ) {
                     self.sign_in_with(how);
                 }
             }

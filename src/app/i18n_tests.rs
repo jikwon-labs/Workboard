@@ -74,6 +74,13 @@ fn english_left(shown: &str, data: &[String]) -> bool {
     if KEEP.iter().any(|k| low == *k) {
         return false;
     }
+    // the app's name with its version ("Workboard 0.1.9")
+    if low
+        .strip_prefix("workboard ")
+        .is_some_and(|v| v.chars().all(|c| c.is_ascii_digit() || c == '.'))
+    {
+        return false;
+    }
     !data
         .iter()
         .any(|d| d.contains(&low) || (low.len() > 3 && low.contains(d.as_str()) && d.len() > 3))
@@ -480,8 +487,10 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
     use super::login::{LoginPage, LoginScreen};
     use super::together::{Form, Mode};
     for (name, page, mode) in [
+        ("server", LoginPage::Server, Mode::Account),
         ("sign in", LoginPage::SignIn, Mode::Account),
-        ("invite", LoginPage::SignIn, Mode::Invite),
+        ("forgot", LoginPage::SignIn, Mode::Forgot),
+        ("invite", LoginPage::Invite, Mode::Invite),
         ("new server", LoginPage::NewServer, Mode::NewServer),
         ("on this mac", LoginPage::OnThisMac, Mode::Account),
     ] {
@@ -493,7 +502,7 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
                     mode,
                     ..Default::default()
                 };
-                a.login = Some(LoginScreen::new(page, ""));
+                a.login = Some(LoginScreen::new(page, "100.101.102.103"));
             }),
         ));
     }

@@ -664,13 +664,14 @@ impl App {
             None
         };
         // the sign-in screen: a first start, or logged out last time
-        // (--modal welcome / join show it for screenshots)
+        // (--modal welcome / signin / join show its steps for screenshots)
         let start_login = match arg("--modal").as_deref() {
-            Some("welcome" | "join") => Some(login::LoginScreen::new(login::LoginPage::SignIn, "")),
-            _ if persist && data.extra.welcome => Some(login::LoginScreen::new(
-                login::LoginPage::SignIn,
-                &login::last_server(),
-            )),
+            Some("welcome") => Some(login::LoginScreen::start("")),
+            Some("signin") => Some(login::LoginScreen::start("macmini")),
+            Some("join") => Some(login::LoginScreen::new(login::LoginPage::Invite, "macmini")),
+            _ if persist && data.extra.welcome => {
+                Some(login::LoginScreen::start(&login::last_server()))
+            }
             _ => None,
         };
         let start_modal = match arg("--modal").as_deref() {
@@ -6989,18 +6990,67 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     ];
     for p in candidates {
-        if let Ok(bytes) = std::fs::read(p) {
-            fonts.font_data.insert(
-                "cjk".into(),
-                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
-            );
-            for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts.families.entry(fam).or_default().push("cjk".into());
-            }
-            break;
+        // read once per run and shared: the Korean font is large (55 MB),
+        // and its Bold face also comes from it
+        static CJK: std::sync::OnceLock<Option<&'static [u8]>> = std::sync::OnceLock::new();
+        let bytes = if p == candidates[0] {
+            *CJK.get_or_init(|| {
+                std::fs::read(p)
+                    .ok()
+                    .map(|b| &*Box::leak(b.into_boxed_slice()))
+            })
+        } else {
+            None
+        };
+        let data = match bytes {
+            Some(b) => egui::FontData::from_static(b),
+            None => match std::fs::read(p) {
+                Ok(b) => egui::FontData::from_owned(b),
+                Err(_) => continue,
+            },
+        };
+        fonts
+            .font_data
+            .insert("cjk".into(), std::sync::Arc::new(data));
+        for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            fonts.families.entry(fam).or_default().push("cjk".into());
         }
+        // a bold family for big headings (the sign-in screen): Apple SD
+        // Gothic Neo's Bold face, with the usual fonts after it
+        if let Some(b) = bytes {
+            let mut bold = egui::FontData::from_static(b);
+            bold.index = 6;
+            fonts
+                .font_data
+                .insert("cjk-bold".into(), std::sync::Arc::new(bold));
+            let mut list = vec!["cjk-bold".to_string()];
+            list.extend(
+                fonts
+                    .families
+                    .get(&egui::FontFamily::Proportional)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            fonts
+                .families
+                .insert(egui::FontFamily::Name(BOLD_FAMILY.into()), list);
+        }
+        break;
     }
     ctx.set_fonts(fonts);
+}
+
+/// The bold font family `setup_fonts` adds when the system has one.
+pub(crate) const BOLD_FAMILY: &str = "bold";
+
+/// A bold font of `size` where there is one, else the usual font.
+pub(crate) fn bold_font(ctx: &egui::Context, size: f32) -> FontId {
+    let fam = egui::FontFamily::Name(BOLD_FAMILY.into());
+    if ctx.fonts(|f| f.families().contains(&fam)) {
+        FontId::new(size, fam)
+    } else {
+        FontId::proportional(size)
+    }
 }
 
 #[allow(dead_code)]

@@ -6395,15 +6395,17 @@ mod template_tests;
 mod wording_tests;
 
 fn sign_in_screen(h: &mut Ui1, addr: &str) {
-    h.app.login = Some(super::login::LoginScreen::new(
-        super::login::LoginPage::SignIn,
-        addr,
-    ));
+    h.app.login = Some(super::login::LoginScreen::start(addr));
     h.settle();
+}
+
+fn login_page(h: &Ui1) -> Option<super::login::LoginPage> {
+    h.app.login.as_ref().map(|l| l.page)
 }
 
 #[test]
 fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
+    use super::login::LoginPage;
     assert!(
         Data::fresh().extra.welcome,
         "a first start shows the sign-in screen"
@@ -6417,24 +6419,39 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
     assert!(!old.extra.welcome, "files from before don't");
     let mut h = Ui1::new();
     sign_in_screen(&mut h, "");
-    // the screen fills the window: none of the app shows, and it doesn't close
+    // the screen fills the window, starting with the server's address:
+    // none of the app shows, and it doesn't close
+    assert_eq!(login_page(&h), Some(LoginPage::Server));
     assert!(
         h.has("Sign in to your team")
-            && h.has("Server address")
-            && h.has("Email entry")
-            && h.has("Password entry")
-            && h.has("Invite code")
+            && h.has("Server address entry")
+            && h.has("Continue")
             && h.has("Set up a server for my team")
             && h.has("Use it on this Mac without an account")
+            && !h.has("Email entry")
     );
     assert!(!h.has("Workspace menu") && !h.has("Profile menu"));
     h.key(egui::Key::Escape);
     h.key_with(egui::Key::N, egui::Modifiers::COMMAND);
     assert!(h.app.login.is_some() && h.app.quick_add.is_none());
 
-    // email and password
-    h.click("Server address");
+    // no address: it says so and stays
+    h.click("Continue");
+    assert_eq!(login_page(&h), Some(LoginPage::Server));
+    assert!(!h.app.sync_rt.form.note.is_empty());
+    // then email and password on that server
+    h.click("Server address entry");
     h.type_text("127.0.0.1:1");
+    h.click("Continue");
+    assert_eq!(login_page(&h), Some(LoginPage::SignIn));
+    assert!(h.app.sync_rt.form.note.is_empty());
+    assert!(
+        h.has("Sign in with email")
+            && h.has("Change")
+            && h.has("Email entry")
+            && h.has("Password entry")
+            && h.has("Forgot password?")
+    );
     h.click("Email entry");
     h.type_text("me@team.io");
     h.click("Password entry");
@@ -6451,16 +6468,33 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
         }
     );
     assert!(
-        !h.has("Set up a server for my team"),
+        !h.has("Use it on this Mac without an account") && !h.has("Set up a server for my team"),
         "the other ways wait while it connects"
     );
     h.click("Cancel");
     assert!(h.app.sync_rt.joining.is_none() && h.app.login.is_some());
 
-    // a new server: the owner's email and password
+    // an invite code instead, choosing a password; the email carries over
+    h.click("Join with an invite code");
+    assert_eq!(login_page(&h), Some(LoginPage::Invite));
+    assert!(h.has("Invite code entry") && h.has("Choose a password entry"));
+    assert_eq!(h.app.sync_rt.form.mode, together::Mode::Invite);
+    assert_eq!(h.app.sync_rt.form.email, "me@team.io");
+    h.click("Sign in with email");
+    assert_eq!(login_page(&h), Some(LoginPage::SignIn));
+
+    // another server
+    h.click("Change");
+    assert_eq!(login_page(&h), Some(LoginPage::Server));
+    h.click("Continue");
+    assert_eq!(login_page(&h), Some(LoginPage::SignIn), "the address stays");
+
+    // a new server: its address, the owner's email and password
     h.click("Set up a server for my team");
+    assert_eq!(login_page(&h), Some(LoginPage::NewServer));
     assert!(
         h.has("Set up your team's server")
+            && h.has("Server address entry")
             && h.has("Repeat password entry")
             && !h.has("Invite code entry")
     );
@@ -6469,7 +6503,7 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
         "the email carries over"
     );
     h.click("Back to sign in");
-    assert!(h.has("Sign in to your team"));
+    assert_eq!(login_page(&h), Some(LoginPage::SignIn));
 
     // alone on this Mac: just a name, then the app
     h.click("Use it on this Mac without an account");
@@ -6488,6 +6522,14 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
 }
 
 #[test]
+fn the_sign_in_screen_starts_at_the_email_when_the_server_is_known() {
+    let mut h = Ui1::new();
+    sign_in_screen(&mut h, "wb.example.com");
+    assert_eq!(login_page(&h), Some(super::login::LoginPage::SignIn));
+    assert!(h.has("Email entry") && h.has("Change"));
+}
+
+#[test]
 fn an_invite_link_opens_the_join_form_filled_in() {
     let mut h = Ui1::new();
     // working on this computer only: the team's workspace opens beside it
@@ -6495,12 +6537,12 @@ fn an_invite_link_opens_the_join_form_filled_in() {
         .open_join_link("workboard://join?server=macmini&code=ABCD-EFGH-JKMN");
     assert!(matches!(&h.app.modal, Some(Modal::JoinTeam { addr }) if addr == "macmini"));
     h.app.modal = None;
-    // on the sign-in screen (a first start): it fills in the invite there
+    // on the sign-in screen (a first start): its invite step, filled in
     sign_in_screen(&mut h, "");
     h.app.open_join_link("workboard://join?server=mac-mini.tail1.ts.net%3A8787&code=ABCD-EFGH-JKMN&email=bo%40team.io");
     h.settle();
     assert!(
-        matches!(&h.app.login, Some(l) if l.addr == "mac-mini.tail1.ts.net:8787" && l.page == super::login::LoginPage::SignIn)
+        matches!(&h.app.login, Some(l) if l.addr == "mac-mini.tail1.ts.net:8787" && l.page == super::login::LoginPage::Invite)
     );
     assert!(h.app.modal.is_none());
     assert_eq!(h.app.sync_rt.form.mode, together::Mode::Invite);
@@ -6514,7 +6556,10 @@ fn an_invite_link_opens_the_join_form_filled_in() {
     assert!(h.has("Invite code entry") && h.has("Choose a password entry"));
 
     // a whole invite mail pasted into the code field fills in the server too
-    sign_in_screen(&mut h, "");
+    h.app.login = Some(super::login::LoginScreen::new(
+        super::login::LoginPage::Invite,
+        "",
+    ));
     h.app.sync_rt.form = together::Form {
         mode: together::Mode::Invite,
         ..Default::default()
@@ -6594,7 +6639,7 @@ fn log_out_asks_first_then_deletes_the_team_copy_and_shows_the_sign_in_screen() 
         h.app.sync_rt.form.email, "me@team.io",
         "ready to sign in again"
     );
-    assert!(h.has("Sign in to your team") && !h.has("Profile menu"));
+    assert!(h.has("Sign in with email") && h.has("Email entry") && !h.has("Profile menu"));
     assert_eq!(
         h.app.toast.as_ref().map(|t| t.0.as_str()),
         Some("Logged out")

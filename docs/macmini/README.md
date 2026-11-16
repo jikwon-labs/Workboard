@@ -9,7 +9,6 @@
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
   - [ ] **앱 실사용 확인**: 앱 서버 주소를 `https://wb.wlrnjs.xyz`로 바꿔 로그인·동기화되고, 앱 두 대의 허들에서 양쪽 소리가 들리는지 사용자 확인이 필요하다. LiveKit Cloud 서버 설정과 API 인증은 완료했지만 이것만으로 실제 통화 성공을 뜻하지 않는다.
 - [ ] **Tailscale 빼기** (2026-11-17 결정, 순서와 이유: `docs/cloudflare-tunnel.md` "Tailscale 빼기"). 위 "앱 실사용 확인"과 MacBook 의 "SSH 를 Cloudflare 로" 가 끝난 뒤에 한다. 순서를 바꾸면 서버가 끊긴다.
-  - [ ] 서버 다시 설치: `git pull` 후 `deploy/install-launchd.sh` (기본이 `127.0.0.1` 하나로 바뀐 서버 코드). 로그 시작 줄에 `127.0.0.1:8787` 만 있고 `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}` 인지 확인
   - [ ] Tailscale 로그아웃·삭제, Tailscale 관리 화면에서 이 기기 지우기
   - [ ] 재부팅 뒤 `deploy/check-after-boot.sh` 와 `wb.wlrnjs.xyz` DNS 조회 확인(`/etc/resolver/wlrnjs.xyz` 는 그대로)
 - [ ] **노출된 터널 토큰 교체 확인** (보안 후속): 앞서 채팅에 노출된 토큰을 Cloudflare에서 교체하고 새 토큰으로 설치했는지 사용자에게 확인한다. 토큰 값은 기록하지 않는다.
@@ -32,6 +31,8 @@
 
 
 ## 끝난 일
+
+- [x] **Tailscale 빼기: 서버를 127.0.0.1 전용으로 다시 설치** (2026-11-17, 설치 기준 `ebf1718`): MacBook 에서 Cloudflare SSH(`ssh macmini`)로 들어가 `~/Documents/workboard` 에서 `git pull` 후 `deploy/install-launchd.sh`(BIND 없이). 설치 전 8787 에 연결된 앱은 0개였다. plist 인자 `--bind 127.0.0.1`, 새 PID, 로그 시작 줄 `listening on ws://127.0.0.1:8787/ws` 와 APNs on, LISTEN 은 127.0.0.1:8787 하나, Tailscale 주소 8787 은 연결 거부. loopback `/health` ok, MacBook 에서 공개 `/health`·`/join`·`/updates/appcast.xml` 200. `deploy/check-after-boot.sh` 의 각 LaunchAgent running, 터널 응답 정상. Tailscale 앱은 아직 지우지 않았다(위 남은 하위 항목).
 
 - [x] **요청한 서버 업데이트 재설치** (2026-11-17, 설치 기준 `b0f121d`): `git pull` 뒤 `deploy/install-launchd.sh`를 실행했다. 최신 스크립트 기본값은 loopback 전용이나, 앱 실사용·Cloudflare SSH 확인 전에는 기존 Tailscale 연결을 유지하도록 `BIND=100.121.190.50,127.0.0.1`을 명시했다. 설치 종료 코드 0, 새 PID, 설치 바이너리와 release 빌드 해시 일치, 새 로그의 두 주소 수신 및 APNs on을 확인했다. 서버 단위 34개·통합 53개 테스트 통과. 공개·loopback·Tailscale health 및 공개 `/join` 모두 200, 종합 점검의 터널 응답 정상이다. 기존 비밀 설정 파일의 수정 시각·크기·권한도 유지됐다. 이는 위 **Tailscale 빼기**의 loopback 전용 전환 완료가 아니며 해당 항목은 열어 둔다. Mac 재부팅·클라이언트 앱 배포·메일 설정은 하지 않았다.
 

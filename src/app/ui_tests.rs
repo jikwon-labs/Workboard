@@ -863,6 +863,63 @@ fn work_together_fits_a_small_window_and_scrolls() {
 }
 
 #[test]
+fn a_workspace_on_a_server_can_still_join_another_team() {
+    // this workspace is already on a team server (its own team)
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.settle();
+    h.click("Workspace menu");
+    h.click("Join a team");
+    assert!(
+        matches!(&h.app.modal, Some(Modal::Welcome { step, .. }) if *step == together::JOIN_ANOTHER)
+    );
+    assert!(h.has("Join a team") && h.has("Server address") && h.has("Email entry"));
+    assert!(h.has("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are."));
+    assert!(!h.has("Back"), "no first-start choices to go back to");
+    h.click("Server address");
+    h.type_text("127.0.0.1:2");
+    h.click("Invite code");
+    h.click("Invite code entry");
+    h.type_text("abcd-efgh-jkmn");
+    h.click("Choose a password entry");
+    h.type_text("pw-12345678");
+    h.click("Repeat password entry");
+    h.type_text("pw-12345678");
+    h.settle();
+    h.click("Connect");
+    let j = h.app.sync_rt.joining.as_ref().expect("connecting");
+    assert_eq!(j.addr, "127.0.0.1:2");
+    assert!(matches!(&j.how, together::How::Invite { code, .. } if code == "abcd-efgh-jkmn"));
+    assert_eq!(
+        h.app
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .and_then(|c| c.server.as_deref()),
+        Some("127.0.0.1:1"),
+        "this workspace stays on its server while joining"
+    );
+    // giving up goes back to this workspace's own server
+    h.click("Cancel");
+    assert!(h.app.sync_rt.joining.is_none());
+    assert_eq!(
+        h.app
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .and_then(|c| c.server.as_deref()),
+        Some("127.0.0.1:1")
+    );
+}
+
+#[test]
 fn work_together_connects_to_a_server_and_shows_the_status() {
     let mut h = Ui1::new();
     h.click("Workspace menu");
@@ -6458,21 +6515,27 @@ fn an_invite_link_opens_the_join_form_filled_in() {
     assert_eq!(h.app.sync_rt.form.code, "WXYZ-2345-6789");
     assert!(matches!(&h.app.modal, Some(Modal::Welcome { addr, .. }) if addr == "macmini"));
 
-    // already on a server: says so instead of switching
+    // already on a server: the other team opens beside it, this one stays
     h.app.data.extra.shared = Some(crate::sync::SharedCfg {
         folder: String::new(),
         device: "dev1".into(),
         tag: 5,
         server: Some("127.0.0.1:1".into()),
     });
+    h.app.toast = None;
     h.app
         .open_join_link("workboard://join?server=other&code=ABCD-EFGH-JKMN");
+    assert!(
+        matches!(&h.app.modal, Some(Modal::Welcome { step, addr, .. }) if *step == together::JOIN_ANOTHER && addr == "other")
+    );
+    assert_eq!(h.app.sync_rt.form.code, "ABCD-EFGH-JKMN");
+    assert!(h.app.toast.is_none(), "no telling them to stop sharing");
+
+    // this workspace's server let it go: the code signs it back in there
+    h.app.sync_rt.net_status = Some(wb_net::Status::Refused("removed".into()));
+    h.app
+        .open_join_link("workboard://join?server=127.0.0.1:1&code=ABCD-EFGH-JKMN");
     assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
-    assert!(h
-        .app
-        .toast
-        .as_ref()
-        .is_some_and(|t| t.0.contains("already on 127.0.0.1:1")));
 }
 
 #[test]

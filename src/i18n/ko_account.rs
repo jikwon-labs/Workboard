@@ -7,6 +7,8 @@ pub const T: &[(&str, &str)] = &[
     // welcome
     ("Welcome to Workboard", "Workboard에 오신 것을 환영합니다"),
     ("Join your team", "팀에 참가"),
+    ("Join a team", "팀에 참가하기"),
+    ("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are.", "팀 워크스페이스는 새 워크스페이스로 열립니다. 지금 있는 워크스페이스는 그대로 워크스페이스 메뉴에 남습니다."),
     ("Set up your team's server", "팀 서버 설정"),
     ("Tasks, chat and docs for you and your team. How do you want to start?", "나와 팀을 위한 작업, 채팅, 문서. 어떻게 시작할까요?"),
     ("Use it on this Mac", "이 Mac에서 쓰기"),
@@ -70,7 +72,7 @@ pub const T: &[(&str, &str)] = &[
     ("Emailed {}'s invite code to {}.", "{}의 초대 코드를 {}(으)로 보냈습니다."),
     ("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", "{}의 초대 코드를 메일로 보내지 못했습니다 ({}). 함께 작업하기 > 사람에서 복사하세요."),
     ("Password saved. Sign in with {} on your other computers and phones.", "비밀번호를 저장했습니다. 다른 컴퓨터와 휴대폰에서 {}(으)로 로그인하세요."),
-    ("This workspace is already on {}. To join another team, choose Stop sharing here first.", "이 워크스페이스는 이미 {}에 있습니다. 다른 팀에 참가하려면 먼저 여기서 공유 중지를 고르세요."),
+    ("That server has no team yet. To set it up, open a workspace that's only on this computer and connect it from Work together.", "그 서버에는 아직 팀이 없습니다. 서버를 설정하려면 이 컴퓨터에만 있는 워크스페이스를 열고 함께 작업하기에서 연결하세요."),
     // invite dialog on a server
     ("This workspace is on a server: each person gets an invite code by email when the server has email set up. Otherwise give them their code from Work together > People.", "이 워크스페이스는 서버에 있습니다. 서버에 메일이 설정되어 있으면 각 사람에게 초대 코드가 메일로 갑니다. 아니면 함께 작업하기 > 사람에서 코드를 전달하세요."),
     ("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", "{}명을 초대했습니다. 초대 코드를 보내는 중입니다 (함께 작업하기 > 사람에서도 볼 수 있습니다)."),

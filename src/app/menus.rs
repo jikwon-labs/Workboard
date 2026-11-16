@@ -101,7 +101,8 @@ pub enum Modal {
         email: String,
     },
     /// The first start. `step`: 0 the choice, 1 your name, 2 join a team,
-    /// 3 set up a team server; `addr`: the server address typed in.
+    /// 3 set up a team server; `addr`: the server address typed in. Also
+    /// joining another team later (`together::JOIN_ANOTHER`).
     Welcome {
         step: u8,
         name: String,
@@ -420,6 +421,19 @@ impl App {
             self.modal = Some(Modal::NewWorkspace {
                 name: String::new(),
             });
+            close_popup(ui);
+        }
+        // someone else's team: it opens as another workspace here, and the
+        // ones already on this computer (on a server or not) stay as they are
+        if ui
+            .add(
+                egui::Button::new(tr("Join a team"))
+                    .min_size(vec2(ui.available_width(), 30.0))
+                    .stroke(Stroke::new(1.0, t.border)),
+            )
+            .clicked()
+        {
+            self.open_join_team(String::new());
             close_popup(ui);
         }
     }
@@ -1192,6 +1206,10 @@ impl App {
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
             Modal::Welcome { step: 2, .. } => tr("Join your team").into(),
+            Modal::Welcome {
+                step: super::together::JOIN_ANOTHER,
+                ..
+            } => tr("Join a team").into(),
             Modal::Welcome { step: 3, .. } => tr("Set up your team's server").into(),
             Modal::Welcome { .. } => tr("Welcome to Workboard").into(),
             Modal::Call { .. } => tr("Start a call").into(),

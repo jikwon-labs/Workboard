@@ -16,6 +16,12 @@ use wb_net::{Event as NetEvent, Msg as NetMsg, Person, Role, SignIn, Status as N
 
 /// How often teammates' copies are looked at (folder), and how often ours is
 /// written (folder) or sent (server).
+/// The Welcome dialog's step for joining a team from the workspace menu or
+/// an invite link when this computer already has a workspace: the same form
+/// as the first start's "Join my team", without going back to the choices.
+/// The team's workspace opens as a new one and the others stay as they are.
+pub(super) const JOIN_ANOTHER: u8 = 4;
+
 const POLL_SECS: f64 = 2.0;
 const WRITE_SECS: f64 = 1.5;
 
@@ -928,6 +934,18 @@ impl App {
                 server: Some(j.addr),
             };
             match snapshot {
+                None if self.data.extra.shared.is_some() => {
+                    // an empty server, but this workspace already goes with
+                    // a team: it stays with that one (setting up a server
+                    // starts from a workspace that is only on this computer)
+                    self.sync_rt.net = None;
+                    self.sync_rt.net_status = None;
+                    self.sync_rt.role = None;
+                    self.toast = Some((
+                        tr("That server has no team yet. To set it up, open a workspace that's only on this computer and connect it from Work together.").into(),
+                        now_ts(),
+                    ));
+                }
                 None => {
                     // an empty server: this workspace becomes the team's
                     self.data.extra.shared = Some(cfg);
@@ -949,6 +967,17 @@ impl App {
                 }
                 Some(base) => match self.join_from(base, cfg) {
                     Ok(()) => {
+                        // what the workspace left knew about its own server
+                        // (its people, backups, ...) doesn't come along; the
+                        // connection that just let us in does
+                        let rt = std::mem::take(&mut self.sync_rt);
+                        self.sync_rt = SyncRt {
+                            net: rt.net,
+                            net_status: rt.net_status,
+                            role: rt.role,
+                            account: rt.account,
+                            ..Default::default()
+                        };
                         self.after_join();
                         // the invite code says who this is
                         self.become_member(Some(member), "", "");
@@ -1089,27 +1118,47 @@ impl App {
         form.code = j.code.clone();
         form.email = j.email.clone().unwrap_or_default();
         form.note.clear();
-        match self
+        let on_server = self
             .data
             .extra
             .shared
             .as_ref()
-            .and_then(|c| c.server.clone())
-        {
-            Some(server) => {
-                if !matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
-                    self.toast = Some((trf!("This workspace is already on {}. To join another team, choose Stop sharing here first.", server), now_ts()));
-                }
-                self.modal = Some(self.together_modal());
-            }
-            None => {
-                self.modal = Some(Modal::Welcome {
-                    step: 2,
-                    name: String::new(),
-                    addr: j.server.unwrap_or_default(),
-                })
-            }
+            .is_some_and(|c| c.server.is_some());
+        if on_server && matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
+            // this workspace's server let it go: the code is to sign back in
+            self.modal = Some(self.together_modal());
+        } else if on_server {
+            // another team (or the same one as someone else): it opens as a
+            // new workspace and this one stays on its server
+            self.modal = Some(Modal::Welcome {
+                step: JOIN_ANOTHER,
+                name: String::new(),
+                addr: j.server.unwrap_or_default(),
+            });
+        } else {
+            self.modal = Some(Modal::Welcome {
+                step: 2,
+                name: String::new(),
+                addr: j.server.unwrap_or_default(),
+            })
         }
+    }
+
+    /// Open the form for joining a team from the workspace menu. Whatever
+    /// this workspace is (on a server, in a folder or only here), the team's
+    /// workspace opens as a new one beside it.
+    pub(super) fn open_join_team(&mut self, addr: String) {
+        if self.sync_rt.joining.is_none() {
+            self.sync_rt.form = Form {
+                mode: Mode::Account,
+                ..Default::default()
+            };
+        }
+        self.modal = Some(Modal::Welcome {
+            step: JOIN_ANOTHER,
+            name: String::new(),
+            addr,
+        });
     }
 
     /// Send an access request to the server (owners and admins).
@@ -1278,6 +1327,8 @@ impl App {
             self.ws_file = file;
         }
         self.data = d;
+        // a huddle in the workspace left ends there (its conversation isn't here)
+        self.leave_huddle();
         Ok(())
     }
 
@@ -2243,9 +2294,18 @@ impl App {
                 } else {
                     "Type your team's server address. Then sign in with your email and password, or use the invite code you were sent."
                 })).color(t.text2));
+                if *step == JOIN_ANOTHER {
+                    ui.label(
+                        RichText::new(tr("The team's workspace opens as a new workspace. The ones you already have stay in the workspace menu, as they are."))
+                            .small()
+                            .color(t.text3),
+                    );
+                }
                 ui.add_space(4.0);
                 let back_id = egui::Id::new(LOGIN_BACK);
-                let can_back = self.sync_rt.joining.is_none();
+                // joining from the workspace menu: there are no first-start
+                // choices to go back to
+                let can_back = self.sync_rt.joining.is_none() && *step != JOIN_ANOTHER;
                 ui.data_mut(|d| {
                     d.insert_temp(back_id, can_back);
                     d.remove::<bool>(back_id.with("clicked"));

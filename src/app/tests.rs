@@ -779,8 +779,13 @@ fn custom_field_values_are_kept_per_task() {
     );
 }
 
+/// Tests that point HOME at a folder of their own (to save workspace files)
+/// take turns: HOME is one for the whole test run.
+static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn workspaces_can_be_created_and_switched() {
+    let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = std::env::temp_dir().join(format!("wb-home-{}", now_ts()));
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
@@ -1334,6 +1339,141 @@ fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
         "timed out waiting for: {} ({:?})",
         what, a.sync_rt.net_status
     );
+}
+
+/// The owner on `addr` makes an invite code for member 3 (Sam).
+fn invite_code_for_sam(a: &mut App, server: &TestServer) -> String {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
+        && std::time::Instant::now() < until
+    {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    net_until(a, "the people list", |a| {
+        a.sync_rt.people.iter().any(|p| p.member == 3)
+    });
+    a.access_request(wb_net::Msg::CreateInvite {
+        member: 3,
+        role: wb_net::Role::Member,
+    });
+    net_until(a, "invite code", |a| {
+        a.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == 3 && p.invite.is_some())
+    });
+    a.sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == 3)
+        .and_then(|p| p.invite.clone())
+        .unwrap()
+}
+
+#[test]
+fn joining_another_team_keeps_the_workspace_already_here() {
+    let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = std::env::temp_dir().join(format!("wb-home-join-{:x}", crate::sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+
+    // someone else's team, with an invite code for Sam
+    let theirs = TestServer::start();
+    let their_addr = format!("127.0.0.1:{}", theirs.port);
+    let mut a = app();
+    a.connect_server(&their_addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| {
+        a.data.extra.shared.is_some()
+    });
+    let code = invite_code_for_sam(&mut a, &theirs);
+
+    // Sam's own workspace, already on Sam's own server
+    let mine = TestServer::start();
+    let my_addr = format!("127.0.0.1:{}", mine.port);
+    let mut b = App::build(
+        None,
+        Some(Data::blank(
+            "Mine",
+            Member {
+                id: 1,
+                name: "Sam".into(),
+                ..Default::default()
+            },
+        )),
+    );
+    b.persist = true;
+    b.data.save();
+    b.connect_server(&my_addr, "").unwrap();
+    net_until(&mut b, "B's workspace on its server", |b| {
+        b.data.extra.shared.is_some()
+    });
+    net_until(&mut b, "B's people list", |b| !b.sync_rt.people.is_empty());
+    let my_tasks = b.data.tasks.len();
+
+    // an empty server doesn't take this workspace away from its own
+    let empty = TestServer::start();
+    b.connect_server(&format!("127.0.0.1:{}", empty.port), "")
+        .unwrap();
+    net_until(&mut b, "told the server has no team", |b| {
+        b.toast
+            .as_ref()
+            .is_some_and(|t| t.0.contains("no team yet"))
+    });
+    assert_eq!(
+        b.data.extra.shared.as_ref().unwrap().server.as_deref(),
+        Some(my_addr.as_str())
+    );
+
+    // join their team from the workspace menu with the code
+    b.open_join_team(String::new());
+    b.connect_with(
+        &their_addr,
+        together::How::Invite {
+            code: code.clone(),
+            email: String::new(),
+            password: String::new(),
+        },
+    )
+    .unwrap();
+    net_until(&mut b, "B joined their team", |b| {
+        b.data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.as_deref() == Some(their_addr.as_str()))
+    });
+    assert_eq!(b.data.me, 3, "the code says who they are there");
+    assert_eq!(b.data.tasks.len(), a.data.tasks.len());
+    assert!(
+        b.sync_rt.people.is_empty(),
+        "the people of Sam's own server don't come along"
+    );
+    assert_ne!(b.ws_file, "data.json", "their team is a new workspace");
+
+    // Sam's own workspace is still there, on Sam's server, as it was
+    let list = Data::workspaces();
+    assert!(
+        list.iter().any(|w| w.file == "data.json"),
+        "{:?}",
+        list.iter().map(|w| &w.file).collect::<Vec<_>>()
+    );
+    assert!(list.iter().any(|w| w.file == b.ws_file));
+    let kept = Data::load();
+    assert_eq!(kept.workspace, "Mine");
+    assert_eq!(kept.tasks.len(), my_tasks);
+    assert_eq!(
+        kept.extra.shared.as_ref().unwrap().server.as_deref(),
+        Some(my_addr.as_str())
+    );
+    // and switching back connects to it again as its owner
+    b.switch_workspace("data.json");
+    assert_eq!(b.data.workspace, "Mine");
+    net_until(&mut b, "back on Sam's server", |b| {
+        b.sync_rt.net_status == Some(wb_net::Status::Connected)
+    });
+    assert_eq!(b.sync_rt.role, Some(wb_net::Role::Owner));
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]

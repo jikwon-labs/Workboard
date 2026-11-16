@@ -1673,7 +1673,7 @@ fn a_teammates_message_through_the_server_becomes_a_notification() {
 fn a_bad_server_address_is_explained() {
     let mut a = app();
     assert!(a.connect_server("", "").is_err());
-    assert!(a.connect_server("wss://example", "").is_err());
+    assert!(a.connect_server("https://example:web", "").is_err());
     assert!(a.sync_rt.joining.is_none());
 }
 

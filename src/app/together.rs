@@ -711,12 +711,16 @@ pub(super) fn fill_sync_baseline(data: &mut Data) {
 
 impl App {
     /// The team server a new workspace can be made on: the one this
-    /// workspace is on, when this person is signed in there with an account.
+    /// workspace is on, when it is the server's first workspace and this
+    /// person is its owner or an admin, signed in with an account (as the
+    /// server allows).
     pub(super) fn server_for_new_workspace(&self) -> Option<String> {
         let cfg = self.data.extra.shared.as_ref()?;
         let addr = cfg.server.clone()?;
         self.sync_rt.account.as_ref()?;
-        self.sync_rt.role?;
+        if !self.sync_rt.role?.manages() || addr.contains("/w/") {
+            return None;
+        }
         Some(addr)
     }
 

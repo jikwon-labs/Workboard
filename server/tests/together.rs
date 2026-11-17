@@ -4972,6 +4972,81 @@ fn stamped(mut d: Value) -> Value {
     d
 }
 
+/// New workspaces on a server are for the team that keeps it: the owner or
+/// an admin of its first workspace. A plain member, or someone signed in
+/// only to another workspace there, can't make them.
+#[test]
+fn only_the_first_workspaces_owner_or_admins_make_workspaces() {
+    let home = temp_home("makews");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let addr = format!("127.0.0.1:{}", port);
+    let mut a = App::start(
+        port,
+        stamped(workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            new_password: Some("ann-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    a.until("owner in", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::start(
+        port,
+        Value::Null,
+        SignIn {
+            invite: Some(code),
+            email: Some("bo@team.io".into()),
+            new_password: Some("bo-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    b.until("Bo in with a password", |b| {
+        b.token.is_some() && b.email.is_some()
+    });
+    let refused = wb_net::create_workspace(&addr, &auth(&b)).unwrap_err();
+    assert!(
+        refused.contains("Only the owner or an admin"),
+        "{}",
+        refused
+    );
+    assert!(!home.join("workspaces").exists());
+    // an admin may
+    a.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Admin,
+    });
+    b.until("Bo is admin", |b| b.role == Some(Role::Admin));
+    let addr2 = wb_net::create_workspace(&addr, &auth(&b)).unwrap();
+    let mut b2 = App::start_at(
+        &addr2,
+        stamped(second_workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("bo@team.io".into()),
+            ..Default::default()
+        },
+    );
+    b2.until("Bo owns the new one", |b| {
+        b.role == Some(Role::Owner) && b.token.is_some()
+    });
+    // owning another workspace there isn't enough
+    let refused = wb_net::create_workspace(&addr2, &auth(&b2)).unwrap_err();
+    assert!(
+        refused.contains("Only the owner or an admin"),
+        "{}",
+        refused
+    );
+    assert_eq!(
+        std::fs::read_dir(home.join("workspaces")).unwrap().count(),
+        1
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 #[test]
 fn one_server_keeps_several_workspaces_apart() {
     let home = mail_home("several");

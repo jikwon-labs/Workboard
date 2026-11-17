@@ -11335,6 +11335,38 @@ fn a_new_workspace_can_go_on_the_team_server_or_stay_here() {
 }
 
 #[test]
+fn only_the_first_workspaces_owner_or_admins_get_the_server_choice() {
+    let _home = own_home("wizard-member");
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 1,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.account = Some("me@team.io".into());
+    // a plain member makes it on this computer, as the server would refuse
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.click("Workspace menu");
+    h.click("Create Workspace");
+    assert!(!h.has("On the team server (127.0.0.1:1)") && !h.has("Where"));
+    h.key(egui::Key::Escape);
+    // so does the owner of another workspace on that server
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1/w/abc".into());
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.click("Workspace menu");
+    h.click("Create Workspace");
+    assert!(!h.has("Where"));
+    h.key(egui::Key::Escape);
+    // an admin of the first workspace has it
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.click("Workspace menu");
+    h.click("Create Workspace");
+    assert!(h.has("On the team server (127.0.0.1:1)"));
+}
+
+#[test]
 fn a_workspace_on_this_computer_only_has_no_server_choice() {
     let _home = own_home("wizard-local");
     let mut h = Ui1::new();

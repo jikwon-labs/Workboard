@@ -184,6 +184,7 @@ pub const T: &[(&str, &str)] = &[
     ("Sign in to a workspace on this server first.", "먼저 이 서버의 워크스페이스에 로그인하세요."),
     ("Choose a password for your account first (Work together).", "먼저 계정 비밀번호를 정하세요(함께 작업하기)."),
     ("This server already keeps {} workspaces, the most it can.", "이 서버에는 이미 워크스페이스가 {}개 있어 더 만들 수 없습니다."),
+    ("Only the owner or an admin of this server's first workspace can make a new workspace on it.", "이 서버에 새 워크스페이스는 서버 첫 워크스페이스의 소유자나 관리자만 만들 수 있습니다."),
     ("This workspace is being set up by someone else.", "다른 사람이 이 워크스페이스를 설정하고 있습니다."),
     ("There's no such workspace on this server.", "이 서버에는 그런 워크스페이스가 없습니다."),
     ("Looking up your workspaces...", "내 워크스페이스를 찾는 중..."),

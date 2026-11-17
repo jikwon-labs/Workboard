@@ -13,7 +13,7 @@
 // that has none of its own.
 //
 //   POST /workspaces        Authorization: Bearer <device>:<token>, a device
-//                           signed in to any workspace on this server.
+//                           of an owner or admin of the first workspace.
 //                           -> {"id"}: a new, empty workspace. Its owner is
 //                           whoever claims it with the account (email) of
 //                           the person who made it; they keep the password
@@ -119,7 +119,9 @@ impl Registry {
     }
 
     /// The account of the person signed in on the device a request names
-    /// (`Bearer <device>:<token>`), from whichever workspace knows it.
+    /// (`Bearer <device>:<token>`): an owner or admin of the server's first
+    /// workspace, the team that keeps the server. New workspaces are theirs
+    /// to make, so a member can't fill the server with them.
     fn requester(&self, headers: &axum::http::HeaderMap) -> Result<Account, (StatusCode, String)> {
         let unknown = (
             StatusCode::UNAUTHORIZED,
@@ -131,20 +133,32 @@ impl Registry {
             .and_then(|v| v.strip_prefix("Bearer "))
             .and_then(|v| v.split_once(':'))
             .ok_or(unknown.clone())?;
-        for hub in self.all() {
-            let g = hub.inner.lock().unwrap();
-            let Some(d) = g.saved.devices.get(device) else {
-                continue;
-            };
-            if !same(&d.token, &hash_token(token)) {
-                continue;
-            }
-            return g.saved.accounts.get(&d.member).cloned().ok_or((
-                StatusCode::FORBIDDEN,
-                "Choose a password for your account first (Work together).".to_string(),
-            ));
+        let g = self.first.inner.lock().unwrap();
+        let signed_in = g
+            .saved
+            .devices
+            .get(device)
+            .filter(|d| same(&d.token, &hash_token(token)));
+        let Some(d) = signed_in else {
+            // a device of another workspace here: signed in, but not of this team
+            let elsewhere = self.others.lock().unwrap().values().any(|h| {
+                h.inner
+                    .lock()
+                    .unwrap()
+                    .saved
+                    .devices
+                    .get(device)
+                    .is_some_and(|d| same(&d.token, &hash_token(token)))
+            });
+            return Err(if elsewhere { not_allowed() } else { unknown });
+        };
+        if !g.saved.role_of(d.member).manages() {
+            return Err(not_allowed());
         }
-        Err(unknown)
+        g.saved.accounts.get(&d.member).cloned().ok_or((
+            StatusCode::FORBIDDEN,
+            "Choose a password for your account first (Work together).".to_string(),
+        ))
     }
 
     /// A new, empty workspace that `owner`'s account sets up.
@@ -242,6 +256,13 @@ impl Registry {
         }
         unclaimed
     }
+}
+
+fn not_allowed() -> (StatusCode, String) {
+    (
+        StatusCode::FORBIDDEN,
+        "Only the owner or an admin of this server's first workspace can make a new workspace on it.".to_string(),
+    )
 }
 
 fn no_workspace() -> Response {

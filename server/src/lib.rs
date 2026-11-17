@@ -1133,6 +1133,8 @@ struct Inner {
     resets: std::collections::HashMap<String, (String, i64)>,
     /// email (normalized) -> (wrong tries in a row, time of the last one)
     fails: std::collections::HashMap<String, (u32, i64)>,
+    /// email (normalized) -> when a reset code was last mailed to it
+    mailed: std::collections::HashMap<String, i64>,
     /// what the team's copy held at the last broadcast, to send apps only
     /// what changed since (`wb_sync::delta`)
     summary: Option<wb_sync::Summary>,
@@ -1185,6 +1187,9 @@ impl Inner {
                 .fails
                 .iter()
                 .filter(|(_, (n, _))| *n < MAX_TRIES)
+                // made-up emails go first: tries at a real account's
+                // password stay counted however many others come
+                .filter(|(e, _)| self.saved.account_member(e).is_none())
                 .map(|(e, (_, last))| (*last, e.clone()))
                 .collect();
             open.sort();
@@ -1194,6 +1199,37 @@ impl Inner {
             }
         }
     }
+}
+
+/// A turn at working out a password hash (100 000 rounds). Anyone on the
+/// internet can ask for one with a made-up email, so only a few run at
+/// once per workspace; more are turned away instead of taking every core
+/// and holding up syncing for everyone.
+struct HashSlot<'a>(&'a AtomicUsize);
+
+impl<'a> HashSlot<'a> {
+    fn take(running: &'a AtomicUsize) -> Result<HashSlot<'a>, String> {
+        let most = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .max(2);
+        if running.fetch_add(1, Ordering::SeqCst) >= most {
+            running.fetch_sub(1, Ordering::SeqCst);
+            return Err("The server is busy. Try again in a moment.".into());
+        }
+        Ok(HashSlot(running))
+    }
+}
+
+impl Drop for HashSlot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The key wrong reset codes for `email` are counted under in `fails`.
+fn reset_tries(email: &str) -> String {
+    format!("reset code {}", norm_email(email))
 }
 
 /// What a hello asked for.
@@ -1330,6 +1366,8 @@ struct Hub {
     access: broadcast::Sender<u64>,
     stop: watch::Receiver<bool>,
     connections: AtomicUsize,
+    /// password hashes being worked out (see HashSlot)
+    hashing: AtomicUsize,
     /// the largest file /files takes
     max_file: u64,
     claim_wait: Duration,
@@ -1367,6 +1405,7 @@ impl Hub {
                 saved,
                 dirty: false,
                 resets: Default::default(),
+                mailed: Default::default(),
                 fails: Default::default(),
                 summary: None,
             }),
@@ -1375,6 +1414,7 @@ impl Hub {
             access: broadcast::channel(16).0,
             stop,
             connections: AtomicUsize::new(0),
+            hashing: AtomicUsize::new(0),
             max_file: options.max_file,
             claim_wait: options.claim_wait,
             pusher,
@@ -1521,9 +1561,14 @@ impl Hub {
         if let Some(code) = given(&h.reset_code) {
             let email = given(&h.email).ok_or("Type the email you sign in with.")?;
             let pw = h.new_password.as_deref().unwrap_or("");
+            // wrong codes are counted apart from wrong passwords: someone
+            // locking an email with wrong passwords doesn't stop its owner
+            // from resetting it
+            let tries = reset_tries(email);
+            let _slot = HashSlot::take(&self.hashing)?;
             {
                 let mut g = self.inner.lock().unwrap();
-                if let Some(why) = g.locked(email) {
+                if let Some(why) = g.locked(&tries) {
                     return Err(why);
                 }
                 // a new password that won't do isn't a wrong try
@@ -1532,7 +1577,7 @@ impl Hub {
                 }
                 // a wrong try until the code proves right (as signing in
                 // with a password), so many at once can't get past MAX_TRIES
-                g.failed(email);
+                g.failed(&tries);
             }
             let hashed = Account::new("", pw);
             let mut g = self.inner.lock().unwrap();
@@ -1547,6 +1592,7 @@ impl Hub {
             };
             g.resets.remove(&key);
             g.fails.remove(&key);
+            g.fails.remove(&tries);
             let kept = g.saved.accounts[&member].email.clone();
             g.saved.accounts.insert(member, hashed.with_email(&kept));
             // a new password: codes made for them earlier no longer sign in
@@ -1559,6 +1605,14 @@ impl Hub {
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(code) = given(&h.invite) {
+            // a made-up code costs no hashing (checked again below)
+            if self.inner.lock().unwrap().saved.find_invite(code).is_none() {
+                return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
+            }
+            let _slot = match h.new_password {
+                Some(_) => Some(HashSlot::take(&self.hashing)?),
+                None => None,
+            };
             // a password to choose, hashed before the lock (checked below)
             let hashed = h
                 .new_password
@@ -1617,6 +1671,10 @@ impl Hub {
             };
         }
         if let Some(member) = h.claim {
+            let _slot = match h.new_password {
+                Some(_) => Some(HashSlot::take(&self.hashing)?),
+                None => None,
+            };
             let hashed = h
                 .new_password
                 .as_deref()
@@ -1700,6 +1758,7 @@ impl Hub {
         email: &str,
         pw: &str,
     ) -> Result<(std::sync::MutexGuard<'_, Inner>, u64), String> {
+        let _slot = HashSlot::take(&self.hashing)?;
         // the try counts as a wrong one until the password proves right,
         // so many tries at once can't get past MAX_TRIES while they hash
         let stored = {
@@ -1850,11 +1909,21 @@ impl Hub {
             let key = norm_email(email);
             let now = now_ms();
             // at most one mail a minute per address
-            let recent = g.resets.get(&key).is_some_and(|(_, t)| now - t < 60_000);
+            let recent = g.mailed.get(&key).is_some_and(|t| now - t < 60_000);
             match g.saved.account_member(email) {
                 Some(m) if !recent => {
-                    let code = new_code();
-                    g.resets.insert(key, (code.clone(), now));
+                    // a code still good is sent again, not replaced: asking
+                    // for mails doesn't cancel the code its owner is typing
+                    let code = match g.resets.get(&key) {
+                        Some((c, t)) if now - t < RESET_MINUTES * 60_000 => c.clone(),
+                        _ => {
+                            let c = new_code();
+                            g.resets.insert(key.clone(), (c.clone(), now));
+                            c
+                        }
+                    };
+                    g.mailed.retain(|_, t| now - *t < 60_000);
+                    g.mailed.insert(key, now);
                     Some((g.saved.accounts[&m].email.clone(), code))
                 }
                 _ => None,
@@ -2212,6 +2281,10 @@ impl Hub {
                     return Reply::Denied("Only the owner can change another admin's role.".into());
                 }
                 g.saved.set_role(who, role);
+                // a code made earlier doesn't bring back a role taken away
+                g.saved
+                    .invites
+                    .retain(|_, i| i.member != who || i.role <= role);
                 g.dirty = true;
                 // their apps hear the new role before the copy it lets them
                 // see (an app goes by its role for what it may see)
@@ -3690,6 +3763,7 @@ mod tests {
                 saved,
                 dirty: false,
                 resets: Default::default(),
+                mailed: Default::default(),
                 fails: Default::default(),
                 summary: None,
             }),
@@ -3698,6 +3772,7 @@ mod tests {
             access: broadcast::channel(16).0,
             stop: watch::channel(false).1,
             connections: AtomicUsize::new(0),
+            hashing: AtomicUsize::new(0),
             max_file: MAX_FILE,
             claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
             pusher: None,
@@ -3721,6 +3796,7 @@ mod tests {
             saved: Saved::default(),
             dirty: false,
             resets: Default::default(),
+            mailed: Default::default(),
             fails: Default::default(),
             summary: None,
         };
@@ -3734,10 +3810,22 @@ mod tests {
         g.prune_fails(now);
         assert!(!g.fails.contains_key("old@x.io"));
         assert!(g.locked("locked@x.io").is_some());
+        // a real account one try short of locked
+        g.saved
+            .accounts
+            .insert(2, Account::new("bo@team.io", "bo-secret-22"));
+        for _ in 0..MAX_TRIES - 1 {
+            g.failed("bo@team.io");
+        }
         // many different emails: the map stays bounded and the locked one stays locked
         for i in 0..(MAX_FAIL_ENTRIES + 500) {
             g.failed(&format!("guess{}@x.io", i));
         }
+        assert_eq!(
+            g.fails.get("bo@team.io").map(|f| f.0),
+            Some(MAX_TRIES - 1),
+            "made-up emails don't push a real account's tries out"
+        );
         assert!(g.fails.len() <= MAX_FAIL_ENTRIES, "{}", g.fails.len());
         assert!(
             g.locked("locked@x.io").is_some(),
@@ -3851,12 +3939,24 @@ mod tests {
             })
             .collect();
         let answers: Vec<String> = guesses.into_iter().map(|g| g.join().unwrap()).collect();
-        let checked = answers.iter().filter(|a| !a.contains("Too many")).count();
+        // (some are turned away while the server is busy hashing: not checked)
+        let checked = answers
+            .iter()
+            .filter(|a| !a.contains("Too many") && !a.contains("busy"))
+            .count();
         assert!(
             checked <= MAX_TRIES as usize,
             "{} guesses were checked",
             checked
         );
+        // more wrong ones one at a time, in case many were turned away
+        for i in 0..MAX_TRIES {
+            let _ = hub.sign_in(&Hello {
+                email: Some("bo@team.io".into()),
+                password: Some(format!("later-{}", i)),
+                ..hello("d")
+            });
+        }
         let right = Hello {
             email: Some("bo@team.io".into()),
             password: Some("bo-secret-22".into()),
@@ -4028,6 +4128,33 @@ mod tests {
         ));
         assert!(ask(2, 4).unwrap_err().contains("Only the owner"));
         assert!(ask(1, 4).is_ok());
+        // an admin code made earlier doesn't bring back a role taken away
+        let admin_code = match hub.request(
+            1,
+            EVERYONE,
+            Msg::CreateInvite {
+                member: 4,
+                role: Role::Admin,
+            },
+        ) {
+            Reply::To(Msg::Invite { code, .. }) => code,
+            _ => panic!("the owner makes an admin code"),
+        };
+        hub.request(
+            1,
+            EVERYONE,
+            Msg::SetRole {
+                member: 4,
+                role: Role::Member,
+            },
+        );
+        assert!(hub
+            .sign_in(&Hello {
+                invite: Some(admin_code),
+                ..hello("later")
+            })
+            .unwrap_err()
+            .contains("invite code doesn't work"));
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -4248,16 +4375,25 @@ mod tests {
             })
             .collect();
         let answers: Vec<String> = guesses.into_iter().map(|g| g.join().unwrap()).collect();
-        let checked = answers.iter().filter(|a| !a.contains("Too many")).count();
+        // (some are turned away while the server is busy hashing: not checked)
+        let checked = answers
+            .iter()
+            .filter(|a| !a.contains("Too many") && !a.contains("busy"))
+            .count();
         assert!(
             checked <= MAX_TRIES as usize,
             "{} guesses were checked",
             checked
         );
+        for i in 0..MAX_TRIES {
+            let _ = hub.sign_in(&guess(format!("WXYZ-LATE-{:04}", i), "long-enough-1"));
+        }
         assert!(hub
             .sign_in(&guess("ABCD-EFGH-JKMN".into(), "long-enough-1"))
             .unwrap_err()
             .contains("Too many"));
+        // wrong passwords don't stop a reset, nor wrong codes signing in
+        assert!(hub.inner.lock().unwrap().locked("bo@team.io").is_none());
         let _ = std::fs::remove_dir_all(&home);
     }
 

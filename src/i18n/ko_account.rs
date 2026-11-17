@@ -144,6 +144,7 @@ pub const T: &[(&str, &str)] = &[
     ("Voice huddles aren't set up on this server yet.", "이 서버에는 아직 음성 허들이 설정돼 있지 않습니다."),
     ("You're not in that conversation.", "그 대화의 멤버가 아닙니다."),
     ("Your access to this server was removed.", "이 서버에 대한 접근 권한이 없어졌습니다."),
+    ("The server is busy. Try again in a moment.", "서버가 바쁩니다. 잠시 후 다시 시도하세요."),
     ("Your account changed in the meantime. Try again.", "그동안 계정이 바뀌었습니다. 다시 시도하세요."),
     ("Your current password isn't right.", "현재 비밀번호가 맞지 않습니다."),
     ("That address doesn't look right.", "주소가 올바르지 않은 것 같습니다."),

@@ -1013,8 +1013,15 @@ fn email_invite_survives_stale_client_push_with_concurrent_general_edits() {
     let _ = std::fs::remove_dir_all(home);
 }
 
+/// How long a test waits for what the server does on its once-a-second tick:
+/// saving the workspace, backups, and answering a request left in its folder.
+/// With the whole suite running beside a live server (the Mac mini's
+/// auto-update) that has taken over five seconds. The waits end as soon as it
+/// happens, so a long limit costs nothing when all is well.
+const TICK_WAIT: Duration = Duration::from_secs(30);
+
 fn local_admin(home: &PathBuf, request: Value) -> Value {
-    workboard_server::admin_request(home, &request, Duration::from_secs(5))
+    workboard_server::admin_request(home, &request, TICK_WAIT)
         .unwrap()
         .expect("local admin answered")
 }
@@ -1372,13 +1379,10 @@ fn health_and_admin_commands_answer() {
     assert_eq!(body["connections"], 2);
 
     // the owner lost their computer: a new owner code from the Mac mini itself
-    let res = workboard_server::admin_request(
-        &home,
-        &json!({"invite": 1, "role": "owner"}),
-        Duration::from_secs(5),
-    )
-    .unwrap()
-    .expect("answered");
+    let res =
+        workboard_server::admin_request(&home, &json!({"invite": 1, "role": "owner"}), TICK_WAIT)
+            .unwrap()
+            .expect("answered");
     assert_eq!(res["ok"], true, "{}", res);
     let code = res["code"].as_str().unwrap().to_string();
     let mut a2 = App::join(server.port, &code);
@@ -1386,7 +1390,7 @@ fn health_and_admin_commands_answer() {
         a.role == Some(Role::Owner) && a.member == Some(1)
     });
     // within a minute of having a workspace there is a backup
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + TICK_WAIT;
     while workboard_server::backup_files(&home.join(workboard_server::BACKUP_DIR), "hourly")
         .is_empty()
         && Instant::now() < until
@@ -1408,7 +1412,7 @@ fn restoring_a_backup_reaches_every_app() {
     let (mut a, mut b) = two_apps(server.port);
     // the backup taken now has both tasks
     let backup_path = home.join("manual-backup.json");
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + TICK_WAIT;
     while !home.join(workboard_server::WORKSPACE_FILE).is_file() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -1424,7 +1428,7 @@ fn restoring_a_backup_reaches_every_app() {
     let res = workboard_server::admin_request(
         &home,
         &json!({"restore": backup_path.to_string_lossy()}),
-        Duration::from_secs(5),
+        TICK_WAIT,
     )
     .unwrap()
     .expect("answered");
@@ -1490,7 +1494,7 @@ fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
     let expected = task_names(&winner.data);
     winner.wait("winner's copy on the server", |_| true);
     // the team copy is the winner's workspace only
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + TICK_WAIT;
     loop {
         let canon: Value = std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE))
             .ok()
@@ -2487,7 +2491,7 @@ fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
     });
     assert!(!b.data.to_string().contains("still private"));
     let canon: Value = {
-        let until = Instant::now() + Duration::from_secs(5);
+        let until = Instant::now() + TICK_WAIT;
         loop {
             let c: Value = std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE))
                 .ok()
@@ -2648,7 +2652,7 @@ fn a_claim_whose_app_quit_can_be_made_again() {
             .map(|s| s.devices.keys().cloned().collect::<Vec<_>>())
             .unwrap_or_default()
     };
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + TICK_WAIT;
     while !(home.join(workboard_server::WORKSPACE_FILE).is_file() && devices() == ["second"])
         && Instant::now() < until
     {
@@ -2718,7 +2722,7 @@ fn only_the_newest_copies_from_before_a_restore_are_kept() {
         )
         .unwrap();
     }
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + TICK_WAIT;
     while !home.join(workboard_server::WORKSPACE_FILE).is_file() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -2727,7 +2731,7 @@ fn only_the_newest_copies_from_before_a_restore_are_kept() {
     let res = workboard_server::admin_request(
         &home,
         &json!({"restore": backup.to_string_lossy()}),
-        Duration::from_secs(5),
+        TICK_WAIT,
     )
     .unwrap()
     .expect("answered");
@@ -2748,7 +2752,7 @@ fn only_the_newest_copies_from_before_a_restore_are_kept() {
     let res = workboard_server::admin_request(
         &home,
         &json!({"restore": backup.to_string_lossy()}),
-        Duration::from_secs(5),
+        TICK_WAIT,
     )
     .unwrap()
     .expect("answered");
@@ -2974,7 +2978,7 @@ fn a_server_whose_workspace_file_went_missing_is_not_up_for_grabs() {
     let server = Server::start_with(&home, 0, options());
     let port = server.port;
     let (_a, _b) = two_apps(port);
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + TICK_WAIT;
     while !home.join(workboard_server::WORKSPACE_FILE).is_file() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(50));
     }

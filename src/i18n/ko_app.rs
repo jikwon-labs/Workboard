@@ -56,7 +56,6 @@ pub const T: &[(&str, &str)] = &[
     ("Replies", "답장"),
     ("Comments from others on tasks and chat replies", "작업에 달린 다른 사람의 댓글과 채팅 답장"),
     ("Assigned Comments", "할당된 댓글"),
-    ("Comments that @mention someone for them to act on", "처리할 사람을 @멘션한 댓글"),
     ("Recent activity across your workspace", "워크스페이스 전체의 최근 활동"),
     ("Unread", "읽지 않음"),
     ("Read", "읽음"),
@@ -85,7 +84,6 @@ pub const T: &[(&str, &str)] = &[
     ("Mark complete", "완료로 표시"),
     ("Empty", "비어 있음"),
     ("Dates", "날짜"),
-    ("Start", "시작"),
     ("Due", "마감"),
     ("Repeats when closed", "닫으면 반복됩니다"),
     (" min", "분"),
@@ -133,7 +131,6 @@ pub const T: &[(&str, &str)] = &[
     ("Choose list", "목록 선택"),
     ("Search or add tags...", "태그 검색 또는 추가..."),
     // command search
-    ("Search, or jump to a task, list, doc or channel...", "검색하거나 작업, 목록, 문서, 채널로 이동..."),
     ("Recent", "최근"),
     ("Locations", "위치"),
     ("Messages", "메시지"),

@@ -12,9 +12,6 @@ pub const T: &[(&str, &str)] = &[
         "Custom Fields you add show here too.",
         "추가한 사용자 지정 필드도 여기에 표시됩니다.",
     ),
-    ("Time tracked", "추적한 시간"),
-    ("Time estimate", "예상 시간"),
-    ("Date updated", "수정한 날짜"),
     ("Collapse group", "그룹 접기"),
     ("Expand group", "그룹 펼치기"),
     ("Collapse all groups", "모든 그룹 접기"),
@@ -125,7 +122,6 @@ pub const T: &[(&str, &str)] = &[
     ("{} is still downloading", "{}을(를) 아직 내려받는 중입니다"),
     ("Adding {}...", "{} 추가하는 중..."),
     ("Uploading {} {}%", "{} 올리는 중 {}%"),
-    ("Try again", "다시 시도"),
     // comments
     ("Resolve", "해결"),
     ("Resolved", "해결됨"),
@@ -183,8 +179,6 @@ pub const T: &[(&str, &str)] = &[
         "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
         "누군가에게 할당되었거나 @멘션한 작업 댓글 (해결될 때까지). 채팅 @멘션은 받은 편지함에 있습니다.",
     ),
-    ("{} commented: {}", "{}님의 댓글: {}"),
-    ("{} replied: {}", "{}님의 답장: {}"),
     ("Mark read", "읽음으로 표시"),
     ("Back to the inbox", "받은 편지함으로 돌아가기"),
     // reminders

@@ -23,11 +23,9 @@ pub const T: &[(&str, &str)] = &[
     // side panel
     ("Followers", "팔로워"),
     ("Find in channel", "채널에서 찾기"),
-    ("Replies", "답장"),
     ("Pinned messages", "고정된 메시지"),
     ("Assigned", "할당됨"),
     ("Add bookmarks, notes, and more", "북마크, 메모 등 추가"),
-    ("Pinned messages", "고정된 메시지"),
     ("Messages with replies", "답장이 있는 메시지"),
     ("Messages turned into tasks", "작업으로 만든 메시지"),
     // empty channel
@@ -44,7 +42,6 @@ pub const T: &[(&str, &str)] = &[
     ("Drop pictures or videos to send", "놓으면 사진이나 동영상을 보냅니다"),
     // message box
     ("Message", "메시지"),
-    ("Post", "게시"),
     ("Ask", "질문"),
     ("Title", "제목"),
     ("Share an announcement...", "공지를 공유하세요..."),
@@ -56,7 +53,6 @@ pub const T: &[(&str, &str)] = &[
     ("No one else here yet", "아직 다른 사람이 없습니다"),
     ("Enter to send, Shift+Enter for a new line", "Enter로 보내기, Shift+Enter로 줄바꿈"),
     // messages
-    ("Someone", "알 수 없는 사용자"),
     ("(edited)", "(편집됨)"),
     ("Pinned", "고정됨"),
     ("You're in it", "참가 중"),
@@ -80,12 +76,12 @@ pub const T: &[(&str, &str)] = &[
     ("Remind me at...", "알림 시간 지정..."),
     ("Edit message", "메시지 편집"),
     ("Click again to delete", "한 번 더 누르면 삭제"),
-    // the text of a reminder about a message
-    ("Message from {}: {}", "{}님의 메시지: {}"),
     ("Delete message", "메시지 삭제"),
     ("Enter to save, Esc to cancel", "Enter로 저장, Esc로 취소"),
     // toasts
     ("Reminder created", "리마인더를 만들었습니다"),
+    // the text of a reminder about a message
+    ("Message from {}: {}", "{}님의 메시지: {}"),
     ("Copied", "복사했습니다"),
     // saved messages, attachments that wait or failed
     ("Saved", "저장됨"),

@@ -18,7 +18,6 @@ pub const T: &[(&str, &str)] = &[
     ("Shared with me", "나와 공유됨"),
     ("Private", "비공개"),
     ("Meeting Notes", "회의록"),
-    ("Archived", "보관됨"),
     ("All Dashboards", "모든 대시보드"),
     ("My Dashboards", "내 대시보드"),
     ("All Whiteboards", "모든 화이트보드"),
@@ -40,7 +39,6 @@ pub const T: &[(&str, &str)] = &[
     ("Only Docs I created", "내가 만든 문서만"),
     ("Sort: {}", "정렬: {}"),
     ("Date updated", "수정일"),
-    ("|  Tags:", "|  태그:"),
     ("Location", "위치"),
     ("Sharing", "공유"),
     ("No Docs here yet", "아직 문서가 없습니다"),
@@ -76,6 +74,8 @@ pub const T: &[(&str, &str)] = &[
     ("Action Plan", "실행 계획"),
     ("Turn goals into actionable steps", "목표를 실행 단계로 나눕니다"),
     ("Customer Journey Map", "고객 여정 지도"),
+    ("Optimize every customer touchpoint", "모든 고객 접점을 개선합니다"),
+    ("Flow Chart", "순서도"),
     // the notes a Whiteboard template starts with
     ("Step 1", "1단계"),
     ("Step 2", "2단계"),
@@ -92,8 +92,6 @@ pub const T: &[(&str, &str)] = &[
     ("Process", "프로세스"),
     ("Tools", "도구"),
     ("Environment", "환경"),
-    ("Optimize every customer touchpoint", "모든 고객 접점을 개선합니다"),
-    ("Flow Chart", "순서도"),
     ("Structure and communicate processes and workflows", "프로세스와 워크플로를 정리하고 공유합니다"),
     ("Root Cause Analysis", "근본 원인 분석"),
     ("Analyze issues using the Ishikawa Fishbone diagram", "이시카와 피시본 다이어그램으로 문제를 분석합니다"),
@@ -185,13 +183,10 @@ pub const T: &[(&str, &str)] = &[
     ("To schedule", "일정 잡기"),
     ("Your tasks without a due date. Drag one onto a day.", "마감일이 없는 내 작업입니다. 날짜로 끌어다 놓으세요."),
     ("Nothing to schedule. Every task of yours has a day, or drag one here to take its date off.", "일정을 잡을 작업이 없습니다. 내 작업에 모두 날짜가 있어요. 날짜를 빼려면 여기로 끌어다 놓으세요."),
-    ("Overdue", "기한 지남"),
     ("Manage people", "사람 관리"),
     ("What everyone is working on", "모두가 진행 중인 작업"),
-    ("{} (you)", "{} (나)"),
     ("{} open  \u{2022}  {} in progress  \u{2022}  {} done", "열림 {}  \u{2022}  진행 중 {}  \u{2022}  완료 {}"),
     ("{} overdue", "기한 지남 {}"),
-    ("+{} more", "+{}개 더"),
     ("No open tasks", "열린 작업 없음"),
     ("+ Doc", "+ 문서"),
     ("No docs yet", "아직 문서가 없습니다"),
@@ -213,7 +208,6 @@ pub const T: &[(&str, &str)] = &[
     ("This week", "이번 주"),
     ("No time tracked this week. Start a timer from any task.", "이번 주 기록된 시간이 없습니다. 아무 작업에서나 타이머를 시작하세요."),
     ("Add time", "시간 추가"),
-    (" min", "분"),
     ("Open (tasks)", "열린 작업"),
     // timesheets and dashboards
     ("Unknown", "알 수 없음"),
@@ -254,12 +248,12 @@ pub const T: &[(&str, &str)] = &[
     ("Urgency", "긴급도"),
     // one of something (English says "1 task", not "1 tasks")
     ("1 member", "멤버 1명"),
-    // the name a new page under a Doc gets
-    ("Page {}", "페이지 {}"),
     ("1 open task", "열린 작업 1개"),
     ("Duplicated 1 task", "작업 1개를 복제했습니다"),
     ("1 overdue task", "마감 지난 작업 1개"),
     ("\u{1F4C1} {}  (1 list)", "\u{1F4C1} {}  (목록 1개)"),
     // the name a new team gets
     ("Team {}", "팀 {}"),
+    // the name a new page under a Doc gets
+    ("Page {}", "페이지 {}"),
 ];

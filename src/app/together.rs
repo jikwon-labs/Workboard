@@ -2159,7 +2159,9 @@ impl App {
                             .color(t.text3),
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if p.role != Role::Owner && p.member != me {
+                            // another admin is the owner's to change (as the server)
+                            let others_admin = p.role == Role::Admin && my_role != Role::Owner;
+                            if p.role != Role::Owner && p.member != me && !others_admin {
                                 if row_button(
                                     ui,
                                     RichText::new(tr("Remove access")).color(t.danger),

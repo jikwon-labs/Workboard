@@ -4848,6 +4848,62 @@ fn a_plain_member_cant_change_who_slack_users_come_in_as() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// Admins are the owner's choice: an admin can't take another admin's role
+/// or access away (removing access deletes their account too). They still
+/// step down themselves, and the owner does both.
+#[test]
+fn only_the_owner_changes_or_removes_another_admin() {
+    let home = temp_home("adminadmin");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Admin,
+    });
+    b.until("Bo is admin", |b| b.role == Some(Role::Admin));
+    let code = a.invite(3, Role::Admin);
+    let mut c = App::join(server.port, &code);
+    c.until("Cy is admin", |c| c.role == Some(Role::Admin));
+    let role_of = |app: &App, m: u64| app.people.iter().find(|p| p.member == m).map(|p| p.role);
+    b.client.send(Msg::SetRole {
+        member: 3,
+        role: Role::Member,
+    });
+    b.until("Bo can't demote Cy", |b| {
+        b.denied.iter().any(|d| d.contains("another admin's role"))
+    });
+    b.client.send(Msg::Revoke { member: 3 });
+    b.until("Bo can't remove Cy", |b| {
+        b.denied
+            .iter()
+            .any(|d| d.contains("another admin's access"))
+    });
+    b.client.send(Msg::AccessList);
+    b.until("Cy is still an admin", |b| {
+        role_of(b, 3) == Some(Role::Admin)
+    });
+    c.pump();
+    assert_eq!(c.role, Some(Role::Admin));
+    assert!(
+        matches!(c.status, Some(Status::Connected)),
+        "{:?}",
+        c.status
+    );
+    // Bo steps down; the owner demotes Cy
+    b.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Member,
+    });
+    b.until("Bo is a member", |b| b.role == Some(Role::Member));
+    a.client.send(Msg::SetRole {
+        member: 3,
+        role: Role::Member,
+    });
+    c.until("Cy is a member", |c| c.role == Some(Role::Member));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 // ------------------------------------------------- several workspaces
 
 fn second_workspace() -> Value {

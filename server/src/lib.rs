@@ -2100,6 +2100,10 @@ impl Hub {
                 if role == Role::Owner || g.saved.role_of(who) == Role::Owner {
                     return Reply::Denied("The owner's role can't be changed here.".into());
                 }
+                // admins are the owner's choice: an admin changes only their own
+                if me != Role::Owner && g.saved.role_of(who) == Role::Admin && who != member {
+                    return Reply::Denied("Only the owner can change another admin's role.".into());
+                }
                 g.saved.set_role(who, role);
                 g.dirty = true;
                 // their apps hear the new role before the copy it lets them
@@ -2115,6 +2119,12 @@ impl Hub {
             Msg::Revoke { member: who } => {
                 if g.saved.role_of(who) == Role::Owner {
                     return Reply::Denied("The owner's access can't be removed.".into());
+                }
+                // it also deletes their account: only the owner removes an admin
+                if me != Role::Owner && g.saved.role_of(who) == Role::Admin && who != member {
+                    return Reply::Denied(
+                        "Only the owner can remove another admin's access.".into(),
+                    );
                 }
                 kicked = g
                     .saved

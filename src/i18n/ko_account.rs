@@ -128,6 +128,8 @@ pub const T: &[(&str, &str)] = &[
     ("That person isn't in the workspace yet. Add them with Invite first.", "그 사람은 아직 워크스페이스에 없습니다. 먼저 초대로 추가하세요."),
     ("That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.", "그 재설정 코드는 쓸 수 없습니다. 이미 쓰였거나 만료됐을 수 있습니다(코드는 {}분 동안 유효합니다). 새 코드를 받으세요."),
     ("The owner's access can't be removed.", "소유자의 접근 권한은 없앨 수 없습니다."),
+    ("Only the owner can change another admin's role.", "다른 관리자의 역할은 소유자만 바꿀 수 있습니다."),
+    ("Only the owner can remove another admin's access.", "다른 관리자의 접근 권한은 소유자만 없앨 수 있습니다."),
     ("The owner's role can't be changed here.", "소유자의 역할은 여기서 바꿀 수 없습니다."),
     ("The server had a problem. Try again.", "서버에 문제가 생겼습니다. 다시 시도하세요."),
     ("There is one owner. Invite them as an admin instead.", "소유자는 한 명입니다. 대신 관리자로 초대하세요."),

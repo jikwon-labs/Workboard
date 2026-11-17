@@ -308,8 +308,11 @@ impl App {
                 // on a team server only its owner and admins manage people, and
                 // the server keeps the roles; alone or in a shared folder it's local
                 let manages = !server || self.sync_rt.role.is_some_and(|r| r.manages());
+                let owner = !server || self.sync_rt.role == Some(wb_net::Role::Owner);
                 let mut remove = None;
                 for m in &members {
+                    // another admin is the owner's to change or remove (as the server)
+                    let manages = manages && (owner || m.role != "Admin" || m.id == me);
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);

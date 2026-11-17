@@ -1622,6 +1622,70 @@ fn an_invited_person_has_cancel_invite_instead_of_remove() {
 }
 
 #[test]
+fn an_admin_has_no_controls_for_another_admin_but_the_owner_does() {
+    let mut h = Ui1::new();
+    server_down(&mut h);
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    let me = h.app.data.me;
+    let others: Vec<u64> = h
+        .app
+        .data
+        .members
+        .iter()
+        .filter(|m| m.id != me && m.role != "Owner")
+        .map(|m| m.id)
+        .take(2)
+        .collect();
+    for (id, role) in [(me, "Admin"), (others[0], "Admin"), (others[1], "Member")] {
+        h.app
+            .data
+            .members
+            .iter_mut()
+            .find(|m| m.id == id)
+            .unwrap()
+            .role = role.into();
+    }
+    let count = |h: &Ui1, name: &str| h.tree.iter().filter(|(n, _)| n == name).count();
+    // People page: the owner may remove both, an admin only the member
+    h.app.section = Section::People;
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.settle();
+    let owner_removes = count(&h, "Remove");
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.settle();
+    assert_eq!(count(&h, "Remove"), owner_removes - 1);
+    // Work together > People: no Make member or Remove access on the other admin's row
+    let person = |member, role| wb_net::Person {
+        member,
+        role,
+        devices: 1,
+        invite: None,
+        account: true,
+    };
+    h.app.sync_rt.people = vec![
+        person(me, wb_net::Role::Admin),
+        person(others[0], wb_net::Role::Admin),
+        person(others[1], wb_net::Role::Member),
+    ];
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    assert_eq!(count(&h, "Make member"), 0);
+    assert_eq!(
+        (count(&h, "Make admin"), count(&h, "Remove access")),
+        (1, 1)
+    );
+    // the member's row still works
+    h.click("Make admin");
+    assert!(h.app.sync_rt.other_asked.is_some(), "the request went out");
+    // the owner has them for the admin too
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.sync_rt.people[0].role = wb_net::Role::Owner;
+    h.settle();
+    assert_eq!(count(&h, "Make member"), 1);
+    assert_eq!(count(&h, "Remove access"), 2);
+}
+
+#[test]
 fn a_member_on_the_server_is_told_who_manages_people() {
     let mut h = Ui1::new();
     h.app

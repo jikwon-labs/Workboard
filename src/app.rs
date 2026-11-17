@@ -437,6 +437,8 @@ pub struct App {
     notepad_open: bool,
     toast: Option<(String, i64)>,
     sync_rt: together::SyncRt,
+    /// A workspace being made on the team server (see together.rs).
+    making_ws: Option<together::MakingWs>,
     huddle: huddle::HuddleRt,
     notify_rt: notify::NotifyRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
@@ -790,6 +792,7 @@ impl App {
                 None
             },
             sync_rt: Default::default(),
+            making_ws: None,
             huddle: Default::default(),
             notify_rt: Default::default(),
             ws_places: HashMap::new(),
@@ -6593,6 +6596,7 @@ impl App {
         }
         self.dirty = false;
         if self.persist {
+            self.making_ws_tick();
             self.sync_tick(ctx);
         }
         self.huddle_tick(Some(ctx));

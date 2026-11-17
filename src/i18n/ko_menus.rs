@@ -311,4 +311,10 @@ pub const T: &[(&str, &str)] = &[
     ("Lists live in a Space. Make a Space first: it comes with a List.", "목록은 스페이스 안에 들어갑니다. 먼저 스페이스를 만드세요. 목록이 함께 생깁니다."),
     (" \u{2022} {} archived", " \u{2022} 보관됨 {}개"),
     ("\"{}\" is back in an archived Folder or Space. Restore that from Settings > Spaces.", "\"{}\" 목록을 되돌렸지만 보관된 폴더나 스페이스 안에 있습니다. 설정 > 스페이스에서 그곳을 복원하세요."),
+    ("Where", "위치"),
+    ("On the team server ({})", "팀 서버에 ({})"),
+    ("On this computer only", "이 컴퓨터에만"),
+    ("Your team signs in to it on the same server, with their own invite.", "팀원은 같은 서버에서 각자 초대를 받아 로그인합니다."),
+    ("You can share it from Work together later.", "나중에 함께 작업하기에서 공유할 수 있습니다."),
+    ("The server emails each of them an invite code once the workspace is up.", "워크스페이스가 서버에 올라가면 서버가 각자에게 초대 코드를 메일로 보냅니다."),
 ];

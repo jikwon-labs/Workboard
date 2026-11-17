@@ -165,6 +165,13 @@ pub struct SyncRt {
     pub(super) auto_invite: Vec<(u64, Role)>,
     /// A "Forgot password" request on its way.
     pub(super) forgot: Option<std::sync::mpsc::Receiver<Result<bool, String>>>,
+    /// Signing in with email and password: asking the server which of its
+    /// workspaces that account has (POST /auth/workspaces), before joining.
+    pub(super) listing: Option<Listing>,
+    /// The account has several workspaces on the server: which to open.
+    pub(super) choices: Option<(Vec<(String, String)>, How)>,
+    /// A workspace on this computer to open (the one chosen is here already).
+    pub(super) open_local: Option<String>,
     /// The owner's view of the server's backups (None until asked for).
     pub(super) backups: Option<Vec<wb_net::Backup>>,
     /// The backup the owner clicked Restore on, waiting for "Yes, restore".
@@ -180,6 +187,53 @@ pub struct SyncRt {
     /// When a request other than joining a huddle last went to the server
     /// (see huddle_denied_unnamed).
     pub(super) other_asked: Option<std::time::Instant>,
+}
+
+/// Asking a server which workspaces an email and password sign in to.
+pub struct Listing {
+    rx: std::sync::mpsc::Receiver<Result<Vec<(String, String)>, String>>,
+    pub(super) addr: String,
+    pub(super) how: How,
+}
+
+/// A local workspace file that is on the team server workspace `addr`
+/// (`wb_net::same_workspace`), other than `except`.
+pub(super) fn local_workspace_on(addr: &str, except: &str) -> Option<String> {
+    Data::workspaces()
+        .into_iter()
+        .map(|e| e.file)
+        .filter(|f| f != except)
+        .find(|f| {
+            let path = if f == "data.json" {
+                Data::path()
+            } else {
+                Data::dir().join(f)
+            };
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| {
+                    v.get("extra")?
+                        .get("shared")?
+                        .get("server")?
+                        .as_str()
+                        .map(|a| wb_net::same_workspace(a, addr))
+                })
+                .unwrap_or(false)
+        })
+}
+
+/// A new workspace asked of the team server (POST /workspaces), waiting for
+/// its address. Kept outside SyncRt, which starts over when the workspace
+/// changes.
+pub struct MakingWs {
+    rx: std::sync::mpsc::Receiver<Result<String, String>>,
+    name: String,
+    apps: Vec<String>,
+    invite: Vec<String>,
+    role: String,
+    /// the account email the new workspace is set up with
+    email: String,
 }
 
 // ---------------------------------------------------------------- tokens
@@ -301,8 +355,9 @@ pub(super) fn server_text(s: &str) -> String {
         // the system's own words follow, untranslated
         return tr("Couldn't reach the server. Check the address and your connection.").into();
     }
-    const WITH_VALUES: [&str; 4] = [
+    const WITH_VALUES: [&str; 5] = [
         "Choose a password of at least {} characters.",
+        "This server already keeps {} workspaces, the most it can.",
         "Too many wrong tries. Wait {} minutes and try again, or use Forgot password.",
         "That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.",
         "The server answered {}.",
@@ -510,6 +565,110 @@ pub(super) fn fill_sync_baseline(data: &mut Data) {
 }
 
 impl App {
+    /// The team server a new workspace can be made on: the one this
+    /// workspace is on, when this person is signed in there with an account.
+    pub(super) fn server_for_new_workspace(&self) -> Option<String> {
+        let cfg = self.data.extra.shared.as_ref()?;
+        let addr = cfg.server.clone()?;
+        self.sync_rt.account.as_ref()?;
+        self.sync_rt.role?;
+        Some(addr)
+    }
+
+    /// Make a workspace on the team server this one is on; it opens once
+    /// the server has made it (making_ws_tick).
+    pub(super) fn make_workspace_on_server(
+        &mut self,
+        name: &str,
+        apps: &[String],
+        invite: &[String],
+        role: &str,
+        ctx: Option<egui::Context>,
+    ) {
+        let (Some(addr), Some(cfg), Some(email)) = (
+            self.server_for_new_workspace(),
+            self.data.extra.shared.clone(),
+            self.sync_rt.account.clone(),
+        ) else {
+            return;
+        };
+        let Some(token) = load_token(&addr, &cfg.device) else {
+            self.toast = Some((
+                tr("Sign in to the team server again, then make the workspace.").into(),
+                now_ts(),
+            ));
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let auth = wb_net::Auth {
+            device: cfg.device.clone(),
+            token,
+        };
+        std::thread::spawn(move || {
+            let _ = tx.send(wb_net::create_workspace(&addr, &auth));
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
+        });
+        self.making_ws = Some(MakingWs {
+            rx,
+            name: name.to_string(),
+            apps: apps.to_vec(),
+            invite: invite.to_vec(),
+            role: role.to_string(),
+            email,
+        });
+        self.toast = Some((
+            tr("Making the workspace on the team server...").into(),
+            now_ts(),
+        ));
+    }
+
+    /// The server answered a make_workspace_on_server: open the new
+    /// workspace on this computer and set it up on the server as its owner.
+    pub(super) fn making_ws_tick(&mut self) {
+        let Some(m) = &self.making_ws else {
+            return;
+        };
+        let answer = match m.rx.try_recv() {
+            Ok(a) => a,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("The server had a problem. Try again.".into())
+            }
+        };
+        let m = self.making_ws.take().expect("checked above");
+        let addr = match answer {
+            Ok(a) => a,
+            Err(e) => {
+                self.toast = Some((
+                    trf!("Couldn't make the workspace: {}", server_text(&e)),
+                    now_ts(),
+                ));
+                return;
+            }
+        };
+        let before = self.ws_file.clone();
+        self.create_workspace(&m.name, &m.apps, &[], &m.role);
+        if self.ws_file == before {
+            return;
+        }
+        // the owner signs in with the account they have on the server
+        if let Some(me) = self.data.members.iter_mut().find(|x| x.id == self.data.me) {
+            me.email = m.email.clone();
+        }
+        let how = How::Claim {
+            email: m.email,
+            password: String::new(),
+        };
+        if let Err(e) = self.connect_with(&addr, how) {
+            self.toast = Some((server_text(&e), now_ts()));
+            return;
+        }
+        self.invite_people(&m.invite, &m.role);
+        self.save_local();
+    }
+
     fn data_value(&self) -> serde_json::Value {
         serde_json::to_value(&self.data).unwrap_or_default()
     }
@@ -759,6 +918,7 @@ impl App {
     /// The server connection: start it when needed and take in what arrived.
     /// Returns true when the team's changes came in.
     pub(super) fn net_tick(&mut self, ctx: Option<&egui::Context>) -> bool {
+        self.listing_tick();
         if self.sync_rt.net.is_none() {
             let (addr, mut sign_in) = if let Some(j) = &self.sync_rt.joining {
                 (j.addr.clone(), j.how.sign_in(&j.device, self.data.me))
@@ -1087,6 +1247,86 @@ impl App {
     /// there if the server is empty, else joins the team's workspace).
     pub(super) fn connect_with(&mut self, addr: &str, how: How) -> Result<(), String> {
         wb_net::server_url(addr)?;
+        // email and password: the account may be in any of the server's
+        // workspaces, or in several (listing_tick goes on from there)
+        if let How::Account { email, password } = &how {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (a, e, p) = (addr.trim().to_string(), email.clone(), password.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(wb_net::list_workspaces(&a, &e, &p));
+            });
+            self.sync_rt.choices = None;
+            self.sync_rt.listing = Some(Listing {
+                rx,
+                addr: addr.trim().to_string(),
+                how,
+            });
+            return Ok(());
+        }
+        self.start_joining(addr, how);
+        Ok(())
+    }
+
+    /// The server said which workspaces the account signs in to: join the
+    /// one, or let the person choose.
+    pub(super) fn listing_tick(&mut self) {
+        if let Some(file) = self.sync_rt.open_local.take() {
+            // the sign-in screen goes: this workspace is signed in already
+            self.login = None;
+            if self.data.extra.welcome {
+                self.data.extra.welcome = false;
+                self.save_local();
+            }
+            if matches!(self.modal, Some(Modal::JoinTeam { .. })) {
+                self.modal = None;
+            }
+            self.switch_workspace(&file);
+            return;
+        }
+        let Some(l) = &self.sync_rt.listing else {
+            return;
+        };
+        let answer = match l.rx.try_recv() {
+            Ok(a) => a,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("The server had a problem. Try again.".into())
+            }
+        };
+        let how = self.sync_rt.listing.take().expect("checked above").how;
+        match answer {
+            Err(e) => self.sync_rt.form.note = e,
+            Ok(list) if list.is_empty() => {
+                self.sync_rt.form.note =
+                    "That email and password don't match an account on this server.".into()
+            }
+            Ok(list) if list.len() == 1 => self.open_or_join(&list[0].0, how),
+            Ok(list) => self.sync_rt.choices = Some((list, how)),
+        }
+    }
+
+    /// Join the team workspace at `addr`, or open it when it is already on
+    /// this computer.
+    pub(super) fn open_or_join(&mut self, addr: &str, how: How) {
+        self.sync_rt.choices = None;
+        let on_it = self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .and_then(|c| c.server.as_deref())
+            .is_some_and(|a| wb_net::same_workspace(a, addr));
+        if !on_it {
+            if let Some(file) = local_workspace_on(addr, &self.ws_file) {
+                // opened from listing_tick, outside the sign-in screen's drawing
+                self.sync_rt.open_local = Some(file);
+                return;
+            }
+        }
+        self.start_joining(addr, how);
+    }
+
+    fn start_joining(&mut self, addr: &str, how: How) {
         if let How::Claim { email, .. } = &how {
             // the owner's email goes up with the workspace
             let me = self.data.me;
@@ -1107,7 +1347,6 @@ impl App {
             device: format!("{:08x}", sync::random_u64() as u32),
             how,
         });
-        Ok(())
     }
 
     /// Sign this computer in again with a new invite code.
@@ -1207,6 +1446,10 @@ impl App {
 
     /// Once per frame: write our copy when it changed, look for teammates' changes.
     pub(super) fn sync_tick(&mut self, ctx: &egui::Context) {
+        if self.sync_rt.listing.is_some() || self.sync_rt.open_local.is_some() {
+            self.listing_tick();
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         if self.sync_rt.joining.is_some() {
             self.net_tick(Some(ctx));
             return;
@@ -1345,11 +1588,31 @@ impl App {
                     file: self.ws_file.clone(),
                 });
             }
-            let file = format!("workspace-{}.json", now_ts());
-            list.push(WsEntry {
-                name: d.workspace.clone(),
-                file: file.clone(),
-            });
+            // the same team workspace joined again (signed out, or signed
+            // in once more): its copy here is replaced, not added to
+            let again = d
+                .extra
+                .shared
+                .as_ref()
+                .and_then(|c| c.server.as_deref())
+                .and_then(|a| local_workspace_on(a, ""))
+                .filter(|f| list.iter().any(|e| &e.file == f));
+            let file = match again {
+                Some(f) => {
+                    if let Some(e) = list.iter_mut().find(|e| e.file == f) {
+                        e.name = d.workspace.clone();
+                    }
+                    f
+                }
+                None => {
+                    let file = format!("workspace-{}.json", now_ts());
+                    list.push(WsEntry {
+                        name: d.workspace.clone(),
+                        file: file.clone(),
+                    });
+                    file
+                }
+            };
             Data::save_workspaces(&list);
             Data::set_last_workspace(&file);
             self.ws_places.clear();
@@ -1820,6 +2083,52 @@ impl App {
     /// While connecting from a sign-in form: how it goes, and Cancel. True
     /// while it connects; a refusal goes back to the form with the reason.
     pub(super) fn join_progress(&mut self, ui: &mut Ui, t: &Theme) -> bool {
+        if self.sync_rt.listing.is_some() {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tr("Looking up your workspaces...")).color(t.text2));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button(tr("Cancel")).clicked() {
+                        self.sync_rt.listing = None;
+                    }
+                });
+            });
+            return self.sync_rt.listing.is_some();
+        }
+        if let Some((list, how)) = self.sync_rt.choices.clone() {
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(tr("Choose a workspace"))
+                    .size(15.0)
+                    .strong()
+                    .color(t.text),
+            );
+            ui.label(
+                RichText::new(tr("Your account is in these workspaces on this server. You can open the others later the same way."))
+                    .small()
+                    .color(t.text2),
+            );
+            ui.add_space(6.0);
+            for (addr, name) in &list {
+                let label = if name.trim().is_empty() {
+                    addr.clone()
+                } else {
+                    name.clone()
+                };
+                let r = ui.add(
+                    egui::Button::new(RichText::new(label).size(15.0))
+                        .min_size(vec2(ui.available_width(), 36.0)),
+                );
+                if r.clicked() {
+                    self.open_or_join(addr, how.clone());
+                }
+            }
+            ui.add_space(6.0);
+            if ui.button(tr("Cancel")).clicked() {
+                self.sync_rt.choices = None;
+            }
+            return self.sync_rt.choices.is_some() || self.sync_rt.joining.is_some();
+        }
         if self.sync_rt.joining.is_some() {
             ui.add_space(8.0);
             ui.horizontal(|ui| {

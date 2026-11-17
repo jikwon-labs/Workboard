@@ -164,10 +164,13 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         },
     )
     .unwrap();
-    until(&mut x, "refused", |x| {
-        matches!(x.sync_rt.net_status, Some(wb_net::Status::Refused(_)))
-    });
-    assert!(x.data.extra.shared.is_none());
+    until(&mut x, "refused", |x| !x.sync_rt.form.note.is_empty());
+    assert!(
+        x.sync_rt.form.note.contains("don't match"),
+        "{}",
+        x.sync_rt.form.note
+    );
+    assert!(x.data.extra.shared.is_none() && x.sync_rt.joining.is_none());
 
     // inviting someone on the server asks for their code, which the server emails
     assert_eq!(a.invite_people(&["new.person@team.io".into()], "Member"), 1);
@@ -386,4 +389,140 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
     });
     assert!(b.login.is_none() && !b.data.extra.welcome);
     assert!(has(&b.data));
+}
+
+/// A computer that keeps its workspace files (in a HOME of the test's own).
+fn keeping_computer(name: &str) -> App {
+    let mut a = computer(name);
+    a.persist = true;
+    a.data.save();
+    a
+}
+
+#[test]
+fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
+    let _home = super::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home =
+        std::env::temp_dir().join(format!("wb-home-several-{:x}", crate::sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    let server = Server::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+
+    // the owner sets up the server with an account
+    let mut a = keeping_computer("Ours");
+    a.connect_with(
+        &addr,
+        How::Claim {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut a, "A on the server", |a| {
+        a.data.extra.shared.is_some() && connected(a)
+    });
+    assert_eq!(a.server_for_new_workspace(), Some(addr.clone()));
+    let first = a.ws_file.clone();
+
+    // a second workspace, on the same server, with someone to invite
+    a.make_workspace_on_server(
+        "Side project",
+        &[],
+        &["helper@team.io".to_string()],
+        "Member",
+        None,
+    );
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while a.making_ws.is_some() && std::time::Instant::now() < end {
+        a.making_ws_tick();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(a.making_ws.is_none(), "the server answered: {:?}", a.toast);
+    until(&mut a, "the second workspace is up", |a| {
+        a.data.workspace == "Side project" && connected(a)
+    });
+    let second = a.ws_file.clone();
+    assert_ne!(second, first);
+    let addr2 = a
+        .data
+        .extra
+        .shared
+        .as_ref()
+        .and_then(|c| c.server.clone())
+        .unwrap();
+    assert!(addr2.starts_with(&format!("{}/w/", addr)), "{}", addr2);
+    assert_eq!(a.sync_rt.role, Some(wb_net::Role::Owner));
+    assert_eq!(a.sync_rt.account.as_deref(), Some("owner@team.io"));
+    assert_eq!(a.workspace_place(&first), "Team server");
+    assert_eq!(a.workspace_place(&second), "Team server");
+    // the person invited gets their code by mail, with the second
+    // workspace's address in the link
+    let id = addr2.rsplit('/').next().unwrap().to_string();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while server.mails_to("helper@team.io").is_empty() && std::time::Instant::now() < end {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let mail = server
+        .mails_to("helper@team.io")
+        .pop()
+        .expect("invite mail");
+    assert!(mail.contains(&format!("/w/{}/join?code=", id)), "{}", mail);
+    let folder = server.home.join("workspaces").join(&id);
+    while !folder.join(workboard_server::WORKSPACE_FILE).is_file() {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // another computer signs in with the account: it chooses which one
+    let mut b = keeping_computer("Laptop");
+    b.connect_with(
+        &addr,
+        How::Account {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut b, "the choices", |b| b.sync_rt.choices.is_some());
+    let (list, how) = b.sync_rt.choices.clone().unwrap();
+    let mut names: Vec<&str> = list.iter().map(|(_, n)| n.as_str()).collect();
+    names.sort();
+    assert_eq!(names, vec!["Ours", "Side project"]);
+    b.open_or_join(&addr2, how.clone());
+    until(&mut b, "B joined the second", |b| {
+        b.data.workspace == "Side project" && connected(b)
+    });
+    let b_second = b.ws_file.clone();
+    let files = Data::workspaces().len();
+
+    // the first one too, then the second again: that opens the copy here
+    b.open_or_join(&addr, how.clone());
+    until(&mut b, "B joined the first", |b| {
+        b.data.workspace == "Ours" && connected(b)
+    });
+    assert_eq!(Data::workspaces().len(), files + 1);
+    b.connect_with(
+        &addr,
+        How::Account {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut b, "the choices again", |b| b.sync_rt.choices.is_some());
+    b.open_or_join(&addr2, how);
+    until(&mut b, "the second opened", |b| {
+        b.data.workspace == "Side project"
+    });
+    assert_eq!(b.ws_file, b_second, "the copy already here");
+    assert_eq!(
+        Data::workspaces().len(),
+        files + 1,
+        "no second copy of a workspace"
+    );
+    let _ = std::fs::remove_dir_all(&home);
 }

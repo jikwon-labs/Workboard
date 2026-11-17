@@ -26,6 +26,9 @@ pub enum Modal {
         apps: Vec<String>,
         emails: String,
         role: String,
+        /// make it on the team server the open workspace is on (when there
+        /// is one), else on this computer only
+        on_server: bool,
     },
     Profile {
         name: String,
@@ -297,6 +300,7 @@ impl Modal {
             apps: Extra::default().rail_items,
             emails: String::new(),
             role: "Member".into(),
+            on_server: true,
         }
     }
 }
@@ -1558,7 +1562,10 @@ impl App {
                 apps,
                 emails,
                 role,
+                on_server,
             } => {
+                let server = self.server_for_new_workspace();
+                let on_server_now = *on_server && server.is_some();
                 // where the setup is: one bar per step, filled up to this one
                 ui.horizontal(|ui| {
                     let gap = 6.0;
@@ -1597,6 +1604,28 @@ impl App {
                             .small()
                             .color(t.text2),
                         );
+                        if let Some(addr) = &server {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(tr("Where")).color(t.text2));
+                            let host = wb_net::server_part(addr);
+                            if radio(ui, *on_server, trf!("On the team server ({})", host))
+                                .clicked()
+                            {
+                                *on_server = true;
+                            }
+                            if radio(ui, !*on_server, tr("On this computer only")).clicked() {
+                                *on_server = false;
+                            }
+                            ui.label(
+                                RichText::new(tr(if *on_server {
+                                    "Your team signs in to it on the same server, with their own invite."
+                                } else {
+                                    "You can share it from Work together later."
+                                }))
+                                .small()
+                                .color(t.text2),
+                            );
+                        }
                     }
                     1 => {
                         ui.label(
@@ -1665,9 +1694,11 @@ impl App {
                             });
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new(tr(
-                                "The new workspace is on this computer only. To work with them, share it from Work together once it's made.",
-                            ))
+                            RichText::new(tr(if on_server_now {
+                                "The server emails each of them an invite code once the workspace is up."
+                            } else {
+                                "The new workspace is on this computer only. To work with them, share it from Work together once it's made."
+                            }))
                             .small()
                             .color(t.text2),
                         );
@@ -1705,7 +1736,12 @@ impl App {
                     });
                 });
                 if let Some(invite) = finish {
-                    self.create_workspace(name.trim(), apps, &invite, role);
+                    if on_server_now {
+                        let ctx = ui.ctx().clone();
+                        self.make_workspace_on_server(name.trim(), apps, &invite, role, Some(ctx));
+                    } else {
+                        self.create_workspace(name.trim(), apps, &invite, role);
+                    }
                     close = true;
                 }
             }
@@ -3057,13 +3093,20 @@ impl App {
                 slack: vec![],
                 slack_mine: vec![],
             });
-            // on a server: ask for their invite code (emailed by the server) once it has them
-            if self
-                .data
-                .extra
-                .shared
+            // on a server (or going up to one): ask for their invite code
+            // (emailed by the server) once it has them
+            let setting_up = self
+                .sync_rt
+                .joining
                 .as_ref()
-                .is_some_and(|c| c.server.is_some())
+                .is_some_and(|j| matches!(j.how, super::together::How::Claim { .. }));
+            if setting_up
+                || self
+                    .data
+                    .extra
+                    .shared
+                    .as_ref()
+                    .is_some_and(|c| c.server.is_some())
             {
                 self.sync_rt.auto_invite.push((
                     id,

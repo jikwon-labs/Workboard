@@ -6644,7 +6644,8 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
     h.type_text("secret-pass");
     h.settle();
     h.click("Sign in");
-    let j = h.app.sync_rt.joining.as_ref().expect("connecting");
+    // first it asks the server which workspaces that account is in
+    let j = h.app.sync_rt.listing.as_ref().expect("looking up");
     assert_eq!(j.addr, "127.0.0.1:1");
     assert_eq!(
         j.how,
@@ -6653,12 +6654,13 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
             password: "secret-pass".into()
         }
     );
+    assert!(h.has("Looking up your workspaces..."));
     assert!(
         !h.has("Use it on this Mac without an account") && !h.has("Set up a server for my team"),
         "the other ways wait while it connects"
     );
     h.click("Cancel");
-    assert!(h.app.sync_rt.joining.is_none() && h.app.login.is_some());
+    assert!(h.app.sync_rt.listing.is_none() && h.app.login.is_some());
 
     // an invite code instead, choosing a password; the email carries over
     h.click("Join with an invite code");
@@ -11015,4 +11017,80 @@ fn new_workspace_needs_a_name_goes_back_and_skips_invites() {
         Extra::default().rail_items,
         "untouched apps stay the default"
     );
+}
+
+#[test]
+fn a_new_workspace_can_go_on_the_team_server_or_stay_here() {
+    let _home = own_home("wizard-server");
+    let mut h = Ui1::new();
+    // this workspace is on a team server, signed in with an account
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 1,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.account = Some("me@team.io".into());
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    together::save_token("127.0.0.1:1", "dev1", "tok");
+    let before = h.app.ws_file.clone();
+
+    // on the server is the choice it starts with
+    h.click("Workspace menu");
+    h.click("+  Create Workspace");
+    assert!(h.has("On the team server (127.0.0.1:1)"));
+    assert!(h.has("On this computer only"));
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewWorkspace {
+            on_server: true,
+            ..
+        })
+    ));
+    h.type_text("Side Biz");
+    h.click("Next");
+    h.click("Next");
+    assert!(h.has("The server emails each of them an invite code once the workspace is up."));
+    h.type_text("helper@team.io");
+    h.click("Create and invite");
+    h.settle();
+    assert!(h.app.modal.is_none());
+    assert!(
+        h.app.making_ws.is_some(),
+        "asked the server to make it; it opens when the server answers"
+    );
+    assert_eq!(h.app.ws_file, before, "nothing opens before that");
+    h.app.making_ws = None;
+
+    // or only on this computer, as before
+    h.click("Workspace menu");
+    h.click("+  Create Workspace");
+    h.click("On this computer only");
+    assert!(matches!(
+        h.app.modal,
+        Some(Modal::NewWorkspace {
+            on_server: false,
+            ..
+        })
+    ));
+    h.type_text("Notes");
+    h.click("Next");
+    h.click("Next");
+    assert!(h.has("The new workspace is on this computer only. To work with them, share it from Work together once it's made."));
+    h.click("Skip for now");
+    h.settle();
+    assert!(h.app.making_ws.is_none());
+    assert_ne!(h.app.ws_file, before);
+    assert_eq!(h.app.data.workspace, "Notes");
+    assert!(h.app.data.extra.shared.is_none());
+}
+
+#[test]
+fn a_workspace_on_this_computer_only_has_no_server_choice() {
+    let _home = own_home("wizard-local");
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("+  Create Workspace");
+    assert!(!h.has("On this computer only"));
+    assert!(!h.has("Where"));
 }

@@ -4695,7 +4695,9 @@ fn one_server_keeps_several_workspaces_apart() {
             ..Default::default()
         },
     );
-    a.until("owner in", |a| a.role == Some(Role::Owner) && a.token.is_some());
+    a.until("owner in", |a| {
+        a.role == Some(Role::Owner) && a.token.is_some()
+    });
 
     // making a workspace needs a device signed in to this server
     let (head, _) = http_post(port, "/workspaces", "{}");
@@ -4791,7 +4793,15 @@ fn one_server_keeps_several_workspaces_apart() {
     // a device of one workspace can't use another's files
     let work = home.join("work");
     let (path, sha, _) = some_file(&work, "p.jpg", 1000);
-    wb_net::upload(&addr2, &auth(&a2), &sha, &path, "image/jpeg", &mut |_, _| true).unwrap();
+    wb_net::upload(
+        &addr2,
+        &auth(&a2),
+        &sha,
+        &path,
+        "image/jpeg",
+        &mut |_, _| true,
+    )
+    .unwrap();
     assert!(home
         .join("workspaces")
         .join(&id)

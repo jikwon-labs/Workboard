@@ -73,7 +73,9 @@ fn main() {
     let home = match workspace.as_deref().filter(|w| !w.is_empty()) {
         None => root.clone(),
         Some(id) => {
-            let dir = root.join(workboard_server::registry::WORKSPACES_DIR).join(id);
+            let dir = root
+                .join(workboard_server::registry::WORKSPACES_DIR)
+                .join(id);
             if !workboard_server::registry::id_ok(id) || !dir.is_dir() {
                 fail(&format!(
                     "There's no workspace {} on this server (see `workboard-server workspaces`)",

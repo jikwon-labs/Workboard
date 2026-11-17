@@ -265,7 +265,11 @@ impl App {
                 ("Already have a team server?", "Sign in", LoginPage::SignIn)
             }
         };
-        if w < 760.0 || self.sync_rt.joining.is_some() {
+        if w < 760.0
+            || self.sync_rt.joining.is_some()
+            || self.sync_rt.listing.is_some()
+            || self.sync_rt.choices.is_some()
+        {
             return;
         }
         let rr = Rect::from_min_max(
@@ -484,6 +488,8 @@ impl App {
         // the way without an account, under the first two steps
         if matches!(login.page, LoginPage::Server | LoginPage::SignIn)
             && self.sync_rt.joining.is_none()
+            && self.sync_rt.listing.is_none()
+            && self.sync_rt.choices.is_none()
             && self.sync_rt.form.mode != Mode::Forgot
         {
             ui.add_space(28.0);

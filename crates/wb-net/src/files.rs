@@ -159,7 +159,11 @@ fn open(addr: &str) -> Result<(Conn, String, String), FileError> {
         .find('/')
         .map(|i| start + i)
         .unwrap_or(url.len());
-    Ok((s, url[start..end].to_string(), crate::workspace_prefix(addr)))
+    Ok((
+        s,
+        url[start..end].to_string(),
+        crate::workspace_prefix(addr),
+    ))
 }
 
 fn request(
@@ -468,7 +472,11 @@ fn post_json(
 fn answer_error(status: u16, json: &str) -> String {
     serde_json::from_str::<serde_json::Value>(json.trim())
         .ok()
-        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(|e| e.to_string()))
+        .and_then(|v| {
+            v.get("error")
+                .and_then(|e| e.as_str())
+                .map(|e| e.to_string())
+        })
         .unwrap_or_else(|| {
             if status == 404 || status == 405 {
                 "This server keeps only one workspace. Update workboard-server to keep more.".into()

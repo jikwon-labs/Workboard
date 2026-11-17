@@ -154,6 +154,15 @@ fn mail_test(home: &std::path::Path, to: &str) {
 }
 
 fn serve(bind: Option<String>, port: u16, home: PathBuf) {
+    // a panic anywhere ends the server, so launchd (KeepAlive) starts it
+    // again: carrying on could leave the workspace's lock poisoned, and
+    // every later request would fail until someone restarted it by hand
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        report(info);
+        eprintln!("workboard-server: stopping after a panic (launchd starts it again)");
+        std::process::exit(101);
+    }));
     let bind = bind.unwrap_or_else(|| "127.0.0.1".into());
     let mut addrs: Vec<SocketAddr> = vec![];
     for b in bind.split(',').map(str::trim).filter(|b| !b.is_empty()) {

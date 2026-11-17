@@ -1030,9 +1030,23 @@ fn commit_email_invite(
     Ok(())
 }
 
+/// Write a file whole or not at all. Only this user may read it: the
+/// workspace holds everyone's messages, server.json the sign-ins.
 fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text)?;
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        open.mode(0o600);
+        // (an older tmp file keeps its mode when opened again)
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    let mut f = open.open(&tmp)?;
+    f.write_all(text.as_bytes())?;
+    drop(f);
     std::fs::rename(&tmp, path)
 }
 
@@ -2871,17 +2885,28 @@ async fn update_route(
     let Some(kind) = update_content_type(&name) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match tokio::fs::read(hub.home.join(UPDATES_DIR).join(&name)).await {
-        Ok(bytes) => (
-            [
-                (header::CONTENT_TYPE, kind),
-                (header::CACHE_CONTROL, "no-cache"),
-            ],
-            bytes,
-        )
-            .into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    // streamed, not read whole: anyone may ask for the app (tens of MB)
+    // many times at once
+    let path = hub.home.join(UPDATES_DIR).join(&name);
+    let (Ok(f), Ok(meta)) = (
+        tokio::fs::File::open(&path).await,
+        tokio::fs::metadata(&path).await,
+    ) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !meta.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
     }
+    let stream = tokio_util::io::ReaderStream::with_capacity(f, 256 << 10);
+    (
+        [
+            (header::CONTENT_TYPE, kind.to_string()),
+            (header::CACHE_CONTROL, "no-cache".to_string()),
+            (header::CONTENT_LENGTH, meta.len().to_string()),
+        ],
+        axum::body::Body::from_stream(stream),
+    )
+        .into_response()
 }
 
 async fn health(State(hub): State<Arc<Hub>>, headers: axum::http::HeaderMap) -> Response {
@@ -4394,6 +4419,27 @@ mod tests {
             .contains("Too many"));
         // wrong passwords don't stop a reset, nor wrong codes signing in
         assert!(hub.inner.lock().unwrap().locked("bo@team.io").is_none());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_files_are_for_this_user_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("wb-mode-{:x}", wb_sync::random_u64()));
+        std::fs::create_dir_all(&home).unwrap();
+        let path = home.join(WORKSPACE_FILE);
+        // an old tmp file left readable by everyone
+        std::fs::write(path.with_extension("json.tmp"), "old").unwrap();
+        std::fs::set_permissions(
+            path.with_extension("json.tmp"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        write_atomic(&path, "{}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
         let _ = std::fs::remove_dir_all(&home);
     }
 

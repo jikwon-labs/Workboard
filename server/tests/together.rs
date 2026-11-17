@@ -3611,6 +3611,47 @@ fn a_deleted_message_comes_back_only_as_it_was() {
 }
 
 #[test]
+fn a_plain_member_cant_move_someone_elses_message_away() {
+    let home = temp_home("move-away");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    // Bo's own private channel
+    b.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({
+            "id": 3100, "name": "bo-only", "kind": "Channel", "private": true, "creator": 2,
+            "topic": "", "members": [2], "messages": [], "last_read": 0
+        }));
+    });
+    round_trip(&mut b, &mut a, "Bo's channel is in", 3024);
+    let mut raw = Raw::connect(
+        server.port,
+        json!({"type": "hello", "device": b.device, "token": b.token, "sync": wb_sync::META_V, "deltas": true}),
+    );
+    let w = raw.next("welcome");
+    let mut general = w["snapshot"]["channels"][0].clone();
+    let msg = general["messages"][0].clone();
+    assert_eq!(msg["id"], 11);
+    general["messages"] = json!([]);
+    let mut mine = find(&w["snapshot"], "channels", 3100).unwrap().clone();
+    mine["messages"] = json!([msg]);
+    let t = now();
+    raw.send(
+        json!({"type": "push", "data": {"channels": [general, mine], "extra": {"sync": {
+        "v": wb_sync::META_V, "moved": {"11": t}, "stamps": {"10": t, "11": t, "3100": t}}}}}),
+    );
+    round_trip(&mut b, &mut a, "after the move", 3023);
+    assert_eq!(
+        find(&a.data, "channels", 10).unwrap()["messages"][0]["id"],
+        11,
+        "Ann's message stays in general: {}",
+        a.data
+    );
+    assert!(!find(&a.data, "channels", 3100).is_some_and(|c| c.to_string().contains("\"hi\"")));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn hidden_items_never_leak_through_deltas() {
     let home = temp_home("deltas-hidden");
     let server = Server::start(&home, 0);

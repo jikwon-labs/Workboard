@@ -582,6 +582,78 @@ fn is_comment(v: &Value) -> bool {
     v.get("comment").and_then(|c| c.as_bool()) == Some(true)
 }
 
+impl Cx {
+    /// A plain member doesn't hide from everyone else what the team has:
+    /// a shared space made their Personal one, someone's doc made their
+    /// private one, a team list moved into their Personal space. Whatever
+    /// their copy would newly hide from an admin stays the team's, except
+    /// their own docs and dashboards (and the pages under them), which they
+    /// may make private.
+    fn keep_visible(&mut self, canon: &Value, data: &mut Value, member: u64) {
+        let touches = data.get("spaces").is_some()
+            || data.get("docs").is_some()
+            || data
+                .get("extra")
+                .and_then(|e| e.get("dashboards"))
+                .is_some();
+        if !touches {
+            return;
+        }
+        // an admin who owns nothing: hidden from them is private to someone
+        const NOBODY: u64 = u64::MAX;
+        set_meta(data, &self.dmeta);
+        let mut trial = canon.clone();
+        wb_sync::merge(&mut trial, &[data.clone()]);
+        let before: HashSet<u64> = wb_sync::hidden_from(canon, NOBODY, true)
+            .into_iter()
+            .collect();
+        let mut theirs: HashSet<u64> = array(canon, "docs")
+            .iter()
+            .chain(array(canon, "extra.dashboards"))
+            .filter(|d| u64_at(d, "owner") == Some(member))
+            .filter_map(id_of)
+            .collect();
+        loop {
+            let more: Vec<u64> = array(canon, "docs")
+                .iter()
+                .filter(|d| u64_at(d, "parent").is_some_and(|p| theirs.contains(&p)))
+                .filter_map(id_of)
+                .filter(|i| !theirs.contains(i))
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            theirs.extend(more);
+        }
+        let newly: Vec<u64> = wb_sync::hidden_from(&trial, NOBODY, true)
+            .into_iter()
+            .filter(|id| !before.contains(id) && !theirs.contains(id) && self.in_team(*id))
+            .collect();
+        if newly.is_empty() {
+            return;
+        }
+        for &id in &newly {
+            self.keep(id, true);
+        }
+        // out of their copy: what the team has stays as it is (an item a
+        // copy leaves out changes nothing)
+        let gone: HashSet<u64> = newly.into_iter().collect();
+        drop_items(data, &gone);
+    }
+}
+
+/// Take the items with these ids out of every list of items in `v`.
+fn drop_items(v: &mut Value, ids: &HashSet<u64>) {
+    match v {
+        Value::Array(a) => {
+            a.retain(|x| id_of(x).is_none_or(|i| !ids.contains(&i)));
+            a.iter_mut().for_each(|x| drop_items(x, ids));
+        }
+        Value::Object(o) => o.values_mut().for_each(|x| drop_items(x, ids)),
+        _ => {}
+    }
+}
+
 /// What a message (or task comment) says and who wrote it, as one number.
 fn written_mark(e: &Value, chat: bool) -> u64 {
     let keys = if chat { MESSAGE_KEYS } else { COMMENT_KEYS };
@@ -952,6 +1024,7 @@ pub fn guard(
     }
     if !manages {
         cx.guard_people(canon, data, member);
+        cx.keep_visible(canon, data, member);
     } else if !owners.is_empty() {
         cx.guard_entries(canon, data, owners);
     }

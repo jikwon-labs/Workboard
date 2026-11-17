@@ -3652,6 +3652,63 @@ fn a_plain_member_cant_move_someone_elses_message_away() {
 }
 
 #[test]
+fn a_plain_member_cant_make_a_shared_space_or_doc_their_own() {
+    let home = temp_home("take-private");
+    let server = Server::start(&home, 0);
+    let mut ws = plans_workspace("edit");
+    ws["docs"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": 92, "owner": 1, "title": "Team doc", "body": "for all", "created": 0, "updated": 0}));
+    let (mut a, mut b, mut c) = ann_bo_cy(server.port, ws);
+    b.change(|d| {
+        find_mut(d, "spaces", 60)["private_owner"] = json!(2);
+        find_mut(d, "docs", 92)["private"] = json!(true);
+        find_mut(d, "docs", 92)["owner"] = json!(2);
+    });
+    round_trip(&mut b, &mut a, "after making them Bo's", 3025);
+    round_trip(&mut a, &mut c, "Cy hears", 2022);
+    for (who, d) in [("Ann", &a.data), ("Cy", &c.data)] {
+        assert!(
+            find(d, "spaces", 60).is_some(),
+            "{} keeps the Team space",
+            who
+        );
+        assert!(find(d, "docs", 92).is_some(), "{} keeps the Team doc", who);
+    }
+    // nor move the team's list into a Personal space of theirs; their own
+    // doc they may make private
+    b.change(|d| {
+        d["spaces"].as_array_mut().unwrap().push(json!(
+            {"id": 3200, "name": "Bo's", "private_owner": 2, "statuses": [], "folders": [], "lists": []}));
+        d["docs"].as_array_mut().unwrap().push(json!(
+            {"id": 3300, "owner": 2, "title": "Bo's notes", "body": "", "created": 0, "updated": 0}));
+    });
+    round_trip(&mut b, &mut c, "Bo's doc is out", 3026);
+    assert!(find(&c.data, "docs", 3300).is_some());
+    b.change(|d| {
+        let list = find(d, "spaces", 60).unwrap()["lists"][0].clone();
+        assert_eq!(list["id"], 61);
+        find_mut(d, "spaces", 60)["lists"] = json!([]);
+        find_mut(d, "spaces", 3200)["lists"] = json!([list]);
+        find_mut(d, "docs", 3300)["private"] = json!(true);
+    });
+    round_trip(&mut b, &mut c, "after the list move", 3027);
+    round_trip(&mut a, &mut c, "Cy hears Ann", 2023);
+    for (who, d) in [("Ann", &a.data), ("Cy", &c.data)] {
+        assert!(
+            find(d, "spaces", 60).is_some_and(|s| s["lists"][0]["id"] == 61),
+            "{} keeps the Team list: {}",
+            who,
+            d
+        );
+    }
+    assert!(find(&c.data, "docs", 3300).is_none(), "Bo's doc is his now");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn hidden_items_never_leak_through_deltas() {
     let home = temp_home("deltas-hidden");
     let server = Server::start(&home, 0);

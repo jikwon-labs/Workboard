@@ -288,12 +288,15 @@ impl App {
                 if server && self.sync_rt.role.is_none() {
                     // the server says who may manage people, once it's reached
                     ui.label(RichText::new(tr("Changing roles and removing people need the team's server. They come back once it's connected.")).small().color(super::together::WARN));
+                } else if server && self.sync_rt.role.is_some_and(|r| !r.manages()) {
+                    // a member sees no Remove or Cancel invite buttons: say why
+                    ui.label(RichText::new(tr("Only the owner or an admin can change roles, cancel invites and remove people.")).small().color(t.text3));
                 }
                 ui.add_space(12.0);
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
-                // column starts as parts of the width; the last 84 px are the
-                // Remove button, so a small window narrows the columns instead
+                // column starts as parts of the width; the last 108 px are the
+                // Remove or Cancel invite button, so a small window narrows the columns instead
                 let (ex, rx, sx) = (0.3, 0.52, 0.68);
                 let col_w = |from: f32, to: f32| w * (to - from) - 16.0;
                 for (x, h) in [(0.0, "Name"), (ex, "Email"), (rx, "Role"), (sx, "Status")] {
@@ -343,16 +346,19 @@ impl App {
                     }
                     let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
-                    paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 84.0);
+                    paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 108.0);
                     if m.id != me && m.role != "Owner" && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
-                        if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr("Remove")).color(t.danger)))).clicked() {
-                            remove = Some((m.id, m.name.clone()));
+                        // someone who hasn't joined yet has an invite to take back
+                        let (label, kind) = if m.invited { ("Cancel invite", "invite") } else { ("Remove", "person") };
+                        let br = if m.invited { Rect::from_min_size(pos2(r.right() - 104.0, br.top()), vec2(96.0, 24.0)) } else { br };
+                        if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr(label)).color(t.danger)))).clicked() {
+                            remove = Some((kind, m.id, m.name.clone()));
                         }
                     }
                 }
-                if let Some((id, name)) = remove {
-                    self.modal = Some(Modal::ConfirmRemove { kind: "person", id, name });
+                if let Some((kind, id, name)) = remove {
+                    self.modal = Some(Modal::ConfirmRemove { kind, id, name });
                 }
                 // how invited people get in, for where this workspace is kept
                 if members.iter().any(|m| m.invited) {
@@ -3993,6 +3999,10 @@ impl App {
             "goal" => trf!("Delete the goal \"{}\"? It goes to Trash.", name),
             "meeting" => trf!("Delete the meeting \"{}\"? This can't be undone.", name),
             "team" => trf!("Delete the team \"{}\"? It goes to Trash.", name),
+            "invite" => trf!(
+                "Cancel the invite for {}? Their invite code stops working and they leave the list.",
+                name
+            ),
             _ => trf!(
                 "Remove {} from the Workspace? Their tasks and conversations stay, without them.",
                 name
@@ -4003,6 +4013,8 @@ impl App {
         ui.horizontal(|ui| {
             let label = if kind == "person" {
                 tr("Remove")
+            } else if kind == "invite" {
+                tr("Cancel invite")
             } else {
                 tr("Delete")
             };
@@ -4110,7 +4122,9 @@ impl App {
                     self.hub_filter = 0;
                 }
             }
-            "person" => {
+            // cancelling an invite takes the not-yet-joined person out the
+            // same way, and the server drops their code
+            "person" | "invite" => {
                 let server = self
                     .data
                     .extra

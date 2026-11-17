@@ -1271,6 +1271,8 @@ impl App {
             Modal::PickTask { mode, .. } => tr(mode.title()).into(),
             Modal::ConfirmRemove { kind, .. } => if *kind == "person" {
                 tr("Remove")
+            } else if *kind == "invite" {
+                tr("Cancel invite")
             } else {
                 tr("Delete")
             }

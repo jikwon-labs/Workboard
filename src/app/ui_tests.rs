@@ -1357,6 +1357,60 @@ fn people_says_why_roles_are_missing_offline_and_how_invited_people_join() {
 }
 
 #[test]
+fn an_invited_person_has_cancel_invite_instead_of_remove() {
+    let mut h = Ui1::new();
+    h.app.section = Section::People;
+    h.settle();
+    let before = h.app.data.members.len();
+    h.app
+        .invite_people(&["dana@example.com".to_string()], "Member");
+    h.settle();
+    let dana = h.app.data.members.iter().find(|m| m.invited).unwrap().id;
+    assert!(h.has("Cancel invite"));
+    h.click("Cancel invite");
+    assert!(h.has(
+        "Cancel the invite for Dana? Their invite code stops working and they leave the list."
+    ));
+    // the dialog's button (its title says the same, above it) takes them out
+    let m = h.modal_rect();
+    let at = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Cancel invite" && m.contains(r.center()))
+        .map(|(_, r)| r.center())
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap();
+    h.click_at(at);
+    assert!(h.app.modal.is_none());
+    assert!(h.app.data.members.iter().all(|m| m.id != dana));
+    assert_eq!(h.app.data.members.len(), before);
+    assert!(!h.has("Cancel invite"));
+    // people who joined keep the Remove button
+    assert!(h.has("Remove"));
+}
+
+#[test]
+fn a_member_on_the_server_is_told_who_manages_people() {
+    let mut h = Ui1::new();
+    h.app
+        .invite_people(&["dana@example.com".to_string()], "Member");
+    server_down(&mut h);
+    h.app.section = Section::People;
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.settle();
+    assert!(!h.has("Remove") && !h.has("Cancel invite"));
+    assert!(h.has("Only the owner or an admin can change roles, cancel invites and remove people."));
+    // the owner sees the buttons and no such note
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.settle();
+    assert!(h.has("Remove") && h.has("Cancel invite"));
+    assert!(
+        !h.has("Only the owner or an admin can change roles, cancel invites and remove people.")
+    );
+}
+
+#[test]
 fn inviting_while_the_server_is_down_says_the_codes_wait_and_the_dialog_stays_narrow() {
     let window = |h: &Ui1| h.modal_rect();
     let bookmark = || Modal::Bookmark {

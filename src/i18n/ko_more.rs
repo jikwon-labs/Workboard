@@ -164,4 +164,8 @@ pub const T: &[(&str, &str)] = &[
     ("{} archived matches are not shown", "보관된 항목 {}개는 결과에 넣지 않았습니다"),
     // the post composer's title field
     ("Add a title", "제목 입력"),
+    // People: taking back an invite, and why a member sees no buttons
+    ("Cancel invite", "초대 취소"),
+    ("Cancel the invite for {}? Their invite code stops working and they leave the list.", "{} 님의 초대를 취소할까요? 초대 코드는 더 이상 쓸 수 없고 목록에서 빠집니다."),
+    ("Only the owner or an admin can change roles, cancel invites and remove people.", "역할 변경, 초대 취소, 사람 제거는 소유자나 관리자만 할 수 있습니다."),
 ];

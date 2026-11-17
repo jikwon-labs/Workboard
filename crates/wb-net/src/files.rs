@@ -185,7 +185,9 @@ fn request(
     extra: &[(&str, String)],
 ) -> Result<(), FileError> {
     if !name_ok(sha) {
-        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+        return Err(FileError::Other(
+            "That isn't a file name the server uses.".into(),
+        ));
     }
     let mut r = format!(
         "{} {}/files/{} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}:{}\r\nConnection: close\r\n",
@@ -214,8 +216,7 @@ fn read_line(r: &mut impl BufRead, line: &mut String) -> std::io::Result<usize> 
 
 fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
     let mut line = String::new();
-    read_line(r, &mut line)
-        .map_err(|e| FileError::Net(e.to_string()))?;
+    read_line(r, &mut line).map_err(|e| FileError::Net(e.to_string()))?;
     let status = line
         .split_whitespace()
         .nth(1)
@@ -229,9 +230,7 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
     };
     loop {
         line.clear();
-        if read_line(r, &mut line)
-            .map_err(|e| FileError::Net(e.to_string()))?
-            == 0
+        if read_line(r, &mut line).map_err(|e| FileError::Net(e.to_string()))? == 0
             || line == "\r\n"
             || line == "\n"
         {
@@ -285,7 +284,9 @@ fn fail(status: u16, body: &str) -> FileError {
 /// The size of a file on the server, or None when it isn't there.
 pub fn remote_size(addr: &str, auth: &Auth, sha: &str) -> Result<Option<u64>, FileError> {
     if !name_ok(sha) {
-        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+        return Err(FileError::Other(
+            "That isn't a file name the server uses.".into(),
+        ));
     }
     let (mut s, host, prefix) = open(addr)?;
     request(&mut s, "HEAD", (&host, &prefix), auth, sha, &[])?;
@@ -310,7 +311,9 @@ pub fn upload(
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<(), FileError> {
     if !name_ok(sha) {
-        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+        return Err(FileError::Other(
+            "That isn't a file name the server uses.".into(),
+        ));
     }
     let mut f = File::open(path).map_err(|e| FileError::Other(e.to_string()))?;
     let total = f
@@ -375,7 +378,9 @@ pub fn download(
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<(), FileError> {
     if !name_ok(sha) {
-        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+        return Err(FileError::Other(
+            "That isn't a file name the server uses.".into(),
+        ));
     }
     let part = dest.with_extension("part");
     if let Some(dir) = dest.parent() {

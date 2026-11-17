@@ -114,7 +114,7 @@ pub const T: &[(&str, &str)] = &[
     // what the team server (server/src/lib.rs) and its client (wb-net) say
     // when they refuse something; shown through together::server_text
     ("Choose another password.", "다른 비밀번호를 고르세요."),
-    ("Only the owner can make a code for an admin or for someone who already has a password. They can sign in with their email and password, or use Forgot password.", "관리자나 이미 비밀번호가 있는 사람의 코드는 소유자만 만들 수 있습니다. 그 사람은 이메일과 비밀번호로 로그인하거나 비밀번호 찾기를 쓰면 됩니다."),
+    ("Only the owner can make a code for an admin or for someone who has already signed in. They can sign in with their email and password, or use Forgot password.", "관리자나 이미 로그인한 적이 있는 사람의 코드는 소유자만 만들 수 있습니다. 그 사람은 이메일과 비밀번호로 로그인하거나 비밀번호 찾기를 쓰면 됩니다."),
     ("Only the owner can make a code for the owner.", "소유자의 코드는 소유자만 만들 수 있습니다."),
     ("Only the owner can see and restore backups.", "백업은 소유자만 보고 복원할 수 있습니다."),
     ("Only the owner or an admin can do that.", "소유자나 관리자만 할 수 있습니다."),

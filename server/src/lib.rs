@@ -378,6 +378,11 @@ pub struct Saved {
     /// account of the person who made it, which becomes the owner's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<Account>,
+    /// Members who have ever signed in here (kept after Revoke). A code
+    /// signs in as its person, so admins may make one only for someone who
+    /// never came in (see admin_may_invite).
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub joined: std::collections::BTreeSet<u64>,
 }
 
 impl Saved {
@@ -408,7 +413,24 @@ impl Saved {
     }
 
     /// Sign a device in as `member`; returns (tag, token).
+    /// Take back `member`'s sign-ins on every device but `keep`, with those
+    /// devices' push tokens. Returns the devices to kick.
+    fn sign_out_others(&mut self, member: u64, keep: &str) -> Vec<String> {
+        let gone: Vec<String> = self
+            .devices
+            .iter()
+            .filter(|(id, d)| d.member == member && id.as_str() != keep)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &gone {
+            self.devices.remove(id);
+            self.push.remove(id);
+        }
+        gone
+    }
+
     fn add_device(&mut self, device: &str, member: u64, asked_tag: Option<u16>) -> (u16, String) {
+        self.joined.insert(member);
         let old = self.devices.remove(device);
         let tag = old
             .map(|d| d.tag)
@@ -526,9 +548,15 @@ impl Saved {
 
     /// Whether an admin (not only the owner) may make and see a code for
     /// `member`: a code signs in as that person, so only for plain members
-    /// who haven't set up an account (new people).
+    /// who have never come in (new people). Otherwise an admin could sign
+    /// in as someone already here, with or without a password (Revoke
+    /// deletes the password, so "has no account" alone isn't enough), and
+    /// read their messages.
     fn admin_may_invite(&self, member: u64) -> bool {
-        self.role_of(member) == Role::Member && !self.accounts.contains_key(&member)
+        self.role_of(member) == Role::Member
+            && !self.accounts.contains_key(&member)
+            && !self.joined.contains(&member)
+            && !self.devices.values().any(|d| d.member == member)
     }
 
     /// Everyone the workspace knows, with their access, as `viewer` may see
@@ -1502,6 +1530,11 @@ impl Hub {
             g.saved.accounts.insert(member, hashed.with_email(&kept));
             // a new password: codes made for them earlier no longer sign in
             g.saved.invites.retain(|_, i| i.member != member);
+            // and whoever knew the old one (or took a device) is signed out
+            let gone = g.saved.sign_out_others(member, device);
+            if !gone.is_empty() {
+                let _ = self.kicks.send(Arc::new(gone));
+            }
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(code) = given(&h.invite) {
@@ -1694,17 +1727,37 @@ impl Hub {
         (member, role, tag, Some(token))
     }
 
+    /// `device` is still signed in here as `member`.
+    fn device_is(&self, device: &str, member: u64) -> bool {
+        let g = self.inner.lock().unwrap();
+        g.saved
+            .devices
+            .get(device)
+            .is_some_and(|d| d.member == member)
+    }
+
     /// Set up `member`'s account or change its password. The hashing happens
     /// outside the hub's lock (see sign_in).
     fn set_password(
         &self,
         member: u64,
+        device: &str,
         email: &str,
         password: &str,
         old: Option<&str>,
     ) -> Result<Msg, String> {
         let existing = {
             let mut g = self.inner.lock().unwrap();
+            // a device whose access was taken back (Revoke deletes the
+            // password) can't set up a new one
+            if !g
+                .saved
+                .devices
+                .get(device)
+                .is_some_and(|d| d.member == member)
+            {
+                return Err("Your access to this server was removed.".into());
+            }
             let existing = g.saved.accounts.get(&member).cloned();
             if let Some(a) = &existing {
                 if let Some(why) = g.locked(&a.email) {
@@ -1745,6 +1798,14 @@ impl Hub {
         // a code made for them earlier no longer signs in as them: with a
         // password they sign in with it (or Forgot password)
         g.saved.invites.retain(|_, i| i.member != member);
+        // a changed password signs out their other devices: whoever knew the
+        // old one (or took a device) is out
+        if existing.is_some() {
+            let gone = g.saved.sign_out_others(member, device);
+            if !gone.is_empty() {
+                let _ = self.kicks.send(Arc::new(gone));
+            }
+        }
         g.dirty = true;
         drop(g);
         let _ = self.access.send(EVERYONE);
@@ -2095,7 +2156,7 @@ impl Hub {
                 // a code signs in as that person: admins make them only for
                 // members who haven't set up an account yet
                 if me != Role::Owner && !g.saved.admin_may_invite(who) {
-                    return Reply::Denied("Only the owner can make a code for an admin or for someone who already has a password. They can sign in with their email and password, or use Forgot password.".into());
+                    return Reply::Denied("Only the owner can make a code for an admin or for someone who has already signed in. They can sign in with their email and password, or use Forgot password.".into());
                 }
                 g.saved.drop_expired_invites(now_ms());
                 let code = g.saved.make_invite(who, role);
@@ -2884,6 +2945,15 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     // listen before sending the copy so no update falls in between
     let mut updates = hub.updates.subscribe();
     let mut kicks = hub.kicks.subscribe();
+    // a Revoke between signing in and listening for kicks isn't heard: look
+    if !hub.device_is(&device, member) {
+        let _ = send(
+            &mut socket,
+            &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json(),
+        )
+        .await;
+        return;
+    }
     let mut access = hub.access.subscribe();
     let mut presence = hub.presence.subscribe();
     // this connection's requests don't bring it the access broadcast too
@@ -2909,11 +2979,15 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             biased;
             _ = stop.changed() => break,
             k = kicks.recv() => {
-                if let Ok(list) = k {
-                    if list.contains(&device) {
-                        let _ = send(&mut socket, &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json()).await;
-                        break;
-                    }
+                let out = match k {
+                    Ok(list) => list.contains(&device),
+                    // fell behind: whether this device is still signed in says it
+                    Err(broadcast::error::RecvError::Lagged(_)) => !hub.device_is(&device, member),
+                    Err(broadcast::error::RecvError::Closed) => false,
+                };
+                if out {
+                    let _ = send(&mut socket, &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json()).await;
+                    break;
                 }
             }
             a = access.recv() => {
@@ -2977,7 +3051,8 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                     }),
                     Some(Msg::SetPassword { email, password, old_password }) => {
                         let h = hub.clone();
-                        let r = tokio::task::spawn_blocking(move || h.set_password(member, &email, &password, old_password.as_deref())).await.unwrap_or_else(|_| Err("The server had a problem. Try again.".into()));
+                        let d = device.clone();
+                        let r = tokio::task::spawn_blocking(move || h.set_password(member, &d, &email, &password, old_password.as_deref())).await.unwrap_or_else(|_| Err("The server had a problem. Try again.".into()));
                         Some(match r {
                             Ok(m) => m.to_json(),
                             Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
@@ -3907,6 +3982,17 @@ mod tests {
             hub.inner.lock().unwrap().saved.accounts[&4].email,
             "di@team.io"
         );
+
+        // once someone has come in, an admin can't make a code that signs in
+        // as them, even without a password or after taking their access away
+        // (which deletes the password)
+        assert!(ask(2, 4).unwrap_err().contains("Only the owner"));
+        assert!(matches!(
+            hub.request(2, EVERYONE, Msg::Revoke { member: 4 }),
+            Reply::To(_)
+        ));
+        assert!(ask(2, 4).unwrap_err().contains("Only the owner"));
+        assert!(ask(1, 4).is_ok());
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -4037,6 +4123,7 @@ mod tests {
         saved
             .accounts
             .insert(3, Account::new("cy@team.io", "cy-secret-33"));
+        saved.add_device("mac", 2, None);
         let hub = test_hub(
             &home,
             Some(json!({"members": [{"id": 2}, {"id": 3}]})),
@@ -4053,23 +4140,35 @@ mod tests {
         // too short, someone else's email: said, not counted
         for _ in 0..MAX_TRIES + 2 {
             assert!(hub
-                .set_password(2, "bo@team.io", "short", Some("bo-secret-22"))
+                .set_password(2, "mac", "bo@team.io", "short", Some("bo-secret-22"))
                 .unwrap_err()
                 .contains("at least"));
             assert!(hub
-                .set_password(2, "cy@team.io", "long-enough-1", Some("bo-secret-22"))
+                .set_password(
+                    2,
+                    "mac",
+                    "cy@team.io",
+                    "long-enough-1",
+                    Some("bo-secret-22")
+                )
                 .is_err());
         }
         assert_eq!(tries(&hub), None);
         // a wrong current password counts
         assert!(hub
-            .set_password(2, "bo@team.io", "long-enough-1", Some("wrong"))
+            .set_password(2, "mac", "bo@team.io", "long-enough-1", Some("wrong"))
             .unwrap_err()
             .contains("current password"));
         assert_eq!(tries(&hub), Some(1));
         // the right one changes it and forgets the wrong tries
         assert!(hub
-            .set_password(2, "bo@team.io", "long-enough-1", Some("bo-secret-22"))
+            .set_password(
+                2,
+                "mac",
+                "bo@team.io",
+                "long-enough-1",
+                Some("bo-secret-22")
+            )
             .is_ok());
         assert_eq!(tries(&hub), None);
         let _ = std::fs::remove_dir_all(&home);
@@ -4128,12 +4227,62 @@ mod tests {
     }
 
     #[test]
-    fn setting_a_password_ends_codes_made_for_that_person() {
-        let home = std::env::temp_dir().join(format!("wb-pwcode-{:x}", wb_sync::random_u64()));
+    fn a_new_password_signs_out_the_persons_other_devices() {
+        let home = std::env::temp_dir().join(format!("wb-pwout-{:x}", wb_sync::random_u64()));
+        let mut saved = Saved::default();
+        saved
+            .accounts
+            .insert(2, Account::new("bo@team.io", "bo-secret-22"));
         let hub = test_hub(
             &home,
             Some(json!({"members": [{"id": 2}, {"id": 3}]})),
-            Saved::default(),
+            saved,
+        );
+        let mut kicks = hub.kicks.subscribe();
+        let devices = |hub: &Hub| -> Vec<String> {
+            let g = hub.inner.lock().unwrap();
+            g.saved.devices.keys().cloned().collect()
+        };
+        {
+            let mut g = hub.inner.lock().unwrap();
+            for (d, m) in [("mac", 2), ("stolen", 2), ("cy-mac", 3)] {
+                g.saved.add_device(d, m, None);
+            }
+        }
+        // Bo changes the password on the Mac: the other device of Bo's is out
+        assert!(hub
+            .set_password(2, "mac", "bo@team.io", "bo-secret-23", Some("bo-secret-22"))
+            .is_ok());
+        assert_eq!(devices(&hub), ["cy-mac", "mac"]);
+        assert_eq!(*kicks.try_recv().unwrap(), ["stolen".to_string()]);
+        // a reset from a new phone signs out the Mac too
+        hub.inner
+            .lock()
+            .unwrap()
+            .resets
+            .insert("bo@team.io".into(), ("ABCD-EFGH-JKMN".into(), now_ms()));
+        assert!(hub
+            .sign_in(&Hello {
+                email: Some("bo@team.io".into()),
+                reset_code: Some("ABCD-EFGH-JKMN".into()),
+                new_password: Some("bo-secret-24".into()),
+                ..hello("phone")
+            })
+            .is_ok());
+        assert_eq!(devices(&hub), ["cy-mac", "phone"]);
+        assert_eq!(*kicks.try_recv().unwrap(), ["mac".to_string()]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn setting_a_password_ends_codes_made_for_that_person() {
+        let home = std::env::temp_dir().join(format!("wb-pwcode-{:x}", wb_sync::random_u64()));
+        let mut saved = Saved::default();
+        saved.add_device("mac", 2, None);
+        let hub = test_hub(
+            &home,
+            Some(json!({"members": [{"id": 2}, {"id": 3}]})),
+            saved,
         );
         let (bo, cy) = {
             let mut g = hub.inner.lock().unwrap();
@@ -4144,7 +4293,7 @@ mod tests {
         };
         // Bo signs in with an admin's code on one computer and sets a password
         assert!(hub
-            .set_password(2, "bo@team.io", "bo-secret-22", None)
+            .set_password(2, "mac", "bo@team.io", "bo-secret-22", None)
             .is_ok());
         {
             let g = hub.inner.lock().unwrap();
@@ -4164,7 +4313,7 @@ mod tests {
         // the same after changing it, or a reset
         let again = hub.inner.lock().unwrap().saved.make_invite(2, Role::Member);
         assert!(hub
-            .set_password(2, "bo@team.io", "bo-secret-23", Some("bo-secret-22"))
+            .set_password(2, "mac", "bo@team.io", "bo-secret-23", Some("bo-secret-22"))
             .is_ok());
         assert!(!hub.inner.lock().unwrap().saved.invites.contains_key(&again));
         let third = {

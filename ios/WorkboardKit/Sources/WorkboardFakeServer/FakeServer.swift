@@ -753,7 +753,7 @@ public final class FakeServer: @unchecked Sendable {
             }
             if roleOf(who) == .owner && me != .owner { return deny("Only the owner can make a code for the owner.") }
             if me != .owner && !(roleOf(who) == .member && accounts[who] == nil) {
-                return deny("Only the owner can make a code for an admin or for someone who already has a password. They can sign in with their email and password, or use Forgot password.")
+                return deny("Only the owner can make a code for an admin or for someone who has already signed in. They can sign in with their email and password, or use Forgot password.")
             }
             for (k, v) in invites where v == who { invites[k] = nil }
             let code = makeCode()

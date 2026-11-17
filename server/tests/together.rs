@@ -422,6 +422,16 @@ fn say(text: &str, id: u64) -> impl FnOnce(&mut Value) + '_ {
     }
 }
 
+/// `say` as member `author` (a plain member can't post as someone else).
+fn say_as(text: &str, id: u64, author: u64) -> impl FnOnce(&mut Value) + '_ {
+    move |d: &mut Value| {
+        d["channels"][0]["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": id, "author": author, "text": text, "ts": now()}));
+    }
+}
+
 /// A sets up an empty server with a workspace, invites B, B joins.
 fn two_apps(port: u16) -> (App, App) {
     let mut a = App::connect(port, Some(workspace()));
@@ -445,7 +455,7 @@ fn a_chat_message_from_a_reaches_b() {
     b.wait("A's message at B", |d| {
         texts(d).contains(&"hello from A".to_string())
     });
-    b.change(say("and from B", 3001));
+    b.change(say_as("and from B", 3001, 2));
     a.wait("B's answer at A", |d| {
         texts(d).ends_with(&["hello from A".to_string(), "and from B".to_string()])
     });
@@ -481,7 +491,7 @@ fn a_task_deleted_by_a_does_not_come_back_from_b() {
     });
     b.wait("delete reaches B", |d| task_names(d) == ["Plan"]);
     // B keeps working and sends its whole copy again
-    b.change(say("still here", 3002));
+    b.change(say_as("still here", 3002, 2));
     a.wait("B's message at A", |d| {
         texts(d).contains(&"still here".to_string())
     });
@@ -492,7 +502,7 @@ fn a_task_deleted_by_a_does_not_come_back_from_b() {
     wb_sync::stamp(&stale, &mut meta, now() - 100_000);
     stale["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
     b.client.push(stale);
-    b.change(say("after the stale copy", 3003));
+    b.change(say_as("after the stale copy", 3003, 2));
     a.wait("message after the stale copy", |d| {
         texts(d).contains(&"after the stale copy".to_string())
     });
@@ -2414,7 +2424,7 @@ fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
         d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2, 3], "messages": [{"id": 21, "author": 1, "text": "secret", "ts": 1}, {"id": 22, "author": 2, "text": "sneaky", "ts": now()}], "last_read": 0}));
         d["channels"].as_array_mut().unwrap().push(json!({"id": 30, "name": "taken over", "kind": "Channel", "private": false, "topic": "", "members": [1, 2, 3], "messages": [], "last_read": 0}));
     });
-    b.change(say("marker 2", 3201));
+    b.change(say_as("marker 2", 3201, 2));
     a.wait("marker 2 at A", |d| {
         texts(d).contains(&"marker 2".to_string())
     });
@@ -2446,7 +2456,7 @@ fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
         b.meta().tombs.contains_key(&20) && b.meta().tombs.contains_key(&21),
         "B's copy did mark them deleted"
     );
-    b.change(say("marker 3", 3202));
+    b.change(say_as("marker 3", 3202, 2));
     a.wait("marker 3 at A", |d| {
         texts(d).contains(&"marker 3".to_string())
     });
@@ -2845,7 +2855,7 @@ fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
         );
     }
     // B keeps working; nothing of it deletes the channels for the others
-    b.change(say("marker 2", 3301));
+    b.change(say_as("marker 2", 3301, 2));
     assert!(!b.meta().tombs.contains_key(&30) && !b.meta().tombs.contains_key(&40));
     a.wait("marker 2 at A", |d| {
         texts(d).contains(&"marker 2".to_string())
@@ -2916,7 +2926,7 @@ fn personal_spaces_and_private_docs_stay_with_their_owner() {
         d["docs"].as_array_mut().unwrap().retain(|x| x["id"] != 80);
     });
     assert!(b.meta().tombs.contains_key(&50) && b.meta().tombs.contains_key(&52));
-    b.change(say("marker 1", 3401));
+    b.change(say_as("marker 1", 3401, 2));
     a.wait("marker 1 at A", |d| {
         texts(d).contains(&"marker 1".to_string())
     });
@@ -3349,7 +3359,7 @@ fn after_the_first_copy_only_what_changed_travels() {
     );
     assert!(last.get("members").is_none() && last.get("channels").is_none());
     // a message: the channel comes with only the new message in it
-    b.change(say("from B", 3001));
+    b.change(say_as("from B", 3001, 2));
     a.wait("B's message at A", |d| {
         texts(d).contains(&"from B".to_string())
     });
@@ -3768,7 +3778,8 @@ fn has_none(d: &Value) -> bool {
 /// A marker message from `from` that `to` waits for: everything `from`
 /// sent before it has been merged.
 fn round_trip(from: &mut App, to: &mut App, text: &str, id: u64) {
-    from.change(say(text, id));
+    let author = from.member.expect("signed in");
+    from.change(say_as(text, id, author));
     to.wait(text, |d| texts(d).contains(&text.to_string()));
 }
 
@@ -4578,7 +4589,7 @@ fn one_server_answers_on_two_addresses_as_one_team() {
     b.wait("B, on the other address, gets the team's copy", |d| {
         task_names(d) == ["Plan", "Ship"]
     });
-    b.change(say("from the other side", 600));
+    b.change(say_as("from the other side", 600, 2));
     a.wait("B's message reaches A", |d| {
         texts(d).contains(&"from the other side".to_string())
     });
@@ -4701,6 +4712,106 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
                 .unwrap()
                 .iter()
                 .any(|m| m["id"] == 9005)
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A plain member sending a copy made by hand: they can't post as someone
+/// else, change or delete someone else's message or comment, or bring in
+/// "imported" history; reacting to Ann's message, their own messages and
+/// comments, and deleting their own still go through.
+#[test]
+fn a_plain_member_cant_write_as_someone_else_or_change_their_words() {
+    let home = temp_home("authors");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| {
+        d["tasks"][0]["activity"] = json!([
+            {"id": 8001, "ts": 1, "author": 1, "text": "Ann's note", "comment": true},
+            {"id": 8004, "ts": 2, "author": 1, "text": "Ann's question", "comment": true}
+        ]);
+        d["channels"][0]["messages"][0]["replies"] =
+            json!([{"id": 12, "author": 1, "text": "Ann's reply", "ts": 2}]);
+    });
+    b.wait("Ann's comments reach Bo", |d| {
+        d["tasks"][0]["activity"].as_array().unwrap().len() == 2
+            && d["channels"][0]["messages"][0]["replies"][0]["id"] == 12
+    });
+    b.change(|d| {
+        let msgs = d["channels"][0]["messages"].as_array_mut().unwrap();
+        msgs[0]["text"] = json!("Ann says Bo is boss");
+        msgs[0]["reactions"] = json!([{"emoji": "👍", "users": [2]}]);
+        msgs[0]["replies"][0]["text"] = json!("changed reply");
+        msgs.push(json!({"id": 7001, "author": 1, "text": "forged by Bo", "ts": now()}));
+        msgs.push(json!({"id": 7002, "author": 2, "text": "Bo's own", "ts": now()}));
+        msgs.push(json!({"id": 7003, "author": 2, "text": "fake history", "ts": 1, "imported": "slack:C1:1"}));
+        msgs.push(json!({"author": 1, "text": "no id", "ts": now()}));
+        let acts = d["tasks"][0]["activity"].as_array_mut().unwrap();
+        acts[0]["text"] = json!("Ann's note, edited by Bo");
+        acts[1]["resolved"] = json!(true);
+        acts.push(json!({"id": 8002, "ts": 3, "author": 1, "text": "forged comment", "comment": true}));
+        acts.push(json!({"id": 8003, "ts": 4, "author": 2, "text": "Bo's comment", "comment": true}));
+    });
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    let honest = |d: &Value| {
+        let text = d.to_string();
+        let m = &d["channels"][0]["messages"];
+        m[0]["text"] == "hi"
+            && m[0]["replies"][0]["text"] == "Ann's reply"
+            && m[0]["reactions"][0]["users"] == json!([2])
+            && text.contains("Bo's own")
+            && text.contains("Bo's comment")
+            && text.contains("Ann's note\"")
+            && d["tasks"][0]["activity"][1]["resolved"] == true
+            && !text.contains("forged")
+            && !text.contains("fake history")
+            && !text.contains("edited by Bo")
+            && !text.contains("Bo is boss")
+    };
+    a.wait("Ann has only Bo's honest changes", |d| {
+        honest(d) && !d.to_string().contains("no id")
+    });
+    // (the entry without an id stays only in Bo's own copy)
+    b.wait("Bo's copy is the team's again", honest);
+    // deleting Ann's message, reply and comment does nothing; Bo's own go
+    b.change(|d| {
+        let msgs = d["channels"][0]["messages"].as_array_mut().unwrap();
+        msgs[0]["replies"] = json!([]);
+        msgs.retain(|m| m["id"] != 7002);
+        let m11 = msgs.iter().position(|m| m["id"] == 11).unwrap();
+        msgs.remove(m11);
+        d["tasks"][0]["activity"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|x| x["author"] != 1 && x["id"] != 8003);
+    });
+    assert!(b.meta().tombs.contains_key(&11));
+    round_trip(&mut b, &mut a, "after the deletes", 3010);
+    let text = a.data.to_string();
+    assert!(!text.contains("Bo's own") && !text.contains("Bo's comment"));
+    assert!(
+        text.contains("\"hi\"") && text.contains("Ann's reply") && text.contains("Ann's question"),
+        "Ann's words stay: {}",
+        a.data["channels"][0]
+    );
+    b.wait("Bo gets Ann's words back", |d| {
+        let text = d.to_string();
+        text.contains("\"hi\"") && text.contains("Ann's reply") && text.contains("Ann's note\"")
+    });
+    // an admin is trusted as before (Import from Slack brings others' words)
+    a.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Admin,
+    });
+    b.until("B learns it is admin", |b| b.role == Some(Role::Admin));
+    b.change(|d| {
+        d["channels"][0]["messages"].as_array_mut().unwrap().push(
+            json!({"id": 7010, "author": 1, "text": "imported for Ann", "ts": 1, "imported": "slack:C1:2"}),
+        );
+    });
+    a.wait("an admin's import reaches Ann", |d| {
+        d.to_string().contains("imported for Ann")
     });
     server.stop();
     let _ = std::fs::remove_dir_all(&home);

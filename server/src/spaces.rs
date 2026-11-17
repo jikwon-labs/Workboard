@@ -25,7 +25,9 @@
 // a plain member (`guard_people`): only the owner and admins add or remove
 // people, change anyone else's entry or any role, rename or recolour the
 // workspace, turn its features on or off, and make, change or delete custom
-// fields, automations, templates and teams.
+// fields, automations, templates and teams. And chat messages and task
+// comments stay their authors' (`guard_authors`): a plain member can't write
+// as someone else or change or delete what someone else wrote.
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -450,6 +452,7 @@ impl Cx {
         for path in ADMIN_ITEMS {
             self.guard_items(canon, data, path, &|_| true, &|_| true, None, &[]);
         }
+        self.guard_authors(canon, data, member);
         for path in ADMIN_VALUES {
             let theirs = self.dmeta.values.get(*path).copied().unwrap_or(0);
             let team_stamp = self.cmeta.values.get(*path).copied().unwrap_or(0);
@@ -463,6 +466,197 @@ impl Cx {
                 set_value_at(data, path, team_value);
             }
         }
+    }
+}
+
+/// What only a message's author changes: what it says and who said it.
+/// Anyone may react to it, pin it or make a task from it.
+pub const MESSAGE_KEYS: &[&str] = &[
+    "author",
+    "text",
+    "ts",
+    "edited",
+    "attachments",
+    "post_title",
+    "post_type",
+    "call",
+    "mentions",
+    "imported",
+];
+/// What only a task comment's author changes. Anyone may react to it,
+/// resolve it or assign it.
+pub const COMMENT_KEYS: &[&str] = &[
+    "author", "text", "ts", "edited", "comment", "post", "parent",
+];
+
+fn author_of(v: &Value) -> Option<u64> {
+    u64_at(v, "author")
+}
+
+fn is_comment(v: &Value) -> bool {
+    v.get("comment").and_then(|c| c.as_bool()) == Some(true)
+}
+
+/// Chat messages, with their thread replies, by id.
+fn collect_messages<'a>(msgs: &'a [Value], out: &mut HashMap<u64, &'a Value>) {
+    for m in msgs {
+        if let Some(id) = id_of(m) {
+            out.insert(id, m);
+        }
+        collect_messages(array(m, "replies"), out);
+    }
+}
+
+impl Cx {
+    /// A plain member: chat messages (with their thread replies) and task
+    /// comments belong to whoever wrote them, as the app has it (Edit and
+    /// Delete only on one's own). They may react to anyone's, pin it, make
+    /// a task from it, resolve or assign a comment, but not write as someone
+    /// else, change what someone else wrote, or delete it. History brought
+    /// in by an import comes only from an owner or admin (Import from Slack).
+    fn guard_authors(&mut self, canon: &Value, data: &mut Value, member: u64) {
+        let mut messages = HashMap::new();
+        for ch in array(canon, "channels") {
+            collect_messages(array(ch, "messages"), &mut messages);
+        }
+        let comments: HashMap<u64, &Value> = array(canon, "tasks")
+            .iter()
+            .flat_map(|t| array(t, "activity"))
+            .filter(|a| is_comment(a))
+            .filter_map(|a| id_of(a).map(|i| (i, a)))
+            .collect();
+        for ch in array_mut(data, "channels").into_iter().flatten() {
+            if let Some(m) = ch.get_mut("messages") {
+                self.fix_written(m, &messages, member, true);
+            }
+        }
+        for t in array_mut(data, "tasks").into_iter().flatten() {
+            if let Some(a) = t.get_mut("activity") {
+                self.fix_written(a, &comments, member, false);
+            }
+        }
+        // deletes of what someone else wrote are undone, unless what it is
+        // in goes (a channel or task they may delete, their own message
+        // with its thread)
+        for ch in array(canon, "channels") {
+            if id_of(ch).is_some_and(|c| !self.dmeta.tombs.contains_key(&c)) {
+                self.keep_messages(array(ch, "messages"), member);
+            }
+        }
+        for t in array(canon, "tasks") {
+            if id_of(t).is_none_or(|i| self.dmeta.tombs.contains_key(&i)) {
+                continue;
+            }
+            let acts: Vec<&Value> = array(t, "activity")
+                .iter()
+                .filter(|a| is_comment(a))
+                .collect();
+            // replies after the comments they answer
+            for replies in [false, true] {
+                for a in &acts {
+                    let parent = u64_at(a, "parent");
+                    if parent.is_some() != replies || author_of(a) == Some(member) {
+                        continue;
+                    }
+                    if parent.is_some_and(|p| self.dmeta.tombs.contains_key(&p)) {
+                        continue;
+                    }
+                    if let Some(id) = id_of(a) {
+                        self.undelete(id);
+                    }
+                }
+            }
+        }
+    }
+
+    fn keep_messages(&mut self, msgs: &[Value], member: u64) {
+        for m in msgs {
+            let Some(id) = id_of(m) else { continue };
+            if author_of(m) != Some(member) {
+                self.undelete(id);
+            }
+            if !self.dmeta.tombs.contains_key(&id) {
+                self.keep_messages(array(m, "replies"), member);
+            }
+        }
+    }
+
+    /// Their messages (`chat`, with replies) or a task's activity: what
+    /// someone else wrote keeps its author and words; who wrote one stays
+    /// who wrote it; a new one is theirs or it is left out.
+    fn fix_written(
+        &mut self,
+        list: &mut Value,
+        team: &HashMap<u64, &Value>,
+        member: u64,
+        chat: bool,
+    ) {
+        let Some(arr) = list.as_array_mut() else {
+            return;
+        };
+        let keys = if chat { MESSAGE_KEYS } else { COMMENT_KEYS };
+        let mut out = Vec::with_capacity(arr.len());
+        for mut e in std::mem::take(arr) {
+            let Some(id) = id_of(&e) else {
+                // every message has an id: one without can only be made up
+                // (task activity got ids from fill_activity_ids)
+                if !chat {
+                    out.push(e);
+                }
+                continue;
+            };
+            match team.get(&id) {
+                Some(t) => {
+                    let protect: &[&str] = if author_of(t) == Some(member) {
+                        &["author"]
+                    } else {
+                        keys
+                    };
+                    let change = self.their_change(id);
+                    let mut changed = false;
+                    for k in protect {
+                        if e.get(*k) == t.get(*k) {
+                            continue;
+                        }
+                        // a copy that leaves a field out changes nothing
+                        changed |= e.get(*k).is_some();
+                        match (t.get(*k), e.as_object_mut()) {
+                            (Some(v), Some(o)) => {
+                                o.insert(k.to_string(), v.clone());
+                            }
+                            (None, Some(o)) => {
+                                o.remove(*k);
+                            }
+                            _ => {}
+                        }
+                        if let Some(f) = self.dmeta.fields.get_mut(&id) {
+                            f.remove(*k);
+                        }
+                    }
+                    if changed {
+                        self.out.bump.insert(id, (change, 0));
+                        self.out.refused = true;
+                    }
+                }
+                None => {
+                    let written = chat || is_comment(&e);
+                    let imported = e.get("imported").is_some_and(|i| !i.is_null());
+                    let forged = written && (author_of(&e) != Some(member) || imported);
+                    // (one the team deleted coming back from the Trash is no forgery)
+                    if forged && !self.cmeta.tombs.contains_key(&id) {
+                        self.leave_out(&wb_sync::ids_within(&e));
+                        continue;
+                    }
+                }
+            }
+            if chat {
+                if let Some(r) = e.get_mut("replies") {
+                    self.fix_written(r, team, member, true);
+                }
+            }
+            out.push(e);
+        }
+        *arr = out;
     }
 }
 
@@ -498,7 +692,8 @@ pub fn guard(canon: &Value, data: &mut Value, member: u64, manages: bool, now: i
     if all_theirs && manages {
         return PutBack::default();
     }
-    if !all_theirs {
+    // (a plain member's comments are checked one by one: see guard_authors)
+    if !all_theirs || !manages {
         wb_sync::fill_activity_ids(data);
     }
     let mut cx = Cx {

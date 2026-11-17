@@ -1,6 +1,7 @@
 // workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
 // workboard-server invite-email EMAIL [--home FOLDER]  (new teammates, Member only)
-// workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER]
+// workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER] [--workspace ID]
+// workboard-server workspaces [--home FOLDER]
 //
 // Listens on 127.0.0.1 port 8787 by default. That is where Cloudflare
 // Tunnel's connector (cloudflared) on the same Mac reaches it; the team
@@ -21,6 +22,7 @@ const USAGE: &str = "usage:
       --home   folder that keeps the team's copy
                (default: $WORKBOARD_SERVER_HOME, else ~/Library/Application Support/WorkboardServer)
 
+  workboard-server workspaces                   the workspaces on this server (id, name, people)
   workboard-server people                       who is in the workspace, their role and computers
   workboard-server backups                      list the backups
   workboard-server restore FILE                 go back to a backup (a file from `backups`)
@@ -28,7 +30,10 @@ const USAGE: &str = "usage:
                                                 (R: member, admin or owner; Owner recovery: invite MEMBER --role owner)
   workboard-server invite-email EMAIL           new teammate invite (Member only; no --role)
                                                 re-invites only unregistered Members; never resets an account
-  workboard-server mail-test ADDRESS            send a test mail with the settings in mail.json";
+  workboard-server mail-test ADDRESS            send a test mail with the settings in mail.json
+
+  people, backups, restore, invite and invite-email work on the server's first
+  workspace; --workspace ID (from `workspaces`) picks another.";
 
 fn main() {
     let mut bind: Option<String> = std::env::var("WORKBOARD_SERVER_BIND")
@@ -37,6 +42,7 @@ fn main() {
     let mut port: u16 = wb_net::DEFAULT_PORT;
     let mut home: Option<PathBuf> = None;
     let mut role: Option<String> = None;
+    let mut workspace: Option<String> = None;
     let mut words: Vec<String> = vec![];
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -49,6 +55,7 @@ fn main() {
             }
             ("--home", Some(v)) => home = Some(PathBuf::from(v)),
             ("--role", Some(v)) => role = Some(v),
+            ("--workspace", Some(v)) => workspace = Some(v),
             ("-h" | "--help", _) => {
                 println!("{}", USAGE);
                 return;
@@ -62,14 +69,28 @@ fn main() {
         }
         i += 2;
     }
-    let home = home.unwrap_or_else(workboard_server::home_dir);
+    let root = home.unwrap_or_else(workboard_server::home_dir);
+    let home = match workspace.as_deref().filter(|w| !w.is_empty()) {
+        None => root.clone(),
+        Some(id) => {
+            let dir = root.join(workboard_server::registry::WORKSPACES_DIR).join(id);
+            if !workboard_server::registry::id_ok(id) || !dir.is_dir() {
+                fail(&format!(
+                    "There's no workspace {} on this server (see `workboard-server workspaces`)",
+                    id
+                ));
+            }
+            dir
+        }
+    };
     match words
         .iter()
         .map(|s| s.as_str())
         .collect::<Vec<_>>()
         .as_slice()
     {
-        [] => serve(bind, port, home),
+        [] => serve(bind, port, root),
+        ["workspaces"] => workspaces(&root),
         ["people"] => people(&home),
         ["backups"] => backups(&home),
         ["restore", file] => {
@@ -106,7 +127,7 @@ fn main() {
                 workboard_server::normalize_invite_email(email).unwrap_or_else(|e| fail(&e));
             request(&home, json!({"invite_email": email}));
         }
-        ["mail-test", to] => mail_test(&home, to),
+        ["mail-test", to] => mail_test(&root, to),
         _ => fail(USAGE),
     }
 }
@@ -208,6 +229,47 @@ fn request(home: &std::path::Path, req: serde_json::Value) {
             home.join(workboard_server::RESULT_FILE).display()
         ),
         Err(e) => fail(&e.to_string()),
+    }
+}
+
+fn workspaces(root: &std::path::Path) {
+    let mut homes = vec![(String::new(), root.to_path_buf())];
+    if let Ok(rd) = std::fs::read_dir(root.join(workboard_server::registry::WORKSPACES_DIR)) {
+        let mut more: Vec<(String, std::path::PathBuf)> = rd
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| Some((e.file_name().to_str()?.to_string(), e.path())))
+            .filter(|(id, _)| workboard_server::registry::id_ok(id))
+            .collect();
+        more.sort();
+        homes.extend(more);
+    }
+    println!("{:<18} {:<28} {:>6}  address", "id", "name", "people");
+    for (id, home) in homes {
+        let saved = workboard_server::load_saved(&home).unwrap_or_default();
+        let name = std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE))
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .map(|c| {
+                c.get("workspace")
+                    .and_then(|w| w.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "(not set up yet)".into());
+        let people: std::collections::BTreeSet<u64> =
+            saved.devices.values().map(|d| d.member).collect();
+        println!(
+            "{:<18} {:<28} {:>6}  {}",
+            if id.is_empty() { "(first)" } else { &id },
+            name,
+            people.len(),
+            if id.is_empty() {
+                "the server's address".to_string()
+            } else {
+                format!("the server's address + /w/{}", id)
+            }
+        );
     }
 }
 

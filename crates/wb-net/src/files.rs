@@ -145,7 +145,9 @@ fn body<'a, R: BufRead>(r: &'a mut R, head: &Head) -> Box<dyn Read + 'a> {
     }
 }
 
-fn open(addr: &str) -> Result<(Conn, String), FileError> {
+/// A connection to the server of `addr`, the Host header to send, and
+/// what paths of the workspace start with (`workspace_prefix`).
+fn open(addr: &str) -> Result<(Conn, String, String), FileError> {
     let (host, port, url) = server_url(addr).map_err(FileError::Other)?;
     let secure = is_secure(&url);
     let s = conn::dial(&host, port, secure, Duration::from_secs(10)).map_err(FileError::Net)?;
@@ -157,20 +159,20 @@ fn open(addr: &str) -> Result<(Conn, String), FileError> {
         .find('/')
         .map(|i| start + i)
         .unwrap_or(url.len());
-    Ok((s, url[start..end].to_string()))
+    Ok((s, url[start..end].to_string(), crate::workspace_prefix(addr)))
 }
 
 fn request(
     s: &mut Conn,
     method: &str,
-    host: &str,
+    (host, prefix): (&str, &str),
     auth: &Auth,
     sha: &str,
     extra: &[(&str, String)],
 ) -> Result<(), FileError> {
     let mut r = format!(
-        "{} /files/{} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}:{}\r\nConnection: close\r\n",
-        method, sha, host, auth.device, auth.token
+        "{} {}/files/{} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}:{}\r\nConnection: close\r\n",
+        method, prefix, sha, host, auth.device, auth.token
     );
     for (k, v) in extra {
         r.push_str(&format!("{}: {}\r\n", k, v));
@@ -252,8 +254,8 @@ fn fail(status: u16, body: &str) -> FileError {
 
 /// The size of a file on the server, or None when it isn't there.
 pub fn remote_size(addr: &str, auth: &Auth, sha: &str) -> Result<Option<u64>, FileError> {
-    let (mut s, host) = open(addr)?;
-    request(&mut s, "HEAD", &host, auth, sha, &[])?;
+    let (mut s, host, prefix) = open(addr)?;
+    request(&mut s, "HEAD", (&host, &prefix), auth, sha, &[])?;
     let mut r = BufReader::new(s);
     let head = read_head(&mut r)?;
     match head.status {
@@ -283,11 +285,11 @@ pub fn upload(
         progress(total, total);
         return Ok(());
     }
-    let (mut s, host) = open(addr)?;
+    let (mut s, host, prefix) = open(addr)?;
     request(
         &mut s,
         "PUT",
-        &host,
+        (&host, &prefix),
         auth,
         sha,
         &[
@@ -341,13 +343,13 @@ pub fn download(
         std::fs::create_dir_all(dir).map_err(|e| FileError::Other(e.to_string()))?;
     }
     let have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
-    let (mut s, host) = open(addr)?;
+    let (mut s, host, prefix) = open(addr)?;
     let extra: Vec<(&str, String)> = if have > 0 {
         vec![("Range", format!("bytes={}-", have))]
     } else {
         vec![]
     };
-    request(&mut s, "GET", &host, auth, sha, &extra)?;
+    request(&mut s, "GET", (&host, &prefix), auth, sha, &extra)?;
     let mut r = BufReader::with_capacity(256 << 10, s);
     let head = read_head(&mut r)?;
     let (mut out, mut done, total) = match head.status {
@@ -419,19 +421,8 @@ pub fn download(
 /// Ok(true): a code is on its way if that email has an account. Ok(false):
 /// this server can't send email.
 pub fn forgot_password(addr: &str, email: &str) -> Result<bool, String> {
-    let (mut s, host) = open(addr).map_err(|e| e.explain())?;
-    let payload = serde_json::json!({ "email": email.trim() }).to_string();
-    let req = format!("POST /auth/forgot HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", host, payload.len(), payload);
-    s.write_all(req.as_bytes())
-        .map_err(|e| format!("Couldn't reach the server: {}", e))?;
-    let mut r = BufReader::new(s);
-    let head = read_head(&mut r).map_err(|e| e.explain())?;
-    let status = head.status;
-    let mut json = String::new();
-    body(&mut r, &head)
-        .take(64 << 10)
-        .read_to_string(&mut json)
-        .map_err(|e| format!("Couldn't reach the server: {}", e))?;
+    let payload = serde_json::json!({ "email": email.trim() });
+    let (status, json) = post_json(addr, "/auth/forgot", None, &payload)?;
     if status == 404 || status == 405 {
         return Err("This server can't reset passwords yet. Update workboard-server, or ask the owner or an admin for a new invite code.".into());
     }
@@ -445,6 +436,98 @@ pub fn forgot_password(addr: &str, email: &str) -> Result<bool, String> {
             .to_string());
     }
     Ok(v.get("mail").and_then(|m| m.as_bool()).unwrap_or(false))
+}
+
+/// POST `payload` to `path` below the workspace of `addr`; the status and
+/// the body as text.
+fn post_json(
+    addr: &str,
+    path: &str,
+    auth: Option<&Auth>,
+    payload: &serde_json::Value,
+) -> Result<(u16, String), String> {
+    let (mut s, host, prefix) = open(addr).map_err(|e| e.explain())?;
+    let payload = payload.to_string();
+    let auth = auth
+        .map(|a| format!("Authorization: Bearer {}:{}\r\n", a.device, a.token))
+        .unwrap_or_default();
+    let req = format!("POST {}{} HTTP/1.1\r\nHost: {}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", prefix, path, host, auth, payload.len(), payload);
+    s.write_all(req.as_bytes())
+        .map_err(|e| format!("Couldn't reach the server: {}", e))?;
+    let mut r = BufReader::new(s);
+    let head = read_head(&mut r).map_err(|e| e.explain())?;
+    let mut json = String::new();
+    body(&mut r, &head)
+        .take(64 << 10)
+        .read_to_string(&mut json)
+        .map_err(|e| format!("Couldn't reach the server: {}", e))?;
+    Ok((head.status, json))
+}
+
+/// The error a server's JSON answer gives, or a plain one for `status`.
+fn answer_error(status: u16, json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(json.trim())
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(|e| e.to_string()))
+        .unwrap_or_else(|| {
+            if status == 404 || status == 405 {
+                "This server keeps only one workspace. Update workboard-server to keep more.".into()
+            } else {
+                format!("The server answered {}.", status)
+            }
+        })
+}
+
+/// Make a new workspace on the server `addr` is on (POST /workspaces), as
+/// the person signed in with `auth` to the workspace at `addr`. Its address
+/// (`workspace_addr`); the app then sets it up as an empty server, signing
+/// in with that person's email.
+pub fn create_workspace(addr: &str, auth: &Auth) -> Result<String, String> {
+    let base = crate::server_part(addr);
+    // the token is checked against every workspace on the server
+    let (status, json) = post_json(&base, "/workspaces", Some(auth), &serde_json::json!({}))?;
+    if status != 200 {
+        return Err(answer_error(status, &json));
+    }
+    let id = serde_json::from_str::<serde_json::Value>(json.trim())
+        .ok()
+        .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(|i| i.to_string()))
+        .filter(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .ok_or("The server's answer didn't make sense.")?;
+    Ok(crate::workspace_addr(addr, &id))
+}
+
+/// The workspaces an email and password sign in to on the server `addr` is
+/// on (POST /auth/workspaces): (address, name). An older server that keeps
+/// one workspace answers with just `addr`.
+pub fn list_workspaces(
+    addr: &str,
+    email: &str,
+    password: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let base = crate::server_part(addr);
+    let payload = serde_json::json!({ "email": email.trim(), "password": password });
+    let (status, json) = post_json(&base, "/auth/workspaces", None, &payload)?;
+    if status == 404 || status == 405 {
+        return Ok(vec![(addr.trim().to_string(), String::new())]);
+    }
+    if status != 200 {
+        return Err(answer_error(status, &json));
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(json.trim()).map_err(|_| "The server's answer didn't make sense.")?;
+    Ok(v.get("workspaces")
+        .and_then(|w| w.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|w| {
+                    let id = w.get("id")?.as_str()?;
+                    let name = w.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    Some((crate::workspace_addr(addr, id), name.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 #[cfg(test)]

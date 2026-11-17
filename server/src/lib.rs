@@ -65,6 +65,7 @@ pub mod mail;
 pub use mail::{load_mail, MailCfg, MAIL_FILE, OUTBOX_DIR};
 pub mod push;
 pub use push::{load_apns, ApnsCfg, APNS_FILE};
+pub mod registry;
 pub mod spaces;
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
@@ -373,6 +374,10 @@ pub struct Saved {
     pub accounts: BTreeMap<u64, Account>,
     /// device id -> its push token (iPhones; see push.rs)
     pub push: BTreeMap<String, push::PushToken>,
+    /// A workspace made with POST /workspaces and not set up yet: the
+    /// account of the person who made it, which becomes the owner's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<Account>,
 }
 
 impl Saved {
@@ -1234,6 +1239,12 @@ impl Canon {
 
 struct Hub {
     home: PathBuf,
+    /// The server folder; the same as `home` for the first workspace. Setup
+    /// files (mail.json, apns.json, livekit.json) missing from `home` come from here.
+    root: PathBuf,
+    /// None for the server's first workspace, else its id: it lives in
+    /// root/workspaces/<id> and apps reach it at /w/<id> (see registry.rs).
+    id: Option<String>,
     /// Serialize disk snapshots with the email-invite commit (lock before inner).
     persistence: Mutex<()>,
     inner: Mutex<Inner>,
@@ -1256,6 +1267,82 @@ struct Hub {
 }
 
 impl Hub {
+    /// A workspace's hub, its copy and state read from `home`.
+    fn open(
+        home: PathBuf,
+        root: PathBuf,
+        id: Option<String>,
+        options: &Options,
+        pusher: Option<Arc<dyn push::Sender>>,
+        stop: watch::Receiver<bool>,
+    ) -> std::io::Result<Hub> {
+        std::fs::create_dir_all(&home)?;
+        let canon = read_json(&home.join(WORKSPACE_FILE))?;
+        let saved = load_saved(&home)?;
+        Ok(Hub {
+            home,
+            root,
+            id,
+            persistence: Mutex::new(()),
+            inner: Mutex::new(Inner {
+                canon,
+                saved,
+                dirty: false,
+                resets: Default::default(),
+                fails: Default::default(),
+                summary: None,
+            }),
+            updates: broadcast::channel(64).0,
+            kicks: broadcast::channel(16).0,
+            access: broadcast::channel(16).0,
+            stop,
+            connections: AtomicUsize::new(0),
+            max_file: options.max_file,
+            claim_wait: options.claim_wait,
+            pusher,
+            online: Mutex::new(Default::default()),
+        })
+    }
+
+    /// Where apps reach this workspace below the server's address: "" for
+    /// the first workspace, "/w/<id>" for the others.
+    fn prefix(&self) -> String {
+        self.id
+            .as_ref()
+            .map(|id| format!("/w/{}", id))
+            .unwrap_or_default()
+    }
+
+    /// The folder a setup file is read from: this workspace's folder when it
+    /// has its own, else the server folder.
+    fn setup_home(&self, file: &str) -> &Path {
+        if self.home.join(file).exists() {
+            &self.home
+        } else {
+            &self.root
+        }
+    }
+
+    /// The huddle room of a channel or DM in this workspace (channel ids
+    /// repeat between workspaces that share a LiveKit server).
+    fn room(&self, channel: u64) -> String {
+        match &self.id {
+            Some(id) => format!("wb-{}-{}", id, channel),
+            None => room_name(channel),
+        }
+    }
+
+    /// The workspace's name, as its copy says.
+    fn name(&self) -> String {
+        let g = self.inner.lock().unwrap();
+        g.canon
+            .as_ref()
+            .and_then(|c| c.get("workspace"))
+            .and_then(|w| w.as_str())
+            .unwrap_or("")
+            .to_string()
+    }
+
     fn flush(&self) {
         let _persistence = self.persistence.lock().unwrap();
         let (canon, saved) = {
@@ -1434,37 +1521,7 @@ impl Hub {
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let (Some(email), Some(pw)) = (given(&h.email), h.password.as_deref()) {
-            // the try counts as a wrong one until the password proves right,
-            // so many tries at once can't get past MAX_TRIES while they hash
-            let stored = {
-                let mut g = self.inner.lock().unwrap();
-                if let Some(why) = g.locked(email) {
-                    return Err(why);
-                }
-                g.failed(email);
-                g.saved
-                    .account_member(email)
-                    .map(|m| (m, g.saved.accounts[&m].clone()))
-            };
-            let ok = match &stored {
-                Some((_, a)) => a.check(pw),
-                None => {
-                    // as slow as a real check, so the answer doesn't tell who has an account
-                    let _ = Account::new("x@x.x", pw);
-                    false
-                }
-            };
-            let mut g = self.inner.lock().unwrap();
-            // the account may have changed or gone meanwhile
-            let member = stored
-                .filter(|(m, a)| ok && g.saved.accounts.get(m) == Some(a))
-                .map(|(m, _)| m);
-            let Some(member) = member else {
-                return Err(
-                    "That email and password don't match an account on this server.".into(),
-                );
-            };
-            g.fails.remove(&norm_email(email));
+            let (g, member) = self.check_password(email, pw)?;
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(token) = &h.token {
@@ -1519,6 +1576,19 @@ impl Hub {
                 }
             }
             if g.canon.is_none() && g.saved.devices.is_empty() {
+                // a workspace made with POST /workspaces is for the person
+                // who made it: they sign in to it with the account they
+                // already have on this server (registry.rs)
+                if let Some(seed) = g.saved.seed.clone() {
+                    let email = given(&h.email).unwrap_or("");
+                    if !same(&norm_email(email), &norm_email(&seed.email)) {
+                        return Err("This workspace is being set up by someone else.".into());
+                    }
+                    g.saved.seed = None;
+                    if h.new_password.is_none() {
+                        g.saved.accounts.insert(member, seed);
+                    }
+                }
                 if let Some(pw) = h.new_password.as_deref() {
                     let email = given(&h.email).unwrap_or("").trim().to_string();
                     if let Some(why) = g.saved.account_problem(member, &email, pw) {
@@ -1535,6 +1605,46 @@ impl Hub {
             }
         }
         Err("This server already has a workspace. Sign in with your email and password, or ask its owner or an admin for an invite code.".into())
+    }
+
+    /// The member whose account `email` and `pw` are, counting a wrong try
+    /// (and refusing while the email is locked). The lock is held on return
+    /// so the account can't change before it is used.
+    fn check_password(
+        &self,
+        email: &str,
+        pw: &str,
+    ) -> Result<(std::sync::MutexGuard<'_, Inner>, u64), String> {
+        // the try counts as a wrong one until the password proves right,
+        // so many tries at once can't get past MAX_TRIES while they hash
+        let stored = {
+            let mut g = self.inner.lock().unwrap();
+            if let Some(why) = g.locked(email) {
+                return Err(why);
+            }
+            g.failed(email);
+            g.saved
+                .account_member(email)
+                .map(|m| (m, g.saved.accounts[&m].clone()))
+        };
+        let ok = match &stored {
+            Some((_, a)) => a.check(pw),
+            None => {
+                // as slow as a real check, so the answer doesn't tell who has an account
+                let _ = Account::new("x@x.x", pw);
+                false
+            }
+        };
+        let mut g = self.inner.lock().unwrap();
+        // the account may have changed or gone meanwhile
+        let member = stored
+            .filter(|(m, a)| ok && g.saved.accounts.get(m) == Some(a))
+            .map(|(m, _)| m);
+        let Some(member) = member else {
+            return Err("That email and password don't match an account on this server.".into());
+        };
+        g.fails.remove(&norm_email(email));
+        Ok((g, member))
     }
 
     /// Give `device` a new token for `member`.
@@ -1615,7 +1725,8 @@ impl Hub {
     /// Email a password-reset code when `email` has an account (quietly
     /// does nothing otherwise). False when this server can't send email.
     fn forgot(&self, email: &str) -> bool {
-        let Some(cfg) = load_mail(&self.home) else {
+        let mail_home = self.setup_home(MAIL_FILE).to_path_buf();
+        let Some(cfg) = load_mail(&mail_home) else {
             return false;
         };
         if !email_ok(email) {
@@ -1637,11 +1748,12 @@ impl Hub {
             }
         };
         if let Some((to, code)) = target {
-            let home = self.home.clone();
             std::thread::spawn(move || {
-                if let Err(e) =
-                    mail::send(&home, &cfg, &mail::reset_mail(&to, &code, RESET_MINUTES))
-                {
+                if let Err(e) = mail::send(
+                    &mail_home,
+                    &cfg,
+                    &mail::reset_mail(&to, &code, RESET_MINUTES),
+                ) {
                     eprintln!("couldn't email a reset code to {}: {}", to, e);
                 }
             });
@@ -1658,7 +1770,8 @@ impl Hub {
         code: &str,
         connected_to: Option<&str>,
     ) -> (Option<String>, Option<String>) {
-        let Some(cfg) = load_mail(&self.home) else {
+        let mail_home = self.setup_home(MAIL_FILE);
+        let Some(cfg) = load_mail(mail_home) else {
             return (None, None);
         };
         let (to, workspace, inviter) = {
@@ -1676,7 +1789,8 @@ impl Hub {
         if !email_ok(&to) {
             return (None, None);
         }
-        let server = mail::link_address(&cfg, connected_to);
+        let server = mail::link_address(&cfg, connected_to)
+            .map(|s| format!("{}{}", s.trim().trim_end_matches('/'), self.prefix()));
         let m = mail::invite_mail(
             &to,
             &workspace,
@@ -1685,7 +1799,7 @@ impl Hub {
             server.as_deref(),
             INVITE_DAYS,
         );
-        match mail::send(&self.home, &cfg, &m) {
+        match mail::send(mail_home, &cfg, &m) {
             Ok(()) => (Some(to), None),
             Err(e) => (None, Some(e)),
         }
@@ -2032,8 +2146,8 @@ impl Hub {
 
     /// A token for the huddle of `channel`, for someone allowed in it.
     fn call(&self, member: u64, device: &str, channel: u64) -> Result<Msg, String> {
-        let cfg =
-            load_livekit(&self.home).ok_or("Voice huddles aren't set up on this server yet.")?;
+        let cfg = load_livekit(self.setup_home(LIVEKIT_FILE))
+            .ok_or("Voice huddles aren't set up on this server yet.")?;
         let g = self.inner.lock().unwrap();
         let canon = g
             .canon
@@ -2067,7 +2181,7 @@ impl Hub {
             .to_string();
         let token = call_token(
             &cfg,
-            &room_name(channel),
+            &self.room(channel),
             &format!("{}-{}", member, device),
             &name,
             now_ms() / 1000,
@@ -2457,10 +2571,13 @@ fn reached_at(h: &axum::http::HeaderMap) -> Option<String> {
 /// GET /join?code=...&email=...: the page an invite mail links to. It opens
 /// the app with everything filled in, and shows what to type otherwise.
 async fn join_route(
+    State(hub): State<Arc<Hub>>,
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let host = reached_at(&headers).unwrap_or_default();
+    let host = reached_at(&headers)
+        .map(|h| format!("{}{}", h, hub.prefix()))
+        .unwrap_or_default();
     let code = q
         .get("code")
         .map(|c| c.trim().to_string())
@@ -2883,52 +3000,38 @@ pub async fn serve_on(
     options: Options,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    std::fs::create_dir_all(&home)?;
-    let canon = read_json(&home.join(WORKSPACE_FILE))?;
-    let saved = load_saved(&home)?;
-    let pusher = options.push.clone().or_else(|| apns_sender(&home));
     let (stop_tx, stop_rx) = watch::channel(false);
     let stopping = stop_rx.clone();
-    let hub = Arc::new(Hub {
-        home,
-        persistence: Mutex::new(()),
-        inner: Mutex::new(Inner {
-            canon,
-            saved,
-            dirty: false,
-            resets: Default::default(),
-            fails: Default::default(),
-            summary: None,
-        }),
-        updates: broadcast::channel(64).0,
-        kicks: broadcast::channel(16).0,
-        access: broadcast::channel(16).0,
-        stop: stop_rx,
-        connections: AtomicUsize::new(0),
-        max_file: options.max_file,
-        claim_wait: options.claim_wait,
-        pusher,
-        online: Mutex::new(Default::default()),
-    });
-    // a request left while the server was off
-    hub.admin_file();
+    let registry = Arc::new(registry::Registry::open(home, options, stop_rx)?);
+    let hub = registry.first();
+    // requests left while the server was off
+    for h in registry.all() {
+        h.admin_file();
+    }
     let worker = {
-        let hub = hub.clone();
+        let registry = registry.clone();
         tokio::spawn(async move {
             let mut tick: u64 = 0;
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 tick += 1;
-                let hub = hub.clone();
+                let registry = registry.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    hub.flush();
-                    hub.admin_file();
-                    if tick % 60 == 1 {
-                        hub.backup_now();
+                    for hub in registry.all() {
+                        hub.flush();
+                        hub.admin_file();
+                        if tick % 60 == 1 {
+                            hub.backup_now();
+                        }
+                        // ten minutes after starting (after a backup), then daily
+                        if tick % 86_400 == 600 {
+                            hub.clean_up();
+                        }
                     }
-                    // ten minutes after starting (after a backup), then daily
-                    if tick % 86_400 == 600 {
-                        hub.clean_up();
+                    if tick % 3600 == 900 {
+                        for id in registry.clean_up() {
+                            println!("removed workspace {}: nobody set it up", id);
+                        }
                     }
                 })
                 .await;
@@ -2944,7 +3047,8 @@ pub async fn serve_on(
         .route("/files/{file}", get(files::get_file).put(files::put_file))
         .route("/auth/forgot", axum::routing::post(forgot_route))
         .route("/join", get(join_route))
-        .with_state(hub.clone());
+        .with_state(hub.clone())
+        .merge(registry::routes(registry.clone()));
     tokio::spawn(async move {
         shutdown.await;
         // open connections end themselves when they see this
@@ -2962,8 +3066,10 @@ pub async fn serve_on(
         .await
         .map(|_| ());
     worker.abort();
-    hub.flush();
-    hub.backup_now();
+    for hub in registry.all() {
+        hub.flush();
+        hub.backup_now();
+    }
     res
 }
 
@@ -3382,6 +3488,8 @@ mod tests {
     fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         Hub {
             home: home.to_path_buf(),
+            root: home.to_path_buf(),
+            id: None,
             persistence: Mutex::new(()),
             inner: Mutex::new(Inner {
                 canon,

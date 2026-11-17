@@ -38,7 +38,10 @@ use tungstenite::{Message, WebSocket};
 mod conn;
 mod files;
 pub use conn::{trust_certificate, Conn};
-pub use files::{download, forgot_password, remote_size, sha256_file, upload, Auth, FileError};
+pub use files::{
+    create_workspace, download, forgot_password, list_workspaces, remote_size, sha256_file, upload,
+    Auth, FileError,
+};
 
 pub const DEFAULT_PORT: u16 = 8787;
 pub const PATH: &str = "/ws";
@@ -518,6 +521,11 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, PATH),
     };
+    // a workspace other than the server's first: its connection is below it
+    let path = match workspace_id(path) {
+        Some(id) => format!("/w/{}{}", id, PATH),
+        None => path.to_string(),
+    };
     let (host, port) = if let Some(h) = hostport.strip_prefix('[') {
         // [ipv6]:port
         let end = h.find(']').ok_or("That address doesn't look right.")?;
@@ -543,6 +551,59 @@ pub fn server_url(addr: &str) -> Result<(String, u16, String), String> {
     let base = origin(&host, port, secure);
     let scheme = if secure { "wss" } else { "ws" };
     Ok((host, port, format!("{}://{}{}", scheme, base, path)))
+}
+
+/// The workspace id in an address's path ("/w/<id>" or "/w/<id>/ws"); None
+/// for the server's first workspace.
+fn workspace_id(path: &str) -> Option<&str> {
+    let rest = path.strip_prefix("/w/")?;
+    let id = rest
+        .strip_suffix(PATH)
+        .unwrap_or(rest)
+        .trim_end_matches('/');
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+/// What paths of a workspace's address start with on the server: "" for
+/// the server's first workspace, "/w/<id>" for the others (see the
+/// server's registry.rs).
+pub fn workspace_prefix(addr: &str) -> String {
+    let a = addr.trim().trim_end_matches('/');
+    let rest = a.find("://").map(|i| &a[i + 3..]).unwrap_or(a);
+    match rest.find('/').and_then(|i| workspace_id(&rest[i..])) {
+        Some(id) => format!("/w/{}", id),
+        None => String::new(),
+    }
+}
+
+/// The server part of an address, as typed, without any path.
+pub fn server_part(addr: &str) -> String {
+    let a = addr.trim().trim_end_matches('/');
+    let start = a.find("://").map(|i| i + 3).unwrap_or(0);
+    match a[start..].find('/') {
+        Some(i) => a[..start + i].to_string(),
+        None => a.to_string(),
+    }
+}
+
+/// The address of workspace `id` on the server `addr` is on ("" is the
+/// server's first workspace).
+pub fn workspace_addr(addr: &str, id: &str) -> String {
+    let base = server_part(addr);
+    if id.is_empty() {
+        base
+    } else {
+        format!("{}/w/{}", base, id)
+    }
+}
+
+/// Whether two addresses reach the same workspace ("macmini" and
+/// "ws://macmini:8787/ws" do).
+pub fn same_workspace(a: &str, b: &str) -> bool {
+    match (server_url(a), server_url(b)) {
+        (Ok(x), Ok(y)) => x.2.eq_ignore_ascii_case(&y.2),
+        _ => false,
+    }
 }
 
 /// host[:port] as it goes into a URL or a Host header: IPv6 in brackets,
@@ -1118,6 +1179,49 @@ fn session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_workspace_below_the_server_has_its_own_paths() {
+        assert_eq!(
+            server_url("macmini/w/ab12").unwrap().2,
+            "ws://macmini:8787/w/ab12/ws"
+        );
+        assert_eq!(
+            server_url("https://wb.example.com/w/ab12/").unwrap().2,
+            "wss://wb.example.com/w/ab12/ws"
+        );
+        assert_eq!(
+            server_url("ws://h:1/w/ab12/ws").unwrap().2,
+            "ws://h:1/w/ab12/ws"
+        );
+        // the first workspace keeps the addresses it always had
+        assert_eq!(server_url("http://h:1/ws").unwrap().2, "ws://h:1/ws");
+        assert_eq!(workspace_prefix("https://wb.example.com"), "");
+        assert_eq!(workspace_prefix("ws://h:1/ws"), "");
+        assert_eq!(workspace_prefix("https://wb.example.com/w/ab12"), "/w/ab12");
+        assert_eq!(workspace_prefix("macmini/w/ab12/ws"), "/w/ab12");
+        assert_eq!(
+            workspace_addr("https://wb.example.com/w/ab12", "cd34"),
+            "https://wb.example.com/w/cd34"
+        );
+        assert_eq!(workspace_addr("macmini:9000/w/ab12", ""), "macmini:9000");
+        assert_eq!(
+            server_part("https://wb.example.com/w/ab12"),
+            "https://wb.example.com"
+        );
+        // app updates come from the server, whichever workspace
+        assert_eq!(
+            updates_url("https://wb.example.com/w/ab12").unwrap(),
+            "https://wb.example.com/updates/appcast.xml"
+        );
+        assert!(same_workspace("macmini", "ws://macmini:8787/ws"));
+        assert!(same_workspace(
+            "macmini/w/ab12",
+            "ws://MACMINI:8787/w/ab12/ws"
+        ));
+        assert!(!same_workspace("macmini", "macmini/w/ab12"));
+        assert!(!same_workspace("macmini/w/ab12", "macmini/w/cd34"));
+    }
 
     #[test]
     fn addresses_people_type_become_urls() {

@@ -4658,3 +4658,206 @@ fn a_plain_member_cant_invite_remove_or_rename_and_gets_the_teams_version_back()
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+// ------------------------------------------------- several workspaces
+
+fn second_workspace() -> Value {
+    json!({
+        "workspace": "Second", "spaces": [], "members": [{"id": 1, "name": "Ann", "role": "Owner", "email": "ann@team.io"}], "me": 1, "next_id": 1, "favorites": [], "docs": [],
+        "tasks": [{"id": 500, "name": "Only in second", "activity": []}],
+        "channels": [{"id": 10, "name": "general", "kind": "Channel", "topic": "", "members": [], "messages": [], "last_read": 0}],
+        "extra": {"sync": {}}
+    })
+}
+
+fn stamped(mut d: Value) -> Value {
+    let mut meta = SyncMeta::default();
+    wb_sync::stamp(&d, &mut meta, now());
+    d["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    d
+}
+
+#[test]
+fn one_server_keeps_several_workspaces_apart() {
+    let home = mail_home("several");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let addr = format!("127.0.0.1:{}", port);
+
+    // Ann sets up the server's first workspace with a password
+    let mut a = App::start(
+        port,
+        stamped(emailed_workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            new_password: Some("ann-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    a.until("owner in", |a| a.role == Some(Role::Owner) && a.token.is_some());
+
+    // making a workspace needs a device signed in to this server
+    let (head, _) = http_post(port, "/workspaces", "{}");
+    assert!(head.starts_with("HTTP/1.1 401"), "{}", head);
+    let bad = wb_net::Auth {
+        device: a.device.clone(),
+        token: "nope".into(),
+    };
+    assert!(wb_net::create_workspace(&addr, &bad).is_err());
+    let addr2 = wb_net::create_workspace(&addr, &auth(&a)).unwrap();
+    assert!(addr2.starts_with(&format!("{}/w/", addr)), "{}", addr2);
+    let id = addr2.rsplit('/').next().unwrap().to_string();
+    assert!(home.join("workspaces").join(&id).is_dir());
+
+    // only the person who made it sets it up
+    let mut other = App::start_at(
+        &addr2,
+        stamped(second_workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("bo@team.io".into()),
+            ..Default::default()
+        },
+    );
+    assert!(refused_with(&mut other, "someone else refused").contains("someone else"));
+
+    // Ann sets it up with the account she has: no new password
+    let mut a2 = App::start_at(
+        &addr2,
+        stamped(second_workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            ..Default::default()
+        },
+    );
+    a2.until("owner of the second", |a| {
+        a.role == Some(Role::Owner) && a.token.is_some()
+    });
+    assert_eq!(a2.email.as_deref(), Some("ann@team.io"));
+
+    // the two copies stay apart
+    a2.change(|d| {
+        d["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 501, "name": "Second only too", "activity": []}))
+    });
+    a.change(|d| d["tasks"][0]["name"] = json!("Plan (first)"));
+    let mut b = sign_in(
+        port,
+        SignIn {
+            email: Some("ann@team.io".into()),
+            password: Some("ann-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    b.wait("first copy", |d| {
+        task_names(d).contains(&"Plan (first)".to_string())
+    });
+    assert!(!task_names(&b.data).iter().any(|n| n.contains("econd")));
+    let mut b2 = App::start_at(
+        &addr2,
+        Value::Null,
+        SignIn {
+            email: Some("ann@team.io".into()),
+            password: Some("ann-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    b2.wait("second copy", |d| {
+        task_names(d).contains(&"Second only too".to_string())
+    });
+    assert_eq!(b2.data["workspace"], "Second");
+    assert!(!task_names(&b2.data).contains(&"Plan (first)".to_string()));
+    assert_eq!(b2.role, Some(Role::Owner));
+
+    // the account's workspaces, with their addresses
+    let mut list = wb_net::list_workspaces(&addr2, "ANN@team.io", "ann-secret-1").unwrap();
+    list.sort();
+    let mut want = vec![
+        (addr.clone(), "Team".to_string()),
+        (addr2.clone(), "Second".to_string()),
+    ];
+    want.sort();
+    assert_eq!(list, want);
+    assert_eq!(
+        wb_net::list_workspaces(&addr, "bo@team.io", "whatever-1"),
+        Err("That email and password don't match an account on this server.".into())
+    );
+    assert!(wb_net::list_workspaces(&addr, "ann@team.io", "wrong-pass-1").is_err());
+
+    // a device of one workspace can't use another's files
+    let work = home.join("work");
+    let (path, sha, _) = some_file(&work, "p.jpg", 1000);
+    wb_net::upload(&addr2, &auth(&a2), &sha, &path, "image/jpeg", &mut |_, _| true).unwrap();
+    assert!(home
+        .join("workspaces")
+        .join(&id)
+        .join("files")
+        .join(&sha)
+        .is_file());
+    assert!(!home.join("files").join(&sha).exists());
+    assert!(wb_net::remote_size(&addr2, &auth(&a), &sha).is_err());
+    assert!(wb_net::remote_size(&addr, &auth(&a2), &sha).is_err());
+
+    // invites from the second workspace link to it
+    a2.change(|d| {
+        d["members"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 2, "name": "Cy", "role": "Member", "email": "cy@team.io"}))
+    });
+    a2.until("Cy is on the server", |a| {
+        a.people.iter().any(|p| p.member == 2)
+    });
+    let code = a2.invite(2, Role::Member);
+    let mail = wait_for_mail(&home, "cy@team.io", 1);
+    assert!(
+        mail.contains(&format!("http://{}/w/{}/join?code={}", addr, id, code)),
+        "{}",
+        mail
+    );
+    let (head, page) = http_get(port, &format!("/w/{}/join?code={}", id, code));
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    let page = String::from_utf8_lossy(&page);
+    assert!(page.contains(&format!("%2Fw%2F{}", id)), "{}", page);
+    let (head, _) = http_get(port, "/w/nosuch/join");
+    assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
+    let mut cy = App::start_at(
+        &addr2,
+        Value::Null,
+        SignIn {
+            invite: Some(code.clone()),
+            ..Default::default()
+        },
+    );
+    cy.wait("Cy has the second copy", |d| d["workspace"] == "Second");
+
+    // after a restart both are there and the apps get back in
+    let token2 = a2.token.clone().unwrap();
+    let device2 = a2.device.clone();
+    drop((a, a2, b, b2, cy, other));
+    server.stop();
+    let server = Server::start(&home, port);
+    let mut again = App::start_at(
+        &addr2,
+        Value::Null,
+        SignIn {
+            device: device2,
+            token: Some(token2),
+            ..Default::default()
+        },
+    );
+    again.wait("second copy after restart", |d| d["workspace"] == "Second");
+    assert_eq!(
+        wb_net::list_workspaces(&addr, "ann@team.io", "ann-secret-1")
+            .unwrap()
+            .len(),
+        2
+    );
+    drop(again);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

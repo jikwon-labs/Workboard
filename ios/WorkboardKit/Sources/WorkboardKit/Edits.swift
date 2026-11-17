@@ -313,22 +313,26 @@ public enum Edits {
         return setStatus(&data, task: task, to: target.name, me: me, ts: ts, today: today)
     }
 
+    /// Logged like the Mac app's typed fields (my line from the last five
+    /// minutes is updated instead of adding another). `me` nil: not logged.
     @discardableResult
-    public static func rename(_ data: inout JSON, task: UInt64, to name: String, ts: Int64) -> Bool {
+    public static func rename(_ data: inout JSON, task: UInt64, to name: String, me: UInt64? = nil, ts: Int64) -> Bool {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return false }
         return data.updateItem(at: "tasks", id: task) { j in
             guard j["name"]?.string != name else { return }
             j["name"] = .string(name)
+            if let me { logEdit(&j, me: me, like: "renamed this task to ", text: "renamed this task to \"\(name)\"", ts: ts) }
             j["updated"] = .int(ts)
         }
     }
 
     @discardableResult
-    public static func setDescription(_ data: inout JSON, task: UInt64, to text: String, ts: Int64) -> Bool {
+    public static func setDescription(_ data: inout JSON, task: UInt64, to text: String, me: UInt64? = nil, ts: Int64) -> Bool {
         data.updateItem(at: "tasks", id: task) { j in
             guard j["description"]?.string != text else { return }
             j["description"] = .string(text)
+            if let me { logEdit(&j, me: me, like: "updated the description", text: "updated the description", ts: ts) }
             j["updated"] = .int(ts)
         }
     }
@@ -337,14 +341,17 @@ public enum Edits {
     /// and "assigned to <name>" (with the person's id in "target", which the
     /// Mac app's Inbox goes by) for everyone else put on it. With `parent` it
     /// is a subtask, in its parent's list (the Mac app's "Add subtask").
-    public static func addTask(_ data: inout JSON, list: UInt64, name: String, assignees: [UInt64], parent: UInt64? = nil, me: UInt64, id: UInt64, ts: Int64) {
+    /// `status`: added from a Board column, the task starts in it (a name
+    /// the list doesn't have falls back to the first status).
+    public static func addTask(_ data: inout JSON, list: UInt64, name: String, assignees: [UInt64], parent: UInt64? = nil, status: String? = nil, due: String? = nil, me: UInt64, id: UInt64, ts: Int64) {
         let view = WorkspaceView(data)
         var activity: [JSON] = [["ts": .int(ts), "author": .id(me), "text": "created this task", "comment": false, "post": false]]
         for who in assignees where who != me {
             let name = view.member(who)?.name ?? ""
             activity.append(["ts": .int(ts), "author": .id(me), "text": .string("assigned to \(name)"), "comment": false, "post": false, "target": .id(who)])
         }
-        let status = view.statuses(forList: list)[0].name
+        let sts = view.statuses(forList: list)
+        let status = sts.first { $0.name == status }?.name ?? sts[0].name
         let order = ((data["tasks"]?.array ?? []).compactMap { $0["order"]?.int }.max() ?? 0) + 1
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let task: JSON = [
@@ -352,7 +359,7 @@ public enum Edits {
             "name": .string(clean.isEmpty ? "Untitled task" : clean),
             "description": "", "status": .string(status), "priority": 0,
             "assignees": .array(assignees.map(JSON.id)),
-            "start": nil, "due": nil, "tags": [], "checklist": [],
+            "start": nil, "due": due.map(JSON.string) ?? .null, "tags": [], "checklist": [],
             "activity": .array(activity),
             "time_entries": [], "timer_started": nil, "estimate_min": nil,
             "created": .int(ts), "updated": .int(ts), "order": .int(order),
@@ -693,5 +700,44 @@ public enum Edits {
         guard docs.count != before else { return false }
         data["docs"] = .array(docs)
         return true
+    }
+}
+
+// MARK: doc pages, privacy and archive (src/app/docs.rs)
+
+extension Edits {
+    /// add_page: a sub page "Page N" under `parent`, in its space and as
+    /// private as it.
+    @discardableResult
+    public static func addPage(_ data: inout JSON, parent: UInt64, me: UInt64, id: UInt64, ts: Int64) -> Bool {
+        let docs = data["docs"]?.array ?? []
+        guard let p = docs.first(where: { $0["id"]?.uint == parent }) else { return false }
+        let n = docs.filter { $0["parent"]?.uint == parent }.count + 1
+        data.append(at: "docs", [
+            "id": .id(id), "space": p["space"] ?? .null, "owner": .id(me), "private": p["private"] ?? false,
+            "archived": false, "meeting_note": false, "parent": .id(parent),
+            "title": .string("Page \(n)"), "body": "", "created": .int(ts), "updated": .int(ts),
+        ])
+        return true
+    }
+
+    /// Only its owner sees a private doc.
+    @discardableResult
+    public static func setDocPrivate(_ data: inout JSON, doc: UInt64, _ on: Bool, ts: Int64) -> Bool {
+        data.updateItem(at: "docs", id: doc) { j in
+            guard (j["private"]?.bool ?? false) != on else { return }
+            j["private"] = .bool(on)
+            j["updated"] = .int(ts)
+        }
+    }
+
+    /// Archived docs leave the Docs list until unarchived (Docs > Archived).
+    @discardableResult
+    public static func setDocArchived(_ data: inout JSON, doc: UInt64, _ on: Bool, ts: Int64) -> Bool {
+        data.updateItem(at: "docs", id: doc) { j in
+            guard (j["archived"]?.bool ?? false) != on else { return }
+            j["archived"] = .bool(on)
+            j["updated"] = .int(ts)
+        }
     }
 }

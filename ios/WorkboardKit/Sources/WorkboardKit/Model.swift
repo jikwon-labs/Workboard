@@ -73,9 +73,12 @@ public struct FolderView: Identifiable, Hashable, Sendable {
     public let id: UInt64
     public let name: String
     public let lists: [ListView]
+    /// Archived folders leave the sidebar with their lists until restored.
+    public let archived: Bool
 
     init(_ j: JSON) {
         id = j["id"]?.uint ?? 0
+        archived = j["archived"]?.bool ?? false
         name = j["name"]?.string ?? ""
         lists = (j["lists"]?.array ?? []).map(ListView.init).filter { !$0.archived }
     }
@@ -97,7 +100,7 @@ public struct SpaceView: Identifiable, Hashable, Sendable {
         color = (j["color"]?.array ?? []).compactMap { $0.int.map(Int.init) }
         let st = (j["statuses"]?.array ?? []).map(StatusView.init)
         statuses = st.isEmpty ? StatusView.defaults : st
-        folders = (j["folders"]?.array ?? []).map(FolderView.init)
+        folders = (j["folders"]?.array ?? []).map(FolderView.init).filter { !$0.archived }
         lists = (j["lists"]?.array ?? []).map(ListView.init).filter { !$0.archived }
         privateOwner = j["private_owner"]?.uint
         archived = j["archived"]?.bool ?? false
@@ -139,8 +142,49 @@ public struct TaskView: Identifiable, Hashable, Sendable {
     public let order: Int64
     public let archived: Bool
     public let updated: Int64
+    public let created: Int64
+    public let start: String?
+    /// Time of day on the start date ("HH:mm"), only with a start date.
+    public let startTime: String?
+    /// People following the task besides its assignees.
+    public let watchers: [UInt64]
+    /// Tasks this one waits on (Blocking is the other side, worked out in
+    /// WorkspaceView.relations).
+    public let waitingOn: [UInt64]
+    public let linked: [UInt64]
+    /// daily, weekly, monthly or yearly; nil when it doesn't repeat.
+    public let recur: String?
+    public let estimateMin: UInt32?
+    public let timeEntries: [TimeEntryView]
+    /// Every running timer: who started it (nil for an old timer that
+    /// didn't record it) and when (Task::running_timers).
+    public let timers: [RunningTimerView]
+    /// Custom field values by field id.
+    public let custom: [UInt64: String]
+    public let milestone: Bool
+    public let attachments: [AttachmentView]
 
     init(_ j: JSON) {
+        created = j["created"]?.int ?? 0
+        start = j["start"]?.string
+        startTime = start == nil ? nil : j["start_time"]?.string.flatMap(TaskView.hhmm)
+        watchers = (j["watchers"]?.array ?? []).compactMap(\.uint)
+        waitingOn = (j["waiting_on"]?.array ?? []).compactMap(\.uint)
+        linked = (j["linked"]?.array ?? []).compactMap(\.uint)
+        recur = j["recur"]?.string
+        estimateMin = j["estimate_min"]?.uint.map { UInt32(clamping: $0) }
+        timeEntries = (j["time_entries"]?.array ?? []).map(TimeEntryView.init)
+        var running: [RunningTimerView] = []
+        if let st = j["timer_started"]?.int { running.append(RunningTimerView(member: j["timer_by"]?.uint, start: st)) }
+        running += (j["timers"]?.array ?? []).compactMap { r in r["start"]?.int.map { RunningTimerView(member: r["member"]?.uint, start: $0) } }
+        timers = running
+        var cf: [UInt64: String] = [:]
+        for (k, v) in j["custom"]?.object ?? [:] {
+            if let id = UInt64(k), let s = v.string, !s.isEmpty { cf[id] = s }
+        }
+        custom = cf
+        milestone = j["milestone"]?.bool ?? false
+        attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         id = j["id"]?.uint ?? 0
         listId = j["list_id"]?.uint ?? 0
         parent = j["parent"]?.uint
@@ -157,6 +201,63 @@ public struct TaskView: Identifiable, Hashable, Sendable {
         order = j["order"]?.int ?? 0
         archived = j["archived"]?.bool ?? false
         updated = j["updated"]?.int ?? 0
+    }
+}
+
+/// A stretch of tracked time (TimeEntry in src/model.rs); `member` 0 is an
+/// entry from before entries had an owner.
+public struct TimeEntryView: Hashable, Sendable {
+    public let start: Int64
+    public let end: Int64
+    public let member: UInt64
+
+    init(_ j: JSON) {
+        start = j["start"]?.int ?? 0
+        end = j["end"]?.int ?? 0
+        member = j["member"]?.uint ?? 0
+    }
+
+    public var secs: Int64 { max(0, end - start) }
+}
+
+public struct RunningTimerView: Hashable, Sendable {
+    public let member: UInt64?
+    public let start: Int64
+}
+
+/// A custom field (CustomField in src/model.rs): text, number, dropdown,
+/// checkbox or date.
+public struct CustomFieldView: Identifiable, Hashable, Sendable {
+    public let id: UInt64
+    public let name: String
+    public let kind: String
+    public let options: [String]
+
+    init(_ j: JSON) {
+        id = j["id"]?.uint ?? 0
+        name = j["name"]?.string ?? ""
+        kind = j["kind"]?.string ?? "text"
+        options = (j["options"]?.array ?? []).compactMap(\.string)
+    }
+}
+
+/// Workspace > ClickApps (ClickApps in src/model.rs): every one is on
+/// unless turned off.
+public struct AppsView: Hashable, Sendable {
+    public let priorities: Bool
+    public let tags: Bool
+    public let timeTracking: Bool
+    public let timeEstimates: Bool
+    public let customFields: Bool
+    public let multipleAssignees: Bool
+
+    init(_ j: JSON?) {
+        priorities = j?["priorities"]?.bool ?? true
+        tags = j?["tags"]?.bool ?? true
+        timeTracking = j?["time_tracking"]?.bool ?? true
+        timeEstimates = j?["time_estimates"]?.bool ?? true
+        customFields = j?["custom_fields"]?.bool ?? true
+        multipleAssignees = j?["multiple_assignees"]?.bool ?? true
     }
 }
 
@@ -268,6 +369,10 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     /// Brought in from a Slack export by a Mac (`imported` holds where it
     /// came from): old history, so it doesn't notify or count as unread.
     public let imported: Bool
+    /// The task made from this message ("Create task").
+    public let task: UInt64?
+    /// Saved for later by this person (kept on this device).
+    public let saved: Bool
 
     /// Message::imported: set once by the import and never cleared; the
     /// field itself stays in the JSON as it came.
@@ -275,6 +380,8 @@ public struct MessageView: Identifiable, Hashable, Sendable {
 
     init(_ j: JSON) {
         imported = Self.isImported(j)
+        task = j["task"]?.uint
+        saved = j["saved"]?.bool ?? false
         attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }
@@ -332,8 +439,12 @@ public struct WorkspaceView: Sendable {
     public let tasks: [TaskView]
     public let docs: [DocView]
     public let channels: [ChannelView]
+    public let fields: [CustomFieldView]
+    public let apps: AppsView
 
     public init(_ data: JSON) {
+        fields = (data.at("extra.fields")?.array ?? []).map(CustomFieldView.init)
+        apps = AppsView(data.at("extra.apps"))
         name = data["workspace"]?.string ?? ""
         members = (data["members"]?.array ?? []).map(MemberView.init)
         spaces = (data["spaces"]?.array ?? []).map(SpaceView.init).filter { !$0.archived }
@@ -392,6 +503,57 @@ public struct WorkspaceView: Sendable {
         let others = c.members.filter { $0 != me }.compactMap { member($0)?.name }
         if others.isEmpty { return c.name.isEmpty ? (member(me)?.name ?? "Me") : c.name }
         return others.joined(separator: ", ")
+    }
+
+    /// Tasks this one waits on, tasks waiting on it, and linked tasks (both
+    /// directions); missing tasks are left out (relations in
+    /// src/app/taskfields.rs).
+    public func relations(of id: UInt64) -> (waitingOn: [TaskView], blocking: [TaskView], linked: [TaskView]) {
+        guard let t = tasks.first(where: { $0.id == id }) else { return ([], [], []) }
+        let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let waiting = t.waitingOn.compactMap { byId[$0] }
+        let blocking = tasks.filter { $0.waitingOn.contains(id) }
+        var linked = t.linked.compactMap { byId[$0] }
+        for x in tasks where x.linked.contains(id) && !linked.contains(where: { $0.id == x.id }) { linked.append(x) }
+        return (waiting, blocking, linked)
+    }
+
+    /// Every tag used on a task, sorted (what the tag field offers).
+    public var allTags: [String] { Array(Set(tasks.flatMap(\.tags))).sorted() }
+
+    /// I'm the only member, so an old timer or entry without an owner is mine.
+    public var solo: Bool { members.count <= 1 }
+
+    /// When my timer on the task started, if one runs (my_timer_start).
+    public func myTimerStart(_ t: TaskView, me: UInt64) -> Int64? {
+        t.timers.first { $0.member == me || ($0.member == nil && solo) }?.start
+    }
+
+    /// All tracked time on the task, running timers counted up to `now`.
+    public func trackedSecs(_ t: TaskView, now: Int64) -> Int64 {
+        t.timeEntries.reduce(0) { $0 + $1.secs } + t.timers.reduce(0) { $0 + max(0, now - $1.start) }
+    }
+
+    /// Who a time entry belongs to: its owner, or for an old entry the
+    /// task's first assignee (Task::entry_owner).
+    public func entryOwner(_ t: TaskView, _ e: TimeEntryView) -> UInt64 {
+        e.member != 0 ? e.member : (t.assignees.first ?? 0)
+    }
+
+    /// Tasks a picker offers for making `id` a subtask of (not itself or
+    /// anything under it, not its current parent).
+    public func parentCandidates(for id: UInt64) -> [TaskView] {
+        var below: Set<UInt64> = [id]
+        var grew = true
+        while grew {
+            grew = false
+            for t in tasks where t.parent.map(below.contains) == true && !below.contains(t.id) {
+                below.insert(t.id)
+                grew = true
+            }
+        }
+        let current = tasks.first { $0.id == id }?.parent
+        return tasks.filter { !below.contains($0.id) && $0.id != current }
     }
 
     /// My Tasks: open tasks assigned to me.

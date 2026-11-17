@@ -594,13 +594,10 @@ mod tests {
         }
     }
 
-    /// Every literal passed to `tr(` / `trf!(` in the source has a Korean entry.
-    #[test]
-    fn every_interface_text_has_korean() {
-        let mut missing = vec![];
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![];
-        let mut stack = vec![root];
+    /// The `.rs` files below `dir` (the Korean tables left out), with their names.
+    fn sources(dir: &std::path::Path) -> Vec<(String, String)> {
+        let mut out = vec![];
+        let mut stack = vec![dir.to_path_buf()];
         while let Some(d) = stack.pop() {
             for e in std::fs::read_dir(&d).unwrap().flatten() {
                 let p = e.path();
@@ -609,16 +606,28 @@ mod tests {
                         stack.push(p);
                     }
                 } else if p.extension().is_some_and(|x| x == "rs") {
-                    files.push(p);
+                    let name = p.file_name().unwrap().to_string_lossy().to_string();
+                    out.push((name, std::fs::read_to_string(&p).unwrap()));
                 }
             }
         }
-        for f in files {
-            let name = f.file_name().unwrap().to_string_lossy().to_string();
-            if name.contains("tests") || name == "i18n.rs" {
-                continue;
-            }
-            let src = std::fs::read_to_string(&f).unwrap();
+        out
+    }
+
+    /// The app's own source files that draw the interface: no tests, no tables.
+    fn interface_sources() -> Vec<(String, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        sources(&root)
+            .into_iter()
+            .filter(|(name, _)| !name.contains("tests") && name != "i18n.rs")
+            .collect()
+    }
+
+    /// Every literal passed to `tr(` / `trf!(` in the source has a Korean entry.
+    #[test]
+    fn every_interface_text_has_korean() {
+        let mut missing = vec![];
+        for (name, src) in interface_sources() {
             for lit in literals_after(&src, &["tr(\"", "trf!(\"", "tr_ctx(\""]) {
                 if !has_ko(&lit) {
                     missing.push(format!("{}: {:?}", name, lit));
@@ -632,6 +641,122 @@ mod tests {
             "{} texts without Korean:\n{}",
             missing.len(),
             missing.join("\n")
+        );
+    }
+
+    /// Text handed straight to egui is wrapped in `tr` (or `trf!`): a literal
+    /// right after `ui.label(`, `RichText::new(` and the like is English on a
+    /// Korean screen, and the screen check only sees the screens it opens (and
+    /// no tooltips). Text that reads the same in every language is let through.
+    #[test]
+    fn interface_text_is_wrapped_in_tr() {
+        const CALLS: [&str; 10] = [
+            ".label(\"",
+            ".button(\"",
+            ".heading(\"",
+            ".small(\"",
+            "RichText::new(\"",
+            "Button::new(\"",
+            ".hint_text(\"",
+            ".on_hover_text(\"",
+            ".on_disabled_hover_text(\"",
+            ".selectable_label(\"",
+        ];
+        // the app's name, key names, units and the example server address
+        const SAME_IN_KOREAN: [&str; 5] =
+            ["Workboard", "ID", "Esc", "KB", "https://wb.example.com"];
+        let words = |s: &str| {
+            let mut run = 0;
+            s.chars().any(|c| {
+                run = if c.is_ascii_alphabetic() { run + 1 } else { 0 };
+                run >= 2
+            })
+        };
+        let mut bare = vec![];
+        for (name, src) in interface_sources() {
+            // the code under a file's test module is not drawn
+            let src = src.split("\n#[cfg(test)]\nmod ").next().unwrap_or("");
+            let fmt: Vec<String> = CALLS.iter().map(|c| c.replace('"', "format!(\"")).collect();
+            let fmt: Vec<&str> = fmt.iter().map(|s| s.as_str()).collect();
+            for lit in literals_after(src, &CALLS)
+                .into_iter()
+                .chain(literals_after(src, &fmt))
+            {
+                let rest = SAME_IN_KOREAN
+                    .iter()
+                    .fold(lit.clone(), |s, k| s.replace(k, ""));
+                if words(&rest) {
+                    bare.push(format!("{}: {:?}", name, lit));
+                }
+            }
+        }
+        bare.sort();
+        bare.dedup();
+        assert!(
+            bare.is_empty(),
+            "{} interface texts not wrapped in tr (wrap them and add the Korean):\n{}",
+            bare.len(),
+            bare.join("\n")
+        );
+    }
+
+    /// Each English text has one Korean entry: `tr` takes the first one in
+    /// `ALL`, so a second entry somewhere else would never show, and changing
+    /// it would change nothing.
+    #[test]
+    fn each_text_has_one_korean_entry() {
+        let mut first: HashMap<&str, &str> = HashMap::new();
+        let mut twice = vec![];
+        for part in ALL {
+            for (en, ko) in part.iter() {
+                if let Some(was) = first.insert(en, ko) {
+                    twice.push(format!("{:?}: {:?} and {:?}", en, was, ko));
+                }
+            }
+        }
+        assert!(
+            twice.is_empty(),
+            "{} texts with more than one Korean entry (keep one):\n{}",
+            twice.len(),
+            twice.join("\n")
+        );
+    }
+
+    /// Every Korean entry is for text the code still has: the English is a
+    /// string literal somewhere in the app, the server or the crates (whose
+    /// messages the app shows). Entries for text the code builds are listed.
+    #[test]
+    fn no_korean_entry_is_left_unused() {
+        // accent colour names, made from the saved lower-case name (menus.rs)
+        const BUILT: [&str; 10] = [
+            "Black", "Purple", "Blue", "Pink", "Violet", "Indigo", "Orange", "Teal", "Bronze",
+            "Mint",
+        ];
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut code = String::new();
+        for dir in ["src", "server/src", "crates"] {
+            for (name, src) in sources(&base.join(dir)) {
+                if name != "i18n.rs" {
+                    code.push_str(&src);
+                }
+            }
+        }
+        // the literals as the code has them, escapes undone
+        let lits: std::collections::HashSet<String> =
+            literals_after(&code, &["\""]).into_iter().collect();
+        let mut unused = vec![];
+        for part in ALL {
+            for (en, _) in part.iter() {
+                if !lits.contains(*en) && !BUILT.contains(en) {
+                    unused.push(format!("{:?}", en));
+                }
+            }
+        }
+        assert!(
+            unused.is_empty(),
+            "{} Korean entries no code uses (remove them):\n{}",
+            unused.len(),
+            unused.join("\n")
         );
     }
 

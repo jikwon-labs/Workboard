@@ -1388,6 +1388,10 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     h.click("Invite code");
     h.click("Invite code entry");
     h.type_text("NEWC-ODEX-XXXX");
+    assert!(
+        !h.painted_text("the same password again").is_empty(),
+        "the repeat box says what goes in it"
+    );
     h.click("Choose a password entry");
     h.type_text("new-secret-1");
     h.click("Repeat password entry");

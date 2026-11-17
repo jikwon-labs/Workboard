@@ -2484,7 +2484,13 @@ impl App {
                     &trf!("at least {} characters", wb_net::MIN_PASSWORD),
                     true,
                 );
-                field(ui, &mut form.repeat, "Repeat password", "", true);
+                field(
+                    ui,
+                    &mut form.repeat,
+                    "Repeat password",
+                    "the same password again",
+                    true,
+                );
                 ui.label(RichText::new(tr("You sign in with this email and password on your other computers and phones.")).small().color(t.text3));
             }
             Mode::Forgot => {
@@ -2550,7 +2556,13 @@ impl App {
                         &trf!("at least {} characters", wb_net::MIN_PASSWORD),
                         true,
                     );
-                    field(ui, &mut form.repeat, "Repeat password", "", true);
+                    field(
+                        ui,
+                        &mut form.repeat,
+                        "Repeat password",
+                        "the same password again",
+                        true,
+                    );
                 }
                 if ui.link(tr("Back to sign in")).clicked() {
                     form.mode = Mode::Account;
@@ -2567,7 +2579,13 @@ impl App {
                     &trf!("at least {} characters", wb_net::MIN_PASSWORD),
                     true,
                 );
-                field(ui, &mut form.repeat, "Repeat password", "", true);
+                field(
+                    ui,
+                    &mut form.repeat,
+                    "Repeat password",
+                    "the same password again",
+                    true,
+                );
             }
         }
         if !form.note.is_empty() {

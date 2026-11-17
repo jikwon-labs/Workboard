@@ -59,7 +59,7 @@ fn english_left(shown: &str, data: &[String]) -> bool {
     }
     let low = s.to_lowercase();
     // names, key names and examples that are the same in Korean
-    const KEEP: [&str; 10] = [
+    const KEEP: [&str; 14] = [
         "workboard",
         "english",
         "jitsi",
@@ -70,6 +70,11 @@ fn english_left(shown: &str, data: &[String]) -> bool {
         "https://...",
         "https://wb.example.com",
         "tab",
+        // sync services found on the computer running the tests
+        "icloud drive",
+        "dropbox",
+        "google drive",
+        "onedrive",
     ];
     if KEEP.iter().any(|k| low == *k) {
         return false;

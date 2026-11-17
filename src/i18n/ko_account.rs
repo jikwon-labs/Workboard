@@ -48,6 +48,7 @@ pub const T: &[(&str, &str)] = &[
     ("Email", "이메일"),
     ("Password", "비밀번호"),
     ("Show password", "비밀번호 보기"),
+    ("the same password again", "같은 비밀번호 한 번 더"),
     ("Hide password", "비밀번호 숨기기"),
     (
         "Passwords take English letters, numbers and symbols. Switch to English input.",

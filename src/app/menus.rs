@@ -19,7 +19,7 @@ pub enum Modal {
         name: String,
     },
     /// A new workspace, set up a step at a time: its name, the apps on the
-    /// left bar, then the people to invite (skippable).
+    /// left bar, then (on a team server) the people to invite.
     NewWorkspace {
         step: u8,
         name: String,
@@ -287,8 +287,16 @@ const RAIL_APPS: [&str; 10] = [
     "Timesheets",
 ];
 
-/// How many steps the new-workspace dialog has.
-const NEW_WS_STEPS: u8 = 3;
+/// How many steps the new-workspace dialog has: inviting is the third, and
+/// only on a team server; one only on this computer has nobody to invite
+/// until it's shared from Work together.
+fn new_ws_steps(on_server: bool) -> u8 {
+    if on_server {
+        3
+    } else {
+        2
+    }
+}
 
 impl Modal {
     /// The new-workspace dialog at its first step, with the apps a new
@@ -1574,13 +1582,15 @@ impl App {
             } => {
                 let server = self.server_for_new_workspace();
                 let on_server_now = *on_server && server.is_some();
+                let steps = new_ws_steps(on_server_now);
+                *step = (*step).min(steps - 1);
                 // where the setup is: one bar per step, filled up to this one
                 ui.horizontal(|ui| {
                     let gap = 6.0;
                     ui.spacing_mut().item_spacing.x = gap;
-                    let n = NEW_WS_STEPS as f32;
+                    let n = steps as f32;
                     let w = (ui.available_width() - gap * (n - 1.0)) / n;
-                    for i in 0..NEW_WS_STEPS {
+                    for i in 0..steps {
                         let (r, _) = ui.allocate_exact_size(vec2(w, 4.0), Sense::hover());
                         let c = if i <= *step { t.primary } else { t.border };
                         ui.painter().rect_filled(r, 2.0, c);
@@ -1588,7 +1598,7 @@ impl App {
                 });
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(crate::trf!("Step {} of {}", *step + 1, NEW_WS_STEPS))
+                    RichText::new(crate::trf!("Step {} of {}", *step + 1, steps))
                         .small()
                         .color(t.text2),
                 );
@@ -1702,11 +1712,9 @@ impl App {
                             });
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new(tr(if on_server_now {
-                                "The server emails each of them an invite code once the workspace is up."
-                            } else {
-                                "The new workspace is on this computer only. To work with them, share it from Work together once it's made."
-                            }))
+                            RichText::new(tr(
+                                "The server emails each of them an invite code once the workspace is up.",
+                            ))
                             .small()
                             .color(t.text2),
                         );
@@ -1714,14 +1722,18 @@ impl App {
                 }
                 ui.add_space(8.0);
                 ui.separator();
-                let last = *step + 1 == NEW_WS_STEPS;
+                let last = *step + 1 == steps;
                 let mut finish: Option<Vec<String>> = None;
                 ui.horizontal(|ui| {
                     if *step > 0 && secondary_button(ui, tr("Back")).clicked() {
                         *step -= 1;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if last {
+                        if last && !on_server_now {
+                            if primary_button(ui, t, tr("Create")).clicked() {
+                                finish = Some(vec![]);
+                            }
+                        } else if last {
                             let invite = emails_in(emails);
                             let label = if invite.is_empty() {
                                 tr("Create Workspace")

@@ -11114,7 +11114,7 @@ fn own_home(tag: &str) -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[test]
-fn new_workspace_steps_through_name_apps_and_invites() {
+fn new_workspace_on_this_computer_is_a_name_and_apps() {
     let _home = own_home("wizard");
     let mut h = Ui1::new();
     let before = h.app.ws_file.clone();
@@ -11124,19 +11124,19 @@ fn new_workspace_steps_through_name_apps_and_invites() {
         h.app.modal,
         Some(Modal::NewWorkspace { step: 0, .. })
     ));
-    assert!(h.has("Step 1 of 3"));
+    assert!(h.has("Step 1 of 2"));
     // step 1: the name
     h.type_text("Side Biz");
     h.click("Next");
-    assert!(h.has("Step 2 of 3"));
+    assert!(h.has("Step 2 of 2"));
     // step 2: the apps on the left bar, the default ones already chosen
     h.click("Chat");
     h.click("AI");
-    h.click("Next");
-    assert!(h.has("Step 3 of 3"));
-    // step 3: the people
-    h.type_text("lee.jiwoo@team.kr, park.minsu@team.kr");
-    h.click("Create and invite");
+    // nobody to invite to a workspace only here: no invite step, one button
+    assert!(!h.has("Invite people to your workspace"));
+    assert!(!h.has("Skip for now"));
+    assert!(!h.has("Next"));
+    h.click("Create");
     h.settle();
     assert!(h.app.modal.is_none(), "the dialog closes when it's made");
     assert_ne!(h.app.ws_file, before, "the new workspace is open");
@@ -11146,21 +11146,7 @@ fn new_workspace_steps_through_name_apps_and_invites() {
         vec!["Planner", "Teams", "Chat"],
         "the chosen apps, in the bar's order"
     );
-    let invited: Vec<(&str, &str)> = h
-        .app
-        .data
-        .members
-        .iter()
-        .filter(|m| m.invited)
-        .map(|m| (m.email.as_str(), m.role.as_str()))
-        .collect();
-    assert_eq!(
-        invited,
-        vec![
-            ("lee.jiwoo@team.kr", "Member"),
-            ("park.minsu@team.kr", "Member")
-        ]
-    );
+    assert_eq!(h.app.data.members.len(), 1, "only me in the new one");
     let me = h.app.data.member(h.app.data.me).unwrap();
     assert_eq!(me.role, "Owner");
     // the workspace menu lists both
@@ -11172,7 +11158,7 @@ fn new_workspace_steps_through_name_apps_and_invites() {
 }
 
 #[test]
-fn new_workspace_needs_a_name_goes_back_and_skips_invites() {
+fn new_workspace_needs_a_name_and_goes_back() {
     let _home = own_home("wizard-skip");
     let mut h = Ui1::new();
     let members_before = h.app.data.members.len();
@@ -11191,31 +11177,20 @@ fn new_workspace_needs_a_name_goes_back_and_skips_invites() {
         h.app.modal,
         Some(Modal::NewWorkspace { step: 1, .. })
     ));
-    h.click("Next");
-    h.type_text("someone@acme.io");
-    // back two steps: what was typed is still there
-    h.click("Back");
+    // back a step: what was typed is still there
     h.click("Back");
     match &h.app.modal {
-        Some(Modal::NewWorkspace {
-            step, name, emails, ..
-        }) => {
+        Some(Modal::NewWorkspace { step, name, .. }) => {
             assert_eq!(*step, 0);
             assert_eq!(name, "Acme");
-            assert_eq!(emails, "someone@acme.io");
         }
         _ => panic!("the dialog is still open"),
     }
     h.click("Next");
-    h.click("Next");
-    h.click("Skip for now");
+    h.click("Create");
     h.settle();
     assert!(h.app.modal.is_none());
     assert_eq!(h.app.data.workspace, "Acme");
-    assert!(
-        h.app.data.members.iter().all(|m| !m.invited),
-        "skipped: nobody invited"
-    );
     assert_eq!(h.app.data.members.len(), 1, "only me in the new one");
     assert!(members_before > 1, "the seed had others");
     assert_eq!(
@@ -11281,9 +11256,9 @@ fn a_new_workspace_can_go_on_the_team_server_or_stay_here() {
     ));
     h.type_text("Notes");
     h.click("Next");
-    h.click("Next");
-    assert!(h.has("The new workspace is on this computer only. To work with them, share it from Work together once it's made."));
-    h.click("Skip for now");
+    assert!(h.has("Step 2 of 2"), "no invite step when it stays here");
+    assert!(!h.has("Invite people to your workspace"));
+    h.click("Create");
     h.settle();
     assert!(h.app.making_ws.is_none());
     assert_ne!(h.app.ws_file, before);

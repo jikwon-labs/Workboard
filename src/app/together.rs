@@ -247,6 +247,148 @@ pub struct MakingWs {
 
 const KEYCHAIN_SERVICE: &str = "Workboard server";
 
+/// What a password may hold: English letters, digits, symbols and spaces.
+/// Typed in Korean mode the same keys give other letters, and the password
+/// then won't match the one typed in English on another computer or phone.
+pub(super) fn password_char(c: char) -> bool {
+    (' '..='~').contains(&c)
+}
+
+/// A password box: dots by default, an eye button inside its right edge
+/// shows what was typed, and only `password_char`s go in. Anything else
+/// (Korean input, pasted text in another script) is left out and a note
+/// under the box asks for English input.
+pub(super) fn secret_edit(
+    ui: &mut Ui,
+    t: &Theme,
+    text: &mut String,
+    label: &str,
+    hint: &str,
+    big: bool,
+) -> egui::Response {
+    let id = ui.make_persistent_id(("password field", label));
+    let shown_id = id.with("shown");
+    let note_id = id.with("not english");
+    let mut shown = ui.data(|d| d.get_temp::<bool>(shown_id)).unwrap_or(false);
+    let mut note = ui.data(|d| d.get_temp::<bool>(note_id)).unwrap_or(false);
+    if ui.memory(|m| m.has_focus(id)) {
+        ui.input_mut(|i| {
+            i.events.retain_mut(|e| {
+                let s = match e {
+                    egui::Event::Text(s) | egui::Event::Paste(s) => s,
+                    egui::Event::Ime(egui::ImeEvent::Commit(s)) => s,
+                    // a word still being put together in another script:
+                    // nothing of it goes in
+                    egui::Event::Ime(egui::ImeEvent::Preedit(s)) => {
+                        if !s.is_empty() {
+                            note = true;
+                        }
+                        return false;
+                    }
+                    _ => return true,
+                };
+                let kept: String = s.chars().filter(|c| password_char(*c)).collect();
+                if kept.len() != s.len() {
+                    note = true;
+                } else if !kept.is_empty() {
+                    note = false;
+                }
+                *s = kept;
+                !s.is_empty()
+            })
+        });
+    }
+    let (eye_w, margin) = if big {
+        (
+            40.0,
+            egui::Margin {
+                left: 14,
+                right: 40,
+                top: 12,
+                bottom: 12,
+            },
+        )
+    } else {
+        (
+            30.0,
+            egui::Margin {
+                left: 8,
+                right: 30,
+                top: 5,
+                bottom: 5,
+            },
+        )
+    };
+    let mut te = field(text)
+        .id(id)
+        .hint_text(tr(hint))
+        .password(!shown)
+        .margin(margin)
+        .desired_width(f32::INFINITY);
+    if big {
+        te = te
+            .font(FontId::proportional(17.0))
+            .min_size(vec2(0.0, super::login::FIELD_H));
+    }
+    let r = ui.add(te);
+    let name = format!("{} entry", label);
+    r.widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name));
+    // the eye, inside the box's right edge (the response holds the box
+    // without its margin)
+    let outer = r.rect + margin;
+    let er = egui::Rect::from_min_max(
+        egui::pos2(outer.right() - eye_w, outer.top()),
+        outer.right_bottom(),
+    );
+    let eye = ui.interact(er, id.with("eye"), Sense::click());
+    let what = if shown {
+        "Hide password"
+    } else {
+        "Show password"
+    };
+    name_it(&eye, what);
+    let color = if eye.hovered() { t.text } else { t.text2 };
+    super::icons::line_icon(
+        ui.painter(),
+        if shown { "eye_off" } else { "eye" },
+        er.center(),
+        color,
+    );
+    let eye = eye
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(tr(what));
+    // pressing the eye takes the focus off the box (egui drops it on any
+    // press elsewhere); give it straight back so typing carries on
+    let was_focused = ui.data(|d| d.get_temp::<bool>(id.with("focused")).unwrap_or(false));
+    if was_focused && (eye.is_pointer_button_down_on() || eye.clicked()) {
+        r.request_focus();
+    }
+    if eye.clicked() {
+        shown = !shown;
+        r.request_focus();
+    }
+    let focused = ui.memory(|m| m.has_focus(id));
+    ui.data_mut(|d| d.insert_temp(id.with("focused"), focused));
+    text.retain(password_char);
+    if note && !focused {
+        note = false;
+    }
+    if note {
+        ui.label(
+            RichText::new(tr(
+                "Passwords take English letters, numbers and symbols. Switch to English input.",
+            ))
+            .size(12.0)
+            .color(t.danger),
+        );
+    }
+    ui.data_mut(|d| {
+        d.insert_temp(shown_id, shown);
+        d.insert_temp(note_id, note);
+    });
+    r
+}
+
 fn token_account(addr: &str, device: &str) -> String {
     format!("{}#{}", addr.trim(), device)
 }
@@ -2251,6 +2393,10 @@ impl App {
             }
         };
         let edit = |ui: &mut Ui, text: &mut String, label: &str, hint: &str, secret: bool| {
+            if secret {
+                secret_edit(ui, t, text, label, hint, big);
+                return;
+            }
             let mut te = field(text)
                 .hint_text(tr(hint))
                 .password(secret)
@@ -2514,7 +2660,11 @@ impl App {
                         ui.label(RichText::new(tr(label)).color(t.text2));
                     },
                 );
-                let r = ui.add(field(text).password(secret).desired_width(f32::INFINITY));
+                if secret {
+                    secret_edit(ui, t, text, label, "", false);
+                    return;
+                }
+                let r = ui.add(field(text).desired_width(f32::INFINITY));
                 let name = format!("{} entry", label);
                 r.widget_info(move || {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name)

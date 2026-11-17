@@ -7011,6 +7011,66 @@ fn signed_in_on_a_server_you_set_a_password_or_change_it() {
 }
 
 #[test]
+fn password_boxes_show_on_the_eye_and_take_english_only() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.app.modal = Some(h.app.together_modal());
+    h.settle();
+    // every password box has its own eye
+    assert_eq!(
+        h.tree.iter().filter(|(n, _)| n == "Show password").count(),
+        2
+    );
+    h.click("Password entry");
+    h.type_text("ab");
+    // Korean typing: neither the word being put together nor the result
+    // goes in, and a note says to switch
+    h.frame(vec![egui::Event::Ime(egui::ImeEvent::Preedit("ㅎ".into()))]);
+    h.frame(vec![egui::Event::Ime(egui::ImeEvent::Commit("한".into()))]);
+    h.type_text("가c1!");
+    h.frame(vec![egui::Event::Paste("d 한e".into())]);
+    h.settle();
+    assert_eq!(h.app.sync_rt.acct.password, "abc1!d e");
+    assert!(h.has("Passwords take English letters, numbers and symbols. Switch to English input."));
+    // English again: the note goes
+    h.type_text("x");
+    h.settle();
+    assert!(!h.has("Passwords take English letters, numbers and symbols. Switch to English input."));
+    // the eye beside this box shows the text and hides it again, typing
+    // carries on
+    let entry = h
+        .tree
+        .iter()
+        .find(|(n, _)| n == "Password entry")
+        .unwrap()
+        .1;
+    let eye = h
+        .tree
+        .iter()
+        .find(|(n, r)| n == "Show password" && entry.y_range().contains(r.center().y))
+        .expect("the eye sits inside its box")
+        .1;
+    h.click_at(eye.center());
+    assert!(h.has("Hide password") && !h.painted_text("abc1!d ex").is_empty());
+    h.type_text("y");
+    h.settle();
+    assert_eq!(h.app.sync_rt.acct.password, "abc1!d exy");
+    h.click("Hide password");
+    assert!(h.painted_text("abc1!d exy").is_empty());
+    assert_eq!(
+        h.tree.iter().filter(|(n, _)| n == "Show password").count(),
+        2
+    );
+}
+
+#[test]
 fn enter_in_the_middle_sends_without_a_line_break_and_shift_enter_keeps_one() {
     let mut h = Ui1::new();
     h.click("general");

@@ -219,17 +219,11 @@ struct PasswordView: View {
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("accountEmailField")
                 if hasAccount {
-                    SecureField("Current password", text: $old)
-                        .passwordField(.current)
-                        .accessibilityIdentifier("oldPasswordField")
+                    PasswordField("Current password", text: $old, kind: .current, id: "oldPasswordField")
                 }
-                SecureField("New password (at least \(minPasswordLength) characters)", text: $password)
-                    .passwordField(.new)
-                    .accessibilityIdentifier("accountPasswordField")
-                SecureField("New password again", text: $confirm)
-                    .passwordField(.new)
+                PasswordField("New password (at least \(minPasswordLength) characters)", text: $password, kind: .new, id: "accountPasswordField")
+                PasswordField("New password again", text: $confirm, kind: .new, id: "accountConfirmField")
                     .onSubmit(save)
-                    .accessibilityIdentifier("accountConfirmField")
             } footer: {
                 if let e = localError ?? failure {
                     Label(e, systemImage: "exclamationmark.triangle").foregroundStyle(.red)

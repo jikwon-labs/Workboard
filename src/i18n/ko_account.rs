@@ -47,6 +47,12 @@ pub const T: &[(&str, &str)] = &[
     ("New server", "새 서버"),
     ("Email", "이메일"),
     ("Password", "비밀번호"),
+    ("Show password", "비밀번호 보기"),
+    ("Hide password", "비밀번호 숨기기"),
+    (
+        "Passwords take English letters, numbers and symbols. Switch to English input.",
+        "비밀번호에는 영문자, 숫자, 기호만 쓸 수 있습니다. 영어 입력으로 바꿔 주세요.",
+    ),
     ("you@company.com", "이메일 주소"),
     ("Forgot password?", "비밀번호를 잊으셨나요?"),
     ("XXXX-XXXX-XXXX, or paste the invite link", "XXXX-XXXX-XXXX 또는 초대 링크 붙여넣기"),

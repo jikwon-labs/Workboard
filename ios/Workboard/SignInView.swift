@@ -117,10 +117,8 @@ struct SignInView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("emailField")
-            SecureField("Password", text: $password)
-                .passwordField(.current)
+            PasswordField("Password", text: $password, kind: .current, id: "passwordField")
                 .onSubmit(signIn)
-                .accessibilityIdentifier("passwordField")
             Button(action: signIn) { busyLabel("Sign in") }
                 .disabled(client.signingIn || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
                 .accessibilityIdentifier("signInButton")
@@ -157,13 +155,9 @@ struct SignInView: View {
             Text("The email you were invited with. Leave it empty if the invite came to your email. You can also paste the whole invite link or email here.")
         }
         Section {
-            SecureField("Password (at least \(minPasswordLength) characters)", text: $newPassword)
-                .passwordField(.new)
-                .accessibilityIdentifier("newPasswordField")
-            SecureField("Password again", text: $confirm)
-                .passwordField(.new)
+            PasswordField("Password (at least \(minPasswordLength) characters)", text: $newPassword, kind: .new, id: "newPasswordField")
+            PasswordField("Password again", text: $confirm, kind: .new, id: "confirmPasswordField")
                 .onSubmit(join)
-                .accessibilityIdentifier("confirmPasswordField")
             Button(action: join) { busyLabel("Join") }
                 .disabled(client.signingIn || code.trimmingCharacters(in: .whitespaces).isEmpty || newPassword.isEmpty)
                 .accessibilityIdentifier("joinButton")
@@ -207,13 +201,9 @@ struct SignInView: View {
                     .autocorrectionDisabled()
                     .font(.title3.monospaced())
                     .accessibilityIdentifier("resetCodeField")
-                SecureField("New password (at least \(minPasswordLength) characters)", text: $resetPassword)
-                    .passwordField(.new)
-                    .accessibilityIdentifier("resetPasswordField")
-                SecureField("New password again", text: $resetConfirm)
-                    .passwordField(.new)
+                PasswordField("New password (at least \(minPasswordLength) characters)", text: $resetPassword, kind: .new, id: "resetPasswordField")
+                PasswordField("New password again", text: $resetConfirm, kind: .new, id: "resetConfirmField")
                     .onSubmit(reset)
-                    .accessibilityIdentifier("resetConfirmField")
                 Button(action: reset) { busyLabel("Set password and sign in") }
                     .disabled(client.signingIn || resetCode.trimmingCharacters(in: .whitespaces).isEmpty || resetPassword.isEmpty)
                     .accessibilityIdentifier("resetButton")

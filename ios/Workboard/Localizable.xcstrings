@@ -2249,6 +2249,16 @@
         }
       }
     },
+    "Hide password": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비밀번호 숨기기"
+          }
+        }
+      }
+    },
     "High": {
       "extractionState": "manual",
       "localizations": {
@@ -3848,6 +3858,16 @@
         }
       }
     },
+    "Passwords take English letters, numbers and symbols. Switch to English input.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비밀번호에는 영문자, 숫자, 기호만 쓸 수 있습니다. 영어 입력으로 바꿔 주세요."
+          }
+        }
+      }
+    },
     "Past": {
       "localizations": {
         "ko": {
@@ -4617,6 +4637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "짧은 글"
+          }
+        }
+      }
+    },
+    "Show password": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비밀번호 보기"
           }
         }
       }

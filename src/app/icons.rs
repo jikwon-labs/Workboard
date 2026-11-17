@@ -87,6 +87,7 @@ pub(super) const KINDS: &[&str] = &[
     "repeat",
     "attach",
     "eye",
+    "eye_off",
     "bookmark",
     "pen",
     "sticky",
@@ -1073,19 +1074,23 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(pts, s));
         }
         "eye" => {
-            let mut top = vec![];
-            for i in 0..=12 {
-                let x = -7.5 + 15.0 * i as f32 / 12.0;
-                let y = -4.5 * (1.0 - (x / 7.5).powi(2));
-                top.push(c + vec2(x, y));
-            }
-            for i in (0..=12).rev() {
-                let x = -7.5 + 15.0 * i as f32 / 12.0;
-                let y = 4.5 * (1.0 - (x / 7.5).powi(2));
-                top.push(c + vec2(x, y));
-            }
-            p.add(egui::Shape::closed_line(top, s));
+            // rounded at the corners, not a pointed almond
+            let pts: Vec<Pos2> = (0..48)
+                .map(|i| {
+                    let a = std::f32::consts::TAU * i as f32 / 48.0;
+                    let (sn, cs) = a.sin_cos();
+                    // a superellipse: fuller than an ellipse near the ends
+                    let x = 7.5 * cs.signum() * cs.abs().powf(0.75);
+                    let y = 4.8 * sn.signum() * sn.abs().powf(1.15);
+                    c + vec2(x, y)
+                })
+                .collect();
+            p.add(egui::Shape::closed_line(pts, s));
             p.circle_stroke(c, 2.2, s);
+        }
+        "eye_off" => {
+            line_icon(p, "eye", c, color);
+            line(vec2(-6.5, 6.5), vec2(6.5, -6.5));
         }
         "bookmark" => {
             let pts = vec![

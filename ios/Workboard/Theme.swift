@@ -148,3 +148,74 @@ extension View {
         textContentType(passwordAutoFillOff ? .emailAddress : .username)
     }
 }
+
+/// What a password may hold: English letters, digits, symbols and spaces.
+/// Typed in Korean mode the same keys give other letters, and the password
+/// then won't match the one typed in English on another computer.
+func isPasswordText(_ s: String) -> Bool {
+    s.unicodeScalars.allSatisfy { (0x20...0x7E).contains($0.value) }
+}
+
+/// A password box: dots by default, an eye button shows what was typed, and
+/// only English letters, digits and symbols go in (anything else is left out
+/// and a note asks for English input). The field keeps `id` as its
+/// accessibility identifier either way; the eye is `id + "Eye"`.
+struct PasswordField: View {
+    let title: LocalizedStringKey
+    @Binding var text: String
+    let kind: PasswordKind
+    let id: String
+    @State private var shown = false
+    @State private var note = false
+    @FocusState private var focused: Bool
+
+    init(_ title: LocalizedStringKey, text: Binding<String>, kind: PasswordKind, id: String) {
+        self.title = title
+        _text = text
+        self.kind = kind
+        self.id = id
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Group {
+                    if shown {
+                        TextField(title, text: $text)
+                    } else {
+                        SecureField(title, text: $text)
+                    }
+                }
+                .passwordField(kind)
+                .keyboardType(.asciiCapable)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focused)
+                .accessibilityIdentifier(id)
+                Button {
+                    shown.toggle()
+                    focused = true
+                } label: {
+                    Image(systemName: shown ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(shown ? "Hide password" : "Show password")
+                .accessibilityIdentifier(id + "Eye")
+            }
+            if note {
+                Text("Passwords take English letters, numbers and symbols. Switch to English input.")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        .onChange(of: text) { _, new in
+            if isPasswordText(new) {
+                if !new.isEmpty { note = false }
+            } else {
+                note = true
+                text = String(String.UnicodeScalarView(new.unicodeScalars.filter { (0x20...0x7E).contains($0.value) }))
+            }
+        }
+    }
+}

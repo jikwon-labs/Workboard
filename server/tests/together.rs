@@ -3709,6 +3709,32 @@ fn a_plain_member_cant_make_a_shared_space_or_doc_their_own() {
 }
 
 #[test]
+fn a_private_channel_stays_closed_when_its_last_member_leaves() {
+    let home = temp_home("last-leaves");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
+    b.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({
+            "id": 3400, "name": "bo-alone", "kind": "Channel", "private": true, "creator": 2,
+            "topic": "", "members": [2], "last_read": 0,
+            "messages": [{"id": 3401, "author": 2, "text": "Bo's secret", "ts": now()}]
+        }));
+    });
+    round_trip(&mut b, &mut c, "Bo's channel is in", 3028);
+    assert!(!c.data.to_string().contains("Bo's secret"));
+    b.change(|d| find_mut(d, "channels", 3400)["members"] = json!([]));
+    round_trip(&mut b, &mut c, "after Bo leaves", 3029);
+    round_trip(&mut a, &mut c, "and Ann writes", 2024);
+    assert!(
+        !c.data.to_string().contains("Bo's secret"),
+        "Cy doesn't get the channel: {}",
+        c.data
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn hidden_items_never_leak_through_deltas() {
     let home = temp_home("deltas-hidden");
     let server = Server::start(&home, 0);

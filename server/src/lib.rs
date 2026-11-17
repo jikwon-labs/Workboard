@@ -847,6 +847,24 @@ fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
                 }
                 _ => {}
             }
+            // a DM or private channel whose members all left would be open
+            // to everyone (an empty list means no list: see closed_to), with
+            // all its history: its last member stays in it
+            let restricted = t.get("kind").and_then(|k| k.as_str()) == Some("Direct")
+                || t.get("private").and_then(|p| p.as_bool()) == Some(true);
+            let had = t
+                .get("members")
+                .and_then(|m| m.as_array())
+                .is_some_and(|a| !a.is_empty());
+            let emptied = c
+                .get("members")
+                .and_then(|m| m.as_array())
+                .is_some_and(|a| a.is_empty());
+            if restricted && had && emptied {
+                if let Some(m) = t.get("members") {
+                    c.insert("members".into(), m.clone());
+                }
+            }
             if manages {
                 continue;
             }
@@ -872,7 +890,7 @@ fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
                 .into_iter()
                 .filter(|m| *m != member)
                 .collect();
-            if theirs.contains(&member) {
+            if theirs.contains(&member) || (restricted && had && allowed.is_empty()) {
                 allowed.push(member);
             }
             let (mut a, mut b) = (allowed.clone(), theirs);

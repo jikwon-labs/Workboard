@@ -824,7 +824,8 @@ impl App {
                                 } else if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, CONTROL_H))).clicked() {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
-                                if icon_button_ex(ui, &t, "download", tr("Import from Slack"), "Import from Slack", true, cw, t.text, t.text2).clicked() {
+                                // it brings people in: the owner's and admins' on a server
+                                if self.may_manage() && icon_button_ex(ui, &t, "download", tr("Import from Slack"), "Import from Slack", true, cw, t.text, t.text2).clicked() {
                                     self.start_slack_import();
                                 }
                                 ui.add_space(8.0);

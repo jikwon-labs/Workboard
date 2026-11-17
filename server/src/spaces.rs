@@ -20,6 +20,11 @@
 // made a tombstone, so their own app takes the team's version back with the
 // next update instead of keeping (and sending) its own forever. Nobody
 // else's data changes: the team's version is what everyone already has.
+//
+// The same goes for the team's people and the workspace's name and colour
+// in a copy from a plain member (`guard_people`): only the owner and admins
+// add or remove people, change anyone else's entry or any role, and rename
+// or recolour the workspace.
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -37,13 +42,54 @@ pub struct PutBack {
     /// keeps the tombstone (so their app sees it was taken in) and counts
     /// the item as restored right after it.
     pub revive: BTreeMap<u64, i64>,
+    /// Shared setting -> their stamp for it: a change of the workspace's
+    /// name or colour they may not make. The team's stamp goes past it.
+    pub values: BTreeMap<String, i64>,
     /// Something they changed was turned down (worth telling them).
     pub refused: bool,
 }
 
 impl PutBack {
     pub fn is_empty(&self) -> bool {
-        self.bump.is_empty() && self.bury.is_empty() && self.revive.is_empty() && !self.refused
+        self.bump.is_empty()
+            && self.bury.is_empty()
+            && self.revive.is_empty()
+            && self.values.is_empty()
+            && !self.refused
+    }
+}
+
+/// Shared settings only the owner and admins change: the workspace's name
+/// and colour (Settings > General).
+pub const ADMIN_VALUES: &[&str] = &["workspace", "extra.workspace_color"];
+
+fn value_at<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.').try_fold(v, |v, part| v.get(part))
+}
+
+fn set_value_at(v: &mut Value, path: &str, new: Option<Value>) {
+    let mut parts: Vec<&str> = path.split('.').collect();
+    let Some(last) = parts.pop() else { return };
+    let mut cur = v;
+    for part in parts {
+        if !cur.get(part).is_some_and(|x| x.is_object()) {
+            if new.is_none() || !cur.is_object() {
+                return;
+            }
+            cur[part] = Value::Object(Map::new());
+        }
+        cur = &mut cur[part];
+    }
+    let Some(obj) = cur.as_object_mut() else {
+        return;
+    };
+    match new {
+        Some(n) => {
+            obj.insert(last.into(), n);
+        }
+        None => {
+            obj.remove(last);
+        }
     }
 }
 
@@ -331,6 +377,80 @@ impl Cx {
     }
 }
 
+impl Cx {
+    /// A plain member (not an owner or admin): only the owner and admins
+    /// bring people in, take them out or change anyone else's entry, and
+    /// change the workspace's name and colour. Their own entry they may
+    /// change (name, colour, status), but not its role.
+    fn guard_people(&mut self, canon: &Value, data: &mut Value, member: u64) {
+        let team = array(canon, "members");
+        let own = |x: &Value| id_of(x) == Some(member);
+        let mut seen = HashSet::new();
+        if let Some(arr) = array_mut(data, "members") {
+            let mut out = Vec::with_capacity(arr.len());
+            for item in std::mem::take(arr) {
+                let Some(id) = id_of(&item) else {
+                    out.push(item);
+                    continue;
+                };
+                seen.insert(id);
+                match team.iter().find(|t| id_of(t) == Some(id)) {
+                    Some(t) if own(&item) => {
+                        let mut mine = item;
+                        // (a copy that leaves the field out changes nothing)
+                        if mine.get("role").is_some_and(|r| Some(r) != t.get("role")) {
+                            match t.get("role") {
+                                Some(r) => mine["role"] = r.clone(),
+                                None => {
+                                    if let Some(o) = mine.as_object_mut() {
+                                        o.remove("role");
+                                    }
+                                }
+                            }
+                            // their stamp for it goes; the item may still be
+                            // newer (a rename), and then carries the team's
+                            // role. Afterwards the team's copy is the newer,
+                            // so their app takes the role back.
+                            let change = self.their_change(id);
+                            if let Some(f) = self.dmeta.fields.get_mut(&id) {
+                                f.remove("role");
+                            }
+                            self.out.bump.insert(id, (change, 0));
+                            self.out.refused = true;
+                        }
+                        out.push(mine);
+                    }
+                    Some(t) => out.push(self.keep_item(t, &item, None, &[])),
+                    // someone new: only the owner and admins invite
+                    None => self.leave_out(&[id]),
+                }
+            }
+            *arr = out;
+        }
+        // the team's people missing from their copy: removing them is undone
+        for t in team {
+            if let Some(id) = id_of(t) {
+                if !seen.contains(&id) {
+                    self.undelete(id);
+                }
+            }
+        }
+        for path in ADMIN_VALUES {
+            let theirs = self.dmeta.values.get(*path).copied().unwrap_or(0);
+            let team_stamp = self.cmeta.values.get(*path).copied().unwrap_or(0);
+            let team_value = value_at(canon, path).cloned();
+            if theirs > team_stamp && value_at(data, path).cloned() != team_value {
+                self.out.values.insert(path.to_string(), theirs);
+                self.out.refused = true;
+            }
+            if theirs > team_stamp {
+                self.dmeta.values.remove(*path);
+                set_value_at(data, path, team_value);
+            }
+        }
+    }
+}
+
 /// Docs in space `sid`, with their sub pages, among `docs`; `seed` are
 /// pages already known to be in it.
 fn docs_in(docs: &[Value], sid: u64, seed: &HashSet<u64>) -> HashSet<u64> {
@@ -360,10 +480,12 @@ pub fn guard(canon: &Value, data: &mut Value, member: u64, manages: bool, now: i
     let all_theirs = array(canon, "spaces")
         .iter()
         .all(|s| wb_sync::space_level(s, member, manages) == Some(Level::Full));
-    if all_theirs {
+    if all_theirs && manages {
         return PutBack::default();
     }
-    wb_sync::fill_activity_ids(data);
+    if !all_theirs {
+        wb_sync::fill_activity_ids(data);
+    }
     let mut cx = Cx {
         cmeta: meta_of(canon),
         dmeta: meta_of(data),
@@ -476,6 +598,9 @@ pub fn guard(canon: &Value, data: &mut Value, member: u64, manages: bool, now: i
         );
         cx.guard_items(canon, data, "extra.forms", &in_lists, &in_lists, None, &[]);
     }
+    if !manages {
+        cx.guard_people(canon, data, member);
+    }
     let meta = std::mem::take(&mut cx.dmeta);
     set_meta(data, &meta);
     cx.out
@@ -485,7 +610,8 @@ pub fn guard(canon: &Value, data: &mut Value, member: u64, manages: bool, now: i
 /// sender changed go past theirs, and what they made where they may not
 /// gets a tombstone, so their app takes the team's version back.
 pub fn put_back(canon: &mut Value, fix: &PutBack) {
-    if fix.bump.is_empty() && fix.bury.is_empty() && fix.revive.is_empty() {
+    if fix.bump.is_empty() && fix.bury.is_empty() && fix.revive.is_empty() && fix.values.is_empty()
+    {
         return;
     }
     let present = wb_sync::fingerprints(canon);
@@ -527,6 +653,10 @@ pub fn put_back(canon: &mut Value, fix: &PutBack) {
         meta.fields.remove(id);
         let s = meta.stamps.entry(*id).or_insert(0);
         *s = (*s).max(r);
+    }
+    for (path, stamp) in &fix.values {
+        let s = meta.values.entry(path.clone()).or_insert(0);
+        *s = (*s).max(stamp + 1);
     }
     set_meta(canon, &meta);
 }

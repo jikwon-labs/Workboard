@@ -2419,7 +2419,8 @@ impl App {
                     }
                 });
                 ui.add_space(6.0);
-                if ui.button(tr("Import from Slack")).clicked() {
+                // it brings people in: the owner's and admins' on a server
+                if self.may_manage() && ui.button(tr("Import from Slack")).clicked() {
                     self.start_slack_import();
                 }
                 if !result.is_empty() {

@@ -4571,3 +4571,90 @@ fn one_server_answers_on_two_addresses_as_one_team() {
     );
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_plain_member_cant_invite_remove_or_rename_and_gets_the_teams_version_back() {
+    let home = temp_home("memberguard");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    // the workspace has a colour, and Bo's app has saved once, so a changed
+    // setting gets a stamp (as in the app)
+    a.change(|_| {});
+    a.change(|d| d["extra"]["workspace_color"] = json!([9, 9, 9]));
+    b.wait("the colour reaches Bo", |d| {
+        d["extra"]["workspace_color"] == json!([9, 9, 9])
+    });
+    b.change(|_| {});
+    b.change(|d| {
+        let m = d["members"].as_array_mut().unwrap();
+        // invites someone, takes Cy out, renames Ann, makes themselves admin
+        m.push(json!({"id": 9001, "name": "New person", "email": "new@team.io", "role": "Member", "invited": true}));
+        m.retain(|x| x["id"] != 3);
+        m[0]["name"] = json!("Bo renamed Ann");
+        m[1]["role"] = json!("Admin");
+        // their own name and status are theirs to change
+        m[1]["name"] = json!("Bo B.");
+        m[1]["status_text"] = json!("at lunch");
+        d["workspace"] = json!("Bo's workspace");
+        d["extra"]["workspace_color"] = json!([1, 2, 3]);
+    });
+    assert!(b.meta().tombs.contains_key(&3));
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    let team_again = |d: &Value| {
+        let ids: Vec<u64> = d["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_u64())
+            .collect();
+        ids == [1, 2, 3]
+            && d["members"][0]["name"] == "Ann"
+            && d["members"][1]["role"] == "Member"
+            && d["members"][1]["name"] == "Bo B."
+            && d["members"][1]["status_text"] == "at lunch"
+            && d["workspace"] == "Team"
+            && d["extra"]["workspace_color"] == json!([9, 9, 9])
+    };
+    b.wait(
+        "Bo's copy is the team's again, with Bo's own name",
+        team_again,
+    );
+    a.wait("Ann has only Bo's own changes", team_again);
+    round_trip(&mut b, &mut a, "after Bo", 3002);
+    assert!(team_again(&a.data) && team_again(&b.data));
+    // nothing comes back with the next copy
+    b.put_back.clear();
+    round_trip(&mut b, &mut a, "again", 3003);
+    b.pump();
+    assert!(
+        b.put_back.is_empty(),
+        "nothing turned down: {:?}",
+        b.put_back
+    );
+    // once admin, the same changes go through
+    a.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Admin,
+    });
+    b.until("B learns it is admin", |b| b.role == Some(Role::Admin));
+    b.wait("B's name shows Admin", |d| {
+        d["members"][1]["role"] == "Admin"
+    });
+    b.change(|d| {
+        let m = d["members"].as_array_mut().unwrap();
+        m.push(json!({"id": 9005, "name": "Dee", "email": "dee@team.io", "role": "Member", "invited": true}));
+        m[0]["name"] = json!("Ann K.");
+        d["workspace"] = json!("Team 2");
+    });
+    a.wait("an admin's changes reach Ann", |d| {
+        d["workspace"] == "Team 2"
+            && d["members"][0]["name"] == "Ann K."
+            && d["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["id"] == 9005)
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}

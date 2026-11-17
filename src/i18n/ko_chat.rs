@@ -96,6 +96,7 @@ pub const T: &[(&str, &str)] = &[
     // Import from Slack (slack.rs)
     ("Choose the Slack export (.zip)", "Slack 내보내기 파일(.zip)을 고르세요"),
     ("Couldn't read the Slack export: {}", "Slack 내보내기 파일을 읽지 못했습니다: {}"),
+    ("Only the owner or an admin of this workspace can import from Slack.", "이 워크스페이스의 소유자나 관리자만 Slack에서 가져올 수 있습니다."),
     ("This isn't a Slack export: channels.json is missing.", "Slack 내보내기 파일이 아닙니다: channels.json 이 없습니다."),
     ("This Slack export has no channels.", "이 Slack 내보내기 파일에는 채널이 없습니다."),
     ("That file couldn't be opened as a .zip.", "그 파일을 .zip 으로 열 수 없습니다."),

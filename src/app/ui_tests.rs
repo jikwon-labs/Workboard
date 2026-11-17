@@ -434,6 +434,20 @@ fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
     });
     h.settle();
     assert!(h.has("Copy link") && !h.has("Invite by email"));
+    // Import and export keeps CSV but not Import from Slack (it brings people in)
+    h.app.modal = Some(Modal::Import {
+        path: String::new(),
+        result: String::new(),
+    });
+    h.settle();
+    assert!(h.has("Export current tasks to CSV") && !h.has("Import from Slack"));
+    h.app
+        .open_slack_export(std::path::Path::new("/nonexistent.zip"));
+    assert!(matches!(h.app.modal, Some(Modal::Import { .. })));
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Only the owner or an admin of this workspace can import from Slack.")
+    );
     // the invite dialog reached anyway (a link) only says who can invite
     h.app.modal = Some(Modal::Invite {
         emails: String::new(),

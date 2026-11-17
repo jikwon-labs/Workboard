@@ -629,6 +629,14 @@ impl App {
     }
 
     pub(super) fn open_slack_export(&mut self, zip: &Path) {
+        if !self.may_manage() {
+            // the server keeps out the people it would bring in
+            self.toast = Some((
+                tr("Only the owner or an admin of this workspace can import from Slack.").into(),
+                now_ts(),
+            ));
+            return;
+        }
         match load(&self.data, zip) {
             Ok(p) => self.modal = Some(Modal::SlackImport(Box::new(p))),
             Err(e) => {

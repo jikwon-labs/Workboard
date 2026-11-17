@@ -455,28 +455,14 @@ impl App {
                 }
             }
         }
-        ui.add_space(4.0);
-        if ui
-            .add(
-                egui::Button::new(tr("+  Create Workspace"))
-                    .min_size(vec2(ui.available_width(), 30.0))
-                    .stroke(Stroke::new(1.0, t.border)),
-            )
-            .clicked()
-        {
+        ui.separator();
+        if menu_item(ui, &t, "plus", tr("Create Workspace"), "").clicked() {
             self.modal = Some(Modal::new_workspace());
             close_popup(ui);
         }
         // someone else's team: it opens as another workspace here, and the
         // ones already on this computer (on a server or not) stay as they are
-        if ui
-            .add(
-                egui::Button::new(tr("Join a team"))
-                    .min_size(vec2(ui.available_width(), 30.0))
-                    .stroke(Stroke::new(1.0, t.border)),
-            )
-            .clicked()
-        {
+        if menu_item(ui, &t, "login", tr("Join a team"), "").clicked() {
             self.open_join_team(String::new());
             close_popup(ui);
         }

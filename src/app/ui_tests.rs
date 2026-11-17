@@ -11059,7 +11059,7 @@ fn new_workspace_steps_through_name_apps_and_invites() {
     let mut h = Ui1::new();
     let before = h.app.ws_file.clone();
     h.click("Workspace menu");
-    h.click("+  Create Workspace");
+    h.click("Create Workspace");
     assert!(matches!(
         h.app.modal,
         Some(Modal::NewWorkspace { step: 0, .. })
@@ -11117,7 +11117,7 @@ fn new_workspace_needs_a_name_goes_back_and_skips_invites() {
     let mut h = Ui1::new();
     let members_before = h.app.data.members.len();
     h.click("Workspace menu");
-    h.click("+  Create Workspace");
+    h.click("Create Workspace");
     // no name yet: Next does nothing
     h.click("Next");
     assert!(matches!(

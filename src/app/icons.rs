@@ -96,6 +96,8 @@ pub(super) const KINDS: &[&str] = &[
     "chart",
     "trash",
     "logout",
+    "plus",
+    "login",
 ];
 
 /// `line_icon` drawn `scale` times larger around `c` (the big icon of an
@@ -1184,6 +1186,22 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-2.0, 0.0), vec2(7.0, 0.0));
             line(vec2(7.0, 0.0), vec2(4.0, -3.0));
             line(vec2(7.0, 0.0), vec2(4.0, 3.0));
+        }
+        "plus" => {
+            line(vec2(0.0, -6.5), vec2(0.0, 6.5));
+            line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
+        }
+        "login" => {
+            let pts = vec![
+                c + vec2(-1.0, -7.0),
+                c + vec2(6.0, -7.0),
+                c + vec2(6.0, 7.0),
+                c + vec2(-1.0, 7.0),
+            ];
+            p.add(egui::Shape::line(pts, s));
+            line(vec2(-7.0, 0.0), vec2(2.0, 0.0));
+            line(vec2(2.0, 0.0), vec2(-1.0, -3.0));
+            line(vec2(2.0, 0.0), vec2(-1.0, 3.0));
         }
         "sort" => {
             line(vec2(-3.5, -7.0), vec2(-3.5, 7.0));

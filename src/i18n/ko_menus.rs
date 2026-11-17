@@ -11,7 +11,6 @@ pub const T: &[(&str, &str)] = &[
     ("Team server", "팀 서버"),
     ("Shared folder", "공유 폴더"),
     ("This computer", "이 컴퓨터"),
-    ("+  Create Workspace", "+  워크스페이스 만들기"),
     // profile menu
     ("Notifications muted", "알림 꺼짐"),
     ("Online", "온라인"),

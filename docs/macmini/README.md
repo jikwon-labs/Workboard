@@ -8,10 +8,6 @@
 
 - [ ] **Cloudflare Tunnel 로 옮기기** (순서와 자세한 설명: `docs/cloudflare-tunnel.md` "옮기는 순서"). MacBook 에서 새 버전(0.1.8) 배포가 끝난 뒤에 한다.
   - [ ] **앱 실사용 확인**: 앱 서버 주소를 `https://wb.wlrnjs.xyz`로 바꿔 로그인·동기화되고, 앱 두 대의 허들에서 양쪽 소리가 들리는지 사용자 확인이 필요하다. LiveKit Cloud 서버 설정과 API 인증은 완료했지만 이것만으로 실제 통화 성공을 뜻하지 않는다.
-- [ ] **서버 자동 업데이트 켜기** (다른 일과 상관없이 해도 된다. 켜 두면 서버 코드가 바뀔 때마다 `git pull && deploy/install-launchd.sh` 를 손으로 돌리지 않아도 된다. 설명: `deploy/README.md` "Follow main by itself")
-  - 서버를 설치한 체크아웃에서 `git pull` 후 `deploy/install-autoupdate.sh`. `~/.local/src/Workboard` 에 업데이트 전용 체크아웃을 만들고, 첫 빌드·테스트·설치를 바로 한 번 한다(처음엔 몇 분 걸리고, 서버가 몇 초 재시작된다).
-  - GitHub 에서 묻지 않고 받아 올 수 있어야 한다. 막히면 스크립트가 그렇게 말하고 멈춘다(그때는 `gh auth login` 이나 읽기 전용 deploy key 를 먼저 둔다).
-  - 확인: 출력 끝에 `installed com.jikwon-labs.workboard-autoupdate`, `tail ~/Library/Logs/workboard-autoupdate.log` 마지막 줄이 `installed, /health answers` 또는 `server unchanged`, `curl https://wb.wlrnjs.xyz/health` 가 `{"ok":true}`.
 - [ ] **노출된 터널 토큰 교체 확인** (보안 후속): 앞서 채팅에 노출된 토큰을 Cloudflare에서 교체하고 새 토큰으로 설치했는지 사용자에게 확인한다. 토큰 값은 기록하지 않는다.
 - [ ] **메일 설정** (별도 작업): Gmail 앱 비밀번호 → `mail.json`의 `public_address`를 `https://wb.wlrnjs.xyz`로 작성·`chmod 600` → `workboard-server mail-test`로 시험 메일 (`accounts-and-mail.md` 2). 현재 메일 설정은 없으며 이번 이전에서는 만들지 않았다.
   - Mac mini 에서 Claude Code 로 할 때: `git pull` 후 [`prompts/mail-setup.md`](prompts/mail-setup.md) 를 새 세션의 첫 프롬프트로 붙여 넣는다. 앱 비밀번호는 사람이 `nano` 로 직접 넣는다.
@@ -32,6 +28,8 @@
 
 
 ## 끝난 일
+
+- [x] **서버 자동 업데이트 켜기** (2026-11-17 확인, 첫 설치 기준 `7f51328`): `deploy/install-autoupdate.sh` 로 `~/.local/src/Workboard` 업데이트 전용 체크아웃과 LaunchAgent `com.jikwon-labs.workboard-autoupdate`(300초 주기, 마지막 종료 코드 0)가 켜져 있다. 첫 실행 로그 `7f51328 …: installed, /health answers`, 마지막 줄 `330eb84 Bump the app to 0.1.12: server unchanged`(= `origin/main`), 로그에 실패 줄 없음, `curl https://wb.wlrnjs.xyz/health` → `{"ok":true}`. 결과는 `~/Library/Logs/workboard-autoupdate.log`.
 
 - [x] **Tailscale 빼기** (2026-11-17): 서버는 127.0.0.1 전용(아래), 관리자 SSH 는 Cloudflare Access 로 옮겼다. Tailscale 앱 자체는 지우지 않기로 했다(사용자 결정, 2026-11-17). 서버·배포·SSH 는 더 이상 Tailscale 에 기대지 않는다.
 

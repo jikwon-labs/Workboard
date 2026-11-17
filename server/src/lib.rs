@@ -856,9 +856,20 @@ fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
 /// so they can't change, join or delete it. Before that, what they may not
 /// change in spaces (shared with them, or closed to them) is put back (see
 /// spaces.rs); the result says what to do to the team's copy after the merge.
-fn guard_push(canon: &Value, data: &mut Value, member: u64, role: Role) -> spaces::PutBack {
+fn guard_push(canon: &Value, data: &mut Value, member: u64, saved: &Saved) -> spaces::PutBack {
+    let role = saved.role_of(member);
     guard_channels(canon, data, member, role);
-    let fix = spaces::guard(canon, data, member, role.manages(), now_ms());
+    // an admin manages people, but the owner's entry stays the owner's
+    let owners: Vec<u64> = match role {
+        Role::Admin => saved
+            .roles
+            .iter()
+            .filter(|(m, r)| **r == Role::Owner && **m != member)
+            .map(|(m, _)| *m)
+            .collect(),
+        _ => vec![],
+    };
+    let fix = spaces::guard(canon, data, member, role.manages(), &owners, now_ms());
     swap_hidden(canon, data, member, role);
     fix
 }
@@ -1889,7 +1900,7 @@ impl Hub {
             _ => None,
         };
         let fix = match &g.canon {
-            Some(c) => guard_push(c, &mut data, member, g.saved.role_of(member)),
+            Some(c) => guard_push(c, &mut data, member, &g.saved),
             None => spaces::PutBack::default(),
         };
         let claimer = g.saved.devices.contains_key(device);

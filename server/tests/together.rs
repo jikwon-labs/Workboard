@@ -4710,14 +4710,14 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
     b.change(|d| {
         let m = d["members"].as_array_mut().unwrap();
         m.push(json!({"id": 9005, "name": "Dee", "email": "dee@team.io", "role": "Member", "invited": true}));
-        m[0]["name"] = json!("Ann K.");
+        m[2]["name"] = json!("Cy C.");
         d["workspace"] = json!("Team 2");
         d["extra"]["teams"][0]["members"] = json!([1, 2]);
     });
     a.wait("an admin's changes reach Ann", |d| {
         d["workspace"] == "Team 2"
             && d["extra"]["teams"][0]["members"] == json!([1, 2])
-            && d["members"][0]["name"] == "Ann K."
+            && d["members"][2]["name"] == "Cy C."
             && d["members"]
                 .as_array()
                 .unwrap()
@@ -4900,6 +4900,56 @@ fn only_the_owner_changes_or_removes_another_admin() {
         role: Role::Member,
     });
     c.until("Cy is a member", |c| c.role == Some(Role::Member));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// An admin manages people, but the owner's own entry stays the owner's:
+/// an admin's copy can't rename them, change their email or role, or take
+/// them out of the list.
+#[test]
+fn an_admin_cant_change_or_remove_the_owners_entry() {
+    let home = temp_home("ownerentry");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| d["members"][0]["email"] = json!("ann@team.io"));
+    a.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Admin,
+    });
+    b.until("Bo is admin", |b| b.role == Some(Role::Admin));
+    b.wait("Ann's email reaches Bo", |d| {
+        d["members"][0]["email"] == "ann@team.io"
+    });
+    b.change(|d| {
+        let m = d["members"].as_array_mut().unwrap();
+        m[0]["name"] = json!("Not Ann");
+        m[0]["email"] = json!("bo@evil.io");
+        m[0]["role"] = json!("Member");
+        m[2]["name"] = json!("Cy C.");
+    });
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    let anns = |d: &Value| {
+        find(d, "members", 1).is_some_and(|m| {
+            m["name"] == "Ann" && m["email"] == "ann@team.io" && m["role"] == "Owner"
+        })
+    };
+    a.wait("Bo's change to Cy reaches Ann", |d| {
+        d["members"][2]["name"] == "Cy C."
+    });
+    assert!(anns(&a.data), "{}", a.data["members"]);
+    b.wait("Bo has Ann's entry back", anns);
+    // taking Ann out of the list does nothing
+    b.change(|d| {
+        d["members"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|m| m["id"] != 1)
+    });
+    assert!(b.meta().tombs.contains_key(&1));
+    round_trip(&mut b, &mut a, "after taking Ann out", 3040);
+    assert!(anns(&a.data), "{}", a.data["members"]);
+    b.wait("Ann is back in Bo's list", anns);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

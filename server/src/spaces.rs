@@ -26,9 +26,11 @@
 // people, change anyone else's entry or any role, rename or recolour the
 // workspace, turn its features on or off, and make, change or delete custom
 // fields, automations, templates and teams, or who a Slack user comes in
-// as (`extra.slack_map`, set by Import from Slack). And chat messages and task
-// comments stay their authors' (`guard_authors`): a plain member can't write
-// as someone else or change or delete what someone else wrote.
+// as (`extra.slack_map`, set by Import from Slack). Admins may do all of
+// that, but the owner's own entry stays the owner's (`guard_entries`). And
+// chat messages and task comments stay their authors' (`guard_authors`): a
+// plain member can't write as someone else or change or delete what someone
+// else wrote.
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -497,6 +499,29 @@ impl Cx {
     }
 }
 
+impl Cx {
+    /// An admin: they bring people in and take them out, but `owners`'
+    /// entries (name, email, role) stay as the owner has them, and the owner
+    /// can't be taken out of the list.
+    fn guard_entries(&mut self, canon: &Value, data: &mut Value, owners: &[u64]) {
+        let team = array(canon, "members");
+        for &id in owners {
+            let Some(t) = team.iter().find(|t| id_of(t) == Some(id)) else {
+                continue;
+            };
+            match array_mut(data, "members")
+                .and_then(|a| a.iter_mut().find(|x| id_of(x) == Some(id)))
+            {
+                Some(x) => {
+                    let theirs = std::mem::replace(x, Value::Null);
+                    *x = self.keep_item(t, &theirs, None, &[]);
+                }
+                None => self.undelete(id),
+            }
+        }
+    }
+}
+
 /// What only a message's author changes: what it says and who said it.
 /// Anyone may react to it, pin it or make a task from it.
 pub const MESSAGE_KEYS: &[&str] = &[
@@ -713,11 +738,18 @@ fn docs_in(docs: &[Value], sid: u64, seed: &HashSet<u64>) -> HashSet<u64> {
 
 /// Fix up a copy from `member` (an owner or admin when `manages`) before it
 /// is merged into the team's copy `canon`: see the top of this file.
-pub fn guard(canon: &Value, data: &mut Value, member: u64, manages: bool, now: i64) -> PutBack {
+pub fn guard(
+    canon: &Value,
+    data: &mut Value,
+    member: u64,
+    manages: bool,
+    owners: &[u64],
+    now: i64,
+) -> PutBack {
     let all_theirs = array(canon, "spaces")
         .iter()
         .all(|s| wb_sync::space_level(s, member, manages) == Some(Level::Full));
-    if all_theirs && manages {
+    if all_theirs && manages && owners.is_empty() {
         return PutBack::default();
     }
     // (a plain member's comments are checked one by one: see guard_authors)
@@ -838,6 +870,8 @@ pub fn guard(canon: &Value, data: &mut Value, member: u64, manages: bool, now: i
     }
     if !manages {
         cx.guard_people(canon, data, member);
+    } else if !owners.is_empty() {
+        cx.guard_entries(canon, data, owners);
     }
     let meta = std::mem::take(&mut cx.dmeta);
     set_meta(data, &meta);

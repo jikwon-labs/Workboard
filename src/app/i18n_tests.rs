@@ -670,3 +670,53 @@ fn korean_screens_have_no_english_left() {
         left.join("\n")
     );
 }
+
+/// A Whiteboard made from a template on a Korean screen gets its name and
+/// sticky notes in Korean, like the other things the app names.
+#[test]
+fn whiteboard_template_notes_are_made_in_korean() {
+    let mut h = Ui1::new();
+    set_lang(Lang::Ko);
+    h.click("Rail More");
+    h.click("Whiteboards");
+    h.click("Action Plan");
+    set_lang(Lang::En);
+    let w = h.app.data.extra.whiteboards.last().expect("a whiteboard");
+    assert_eq!(w.name, "실행 계획");
+    let notes: Vec<&str> = w.notes.iter().map(|n| n.text.as_str()).collect();
+    assert_eq!(notes, ["목표", "1단계", "2단계", "3단계", "담당자 / 마감일"]);
+}
+
+/// The word before a filter's first condition reads "조건", not "위치" (the
+/// place a new workspace is kept, whose English is also "Where").
+#[test]
+fn filter_lead_reads_as_a_condition_in_korean() {
+    let mut h = Ui1::new();
+    h.app.loc = Location::Everything;
+    set_lang(Lang::Ko);
+    h.settle();
+    h.click("Filter");
+    h.click("+ 필터 추가");
+    h.settle();
+    let mut shown = vec![];
+    texts(&h.shapes, &mut shown);
+    set_lang(Lang::En);
+    assert!(shown.iter().any(|s| s == "조건"), "{:?}", shown);
+    assert!(!shown.iter().any(|s| s == "위치"));
+}
+
+/// A goal's new targets are named in the screen's language.
+#[test]
+fn goal_targets_are_named_in_korean() {
+    let mut h = Ui1::new();
+    set_lang(Lang::Ko);
+    h.click("Rail More");
+    h.click("Goals");
+    h.click("목표 설정");
+    h.click("숫자");
+    h.click("작업");
+    set_lang(Lang::En);
+    let g = h.app.data.extra.goals.last().expect("a goal");
+    let names: Vec<&str> = g.targets.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["목표치", "작업 끝내기"]);
+}

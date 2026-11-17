@@ -338,7 +338,7 @@ fn join_lead(ui: &mut Ui, t: &Theme, i: usize, join: Join, name: &str) -> bool {
         ui.painter().text(
             lr.left_center(),
             Align2::LEFT_CENTER,
-            tr("Where"),
+            crate::i18n::tr_ctx("Where (filter)", "Where"),
             FontId::proportional(14.0),
             t.text3,
         );

@@ -80,6 +80,9 @@ pub const T: &[(&str, &str)] = &[
     ("Notes", "메모"),
     ("Write notes. Lines starting with [ ] become action items.", "메모를 쓰세요. [ ]로 시작하는 줄은 실행 항목이 됩니다."),
     ("Create {} tasks from action items", "실행 항목으로 작업 {}개 만들기"),
+    // the names a new target gets
+    ("Target", "목표치"),
+    ("Finish tasks", "작업 끝내기"),
     ("Tasks created from the meeting notes", "회의 메모로 작업을 만들었습니다"),
     // goals
     ("+ New Goal", "+ 새 목표"),

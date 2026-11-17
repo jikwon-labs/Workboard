@@ -80,6 +80,8 @@ pub const T: &[(&str, &str)] = &[
     ("Remind me at...", "알림 시간 지정..."),
     ("Edit message", "메시지 편집"),
     ("Click again to delete", "한 번 더 누르면 삭제"),
+    // the text of a reminder about a message
+    ("Message from {}: {}", "{}님의 메시지: {}"),
     ("Delete message", "메시지 삭제"),
     ("Enter to save, Esc to cancel", "Enter로 저장, Esc로 취소"),
     // toasts

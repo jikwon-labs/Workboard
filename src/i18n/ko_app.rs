@@ -47,7 +47,7 @@ pub const T: &[(&str, &str)] = &[
     ("Good afternoon", "좋은 오후예요"),
     ("Good evening", "좋은 저녁이에요"),
     ("{}, {}", "{}, {}님"),
-    ("My Work", "내 작업"),
+    ("My Work", "내 업무"),
     ("Overdue", "기한 지남"),
     ("Unscheduled", "일정 없음"),
     ("Show all {}", "{}개 모두 보기"),

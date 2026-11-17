@@ -123,7 +123,7 @@ impl App {
             wiki: None,
             views: vec![],
             parent: Some(parent),
-            title: format!("Page {}", n),
+            title: trf!("Page {}", n),
             body: String::new(),
             created: now,
             updated: now,

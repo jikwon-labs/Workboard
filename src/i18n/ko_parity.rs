@@ -97,7 +97,8 @@ pub const T: &[(&str, &str)] = &[
     ("Filters", "필터"),
     ("Clear all", "모두 지우기"),
     ("Task name or tag...", "작업 이름 또는 태그..."),
-    ("Where", "조건"),
+    // the lead before a filter's first condition ("Where" alone is a new workspace's place)
+    ("Where (filter)", "조건"),
     ("And", "그리고"),
     ("Select filter", "필터 선택"),
     ("is not", "아님"),

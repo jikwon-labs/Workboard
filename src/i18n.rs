@@ -138,7 +138,7 @@ pub fn history_line(who: &str, text: &str) -> String {
 
 fn history_ko(text: &str) -> Option<String> {
     // (English pattern, Korean): {} values in order, {0} {1} in Korean
-    const LINES: [(&str, &str); 24] = [
+    const LINES: [(&str, &str); 28] = [
         ("changed status from {} to {}", "\u{c0c1}\u{d0dc}\u{b97c} {0}\u{c5d0}\u{c11c} {1}(\u{c73c})\u{b85c} \u{bcc0}\u{acbd}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("set priority to {}", "\u{c6b0}\u{c120}\u{c21c}\u{c704}\u{b97c} {0}(\u{c73c})\u{b85c} \u{c124}\u{c815}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
         ("changed due date to {}", "\u{b9c8}\u{ac10}\u{c77c}\u{c744} {0}(\u{c73c})\u{b85c} \u{bcc0}\u{acbd}\u{d588}\u{c2b5}\u{b2c8}\u{b2e4}"),
@@ -163,6 +163,11 @@ fn history_ko(text: &str) -> Option<String> {
         ("linked {}", "{0}을(를) 연결했습니다"),
         ("attached {}", "{0}을(를) 첨부했습니다"),
         ("submitted the form {}", "{0} 폼을 제출했습니다"),
+        // what an Automation did (`describe_action`)
+        ("Automation ran: assign to {}", "자동화로 {0}에게 할당했습니다"),
+        ("Automation ran: set priority to {}", "자동화로 우선순위를 {0}(으)로 설정했습니다"),
+        ("Automation ran: move to {}", "자동화로 {0}(으)로 옮겼습니다"),
+        ("Automation ran: comment \"{}\"", "자동화로 \"{0}\" 댓글을 달았습니다"),
     ];
     for (en, ko) in LINES {
         if let Some(vals) = match_pattern(en, text) {
@@ -540,6 +545,14 @@ mod tests {
         assert_eq!(
             history_line("Alex", "added tag 디자인"),
             "Alex님이 태그 디자인을 추가했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "Automation ran: set priority to Urgent"),
+            "Alex님이 자동화로 우선순위를 긴급으로 설정했습니다"
+        );
+        assert_eq!(
+            history_line("Alex", "Automation ran: move to Sprint 2"),
+            "Alex님이 자동화로 Sprint 2로 옮겼습니다"
         );
         assert_eq!(
             history_line("Alex", "made this a top-level task"),

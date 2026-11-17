@@ -2254,9 +2254,10 @@ impl App {
                         .data
                         .member(author)
                         .map(|x| x.name.clone())
-                        .unwrap_or_else(|| "Someone".into());
+                        .unwrap_or_else(|| tr("Someone").into());
                     let body = title.filter(|x| !x.is_empty()).unwrap_or(text);
-                    let what = format!(
+                    // the reminder is this person's own: in their language
+                    let what = trf!(
                         "Message from {}: {}",
                         who,
                         truncate(body.lines().next().unwrap_or(""), 60)

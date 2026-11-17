@@ -1316,11 +1316,12 @@ impl App {
                     // each note gets its id now, like any new item
                     let ids: Vec<u64> = notes.iter().map(|_| self.data.new_id()).collect();
                     if let Some(w) = self.wb_open.and_then(|id| self.data.extra.whiteboards.iter_mut().find(|w| w.id == id)) {
+                        // made in the language of the person making it, like a new task's name
                         if name != "Start from scratch" {
-                            w.name = name.clone();
+                            w.name = tr(&name).to_string();
                         }
                         for (i, ((txt, pos), id)) in notes.into_iter().zip(ids).enumerate() {
-                            w.notes.push(Sticky { id, pos, text: txt.to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
+                            w.notes.push(Sticky { id, pos, text: tr(txt).to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
                         }
                     }
                 }

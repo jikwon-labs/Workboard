@@ -1668,7 +1668,7 @@ impl App {
                     ui.label(RichText::new(tr("Add target:")).color(t.text2));
                     if ui.button(tr("Number")).clicked() {
                         g.targets.push(GoalTarget {
-                            name: "Target".into(),
+                            name: tr("Target").into(),
                             kind: TargetKind::Number {
                                 start: 0.0,
                                 target: 100.0,
@@ -1680,14 +1680,14 @@ impl App {
                     }
                     if ui.button(tr("Done / not done")).clicked() {
                         g.targets.push(GoalTarget {
-                            name: "Target".into(),
+                            name: tr("Target").into(),
                             kind: TargetKind::TrueFalse { done: false },
                         });
                         ch = true;
                     }
                     if ui.button(tr("Tasks")).clicked() {
                         g.targets.push(GoalTarget {
-                            name: "Finish tasks".into(),
+                            name: tr("Finish tasks").into(),
                             kind: TargetKind::Tasks { ids: vec![] },
                         });
                         ch = true;

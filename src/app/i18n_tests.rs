@@ -684,7 +684,10 @@ fn whiteboard_template_notes_are_made_in_korean() {
     let w = h.app.data.extra.whiteboards.last().expect("a whiteboard");
     assert_eq!(w.name, "실행 계획");
     let notes: Vec<&str> = w.notes.iter().map(|n| n.text.as_str()).collect();
-    assert_eq!(notes, ["목표", "1단계", "2단계", "3단계", "담당자 / 마감일"]);
+    assert_eq!(
+        notes,
+        ["목표", "1단계", "2단계", "3단계", "담당자 / 마감일"]
+    );
 }
 
 /// The word before a filter's first condition reads "조건", not "위치" (the

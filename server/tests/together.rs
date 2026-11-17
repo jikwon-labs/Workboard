@@ -4076,6 +4076,16 @@ fn only_full_members_and_admins_change_a_spaces_sharing() {
     assert_eq!(find(&a.data, "spaces", 70).unwrap()["name"], "Plans");
     round_trip(&mut a, &mut c, "Cy hears", 2020);
     assert!(find(&c.data, "spaces", 70).is_none(), "still not Cy's");
+    // nor by sending the sharing as a list of items (which merged as items
+    // and opened the space to everyone)
+    b.change(|d| find_mut(d, "spaces", 70)["sharing"] = json!([{"id": 987654321}]));
+    round_trip(&mut b, &mut a, "after the sharing list", 3022);
+    assert_eq!(
+        find(&a.data, "spaces", 70).unwrap()["sharing"]["people"],
+        json!([{"member": 2, "level": "edit"}])
+    );
+    round_trip(&mut a, &mut c, "Cy hears again", 2021);
+    assert!(find(&c.data, "spaces", 70).is_none(), "still not Cy's");
     // deleting the space: it comes back with everything in it
     b.change(|d| {
         d["spaces"]

@@ -180,6 +180,9 @@ fn u64_at(v: &Value, key: &str) -> Option<u64> {
 }
 
 /// Arrays of items with ids inside an item (a task's comments, a doc's views).
+/// The fields of a space that hold items (see Space in the app's model).
+const SPACE_ITEMS: [&str; 3] = ["folders", "lists", "statuses"];
+
 fn is_items(v: &Value) -> bool {
     v.as_array()
         .is_some_and(|a| !a.is_empty() && a.iter().all(|x| id_of(x).is_some()))
@@ -814,7 +817,17 @@ pub fn guard(
                     let telling = wb_sync::own_fields(ds) != wb_sync::own_fields(s);
                     let mut fixed = s.clone();
                     for (k, v) in ds.as_object().into_iter().flatten() {
-                        if is_items(v) || v.as_array().is_some_and(|a| a.is_empty()) {
+                        // only what holds items already (lists, folders,
+                        // statuses): a setting sent as a list of items would
+                        // otherwise merge as items and replace it (`sharing`
+                        // turned into a list opens the space to everyone)
+                        let holds_items = match s.get(k.as_str()) {
+                            Some(team) => team.is_array(),
+                            None => SPACE_ITEMS.contains(&k.as_str()),
+                        };
+                        if holds_items
+                            && (is_items(v) || v.as_array().is_some_and(|a| a.is_empty()))
+                        {
                             fixed[k.as_str()] = v.clone();
                         }
                     }

@@ -39,7 +39,7 @@ mod conn;
 mod files;
 pub use conn::{trust_certificate, Conn};
 pub use files::{
-    create_workspace, download, forgot_password, list_workspaces, remote_size, sha256_file, upload,
+    create_workspace, download, forgot_password, list_workspaces, name_ok, remote_size, sha256_file, upload,
     Auth, FileError,
 };
 

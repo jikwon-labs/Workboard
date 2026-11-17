@@ -675,6 +675,11 @@ impl Files {
 
     /// While drawing: this attachment is on screen and should be shown at `max`.
     pub fn want(&self, a: &Attachment, max: u32) {
+        // the name comes from another member's synced message: only a sha256
+        // may become a cache path or a request to the server
+        if !wb_server_name_ok(&a.file) {
+            return;
+        }
         self.wants
             .borrow_mut()
             .push((a.file.clone(), ext_of(&a.name), a.kind, max));
@@ -1067,16 +1072,16 @@ fn log_broken(key: &str) {
 }
 
 fn wb_server_name_ok(sha: &str) -> bool {
-    sha.len() == 64
-        && sha
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    wb_net::name_ok(sha)
 }
 
 /// Copy `from` into the cache (or the shared folder) under its hash
 /// (temporary name first). It's marked as changed now, whatever the
 /// original's date: the cleaning goes by when a file was put there.
 fn store(dir: &Path, from: &Path, sha: &str) -> Result<(), String> {
+    if !wb_server_name_ok(sha) {
+        return Err("not a file name".into());
+    }
     let dest = dir.join(sha);
     if dest.is_file() {
         touch(&dest);

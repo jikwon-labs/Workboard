@@ -12,6 +12,16 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::Duration;
 
+/// A file name the server's /files route uses: 64 lowercase hex digits (a
+/// sha256). Names come from synced data another member wrote, so anything
+/// else is refused before it reaches a request line or a path on disk.
+pub fn name_ok(sha: &str) -> bool {
+    sha.len() == 64
+        && sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// How an app proves who it is: the device id and token it signs in with.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Auth {
@@ -98,7 +108,7 @@ impl<R: BufRead> Chunked<R> {
 
     fn line(&mut self) -> std::io::Result<String> {
         let mut l = String::new();
-        if self.inner.read_line(&mut l)? == 0 {
+        if read_line(&mut self.inner, &mut l)? == 0 {
             return Err(std::io::ErrorKind::UnexpectedEof.into());
         }
         Ok(l)
@@ -174,6 +184,9 @@ fn request(
     sha: &str,
     extra: &[(&str, String)],
 ) -> Result<(), FileError> {
+    if !name_ok(sha) {
+        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+    }
     let mut r = format!(
         "{} {}/files/{} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}:{}\r\nConnection: close\r\n",
         method, prefix, sha, host, auth.device, auth.token
@@ -186,9 +199,22 @@ fn request(
         .map_err(|e| FileError::Net(e.to_string()))
 }
 
+/// One header or chunk-size line, at most 8 KB (an endless line from a
+/// broken or hostile server would otherwise fill memory).
+fn read_line(r: &mut impl BufRead, line: &mut String) -> std::io::Result<usize> {
+    let n = r.take(8 << 10).read_line(line)?;
+    if n == 8 << 10 && !line.ends_with('\n') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the server's answer had a line that was too long",
+        ));
+    }
+    Ok(n)
+}
+
 fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
     let mut line = String::new();
-    r.read_line(&mut line)
+    read_line(r, &mut line)
         .map_err(|e| FileError::Net(e.to_string()))?;
     let status = line
         .split_whitespace()
@@ -203,7 +229,7 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FileError> {
     };
     loop {
         line.clear();
-        if r.read_line(&mut line)
+        if read_line(r, &mut line)
             .map_err(|e| FileError::Net(e.to_string()))?
             == 0
             || line == "\r\n"
@@ -258,6 +284,9 @@ fn fail(status: u16, body: &str) -> FileError {
 
 /// The size of a file on the server, or None when it isn't there.
 pub fn remote_size(addr: &str, auth: &Auth, sha: &str) -> Result<Option<u64>, FileError> {
+    if !name_ok(sha) {
+        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+    }
     let (mut s, host, prefix) = open(addr)?;
     request(&mut s, "HEAD", (&host, &prefix), auth, sha, &[])?;
     let mut r = BufReader::new(s);
@@ -280,6 +309,9 @@ pub fn upload(
     content_type: &str,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<(), FileError> {
+    if !name_ok(sha) {
+        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+    }
     let mut f = File::open(path).map_err(|e| FileError::Other(e.to_string()))?;
     let total = f
         .metadata()
@@ -342,6 +374,9 @@ pub fn download(
     dest: &Path,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<(), FileError> {
+    if !name_ok(sha) {
+        return Err(FileError::Other("That isn't a file name the server uses.".into()));
+    }
     let part = dest.with_extension("part");
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir).map_err(|e| FileError::Other(e.to_string()))?;
@@ -566,5 +601,42 @@ mod tests {
             body(&mut r, &head).read_to_end(&mut out).is_err(),
             "a body that breaks off is an error, not a short file"
         );
+    }
+
+    #[test]
+    fn a_name_from_synced_data_never_reaches_a_path_or_request() {
+        let sha = "a".repeat(64);
+        assert!(name_ok(&sha));
+        let dir = std::env::temp_dir().join(format!("wb-name-{}", std::process::id()));
+        for bad in [
+            format!("{sha} HTTP/1.1\r\nX: y"),
+            format!("../../{sha}"),
+            "A".repeat(64),
+            "a".repeat(63),
+            String::new(),
+        ] {
+            assert!(!name_ok(&bad), "{bad:?}");
+            let auth = Auth {
+                device: "d".into(),
+                token: "t".into(),
+            };
+            // refused before any connection or directory is made
+            let dest = dir.join("x").join(&bad);
+            let e = download("127.0.0.1:1", &auth, &bad, &dest, &mut |_, _| true);
+            assert!(matches!(e, Err(FileError::Other(_))), "{bad:?}: {e:?}");
+            assert!(!dir.exists());
+            assert!(matches!(
+                remote_size("127.0.0.1:1", &auth, &bad),
+                Err(FileError::Other(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn an_endless_header_line_is_an_error() {
+        let mut raw = b"HTTP/1.1 200 OK\r\nX: ".to_vec();
+        raw.extend(std::iter::repeat_n(b'a', 100_000));
+        let mut r = BufReader::new(&raw[..]);
+        assert!(read_head(&mut r).is_err());
     }
 }

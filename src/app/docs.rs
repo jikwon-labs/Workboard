@@ -1766,7 +1766,7 @@ impl App {
             }
             close_any(ui);
         }
-        if ui.button(tr("Save as template")).clicked() {
+        if self.may_manage() && ui.button(tr("Save as template")).clicked() {
             if self.save_doc_as_template(id).is_some() {
                 self.toast = Some((tr("Saved as a template").into(), now_ts()));
             }

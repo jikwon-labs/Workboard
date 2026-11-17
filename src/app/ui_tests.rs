@@ -427,6 +427,33 @@ fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
     h.app.open_settings("General");
     h.settle();
     assert!(h.has("Full name") && !h.has("Workspace name"));
+    // nor what changes the workspace for everyone; Templates stays, to use them
+    for s in ["Apps", "Custom fields", "Tag manager", "Automations"] {
+        assert!(!h.has(&format!("Settings {}", s)), "no {}", s);
+    }
+    h.click("Settings Templates");
+    assert!(!h.has("New task template"));
+    // reached anyway, those dialogs only say who can change them
+    h.app.section = Section::Home;
+    h.app.modal = Some(Modal::ClickApps);
+    h.settle();
+    assert!(h.has("Only the owner or an admin of this workspace can change this."));
+    assert!(!h.has("Priorities"));
+    h.click("Close");
+    // teams can be looked at, not made
+    h.app.data.extra.teams.push(Team {
+        id: 777,
+        name: "Design".into(),
+        members: vec![h.app.data.me],
+        color: [1, 2, 3],
+    });
+    h.app.section = Section::Teams;
+    h.settle();
+    assert!(!h.has("Create team"));
+    h.app.team_open = Some(777);
+    h.app.hub_filter = 9;
+    h.settle();
+    assert!(!h.has("Delete team"));
     h.app.section = Section::Home;
     // Share keeps Copy link but has no invite field
     h.app.modal = Some(Modal::Share {
@@ -469,6 +496,10 @@ fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
     h.app.open_settings("General");
     h.settle();
     assert!(h.has("Settings General") && h.has("Workspace name"));
+    assert!(h.has("Settings Automations") && h.has("Settings Custom fields"));
+    h.app.section = Section::Teams;
+    h.settle();
+    assert!(h.has("Delete team"));
     // before the server is reached, the role in People decides
     h.app.section = Section::Home;
     h.app.sync_rt.role = None;

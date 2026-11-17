@@ -1477,12 +1477,14 @@ impl App {
         } else {
             self.hub_filter.min(4)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "teams", "Teams", &items, sel, true);
+        // teams are made and changed by the owner and admins on a server
+        let may = self.may_manage();
+        let (clicked, plus) = self.hub_sidebar(ui, "teams", "Teams", &items, sel, may);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.team_open = None;
         }
-        if plus {
+        if plus && may {
             self.new_team();
         }
         egui::CentralPanel::default()
@@ -1515,7 +1517,7 @@ impl App {
         let t = self.t();
         self.page_bar(ui, if mine { "My Teams" } else { "All Teams" }, |s, ui| {
             let tt = s.t();
-            if primary_button(ui, &tt, tr("Create team")).clicked() {
+            if s.may_manage() && primary_button(ui, &tt, tr("Create team")).clicked() {
                 s.new_team();
             }
         });
@@ -1543,7 +1545,7 @@ impl App {
                         ui.label(RichText::new(tr("Manage teams and see their work")).size(24.0));
                         ui.label(RichText::new(tr("Coordinate teams, organize members and see the details of their work.")).color(t.text2));
                         ui.add_space(12.0);
-                        if primary_button(ui, &t, tr("Create team")).clicked() {
+                        if self.may_manage() && primary_button(ui, &t, tr("Create team")).clicked() {
                             self.new_team();
                         }
                     });
@@ -1582,9 +1584,14 @@ impl App {
             return;
         };
         let members = self.data.members.clone();
+        // a plain member on a server sees the team but doesn't change it
+        let may = self.may_manage();
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(24, 16))
             .show(ui, |ui| {
+                if !may {
+                    ui.disable();
+                }
                 let tm = &mut self.data.extra.teams[ti];
                 if ui
                     .add(
@@ -1639,9 +1646,10 @@ impl App {
                 });
                 ui.add_space(4.0);
                 // a framed button like Delete on dashboards and whiteboards
-                if ui
-                    .button(RichText::new(tr("Delete team")).color(t.danger))
-                    .clicked()
+                if may
+                    && ui
+                        .button(RichText::new(tr("Delete team")).color(t.danger))
+                        .clicked()
                 {
                     self.modal = Some(Modal::ConfirmRemove {
                         kind: "team",

@@ -21,10 +21,11 @@
 // next update instead of keeping (and sending) its own forever. Nobody
 // else's data changes: the team's version is what everyone already has.
 //
-// The same goes for the team's people and the workspace's name and colour
-// in a copy from a plain member (`guard_people`): only the owner and admins
-// add or remove people, change anyone else's entry or any role, and rename
-// or recolour the workspace.
+// The same goes for what changes the workspace for everyone in a copy from
+// a plain member (`guard_people`): only the owner and admins add or remove
+// people, change anyone else's entry or any role, rename or recolour the
+// workspace, turn its features on or off, and make, change or delete custom
+// fields, automations, templates and teams.
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -60,8 +61,18 @@ impl PutBack {
 }
 
 /// Shared settings only the owner and admins change: the workspace's name
-/// and colour (Settings > General).
-pub const ADMIN_VALUES: &[&str] = &["workspace", "extra.workspace_color"];
+/// and colour (Settings > General) and its features (Settings > Apps).
+pub const ADMIN_VALUES: &[&str] = &["workspace", "extra.workspace_color", "extra.apps"];
+
+/// Team-wide collections only the owner and admins add to, change or
+/// delete from: custom fields, automations, templates and teams. Everyone
+/// uses them (a field's value on a task, a template to make a task).
+pub const ADMIN_ITEMS: &[&str] = &[
+    "extra.fields",
+    "extra.automations",
+    "extra.templates",
+    "extra.teams",
+];
 
 fn value_at<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
     path.split('.').try_fold(v, |v, part| v.get(part))
@@ -379,9 +390,10 @@ impl Cx {
 
 impl Cx {
     /// A plain member (not an owner or admin): only the owner and admins
-    /// bring people in, take them out or change anyone else's entry, and
-    /// change the workspace's name and colour. Their own entry they may
-    /// change (name, colour, status), but not its role.
+    /// bring people in, take them out or change anyone else's entry, change
+    /// the workspace's name, colour and features, and make, change or delete
+    /// custom fields, automations, templates and teams. Their own entry
+    /// they may change (name, colour, status), but not its role.
     fn guard_people(&mut self, canon: &Value, data: &mut Value, member: u64) {
         let team = array(canon, "members");
         let own = |x: &Value| id_of(x) == Some(member);
@@ -434,6 +446,9 @@ impl Cx {
                     self.undelete(id);
                 }
             }
+        }
+        for path in ADMIN_ITEMS {
+            self.guard_items(canon, data, path, &|_| true, &|_| true, None, &[]);
         }
         for path in ADMIN_VALUES {
             let theirs = self.dmeta.values.get(*path).copied().unwrap_or(0);

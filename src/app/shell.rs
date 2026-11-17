@@ -3087,7 +3087,8 @@ impl App {
                                             close_popup(ui);
                                         }
                                     }
-                                    if ui.button(tr("Custom fields")).clicked() {
+                                    if self.may_manage() && ui.button(tr("Custom fields")).clicked()
+                                    {
                                         self.modal = Some(Modal::CustomFields {
                                             name: String::new(),
                                             kind: "text".into(),
@@ -3117,7 +3118,7 @@ impl App {
                         if hb(ui, "\u{1F4DD}  Ask").clicked() {
                             self.section = Section::Ai;
                         }
-                        if hb(ui, "\u{2699}  Automate").clicked() {
+                        if self.may_manage() && hb(ui, "\u{2699}  Automate").clicked() {
                             // new rules run where I am, as from the sidebar menus
                             // (a folder's rules run in its space)
                             let scope = match self.loc {
@@ -3842,6 +3843,7 @@ impl App {
         if add_col
             .on_hover_text(tr("Add a column (Custom Field)"))
             .clicked()
+            && self.may_manage()
         {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),

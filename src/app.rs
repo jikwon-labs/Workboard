@@ -4892,7 +4892,9 @@ impl App {
                                         close_popup(ui);
                                     }
                                     ui.separator();
-                                    if ui.button(tr("Save as template")).clicked() {
+                                    if self.may_manage()
+                                        && ui.button(tr("Save as template")).clicked()
+                                    {
                                         let id = self.data.new_id();
                                         self.data.extra.templates.push(TaskTemplate {
                                             id,

@@ -391,7 +391,12 @@ impl App {
             ("robot", "Automations"),
             ("tag", "Tag manager"),
         ];
+        let manages = self.may_manage();
         for (icon, label) in items {
+            // only Templates (to use one) for a plain member on a server
+            if !manages && label != "Templates" {
+                continue;
+            }
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 self.modal = Some(match label {
                     "Apps" => Modal::ClickApps,
@@ -1401,11 +1406,20 @@ impl App {
                 let (tid, m) = (*task, *mode);
                 close = self.pick_task_body(ui, t, tid, m, query);
             }
-            Modal::Invite { .. } if !self.may_manage() => {
-                // reached by a link or a stale screen: members don't invite on a server
-                ui.label(tr(
-                    "Only the owner or an admin of this workspace can invite people.",
-                ));
+            Modal::Invite { .. }
+            | Modal::ClickApps
+            | Modal::CustomFields { .. }
+            | Modal::Automations { .. }
+            | Modal::TagManager { .. }
+                if !self.may_manage() =>
+            {
+                // reached by a link or a stale screen: on a server these are
+                // the owner's and admins' (the server keeps them too)
+                ui.label(tr(if matches!(modal, Modal::Invite { .. }) {
+                    "Only the owner or an admin of this workspace can invite people."
+                } else {
+                    "Only the owner or an admin of this workspace can change this."
+                }));
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -808,7 +808,13 @@ impl App {
                     c.cat = cat;
                 }
             }
+            // team templates are made, renamed and deleted by the owner and
+            // admins on a server; everyone uses them
+            let manages = self.may_manage();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if !manages {
+                    return;
+                }
                 let r = ui.add(ghost(egui::Button::new(
                     RichText::new(tr("+ New task template")).color(t.text2),
                 )));
@@ -917,7 +923,9 @@ impl App {
             return false;
         };
         if pick == Pick::NewTask {
-            self.new_task_template_form(ui, t, c);
+            if self.may_manage() {
+                self.new_task_template_form(ui, t, c);
+            }
             return false;
         }
         let Some(tp) = self.picked_template(&pick) else {
@@ -947,7 +955,7 @@ impl App {
                 ui.label(RichText::new(about).small().color(t.text2));
             });
         });
-        if let Pick::Team(id) = pick {
+        if let (Pick::Team(id), true) = (pick.clone(), self.may_manage()) {
             if self.team_template_manage(ui, t, c, id) {
                 return false;
             }

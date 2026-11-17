@@ -1413,7 +1413,7 @@ impl App {
             self.actions.push(Action::ToggleTimer(tid));
             close_any(ui);
         }
-        if ui.button(tr("Save as template")).clicked() {
+        if self.may_manage() && ui.button(tr("Save as template")).clicked() {
             let id = self.data.new_id();
             self.data.extra.templates.push(TaskTemplate {
                 id,
@@ -1519,7 +1519,7 @@ impl App {
                 close_any(ui);
             }
         }
-        if ui.button(tr("Custom fields")).clicked() {
+        if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
@@ -1527,7 +1527,7 @@ impl App {
             });
             close_any(ui);
         }
-        if ui.button(tr("Automations")).clicked() {
+        if self.may_manage() && ui.button(tr("Automations")).clicked() {
             self.modal = Some(Modal::Automations {
                 status: "complete".into(),
                 action: "comment".into(),
@@ -1549,7 +1549,7 @@ impl App {
             }
             close_any(ui);
         }
-        if ui.button(tr("Save as template")).clicked() {
+        if self.may_manage() && ui.button(tr("Save as template")).clicked() {
             if self.save_list_as_template(lid).is_some() {
                 self.toast = Some((tr("Saved as a template").into(), now_ts()));
             }
@@ -2203,7 +2203,7 @@ impl App {
             self.actions.push(Action::EditStatuses(sid));
             close_any(ui);
         }
-        if ui.button(tr("Custom fields")).clicked() {
+        if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
             self.modal = Some(Modal::CustomFields {
                 name: String::new(),
                 kind: "text".into(),
@@ -2211,7 +2211,7 @@ impl App {
             });
             close_any(ui);
         }
-        if ui.button(tr("Automations")).clicked() {
+        if self.may_manage() && ui.button(tr("Automations")).clicked() {
             self.modal = Some(Modal::Automations {
                 status: "complete".into(),
                 action: "comment".into(),
@@ -2430,7 +2430,7 @@ impl App {
                     }
                 });
                 ui.separator();
-                if ui.button(tr("+ Create new field")).clicked() {
+                if self.may_manage() && ui.button(tr("+ Create new field")).clicked() {
                     self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
                     close = true;
                 }

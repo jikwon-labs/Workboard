@@ -4594,16 +4594,26 @@ fn one_server_answers_on_two_addresses_as_one_team() {
 }
 
 #[test]
-fn a_plain_member_cant_invite_remove_or_rename_and_gets_the_teams_version_back() {
+fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version_back() {
     let home = temp_home("memberguard");
     let server = Server::start(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // the workspace has a colour, and Bo's app has saved once, so a changed
     // setting gets a stamp (as in the app)
     a.change(|_| {});
-    a.change(|d| d["extra"]["workspace_color"] = json!([9, 9, 9]));
-    b.wait("the colour reaches Bo", |d| {
+    // and team-wide things Ann set up: features, a field, a rule, a template, a team
+    a.change(|d| {
+        d["extra"]["workspace_color"] = json!([9, 9, 9]);
+        d["extra"]["apps"] = json!({"priorities": true, "tags": true});
+        d["extra"]["fields"] = json!([{"id": 501, "name": "Budget", "kind": "number", "options": []}]);
+        d["extra"]["automations"] = json!([{"id": 502, "enabled": true, "trigger_status": "complete", "action": "comment", "value": "done"}]);
+        d["extra"]["templates"] = json!([{"id": 503, "name": "Bug", "task_name": "Bug"}]);
+        d["extra"]["teams"] = json!([{"id": 504, "name": "Design", "members": [1], "color": [1, 1, 1]}]);
+    });
+    b.wait("Ann's setup reaches Bo", |d| {
         d["extra"]["workspace_color"] == json!([9, 9, 9])
+            && d["extra"]["teams"][0]["id"] == 504
+            && d["extra"]["apps"]["priorities"] == true
     });
     b.change(|_| {});
     b.change(|d| {
@@ -4618,6 +4628,15 @@ fn a_plain_member_cant_invite_remove_or_rename_and_gets_the_teams_version_back()
         m[1]["status_text"] = json!("at lunch");
         d["workspace"] = json!("Bo's workspace");
         d["extra"]["workspace_color"] = json!([1, 2, 3]);
+        // features off, a field renamed, a rule deleted, a new template, joins a team
+        d["extra"]["apps"]["priorities"] = json!(false);
+        d["extra"]["fields"][0]["name"] = json!("Bo's field");
+        d["extra"]["automations"] = json!([]);
+        d["extra"]["templates"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 9002, "name": "Bo's template", "task_name": "x"}));
+        d["extra"]["teams"][0]["members"] = json!([1, 2]);
     });
     assert!(b.meta().tombs.contains_key(&3));
     b.until("Bo is told", |b| !b.put_back.is_empty());
@@ -4635,6 +4654,11 @@ fn a_plain_member_cant_invite_remove_or_rename_and_gets_the_teams_version_back()
             && d["members"][1]["status_text"] == "at lunch"
             && d["workspace"] == "Team"
             && d["extra"]["workspace_color"] == json!([9, 9, 9])
+            && d["extra"]["apps"]["priorities"] == true
+            && d["extra"]["fields"][0]["name"] == "Budget"
+            && d["extra"]["automations"][0]["id"] == 502
+            && d["extra"]["templates"].as_array().unwrap().len() == 1
+            && d["extra"]["teams"][0]["members"] == json!([1])
     };
     b.wait(
         "Bo's copy is the team's again, with Bo's own name",
@@ -4666,9 +4690,11 @@ fn a_plain_member_cant_invite_remove_or_rename_and_gets_the_teams_version_back()
         m.push(json!({"id": 9005, "name": "Dee", "email": "dee@team.io", "role": "Member", "invited": true}));
         m[0]["name"] = json!("Ann K.");
         d["workspace"] = json!("Team 2");
+        d["extra"]["teams"][0]["members"] = json!([1, 2]);
     });
     a.wait("an admin's changes reach Ann", |d| {
         d["workspace"] == "Team 2"
+            && d["extra"]["teams"][0]["members"] == json!([1, 2])
             && d["members"][0]["name"] == "Ann K."
             && d["members"]
                 .as_array()

@@ -23,9 +23,19 @@ pub const SETTINGS: [(&str, &str); 15] = [
     ("Personal", "Keyboard shortcuts"),
 ];
 
+/// Sections that change the whole workspace for everyone: on a team server
+/// only its owner and admins see them (the server keeps them too).
+const ADMIN_ONLY: [&str; 5] = [
+    "General",
+    "Apps",
+    "Custom fields",
+    "Tag manager",
+    "Automations",
+];
+
 impl App {
     pub(super) fn open_settings(&mut self, label: &str) {
-        let label = if label == "General" && !self.may_manage() {
+        let label = if ADMIN_ONLY.contains(&label) && !self.may_manage() {
             "My settings"
         } else {
             label
@@ -106,8 +116,8 @@ impl App {
                 let mut last_group = "";
                 let manages = self.may_manage();
                 for (i, (group, label)) in SETTINGS.iter().enumerate() {
-                    // the workspace's name and colour are the owner's and admins'
-                    if *label == "General" && !manages {
+                    // sections that change the workspace for everyone are the owner's and admins'
+                    if ADMIN_ONLY.contains(label) && !manages {
                         continue;
                     }
                     if *group != last_group {
@@ -140,7 +150,7 @@ impl App {
                 }
             });
         let mut label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
-        if label == "General" && !self.may_manage() {
+        if ADMIN_ONLY.contains(&label) && !self.may_manage() {
             // a member lands on their own settings instead
             label = "My settings";
             self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;

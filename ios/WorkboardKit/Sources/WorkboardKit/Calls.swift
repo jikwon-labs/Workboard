@@ -36,8 +36,12 @@ public enum CallError: Error, Equatable, Sendable {
 }
 
 public enum CallAPI {
-    /// The room the server makes for a conversation (room_name in server/src/lib.rs).
-    public static func room(channel: UInt64) -> String { "wb-\(channel)" }
+    /// The room the server makes for a conversation (Hub::room in
+    /// server/src/lib.rs): the workspace id goes in for a workspace other
+    /// than the server's first, as channel ids repeat between workspaces.
+    public static func room(channel: UInt64, workspace: String? = nil) -> String {
+        workspace.map { "wb-\($0)-\(channel)" } ?? "wb-\(channel)"
+    }
 
     /// How the server words "this server has no LiveKit".
     public static func meansNotSetUp(_ message: String) -> Bool {

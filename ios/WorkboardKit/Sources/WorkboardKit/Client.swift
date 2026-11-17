@@ -702,7 +702,7 @@ public final class SyncClient {
             storage.save(settings)
             accountRequest = .done
         case let .callToken(channel, url, token):
-            finishCall(channel, .success(CallGrant(url: url, token: token, room: CallAPI.room(channel: channel))))
+            finishCall(channel, .success(CallGrant(url: url, token: token, room: CallAPI.room(channel: channel, workspace: ServerAddress.workspaceID(settings.server)))))
         case .invite, .access, .backups, .restored:
             handleAdmin(m)
         case .ping:

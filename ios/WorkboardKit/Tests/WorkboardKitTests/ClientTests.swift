@@ -62,6 +62,19 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(ServerAddress.http("wss://h", path: "/auth/forgot")?.absoluteString, "https://h/auth/forgot")
         XCTAssertTrue(ServerAddress.same("macmini", "ws://macmini:8787/ws"))
         XCTAssertFalse(ServerAddress.same("macmini", "ws://other:8787"))
+        // a workspace other than the server's first, below /w/<id>
+        XCTAssertEqual(ServerAddress.websocket("https://wb.example.com/w/ab12")?.absoluteString, "wss://wb.example.com/w/ab12/ws")
+        XCTAssertEqual(ServerAddress.websocket("macmini/w/ab12/ws")?.absoluteString, "ws://macmini:8787/w/ab12/ws")
+        XCTAssertEqual(ServerAddress.http("https://wb.example.com/w/ab12", path: "/files/abc")?.absoluteString, "https://wb.example.com/w/ab12/files/abc")
+        XCTAssertEqual(ServerAddress.http("macmini/w/ab12", path: "/auth/forgot")?.absoluteString, "http://macmini:8787/w/ab12/auth/forgot")
+        XCTAssertEqual(ServerAddress.workspaceID("https://wb.example.com/w/ab12"), "ab12")
+        XCTAssertNil(ServerAddress.workspaceID("https://wb.example.com"))
+        XCTAssertFalse(ServerAddress.same("macmini/w/ab12", "macmini/w/cd34"))
+        XCTAssertTrue(ServerAddress.same("macmini/w/ab12", "ws://macmini:8787/w/ab12/ws"))
+        XCTAssertEqual(InviteLink.parse("https://wb.example.com/w/ab12/join?code=C")?.server, "wss://wb.example.com/w/ab12")
+        XCTAssertEqual(InviteLink.parse("workboard://join?server=wb.example.com%2Fw%2Fab12&code=C")?.server, "ws://wb.example.com/w/ab12")
+        XCTAssertEqual(CallAPI.room(channel: 10), "wb-10")
+        XCTAssertEqual(CallAPI.room(channel: 10, workspace: "ab12"), "wb-ab12-10")
     }
 }
 

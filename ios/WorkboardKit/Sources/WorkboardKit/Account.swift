@@ -124,7 +124,9 @@ public struct InviteLink: Equatable, Sendable {
         case "http", "https":
             guard c.path.hasSuffix("/join"), let host = c.host else { return nil }
             let shown = host.contains(":") ? "[\(host)]" : host
-            server = (scheme == "https" ? "wss://" : "ws://") + shown + (c.port.map { ":\($0)" } ?? "")
+            // the join page of a workspace other than the server's first: /w/<id>/join
+            let below = ServerAddress.workspaceID(inPath: String(c.path.dropLast(5))).map { "/w/" + $0 } ?? ""
+            server = (scheme == "https" ? "wss://" : "ws://") + shown + (c.port.map { ":\($0)" } ?? "") + below
         default:
             return nil
         }
@@ -214,15 +216,38 @@ public enum ServerAddress {
         default: return nil
         }
         if c.port == nil, c.scheme == "ws" { c.port = defaultPort }
-        if c.path.isEmpty || c.path == "/" { c.path = path }
+        if let id = workspaceID(inPath: c.path) {
+            // a workspace other than the server's first: its connection is below it
+            c.path = "/w/" + id + path
+        } else if c.path.isEmpty || c.path == "/" {
+            c.path = path
+        }
         return c.url
     }
 
-    /// http(s) on the same host and port.
+    /// The workspace id in an address path ("/w/<id>" or "/w/<id>/ws"); nil
+    /// for the server's first workspace (see registry.rs in the server).
+    public static func workspaceID(inPath p: String) -> String? {
+        guard p.hasPrefix("/w/") else { return nil }
+        var rest = String(p.dropFirst(3))
+        if rest.hasSuffix(path) { rest = String(rest.dropLast(path.count)) }
+        while rest.hasSuffix("/") { rest.removeLast() }
+        return rest.isEmpty || rest.contains("/") ? nil : rest
+    }
+
+    /// The workspace id in an address; nil for the server's first workspace.
+    public static func workspaceID(_ address: String) -> String? {
+        guard let ws = websocket(address), let c = URLComponents(url: ws, resolvingAgainstBaseURL: false) else { return nil }
+        return workspaceID(inPath: c.path)
+    }
+
+    /// http(s) on the same host and port, below the workspace's /w/<id>
+    /// when the address has one.
     public static func http(_ address: String, path: String) -> URL? {
         guard let ws = websocket(address), var c = URLComponents(url: ws, resolvingAgainstBaseURL: false) else { return nil }
+        let below = workspaceID(inPath: c.path).map { "/w/" + $0 } ?? ""
         c.scheme = c.scheme == "wss" ? "https" : "http"
-        c.path = path
+        c.path = below + path
         c.query = nil
         return c.url
     }

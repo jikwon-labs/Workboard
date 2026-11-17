@@ -187,6 +187,9 @@ pub struct SyncRt {
     /// When a request other than joining a huddle last went to the server
     /// (see huddle_denied_unnamed).
     pub(super) other_asked: Option<std::time::Instant>,
+    /// The members connected to the server, as it last said (None until it
+    /// says, or after the connection drops; older servers never say).
+    pub(super) online: Option<Vec<u64>>,
 }
 
 /// Asking a server which workspaces an email and password sign in to.
@@ -902,6 +905,33 @@ impl App {
     /// What the top bar says about a team server that isn't working: can't
     /// be reached, or won't let this computer in. None while connected,
     /// connecting, or without a server.
+    /// Whether this workspace works through a team server.
+    pub(super) fn on_server(&self) -> bool {
+        self.data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some())
+    }
+
+    /// Whether this computer is connected to the team server right now.
+    pub(super) fn connected(&self) -> bool {
+        self.on_server() && self.sync_rt.net_status == Some(NetStatus::Connected)
+    }
+
+    /// Whether `member` has Workboard open and connected somewhere: None
+    /// when that isn't known (no server, not connected, or a server too old
+    /// to say).
+    pub(super) fn is_online(&self, member: u64) -> Option<bool> {
+        if !self.connected() {
+            return None;
+        }
+        if member == self.data.me {
+            return Some(true);
+        }
+        self.sync_rt.online.as_ref().map(|o| o.contains(&member))
+    }
+
     pub(super) fn server_trouble(&self) -> Option<String> {
         self.data.extra.shared.as_ref()?.server.as_ref()?;
         self.sync_rt.net.as_ref()?;
@@ -970,6 +1000,10 @@ impl App {
                         NetStatus::Reconnecting(_) => self.sync_rt.fails += 1,
                         NetStatus::Connected => self.sync_rt.fails = 0,
                         _ => {}
+                    }
+                    if s != NetStatus::Connected {
+                        // the list comes again after the next welcome
+                        self.sync_rt.online = None;
                     }
                     self.sync_rt.net_status = Some(s)
                 }
@@ -1080,6 +1114,7 @@ impl App {
                     token,
                 } => self.huddle_token(channel, url, token),
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
+                NetEvent::Presence(online) => self.sync_rt.online = Some(online),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();
                     self.toast = Some((

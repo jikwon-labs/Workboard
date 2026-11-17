@@ -562,14 +562,20 @@ impl App {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(&m.name).size(15.0));
                     let muted = self.data.extra.muted_until > now_ts();
-                    let st = if !m.status_text.is_empty() {
+                    let st: String = if !m.status_text.is_empty() {
                         m.status_text.clone()
                     } else if muted {
                         tr("Notifications muted").into()
-                    } else {
+                    } else if self.connected() {
                         tr("Online").into()
+                    } else if self.on_server() {
+                        tr("Offline").into()
+                    } else {
+                        String::new()
                     };
-                    ui.label(RichText::new(st).small().color(t.text2));
+                    if !st.is_empty() {
+                        ui.label(RichText::new(st).small().color(t.text2));
+                    }
                 });
             });
         }

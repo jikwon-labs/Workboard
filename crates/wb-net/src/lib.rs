@@ -413,6 +413,12 @@ pub enum Msg {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         answer: Option<bool>,
     },
+    /// The members with the app open somewhere (connected to the server),
+    /// sent after welcome and whenever it changes. Older servers never send
+    /// it; older apps ignore it.
+    Presence {
+        online: Vec<u64>,
+    },
     Error {
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -699,6 +705,8 @@ pub enum Event {
     },
     Backups(Vec<Backup>),
     Restored(String),
+    /// The members connected to the server right now.
+    Presence(Vec<u64>),
 }
 
 /// How this computer signs in.
@@ -1137,6 +1145,7 @@ fn session(
                     }),
                     Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
                     Some(Msg::Restored { name }) => emit(Event::Restored(name)),
+                    Some(Msg::Presence { online }) => emit(Event::Presence(online)),
                     Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
                     Some(Msg::Error {
                         message,

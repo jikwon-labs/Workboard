@@ -687,18 +687,24 @@ impl App {
                     }
                     let c = r.left_center() + vec2(15.0, 0.0);
                     paint_avatar(ui.painter(), c, 12.0, &m, t.app_bg);
+                    // orange: notifications muted; green / grey ring:
+                    // connected to the team server or not; alone or in a
+                    // shared folder there is no "online", so no dot
                     let muted = self.data.extra.muted_until > now_ts();
-                    ui.painter()
-                        .circle_filled(c + vec2(9.0, 9.0), 4.0, t.app_bg);
-                    ui.painter().circle_filled(
-                        c + vec2(9.0, 9.0),
-                        2.8,
-                        if muted {
-                            Color32::from_rgb(0xe1, 0x6b, 0x16)
-                        } else {
-                            Color32::from_rgb(48, 164, 108)
-                        },
-                    );
+                    let dot = c + vec2(9.0, 9.0);
+                    if muted {
+                        ui.painter().circle_filled(dot, 4.0, t.app_bg);
+                        ui.painter().circle_filled(dot, 2.8, crate::widgets::MUTED);
+                    } else if self.on_server() {
+                        crate::widgets::paint_presence(
+                            ui.painter(),
+                            dot,
+                            2.8,
+                            self.connected(),
+                            t.app_bg,
+                            t.text3,
+                        );
+                    }
                     if crate::updater::update_available() {
                         // a newer version is waiting: "Check for updates" in this menu
                         let d = c + vec2(9.0, -9.0);
@@ -2133,6 +2139,9 @@ impl App {
                                     self.section == Section::Chat && self.chat_open == Some(id);
                                 let who = other.clone().or_else(|| self.data.member(me).cloned());
                                 let bg = t.sidebar;
+                                let grey = t.text3;
+                                // a dot only when the server says who is online
+                                let online = who.as_ref().and_then(|m| self.is_online(m.id));
                                 let r = self.side_row(
                                     ui,
                                     0.0,
@@ -2140,12 +2149,16 @@ impl App {
                                     |p, c| {
                                         if let Some(m) = &who {
                                             paint_avatar(p, c, 9.0, m, bg);
-                                            p.circle_filled(c + vec2(7.0, 7.0), 3.0, bg);
-                                            p.circle_filled(
-                                                c + vec2(7.0, 7.0),
-                                                2.0,
-                                                Color32::from_rgb(48, 164, 108),
-                                            );
+                                            if let Some(on) = online {
+                                                crate::widgets::paint_presence(
+                                                    p,
+                                                    c + vec2(7.0, 7.0),
+                                                    2.2,
+                                                    on,
+                                                    bg,
+                                                    grey,
+                                                );
+                                            }
                                         }
                                     },
                                     &name,

@@ -76,6 +76,30 @@ pub fn priority_color(pr: u8, t: &Theme) -> Color32 {
     }
 }
 
+/// The green of "online" dots.
+pub const ONLINE: Color32 = Color32::from_rgb(48, 164, 108);
+/// The orange of "notifications muted".
+pub const MUTED: Color32 = Color32::from_rgb(0xe1, 0x6b, 0x16);
+
+/// A presence dot at `c` on an avatar: filled green when `online`, a grey
+/// ring when not; `bg` is what's behind the avatar (it outlines the dot).
+pub fn paint_presence(
+    p: &egui::Painter,
+    c: Pos2,
+    r: f32,
+    online: bool,
+    bg: Color32,
+    grey: Color32,
+) {
+    p.circle_filled(c, r + 1.2, bg);
+    if online {
+        p.circle_filled(c, r, ONLINE);
+    } else {
+        p.circle_filled(c, r, bg);
+        p.circle_stroke(c, r - 0.6, Stroke::new(1.2, grey));
+    }
+}
+
 pub fn paint_avatar(p: &egui::Painter, center: Pos2, r: f32, m: &Member, ring: Color32) {
     p.circle_filled(center, r + 1.5, ring);
     p.circle_filled(center, r, rgb(m.color));

@@ -792,6 +792,115 @@ fn red_dots_in(h: &Ui1, name: &str) -> usize {
         .sum()
 }
 
+/// Filled circles of `color` painted inside the control named `name`.
+fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
+    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
+        return 0;
+    };
+    fn count(s: &egui::Shape, rect: egui::Rect, color: Color32) -> usize {
+        match s {
+            egui::Shape::Circle(c) if c.fill == color && rect.contains(c.center) => 1,
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, color)).sum(),
+            _ => 0,
+        }
+    }
+    h.shapes.iter().map(|c| count(&c.shape, *rect, color)).sum()
+}
+
+/// Grey presence rings ("not online") painted inside the control named `name`.
+fn rings_in(h: &Ui1, name: &str) -> usize {
+    let grey = h.app.t().text3;
+    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
+        return 0;
+    };
+    fn count(s: &egui::Shape, rect: egui::Rect, grey: Color32) -> usize {
+        match s {
+            egui::Shape::Circle(c)
+                if c.stroke.color == grey && c.radius < 4.0 && rect.contains(c.center) =>
+            {
+                1
+            }
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, grey)).sum(),
+            _ => 0,
+        }
+    }
+    h.shapes.iter().map(|c| count(&c.shape, *rect, grey)).sum()
+}
+
+#[test]
+fn green_dots_show_who_is_really_connected() {
+    use crate::widgets::ONLINE;
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    // a DM with someone else, open in the sidebar
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.id != me)
+        .unwrap()
+        .clone();
+    let has_dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .any(|c| c.kind == crate::model::ChannelKind::Direct && c.members.contains(&other.id));
+    if !has_dm {
+        let mut c = h.app.data.channels[0].clone();
+        c.id = 987_654;
+        c.name = String::new();
+        c.kind = crate::model::ChannelKind::Direct;
+        c.members = vec![me, other.id];
+        c.messages.clear();
+        h.app.data.channels.push(c);
+    }
+    h.app.section = Section::Chat;
+    h.settle();
+    let row = other.name.clone();
+    assert!(h.has(&row), "the DM is listed");
+    // alone: no "online" at all, so no dots
+    assert_eq!(dots_in(&h, "Profile menu", ONLINE), 0);
+    assert_eq!(dots_in(&h, &row, ONLINE) + rings_in(&h, &row), 0);
+    h.click("Profile menu");
+    assert!(!h.has("Online"), "no claim of being online");
+    h.key(egui::Key::Escape);
+
+    // on a server, connected; the server says only I am online
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.online = Some(vec![me]);
+    h.settle();
+    assert_eq!(dots_in(&h, "Profile menu", ONLINE), 1, "I am connected");
+    assert_eq!(dots_in(&h, &row, ONLINE), 0, "they aren't");
+    assert_eq!(rings_in(&h, &row), 1, "a grey ring says so");
+    h.click("Profile menu");
+    assert!(h.has("Online"));
+    h.key(egui::Key::Escape);
+
+    // they open Workboard
+    h.app.sync_rt.online = Some(vec![me, other.id]);
+    h.settle();
+    assert_eq!(dots_in(&h, &row, ONLINE), 1);
+    assert_eq!(rings_in(&h, &row), 0);
+
+    // the connection drops: who is online isn't known, and I am offline
+    h.app.sync_rt.net_status = Some(wb_net::Status::Reconnecting("gone".into()));
+    h.settle();
+    assert_eq!(dots_in(&h, "Profile menu", ONLINE), 0);
+    assert_eq!(rings_in(&h, "Profile menu"), 1);
+    assert_eq!(dots_in(&h, &row, ONLINE) + rings_in(&h, &row), 0);
+    h.click("Profile menu");
+    assert!(h.has("Offline") && !h.has("Online"));
+    h.key(egui::Key::Escape);
+}
+
 #[test]
 fn a_waiting_update_puts_a_red_dot_on_the_profile_and_check_for_updates() {
     let mut h = Ui1::new();

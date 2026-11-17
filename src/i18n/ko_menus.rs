@@ -15,6 +15,7 @@ pub const T: &[(&str, &str)] = &[
     // profile menu
     ("Notifications muted", "알림 꺼짐"),
     ("Online", "온라인"),
+    ("Offline", "오프라인"),
     ("Mute notifications", "알림 끄기"),
     ("For 1 hour", "1시간 동안"),
     ("For 4 hours", "4시간 동안"),

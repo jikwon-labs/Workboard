@@ -1264,6 +1264,11 @@ struct Hub {
     pusher: Option<Arc<dyn push::Sender>>,
     /// device id -> its open connections (connected devices get no pushes)
     online: Mutex<std::collections::HashMap<String, usize>>,
+    /// member id -> their open connections; `presence` holds its keys
+    members_online: Mutex<BTreeMap<u64, usize>>,
+    /// the members with an open connection, sorted: each connection tells
+    /// its app when it changes (the green dot by someone's name)
+    presence: watch::Sender<Vec<u64>>,
 }
 
 impl Hub {
@@ -1301,6 +1306,8 @@ impl Hub {
             claim_wait: options.claim_wait,
             pusher,
             online: Mutex::new(Default::default()),
+            members_online: Mutex::new(Default::default()),
+            presence: watch::channel(vec![]).0,
         })
     }
 
@@ -2706,29 +2713,58 @@ impl Drop for Counted {
     }
 }
 
-/// A signed-in device's connection, counted in Hub::online while it lasts.
-struct Online(Arc<Hub>, String);
+/// A signed-in device's connection, counted in Hub::online (and its member
+/// in Hub::members_online) while it lasts.
+struct Online(Arc<Hub>, String, u64);
 
 impl Online {
-    fn new(hub: &Arc<Hub>, device: &str) -> Online {
+    fn new(hub: &Arc<Hub>, device: &str, member: u64) -> Online {
         *hub.online
             .lock()
             .unwrap()
             .entry(device.to_string())
             .or_insert(0) += 1;
-        Online(hub.clone(), device.to_string())
+        hub.member_seen(member, true);
+        Online(hub.clone(), device.to_string(), member)
     }
 }
 
 impl Drop for Online {
     fn drop(&mut self) {
-        let mut o = self.0.online.lock().unwrap();
-        if let Some(n) = o.get_mut(&self.1) {
-            *n -= 1;
-            if *n == 0 {
-                o.remove(&self.1);
+        {
+            let mut o = self.0.online.lock().unwrap();
+            if let Some(n) = o.get_mut(&self.1) {
+                *n -= 1;
+                if *n == 0 {
+                    o.remove(&self.1);
+                }
             }
         }
+        self.0.member_seen(self.2, false);
+    }
+}
+
+impl Hub {
+    /// A connection of `member` opened (`on`) or closed; tells everyone
+    /// when that changes who is online.
+    fn member_seen(&self, member: u64, on: bool) {
+        let mut m = self.members_online.lock().unwrap();
+        if on {
+            *m.entry(member).or_insert(0) += 1;
+        } else if let Some(n) = m.get_mut(&member) {
+            *n -= 1;
+            if *n == 0 {
+                m.remove(&member);
+            }
+        }
+        let now: Vec<u64> = m.keys().copied().collect();
+        self.presence.send_if_modified(|v| {
+            let changed = *v != now;
+            if changed {
+                *v = now;
+            }
+            changed
+        });
     }
 }
 
@@ -2791,7 +2827,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             return;
         }
     };
-    let _online = Online::new(&hub, &device);
+    let _online = Online::new(&hub, &device, member);
     // an app too old to know every field would erase the ones it doesn't
     // know when its copy wins: it gets the team's copy but sends no changes
     let too_old = sync.is_none_or(|v| v < wb_net::OLDEST_SYNC);
@@ -2815,6 +2851,7 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
     let mut updates = hub.updates.subscribe();
     let mut kicks = hub.kicks.subscribe();
     let mut access = hub.access.subscribe();
+    let mut presence = hub.presence.subscribe();
     // this connection's requests don't bring it the access broadcast too
     let conn = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
     let (welcome, mut was_hidden) = hub.welcome(tag, member, role, token);
@@ -2822,6 +2859,10 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
         return;
     }
     if role.manages() && !send(&mut socket, &hub.access_for(member, false).to_json()).await {
+        return;
+    }
+    let online = presence.borrow_and_update().clone();
+    if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
         return;
     }
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
@@ -2849,6 +2890,15 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
                     Err(broadcast::error::RecvError::Closed) => false,
                 };
                 if tell && !send(&mut socket, &hub.access_for(member, false).to_json()).await {
+                    break;
+                }
+            }
+            p = presence.changed() => {
+                if p.is_err() {
+                    break;
+                }
+                let online = presence.borrow_and_update().clone();
+                if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
                     break;
                 }
             }
@@ -3508,6 +3558,8 @@ mod tests {
             claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
             pusher: None,
             online: Mutex::new(Default::default()),
+            members_online: Mutex::new(Default::default()),
+            presence: watch::channel(vec![]).0,
         }
     }
 

@@ -116,6 +116,8 @@ struct App {
     put_back: Vec<String>,
     backups: Option<Vec<wb_net::Backup>>,
     restored: Vec<String>,
+    /// the members online, from the last presence message
+    online: Option<Vec<u64>>,
     /// account email from the welcome, then from `account` answers
     email: Option<String>,
     /// (member, emailed to, mail error) for each invite answer
@@ -204,6 +206,7 @@ impl App {
             put_back: vec![],
             backups: None,
             restored: vec![],
+            online: None,
             email: None,
             mailed: vec![],
             updates: vec![],
@@ -352,6 +355,7 @@ impl App {
                 Event::CallToken { .. } => {}
                 Event::Backups(b) => self.backups = Some(b),
                 Event::Restored(n) => self.restored.push(n),
+                Event::Presence(o) => self.online = Some(o),
             }
         }
     }
@@ -565,6 +569,23 @@ fn messages_written_while_disconnected_merge_after_reconnecting() {
     a.wait("B's offline edit at A", |d| {
         task_names(d)[0] == "Plan (offline B)"
     });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn everyone_sees_who_is_connected() {
+    let home = temp_home("presence");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    b.until("B sees A and itself online", |b| {
+        b.online.as_deref() == Some(&[1, 2])
+    });
+    a.until("A hears B came online", |a| {
+        a.online.as_deref() == Some(&[1, 2])
+    });
+    drop(b);
+    a.until("A hears B went away", |a| a.online.as_deref() == Some(&[1]));
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

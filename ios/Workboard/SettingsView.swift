@@ -91,6 +91,12 @@ struct SettingsView: View {
                         Button("Turn on notifications") { Task { await notifier.requestPermission() } }
                             .accessibilityIdentifier("notifyButton")
                     }
+                    NavigationLink {
+                        NotificationSettingsView()
+                    } label: {
+                        Label("What to notify about", systemImage: "slider.horizontal.3")
+                    }
+                    .accessibilityIdentifier("notificationSettingsLink")
                 } header: {
                     Text("Notifications")
                 } footer: {
@@ -118,6 +124,14 @@ struct SettingsView: View {
                     } footer: {
                         Text(role == .owner ? "You're the owner of this server." : "You're an admin on this server.")
                     }
+                }
+                Section("Look") {
+                    NavigationLink {
+                        ThemeSettingsView()
+                    } label: {
+                        Label("Theme", systemImage: "paintpalette")
+                    }
+                    .accessibilityIdentifier("themeLink")
                 }
                 Section("Workspace") {
                     NavigationLink {

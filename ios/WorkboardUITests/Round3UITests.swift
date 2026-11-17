@@ -20,7 +20,7 @@ final class Round3UITests: XCTestCase {
         join(a, member: 1, email: "jamie@example.com", password: "jamie-password-1")
         a.buttons["settingsButton"].tap()
         let people = a.buttons["peopleLink"]
-        XCTAssertTrue(people.waitForExistence(timeout: 5), "owners see the Team section")
+        XCTAssertTrue(reveal(people, in: a), "owners see the Team section")
         people.tap()
 
         // an invite code for Sam, emailed to the address on record
@@ -37,6 +37,12 @@ final class Round3UITests: XCTestCase {
         // make Alex an admin and back
         a.buttons["personMenu-2"].tap()
         let makeAdmin = a.buttons["Make admin"]
+        if !makeAdmin.waitForExistence(timeout: 3), a.buttons["Make member"].exists {
+            // an earlier run left Alex an admin
+            a.buttons["Make member"].tap()
+            waitLabel(a.staticTexts["personRole-2"], contains: "Member")
+            a.buttons["personMenu-2"].tap()
+        }
         XCTAssertTrue(makeAdmin.waitForExistence(timeout: 5))
         makeAdmin.tap()
         waitLabel(a.staticTexts["personRole-2"], contains: "Admin")
@@ -48,7 +54,7 @@ final class Round3UITests: XCTestCase {
         admin("backup?name=daily-20261115.json")
         a.navigationBars.buttons.element(boundBy: 0).tap()
         let backups = a.buttons["backupsLink"]
-        XCTAssertTrue(backups.waitForExistence(timeout: 5))
+        XCTAssertTrue(reveal(backups, in: a))
         backups.tap()
         let restore = a.buttons["restore-daily-20261115.json"]
         XCTAssertTrue(restore.waitForExistence(timeout: 8))
@@ -61,7 +67,9 @@ final class Round3UITests: XCTestCase {
         let a = launch(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 3, password: "sam-password-r3")
         a.buttons["settingsButton"].tap()
-        XCTAssertTrue(a.buttons["trashLink"].waitForExistence(timeout: 5))
+        XCTAssertTrue(reveal(a.buttons["trashLink"], in: a))
+        // back to the top, where an owner's Team section is
+        for _ in 0..<3 { a.swipeDown() }
         XCTAssertFalse(a.buttons["peopleLink"].exists)
         XCTAssertFalse(a.buttons["backupsLink"].exists)
     }
@@ -94,7 +102,7 @@ final class Round3UITests: XCTestCase {
         // Trash is kept on the phone across launches
         let b = launch(["-wbServer", open, "-wbOpen", "settings"])
         let trash = b.buttons["trashLink"]
-        XCTAssertTrue(trash.waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(trash, in: b, timeout: 10))
         trash.tap()
         let restore = b.buttons["restoreTrash-\(name)"]
         XCTAssertTrue(restore.waitForExistence(timeout: 5))

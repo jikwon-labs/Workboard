@@ -721,6 +721,7 @@ struct Composer: View {
 /// it; anyone may join or leave.
 struct ChannelSettingsView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(Notifier.self) private var notifier
     @Environment(\.dismiss) private var dismiss
     let channelId: UInt64
     @State private var name = ""
@@ -742,6 +743,14 @@ struct ChannelSettingsView: View {
                         Section("Topic") {
                             TextField("What it's about", text: $topic, axis: .vertical)
                                 .accessibilityIdentifier("channelTopicField")
+                        }
+                    }
+                    if c.kind == .channel {
+                        Section("Notify me about") {
+                            Picker("Messages", selection: Binding(get: { notifier.prefs.channelMode(c.id) }, set: { notifier.prefs.setChannelMode(c.id, $0) })) {
+                                ForEach(NotificationSettingsView.modes, id: \.0) { Text(L($0.1)).tag($0.0) }
+                            }
+                            .accessibilityIdentifier("channelNotifyMode")
                         }
                     }
                     Section {

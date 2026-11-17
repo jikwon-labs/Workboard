@@ -4,7 +4,8 @@ import SwiftUI
 import WorkboardKit
 
 extension Color {
-    static let wbAccent = Color(red: 0x8B / 255, green: 0x7B / 255, blue: 0xFF / 255)
+    /// The accent chosen in Settings > Theme (Workboard's purple at first).
+    static var wbAccent: Color { Appearance.color(UserDefaults.standard.string(forKey: "accent") ?? "workboard") }
 
     init(rgb: [Int]) {
         guard rgb.count == 3 else { self = .gray; return }

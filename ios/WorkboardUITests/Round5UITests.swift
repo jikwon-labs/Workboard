@@ -45,7 +45,7 @@ final class Round5UITests: XCTestCase {
         join(a, member: 1, email: "jamie@example.com", password: "jamie-password-5")
         a.buttons["settingsButton"].tap()
         let people = a.buttons["peopleLink"]
-        XCTAssertTrue(people.waitForExistence(timeout: 5))
+        XCTAssertTrue(reveal(people, in: a))
         people.tap()
         let alex = a.buttons["personMenu-2"]
         XCTAssertTrue(alex.waitForExistence(timeout: 8))

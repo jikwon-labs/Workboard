@@ -229,6 +229,8 @@ public final class SyncClient {
 
     /// Called with messages from others as they arrive (not on the first load).
     @ObservationIgnored public var onIncoming: ([IncomingMessage]) -> Void = { _ in }
+    /// Called after the team's changes came in (each welcome and update).
+    @ObservationIgnored public var onUpdate: () -> Void = {}
 
     @ObservationIgnored let storage: Storage
     @ObservationIgnored let tokens: TokenStore
@@ -801,6 +803,7 @@ public final class SyncClient {
             let fresh = Self.newMessages(before: before, after: after, me: settings.me, now: nowTs())
             if !fresh.isEmpty { onIncoming(fresh) }
         }
+        onUpdate()
     }
 
     /// Tests: handle a message as if it came over the connection.

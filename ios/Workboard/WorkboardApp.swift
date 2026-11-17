@@ -49,6 +49,9 @@ struct WorkboardApp: App {
         _nav = State(initialValue: nav)
     }
 
+    @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("accent") private var accent = "workboard"
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -56,7 +59,8 @@ struct WorkboardApp: App {
                 .environment(nav)
                 .environment(calls)
                 .environment(notifier)
-                .tint(.wbAccent)
+                .tint(Appearance.color(accent))
+                .preferredColorScheme(Appearance.scheme(appearance))
                 .onAppear(perform: wire)
                 .onOpenURL { url in
                     if let link = InviteLink.parse(url.absoluteString) { nav.openedLink = link }
@@ -68,9 +72,9 @@ struct WorkboardApp: App {
     func wire() {
         if client.state == .idle, !client.settings.server.isEmpty { client.connect() }
         let (c, n, nv) = (client, notifier, nav)
-        c.onIncoming = { msgs in
-            n.announce(msgs, view: c.view, me: c.me ?? 0, currentChannel: nv.currentChannel)
-        }
+        c.onUpdate = { n.scan(client: c, nav: nv) }
+        n.scan(client: c, nav: nv) // the first look only remembers what is there
+        appDelegate.onOpenTask = { id in nv.showSettings = false; nv.tab = .tasks; nv.tasks = [.task(id)] }
         appDelegate.currentChannel = { nv.currentChannel }
         appDelegate.onOpen = { ch, parent in nv.open(channel: ch, parent: parent) }
         if let (ch, parent) = appDelegate.pendingOpen { nav.open(channel: ch, parent: parent) }
@@ -145,6 +149,20 @@ final class Nav {
         showSettings = false
         tab = .chat
         chat = [.channel(channel)] + (parent.map { [.thread(channel: channel, message: $0)] } ?? [])
+    }
+
+    /// The task on screen, if any (no notification for it).
+    var currentTask: UInt64? {
+        let path: [Route]
+        switch tab {
+        case .home: path = home
+        case .chat: path = chat
+        case .tasks: path = tasks
+        case .docs: path = docs
+        case .more: path = more
+        }
+        if case .task(let id)? = path.last { return id }
+        return nil
     }
 
     /// The conversation on screen, if any (no notification for it).

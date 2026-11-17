@@ -15,6 +15,25 @@ let signInServer = "ws://127.0.0.1:18788"
 /// is set to (KoreanUITests checks the Korean screens).
 let testArgs = ["-wbNoPasswordAutoFill", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
 
+/// Waits for a row of a long form (Settings), scrolling down to it: rows
+/// below the screen aren't made until they come into view.
+func reveal(_ e: XCUIElement, in a: XCUIApplication, timeout: TimeInterval = 5) -> Bool {
+    // clear of the bars at the top and the bottom
+    func shown() -> Bool {
+        e.exists && e.isHittable && e.frame.minY > a.frame.height * 0.15 && e.frame.maxY < a.frame.height * 0.9
+    }
+    if e.waitForExistence(timeout: timeout) && shown() { return true }
+    // above the screen: back up; otherwise further down
+    if e.exists && e.frame.minY <= a.frame.height * 0.15 {
+        for _ in 0..<6 where !shown() { a.swipeDown() }
+    } else {
+        for _ in 0..<8 where !shown() { a.swipeUp() }
+        for _ in 0..<10 where !shown() { a.swipeDown() }
+    }
+    usleep(500_000)
+    return shown()
+}
+
 extension XCTestCase {
     /// Test-only admin call on the sign-in server (blocking; UI tests run on the main thread).
     @discardableResult

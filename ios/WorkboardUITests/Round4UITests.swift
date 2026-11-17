@@ -65,19 +65,21 @@ final class Round4UITests: XCTestCase {
 
         let c = launch(["-wbServer", signInServer, "-wbOpen", "settings"])
         let trash = c.buttons["trashLink"]
-        XCTAssertTrue(trash.waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(trash, in: c, timeout: 10))
         trash.tap()
         XCTAssertTrue(c.buttons["restoreTrash-\(name)"].waitForExistence(timeout: 5), "in Sam's Trash")
-        c.navigationBars.buttons.element(boundBy: 0).tap()
+        // the Trash screen's own back button (Settings' bar sits behind it)
+        c.navigationBars["Trash"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(c.navigationBars["Settings"].waitForExistence(timeout: 5))
         let out = c.buttons["signOutButton"]
-        XCTAssertTrue(out.waitForExistence(timeout: 5))
+        XCTAssertTrue(reveal(out, in: c))
         out.tap()
         XCTAssertTrue(c.textFields["emailField"].waitForExistence(timeout: 10))
 
         // Alex signs in on this iPhone next: nothing of Sam's Trash
         join(c, member: 2, email: "alex@example.test", password: "alex-password-r4")
         c.buttons["settingsButton"].tap()
-        XCTAssertTrue(c.buttons["trashLink"].waitForExistence(timeout: 5))
+        XCTAssertTrue(reveal(c.buttons["trashLink"], in: c))
         c.buttons["trashLink"].tap()
         XCTAssertTrue(c.navigationBars["Trash"].waitForExistence(timeout: 5))
         XCTAssertFalse(c.buttons["restoreTrash-\(name)"].exists)

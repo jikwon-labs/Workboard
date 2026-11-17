@@ -32,15 +32,43 @@ final class NotificationUITests: XCTestCase {
             let allow = springboard.buttons["Allow"]
             if allow.waitForExistence(timeout: 5) { allow.tap() }
         }
-        // look at another tab, then someone writes in #general
+        // look at another tab, then someone mentions me in #general (channels
+        // notify about mentions unless set to all messages, as on the Mac)
         app.tabBars.buttons["Home"].tap()
         XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
         let text = "Banner check \(Int(Date().timeIntervalSince1970) % 100000)"
-        say(text)
+        say("@Jamie Park " + text)
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 10), "banner shown")
         banner.tap()
         XCTAssertTrue(app.navigationBars["#general"].waitForExistence(timeout: 8), "tapping opens the conversation")
-        XCTAssertTrue(app.staticTexts[text].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists)
+    }
+
+    func testAChannelSetToAllMessagesNotifiesWithoutAMention() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-wbReset", "YES", "-wbServer", server, "-wbMe", "1", "-wbOpen", "settings"] + testArgs
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let turnOn = app.buttons["notifyButton"]
+        if turnOn.waitForExistence(timeout: 3) {
+            turnOn.tap()
+            let allow = springboard.buttons["Allow"]
+            if allow.waitForExistence(timeout: 5) { allow.tap() }
+        }
+        let link = app.buttons["notificationSettingsLink"]
+        for _ in 0..<6 where !(link.exists && link.isHittable) { app.swipeUp() }
+        link.tap()
+        let mode = app.buttons["channelMode-301"]
+        for _ in 0..<8 where !(mode.exists && mode.isHittable) { app.swipeUp() }
+        mode.tap()
+        app.buttons["All messages"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Done"].firstMatch.tap()
+
+        let text = "Plain note \(Int(Date().timeIntervalSince1970) % 100000)"
+        say(text)
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 10), "a channel set to all messages notifies without a mention")
     }
 }

@@ -662,16 +662,6 @@ mod tests {
             ".on_disabled_hover_text(\"",
             ".selectable_label(\"",
         ];
-        // the app's name, key names, units and the example server address
-        const SAME_IN_KOREAN: [&str; 5] =
-            ["Workboard", "ID", "Esc", "KB", "https://wb.example.com"];
-        let words = |s: &str| {
-            let mut run = 0;
-            s.chars().any(|c| {
-                run = if c.is_ascii_alphabetic() { run + 1 } else { 0 };
-                run >= 2
-            })
-        };
         let mut bare = vec![];
         for (name, src) in interface_sources() {
             // the code under a file's test module is not drawn
@@ -682,10 +672,7 @@ mod tests {
                 .into_iter()
                 .chain(literals_after(src, &fmt))
             {
-                let rest = SAME_IN_KOREAN
-                    .iter()
-                    .fold(lit.clone(), |s, k| s.replace(k, ""));
-                if words(&rest) {
+                if reads_as_english(&lit) {
                     bare.push(format!("{}: {:?}", name, lit));
                 }
             }
@@ -698,6 +685,176 @@ mod tests {
             bare.len(),
             bare.join("\n")
         );
+    }
+
+    /// A literal that would show as English on a Korean screen: a word of two
+    /// or more Latin letters, once the text that reads the same in Korean
+    /// (the app's name, key names, units, the example server address) is out.
+    fn reads_as_english(lit: &str) -> bool {
+        const SAME_IN_KOREAN: [&str; 5] =
+            ["Workboard", "ID", "Esc", "KB", "https://wb.example.com"];
+        let rest = SAME_IN_KOREAN
+            .iter()
+            .fold(lit.to_string(), |s, k| s.replace(k, ""));
+        let mut run = 0;
+        rest.chars().any(|c| {
+            run = if c.is_ascii_alphabetic() { run + 1 } else { 0 };
+            run >= 2
+        })
+    }
+
+    /// The arguments of the call whose `(` is just before `src`, split at its
+    /// own commas (not those inside strings, brackets or a closure's `|a, b|`).
+    fn call_args(src: &str) -> Vec<&str> {
+        let (mut out, mut depth, mut start, mut pipe) = (vec![], 0, 0, false);
+        let b = src.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            match b[i] {
+                b'"' => {
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' {
+                        i += if b[i] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                // a char literal such as '(' or ','
+                b'\'' if i + 2 < b.len() && b[i + 2] == b'\'' => i += 2,
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => {
+                    if depth == 0 {
+                        out.push(&src[start..i]);
+                        return out;
+                    }
+                    depth -= 1;
+                }
+                b'|' if depth == 0 => pipe = !pipe,
+                b',' if depth == 0 && !pipe => {
+                    out.push(&src[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// The string literals in `arg` that are not inside a `tr(`, `trf!(` or
+    /// `tr_ctx(` (so `tr(if on { "A" } else { "B" })` passes).
+    fn literals_outside_tr(arg: &str) -> Vec<String> {
+        let mut outside = String::new();
+        let mut rest = arg;
+        while let Some(i) = ["tr(", "trf!(", "tr_ctx("]
+            .iter()
+            .filter_map(|m| {
+                rest.match_indices(m)
+                    .find(|(i, _)| {
+                        !rest[..*i]
+                            .chars()
+                            .last()
+                            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                    })
+                    .map(|(i, _)| (i, m.len()))
+            })
+            .min()
+            .map(|(i, len)| (i, i + len))
+        {
+            outside.push_str(&rest[..i.0]);
+            let inner = &rest[i.1..];
+            let used: usize = call_args(inner).iter().map(|a| a.len() + 1).sum();
+            rest = &inner[used.min(inner.len())..];
+        }
+        outside.push_str(rest);
+        literals_after(&outside, &["\""])
+            .into_iter()
+            .step_by(2)
+            .collect()
+    }
+
+    /// The app's own drawing helpers take their text as it is shown, so it is
+    /// wrapped in `tr` where they are called: `menu_item(ui, t, "list", "New
+    /// list", "")` would show English on a Korean screen. Each helper is listed
+    /// with the arguments it draws (counted from 0); arguments that only name
+    /// a control for screen readers and tests stay English and are not listed.
+    #[test]
+    fn helper_text_is_wrapped_in_tr() {
+        const HELPERS: [(&str, &[usize]); 21] = [
+            ("icon_button", &[3]),
+            ("icon_button_ex", &[3]),
+            ("menu_item", &[3, 4]),
+            ("menu_item2", &[3, 4]),
+            ("title", &[2, 3]),
+            ("page_title", &[2, 3]),
+            ("bar_row", &[2]),
+            ("pill", &[3]),
+            ("template_row", &[5, 6]),
+            ("menu_row", &[2]),
+            ("menu_row_named", &[3]),
+            ("menu_row_plain", &[2]),
+            ("add_line", &[2]),
+            ("primary_button", &[2]),
+            ("primary_btn", &[1]),
+            ("secondary_button", &[1]),
+            ("row_button", &[1]),
+            ("dialog_header", &[2]),
+            ("check", &[2]),
+            ("radio", &[2]),
+            ("gallery", &[1, 2]),
+        ];
+        let mut bare = vec![];
+        for (name, src) in interface_sources() {
+            let src = src.split("\n#[cfg(test)]\nmod ").next().unwrap_or("");
+            for (helper, drawn) in HELPERS {
+                let call = format!("{}(", helper);
+                for (at, _) in src.match_indices(&call) {
+                    let before = &src[..at];
+                    if before.ends_with("fn ")
+                        || before
+                            .chars()
+                            .last()
+                            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                    {
+                        continue;
+                    }
+                    let args = call_args(&src[at + call.len()..]);
+                    for &k in drawn {
+                        let Some(arg) = args.get(k) else { continue };
+                        for lit in literals_outside_tr(arg) {
+                            if reads_as_english(&lit) {
+                                let line = before.matches('\n').count() + 1;
+                                bare.push(format!("{}:{} {}: {:?}", name, line, helper, lit));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        bare.sort();
+        bare.dedup();
+        assert!(
+            bare.is_empty(),
+            "{} helper texts not wrapped in tr (wrap them and add the Korean):\n{}",
+            bare.len(),
+            bare.join("\n")
+        );
+    }
+
+    /// The helper check sees bare text, text in a format and text in a
+    /// branch, and lets translated text and screen-reader names through.
+    #[test]
+    fn helper_check_reads_arguments_as_written() {
+        let args = call_args("ui, &t, \"list\", tr(\"New list\"), \"Name, here\", |p, c| {}) rest");
+        assert_eq!(args.len(), 6);
+        assert_eq!(args[4].trim(), "\"Name, here\"");
+        assert!(literals_outside_tr("tr(if on { \"Watching\" } else { \"Watch\" })").is_empty());
+        assert!(literals_outside_tr("trf!(\"{} tasks\", n)").is_empty());
+        assert_eq!(
+            literals_outside_tr("if on { tr(\"Stop\") } else { \"Start\" }"),
+            ["Start"]
+        );
+        assert_eq!(literals_outside_tr("&format!(\"Open {}\", x)"), ["Open {}"]);
+        assert!(!reads_as_english("\u{2318}K"));
+        assert!(!reads_as_english("Workboard {}"));
     }
 
     /// Each English text has one Korean entry: `tr` takes the first one in

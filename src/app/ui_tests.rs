@@ -3494,8 +3494,14 @@ fn switch_person_on_a_team_server_does_not_become_someone_else() {
         server: Some("127.0.0.1:1".into()),
     });
     h.click("Profile menu");
-    h.click("Switch person");
-    assert!(matches!(h.app.modal, Some(Modal::SwitchUser)));
+    assert!(
+        h.has("Trash") && !h.has("Switch person"),
+        "not in the menu on a team server"
+    );
+    h.key(egui::Key::Escape);
+    // the dialog, if it ever opens there, still switches no one
+    h.app.modal = Some(Modal::SwitchUser);
+    h.settle();
     assert!(h.has(&format!("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", my_name)));
     assert_eq!(count(&h), before, "no other member to switch to");
     h.click("Work together");

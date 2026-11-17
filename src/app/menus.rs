@@ -802,10 +802,12 @@ impl App {
             self.modal = Some(Modal::Trash);
             close_popup(ui);
         }
-        // it changes who uses the app on this computer without signing out
-        if menu_item(ui, &t, "person", tr("Switch person"), "")
-            .on_hover_text(tr("Switch to another person on this computer"))
-            .clicked()
+        // it changes who uses the app on this computer without signing out;
+        // on a team server the person is who signed in, so it isn't there
+        if !self.on_team_server()
+            && menu_item(ui, &t, "person", tr("Switch person"), "")
+                .on_hover_text(tr("Switch to another person on this computer"))
+                .clicked()
         {
             self.modal = Some(Modal::SwitchUser);
             close_popup(ui);

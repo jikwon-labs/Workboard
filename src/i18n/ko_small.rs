@@ -48,6 +48,7 @@ pub const T: &[(&str, &str)] = &[
     ("already here", "이미 있습니다"),
     ("stored", "저장했습니다"),
     ("You're not signed in to the server.", "서버에 로그인되어 있지 않습니다."),
+    ("That isn't a file name the server uses.", "서버가 쓰는 파일 이름이 아닙니다."),
     // from the connection code and the server (crates/wb-net, server/src/registry.rs)
     ("This computer has no trusted certificates to check the server with.", "이 컴퓨터에 서버를 확인할 신뢰할 수 있는 인증서가 없습니다."),
     ("Type your email and password.", "이메일과 비밀번호를 입력하세요."),

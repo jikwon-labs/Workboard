@@ -38,7 +38,9 @@ the same address and port and checks `/health`.
   don't change the server binary (app, docs) only log `server unchanged`.
 - Failing tests leave the running server alone. A new server that doesn't
   answer `/health` within 60 seconds is replaced by the previous binary.
-  Either way that build isn't tried again; the next change is.
+  Either way that build isn't tried again; the next change is. A change to
+  the server's or the sync crates' tests alone counts as a change, so a fix
+  to a test that failed only now and then gets the waiting server installed.
 - The Mac mini has to fetch the repository without a prompt (try
   `git -C ~/.local/src/Workboard fetch` after setting up).
 - Log: `~/Library/Logs/workboard-autoupdate.log` (one line per change on

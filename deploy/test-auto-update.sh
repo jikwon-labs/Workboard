@@ -23,6 +23,7 @@ mkdir -p "$T/origin/deploy"
 cp "$HERE/auto-update.sh" "$T/origin/deploy/"
 echo "server v1" >"$T/origin/server.txt"
 echo "readme" >"$T/origin/README.md"
+echo "tests v1" >"$T/origin/tests.txt"
 g -C "$T/origin" add -A && g -C "$T/origin" commit -qm "first"
 g clone -q "$T/origin" "$T/src"
 
@@ -49,10 +50,12 @@ export WB_AU_LOG="$T/log"
 export WB_AU_STATE="$T/state"
 export WB_AU_HEALTH_URL="file://$T/health"
 export WB_AU_HEALTH_SECS=2
-# build: the "binary" is the source file; tests fail on BROKEN; a server
-# with DEAD in it never answers /health; restart brings the old one back up
+# build: the "binary" is the source file; tests fail on BROKEN in it or
+# FLAKY in tests.txt; a server with DEAD in it never answers /health; restart
+# brings the old one back up
 export WB_AU_BUILD='mkdir -p target/release && cp server.txt target/release/workboard-server'
-export WB_AU_TEST='! grep -q BROKEN server.txt'
+export WB_AU_TEST='! grep -q BROKEN server.txt && ! grep -q FLAKY tests.txt'
+export WB_AU_TEST_PATHS='server.txt tests.txt'
 export WB_AU_INSTALL="cp target/release/workboard-server \"\$WB_AU_BIN\" && echo \"\$BIND \$PORT\" >\"$T/install-args\" && if grep -q DEAD \"\$WB_AU_BIN\"; then rm -f \"$T/health\"; fi"
 export WB_AU_RESTART="echo '{\"ok\":true}' >\"$T/health\""
 
@@ -94,10 +97,20 @@ commit server.txt "server v4" "fixed server"
 run
 check "fix after failure: installed" '[ "$(installed)" = "server v4" ]'
 
+# 6b. a test that fails now and then: the same build is tried again once the
+# tests change, although the binary doesn't
+commit tests.txt "tests v2 FLAKY" "flaky test"
+commit server.txt "server v4b" "server with a flaky test"
+run
+check "flaky test: running server stays" '[ "$(installed)" = "server v4" ] && last | grep -q "tests failed"'
+commit tests.txt "tests v3" "steady test"
+run
+check "test fixed: same build installed" '[ "$(installed)" = "server v4b" ] && last | grep -q "installed, /health answers"'
+
 # 7. a server that doesn't answer /health: the previous one goes back
 commit server.txt "server v5 DEAD" "dead server"
 run
-check "no health: previous binary back" '[ "$(installed)" = "server v4" ]'
+check "no health: previous binary back" '[ "$(installed)" = "server v4b" ]'
 check "no health: logged" 'grep -q "didn.t answer" "$T/log" && last | grep -q "previous server is back"'
 check "no health: previous server answering" '[ -f "$T/health" ]'
 
@@ -107,7 +120,7 @@ echo "edited" >>"$T/src/README.md"
 before="$(lines)"
 run
 run
-check "local edits: not installed" '[ "$(installed)" = "server v4" ]'
+check "local edits: not installed" '[ "$(installed)" = "server v4b" ]'
 check "local edits: logged once" '[ "$(( $(lines) - before ))" = 1 ] && last | grep -q "local edits"'
 g -C "$T/src" checkout -q README.md
 run

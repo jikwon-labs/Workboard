@@ -16,7 +16,9 @@
 #      binary goes back
 #
 # A build that failed its tests or its health check is remembered (by its
-# sha256) and not tried again; the next build that differs is.
+# sha256 and the tests' sources) and not tried again; the next build that
+# differs is, and so is the same build once the tests change (a test that
+# failed only now and then, fixed).
 #
 #   deploy/auto-update.sh         what the LaunchAgent runs
 #   deploy/auto-update.sh --now   also when main hasn't moved (first run, or
@@ -45,6 +47,8 @@ main() {
   STATE="${WB_AU_STATE:-$HOME/.local/state/workboard-autoupdate}"
   local build_cmd="${WB_AU_BUILD:-cargo build --release -p workboard-server}"
   local test_cmd="${WB_AU_TEST:-cargo test -p workboard-server -p wb-sync -p wb-net}"
+  # what test_cmd tests; a change here is a new try even with the same binary
+  local test_paths="${WB_AU_TEST_PATHS:-server crates/wb-sync crates/wb-net Cargo.lock}"
   local install_cmd="${WB_AU_INSTALL:-deploy/install-launchd.sh}"
   RESTART_CMD="${WB_AU_RESTART:-launchctl kickstart -k gui/$(id -u)/$label}"
   HEALTH_SECS="${WB_AU_HEALTH_SECS:-60}"
@@ -86,7 +90,11 @@ main() {
     say "$rev: server unchanged"
     return
   fi
-  sum="$(shasum -a 256 "$NEW_BIN" | cut -d' ' -f1)"
+  local p
+  sum="$({
+    shasum -a 256 "$NEW_BIN" | cut -d' ' -f1
+    for p in $test_paths; do git rev-parse "HEAD:$p" 2>/dev/null; done
+  } | shasum -a 256 | cut -d' ' -f1)"
   if [ -f "$STATE/failed-build" ] && [ "$(cat "$STATE/failed-build")" = "$sum" ]; then
     say "$rev: same server build that failed before, skipped"
     return

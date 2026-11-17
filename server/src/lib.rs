@@ -111,6 +111,10 @@ pub fn home_dir() -> PathBuf {
     Path::new(&home).join("Library/Application Support/WorkboardServer")
 }
 
+/// How long the server remembers what a deleted message said (see
+/// Saved::graves): after that, only owners and admins bring it back.
+const GRAVE_DAYS: i64 = 365;
+
 /// How far ahead of the server's clock an app's change times may be (a
 /// computer's clock a little fast); later ones count as now + this.
 const FUTURE_SKEW_MS: i64 = 5 * 60_000;
@@ -387,6 +391,11 @@ pub struct Saved {
     /// never came in (see admin_may_invite).
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub joined: std::collections::BTreeSet<u64>,
+    /// Deleted chat messages and task comments: id -> (what it said and
+    /// who wrote it, see spaces::written_marks; when it went). Only one
+    /// saying the same may come back under someone else's name.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub graves: BTreeMap<u64, (u64, i64)>,
 }
 
 impl Saved {
@@ -901,7 +910,15 @@ fn guard_push(canon: &Value, data: &mut Value, member: u64, saved: &Saved) -> sp
             .collect(),
         _ => vec![],
     };
-    let fix = spaces::guard(canon, data, member, role.manages(), &owners, now_ms());
+    let fix = spaces::guard(
+        canon,
+        data,
+        member,
+        role.manages(),
+        &owners,
+        now_ms(),
+        &saved.graves,
+    );
     swap_hidden(canon, data, member, role);
     fix
 }
@@ -1992,12 +2009,24 @@ impl Hub {
                 true
             }
             Some(c) => {
+                let written = spaces::written_marks(c);
                 let changed = wb_sync::merge(c, &[data]);
                 if changed {
                     *c = wb_sync::shareable(c);
                 }
                 // what was turned down goes back to its sender with everyone's update
                 spaces::put_back(c, &fix);
+                if changed {
+                    let now = now_ms();
+                    let after = spaces::written_marks(c);
+                    let graves = &mut g.saved.graves;
+                    for (id, mark) in written {
+                        if !after.contains_key(&id) {
+                            graves.insert(id, (mark, now));
+                        }
+                    }
+                    graves.retain(|_, (_, t)| now - *t < GRAVE_DAYS * 86_400_000);
+                }
                 changed || !fix.is_empty()
             }
         };

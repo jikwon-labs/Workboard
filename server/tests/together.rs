@@ -3579,6 +3579,38 @@ fn change_times_from_the_future_dont_win_over_later_edits() {
 }
 
 #[test]
+fn a_deleted_message_comes_back_only_as_it_was() {
+    let home = temp_home("graves");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| d["channels"][0]["messages"] = json!([]));
+    b.wait("Ann's message gone at Bo", |d| texts(d).is_empty());
+    let mut raw = Raw::connect(
+        server.port,
+        json!({"type": "hello", "device": b.device, "token": b.token, "sync": wb_sync::META_V, "deltas": true}),
+    );
+    let w = raw.next("welcome");
+    let channel = |text: &str| {
+        let mut ch = w["snapshot"]["channels"][0].clone();
+        ch["messages"] = json!([{"id": 11, "author": 1, "text": text, "ts": 1}]);
+        ch
+    };
+    let back = |text: &str, t: i64| {
+        json!({"type": "push", "data": {"channels": [channel(text)], "extra": {"sync": {
+            "v": wb_sync::META_V, "revived": {"11": t}, "stamps": {"11": t}}}}})
+    };
+    // Bo makes up words for Ann under the deleted message's id
+    raw.send(back("Ann says Bo is boss", now()));
+    // then brings the real one back from the Trash
+    std::thread::sleep(Duration::from_millis(5));
+    raw.send(back("hi", now()));
+    a.wait("the real message is back", |d| texts(d) == ["hi"]);
+    assert!(!a.data.to_string().contains("boss"));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn hidden_items_never_leak_through_deltas() {
     let home = temp_home("deltas-hidden");
     let server = Server::start(&home, 0);

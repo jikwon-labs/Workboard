@@ -206,6 +206,8 @@ struct Cx {
     dfp: BTreeMap<u64, u64>,
     out: PutBack,
     now: i64,
+    /// deleted messages and comments: id -> written_mark when it went
+    graves: BTreeMap<u64, u64>,
 }
 
 impl Cx {
@@ -580,6 +582,40 @@ fn is_comment(v: &Value) -> bool {
     v.get("comment").and_then(|c| c.as_bool()) == Some(true)
 }
 
+/// What a message (or task comment) says and who wrote it, as one number.
+fn written_mark(e: &Value, chat: bool) -> u64 {
+    let keys = if chat { MESSAGE_KEYS } else { COMMENT_KEYS };
+    let picked: Vec<Option<&Value>> = keys.iter().map(|k| e.get(*k)).collect();
+    wb_sync::fnv(
+        serde_json::to_string(&picked)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+}
+
+/// Every chat message (with thread replies) and task comment in `canon`:
+/// id -> written_mark. The server keeps the marks of deleted ones, so one
+/// coming back from the Trash can be told from one made up under its id.
+pub fn written_marks(canon: &Value) -> HashMap<u64, u64> {
+    let mut messages = HashMap::new();
+    for ch in array(canon, "channels") {
+        collect_messages(array(ch, "messages"), &mut messages);
+    }
+    let mut out: HashMap<u64, u64> = messages
+        .into_iter()
+        .map(|(id, m)| (id, written_mark(m, true)))
+        .collect();
+    for a in array(canon, "tasks")
+        .iter()
+        .flat_map(|t| array(t, "activity"))
+    {
+        if let (Some(id), true) = (id_of(a), is_comment(a)) {
+            out.insert(id, written_mark(a, false));
+        }
+    }
+    out
+}
+
 /// Chat messages, with their thread replies, by id.
 fn collect_messages<'a>(msgs: &'a [Value], out: &mut HashMap<u64, &'a Value>) {
     for m in msgs {
@@ -725,8 +761,12 @@ impl Cx {
                     let written = chat || is_comment(&e);
                     let imported = e.get("imported").is_some_and(|i| !i.is_null());
                     let forged = written && (author_of(&e) != Some(member) || imported);
-                    // (one the team deleted coming back from the Trash is no forgery)
-                    if forged && !self.cmeta.tombs.contains_key(&id) {
+                    // one the team deleted coming back from the Trash is no
+                    // forgery, when it says just what it said then (any
+                    // deleted id is known to all: no other words under it)
+                    let back = self.cmeta.tombs.contains_key(&id)
+                        && self.graves.get(&id) == Some(&written_mark(&e, chat));
+                    if forged && !back {
                         self.leave_out(&wb_sync::ids_within(&e));
                         continue;
                     }
@@ -775,6 +815,7 @@ pub fn guard(
     manages: bool,
     owners: &[u64],
     now: i64,
+    graves: &BTreeMap<u64, (u64, i64)>,
 ) -> PutBack {
     let all_theirs = array(canon, "spaces")
         .iter()
@@ -793,6 +834,7 @@ pub fn guard(
         dfp: wb_sync::fingerprints(data),
         out: PutBack::default(),
         now,
+        graves: graves.iter().map(|(id, (m, _))| (*id, *m)).collect(),
     };
     for s in array(canon, "spaces") {
         let Some(sid) = id_of(s) else { continue };

@@ -278,7 +278,7 @@ impl App {
                         ui.label(RichText::new(tr("People")).size(20.0));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, &t, tr("Invite people")).clicked() {
+                        if self.may_manage() && primary_button(ui, &t, tr("Invite people")).clicked() {
                             self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                         }
                     });
@@ -546,6 +546,8 @@ impl App {
                             ui.add_space(ui.available_height() * 0.3);
                             ui.vertical_centered(|ui| {
                                 let alone = self.data.members.len() <= 1;
+                                // only someone who may invite is pointed to inviting
+                                let invite = alone && self.may_manage();
                                 // alone, the Inbox stays empty: point at what is due
                                 let me = self.data.me;
                                 let due_work = self
@@ -567,7 +569,7 @@ impl App {
                                         "The Inbox collects comments, mentions and assignments from others.",
                                         "check",
                                     ),
-                                    0 if alone => (
+                                    0 if invite => (
                                         "Looking to collaborate?",
                                         "Collaboration is one invite away.",
                                         "teams",
@@ -638,13 +640,13 @@ impl App {
                                         self.actions.push(Action::Go(Location::TodayOverdue));
                                     }
                                     ui.add_space(4.0);
-                                    if ui.button(tr("Invite people")).clicked() {
+                                    if invite && ui.button(tr("Invite people")).clicked() {
                                         self.modal = Some(Modal::Invite {
                                             emails: String::new(),
                                             role: "Member".into(),
                                         });
                                     }
-                                } else if self.inbox_tab == 0 && alone {
+                                } else if self.inbox_tab == 0 && invite {
                                     ui.add_space(10.0);
                                     if ui
                                         .add(Tint(

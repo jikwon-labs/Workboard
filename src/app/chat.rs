@@ -818,7 +818,7 @@ impl App {
                                 ui.add_space(10.0);
                                 // alone in the workspace there is nobody to add: invite instead
                                 if self.data.solo() {
-                                    if ui.add(egui::Button::new(tr("+  Invite people")).min_size(vec2(cw, CONTROL_H))).clicked() {
+                                    if self.may_manage() && ui.add(egui::Button::new(tr("+  Invite people")).min_size(vec2(cw, CONTROL_H))).clicked() {
                                         self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                                     }
                                 } else if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, CONTROL_H))).clicked() {

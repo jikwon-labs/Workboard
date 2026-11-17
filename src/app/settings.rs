@@ -25,6 +25,11 @@ pub const SETTINGS: [(&str, &str); 15] = [
 
 impl App {
     pub(super) fn open_settings(&mut self, label: &str) {
+        let label = if label == "General" && !self.may_manage() {
+            "My settings"
+        } else {
+            label
+        };
         self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;
         self.settings_state = None;
         self.section = Section::Settings;
@@ -99,7 +104,12 @@ impl App {
             .auto_shrink([false, false])
             .show(&mut nui, |nui| {
                 let mut last_group = "";
+                let manages = self.may_manage();
                 for (i, (group, label)) in SETTINGS.iter().enumerate() {
+                    // the workspace's name and colour are the owner's and admins'
+                    if *label == "General" && !manages {
+                        continue;
+                    }
                     if *group != last_group {
                         last_group = group;
                         nui.add_space(8.0);
@@ -129,7 +139,13 @@ impl App {
                     }
                 }
             });
-        let label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
+        let mut label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
+        if label == "General" && !self.may_manage() {
+            // a member lands on their own settings instead
+            label = "My settings";
+            self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;
+            self.settings_state = None;
+        }
         let mut bui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(body.shrink2(vec2(32.0, 20.0)))

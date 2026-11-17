@@ -1664,6 +1664,31 @@ impl App {
         }
     }
 
+    /// Whether I may bring new people into the workspace and change its
+    /// name and colour. On a team server
+    /// only its owner and admins: what the server last said, or before it
+    /// is reached the role in People (which follows the server's). Alone or
+    /// in a shared folder anyone may, as the People page there lets anyone
+    /// manage people.
+    pub(super) fn may_manage(&self) -> bool {
+        let server = self
+            .data
+            .extra
+            .shared
+            .as_ref()
+            .is_some_and(|c| c.server.is_some());
+        if !server {
+            return true;
+        }
+        match self.sync_rt.role {
+            Some(r) => r.manages(),
+            None => self
+                .data
+                .member(self.data.me)
+                .is_some_and(|m| m.role == "Owner" || m.role == "Admin"),
+        }
+    }
+
     /// Owners and admins: everyone's access, invite codes, roles.
     fn people_section(&mut self, ui: &mut Ui, t: &Theme) {
         ui.label(RichText::new(tr("People")).strong());
@@ -1720,10 +1745,10 @@ impl App {
                             }
                             // a code signs in as its person: the owner makes any, an
                             // admin only for members without a password (as the server)
-                            let may_invite = p.member != me
+                            let may_manage = p.member != me
                                 && (my_role == Role::Owner
                                     || (p.role == Role::Member && !p.account));
-                            if may_invite
+                            if may_manage
                                 && row_button(
                                     ui,
                                     if p.invite.is_some() {

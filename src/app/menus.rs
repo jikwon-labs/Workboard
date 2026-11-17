@@ -1389,6 +1389,20 @@ impl App {
                 let (tid, m) = (*task, *mode);
                 close = self.pick_task_body(ui, t, tid, m, query);
             }
+            Modal::Invite { .. } if !self.may_manage() => {
+                // reached by a link or a stale screen: members don't invite on a server
+                ui.label(tr(
+                    "Only the owner or an admin of this workspace can invite people.",
+                ));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(tr("Close")).clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            }
             Modal::Invite { emails, role } => {
                 ui.label(RichText::new(tr("Email")).color(t.text2));
                 let r = ui.add(
@@ -2543,7 +2557,8 @@ impl App {
                     "Share \"{}\" with people in your workspace.",
                     name
                 ));
-                if !self.data.members.iter().any(|m| m.id != self.data.me) {
+                let may_manage = self.may_manage();
+                if may_manage && !self.data.members.iter().any(|m| m.id != self.data.me) {
                     ui.label(
                         RichText::new(tr("Only you are in this Workspace so far. Invite people by email below to work on it together."))
                             .small()
@@ -2568,14 +2583,20 @@ impl App {
                     });
                 }
                 ui.separator();
-                ui.label(tr("Invite by email"));
-                ui.add(
-                    field(emails)
-                        .hint_text(tr("name@company.com"))
-                        .desired_width(f32::INFINITY),
-                );
+                // bringing new people in is for the owner and admins on a server
+                if may_manage {
+                    ui.label(tr("Invite by email"));
+                    ui.add(
+                        field(emails)
+                            .hint_text(tr("name@company.com"))
+                            .desired_width(f32::INFINITY),
+                    );
+                }
                 ui.horizontal(|ui| {
-                    if primary_button(ui, t, tr("Invite")).clicked() && emails.contains('@') {
+                    if may_manage
+                        && primary_button(ui, t, tr("Invite")).clicked()
+                        && emails.contains('@')
+                    {
                         self.modal = Some(Modal::Invite {
                             emails: emails.clone(),
                             role: "Member".into(),

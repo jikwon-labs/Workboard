@@ -1004,10 +1004,15 @@ impl App {
                 popup(ui, &resp, ui.id().with("more_pop"), 220.0, |ui| {
                     self.rail_more_menu(ui)
                 });
-                // bottom group: Invite (every 56 px); Labs, Upgrade and Install removed at the person's request
-                let bottom: [(&str, &str); 1] = [("Invite", "")];
+                // bottom group: Invite (every 56 px), only for whoever may
+                // invite; Labs, Upgrade and Install removed at the person's request
+                let bottom: &[(&str, &str)] = if self.may_manage() {
+                    &[("Invite", "")]
+                } else {
+                    &[]
+                };
                 let mut by = rect.bottom() - bottom.len() as f32 * 56.0 - 2.0;
-                for (label, icon) in bottom {
+                for &(label, icon) in bottom {
                     let ibox = Rect::from_center_size(pos2(cx, by + 16.0), vec2(32.0, 32.0));
                     let hit = Rect::from_min_max(
                         pos2(rect.left(), by - 2.0),

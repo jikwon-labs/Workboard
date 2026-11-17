@@ -406,6 +406,80 @@ fn click_invite_in_rail_and_send() {
 }
 
 #[test]
+fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.settle();
+    assert!(!h.has("Rail Invite"), "no Invite in the rail");
+    // People lists everyone, but without Invite people
+    h.app.open_settings("People");
+    h.settle();
+    assert!(h.has("Settings People") && !h.has("Invite people"));
+    // no General (workspace name and colour); asking for it opens my settings
+    assert!(!h.has("Settings General"));
+    h.app.open_settings("General");
+    h.settle();
+    assert!(h.has("Full name") && !h.has("Workspace name"));
+    h.app.section = Section::Home;
+    // Share keeps Copy link but has no invite field
+    h.app.modal = Some(Modal::Share {
+        emails: String::new(),
+    });
+    h.settle();
+    assert!(h.has("Copy link") && !h.has("Invite by email"));
+    // the invite dialog reached anyway (a link) only says who can invite
+    h.app.modal = Some(Modal::Invite {
+        emails: String::new(),
+        role: "Member".into(),
+    });
+    h.settle();
+    assert!(h.has("Only the owner or an admin of this workspace can invite people."));
+    assert!(!h.has("Send invite"));
+    let n = h.app.data.members.len();
+    h.click("Close");
+    assert!(h.app.modal.is_none() && h.app.data.members.len() == n);
+    // an admin gets all of it back
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.settle();
+    assert!(h.has("Rail Invite"));
+    h.click("Rail Invite");
+    assert!(h.has("Send invite"));
+    h.key(egui::Key::Escape);
+    h.app.open_settings("General");
+    h.settle();
+    assert!(h.has("Settings General") && h.has("Workspace name"));
+    // before the server is reached, the role in People decides
+    h.app.section = Section::Home;
+    h.app.sync_rt.role = None;
+    let me = h.app.data.me;
+    h.app
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .role = "Member".into();
+    h.settle();
+    assert!(!h.has("Rail Invite"));
+    h.app
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .role = "Owner".into();
+    h.settle();
+    assert!(h.has("Rail Invite"));
+}
+
+#[test]
 fn click_view_tabs() {
     let mut h = Ui1::new();
     for (name, v) in [

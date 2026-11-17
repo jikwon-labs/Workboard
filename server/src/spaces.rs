@@ -120,6 +120,33 @@ fn meta_of(v: &Value) -> SyncMeta {
         .unwrap_or_default()
 }
 
+/// Bring every change time in a copy someone sent down to `limit` at most.
+/// Times decide which version wins, so a stamp far in the future (or
+/// i64::MAX, which would also overflow the `+ 1`s in put_back) would make an
+/// edit, a delete or a restore win over everything anyone does later.
+pub fn clamp_future(data: &mut Value, limit: i64) {
+    let mut meta = meta_of(data);
+    let mut over = false;
+    let mut clamp = |t: &mut i64| {
+        if *t > limit {
+            *t = limit;
+            over = true;
+        }
+    };
+    meta.stamps.values_mut().for_each(&mut clamp);
+    meta.tombs.values_mut().for_each(&mut clamp);
+    meta.revived.values_mut().for_each(&mut clamp);
+    meta.moved.values_mut().for_each(&mut clamp);
+    meta.values.values_mut().for_each(&mut clamp);
+    meta.fields
+        .values_mut()
+        .flat_map(|f| f.values_mut())
+        .for_each(&mut clamp);
+    if over {
+        set_meta(data, &meta);
+    }
+}
+
 fn set_meta(v: &mut Value, meta: &SyncMeta) {
     if v.is_object() && !v.get("extra").is_some_and(|e| e.is_object()) {
         v["extra"] = Value::Object(Map::new());
@@ -259,7 +286,7 @@ impl Cx {
             let (ds, dr) = (self.their_change(id), self.their(&self.dmeta.revived, id));
             // a deleted item still in a copy that hasn't heard is no news
             if !dead || dr > ctomb {
-                let t = (ds.max(dr).max(ctomb) + 1).max(self.now);
+                let t = ds.max(dr).max(ctomb).saturating_add(1).max(self.now);
                 self.out.bury.insert(id, t);
                 self.out.refused = true;
             }
@@ -900,10 +927,10 @@ pub fn put_back(canon: &mut Value, fix: &PutBack) {
             .and_then(|f| f.values().max().copied())
             .unwrap_or(0);
         let s = meta.stamps.entry(*id).or_insert(0);
-        *s = (*s).max(stamp + 1).max(base);
+        *s = (*s).max(stamp.saturating_add(1)).max(base);
         if *moved > 0 {
             let m = meta.moved.entry(*id).or_insert(0);
-            *m = (*m).max(moved + 1);
+            *m = (*m).max(moved.saturating_add(1));
         }
     }
     for (id, t) in &fix.bury {
@@ -918,7 +945,7 @@ pub fn put_back(canon: &mut Value, fix: &PutBack) {
         *tomb = (*tomb).max(*t);
         let tomb = *tomb;
         let r = meta.revived.entry(*id).or_insert(0);
-        *r = (*r).max(tomb + 1);
+        *r = (*r).max(tomb.saturating_add(1));
         let r = *r;
         // a newer stamp too, so an update that carries only what changed
         // (a delta) brings the item back whole to the app that deleted it
@@ -928,7 +955,7 @@ pub fn put_back(canon: &mut Value, fix: &PutBack) {
     }
     for (path, stamp) in &fix.values {
         let s = meta.values.entry(path.clone()).or_insert(0);
-        *s = (*s).max(stamp + 1);
+        *s = (*s).max(stamp.saturating_add(1));
     }
     set_meta(canon, &meta);
 }

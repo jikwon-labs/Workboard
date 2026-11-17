@@ -111,6 +111,10 @@ pub fn home_dir() -> PathBuf {
     Path::new(&home).join("Library/Application Support/WorkboardServer")
 }
 
+/// How far ahead of the server's clock an app's change times may be (a
+/// computer's clock a little fast); later ones count as now + this.
+const FUTURE_SKEW_MS: i64 = 5 * 60_000;
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1950,6 +1954,8 @@ impl Hub {
             return false;
         }
         let mut data = wb_sync::shareable(&data);
+        // no change time from the future (see clamp_future)
+        spaces::clamp_future(&mut data, now_ms() + FUTURE_SKEW_MS);
         let mut g = self.inner.lock().unwrap();
         let members_before = member_ids(g.canon.as_ref());
         // the messages already there, to tell which ones are new (only when

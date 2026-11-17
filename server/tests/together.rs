@@ -3534,6 +3534,51 @@ fn a_missed_revision_brings_the_whole_copy_and_partial_pushes_merge() {
 }
 
 #[test]
+fn change_times_from_the_future_dont_win_over_later_edits() {
+    let home = temp_home("future-stamps");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let mut raw = Raw::connect(
+        server.port,
+        json!({"type": "hello", "device": b.device, "token": b.token, "sync": wb_sync::META_V, "deltas": true}),
+    );
+    let whole = raw.next("welcome");
+    let v = wb_sync::META_V;
+    // Bo deletes Ann's message "forever" (i64::MAX also overflowed the
+    // server's "+ 1" and buried it for good)
+    raw.send(json!({"type": "push", "data": {"tasks": [], "extra": {"sync": {"v": v, "tombs": {"11": i64::MAX}}}}}));
+    // and renames a task with a stamp far in the future
+    let mut part =
+        json!({"tasks": [whole["snapshot"]["tasks"][1].clone()], "extra": {"sync": {"v": v}}});
+    part["tasks"][0]["name"] = json!("frozen");
+    part["extra"]["sync"]["stamps"] = json!({"101": i64::MAX / 2});
+    part["extra"]["sync"]["fields"] = json!({"101": {"name": i64::MAX / 2}});
+    raw.send(json!({"type": "push", "data": part}));
+    a.wait("Bo's rename at Ann", |d| {
+        task_names(d) == ["Plan", "frozen"]
+    });
+    assert_eq!(texts(&a.data), ["hi"], "Ann's message stays");
+    // a little later Ann renames it: her edit wins
+    std::thread::sleep(Duration::from_millis(5));
+    a.change(|d| d["tasks"][1]["name"] = json!("Ship again"));
+    b.wait("Ann's later rename wins at Bo", |d| {
+        task_names(d) == ["Plan", "Ship again"]
+    });
+    let far = now() + 3_600_000;
+    let meta = a.meta();
+    assert!(
+        meta.stamps
+            .values()
+            .chain(meta.tombs.values())
+            .all(|t| *t < far),
+        "no stamp from the future: {:?}",
+        meta
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn hidden_items_never_leak_through_deltas() {
     let home = temp_home("deltas-hidden");
     let server = Server::start(&home, 0);
@@ -4506,7 +4551,7 @@ fn a_front_with_a_certificate_nobody_trusts_is_refused() {
             device: "d".into(),
             token: "t".into(),
         },
-        "00",
+        &"0".repeat(64),
     )
     .unwrap_err();
     assert!(matches!(err, wb_net::FileError::Net(_)), "{:?}", err);

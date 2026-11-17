@@ -11183,7 +11183,7 @@ fn a_new_workspace_can_go_on_the_team_server_or_stay_here() {
 
     // on the server is the choice it starts with
     h.click("Workspace menu");
-    h.click("+  Create Workspace");
+    h.click("Create Workspace");
     assert!(h.has("On the team server (127.0.0.1:1)"));
     assert!(h.has("On this computer only"));
     assert!(matches!(
@@ -11210,7 +11210,7 @@ fn a_new_workspace_can_go_on_the_team_server_or_stay_here() {
 
     // or only on this computer, as before
     h.click("Workspace menu");
-    h.click("+  Create Workspace");
+    h.click("Create Workspace");
     h.click("On this computer only");
     assert!(matches!(
         h.app.modal,
@@ -11236,7 +11236,7 @@ fn a_workspace_on_this_computer_only_has_no_server_choice() {
     let _home = own_home("wizard-local");
     let mut h = Ui1::new();
     h.click("Workspace menu");
-    h.click("+  Create Workspace");
+    h.click("Create Workspace");
     assert!(!h.has("On this computer only"));
     assert!(!h.has("Where"));
 }

@@ -3661,6 +3661,17 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
     });
     assert!(b.meta().tombs.contains_key(&40));
     a.wait("the old channel deleted at A", |d| channel(d, 50).is_none());
+    // B makes Ann's channel private (Cy, not in it, would lose it) and
+    // turns it into a DM: it stays a public channel
+    b.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(
+            json!({"id": 40, "name": "renamed by Bo", "kind": "Direct", "private": true, "topic": "", "creator": 1, "members": [1, 3, 2], "messages": [], "last_read": 0}),
+        );
+    });
+    round_trip(&mut b, &mut a, "after making it private", 3030);
+    let c = channel(&a.data, 40).unwrap();
+    assert_eq!(c["kind"], "Channel", "{}", c);
+    assert!(c.get("private").is_none_or(|p| p == false), "{}", c);
     assert!(
         channel(&a.data, 40).is_some(),
         "Ann's channel is still there"

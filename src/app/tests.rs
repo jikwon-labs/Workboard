@@ -9179,3 +9179,24 @@ fn joining_a_team_forgets_my_old_carried_slack_matches() {
     assert!(!b.data.extra.slack_carried.contains(&"UOLD".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn updates_come_from_a_team_server_even_while_a_local_workspace_is_open() {
+    let srv = |s: &str| Some(s.to_string());
+    // the open workspace's own server comes first
+    assert_eq!(
+        together::pick_update_server(srv("https://a"), "https://b", [srv("https://c")]),
+        srv("https://a")
+    );
+    // a workspace kept only on this computer: the server last signed in to
+    assert_eq!(
+        together::pick_update_server(None, "https://b", [srv("https://c")]),
+        srv("https://b")
+    );
+    // never signed in on this version: any other workspace on a server
+    assert_eq!(
+        together::pick_update_server(None, "", [None, srv(""), srv("https://c")]),
+        srv("https://c")
+    );
+    assert_eq!(together::pick_update_server(srv(" "), "", [None]), None);
+}

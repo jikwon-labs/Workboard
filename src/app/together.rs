@@ -459,6 +459,32 @@ pub(super) fn legacy_shape(v: &serde_json::Value) -> serde_json::Value {
     v
 }
 
+/// The team server to look for app updates on, chosen at start so updates
+/// arrive whichever workspace is open, even one kept only on this computer:
+/// the open workspace's server, else the one last signed in to, else the
+/// first other workspace on a server.
+pub(super) fn update_server(open: &Data) -> Option<String> {
+    let others = Data::workspaces()
+        .into_iter()
+        .map(|w| Data::load_file(&w.file).and_then(|d| d.extra.shared.and_then(|c| c.server)));
+    pick_update_server(
+        open.extra.shared.as_ref().and_then(|c| c.server.clone()),
+        &super::login::last_server(),
+        others,
+    )
+}
+
+pub(super) fn pick_update_server(
+    open: Option<String>,
+    last: &str,
+    others: impl IntoIterator<Item = Option<String>>,
+) -> Option<String> {
+    let real = |s: &String| !s.trim().is_empty();
+    open.filter(real)
+        .or_else(|| Some(last.to_string()).filter(real))
+        .or_else(|| others.into_iter().flatten().find(real))
+}
+
 /// After opening a workspace: a copy saved before field fingerprints were
 /// kept gets them for every item unchanged since its last save, so changes
 /// made before the next sync are noted field by field (as the iPhone does

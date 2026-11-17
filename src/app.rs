@@ -632,6 +632,13 @@ impl App {
         data.fix_activity_ids();
         data.fold_legacy_slack();
         together::fill_sync_baseline(&mut data);
+        // updates come from the team's server even while a workspace kept
+        // only on this computer is open
+        if persist {
+            if let Some(addr) = together::update_server(&data) {
+                crate::updater::set_server(&addr);
+            }
+        }
         let loc = data
             .first_list()
             .map(Location::List)

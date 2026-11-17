@@ -6472,11 +6472,26 @@ fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
 #[test]
 fn server_refusals_are_shown_in_the_interface_language() {
     use super::together::server_text;
-    const CLI_ONLY: [&str; 4] = [
+    const CLI_ONLY: &[&str] = &[
         "Invite code for member {} as {}: {}  (works once, for {} days)",
         "No member with id {} in the workspace (see `workboard-server people`).",
         "Restored {}. Everyone's app gets it now (the copy from before is in {}/before-restore-*.json).",
         "This address takes Workboard's WebSocket connection.",
+        // `workboard-server invite-email`: only the local admin request sees these
+        "Type a valid ASCII email address (for example, member@example.test).",
+        "Couldn't save invitation: {e}. No new code was issued.",
+        "Set up a workspace before inviting teammates.",
+        "Workspace metadata is malformed; no invitation was created.",
+        "Workspace sync metadata is malformed; no invitation was created.",
+        "Workspace has no members list.",
+        "Several members have that email. Resolve the duplicate identities first.",
+        "That email already has a sign-in account. Use sign-in or Forgot password instead.",
+        "That member has an invalid id.",
+        "Several members share that id. Resolve the duplicate identities first.",
+        "That member's role is malformed.",
+        "Only unregistered plain Members can be invited by email; privileged identities are protected.",
+        "That member has already signed in. Use sign-in or account recovery instead.",
+        "Invite code for member {} as Member: {}  (works once, for {} days)",
     ];
     let sentences = |src: &str| -> Vec<String> {
         let src = src.split("#[cfg(test)]\nmod tests").next().unwrap();

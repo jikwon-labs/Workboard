@@ -196,8 +196,31 @@ computer of theirs at once) in Work together > People.
     ~/.local/bin/workboard-server restore FILE        go back to a backup
                                                       (the owner can also do this in the app:
                                                        Work together > Backups)
+    ~/.local/bin/workboard-server invite-email EMAIL   invite a new teammate as Member only
     ~/.local/bin/workboard-server invite ID --role owner
-                                                      new owner code (owner lost their computer)
+                                                      Owner recovery only (existing member ID)
+
+`invite-email EMAIL` creates a new plain Member, adds them to `general` when
+present, and prints a one-time code (7 days). It does not send mail: give the
+code and server address to that teammate privately. It uses the local admin
+request, so connected apps receive the change and the server saves it; no
+workspace-file edits or restart are needed. If the server is stopped, the
+request waits until startup; read `admin-result.json` in the server home for
+the answer. Run admin commands one at a time (the local request has one slot).
+Use `--home FOLDER` for a separate server home.
+
+Addresses are compared without case or surrounding spaces and new addresses
+are stored lowercase. Use a plain ASCII mailbox, not a display name. A pending,
+unregistered Member can be re-invited with the same ID and a fresh code; the
+previous code stops working. Duplicate emails/IDs, Owner/Admin/Guest identities,
+any existing account (including its login email), and members with signed-in
+computers are refused without changing their data, roles or credentials.
+`--role` is not allowed: this command cannot grant Owner or Admin.
+
+**Do not use `invite ID --role owner` for teammates.** That existing command
+recovers access to the named existing Owner identity; its code signs in as
+that person. Existing registered members should sign in or use Forgot password,
+not `invite-email` to reset their account.
 
 Backups: `backups/` in the data folder, hourly (48 kept) and daily (30 kept).
 Health: `curl http://127.0.0.1:8787/health` on the Mac mini (everything), or

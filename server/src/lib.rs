@@ -175,6 +175,42 @@ fn email_ok(e: &str) -> bool {
     }
 }
 
+/// Conservative ASCII mailbox syntax for the local teammate-invite command.
+/// This intentionally does not accept display names or quoted local parts.
+/// Existing account/login validation is unchanged.
+pub fn normalize_invite_email(input: &str) -> Result<String, String> {
+    let invalid =
+        || "Type a valid ASCII email address (for example, member@example.test).".to_string();
+    if !input.is_ascii() || input.chars().any(char::is_control) {
+        return Err(invalid());
+    }
+    let email = norm_email(input);
+    let (local, domain) = email.split_once('@').ok_or_else(invalid)?;
+    let atom = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~.".contains(&b);
+    let domain_ok = domain.contains('.')
+        && domain.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    if email.len() > 254
+        || local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || !local.bytes().all(atom)
+        || !domain_ok
+    {
+        return Err(invalid());
+    }
+    Ok(email)
+}
+
 fn password_problem(p: &str) -> Option<String> {
     (p.chars().count() < MIN_PASSWORD)
         .then(|| format!("Choose a password of at least {} characters.", MIN_PASSWORD))
@@ -557,6 +593,47 @@ fn member_exists(canon: Option<&Value>, member: u64) -> bool {
         })
 }
 
+/// Reserve even orphaned references and sync tombstones: reusing an old
+/// identity must not attach the new teammate to somebody else's data.
+/// Numeric values/keys are conservatively reserved, including unknown fields.
+fn fresh_member_id(canon: &Value, saved: &Saved, start: u64) -> u64 {
+    fn reserve(value: &Value, ids: &mut std::collections::BTreeSet<u64>) {
+        match value {
+            Value::Object(map) => {
+                for (key, value) in map {
+                    if let Ok(id) = key.parse::<u64>() {
+                        ids.insert(id);
+                    }
+                    reserve(value, ids);
+                }
+            }
+            Value::Array(array) => {
+                for value in array {
+                    reserve(value, ids);
+                }
+            }
+            Value::Number(n) => {
+                if let Some(id) = n.as_u64() {
+                    ids.insert(id);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    reserve(canon, &mut ids);
+    ids.extend(saved.roles.keys().copied());
+    ids.extend(saved.accounts.keys().copied());
+    ids.extend(saved.devices.values().map(|d| d.member));
+    ids.extend(saved.invites.values().map(|i| i.member));
+    const MASK: u64 = (1u64 << 62) - 1;
+    let mut id = start & MASK;
+    while id == 0 || ids.contains(&id) {
+        id = (id + 1) & MASK;
+    }
+    id
+}
+
 /// Make every item in a restored copy win over what the apps have, and bring
 /// back the items deleted since: their change stamps become `now` and each
 /// one counts as restored.
@@ -811,6 +888,68 @@ fn swap_hidden(canon: &Value, data: &mut Value, member: u64, role: Role) {
         &["stamps", "tombs", "revived", "moved", "fields"],
         &ids,
     );
+}
+
+/// Email invitations must save both snapshots before exposing a usable code.
+/// Stage both files while the hub/persistence locks keep live state unchanged.
+fn persist_email_invite(home: &Path, canon: &Value, saved: &Saved) -> Result<(), String> {
+    let workspace = home.join(WORKSPACE_FILE);
+    let state = home.join(STATE_FILE);
+    let workspace_tmp = workspace.with_extension("json.tmp");
+    let state_tmp = state.with_extension("json.tmp");
+    let result = (|| -> std::io::Result<()> {
+        let before = match std::fs::read(&workspace) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
+        // Catch known destination failures before installing either snapshot.
+        match std::fs::metadata(&state) {
+            Ok(meta) if !meta.is_file() => {
+                return Err(std::io::Error::other("server.json is not a regular file"));
+            }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+        std::fs::write(&workspace_tmp, serde_json::to_vec(canon)?)?;
+        std::fs::write(&state_tmp, serde_json::to_vec_pretty(saved)?)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&state_tmp, std::fs::Permissions::from_mode(0o600))?;
+        }
+        commit_email_invite(&workspace, &state, before.as_deref())
+    })();
+    // Never remove a directory (including a fault-injection blocker).
+    let _ = std::fs::remove_file(&workspace_tmp);
+    let _ = std::fs::remove_file(&state_tmp);
+    result.map_err(|e| format!("Couldn't save invitation: {e}. No new code was issued."))
+}
+
+/// Two renames are not a filesystem transaction. If the second fails, restore
+/// the exact old workspace (or its absence); never install live invite state.
+/// Rollback is best effort: a second I/O failure requires operator recovery.
+fn commit_email_invite(
+    workspace: &Path,
+    state: &Path,
+    before: Option<&[u8]>,
+) -> std::io::Result<()> {
+    let workspace_tmp = workspace.with_extension("json.tmp");
+    std::fs::rename(&workspace_tmp, workspace)?;
+    if let Err(e) = std::fs::rename(state.with_extension("json.tmp"), state) {
+        let rollback = match before {
+            Some(bytes) => std::fs::write(&workspace_tmp, bytes)
+                .and_then(|()| std::fs::rename(&workspace_tmp, workspace)),
+            None => std::fs::remove_file(workspace),
+        };
+        if let Err(rollback) = rollback {
+            return Err(std::io::Error::other(format!(
+                "{e}; workspace rollback also failed: {rollback}; repair workspace.json before restarting"
+            )));
+        }
+        return Err(e);
+    }
+    Ok(())
 }
 
 fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
@@ -1095,6 +1234,8 @@ impl Canon {
 
 struct Hub {
     home: PathBuf,
+    /// Serialize disk snapshots with the email-invite commit (lock before inner).
+    persistence: Mutex<()>,
     inner: Mutex<Inner>,
     updates: broadcast::Sender<Arc<Canon>>,
     /// device ids whose access was just removed
@@ -1116,6 +1257,7 @@ struct Hub {
 
 impl Hub {
     fn flush(&self) {
+        let _persistence = self.persistence.lock().unwrap();
         let (canon, saved) = {
             let mut g = self.inner.lock().unwrap();
             if !g.dirty {
@@ -2015,8 +2157,140 @@ impl Hub {
         Ok(())
     }
 
+    /// Create a plain member through the same canon and broadcast as app edits.
+    fn invite_email(&self, email: &str) -> Result<Value, String> {
+        let email = normalize_invite_email(email)?;
+        let _persistence = self.persistence.lock().unwrap();
+        let mut g = self.inner.lock().unwrap();
+        let canon = g
+            .canon
+            .as_ref()
+            .ok_or("Set up a workspace before inviting teammates.")?;
+        if !copy_shape_ok(canon) {
+            return Err("Workspace metadata is malformed; no invitation was created.".into());
+        }
+        let mut meta: wb_sync::SyncMeta = match canon.get("extra").and_then(|e| e.get("sync")) {
+            None | Some(Value::Null) => Default::default(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|_| "Workspace sync metadata is malformed; no invitation was created.")?,
+        };
+        let members = canon["members"]
+            .as_array()
+            .ok_or("Workspace has no members list.")?;
+        let matches: Vec<&Value> = members
+            .iter()
+            .filter(|m| m["email"].as_str().is_some_and(|e| norm_email(e) == email))
+            .collect();
+        if matches.len() > 1 {
+            return Err(
+                "Several members have that email. Resolve the duplicate identities first.".into(),
+            );
+        }
+        if g.saved.account_member(&email).is_some() {
+            return Err(
+                "That email already has a sign-in account. Use sign-in or Forgot password instead."
+                    .into(),
+            );
+        }
+        if let Some(member) = matches.first() {
+            let id = member["id"]
+                .as_u64()
+                .filter(|id| *id != 0)
+                .ok_or("That member has an invalid id.")?;
+            if members
+                .iter()
+                .filter(|m| m["id"].as_u64() == Some(id))
+                .count()
+                != 1
+            {
+                return Err(
+                    "Several members share that id. Resolve the duplicate identities first.".into(),
+                );
+            }
+            let role = match member.get("role") {
+                None | Some(Value::Null) => "",
+                Some(value) => value.as_str().ok_or("That member's role is malformed.")?,
+            };
+            if !(role.is_empty() || role.eq_ignore_ascii_case("Member"))
+                || g.saved.role_of(id) != Role::Member
+                || g.saved
+                    .invites
+                    .values()
+                    .any(|i| i.member == id && i.role != Role::Member)
+            {
+                return Err("Only unregistered plain Members can be invited by email; privileged identities are protected.".into());
+            }
+            if g.saved.accounts.contains_key(&id)
+                || g.saved.devices.values().any(|d| d.member == id)
+            {
+                return Err(
+                    "That member has already signed in. Use sign-in or account recovery instead."
+                        .into(),
+                );
+            }
+            let mut saved = g.saved.clone();
+            let code = saved.make_invite(id, Role::Member);
+            persist_email_invite(&self.home, canon, &saved)?;
+            g.saved = saved;
+            g.dirty = false;
+            drop(g);
+            let _ = self.access.send(EVERYONE);
+            return Ok(json!({"ok": true, "member": id, "code": code,
+                "message": format!("Invite code for member {} as Member: {}  (works once, for {} days)", id, code, INVITE_DAYS)}));
+        }
+        let id = fresh_member_id(canon, &g.saved, wb_sync::random_u64());
+        let mut canon = canon.clone();
+        wb_sync::touch_fields(&mut meta, id, &[], now_ms());
+        canon["members"]
+            .as_array_mut()
+            .ok_or("Workspace has no members list.")?
+            .push(json!({
+                "id": id, "name": email.split('@').next().unwrap_or(&email),
+                "email": email, "role": "Member", "invited": true,
+                "color": [90, 150, 200], "status_text": ""
+            }));
+        if let Some(general) = canon["channels"].as_array_mut().and_then(|a| {
+            a.iter_mut()
+                .find(|c| c["kind"] == "Channel" && c["name"] == "general")
+        }) {
+            if let Some(members) = general["members"].as_array_mut() {
+                members.push(json!(id));
+                if let Some(channel) = general["id"].as_u64() {
+                    wb_sync::touch_fields(&mut meta, channel, &["members"], now_ms());
+                }
+            }
+        }
+        canon["extra"]["sync"] = serde_json::to_value(meta).unwrap();
+        let mut saved = g.saved.clone();
+        let code = saved.make_invite(id, Role::Member);
+        // Persist the same revision broadcast_canon will publish, before any
+        // identity/code becomes visible to sign-ins or connected apps.
+        saved.rev += 1;
+        persist_email_invite(&self.home, &canon, &saved)?;
+        saved.rev = g.saved.rev;
+        g.canon = Some(canon);
+        g.saved = saved;
+        self.broadcast_canon(&mut g, false);
+        g.dirty = false;
+        drop(g);
+        let _ = self.access.send(EVERYONE);
+        Ok(json!({"ok": true, "member": id, "code": code,
+            "message": format!("Invite code for member {} as Member: {}  (works once, for {} days)", id, code, INVITE_DAYS)}))
+    }
+
     /// Requests from the `workboard-server` admin commands.
     fn admin(&self, req: &Value) -> Value {
+        if let Some(email) = req.get("invite_email") {
+            if req.as_object().is_none_or(|o| o.len() != 1) {
+                return json!({"ok": false, "message": "invite-email is Member only; role overrides and mixed requests are not allowed."});
+            }
+            let Some(email) = email.as_str() else {
+                return json!({"ok": false, "message": "invite-email requires an email string."});
+            };
+            return self
+                .invite_email(email)
+                .unwrap_or_else(|e| json!({"ok": false, "message": e}));
+        }
         if let Some(file) = req.get("restore").and_then(|f| f.as_str()) {
             return match self.restore(Path::new(file)) {
                 Ok(()) => {
@@ -2617,6 +2891,7 @@ pub async fn serve_on(
     let stopping = stop_rx.clone();
     let hub = Arc::new(Hub {
         home,
+        persistence: Mutex::new(()),
         inner: Mutex::new(Inner {
             canon,
             saved,
@@ -2712,6 +2987,143 @@ pub fn admin_request(home: &Path, req: &Value, wait: Duration) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn email_invite_commit_failure_keeps_previous_workspace() {
+        let home =
+            std::env::temp_dir().join(format!("wb-invite-commit-{:x}", wb_sync::random_u64()));
+        std::fs::create_dir_all(&home).unwrap();
+        let workspace = home.join(WORKSPACE_FILE);
+        let state = home.join(STATE_FILE);
+        let before = b"{\"workspace\": \"unchanged\"}\n";
+        std::fs::write(&workspace, before).unwrap();
+        // Both temporary writes succeed, but installing server.json cannot.
+        std::fs::create_dir(&state).unwrap();
+        let result =
+            persist_email_invite(&home, &json!({"workspace": "candidate"}), &Saved::default());
+        assert!(result.is_err());
+        assert!(
+            std::fs::read(&workspace).unwrap() == before,
+            "failed commit must preserve the original workspace bytes"
+        );
+        assert!(state.is_dir());
+        assert!(!workspace.with_extension("json.tmp").exists());
+        assert!(!state.with_extension("json.tmp").exists());
+        // Also inject the same fault *after* preparation, at the commit seam:
+        // cover rollback of an existing workspace and of a not-yet-saved one.
+        for existing in [true, false] {
+            if !existing {
+                std::fs::remove_file(&workspace).unwrap();
+            }
+            std::fs::write(workspace.with_extension("json.tmp"), b"candidate").unwrap();
+            std::fs::write(state.with_extension("json.tmp"), b"candidate state").unwrap();
+            let before = existing.then_some(before.as_slice());
+            assert!(commit_email_invite(&workspace, &state, before).is_err());
+            if existing {
+                assert!(std::fs::read(&workspace).unwrap() == before.unwrap());
+            } else {
+                assert!(
+                    !workspace.exists(),
+                    "rollback must restore original absence"
+                );
+            }
+            assert!(state.is_dir());
+        }
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn email_invite_staging_failure_leaves_live_state_and_notifications_untouched() {
+        for file in [STATE_FILE, WORKSPACE_FILE] {
+            for reinvite in [false, true] {
+                let home = std::env::temp_dir()
+                    .join(format!("wb-invite-live-{:x}", wb_sync::random_u64()));
+                std::fs::create_dir_all(home.join(file).with_extension("json.tmp")).unwrap();
+                let canon = json!({
+                    "members": [{"id": 1, "role": "Owner"}, {"id": 2, "role": "Member", "email": "pending@example.test"}],
+                    "channels": [{"id": 10, "kind": "Channel", "name": "general", "members": []}],
+                    "extra": {"sync": {}}
+                });
+                let mut saved = Saved::default();
+                saved.roles.insert(1, Role::Owner);
+                saved.make_invite(2, Role::Member);
+                let before_saved = serde_json::to_value(&saved).unwrap();
+                let hub = test_hub(&home, Some(canon.clone()), saved);
+                // Existing unsaved work must remain dirty after a failed invite.
+                hub.inner.lock().unwrap().dirty = true;
+                let mut updates = hub.updates.subscribe();
+                let mut access = hub.access.subscribe();
+                let email = if reinvite {
+                    "pending@example.test"
+                } else {
+                    "new@example.test"
+                };
+                let res = hub.admin(&json!({"invite_email": email}));
+                assert_eq!(res["ok"], false);
+                assert!(res.get("code").is_none());
+                let g = hub.inner.lock().unwrap();
+                assert!(
+                    g.canon.as_ref() == Some(&canon),
+                    "live canon must not change"
+                );
+                assert!(
+                    serde_json::to_value(&g.saved).unwrap() == before_saved,
+                    "live invites, roles, revision and credentials must not change"
+                );
+                assert!(g.dirty, "do not forget unrelated pending writes");
+                assert!(
+                    updates.try_recv().is_err(),
+                    "no canon notification on failure"
+                );
+                assert!(
+                    access.try_recv().is_err(),
+                    "no access/code notification on failure"
+                );
+                drop(g);
+                std::fs::remove_dir_all(home).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn email_invite_id_allocation_skips_items_tombs_and_every_saved_identity() {
+        let mut canon = json!({"members": [{"id": 1}], "tasks": [{"id": 2, "activity": [{"id": 3}]}], "extra": {"sync": {"tombs": {"4": 1}, "stamps": {"5": 1}}}});
+        let mut saved = Saved::default();
+        saved.roles.insert(6, Role::Owner);
+        saved.accounts.insert(
+            7,
+            Account {
+                email: "reserved@example.test".into(),
+                salt: String::new(),
+                hash: String::new(),
+                rounds: 1,
+                created: 1,
+            },
+        );
+        saved.devices.insert(
+            "test".into(),
+            Device {
+                tag: 1,
+                member: 8,
+                token: String::new(),
+                created: 1,
+            },
+        );
+        saved.make_invite(9, Role::Admin);
+        assert_eq!(
+            fresh_member_id(&canon, &saved, 0),
+            10,
+            "all occupied candidate ids must be skipped"
+        );
+        assert_eq!(fresh_member_id(&canon, &saved, 2), 10);
+        canon["extra"]["sync"]["revived"] = json!({"10": 1});
+        assert_eq!(fresh_member_id(&canon, &saved, 10), 11);
+        let id = fresh_member_id(&canon, &saved, u64::MAX);
+        assert!(
+            id > 0 && id < (1u64 << 62),
+            "ids stay compatible with signed clients"
+        );
+    }
 
     fn dt(s: &str) -> chrono::NaiveDateTime {
         chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap()
@@ -2970,6 +3382,7 @@ mod tests {
     fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         Hub {
             home: home.to_path_buf(),
+            persistence: Mutex::new(()),
             inner: Mutex::new(Inner {
                 canon,
                 saved,

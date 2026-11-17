@@ -1,4 +1,5 @@
 // workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
+// workboard-server invite-email EMAIL [--home FOLDER]  (new teammates, Member only)
 // workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER]
 //
 // Listens on 127.0.0.1 port 8787 by default. That is where Cloudflare
@@ -23,8 +24,10 @@ const USAGE: &str = "usage:
   workboard-server people                       who is in the workspace, their role and computers
   workboard-server backups                      list the backups
   workboard-server restore FILE                 go back to a backup (a file from `backups`)
-  workboard-server invite MEMBER [--role R]     a one-time invite code for member id MEMBER
-                                                (R: member, admin or owner; for when the owner lost access)
+  workboard-server invite MEMBER [--role R]     existing-account recovery code for member id MEMBER
+                                                (R: member, admin or owner; Owner recovery: invite MEMBER --role owner)
+  workboard-server invite-email EMAIL           new teammate invite (Member only; no --role)
+                                                re-invites only unregistered Members; never resets an account
   workboard-server mail-test ADDRESS            send a test mail with the settings in mail.json";
 
 fn main() {
@@ -94,6 +97,14 @@ fn main() {
                 fail("--role is member, admin or owner");
             }
             request(&home, json!({"invite": member, "role": role}));
+        }
+        ["invite-email", email] => {
+            if role.is_some() {
+                fail("invite-email is Member only; --role is not allowed. Owner recovery uses invite MEMBER --role owner.");
+            }
+            let email =
+                workboard_server::normalize_invite_email(email).unwrap_or_else(|e| fail(&e));
+            request(&home, json!({"invite_email": email}));
         }
         ["mail-test", to] => mail_test(&home, to),
         _ => fail(USAGE),

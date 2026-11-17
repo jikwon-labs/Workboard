@@ -748,6 +748,582 @@ fn app_updates_are_served_from_the_updates_folder() {
 }
 
 #[test]
+fn email_invite_cli_creates_member_and_reaches_connected_apps() {
+    let home = temp_home("email-invite-cli");
+    let server = Server::start(&home, 0);
+    let mut owner = App::connect(server.port, Some(workspace()));
+    owner.until("owner ready", |a| a.role == Some(Role::Owner));
+    owner.wait("workspace ready", |d| d["workspace"] == "Team");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
+        .args(["invite-email", "new.member@example.test", "--home"])
+        .arg(&home)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "invite-email must succeed");
+    owner.wait("new member broadcast", |d| {
+        d["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["email"] == "new.member@example.test")
+    });
+    let member = owner.data["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["email"] == "new.member@example.test")
+        .unwrap();
+    let id = member["id"].as_u64().unwrap();
+    assert_eq!(member["role"], "Member");
+    assert_eq!(member["invited"], true);
+    assert!(member["color"].is_array());
+    assert!(owner.data["channels"][0]["members"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(id)));
+    let saved = workboard_server::load_saved(&home).unwrap();
+    let code = saved
+        .open_invite(id, now())
+        .expect("persisted invite")
+        .clone();
+    assert_eq!(saved.role_of(id), Role::Member);
+    assert_eq!(saved.invites[&code].role, Role::Member);
+    let disk: Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join(workboard_server::WORKSPACE_FILE)).unwrap(),
+    )
+    .unwrap();
+    assert!(disk["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == id));
+    drop(owner);
+    server.stop();
+    let restarted = Server::start(&home, 0);
+    let mut joined = App::join(restarted.port, &code);
+    joined.until("member after restart", |a| {
+        a.member == Some(id) && a.role == Some(Role::Member)
+    });
+    assert!(joined.data["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == id));
+    let mut reused = App::join(restarted.port, &code);
+    reused.until("code works only once", |a| {
+        matches!(a.status, Some(Status::Refused(_)))
+    });
+    drop((joined, reused));
+    restarted.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
+    for file in [
+        workboard_server::STATE_FILE,
+        workboard_server::WORKSPACE_FILE,
+    ] {
+        for reinvite in [false, true] {
+            let home = temp_home("email-invite-write-failure");
+            let server = Server::start(&home, 0);
+            let mut owner = App::connect(server.port, Some(workspace()));
+            owner.until("owner ready", |a| a.role == Some(Role::Owner));
+            let old_code = if reinvite {
+                let first = local_admin(&home, json!({"invite_email": "pending@example.test"}));
+                assert_eq!(first["ok"], true);
+                owner.wait("initial invitation", |d| {
+                    d["members"].as_array().unwrap().len() == 4
+                });
+                Some(first["code"].as_str().unwrap().to_string())
+            } else {
+                None
+            };
+            // A harmless admin request is also a persistence barrier for setup.
+            local_admin(&home, json!({"people": true}));
+            owner.pump();
+            let updates_before = owner.updates.len();
+            let workspace_path = home.join(workboard_server::WORKSPACE_FILE);
+            let saved_path = home.join(workboard_server::STATE_FILE);
+            let before_workspace = std::fs::read(&workspace_path).unwrap();
+            let before_saved = std::fs::read(&saved_path).unwrap();
+            let blocked = home.join(file).with_extension("json.tmp");
+            std::fs::create_dir(&blocked).unwrap();
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
+                .args(["invite-email", "pending@example.test", "--home"])
+                .arg(&home)
+                .output()
+                .unwrap();
+            assert!(
+                !output.status.success(),
+                "invite-email must fail when {file} cannot be staged (reinvite={reinvite})"
+            );
+            assert!(
+                !String::from_utf8_lossy(&output.stdout).contains("Invite code"),
+                "failed CLI must not deliver a credential"
+            );
+            let res = local_admin(&home, json!({"invite_email": "pending@example.test"}));
+            assert_eq!(res["ok"], false);
+            assert!(res.get("code").is_none(), "failed admin result has no code");
+            assert!(res["message"].as_str().unwrap().contains("save"));
+            assert!(
+                std::fs::read(&workspace_path).unwrap() == before_workspace,
+                "no partial workspace write"
+            );
+            assert!(
+                std::fs::read(&saved_path).unwrap() == before_saved,
+                "no code rotation or partial saved-state write"
+            );
+            owner.pump();
+            assert_eq!(
+                owner.updates.len(),
+                updates_before,
+                "no failed-invite broadcast"
+            );
+            std::fs::remove_dir(&blocked).unwrap();
+            // A later flush must not publish any latent in-memory mutation.
+            local_admin(&home, json!({"people": true}));
+            assert!(std::fs::read(&workspace_path).unwrap() == before_workspace);
+            assert!(std::fs::read(&saved_path).unwrap() == before_saved);
+            if file == workboard_server::STATE_FILE {
+                if let Some(code) = &old_code {
+                    let mut joined = App::join(server.port, code);
+                    joined.until("old code still works in live memory", |a| {
+                        a.role == Some(Role::Member)
+                    });
+                    drop(joined);
+                }
+            }
+            drop(owner);
+            server.stop();
+            if file == workboard_server::WORKSPACE_FILE {
+                if let Some(code) = &old_code {
+                    let restarted = Server::start(&home, 0);
+                    let mut joined = App::join(restarted.port, code);
+                    joined.until("old code still works after restart", |a| {
+                        a.role == Some(Role::Member)
+                    });
+                    let mut reused = App::join(restarted.port, code);
+                    reused.until("preserved code remains single use", |a| {
+                        matches!(a.status, Some(Status::Refused(_)))
+                    });
+                    drop((joined, reused));
+                    restarted.stop();
+                }
+            }
+            let _ = std::fs::remove_dir_all(home);
+        }
+    }
+}
+
+#[test]
+fn email_invite_survives_stale_client_push_with_concurrent_general_edits() {
+    let home = temp_home("email-stale-push");
+    let server = Server::start(&home, 0);
+    let mut owner = App::connect(server.port, Some(workspace()));
+    owner.until("owner ready", |a| a.role == Some(Role::Owner));
+    local_admin(&home, json!({"people": true}));
+    // Do not pump the owner's queued invitation broadcast: their next push
+    // still has the old member list and old general membership.
+    let res = local_admin(&home, json!({"invite_email": "concurrent@example.test"}));
+    assert_eq!(res["ok"], true);
+    let id = res["member"].as_u64().unwrap();
+    assert_eq!(owner.data["members"].as_array().unwrap().len(), 3);
+    owner.change(|d| {
+        d["channels"][0]["topic"] = json!("concurrent topic");
+        d["tasks"][0]["name"] = json!("concurrent task");
+    });
+    owner.wait("stale client edit merged", |d| {
+        d["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == id)
+            && d["channels"][0]["topic"] == "concurrent topic"
+            && d["tasks"][0]["name"] == "concurrent task"
+    });
+    // The client's own edit is already present locally; observe the server's
+    // result independently through a fresh sign-in using the invitation.
+    let mut joined = App::join(server.port, res["code"].as_str().unwrap());
+    joined.until("Member joins merged workspace", |a| {
+        a.role == Some(Role::Member)
+    });
+    joined.wait("server retained both concurrent edits", |d| {
+        d["channels"][0]["topic"] == "concurrent topic"
+            && d["tasks"][0]["name"] == "concurrent task"
+    });
+    assert!(joined.data["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == id));
+    assert!(joined.data["channels"][0]["members"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(id)));
+    local_admin(&home, json!({"people": true}));
+    let disk: Value = serde_json::from_slice(
+        &std::fs::read(home.join(workboard_server::WORKSPACE_FILE)).unwrap(),
+    )
+    .unwrap();
+    assert!(disk["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == id));
+    assert!(disk["channels"][0]["members"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(id)));
+    assert_eq!(disk["channels"][0]["topic"], "concurrent topic");
+    assert_eq!(disk["tasks"][0]["name"], "concurrent task");
+    drop((owner, joined));
+    server.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+fn local_admin(home: &PathBuf, request: Value) -> Value {
+    workboard_server::admin_request(home, &request, Duration::from_secs(5))
+        .unwrap()
+        .expect("local admin answered")
+}
+
+#[test]
+fn email_invite_reuses_unregistered_member_case_insensitively_with_fresh_code() {
+    let home = temp_home("email-reinvite");
+    let server = Server::start(&home, 0);
+    let mut data = workspace();
+    data["members"][1]["email"] = json!("Pending.Member@example.test");
+    data["members"][1]["invited"] = json!(true);
+    let mut owner = App::connect(server.port, Some(data));
+    owner.until("ready", |a| a.role == Some(Role::Owner));
+    let first = local_admin(
+        &home,
+        json!({"invite_email": " pending.member@EXAMPLE.TEST "}),
+    );
+    assert_eq!(first["ok"], true);
+    assert_eq!(first["member"], 2, "reuse the existing identity");
+    let second = local_admin(
+        &home,
+        json!({"invite_email": "PENDING.MEMBER@example.test"}),
+    );
+    assert_eq!(second["member"], 2);
+    assert_ne!(first["code"], second["code"]);
+    let saved = workboard_server::load_saved(&home).unwrap();
+    assert_eq!(saved.invites.values().filter(|i| i.member == 2).count(), 1);
+    assert!(!saved.invites.contains_key(first["code"].as_str().unwrap()));
+    let mut old = App::join(server.port, first["code"].as_str().unwrap());
+    old.until("old code invalid", |a| {
+        matches!(a.status, Some(Status::Refused(_)))
+    });
+    let mut joined = App::join(server.port, second["code"].as_str().unwrap());
+    joined.until("fresh code valid", |a| {
+        a.member == Some(2) && a.role == Some(Role::Member)
+    });
+    assert_eq!(joined.data["members"].as_array().unwrap().len(), 3);
+    drop((owner, old, joined));
+    server.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_protects_privileged_registered_and_ambiguous_identities() {
+    let home = temp_home("email-protected");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut data = workspace();
+    data["members"] = json!([
+        {"id": 1, "email": "owner@example.test", "role": "Owner"},
+        {"id": 2, "email": "admin@example.test", "role": "Admin"},
+        {"id": 3, "email": "saved-admin@example.test", "role": "Member"},
+        {"id": 4, "email": "registered@example.test", "role": "Member"},
+        {"id": 5, "email": "device@example.test", "role": "Member"},
+        {"id": 6, "email": "duplicate@example.test", "role": "Member"},
+        {"id": 7, "email": "DUPLICATE@example.test", "role": "Member"},
+        {"id": 8, "email": "pending-admin@example.test", "role": "Member"},
+        {"id": 9, "email": "guest@example.test", "role": "Guest"}
+    ]);
+    let mut saved = workboard_server::Saved::default();
+    saved.roles.insert(1, Role::Owner);
+    saved.roles.insert(3, Role::Admin);
+    saved.accounts.insert(
+        4,
+        workboard_server::Account {
+            email: "account-alias@example.test".into(),
+            salt: String::new(),
+            hash: String::new(),
+            rounds: 1,
+            created: 1,
+        },
+    );
+    saved.devices.insert(
+        "test-device".into(),
+        workboard_server::Device {
+            tag: 1,
+            member: 5,
+            token: String::new(),
+            created: 1,
+        },
+    );
+    saved.make_invite(8, Role::Admin);
+    std::fs::write(
+        home.join(workboard_server::WORKSPACE_FILE),
+        data.to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        home.join(workboard_server::STATE_FILE),
+        serde_json::to_vec(&saved).unwrap(),
+    )
+    .unwrap();
+    let server = Server::start(&home, 0);
+    for email in [
+        "OWNER@example.test",
+        "admin@example.test",
+        "saved-admin@example.test",
+        "registered@example.test",
+        "ACCOUNT-ALIAS@example.test",
+        "device@example.test",
+        "duplicate@example.test",
+        "pending-admin@example.test",
+        "guest@example.test",
+    ] {
+        let res = local_admin(&home, json!({"invite_email": email}));
+        assert_eq!(res["ok"], false, "must protect {email}");
+        assert!(
+            res.get("code").is_none(),
+            "no sign-in credential on rejection"
+        );
+    }
+    server.stop();
+    let disk: Value = serde_json::from_slice(
+        &std::fs::read(home.join(workboard_server::WORKSPACE_FILE)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(disk, data, "no identities or canon roles changed");
+    assert_eq!(
+        serde_json::to_value(workboard_server::load_saved(&home).unwrap()).unwrap(),
+        serde_json::to_value(saved).unwrap(),
+        "all accounts, roles, devices and codes unchanged"
+    );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_rejects_invalid_addresses_before_queuing_and_on_server() {
+    let home = temp_home("email-invalid");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
+        .args(["invite-email", "not-an-email", "--home"])
+        .arg(&home)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "invalid email must fail before queuing"
+    );
+    assert!(
+        !home.exists(),
+        "invalid CLI input must not create a pending request"
+    );
+    let server = Server::start(&home, 0);
+    let mut owner = App::connect(server.port, Some(workspace()));
+    owner.until("ready", |a| a.role == Some(Role::Owner));
+    for email in [
+        "",
+        "a",
+        "a@b",
+        "@example.test",
+        "a@@example.test",
+        "a b@example.test",
+        "a@example..test",
+        "a@-example.test",
+        "a@example-.test",
+        "a@.example.test",
+        ".a@example.test",
+        "a..b@example.test",
+        "a.@example.test",
+        "Name <a@example.test>",
+        "a@example.test\r\nBcc: b@example.test",
+        "a@example.test\0",
+        "a@example.test\n",
+    ] {
+        assert_eq!(
+            local_admin(&home, json!({"invite_email": email}))["ok"],
+            false,
+            "reject malformed input"
+        );
+    }
+    for email in [
+        format!("{}@example.test", "a".repeat(65)),
+        format!("a@{}.test", "b".repeat(64)),
+    ] {
+        assert_eq!(
+            local_admin(&home, json!({"invite_email": email}))["ok"],
+            false
+        );
+    }
+    let valid = local_admin(
+        &home,
+        json!({"invite_email": " New.Person+tag@EXAMPLE.TEST "}),
+    );
+    assert_eq!(valid["ok"], true);
+    owner.wait("normalized address", |d| {
+        d["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["email"] == "new.person+tag@example.test")
+    });
+    assert_eq!(owner.data["members"].as_array().unwrap().len(), 4);
+    drop(owner);
+    server.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_cli_and_admin_explicitly_refuse_role_overrides() {
+    let home = temp_home("email-role");
+    for role in ["owner", "admin", "member", "invalid"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
+            .args(["invite-email", "new@example.test", "--role", role, "--home"])
+            .arg(&home)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "invite-email must refuse --role");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Member only"));
+        assert!(!home.exists());
+    }
+    let help = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("invite-email EMAIL"));
+    assert!(help.contains("Owner recovery") && help.contains("teammate"));
+    let server = Server::start(&home, 0);
+    let mut owner = App::connect(server.port, Some(workspace()));
+    owner.until("ready", |a| a.role == Some(Role::Owner));
+    for request in [
+        json!({"invite_email": "new@example.test", "role": "owner"}),
+        json!({"invite_email": "new@example.test", "role": "admin"}),
+        json!({"invite_email": "new@example.test", "invite": 1}),
+        json!({"invite_email": 1}),
+        json!({"invite_email": null}),
+    ] {
+        assert_eq!(local_admin(&home, request)["ok"], false);
+    }
+    assert!(workboard_server::load_saved(&home)
+        .unwrap()
+        .invites
+        .is_empty());
+    drop(owner);
+    server.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_rejects_ambiguous_member_ids_without_changing_either_identity() {
+    let home = temp_home("email-id-duplicate");
+    let server = Server::start(&home, 0);
+    let mut data = workspace();
+    data["members"][1]["email"] = json!("pending@example.test");
+    data["members"][2]["id"] = json!(2);
+    let mut owner = App::connect(server.port, Some(data));
+    owner.until("ready", |a| a.role == Some(Role::Owner));
+    let res = local_admin(&home, json!({"invite_email": "pending@example.test"}));
+    assert_eq!(
+        res["ok"], false,
+        "duplicate member ids cannot safely identify an invitee"
+    );
+    assert!(workboard_server::load_saved(&home)
+        .unwrap()
+        .invites
+        .is_empty());
+    drop(owner);
+    server.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_preserves_unrelated_sync_stamps_and_general_fields() {
+    let home = temp_home("email-sync-stamps");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut data = workspace();
+    let mut meta = SyncMeta::default();
+    wb_sync::stamp(&data, &mut meta, 1000);
+    data["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    let data = wb_sync::shareable(&data);
+    std::fs::write(
+        home.join(workboard_server::WORKSPACE_FILE),
+        data.to_string(),
+    )
+    .unwrap();
+    let server = Server::start(&home, 0);
+    let res = local_admin(&home, json!({"invite_email": "fresh@example.test"}));
+    assert_eq!(res["ok"], true);
+    let disk: Value = serde_json::from_slice(
+        &std::fs::read(home.join(workboard_server::WORKSPACE_FILE)).unwrap(),
+    )
+    .unwrap();
+    let after: SyncMeta = serde_json::from_value(disk["extra"]["sync"].clone()).unwrap();
+    for id in [1, 2, 3, 11, 100, 101] {
+        assert_eq!(
+            after.stamps[&id], meta.stamps[&id],
+            "unrelated item {id} must not be restamped"
+        );
+    }
+    assert_eq!(
+        after.fields[&10]
+            .get("name")
+            .copied()
+            .unwrap_or(after.fields[&10][""]),
+        1000
+    );
+    assert!(after.fields[&10]["members"] > 1000);
+    assert!(after.stamps[&res["member"].as_u64().unwrap()] > 1000);
+    assert_eq!(disk["tasks"], data["tasks"]);
+    server.stop();
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn email_invite_fails_closed_on_malformed_workspace_metadata_or_role() {
+    for (tag, field) in [("sync", 0), ("extra", 1), ("role", 2), ("members", 3)] {
+        let home = temp_home(tag);
+        std::fs::create_dir_all(&home).unwrap();
+        let mut data = workspace();
+        data["members"][1]["email"] = json!("pending@example.test");
+        match field {
+            0 => data["extra"]["sync"] = json!({"tombs": "corrupt"}),
+            1 => data["extra"] = json!([]),
+            2 => data["members"][1]["role"] = json!({"unknown": true}),
+            _ => data["members"] = json!("corrupt"),
+        }
+        std::fs::write(
+            home.join(workboard_server::WORKSPACE_FILE),
+            data.to_string(),
+        )
+        .unwrap();
+        let server = Server::start(&home, 0);
+        let res = local_admin(&home, json!({"invite_email": "pending@example.test"}));
+        assert_eq!(
+            res["ok"], false,
+            "malformed {tag} must fail without mutation"
+        );
+        server.stop();
+        let disk: Value = serde_json::from_slice(
+            &std::fs::read(home.join(workboard_server::WORKSPACE_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(disk, data);
+        assert!(workboard_server::load_saved(&home)
+            .unwrap()
+            .invites
+            .is_empty());
+        let _ = std::fs::remove_dir_all(home);
+    }
+}
+
+#[test]
 fn health_and_admin_commands_answer() {
     let home = temp_home("health");
     let server = Server::start(&home, 0);

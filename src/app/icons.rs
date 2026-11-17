@@ -1074,17 +1074,22 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(pts, s));
         }
         "eye" => {
-            // rounded at the corners, not a pointed almond
-            let pts: Vec<Pos2> = (0..48)
-                .map(|i| {
-                    let a = std::f32::consts::TAU * i as f32 / 48.0;
-                    let (sn, cs) = a.sin_cos();
-                    // a superellipse: fuller than an ellipse near the ends
-                    let x = 7.5 * cs.signum() * cs.abs().powf(0.75);
-                    let y = 4.8 * sn.signum() * sn.abs().powf(1.15);
-                    c + vec2(x, y)
-                })
-                .collect();
+            // two wide arcs meeting in small round tips (the usual eye
+            // outline), in a 20-unit box scaled to the icon size
+            let k = 0.75;
+            let mut pts: Vec<Pos2> = vec![];
+            let mut arc = |cx: f32, cy: f32, r: f32, a0: f32, a1: f32, n: usize| {
+                // each arc starts where the last ended: skip that point, as
+                // a zero-length segment throws spikes off the stroke
+                for i in 1..=n {
+                    let a = (a0 + (a1 - a0) * i as f32 / n as f32).to_radians();
+                    pts.push(c + vec2(cx + r * a.cos(), cy + r * a.sin()) * k);
+                }
+            };
+            arc(0.0, 3.75, 10.75, -157.6, -22.4, 20); // top
+            arc(9.0, 0.0, 1.0, -20.4, 20.4, 4); // right tip
+            arc(0.0, -3.75, 10.75, 22.4, 157.6, 20); // bottom
+            arc(-9.0, 0.0, 1.0, 159.6, 200.4, 4); // left tip
             p.add(egui::Shape::closed_line(pts, s));
             p.circle_stroke(c, 2.2, s);
         }

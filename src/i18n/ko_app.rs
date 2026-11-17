@@ -154,7 +154,7 @@ pub const T: &[(&str, &str)] = &[
     ("Fr", "금"),
     ("Sa", "토"),
     ("Set Recurring", "반복 설정"),
-    ("Never", "안 함"),
+    ("Never", "반복 안 함"),
     ("Daily", "매일"),
     ("Weekly", "매주"),
     ("Monthly", "매월"),

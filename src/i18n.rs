@@ -510,6 +510,12 @@ mod tests {
         assert_eq!(tr("Save"), "저장");
         assert_eq!(tr("no such text 123"), "no such text 123");
         assert_eq!(crate::trf!("{} tasks", 3), "작업 3개");
+        // "Never" is only the repeat choice; a reply reads as 답장 like "Replies"
+        assert_eq!(tr("Never"), "반복 안 함");
+        assert_eq!(
+            crate::trf!("{} replied: {}", "Sam", "ok"),
+            "Sam님의 답장: ok"
+        );
         let d = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
         assert_eq!(d.text("%b %-d"), "11월 16일");
         assert_eq!(d.text("%A, %B %-d"), "11월 16일 월요일");

@@ -214,7 +214,7 @@ struct ChannelRow: View {
         let who = m.author == client.me ? "You" : (client.view.member(m.author)?.name.split(separator: " ").first.map(String.init) ?? "")
         var text = m.text
         if text.isEmpty, let a = m.attachments.first {
-            text = a.isVideo ? "Video" : (m.attachments.count == 1 ? "Photo" : "\(m.attachments.count) photos")
+            text = a.isVideo ? String(localized: "Video") : (m.attachments.count == 1 ? String(localized: "Photo") : String(localized: "\(m.attachments.count) photos"))
         }
         return who.isEmpty ? text : "\(who): \(text)"
     }
@@ -225,6 +225,8 @@ struct ConversationView: View {
     @Environment(CallManager.self) private var calls
     @Environment(\.openURL) private var openURL
     let channelId: UInt64
+    @State private var settings = false
+    @State private var posting = false
 
     var body: some View {
         let me = client.me ?? 0
@@ -284,7 +286,22 @@ struct ConversationView: View {
                     .accessibilityLabel("Huddle")
                     .accessibilityIdentifier("huddleButton")
                 }
+                if c.kind == .channel {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { posting = true } label: { Image(systemName: "megaphone") }
+                            .disabled(!client.canEdit)
+                            .accessibilityLabel("Write a post")
+                            .accessibilityIdentifier("writePostButton")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { settings = true } label: { Image(systemName: "person.2") }
+                        .accessibilityLabel("Channel settings")
+                        .accessibilityIdentifier("channelSettingsButton")
+                }
             }
+            .sheet(isPresented: $settings) { ChannelSettingsView(channelId: c.id) }
+            .sheet(isPresented: $posting) { NewPostSheet(channelId: c.id) }
         } else {
             EmptyNote(title: "This conversation is gone", systemImage: "bubble.left")
         }
@@ -314,7 +331,7 @@ struct ThreadView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     MessageRow(message: m, channelId: c.id, compact: false)
                     HStack {
-                        Text(m.replies.isEmpty ? "No replies yet" : "\(m.replies.count) \(m.replies.count == 1 ? "reply" : "replies")")
+                        Text(m.replies.isEmpty ? "No replies yet" : m.replies.count == 1 ? "1 reply" : "\(m.replies.count) replies")
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(.secondary)
                         VStack { Divider() }
@@ -353,6 +370,12 @@ struct MessageRow: View {
     @State private var draft = ""
     @State private var confirmDelete = false
 
+    func remind(at ts: Int64) {
+        let id = client.newId(), me = client.me ?? 0, text = String(message.text.prefix(80))
+        client.editLocal { d in Edits.remindAboutMessage(&d, channel: channelId, message: message.id, at: ts, me: me, id: id) }
+        ReminderAlerts.schedule(id: id, text: text.isEmpty ? "Message" : text, at: ts)
+    }
+
     /// Quick reactions offered on a long press.
     static let quick = ["👍", "❤️", "😂", "🎉", "👀", "✅"]
 
@@ -368,10 +391,19 @@ struct MessageRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 if !compact {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(author?.name ?? "Someone").font(.subheadline.weight(.semibold))
+                        Text(author?.name ?? String(localized: "Someone")).font(.subheadline.weight(.semibold))
                         Text(Fmt.time(message.ts)).font(.caption).foregroundStyle(.secondary)
                         if message.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
+                        if message.saved { Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Saved") }
                     }
+                }
+                if compact && (message.pinned || message.saved) {
+                    // a message under the one before it has no name line for these
+                    HStack(spacing: 4) {
+                        if message.pinned { Image(systemName: "pin.fill").accessibilityLabel("Pinned") }
+                        if message.saved { Image(systemName: "bookmark.fill").accessibilityLabel("Saved") }
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
                 }
                 if let title = message.postTitle, !title.isEmpty {
                     Text(title).font(.headline)
@@ -384,6 +416,15 @@ struct MessageRow: View {
                 if !message.attachments.isEmpty {
                     AttachmentsView(attachments: message.attachments)
                         .padding(.top, 4)
+                }
+                if let tid = message.task, let t = client.view.tasks.first(where: { $0.id == tid }) {
+                    NavigationLink(value: Nav.Route.task(tid)) {
+                        Label(t.name, systemImage: "checklist").font(.caption).lineLimit(1)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("messageTask-\(message.id)")
                 }
                 if let call = message.call {
                     if let ch = CallAPI.huddleChannel(call) {
@@ -448,6 +489,27 @@ struct MessageRow: View {
             if !message.text.isEmpty {
                 Button { UIPasteboard.general.string = message.text } label: { Label("Copy text", systemImage: "doc.on.doc") }
             }
+            Button {
+                client.editLocal { d in Edits.toggleSaved(&d, channel: channelId, message: message.id) }
+            } label: { Label(message.saved ? "Remove from saved" : "Save for later", systemImage: message.saved ? "bookmark.slash" : "bookmark") }
+            if client.canEdit && !isReply && message.task == nil && !message.text.isEmpty {
+                Button {
+                    let id = client.newId()
+                    let list = client.view.visibleSpaces(me: client.me ?? 0).flatMap(\.allListIds).first ?? 0
+                    client.edit { d, me in Edits.messageToTask(&d, channel: channelId, message: message.id, list: list, me: me, id: id, ts: nowTs()) }
+                } label: { Label("Create task", systemImage: "checklist") }
+            }
+            if !isReply {
+                Menu {
+                    Button("In 1 hour") { remind(at: nowTs() + 3600) }
+                    Button("In 3 hours") { remind(at: nowTs() + 3 * 3600) }
+                    Button("Tomorrow at 9 AM") {
+                        let cal = Calendar.current
+                        let t = cal.date(bySettingHour: 9, minute: 0, second: 0, of: cal.date(byAdding: .day, value: 1, to: Date())!)!
+                        remind(at: Int64(t.timeIntervalSince1970))
+                    }
+                } label: { Label("Remind me", systemImage: "alarm") }
+            }
             if client.canEdit && mine {
                 Button(role: .destructive) { confirmDelete = true } label: { Label("Delete message", systemImage: "trash") }
             }
@@ -503,7 +565,7 @@ struct RepliesChip: View {
                     Avatar(member: client.view.member(id), size: 18)
                 }
             }
-            Text("\(message.replies.count) \(message.replies.count == 1 ? "reply" : "replies")")
+            Text(message.replies.count == 1 ? "1 reply" : "\(message.replies.count) replies")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Color.wbAccent)
             if let last = message.replies.last {
@@ -649,35 +711,111 @@ struct Composer: View {
         let f = PendingFile()
         pending.append(f)
         let (server, auth) = (client.settings.server, client.fileAuth)
-        Task {
-            do {
-                let a = try await MediaUpload.prepare(item)
-                defer { if let file = a.file { try? FileManager.default.removeItem(at: file) } }
-                // a video's still goes up first, so it's there when the message
-                // is; it's only a preview, so the video goes without one when
-                // it can't (as on the Mac)
-                var thumb: String?
-                if let still = a.still {
-                    thumb = try? await FileAPI.upload(server: server, auth: auth, data: still, contentType: "image/jpeg")
-                    if let thumb { FileAPI.keep(still, sha: thumb, ext: "jpg") }
+        Task { await uploadMedia(item, server: server, auth: auth, into: f) }
+    }
+}
+
+/// Channel Settings, as on the Mac: name and topic, and who is in it. A
+/// private channel with chosen people is how a group conversation is made.
+/// Whoever made the channel, an owner or an admin may change who else is in
+/// it; anyone may join or leave.
+struct ChannelSettingsView: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    let channelId: UInt64
+    @State private var name = ""
+    @State private var topic = ""
+
+    var body: some View {
+        let v = client.view
+        let me = client.me ?? 0
+        NavigationStack {
+            if let c = v.channels.first(where: { $0.id == channelId }) {
+                let manager = client.data.map { Edits.mayManageChannel($0, channel: c.id, me: me, role: client.settings.role) } ?? false
+                Form {
+                    if c.kind == .channel {
+                        Section("Name") {
+                            TextField("Channel name", text: $name)
+                                .textInputAutocapitalization(.never)
+                                .accessibilityIdentifier("channelSettingsName")
+                        }
+                        Section("Topic") {
+                            TextField("What it's about", text: $topic, axis: .vertical)
+                                .accessibilityIdentifier("channelTopicField")
+                        }
+                    }
+                    Section {
+                        ForEach(v.members.filter { !$0.invited || c.members.contains($0.id) }) { m in
+                            let on = c.members.contains(m.id)
+                            Toggle(isOn: Binding(get: { on }, set: { new in
+                                client.edit { d, _ in Edits.setChannelMember(&d, channel: c.id, member: m.id, new) }
+                            })) {
+                                HStack(spacing: 10) {
+                                    Avatar(member: m, size: 24)
+                                    Text(m.id == me ? "\(m.name) (you)" : m.name)
+                                }
+                            }
+                            .disabled(!client.canEdit || !(manager || m.id == me))
+                            .accessibilityIdentifier("channelMember-\(m.id)")
+                        }
+                    } header: {
+                        Text("People")
+                    } footer: {
+                        Text(c.isPrivate || c.kind == .direct ? "Only the people here see this conversation." : "Everyone can see a public channel; people here get its messages in their list.")
+                    }
                 }
-                let sha: String
-                let ext = (a.name as NSString).pathExtension.lowercased()
-                if let file = a.file {
-                    // streamed from the file, never read whole
-                    sha = try await FileAPI.upload(server: server, auth: auth, file: file, contentType: a.contentType)
-                    FileAPI.keep(file: file, sha: sha, ext: ext)
-                } else {
-                    let data = a.data ?? Data()
-                    sha = try await FileAPI.upload(server: server, auth: auth, data: data, contentType: a.contentType)
-                    FileAPI.keep(data, sha: sha, ext: ext)
+                .navigationTitle("Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            save(c)
+                            dismiss()
+                        }
+                        .accessibilityIdentifier("channelSettingsDone")
+                    }
                 }
-                f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.bytes, w: a.w, h: a.h, secs: a.secs, thumb: thumb)
-                f.preview = a.preview
-            } catch let e as FileError {
-                f.error = e.explanation
-            } catch {
-                f.error = error.localizedDescription
+                .onAppear { name = c.name; topic = c.topic }
+            }
+        }
+    }
+
+    func save(_ c: ChannelView) {
+        guard client.canEdit, c.kind == .channel else { return }
+        client.edit { d, _ in
+            if name.trimmingCharacters(in: .whitespaces) != c.name { Edits.renameChannel(&d, channel: c.id, to: name) }
+            if topic.trimmingCharacters(in: .whitespacesAndNewlines) != c.topic { Edits.setChannelTopic(&d, channel: c.id, to: topic) }
+        }
+    }
+}
+
+/// A post: an announcement with a title (the Mac composer's Post tab).
+struct NewPostSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    let channelId: UInt64
+    @State private var title = ""
+    @State private var text = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Title", text: $title).accessibilityIdentifier("postTitle")
+                TextField("Share an announcement...", text: $text, axis: .vertical).lineLimit(5...).accessibilityIdentifier("postText")
+            }
+            .navigationTitle("New post")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Post") {
+                        let id = client.newId()
+                        client.edit { d, me in Edits.sendPost(&d, channel: channelId, title: title, text: text, me: me, id: id, ts: nowTs()) }
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty && text.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .accessibilityIdentifier("postSend")
+                }
             }
         }
     }

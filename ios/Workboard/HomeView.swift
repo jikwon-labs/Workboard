@@ -1,9 +1,11 @@
 import SwiftUI
 import WorkboardKit
 
-/// My Tasks: open tasks assigned to me, overdue and today first.
+/// Home: the Inbox, then my open tasks (overdue and today first), and a
+/// search over everything.
 struct HomeView: View {
     @Environment(SyncClient.self) private var client
+    @State private var query = ""
 
     var body: some View {
         let me = client.me ?? 0
@@ -18,16 +20,22 @@ struct HomeView: View {
         let later = mine.filter { ($0.due ?? "") > today }.sorted { key($0) < key($1) }
         let undated = mine.filter { $0.due == nil }
         List {
-            if mine.isEmpty {
-                EmptyNote(title: "Nothing assigned to you", systemImage: "checkmark.circle", detail: "Tasks assigned to you show up here.")
-                    .listRowBackground(Color.clear)
+            if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                SearchResults(query: query)
+            } else {
+                InboxView()
+                if mine.isEmpty {
+                    EmptyNote(title: "Nothing assigned to you", systemImage: "checkmark.circle", detail: "Tasks assigned to you show up here.")
+                        .listRowBackground(Color.clear)
+                }
+                section("Overdue", overdue, tint: .red)
+                section("Today", due)
+                section("Upcoming", later)
+                section("No date", undated)
             }
-            section("Overdue", overdue, tint: .red)
-            section("Today", due)
-            section("Upcoming", later)
-            section("No date", undated)
         }
-        .navigationTitle("My Tasks")
+        .searchable(text: $query, prompt: "Search tasks, docs, messages, people")
+        .navigationTitle("Home")
         .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsButton() } }
     }
 
@@ -40,7 +48,7 @@ struct HomeView: View {
                 }
             } header: {
                 HStack {
-                    Text(title).foregroundStyle(tint ?? .secondary)
+                    Text(L(title)).foregroundStyle(tint ?? .secondary)
                     Spacer()
                     Text("\(tasks.count)").monospacedDigit()
                 }

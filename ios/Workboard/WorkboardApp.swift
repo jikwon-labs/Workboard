@@ -89,7 +89,7 @@ struct WorkboardApp: App {
 @MainActor
 @Observable
 final class Nav {
-    enum Tab: String, Hashable { case home, chat, tasks, docs }
+    enum Tab: String, Hashable { case home, chat, tasks, docs, more }
 
     enum Route: Hashable {
         case channel(UInt64)
@@ -98,6 +98,10 @@ final class Nav {
         case list(UInt64)
         case task(UInt64)
         case doc(UInt64)
+        case statuses(UInt64)
+        case app(String)
+        case goal(UInt64)
+        case meeting(UInt64)
     }
 
     var tab: Tab = .home
@@ -105,6 +109,7 @@ final class Nav {
     var chat: [Route] = []
     var tasks: [Route] = []
     var docs: [Route] = []
+    var more: [Route] = []
     var showSettings = false
     /// An invite link just opened, waiting for RootView to act on it.
     var openedLink: InviteLink?
@@ -128,6 +133,9 @@ final class Nav {
         case ("list", 2): self.tab = .tasks; tasks = [.space(ids[0]), .list(ids[1])]
         case ("doc", 1): self.tab = .docs; docs = [.doc(ids[0])]
         case ("settings", _): showSettings = true
+        case ("app", _) where parts.count == 2: self.tab = .more; more = [.app(parts[1])]
+        case ("goal", 1): self.tab = .more; more = [.app("goals"), .goal(ids[0])]
+        case ("meeting", 1): self.tab = .more; more = [.app("meetings"), .meeting(ids[0])]
         default: break
         }
     }

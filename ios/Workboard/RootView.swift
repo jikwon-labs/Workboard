@@ -99,6 +99,9 @@ struct MainTabs: View {
             NavigationStack(path: $nav.docs) { DocsView().wbDestinations() }
                 .tabItem { Label("Docs", systemImage: "doc.text") }
                 .tag(Nav.Tab.docs)
+            NavigationStack(path: $nav.more) { MoreView().wbDestinations() }
+                .tabItem { Label("More", systemImage: "square.grid.2x2") }
+                .tag(Nav.Tab.more)
         }
     }
 
@@ -118,6 +121,10 @@ extension View {
             case .list(let id): ListTasksView(listId: id)
             case .task(let id): TaskDetailView(taskId: id)
             case .doc(let id): DocDetailView(docId: id)
+            case .statuses(let id): StatusEditorView(spaceId: id)
+            case .app(let name): AppPage(name: name)
+            case .goal(let id): GoalDetailView(goalId: id)
+            case .meeting(let id): MeetingDetailView(meetingId: id)
             }
         }
     }
@@ -160,7 +167,7 @@ struct ConnectionBanner: View {
     /// Edits keep working offline; say how many are waiting to go up.
     var waiting: String {
         let n = client.waitingCount
-        return n == 0 ? " · edits sync later" : " · \(n) \(n == 1 ? "change" : "changes") waiting"
+        return n == 0 ? String(localized: " · edits sync later") : n == 1 ? String(localized: " · 1 change waiting") : String(localized: " · \(n) changes waiting")
     }
 
     func bar(icon: String, text: String, retry: Bool) -> some View {

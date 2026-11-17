@@ -34,7 +34,7 @@ final class NotificationUITests: XCTestCase {
         }
         // look at another tab, then someone writes in #general
         app.tabBars.buttons["Home"].tap()
-        XCTAssertTrue(app.navigationBars["My Tasks"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
         let text = "Banner check \(Int(Date().timeIntervalSince1970) % 100000)"
         say(text)
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch

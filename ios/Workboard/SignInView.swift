@@ -67,7 +67,7 @@ struct SignInView: View {
                 Button("Switch", role: .destructive) { useAddress(confirmed: true) }
                 Button("Cancel", role: .cancel) { address = client.settings.server }
             } message: {
-                Text("\(client.waitingCount) \(client.waitingCount == 1 ? "change hasn't" : "changes haven't") reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
+                Text(client.waitingCount == 1 ? "1 change hasn't reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and that change is lost." : "\(client.waitingCount) changes haven't reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
             }
         }
     }

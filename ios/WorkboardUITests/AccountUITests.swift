@@ -11,7 +11,9 @@ import XCTest
 let signInServer = "ws://127.0.0.1:18788"
 /// Added to every launch: no saved or strong passwords offered, so iOS's
 /// "Use Strong Password" sheet never takes over the keyboard mid-typing.
-let testArgs = ["-wbNoPasswordAutoFill", "YES"]
+/// Every UI test runs the app in English, whatever language the simulator
+/// is set to (KoreanUITests checks the Korean screens).
+let testArgs = ["-wbNoPasswordAutoFill", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
 
 extension XCTestCase {
     /// Test-only admin call on the sign-in server (blocking; UI tests run on the main thread).
@@ -81,7 +83,7 @@ extension XCTestCase {
         type(a.secureTextFields["newPasswordField"], password)
         type(a.secureTextFields["confirmPasswordField"], password)
         a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10), "signed in")
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in")
     }
 
     func signOut(_ a: XCUIApplication) {
@@ -119,7 +121,7 @@ final class AccountUITests: XCTestCase {
         let code = admin("invite?member=3")["code"] as! String
         type(a.textFields["inviteField"], code)
         a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10), "signed in as the invited member; no member picker")
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in as the invited member; no member picker")
         a.buttons["settingsButton"].tap()
         waitLabel(a.staticTexts["signedInAs"], contains: "Signed in as Sam Lee")
         waitLabel(a.staticTexts["accountEmail"], contains: "sam@example.com")
@@ -133,7 +135,7 @@ final class AccountUITests: XCTestCase {
         waitLabel(a.staticTexts["signInError"], contains: "That email and password don't match.")
         type(a.secureTextFields["passwordField"], "sam-password-1")
         a.buttons["signInButton"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10), "signed in with email and password")
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with email and password")
     }
 
     func testForgotPasswordWithResetCode() {
@@ -152,14 +154,14 @@ final class AccountUITests: XCTestCase {
         type(a.secureTextFields["resetPasswordField"], "remembered-pass-2")
         type(a.secureTextFields["resetConfirmField"], "remembered-pass-2")
         a.buttons["resetButton"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10), "signed in with the new password")
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with the new password")
 
         // and the new password is the one that works now
         signOut(a)
         type(a.textFields["emailField"], "sam@example.com")
         type(a.secureTextFields["passwordField"], "remembered-pass-2")
         a.buttons["signInButton"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10))
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
     }
 
     func testSetAndChangePasswordFromSettings() {
@@ -169,7 +171,7 @@ final class AccountUITests: XCTestCase {
         admin("drop-account?member=2")
         a.terminate()
         a = app(["-wbServer", signInServer])
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10), "signed in with the saved token")
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with the saved token")
         a.buttons["settingsButton"].tap()
         waitLabel(a.staticTexts["accountEmail"], contains: "No password yet")
         let link = a.buttons["passwordLink"]
@@ -208,7 +210,7 @@ final class AccountUITests: XCTestCase {
         type(a.secureTextFields["newPasswordField"], "alex-password-1")
         type(a.secureTextFields["confirmPasswordField"], "alex-password-1")
         a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 10))
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
     }
 
     func testPastedInviteEmailFillsTheForm() {

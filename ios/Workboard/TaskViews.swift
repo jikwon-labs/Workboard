@@ -4,6 +4,7 @@ import WorkboardKit
 /// Spaces -> folders -> lists -> tasks.
 struct SpacesView: View {
     @Environment(SyncClient.self) private var client
+    @State private var prompt: NamePrompt?
 
     var body: some View {
         let spaces = client.view.visibleSpaces(me: client.me ?? 0)
@@ -24,10 +25,28 @@ struct SpacesView: View {
                     }
                 }
                 .accessibilityIdentifier("space-\(s.id)")
+                .contextMenu {
+                    if client.canEdit && s.privateOwner == nil {
+                        Button { prompt = .renameSpace(s.id) } label: { Label("Rename", systemImage: "pencil") }
+                        ColorMenu(title: "Color") { c in client.edit { d, _ in Edits.setSpaceColor(&d, space: s.id, to: c) } }
+                        Button(role: .destructive) {
+                            client.edit { d, _ in Edits.setSpaceArchived(&d, space: s.id, true) }
+                        } label: { Label("Archive", systemImage: "archivebox") }
+                    }
+                }
             }
         }
         .navigationTitle("Tasks")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsButton() } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { prompt = .newSpace } label: { Image(systemName: "plus") }
+                    .disabled(!client.canEdit)
+                    .accessibilityLabel("New space")
+                    .accessibilityIdentifier("newSpaceButton")
+            }
+        }
+        .namePrompt($prompt)
     }
 
     func openCount(_ s: SpaceView) -> Int {
@@ -38,7 +57,9 @@ struct SpacesView: View {
 
 struct SpaceDetailView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
     let spaceId: UInt64
+    @State private var prompt: NamePrompt?
 
     var body: some View {
         let v = client.view
@@ -53,7 +74,23 @@ struct SpaceDetailView: View {
                     Section {
                         ForEach(f.lists) { l in listLink(l) }
                     } header: {
-                        Label(f.name, systemImage: "folder")
+                        HStack {
+                            Label(f.name, systemImage: "folder")
+                            Spacer()
+                            if client.canEdit {
+                                Menu {
+                                    Button { prompt = .newList(space: s.id, folder: f.id) } label: { Label("New list", systemImage: "plus") }
+                                    Button { prompt = .renameFolder(f.id) } label: { Label("Rename", systemImage: "pencil") }
+                                    Button(role: .destructive) {
+                                        client.edit { d, _ in Edits.setFolderArchived(&d, folder: f.id, true) }
+                                    } label: { Label("Archive", systemImage: "archivebox") }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                }
+                                .accessibilityLabel("Folder \(f.name)")
+                                .accessibilityIdentifier("folderMenu-\(f.id)")
+                            }
+                        }
                     }
                 }
                 if s.lists.isEmpty && s.folders.allSatisfy({ $0.lists.isEmpty }) {
@@ -61,6 +98,31 @@ struct SpaceDetailView: View {
                 }
             }
             .navigationTitle(s.name)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { prompt = .newList(space: s.id, folder: nil) } label: { Label("New list", systemImage: "list.bullet") }
+                            .accessibilityIdentifier("newListButton")
+                        Button { prompt = .newFolder(s.id) } label: { Label("New folder", systemImage: "folder.badge.plus") }
+                            .accessibilityIdentifier("newFolderButton")
+                        NavigationLink(value: Nav.Route.statuses(s.id)) { Label("Edit statuses", systemImage: "circle.dashed") }
+                            .accessibilityIdentifier("editStatusesButton")
+                        if s.privateOwner == nil {
+                            Button { prompt = .renameSpace(s.id) } label: { Label("Rename space", systemImage: "pencil") }
+                            ColorMenu(title: "Color") { c in client.edit { d, _ in Edits.setSpaceColor(&d, space: s.id, to: c) } }
+                            Button(role: .destructive) {
+                                if client.edit({ d, _ in Edits.setSpaceArchived(&d, space: s.id, true) }) { dismiss() }
+                            } label: { Label("Archive space", systemImage: "archivebox") }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .disabled(!client.canEdit)
+                    .accessibilityLabel("Space menu")
+                    .accessibilityIdentifier("spaceMenu")
+                }
+            }
+            .namePrompt($prompt)
         } else {
             EmptyNote(title: "This space is gone", systemImage: "square.grid.2x2")
         }
@@ -76,6 +138,18 @@ struct SpaceDetailView: View {
             }
         }
         .accessibilityIdentifier("list-\(l.id)")
+        .contextMenu {
+            if client.canEdit {
+                Button { prompt = .renameList(l.id) } label: { Label("Rename", systemImage: "pencil") }
+                Button {
+                    let id = client.newId()
+                    client.edit { d, _ in Edits.saveListAsTemplate(&d, list: l.id, id: id) }
+                } label: { Label("Save as template", systemImage: "square.on.square") }
+                Button(role: .destructive) {
+                    client.edit { d, _ in Edits.setListArchived(&d, list: l.id, true) }
+                } label: { Label("Archive", systemImage: "archivebox") }
+            }
+        }
     }
 }
 
@@ -85,12 +159,45 @@ struct ListTasksView: View {
     @State private var adding = false
     @State private var newName = ""
     @FocusState private var newFocused: Bool
+    /// List, Board or Calendar, remembered per list on this phone.
+    @State private var mode: ListMode = .list
 
     var body: some View {
+        content
+            .navigationTitle(client.view.list(listId)?.name ?? "List")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("View", selection: $mode) {
+                            ForEach(ListMode.allCases) { m in Label(L(m.rawValue), systemImage: m.icon).tag(m) }
+                        }
+                    } label: {
+                        Image(systemName: mode.icon)
+                    }
+                    .accessibilityLabel("View")
+                    .accessibilityIdentifier("viewModeMenu")
+                }
+            }
+            .onAppear { mode = ListMode(rawValue: UserDefaults.standard.string(forKey: "listMode-\(listId)") ?? "") ?? .list }
+            .onChange(of: mode) { UserDefaults.standard.set(mode.rawValue, forKey: "listMode-\(listId)") }
+    }
+
+    @ViewBuilder var content: some View {
+        switch mode {
+        case .list: listBody
+        case .board: BoardView(listId: listId)
+        case .calendar: CalendarListView(listId: listId)
+        case .gantt: BarsView(listId: listId, lanes: false)
+        case .timeline: BarsView(listId: listId, lanes: true)
+        case .table: TableListView(listId: listId)
+        }
+    }
+
+    var listBody: some View {
         let v = client.view
         let tasks = v.tasks(inList: listId)
         let statuses = v.statuses(forList: listId)
-        List {
+        return List {
             ForEach(statuses, id: \.name) { st in
                 let group = tasks.filter { v.status(of: $0).name == st.name }
                 if !group.isEmpty {
@@ -129,7 +236,6 @@ struct ListTasksView: View {
                 }
             }
         }
-        .navigationTitle(v.list(listId)?.name ?? "List")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if adding {
@@ -175,6 +281,11 @@ struct TaskDetailView: View {
     /// subtask and checklist sections can push Activity below the fold).
     @State private var commented = 0
     @FocusState private var focus: Field?
+    @State private var sheet: Sheet?
+    @State private var renaming: Int?
+    @State private var renameText = ""
+
+    enum Sheet: Identifiable { case move, parent, remind; var id: Self { self } }
 
     enum Field { case name, desc, subtask, check }
 
@@ -239,30 +350,33 @@ struct TaskDetailView: View {
                             }
                         } label: {
                             LabeledContent("Assignees") {
-                                Text(t.assignees.isEmpty ? "None" : t.assignees.compactMap { v.member($0)?.name }.joined(separator: ", "))
+                                Text(t.assignees.isEmpty ? String(localized: "None") : t.assignees.compactMap { v.member($0)?.name }.joined(separator: ", "))
                                     .lineLimit(1)
                             }
                         }
                         .disabled(!can)
                         .accessibilityIdentifier("assigneeMenu")
                         DueRow(task: t, enabled: can)
+                        if v.apps.priorities {
                         Menu {
                             ForEach(0..<5) { p in
                                 Button {
                                     client.edit { d, me in Edits.setPriority(&d, task: t.id, to: p, me: me, ts: nowTs()) }
                                 } label: {
-                                    if t.priority == p { Label(Edits.priorityLabels[p], systemImage: "checkmark") } else { Text(Edits.priorityLabels[p]) }
+                                    if t.priority == p { Label(L(Edits.priorityLabels[p]), systemImage: "checkmark") } else { Text(L(Edits.priorityLabels[p])) }
                                 }
                             }
                         } label: {
                             LabeledContent("Priority") {
-                                Label(Edits.priorityLabels[min(max(t.priority, 0), 4)], systemImage: t.priority == 0 ? "flag" : "flag.fill")
+                                Label(L(Edits.priorityLabels[min(max(t.priority, 0), 4)]), systemImage: t.priority == 0 ? "flag" : "flag.fill")
                                     .foregroundStyle(priorityColor(t.priority))
                             }
                         }
                         .disabled(!can)
                         .accessibilityIdentifier("priorityMenu")
+                        }
                     }
+                    TaskDetailsSection(task: t, can: can)
                     Section("Description") {
                         TextField("Add a description", text: $desc, axis: .vertical)
                             .lineLimit(3...)
@@ -270,6 +384,7 @@ struct TaskDetailView: View {
                             .disabled(!can)
                             .accessibilityIdentifier("taskDescription")
                     }
+                    CustomFieldsSection(task: t, can: can)
                     let subs = v.subtasks(of: t.id)
                     if !subs.isEmpty || can {
                         Section("Subtasks") {
@@ -286,6 +401,8 @@ struct TaskDetailView: View {
                             }
                         }
                     }
+                    RelationshipsSection(task: t, can: can)
+                    TaskAttachmentsSection(task: t, can: can)
                     if !t.checklist.isEmpty || can {
                         Section {
                             ForEach(Array(t.checklist.enumerated()), id: \.offset) { i, item in
@@ -308,6 +425,25 @@ struct TaskDetailView: View {
                                 .accessibilityLabel(item.text)
                                 .accessibilityValue(item.done ? "Done" : "Not done")
                                 .accessibilityIdentifier("checkItem-\(i)")
+                                .contextMenu {
+                                    if can {
+                                        Button { renameText = item.text; renaming = i } label: { Label("Rename", systemImage: "pencil") }
+                                        Menu {
+                                            Button("Nobody") { client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: nil, ts: nowTs()) } }
+                                            ForEach(v.members.filter { !$0.invited }) { m in
+                                                Button {
+                                                    client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: m.id, ts: nowTs()) }
+                                                } label: {
+                                                    if item.assignee == m.id { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                                                }
+                                            }
+                                        } label: { Label("Assign", systemImage: "person") }
+                                        Button {
+                                            let id = client.newId()
+                                            client.edit { d, me in Edits.checkItemToSubtask(&d, task: t.id, index: i, me: me, id: id, ts: nowTs()) }
+                                        } label: { Label("Convert to subtask", systemImage: "arrow.turn.down.right") }
+                                    }
+                                }
                                 .swipeActions {
                                     if can {
                                         Button("Delete", role: .destructive) {
@@ -334,15 +470,18 @@ struct TaskDetailView: View {
                             }
                         }
                     }
+                    if v.apps.timeTracking {
+                        TimeSection(task: t, can: can)
+                    }
                     Section {
                         ForEach(Array(t.activity.suffix(30).reversed().enumerated()), id: \.offset) { i, a in
                             HStack(alignment: .top, spacing: 10) {
                                 Avatar(member: v.member(a.author), size: 22)
                                 VStack(alignment: .leading, spacing: 2) {
                                     if a.comment {
-                                        Text(v.member(a.author)?.name ?? "Someone").font(.caption.weight(.semibold))
+                                        Text(v.member(a.author)?.name ?? String(localized: "Someone")).font(.caption.weight(.semibold))
                                     }
-                                    Text(a.comment ? a.text : "\(v.member(a.author)?.name ?? "Someone") \(a.text)")
+                                    Text(verbatim: a.comment ? a.text : History.line(who: v.member(a.author)?.name ?? String(localized: "Someone"), text: a.text))
                                         .font(.subheadline)
                                         .foregroundStyle(a.comment ? .primary : .secondary)
                                     Text(Fmt.relative(a.ts)).font(.caption2).foregroundStyle(.tertiary)
@@ -375,6 +514,27 @@ struct TaskDetailView: View {
                 } else {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            Button {
+                                client.edit { d, me in Edits.duplicateTask(&d, task: t.id, me: me, ts: nowTs()) { client.newId() } }
+                            } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                                .accessibilityIdentifier("duplicateTaskButton")
+                            Button { sheet = .remind } label: { Label("Remind me", systemImage: "alarm") }
+                                .accessibilityIdentifier("remindTaskButton")
+                            Button { sheet = .move } label: { Label("Move to...", systemImage: "arrow.right.square") }
+                                .accessibilityIdentifier("moveTaskButton")
+                            Button { sheet = .parent } label: { Label("Make subtask of...", systemImage: "arrow.turn.down.right") }
+                                .accessibilityIdentifier("makeSubtaskButton")
+                            if t.parent != nil {
+                                Button {
+                                    client.edit { d, me in Edits.setParent(&d, task: t.id, to: nil, me: me, ts: nowTs()) }
+                                } label: { Label("Make top-level task", systemImage: "arrow.turn.left.up") }
+                                    .accessibilityIdentifier("makeTopLevelButton")
+                            }
+                            Button {
+                                loaded = false
+                                if client.edit({ d, me in Edits.setArchived(&d, task: t.id, true, me: me, ts: nowTs()) }) { dismiss() }
+                            } label: { Label("Archive", systemImage: "archivebox") }
+                                .accessibilityIdentifier("archiveTaskButton")
                             Button(role: .destructive) { confirmDelete = true } label: { Label("Delete task", systemImage: "trash") }
                                 .accessibilityIdentifier("deleteTaskButton")
                         } label: {
@@ -384,6 +544,28 @@ struct TaskDetailView: View {
                         .accessibilityLabel("More")
                         .accessibilityIdentifier("taskMoreMenu")
                     }
+                }
+            }
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .move:
+                    ListPickerSheet(current: t.listId) { list in
+                        client.edit { d, me in Edits.moveTasks(&d, ids: [t.id], to: list, me: me, ts: nowTs()) }
+                    }
+                case .parent:
+                    TaskPickerSheet(title: "Make subtask of", tasks: v.parentCandidates(for: t.id)) { p in
+                        client.edit { d, me in Edits.setParent(&d, task: t.id, to: p, me: me, ts: nowTs()) }
+                    }
+                case .remind:
+                    NewReminderView(task: t)
+                }
+            }
+            .alert("Rename item", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("Item", text: $renameText).accessibilityIdentifier("renameCheckField")
+                Button("Cancel", role: .cancel) { renaming = nil }
+                Button("Save") {
+                    if let i = renaming { client.edit { d, _ in Edits.renameCheckItem(&d, task: t.id, index: i, to: renameText, ts: nowTs()) } }
+                    renaming = nil
                 }
             }
             .confirmationDialog("Delete this task?", isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -445,9 +627,9 @@ struct TaskDetailView: View {
         let nameChanged = !n.isEmpty && n != t.name
         let descChanged = desc != t.description
         guard nameChanged || descChanged else { return }
-        let ok = client.edit { d, _ in
-            if nameChanged { Edits.rename(&d, task: t.id, to: n, ts: nowTs()) }
-            if descChanged { Edits.setDescription(&d, task: t.id, to: desc, ts: nowTs()) }
+        let ok = client.edit { d, me in
+            if nameChanged { Edits.rename(&d, task: t.id, to: n, me: me, ts: nowTs()) }
+            if descChanged { Edits.setDescription(&d, task: t.id, to: desc, me: me, ts: nowTs()) }
         }
         if !ok {
             name = t.name
@@ -466,7 +648,7 @@ struct DueRow: View {
     var body: some View {
         Button { picking = true } label: {
             LabeledContent("Due") {
-                Text(Fmt.due(task) ?? "None")
+                Text(Fmt.due(task) ?? String(localized: "None"))
                     .foregroundStyle(task.isOverdue(today: dayString(), now: timeString()) ? .red : .secondary)
             }
         }

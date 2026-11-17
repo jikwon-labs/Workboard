@@ -24,7 +24,7 @@ struct SettingsView: View {
                     LabeledContent("Status") { stateText }
                         .accessibilityIdentifier("connectionStatus")
                     if client.waitingCount > 0 {
-                        LabeledContent("Waiting to sync", value: "\(client.waitingCount) \(client.waitingCount == 1 ? "change" : "changes")")
+                        LabeledContent("Waiting to sync", value: client.waitingCount == 1 ? String(localized: "1 change") : String(localized: "\(client.waitingCount) changes"))
                             .accessibilityIdentifier("waitingCount")
                     }
                     if let e = client.lastError, !client.state.isConnected {
@@ -130,6 +130,12 @@ struct SettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("trashLink")
+                    NavigationLink {
+                        AutomationsView()
+                    } label: {
+                        Label("Automations", systemImage: "bolt")
+                    }
+                    .accessibilityIdentifier("automationsLink")
                     LabeledContent("Name", value: client.view.name)
                     LabeledContent("Members", value: "\(client.view.members.count)")
                     LabeledContent("Server revision", value: "\(client.rev)")
@@ -147,7 +153,7 @@ struct SettingsView: View {
                     .accessibilityIdentifier("confirmServerSwitch")
                 Button("Cancel", role: .cancel) { address = client.settings.server }
             } message: {
-                Text("\(client.waitingCount) \(client.waitingCount == 1 ? "change hasn't" : "changes haven't") reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
+                Text(client.waitingCount == 1 ? "1 change hasn't reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and that change is lost." : "\(client.waitingCount) changes haven't reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
             }
         }
     }

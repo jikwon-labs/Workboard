@@ -24,10 +24,28 @@ final class NewItemsUITests: XCTestCase {
 
     /// Scrolls the form up until `e` is there (rows below the fold aren't made yet).
     func scrollTo(_ e: XCUIElement, in a: XCUIApplication) {
-        for _ in 0..<6 where !(e.exists && e.isHittable) {
-            a.swipeUp()
+        var swiped = false
+        // until it is well clear of the comment box at the bottom; once it is
+        // on screen, small drags, so a whole swipe doesn't carry it past the top
+        for i in 0..<24 where !(e.exists && e.isHittable && e.frame.maxY < a.frame.height * 0.7) {
+            if e.exists && e.frame.maxY < a.frame.height * 0.15 {
+                // above: back down a little
+                let from = a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+                from.press(forDuration: 0.05, thenDragTo: a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)))
+            } else if !e.exists && i >= 10 {
+                // not found going down: it is further up
+                a.swipeDown()
+            } else if e.exists && e.frame.minY > 0 && e.frame.minY < a.frame.height {
+                let from = a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+                from.press(forDuration: 0.05, thenDragTo: a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+            } else {
+                a.swipeUp()
+            }
+            swiped = true
         }
         XCTAssertTrue(e.waitForExistence(timeout: 5))
+        // let the scroll come to rest, or a tap lands where the row was
+        if swiped { usleep(800_000) }
     }
 
     func testStartADirectMessageAndOpenTheOneThereIs() {

@@ -30,7 +30,7 @@ final class WorkboardUITests: XCTestCase {
         let me = app.buttons["member-1"]
         XCTAssertTrue(me.waitForExistence(timeout: 10), "member list after connecting")
         me.tap()
-        XCTAssertTrue(app.navigationBars["My Tasks"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
     }
 
     func testSendMessageAndReply() {

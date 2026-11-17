@@ -344,3 +344,38 @@ enum MediaUpload {
         return Prepared(data: jpeg, bytes: jpeg.count, name: "Photo-\(stamp()).jpg", contentType: "image/jpeg", isVideo: false, w: Int(size.width), h: Int(size.height), secs: 0, preview: preview)
     }
 }
+
+/// Gets a picked picture or video ready and puts it on the server (a
+/// video's still first); the pending file then holds its Attachment.
+@MainActor
+func uploadMedia(_ item: PhotosPickerItem, server: String, auth: String?, into f: PendingFile) async {
+    do {
+        let a = try await MediaUpload.prepare(item)
+        defer { if let file = a.file { try? FileManager.default.removeItem(at: file) } }
+        // a video's still goes up first, so it's there when the message
+        // is; it's only a preview, so the video goes without one when
+        // it can't (as on the Mac)
+        var thumb: String?
+        if let still = a.still {
+            thumb = try? await FileAPI.upload(server: server, auth: auth, data: still, contentType: "image/jpeg")
+            if let thumb { FileAPI.keep(still, sha: thumb, ext: "jpg") }
+        }
+        let sha: String
+        let ext = (a.name as NSString).pathExtension.lowercased()
+        if let file = a.file {
+            // streamed from the file, never read whole
+            sha = try await FileAPI.upload(server: server, auth: auth, file: file, contentType: a.contentType)
+            FileAPI.keep(file: file, sha: sha, ext: ext)
+        } else {
+            let data = a.data ?? Data()
+            sha = try await FileAPI.upload(server: server, auth: auth, data: data, contentType: a.contentType)
+            FileAPI.keep(data, sha: sha, ext: ext)
+        }
+        f.attachment = FileAPI.attachment(sha: sha, name: a.name, isVideo: a.isVideo, bytes: a.bytes, w: a.w, h: a.h, secs: a.secs, thumb: thumb)
+        f.preview = a.preview
+    } catch let e as FileError {
+        f.error = e.explanation
+    } catch {
+        f.error = error.localizedDescription
+    }
+}

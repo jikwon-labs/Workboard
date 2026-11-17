@@ -233,7 +233,7 @@ struct TrashView: View {
                         Image(systemName: item.kind == "Doc" ? "doc.text" : "checkmark.circle")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading) {
-                            Text(item.title.isEmpty ? "Untitled" : item.title)
+                            Text(item.title.isEmpty ? String(localized: "Untitled") : item.title)
                             Text("\(item.kind == "Doc" ? "Doc" : "Task") · deleted \(Fmt.relative(item.deleted))")
                                 .font(.caption).foregroundStyle(.secondary)
                         }

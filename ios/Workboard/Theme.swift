@@ -48,9 +48,9 @@ struct StatusDot: View {
 
 /// An empty-state message in the middle of a screen.
 struct EmptyNote: View {
-    let title: String
+    let title: LocalizedStringKey
     let systemImage: String
-    var detail: String?
+    var detail: LocalizedStringKey?
 
     var body: some View {
         ContentUnavailableView {
@@ -61,12 +61,25 @@ struct EmptyNote: View {
     }
 }
 
+/// Words kept in a variable (a menu's labels, a card's title) shown in the
+/// phone's language, from Localizable.xcstrings.
+func L(_ s: String) -> LocalizedStringKey { LocalizedStringKey(s) }
+
 enum Fmt {
     static func time(_ ts: Int64) -> String {
         let d = Date(timeIntervalSince1970: TimeInterval(ts))
         if Calendar.current.isDateInToday(d) { return d.formatted(date: .omitted, time: .shortened) }
-        if Calendar.current.isDateInYesterday(d) { return "Yesterday " + d.formatted(date: .omitted, time: .shortened) }
+        if Calendar.current.isDateInYesterday(d) { return String(localized: "Yesterday") + " " + d.formatted(date: .omitted, time: .shortened) }
         return d.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    }
+
+    /// "14:30" as the phone shows times ("2:30 PM", "오후 2:30").
+    static func clock(_ hhmm: String) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm"
+        guard let d = f.date(from: hhmm) else { return hhmm }
+        return d.formatted(date: .omitted, time: .shortened)
     }
 
     static func relative(_ ts: Int64) -> String {
@@ -76,15 +89,15 @@ enum Fmt {
     /// A task's due date with its time when it has one: "Today 2:30 PM".
     static func due(_ task: TaskView) -> String? {
         guard let d = task.due else { return nil }
-        return [due(d), task.dueTimeLabel].compactMap { $0 }.joined(separator: " ")
+        return [due(d), task.dueTime.map(clock)].compactMap { $0 }.joined(separator: " ")
     }
 
     /// "YYYY-MM-DD" -> "Today", "Tomorrow", "Mar 3".
     static func due(_ day: String) -> String {
         let today = dayString()
-        if day == today { return "Today" }
-        if day == dayString(Date().addingTimeInterval(86400)) { return "Tomorrow" }
-        if day == dayString(Date().addingTimeInterval(-86400)) { return "Yesterday" }
+        if day == today { return String(localized: "Today") }
+        if day == dayString(Date().addingTimeInterval(86400)) { return String(localized: "Tomorrow") }
+        if day == dayString(Date().addingTimeInterval(-86400)) { return String(localized: "Yesterday") }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")

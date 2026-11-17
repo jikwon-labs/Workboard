@@ -27,7 +27,7 @@ final class Round5UITests: XCTestCase {
             if allow.waitForExistence(timeout: 5) { allow.tap() }
         }
         a.tabBars.buttons["Home"].tap()
-        XCTAssertTrue(a.navigationBars["My Tasks"].waitForExistence(timeout: 5))
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 5))
         func banner(_ text: String) -> XCUIElement {
             springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         }

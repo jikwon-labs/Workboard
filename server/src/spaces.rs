@@ -25,7 +25,8 @@
 // a plain member (`guard_people`): only the owner and admins add or remove
 // people, change anyone else's entry or any role, rename or recolour the
 // workspace, turn its features on or off, and make, change or delete custom
-// fields, automations, templates and teams. And chat messages and task
+// fields, automations, templates and teams, or who a Slack user comes in
+// as (`extra.slack_map`, set by Import from Slack). And chat messages and task
 // comments stay their authors' (`guard_authors`): a plain member can't write
 // as someone else or change or delete what someone else wrote.
 
@@ -451,6 +452,33 @@ impl Cx {
         }
         for path in ADMIN_ITEMS {
             self.guard_items(canon, data, path, &|_| true, &|_| true, None, &[]);
+        }
+        // who a Slack user comes in as: set by Import from Slack, which only
+        // the owner and admins run
+        for path in wb_sync::SHARED_MAPS {
+            let prefix = format!("{}/", path);
+            let newer: Vec<(String, i64)> = self
+                .dmeta
+                .values
+                .iter()
+                .filter(|(k, s)| {
+                    k.starts_with(&prefix) && **s > self.cmeta.values.get(*k).copied().unwrap_or(0)
+                })
+                .map(|(k, s)| (k.clone(), *s))
+                .collect();
+            if newer.is_empty() {
+                continue;
+            }
+            let team_map = value_at(canon, path).cloned();
+            let changed = value_at(data, path).cloned() != team_map;
+            for (k, s) in newer {
+                self.dmeta.values.remove(&k);
+                if changed {
+                    self.out.values.insert(k, s);
+                }
+            }
+            self.out.refused |= changed;
+            set_value_at(data, path, team_map);
         }
         self.guard_authors(canon, data, member);
         for path in ADMIN_VALUES {

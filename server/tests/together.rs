@@ -4817,6 +4817,26 @@ fn a_plain_member_cant_write_as_someone_else_or_change_their_words() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// Who a Slack user comes in as is set by Import from Slack, which only the
+/// owner and admins run: a plain member's copy can't change it.
+#[test]
+fn a_plain_member_cant_change_who_slack_users_come_in_as() {
+    let home = temp_home("slackmap");
+    let server = Server::start(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    a.change(|d| d["extra"]["slack_map"] = json!({"U1": 1}));
+    b.wait("the map reaches Bo", |d| d["extra"]["slack_map"]["U1"] == 1);
+    b.change(|d| d["extra"]["slack_map"] = json!({"U1": 2, "U2": 2}));
+    b.until("Bo is told", |b| !b.put_back.is_empty());
+    round_trip(&mut b, &mut a, "after the map", 3020);
+    assert_eq!(a.data["extra"]["slack_map"], json!({"U1": 1}));
+    b.wait("Bo has the team's map again", |d| {
+        d["extra"]["slack_map"] == json!({"U1": 1})
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 // ------------------------------------------------- several workspaces
 
 fn second_workspace() -> Value {

@@ -8790,7 +8790,8 @@ fn concurrent_slack_matches_go_through_a_server() {
     });
     a.access_request(wb_net::Msg::CreateInvite {
         member: sam,
-        role: wb_net::Role::Member,
+        // Import from Slack is for owners and admins
+        role: wb_net::Role::Admin,
     });
     net_until(&mut a, "invite code", |a| {
         a.sync_rt

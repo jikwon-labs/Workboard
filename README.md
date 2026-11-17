@@ -30,7 +30,13 @@ Workspace menu > Work together offers two ways:
     otherwise the code is copied from Work together > People. Joining with
     the code also sets their password.
   - **Email and password**: signs in on another computer or phone without a
-    new code. "Forgot password?" mails a reset code.
+    new code. "Forgot password?" mails a reset code. When the account is in
+    several workspaces on that server, you choose which to open.
+
+  One server keeps several workspaces: with a workspace on the server open,
+  Create Workspace puts the new one on the same server (or, if you choose,
+  on this computer only). Each has its own people, backups and files, and
+  its address is the server's address plus `/w/<id>`.
 
   Tasks, chat and docs show up for everyone within a second or two, and
   Huddle starts a voice and video call, with screen sharing, inside the app. The server also keeps

@@ -209,7 +209,13 @@ pub fn start_screen(
         .spawn(move || {
             let r = match share {
                 Share::Pattern(rgb) => {
-                    run_pattern(rgb, &source, &limits, &stop);
+                    video::run_pattern(
+                        rgb,
+                        quality::SCREEN_WIDTH,
+                        &limits,
+                        &stop,
+                        |buf, started| video::push(&source, buf, started),
+                    );
                     Ok(())
                 }
                 _ => {
@@ -227,22 +233,6 @@ pub fn start_screen(
         })
         .expect("start screen thread");
     feed
-}
-
-fn run_pattern(rgb: [u8; 3], source: &NativeVideoSource, limits: &Limits, stop: &AtomicBool) {
-    let started = Instant::now();
-    let mut n = 0u32;
-    while !stop.load(Ordering::Relaxed) {
-        let (w, h) = video::send_size(
-            quality::SCREEN_WIDTH,
-            quality::SCREEN_WIDTH * 9 / 16,
-            limits.width(),
-        );
-        let bar = (n * w / 40) % w;
-        video::push(source, video::pattern_i420(w, h, rgb, bar), started);
-        n += 1;
-        std::thread::sleep(limits.gap());
-    }
 }
 
 /// Send the newest picture (or the last one again) at the frame rate until

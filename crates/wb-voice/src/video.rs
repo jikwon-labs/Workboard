@@ -278,7 +278,12 @@ pub fn start_feed(
         .spawn(move || {
             let show = |p: Picture| preview(Some(p));
             match video {
-                Video::Pattern(rgb) => run_pattern(rgb, &source, &limits, &s, &show),
+                // the camera's size
+                Video::Pattern(rgb) => {
+                    run_pattern(rgb, quality::CAMERA_WIDTH, &limits, &s, |buf, started| {
+                        send(&source, buf, started, &show)
+                    })
+                }
                 Video::Camera => {
                     eprintln!("workboard camera: starting");
                     match run_camera(&source, &limits, &s, &show) {
@@ -317,25 +322,22 @@ fn send(
     push(source, buf, started);
 }
 
-fn run_pattern(
+/// Send a test pattern of colour `rgb` until stopped, to `out` with the
+/// time it started: `width` wide (or less on a poor connection), 16:9, with
+/// a light bar moving across so frames differ like real video.
+pub(crate) fn run_pattern(
     rgb: [u8; 3],
-    source: &NativeVideoSource,
+    width: u32,
     limits: &Limits,
     stop: &AtomicBool,
-    preview: &impl Fn(Picture),
+    mut out: impl FnMut(I420Buffer, Instant),
 ) {
     let started = Instant::now();
     let mut n = 0u32;
     while !stop.load(Ordering::Relaxed) {
-        // the camera's size (or less on a poor connection); a light bar
-        // moves across, so frames differ like real video
-        let (w, h) = send_size(
-            quality::CAMERA_WIDTH,
-            quality::CAMERA_WIDTH * 9 / 16,
-            limits.width(),
-        );
+        let (w, h) = send_size(width, width * 9 / 16, limits.width());
         let bar = (n * w / 40) % w;
-        send(source, pattern_i420(w, h, rgb, bar), started, preview);
+        out(pattern_i420(w, h, rgb, bar), started);
         n += 1;
         std::thread::sleep(limits.gap());
     }

@@ -333,72 +333,16 @@ pub(crate) fn merge_fields<'a>(
         }
     }
     if decided.contains("reactions") {
-        // the same order on every device, whatever order the copies had
-        // them in: by emoji, then by person
-        reactions.sort();
-        let mut out: Vec<(String, Vec<u64>)> = vec![];
-        for (e, u) in reactions {
-            match out.iter_mut().find(|(x, _)| *x == e) {
-                Some((_, users)) => users.push(u),
-                None => out.push((e, vec![u])),
-            }
-        }
-        if !out.is_empty() || newest.contains_key("reactions") {
-            obj.insert(
-                "reactions".into(),
-                Value::Array(
-                    out.into_iter()
-                        .map(|(e, users)| serde_json::json!({"emoji": e, "users": users}))
-                        .collect(),
-                ),
-            );
-        }
+        put_reactions(&mut obj, reactions, newest);
     }
     if decided.contains("timers") {
-        // the same order everywhere: an old timer nobody owns first (only
-        // the field older apps read can hold it), then by start
-        timers.sort_by_key(|(m, st)| (*m != 0, *st, *m));
-        let mut rest = timers.into_iter();
-        match rest.next() {
-            Some((m, st)) => {
-                obj.insert("timer_started".into(), Value::from(st));
-                if m != 0 {
-                    obj.insert("timer_by".into(), Value::from(m));
-                }
-            }
-            None => {
-                if sides.iter().any(|sd| sd.obj.contains_key("timer_started")) {
-                    obj.insert("timer_started".into(), Value::Null);
-                }
-            }
-        }
-        let rest: Vec<Value> = rest
-            .map(|(m, st)| serde_json::json!({"member": m, "start": st}))
-            .collect();
-        if !rest.is_empty() {
-            obj.insert("timers".into(), Value::Array(rest));
-        }
+        put_timers(&mut obj, timers, &sides);
     }
     if decided.contains("time_entries") {
-        // the same order everywhere: by start, then whose
-        let key = |v: &Value| {
-            (
-                v.get("start").and_then(|s| s.as_i64()).unwrap_or(0),
-                v.get("member").and_then(|m| m.as_u64()).unwrap_or(0),
-            )
-        };
-        entries.sort_by(|(p, a), (q, b)| key(a).cmp(&key(b)).then_with(|| p.cmp(q)));
-        if !entries.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("time_entries")) {
-            obj.insert(
-                "time_entries".into(),
-                Value::Array(entries.into_iter().map(|(_, v)| v).collect()),
-            );
-        }
+        put_time_entries(&mut obj, entries, &sides);
     }
-    if decided.contains("custom")
-        && (!custom.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("custom")))
-    {
-        obj.insert("custom".into(), Value::Object(custom));
+    if decided.contains("custom") {
+        put_custom(&mut obj, custom, &sides);
     }
     if any_entry {
         if base_out != stamp {
@@ -407,6 +351,87 @@ pub(crate) fn merge_fields<'a>(
         cx.out_fields.insert(id, entry);
     }
     (obj, decided, loose)
+}
+
+/// The merged reactions, one per (emoji, person), into `obj`.
+fn put_reactions(
+    obj: &mut Map<String, Value>,
+    mut reactions: Vec<(String, u64)>,
+    newest: &Map<String, Value>,
+) {
+    // the same order on every device, whatever order the copies had
+    // them in: by emoji, then by person
+    reactions.sort();
+    let mut out: Vec<(String, Vec<u64>)> = vec![];
+    for (e, u) in reactions {
+        match out.iter_mut().find(|(x, _)| *x == e) {
+            Some((_, users)) => users.push(u),
+            None => out.push((e, vec![u])),
+        }
+    }
+    if !out.is_empty() || newest.contains_key("reactions") {
+        obj.insert(
+            "reactions".into(),
+            Value::Array(
+                out.into_iter()
+                    .map(|(e, users)| serde_json::json!({"emoji": e, "users": users}))
+                    .collect(),
+            ),
+        );
+    }
+}
+
+/// The merged running timers, one per person, into `obj`: the first in
+/// the field older apps read, the rest in `timers`.
+fn put_timers(obj: &mut Map<String, Value>, mut timers: Vec<(u64, i64)>, sides: &[Side]) {
+    // the same order everywhere: an old timer nobody owns first (only
+    // the field older apps read can hold it), then by start
+    timers.sort_by_key(|(m, st)| (*m != 0, *st, *m));
+    let mut rest = timers.into_iter();
+    match rest.next() {
+        Some((m, st)) => {
+            obj.insert("timer_started".into(), Value::from(st));
+            if m != 0 {
+                obj.insert("timer_by".into(), Value::from(m));
+            }
+        }
+        None => {
+            if sides.iter().any(|sd| sd.obj.contains_key("timer_started")) {
+                obj.insert("timer_started".into(), Value::Null);
+            }
+        }
+    }
+    let rest: Vec<Value> = rest
+        .map(|(m, st)| serde_json::json!({"member": m, "start": st}))
+        .collect();
+    if !rest.is_empty() {
+        obj.insert("timers".into(), Value::Array(rest));
+    }
+}
+
+/// The merged time entries, one per (person, start), into `obj`.
+fn put_time_entries(obj: &mut Map<String, Value>, mut entries: Vec<(&str, Value)>, sides: &[Side]) {
+    // the same order everywhere: by start, then whose
+    let key = |v: &Value| {
+        (
+            v.get("start").and_then(|s| s.as_i64()).unwrap_or(0),
+            v.get("member").and_then(|m| m.as_u64()).unwrap_or(0),
+        )
+    };
+    entries.sort_by(|(p, a), (q, b)| key(a).cmp(&key(b)).then_with(|| p.cmp(q)));
+    if !entries.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("time_entries")) {
+        obj.insert(
+            "time_entries".into(),
+            Value::Array(entries.into_iter().map(|(_, v)| v).collect()),
+        );
+    }
+}
+
+/// The merged custom field values, one per field, into `obj`.
+fn put_custom(obj: &mut Map<String, Value>, custom: Map<String, Value>, sides: &[Side]) {
+    if !custom.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("custom")) {
+        obj.insert("custom".into(), Value::Object(custom));
+    }
 }
 
 /// Merge one array of items. `parent` is the item it sits in (None at the

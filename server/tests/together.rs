@@ -5474,6 +5474,16 @@ fn an_owner_deletes_a_workspace_and_it_can_come_back() {
     late.wait_status(|s| matches!(s, Status::Gone(_)), "late app told it's gone");
     let (head, _) = http_get(port, &format!("/w/{}/health", id));
     assert!(head.starts_with("HTTP/1.1 410"), "{}", head);
+    // a password reset there says it was deleted, and one for a workspace
+    // that never was says so (not that the server can't reset passwords)
+    assert_eq!(
+        wb_net::forgot_password(&addr2, "bo@team.io"),
+        Err(wb_net::WORKSPACE_GONE.to_string())
+    );
+    assert_eq!(
+        wb_net::forgot_password(&format!("{}/w/nosuch", addr), "bo@team.io"),
+        Err("There's no such workspace on this server.".to_string())
+    );
     // deleting again is fine
     wb_net::delete_workspace(&addr2, &auth(&a2)).unwrap();
     // and the list of the account's workspaces leaves it out

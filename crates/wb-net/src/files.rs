@@ -467,17 +467,23 @@ pub fn download(
 pub fn forgot_password(addr: &str, email: &str) -> Result<bool, String> {
     let payload = serde_json::json!({ "email": email.trim() });
     let (status, json) = post_json(addr, "/auth/forgot", None, &payload)?;
+    let v: Option<serde_json::Value> = serde_json::from_str(json.trim()).ok();
+    // the server's reason ("error"; "message" from older servers): a
+    // deleted workspace (410), one that never was (404)
+    let why = v.as_ref().and_then(|v| {
+        ["error", "message"]
+            .iter()
+            .find_map(|k| v.get(*k).and_then(|m| m.as_str()))
+            .map(str::to_string)
+    });
     if status == 404 || status == 405 {
-        return Err("This server can't reset passwords yet. Update workboard-server, or ask the owner or an admin for a new invite code.".into());
+        return Err(why.unwrap_or_else(|| "This server can't reset passwords yet. Update workboard-server, or ask the owner or an admin for a new invite code.".into()));
     }
-    let v: serde_json::Value = serde_json::from_str(json.trim())
-        .map_err(|_| format!("The server answered {}.", status))?;
+    let Some(v) = v else {
+        return Err(format!("The server answered {}.", status));
+    };
     if status != 200 {
-        return Err(v
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("The server said no.")
-            .to_string());
+        return Err(why.unwrap_or_else(|| "The server said no.".into()));
     }
     Ok(v.get("mail").and_then(|m| m.as_bool()).unwrap_or(false))
 }

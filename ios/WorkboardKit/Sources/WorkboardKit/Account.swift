@@ -176,10 +176,12 @@ public enum AuthAPI {
             throw AuthError.failed(error.localizedDescription)
         }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200, let j = try? JSON(parsing: data) else {
-            throw AuthError.failed(status == 404 ? "This server can't reset passwords. Ask the owner or an admin for a new invite code." : "The server answered \(status).")
-        }
-        return j["mail"]?.bool ?? false
+        let j = try? JSON(parsing: data)
+        if status == 200, let j { return j["mail"]?.bool ?? false }
+        // the server's reason ("error"; "message" from older servers): a
+        // deleted workspace (410), one that never was (404)
+        if let why = j?["error"]?.string ?? j?["message"]?.string { throw AuthError.failed(why) }
+        throw AuthError.failed(status == 404 ? "This server can't reset passwords. Ask the owner or an admin for a new invite code." : "The server answered \(status).")
     }
 
     /// Whether the server has a workspace yet (GET /health "workspace"); nil

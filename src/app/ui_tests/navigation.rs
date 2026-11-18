@@ -1,0 +1,841 @@
+// Click-through tests for getting around: the rail, sidebar, search, Home,
+// Inbox, reminders, settings, notifications and keyboard shortcuts.
+
+use super::*;
+
+#[test]
+fn click_sidebar_inbox_and_my_tasks() {
+    let mut h = Ui1::new();
+    h.click("Inbox");
+    assert_eq!(h.app.loc, Location::Inbox);
+    h.click("My Tasks");
+    assert_eq!(h.app.loc, Location::MyTasks);
+    h.click("Today & Overdue");
+    assert_eq!(h.app.loc, Location::TodayOverdue);
+    h.click("Personal List");
+    let pl = h
+        .app
+        .personal_list_id()
+        .expect("personal list created by the click");
+    assert_eq!(h.app.loc, Location::List(pl));
+}
+
+#[test]
+fn click_workspace_menu_people_and_profile_themes() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("People");
+    assert_eq!(h.app.section, Section::People);
+    h.click("Profile menu");
+    h.click("Themes");
+    assert!(matches!(h.app.modal, Some(Modal::Themes)));
+    h.click("Dark");
+    assert!(h.app.data.dark, "dark theme switched on");
+}
+
+#[test]
+fn click_search_and_open_result() {
+    let mut h = Ui1::new();
+    h.click("Search");
+    assert!(h.app.palette.is_some());
+    h.type_text("passport");
+    h.key(egui::Key::Enter);
+    let id = h.app.open_task.expect("Enter opens the first match");
+    assert_eq!(h.app.task(id).unwrap().name, "Renew passport");
+}
+
+#[test]
+fn click_back_and_forward() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    h.click("Replies");
+    h.click("Go back");
+    assert_eq!(h.app.loc, Location::Inbox);
+    h.click("Go back");
+    assert_eq!(h.app.loc, start);
+    h.click("Go forward");
+    assert_eq!(h.app.loc, Location::Inbox);
+}
+
+#[test]
+fn click_inbox_item_later_and_clear() {
+    let mut h = Ui1::new();
+    h.click("Inbox");
+    // hover the first inbox item to reveal its buttons
+    let row = h
+        .find("Inbox Primary")
+        .map(|p| pos2(700.0, p.y + 120.0))
+        .unwrap();
+    h.hover(row);
+    h.click("Later");
+    assert_eq!(h.app.data.extra.inbox_later.len(), 1);
+    h.click("Inbox Later");
+    h.hover(row);
+    h.click("Clear");
+    assert_eq!(h.app.data.extra.inbox_cleared.len(), 1);
+}
+
+#[test]
+fn click_settings_dialogs_open_and_close() {
+    let mut h = Ui1::new();
+    for item in [
+        "Apps",
+        "Templates",
+        "Custom fields",
+        "Automations",
+        "Tag manager",
+    ] {
+        h.click("Workspace menu");
+        h.click(item);
+        assert!(h.app.modal.is_some(), "{} opens a dialog", item);
+        h.key(egui::Key::Escape);
+        assert!(h.app.modal.is_none(), "Esc closes {}", item);
+    }
+    for item in [
+        "Notifications",
+        "Themes",
+        "Labs",
+        "Keyboard shortcuts",
+        "Help",
+    ] {
+        h.click("Profile menu");
+        h.click(item);
+        assert!(h.app.modal.is_some(), "{} opens a dialog", item);
+        h.key(egui::Key::Escape);
+        assert!(h.app.modal.is_none(), "Esc closes {}", item);
+    }
+}
+
+#[test]
+fn check_for_updates_explains_why_it_cannot_run_outside_the_installed_app() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.click("Check for updates");
+    // tests don't run inside Workboard.app, so there is no Sparkle to ask
+    match &h.app.modal {
+        Some(Modal::Unavailable { title, body }) => {
+            assert_eq!(title, "Check for updates");
+            assert!(body.contains(env!("CARGO_PKG_VERSION")), "{}", body);
+        }
+        other => panic!("expected an explanation, got {:?}", other.is_some()),
+    }
+    h.key(egui::Key::Escape);
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
+fn a_waiting_update_puts_a_red_dot_on_the_profile_and_check_for_updates() {
+    let mut h = Ui1::new();
+    // nothing waiting: no dots
+    crate::updater::pretend_update_available(false);
+    h.settle();
+    assert_eq!(red_dots_in(&h, "Profile menu"), 0);
+    h.click("Profile menu");
+    assert_eq!(red_dots_in(&h, "Check for updates"), 0);
+    h.key(egui::Key::Escape);
+
+    // the server has a newer version
+    crate::updater::pretend_update_available(true);
+    h.settle();
+    assert_eq!(red_dots_in(&h, "Profile menu"), 1, "the profile shows it");
+    h.click("Profile menu");
+    assert_eq!(
+        red_dots_in(&h, "Check for updates"),
+        1,
+        "the menu row says where to go"
+    );
+    assert_eq!(red_dots_in(&h, "Settings"), 0, "only that row");
+    crate::updater::pretend_update_available(false);
+}
+
+#[test]
+fn an_online_only_tool_says_workboard_has_no_such_service() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.click("Talk to Text");
+    // the team server exists now, so the note must not promise that setting
+    // one up makes AI, video or voice processing work
+    match &h.app.modal {
+        Some(Modal::Unavailable { title, body }) => {
+            assert_eq!(title, "Talk to Text");
+            assert!(
+                body.starts_with("Talk to Text needs an online service"),
+                "{}",
+                body
+            );
+            assert!(body.contains("Workboard doesn't have"), "{}", body);
+            assert!(!body.contains("server"), "{}", body);
+        }
+        other => panic!("expected an explanation, got {:?}", other.is_some()),
+    }
+    h.key(egui::Key::Escape);
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
+fn click_every_rail_more_app() {
+    let mut h = Ui1::new();
+    for (item, sec) in [
+        ("Docs", Section::Docs),
+        ("Dashboards", Section::Dashboards),
+        ("Whiteboards", Section::Whiteboards),
+        ("Forms", Section::Forms),
+        ("Goals", Section::Goals),
+        ("Timesheets", Section::Timesheets),
+    ] {
+        h.click("Rail More");
+        h.click(item);
+        assert_eq!(h.app.section, sec, "{} opens", item);
+    }
+    for item in ["Rail Home", "Rail Planner", "Rail AI", "Rail Teams"] {
+        h.click(item);
+    }
+    assert_eq!(h.app.section, Section::Teams);
+}
+
+#[test]
+fn help_says_where_the_workspace_is_kept() {
+    let mut h = Ui1::new();
+    h.app.modal = Some(Modal::Help);
+    h.settle();
+    assert!(
+        h.has("This is your own copy of the work manager. Everything is saved on this computer.")
+    );
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: "/tmp/wb-help".into(),
+        device: "dev-help".into(),
+        tag: 1,
+        server: None,
+    });
+    h.settle();
+    assert!(h.has("This workspace is shared through a folder your sync app keeps in step. Your copy is saved on this computer and in that folder."));
+    h.app.data.extra.shared.as_mut().unwrap().server = Some("127.0.0.1:1".into());
+    h.settle();
+    assert!(h.has("This workspace is on your team's server. A copy is kept on this computer, so you can keep working while the server can't be reached."));
+    assert!(
+        !h.has("This is your own copy of the work manager. Everything is saved on this computer.")
+    );
+}
+
+#[test]
+fn single_key_t_opens_create_task_and_cmd_backslash_hides_the_sidebar() {
+    let mut h = Ui1::new();
+    h.key(egui::Key::T);
+    assert!(h.app.quick_add.is_some());
+    h.app.quick_add = None;
+    h.settle();
+    let cmd = egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        ..Default::default()
+    };
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Backslash,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: cmd,
+    }]);
+    h.settle();
+    assert!(h.app.sidebar_collapsed);
+}
+
+#[test]
+fn settings_is_a_full_page_with_sections() {
+    let mut h = Ui1::new();
+    h.click("Workspace menu");
+    h.click("Settings");
+    assert_eq!(h.app.section, Section::Settings);
+    h.click("Settings Spaces");
+    assert!(h.has("Team Space"));
+    h.click("Settings Themes");
+    h.click("Auto");
+    assert!(h.app.data.extra.auto_theme);
+    h.click("\u{2190}  Back to Workspace");
+    assert_eq!(h.app.section, Section::Home);
+}
+
+#[test]
+fn search_shows_recent_items_and_finds_docs() {
+    let mut h = Ui1::new();
+    h.click("Task Set up analytics dashboard");
+    h.key(egui::Key::Escape);
+    h.app.palette = Some(String::new());
+    h.settle();
+    assert!(h.has("Recent"));
+    h.click("Docs");
+    // (results are named by their title; the doc glyph is drawn beside it)
+    h.click_side("Project brief", true);
+    assert_eq!(h.app.section, Section::Docs);
+}
+
+#[test]
+fn search_hides_empty_group_headings() {
+    let mut h = Ui1::new();
+    assert!(
+        !h.app
+            .data
+            .tasks
+            .iter()
+            .any(|t| t.name.to_lowercase().contains("gen")),
+        "seed check"
+    );
+    // distinct places on screen with this name
+    let count = |h: &Ui1, n: &str| {
+        let mut r: Vec<String> = h
+            .tree
+            .iter()
+            .filter(|(x, _)| x == n)
+            .map(|(_, r)| format!("{:?}", r))
+            .collect();
+        r.sort();
+        r.dedup();
+        r.len()
+    };
+    h.click("Search");
+    h.type_text("a"); // matches tasks and locations
+    let tasks_with = count(&h, "Tasks");
+    assert!(h.has("Locations"));
+    h.app.palette = Some(String::new());
+    h.settle();
+    h.type_text("gen"); // only the #general channel
+    assert_eq!(h.app.palette.as_deref(), Some("gen"));
+    assert!(h.has("Channels"));
+    assert!(!h.has("Locations"), "no empty Locations heading");
+    assert_eq!(
+        count(&h, "Tasks"),
+        tasks_with - 1,
+        "no empty Tasks heading (the Tasks tab stays)"
+    );
+}
+
+#[test]
+fn sidebar_search_filters_spaces_folders_and_lists() {
+    let mut h = Ui1::new();
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 5000.0));
+    let in_side = |h: &Ui1, name: &str| {
+        h.tree
+            .iter()
+            .any(|(n, r)| n == name && side.contains(r.center()))
+    };
+    let spaces: Vec<Space> = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .filter(|s| s.private_owner.is_none() && !s.archived && !s.hidden)
+        .cloned()
+        .collect();
+    assert!(spaces.len() >= 2);
+    for s in &spaces {
+        assert!(in_side(&h, &s.name), "{} shows before searching", s.name);
+    }
+    h.click("Search your sidebar");
+    h.type_text("zzz");
+    h.settle();
+    for s in &spaces {
+        assert!(
+            !in_side(&h, &s.name),
+            "no match: space {} is hidden",
+            s.name
+        );
+        for f in &s.folders {
+            assert!(
+                !in_side(&h, &f.name),
+                "no match: folder {} is hidden",
+                f.name
+            );
+        }
+        for l in &s.lists {
+            assert!(!in_side(&h, &l.name), "no match: list {} is hidden", l.name);
+        }
+    }
+    // part of one list's name: that list, its folder and space stay; other rows go
+    let (space, folder, list) = spaces
+        .iter()
+        .find_map(|s| {
+            s.folders
+                .iter()
+                .find_map(|f| f.lists.first().map(|l| (s.clone(), f.clone(), l.clone())))
+        })
+        .expect("a list in a folder");
+    let q: String = list.name.to_lowercase().chars().take(5).collect();
+    h.app.side.search = Some(q.clone());
+    h.settle();
+    assert!(
+        in_side(&h, &space.name) && in_side(&h, &folder.name) && in_side(&h, &list.name),
+        "{:?}: the list, its folder and space show",
+        q
+    );
+    for s in spaces.iter().filter(|s| s.id != space.id) {
+        let inside = s.name.to_lowercase().contains(&q)
+            || s.folders.iter().any(|f| {
+                f.name.to_lowercase().contains(&q)
+                    || f.lists.iter().any(|l| l.name.to_lowercase().contains(&q))
+            })
+            || s.lists.iter().any(|l| l.name.to_lowercase().contains(&q))
+            || h.app
+                .data
+                .docs
+                .iter()
+                .any(|d| d.space == Some(s.id) && d.title.to_lowercase().contains(&q));
+        assert_eq!(
+            in_side(&h, &s.name),
+            inside,
+            "space {} shows only with a match",
+            s.name
+        );
+    }
+    for l in space
+        .lists
+        .iter()
+        .chain(folder.lists.iter())
+        .filter(|l| !l.name.to_lowercase().contains(&q))
+    {
+        assert!(
+            !in_side(&h, &l.name) || h.app.data.favorites.contains(&Location::List(l.id)),
+            "list {} without a match is hidden",
+            l.name
+        );
+    }
+    // an empty query shows everything again
+    h.app.side.search = Some(String::new());
+    h.settle();
+    for s in &spaces {
+        assert!(in_side(&h, &s.name));
+    }
+}
+
+#[test]
+fn sidebar_search_hides_the_favorites_heading_without_a_match() {
+    let mut h = Ui1::new();
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 5000.0));
+    let heading = |h: &Ui1| {
+        h.painted_text("Favorites")
+            .iter()
+            .any(|(r, _)| side.contains(r.center()))
+    };
+    if h.app.data.favorites.is_empty() {
+        h.app
+            .data
+            .favorites
+            .push(Location::List(h.app.data.spaces[0].folders[0].lists[0].id));
+        h.settle();
+    }
+    assert!(heading(&h), "Favorites shows before searching");
+    let fav = h.app.data.location_name(h.app.data.favorites[0]);
+    h.app.side.search = Some("zzz".into());
+    h.settle();
+    assert!(!heading(&h), "no favorite matches: no heading");
+    h.app.side.search = Some(fav.to_lowercase());
+    h.settle();
+    assert!(heading(&h), "a matching favorite keeps the heading");
+}
+
+#[test]
+fn favorite_a_task_and_open_it_from_the_sidebar() {
+    let mut h = Ui1::new();
+    h.click("Task options Write copy for landing page");
+    h.click("Add to Favorites");
+    let id = task_named(&h, "Write copy for landing page").id;
+    assert!(h.app.data.extra.starred.contains(&format!("task:{}", id)));
+    h.click_side("Write copy for landing page", false);
+    assert_eq!(h.app.open_task, Some(id));
+}
+
+#[test]
+fn sidebar_lists_reorder_by_drag() {
+    let mut h = Ui1::sized(1440.0, 1200.0);
+    let personal = h.app.data.spaces[0].lists[0].id;
+    h.drag("Personal", "Marketing");
+    let f = &h.app.data.spaces[0].folders[0];
+    assert_eq!(
+        f.lists.iter().map(|l| l.id).collect::<Vec<_>>()[1],
+        personal,
+        "Personal lands before Marketing"
+    );
+    assert!(h.app.data.spaces[0].lists.is_empty());
+}
+
+#[test]
+fn home_my_work_row_ticks_done() {
+    let mut h = Ui1::new();
+    h.app.actions.push(Action::Go(Location::Home));
+    h.settle();
+    h.click("Complete Renew passport");
+    let t = task_named(&h, "Renew passport");
+    assert!(h.app.data.is_closed(t));
+    // the Done section starts folded
+    h.app.home_collapsed.remove("Done");
+    h.settle();
+    h.click("Reopen Renew passport");
+    let t = task_named(&h, "Renew passport");
+    assert!(!h.app.data.is_closed(t));
+}
+
+#[test]
+fn reminders_snooze_edit_delete_and_show_done() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    h.app.data.extra.reminders.push(Reminder {
+        id: 501,
+        text: "Call the bank".into(),
+        due_ts: now_ts() + 600,
+        done: false,
+        owner: me,
+        ..Default::default()
+    });
+    h.app.data.extra.reminders.push(Reminder {
+        id: 502,
+        text: "Old one".into(),
+        due_ts: now_ts() - 600,
+        done: true,
+        owner: me,
+        ..Default::default()
+    });
+    h.click("Inbox");
+    h.click("Snooze Call the bank");
+    h.click("Tomorrow 9 AM");
+    let r = h
+        .app
+        .data
+        .extra
+        .reminders
+        .iter()
+        .find(|r| r.id == 501)
+        .unwrap();
+    assert!(r.due_ts > now_ts() + 3600);
+    h.click("Edit Call the bank");
+    h.click("Reminder text");
+    h.type_text(" back");
+    h.click("Save");
+    assert!(h
+        .app
+        .data
+        .extra
+        .reminders
+        .iter()
+        .any(|r| r.text == "Call the bank back"));
+    assert!(!h.has("Old one"));
+    h.click("Show done reminders");
+    assert!(h.has("Old one"));
+    h.click("Done Old one");
+    assert!(
+        !h.app
+            .data
+            .extra
+            .reminders
+            .iter()
+            .find(|r| r.id == 502)
+            .unwrap()
+            .done,
+        "a done reminder can be ticked back"
+    );
+    h.click("Delete Call the bank back");
+    assert!(!h.app.data.extra.reminders.iter().any(|r| r.id == 501));
+}
+
+#[test]
+fn inbox_later_item_goes_back_to_primary() {
+    let mut h = Ui1::new();
+    let tid = h.app.data.tasks[1].id;
+    let ts = now_ts() - 30;
+    h.app.data.tasks[1].activity.push(Activity {
+        ts,
+        author: 2,
+        text: "Over to you".into(),
+        comment: true,
+        post: false,
+        ..Default::default()
+    });
+    let key = format!("{}:{}:2", tid, ts);
+    h.app.data.extra.inbox_later.push(key.clone());
+    h.click("Inbox");
+    h.click("Inbox Later");
+    let p = h
+        .find("Write copy for landing page")
+        .expect("the item is in Later");
+    h.hover(p);
+    h.click("Primary");
+    assert!(!h.app.data.extra.inbox_later.contains(&key));
+}
+
+#[test]
+fn search_link_arrows_and_enter() {
+    let mut h = Ui1::new();
+    let tid = h.task_id("Newsletter draft");
+    h.app.palette = Some(format!("workboard://task/{}", tid));
+    h.settle();
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.open_task, Some(tid));
+    h.app.open_task = None;
+    // arrows move the highlight; Enter opens the highlighted result
+    h.app.palette = Some("Projects".into());
+    h.settle();
+    h.key(egui::Key::ArrowDown);
+    let rows = h.app.search_rows("Projects", 0);
+    assert_eq!(h.app.sweep.search_sel, 1);
+    h.key(egui::Key::Enter);
+    assert!(h.app.palette.is_none());
+    assert_eq!(
+        h.app.sweep.search_recent.first().map(String::as_str),
+        Some("Projects")
+    );
+    if let crate::app::more::Hit::Go(l) = rows[1].4 {
+        assert_eq!(h.app.loc, l);
+    }
+}
+
+#[test]
+fn cmd_brackets_and_comma_shortcuts() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    cmd_key(&mut h, egui::Key::OpenBracket);
+    assert_eq!(h.app.loc, start, "Cmd+[ goes back");
+    cmd_key(&mut h, egui::Key::CloseBracket);
+    assert_eq!(h.app.loc, Location::Inbox, "Cmd+] goes forward");
+    cmd_key(&mut h, egui::Key::Comma);
+    assert_eq!(h.app.section, Section::Settings);
+}
+
+#[test]
+fn cmd_brackets_go_back_and_forward() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    let cmd = egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        ..Default::default()
+    };
+    let press = |h: &mut Ui1, key| {
+        h.frame(vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: cmd,
+        }]);
+        h.settle();
+    };
+    press(&mut h, egui::Key::OpenBracket);
+    assert_eq!(h.app.loc, start);
+    press(&mut h, egui::Key::CloseBracket);
+    assert_eq!(h.app.loc, Location::Inbox);
+}
+
+#[test]
+fn option_t_while_typing_and_enter_in_search() {
+    let mut h = Ui1::new();
+    h.app.palette = Some(String::new());
+    h.settle();
+    // Option+T types into the search box, it doesn't open Create Task
+    let alt = egui::Modifiers {
+        alt: true,
+        ..Default::default()
+    };
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::T,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: alt,
+    }]);
+    h.settle();
+    assert!(h.app.quick_add.is_none());
+    // a pasted task link opens the task on Enter
+    let tid = h.app.data.tasks[0].id;
+    h.app.palette = Some(format!("workboard://task/{}", tid));
+    h.settle();
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(h.app.palette.is_none());
+    assert_eq!(h.app.open_task, Some(tid));
+    // Enter on a search that only finds a channel opens the channel
+    h.app.open_task = None;
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "website-redesign")
+        .unwrap()
+        .id;
+    h.app.palette = Some("website-redesign".into());
+    h.settle();
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert_eq!((h.app.section, h.app.chat.open), (Section::Chat, Some(ch)));
+}
+
+#[test]
+fn search_leaves_out_other_peoples_personal_space_and_archived_lists() {
+    let mut h = Ui1::new();
+    let other = h.app.data.spaces.len() as u64 + 90_000;
+    h.app.data.spaces.push(Space {
+        id: other,
+        name: "Someone Private".into(),
+        private_owner: Some(2),
+        lists: vec![ListItem {
+            id: other + 1,
+            name: "Their Secret List".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    if let Some(l) = h.app.data.spaces[0].lists.first_mut() {
+        l.name = "Old Archived List".into();
+        l.archived = true;
+    }
+    h.app.palette = Some(String::new());
+    h.settle();
+    // the palette names lists by their path
+    assert!(h.has("Team Space / Projects / Marketing"));
+    assert!(
+        !h.has("Someone Private")
+            && !h.has("Someone Private / Their Secret List")
+            && !h.has("Team Space / Old Archived List")
+    );
+}
+
+#[test]
+fn header_automate_opens_for_the_current_list_and_manage_people_opens_settings() {
+    let mut h = Ui1::new();
+    let lid = h.app.data.first_list().unwrap();
+    h.app.loc = Location::List(lid);
+    h.settle();
+    h.click("Automate");
+    assert!(
+        matches!(h.app.modal, Some(Modal::Automations { scope: Some(Location::List(l)), .. }) if l == lid),
+        "new rules run in this list"
+    );
+    h.app.modal = None;
+    h.app.section = Section::Teams;
+    h.app.hub_filter = 3;
+    h.settle();
+    h.click("Manage people");
+    assert_eq!(h.app.section, Section::Settings);
+    assert_eq!(
+        crate::app::settings::SETTINGS[h.app.settings_tab as usize].1,
+        "People"
+    );
+}
+
+#[test]
+fn a_link_from_macos_opens_in_the_frame_it_arrives() {
+    let mut h = Ui1::new();
+    let id = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| h.app.task_visible(t))
+        .map(|t| t.id)
+        .unwrap();
+    assert_eq!(h.app.open_task, None);
+    // macOS hands the link over between frames (no click or key follows)
+    crate::links::arrived(format!("workboard://task/{}", id));
+    h.frame(vec![]);
+    assert_eq!(
+        h.app.open_task,
+        Some(id),
+        "the link opened without waiting for more input"
+    );
+    assert!(
+        h.ctx.has_requested_repaint(),
+        "the app draws again to show it"
+    );
+}
+
+#[test]
+fn click_notification_settings_turn_kinds_off_and_set_channels() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.click("Notifications");
+    assert!(matches!(h.app.modal, Some(Modal::Notifications)));
+    assert!(h.app.data.extra.notify.direct);
+    h.click("Direct messages");
+    assert!(!h.app.data.extra.notify.direct);
+    // rows past the dialog's scroll area are laid out but clipped: bring
+    // this one up before clicking it
+    let over = h.find("Direct messages").unwrap();
+    h.frame(vec![egui::Event::PointerMoved(over)]);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -120.0),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    h.click("Reactions to my messages");
+    assert!(h.app.data.extra.notify.reactions);
+    // the dialog scrolls: wheel down over it to reach the channel choices
+    let over = h.find("Direct messages").unwrap();
+    for _ in 0..6 {
+        h.frame(vec![egui::Event::PointerMoved(over)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -120.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    h.click("Every new message");
+    assert_eq!(h.app.data.extra.notify.channel_default, "all");
+    h.click("Send a test notification");
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|t| t.0.starts_with("Sent a test notification")));
+}
+
+#[test]
+fn home_lists_card_says_when_there_are_no_lists_and_offers_one() {
+    let mut h = Ui1::new();
+    // a workspace without Spaces or Lists, as a first start has
+    h.app.data.spaces.retain(|s| s.private_owner.is_some());
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    assert!(h.has("No Lists yet. Lists keep a Space's tasks together."));
+    h.click("Home new list");
+    assert!(
+        matches!(h.app.modal, Some(Modal::NewSpace { .. })),
+        "no Space yet: make one first"
+    );
+    h.key(egui::Key::Escape);
+    // with a Space, the button makes a List in it
+    let mut h = Ui1::new();
+    for s in h.app.data.spaces.iter_mut() {
+        s.lists.clear();
+        s.folders.clear();
+    }
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    h.click("Home new list");
+    assert!(matches!(h.app.modal, Some(Modal::NewList { .. })));
+}
+
+#[test]
+fn inbox_with_reminders_waiting_is_not_all_caught_up() {
+    let mut h = Ui1::new();
+    h.click("Inbox");
+    h.app.data.extra.inbox_cleared = h.app.inbox_items().iter().cloned().map(|i| i.key).collect();
+    h.settle();
+    assert!(h.has("You're all caught up") || h.has("Looking to collaborate?"));
+    let id = h.app.data.new_id();
+    h.app.data.extra.reminders.push(Reminder {
+        id,
+        text: "Call the bank".into(),
+        due_ts: now_ts() - 60,
+        owner: h.app.data.me,
+        ..Default::default()
+    });
+    h.settle();
+    assert!(h.has("Call the bank"));
+    assert!(!h.has("You're all caught up"), "a reminder is waiting");
+    assert!(h.has("No new comments, mentions or assignments."));
+}

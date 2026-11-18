@@ -610,3 +610,77 @@ pub(super) fn drawn_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> 
     each_text(shapes, |ts, _| out.push(ts.galley.text().to_string()));
     out
 }
+
+// a server workspace whose server can't be reached, waited on until the
+// app has tried and failed (nothing listens on port 1)
+pub(super) fn server_down(h: &mut Ui1) {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-down".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !matches!(
+        h.app.sync_rt.net_status,
+        Some(wb_net::Status::Reconnecting(_))
+    ) && std::time::Instant::now() < until
+    {
+        // tests don't save, so the frame doesn't run the connection
+        h.app.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.settle();
+}
+
+// send a message in #general and show its hover toolbar
+pub(super) fn general_with_my_message(text: &str) -> (Ui1, u64) {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Message composer");
+    h.type_text(text);
+    h.key(egui::Key::Enter);
+    let p = h.find(text).unwrap();
+    h.hover(p);
+    (h, cid)
+}
+
+pub(super) fn open_design_task(h: &mut Ui1) -> u64 {
+    h.click_left("Task Design new homepage layout", 120.0);
+    h.app.open_task.expect("the task window opens")
+}
+
+/// The seed with every List and task archived (the audit's "archived" state).
+pub(super) fn archived_workspace() -> Ui1 {
+    let mut h = Ui1::new();
+    for s in h.app.data.spaces.iter_mut() {
+        for l in s.lists.iter_mut() {
+            l.archived = true;
+        }
+        for f in s.folders.iter_mut() {
+            for l in f.lists.iter_mut() {
+                l.archived = true;
+            }
+        }
+    }
+    for t in h.app.data.tasks.iter_mut() {
+        t.archived = true;
+    }
+    h.app.section = Section::Home;
+    h.app.loc = Location::Home;
+    h.settle();
+    h
+}
+
+/// A teammate's copy of `data` with one change of theirs: `change` runs on
+/// it and the change is stamped a moment later.
+pub(super) fn teammate_change(data: &Data, change: impl FnOnce(&mut Data)) -> serde_json::Value {
+    let mut d = data.clone();
+    change(&mut d);
+    let mut v = serde_json::to_value(&d).unwrap();
+    let mut meta = d.extra.sync.clone();
+    crate::sync::stamp(&v, &mut meta, chrono::Utc::now().timestamp_millis() + 5);
+    v["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    v
+}

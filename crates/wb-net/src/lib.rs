@@ -151,7 +151,9 @@ pub fn parse_join(text: &str) -> JoinLink {
     out
 }
 
-fn pct_encode(s: &str) -> String {
+/// Percent-encode for a URL query value: everything but letters, digits
+/// and `-._~` becomes %XX.
+pub fn pct_encode(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {

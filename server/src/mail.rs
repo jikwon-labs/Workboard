@@ -162,7 +162,7 @@ pub fn invite_mail(
             "Open this link on a computer or phone that can reach your team's server:\n\n  {}/join?code={}&email={}\n\nOr open Workboard, choose \"Join my team\" and type:\n\n  Server:       {}\n  Invite code:  {}\n",
             web_base(s),
             code,
-            pct(to),
+            wb_net::pct_encode(to),
             s,
             code
         ));
@@ -189,18 +189,6 @@ pub fn reset_mail(to: &str, code: &str, minutes: i64) -> Mail {
             to, code, minutes
         ),
     }
-}
-
-fn pct(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{:02X}", b)
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

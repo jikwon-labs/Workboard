@@ -57,33 +57,33 @@ public struct LiveKitConfig: Sendable {
 }
 
 public final class FakeServer: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "workboard.fake-server")
-    private var listener: NWListener?
-    private var peers: [ObjectIdentifier: Peer] = [:]
-    private var snapshot: JSON?
-    private var rev: Int64 = 0
+    let queue = DispatchQueue(label: "workboard.fake-server")
+    var listener: NWListener?
+    var peers: [ObjectIdentifier: Peer] = [:]
+    var snapshot: JSON?
+    var rev: Int64 = 0
     /// device -> tag, so a device keeps its tag across reconnects.
-    private var tags: [String: UInt64] = [:]
+    var tags: [String: UInt64] = [:]
     /// normalized code (letters and digits only, upper case) -> member
-    private var invites: [String: UInt64] = [:]
+    var invites: [String: UInt64] = [:]
     /// token -> (member, device)
-    private var tokens: [String: (member: UInt64, device: String)] = [:]
+    var tokens: [String: (member: UInt64, device: String)] = [:]
     /// DELETE /w/<id> came from an owner: the workspace is gone
-    private var deleted = false
+    var deleted = false
     /// Whether an owner deleted the workspace (tests).
     public var isDeleted: Bool { queue.sync { deleted } }
-    private var pushTokens: [String: String] = [:]
+    var pushTokens: [String: String] = [:]
     /// member -> account
-    private var accounts: [UInt64: Account] = [:]
+    var accounts: [UInt64: Account] = [:]
     /// normalized reset code -> (email, made at)
-    private var resets: [String: (email: String, made: Date)] = [:]
-    private var lastResetCode: [String: String] = [:]
+    var resets: [String: (email: String, made: Date)] = [:]
+    var lastResetCode: [String: String] = [:]
     /// sha256 -> (contents, content type)
-    private var files: [String: (data: Data, type: String)] = [:]
+    var files: [String: (data: Data, type: String)] = [:]
     /// member -> role; members not listed are plain members, member 1 the owner
-    private var roles: [UInt64: Role] = [1: .owner]
+    var roles: [UInt64: Role] = [1: .owner]
     /// newest first
-    private var backupFiles: [(name: String, snapshot: JSON)] = []
+    var backupFiles: [(name: String, snapshot: JSON)] = []
 
     struct Account {
         var email: String
@@ -98,7 +98,7 @@ public final class FakeServer: @unchecked Sendable {
         get { queue.sync { putBackIds } }
         set { queue.sync { putBackIds = newValue } }
     }
-    private var putBackIds: Set<UInt64> = []
+    var putBackIds: Set<UInt64> = []
     public static let putBackMessage =
         "Some changes were put back because that space is shared with you at a level that doesn't allow them."
 
@@ -110,13 +110,13 @@ public final class FakeServer: @unchecked Sendable {
     /// Merge pushes and send deltas to apps that take them.
     public var deltas = false
     /// What the snapshot held at the last broadcast (deltas mode).
-    private var summary: SyncSummary?
-    private var loseNextDelta = false
-    private var resyncCount = 0
+    var summary: SyncSummary?
+    var loseNextDelta = false
+    var resyncCount = 0
     /// Tests: the next delta goes to nobody, as if it were lost.
     public func dropNextDelta() { queue.sync { loseNextDelta = true } }
-    private var meddle: (member: UInt64, role: Role)?
-    private var lateAnswer: TimeInterval?
+    var meddle: (member: UInt64, role: Role)?
+    var lateAnswer: TimeInterval?
     /// Tests: another admin gives `member` this role just as the next
     /// set_role or revoke is made, before its answer is worked out (the
     /// real server answers with access_for after letting go of its lock),
@@ -142,7 +142,7 @@ public final class FakeServer: @unchecked Sendable {
     /// Until when the server acts as gone: its WebSocket connections were
     /// dropped and new ones are turned away (HTTP still answers, so a test
     /// can bring it back). The address stays the same.
-    private var offlineUntil: Date?
+    var offlineUntil: Date?
 
     /// Tests: drop every connection and turn new ones away for `secs`.
     public func goOffline(for secs: TimeInterval) { queue.sync { offlineOnQueue(secs) } }
@@ -150,7 +150,7 @@ public final class FakeServer: @unchecked Sendable {
     /// Tests: take connections again.
     public func goOnline() { queue.sync { offlineUntil = nil } }
 
-    private func offlineOnQueue(_ secs: TimeInterval) {
+    func offlineOnQueue(_ secs: TimeInterval) {
         offlineUntil = Date().addingTimeInterval(secs)
         for p in peers.values where p.isWebSocket { drop(p) }
         log("offline for \(Int(secs))s")
@@ -245,9 +245,9 @@ public final class FakeServer: @unchecked Sendable {
     /// The open invite code for a member, if any.
     public func openInvite(member: UInt64) -> String? { queue.sync { inviteCode(of: member) } }
 
-    private func roleOf(_ member: UInt64) -> Role { roles[member] ?? .member }
+    func roleOf(_ member: UInt64) -> Role { roles[member] ?? .member }
 
-    private func inviteCode(of member: UInt64) -> String? {
+    func inviteCode(of member: UInt64) -> String? {
         invites.first { $0.value == member }.map { k, _ in
             // codes are kept normalized; show them as XXXX-XXXX-XXXX
             stride(from: 0, to: k.count, by: 4).map { i in
@@ -264,7 +264,7 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     /// XXXX-XXXX-XXXX without look-alike letters, like the real server.
-    private func makeCode() -> String {
+    func makeCode() -> String {
         let alphabet = Array("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
         func four() -> String { String((0..<4).map { _ in alphabet.randomElement()! }) }
         return four() + "-" + four() + "-" + four()
@@ -289,7 +289,7 @@ public final class FakeServer: @unchecked Sendable {
         queue.sync { revokeOnQueue(member) }
     }
 
-    private func revokeOnQueue(_ member: UInt64) {
+    func revokeOnQueue(_ member: UInt64) {
         for (t, v) in tokens where v.member == member {
             tokens[t] = nil
             pushTokens[v.device] = nil
@@ -301,7 +301,7 @@ public final class FakeServer: @unchecked Sendable {
 
     // MARK: connections
 
-    private func accept(_ c: NWConnection) {
+    func accept(_ c: NWConnection) {
         let p = Peer(c)
         peers[ObjectIdentifier(c)] = p
         c.stateUpdateHandler = { [weak self] st in
@@ -314,12 +314,12 @@ public final class FakeServer: @unchecked Sendable {
         read(p)
     }
 
-    private func drop(_ p: Peer) {
+    func drop(_ p: Peer) {
         p.conn.cancel()
         peers[ObjectIdentifier(p.conn)] = nil
     }
 
-    private func read(_ p: Peer) {
+    func read(_ p: Peer) {
         p.conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, err in
             guard let self else { return }
             if let data { p.buffer.append(data) }
@@ -332,296 +332,9 @@ public final class FakeServer: @unchecked Sendable {
         }
     }
 
-    // MARK: HTTP
-
-    private func readHTTP(_ p: Peer) {
-        guard let end = p.buffer.range(of: Data("\r\n\r\n".utf8)) else { return }
-        let head = String(decoding: p.buffer[..<end.lowerBound], as: UTF8.self)
-        var lines = head.components(separatedBy: "\r\n")
-        let request = lines.removeFirst().split(separator: " ").map(String.init)
-        var headers: [String: String] = [:]
-        for l in lines {
-            if let i = l.firstIndex(of: ":") {
-                headers[l[..<i].lowercased()] = l[l.index(after: i)...].trimmingCharacters(in: .whitespaces)
-            }
-        }
-        let length = Int(headers["content-length"] ?? "0") ?? 0
-        let bodyStart = end.upperBound
-        guard p.buffer.endIndex - bodyStart >= length else { return }
-        let body = Data(p.buffer[bodyStart..<(bodyStart + length)])
-        p.buffer.removeSubrange(..<(bodyStart + length))
-        let method = request.first ?? ""
-        let path = request.count > 1 ? request[1] : "/"
-
-        if headers["upgrade"]?.lowercased() == "websocket", let until = offlineUntil, until > Date() {
-            return respond(p, 503, ["error": "offline"])
-        }
-        if deleted, path.hasPrefix("/w/") {
-            return respond(p, 410, ["error": .string(WorkspaceAPI.goneMessage)])
-        }
-        if headers["upgrade"]?.lowercased() == "websocket", let key = headers["sec-websocket-key"] {
-            let accept = Data(Insecure.SHA1.hash(data: Data((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
-            let resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
-            p.conn.send(content: Data(resp.utf8), completion: .contentProcessed { _ in })
-            p.isWebSocket = true
-            readFrames(p)
-            return
-        }
-        switch (method, path) {
-        case ("GET", "/health"):
-            respond(p, 200, ["ok": true, "rev": .int(rev), "workspace": .bool(snapshot != nil), "devices": .int(Int64(tokens.count))])
-        case ("POST", "/auth/forgot"):
-            forgot(p, body: body)
-        case ("DELETE", _) where path.hasPrefix("/w/"):
-            deleteWorkspace(p, headers: headers)
-        case (_, _) where path.hasPrefix("/files/"):
-            file(p, method: method, name: String(path.dropFirst(7)), headers: headers, body: body)
-        case ("POST", _) where adminHTTP && path.hasPrefix("/admin/"):
-            let comps = URLComponents(string: path)
-            let member = comps?.queryItems?.first { $0.name == "member" }?.value.flatMap { UInt64($0) } ?? 0
-            switch comps?.path {
-            case "/admin/invite":
-                let code = makeCode()
-                invites[Self.normalize(code)] = member
-                log("admin: invite for member \(member): \(code)")
-                respond(p, 200, ["code": .string(code)])
-            case "/admin/say":
-                // a message from someone else, as if their app had pushed it
-                let q = { (n: String) in comps?.queryItems?.first { $0.name == n }?.value }
-                let ch = q("channel").flatMap { UInt64($0) } ?? 0
-                let author = q("author").flatMap { UInt64($0) } ?? 2
-                var snap = snapshot ?? [:]
-                let id = UInt64(Date().timeIntervalSince1970 * 1000) * 1024 + 1023
-                Edits.sendMessage(&snap, channel: ch, text: q("text") ?? "Hello", me: author, id: id, ts: nowTs())
-                if let key = q("imported") {
-                    // as a Mac's Slack import writes it (Message::imported)
-                    var chans = snap["channels"]?.array ?? []
-                    for i in chans.indices where chans[i]["id"]?.uint == ch {
-                        var msgs = chans[i]["messages"]?.array ?? []
-                        for j in msgs.indices where msgs[j]["id"]?.uint == id { msgs[j]["imported"] = .string(key) }
-                        chans[i]["messages"] = .array(msgs)
-                    }
-                    snap["channels"] = .array(chans)
-                }
-                snapshot = snap
-                rev += 1
-                broadcast(.update(data: snap, rev: rev))
-                log("admin: message in \(ch) from \(author)")
-                respond(p, 200, ["ok": true])
-            case "/admin/reset-code":
-                let email = comps?.queryItems?.first { $0.name == "email" }?.value?.lowercased() ?? ""
-                respond(p, 200, ["code": lastResetCode[email].map(JSON.string) ?? .null])
-            case "/admin/drop-account":
-                accounts[member] = nil
-                log("admin: dropped the account of member \(member)")
-                respond(p, 200, ["ok": true])
-            case "/admin/backup":
-                // a backup of the current snapshot, for the owner to restore
-                let name = comps?.queryItems?.first { $0.name == "name" }?.value ?? "hourly-20261116-03.json"
-                backupFiles.removeAll { $0.name == name }
-                backupFiles.insert((name, snapshot ?? [:]), at: 0)
-                log("admin: backup \(name)")
-                respond(p, 200, ["ok": true])
-            case "/admin/offline":
-                let secs = comps?.queryItems?.first { $0.name == "secs" }?.value.flatMap { Double($0) } ?? 30
-                offlineOnQueue(secs)
-                respond(p, 200, ["ok": true])
-            case "/admin/online":
-                offlineUntil = nil
-                log("online")
-                respond(p, 200, ["ok": true])
-            case "/admin/find":
-                // whether a message or reply with this text is on the server
-                let text = comps?.queryItems?.first { $0.name == "text" }?.value ?? ""
-                let found = WorkspaceView(snapshot ?? [:]).channels.contains { c in
-                    c.messages.contains { $0.text == text || $0.replies.contains { $0.text == text } }
-                }
-                respond(p, 200, ["found": .bool(found)])
-            case "/admin/late-answer":
-                // the next access or backup request is answered after secs
-                let secs = comps?.queryItems?.first { $0.name == "secs" }?.value.flatMap(Double.init) ?? 30
-                lateAnswer = secs
-                respond(p, 200, ["ok": true])
-            case "/admin/revoke":
-                revokeOnQueue(member)
-                log("admin: revoked member \(member)")
-                respond(p, 200, ["ok": true])
-            default:
-                respond(p, 404, ["error": "not_found"])
-            }
-        default:
-            respond(p, 404, ["error": "not_found"])
-        }
-    }
-
-    /// DELETE /w/<id>: an owner's device deletes the workspace, like
-    /// registry.rs; its apps are told and stop.
-    private func deleteWorkspace(_ p: Peer, headers: [String: String]) {
-        let auth = headers["authorization"] ?? ""
-        let rest = auth.hasPrefix("Bearer ") ? String(auth.dropFirst(7)) : ""
-        let parts = rest.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let t = tokens[parts[1]], t.device == parts[0] else {
-            return respond(p, 401, ["error": "Sign in to this workspace first."])
-        }
-        guard roleOf(t.member) == .owner else {
-            return respond(p, 403, ["error": "Only an owner of this workspace can delete it."])
-        }
-        deleted = true
-        tokens = [:]
-        log("workspace deleted by member \(t.member)")
-        for peer in peers.values where peer.isWebSocket {
-            refuse(peer, WorkspaceAPI.goneMessage)
-        }
-        respond(p, 200, ["deleted": "fake"])
-    }
-
-    /// POST /auth/forgot: always ok; a code only when the account exists.
-    private func forgot(_ p: Peer, body: Data) {
-        let email = ((try? JSON(parsing: body))?["email"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if canMail, accounts.values.contains(where: { $0.email == email }) {
-            let code = makeCode()
-            resets = resets.filter { $0.value.email != email }
-            resets[Self.normalize(code)] = (email, Date())
-            lastResetCode[email] = code
-            log("reset code for \(email): \(code)")
-        }
-        respond(p, 200, ["ok": true, "mail": .bool(canMail)])
-    }
-
-    private func respond(_ p: Peer, _ status: Int, _ body: JSON) {
-        let text = body.serialized()
-        let reason = [200: "OK", 201: "Created", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 410: "Gone", 400: "Bad Request", 501: "Not Implemented", 503: "Service Unavailable"][status] ?? "Error"
-        let resp = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(text.utf8.count)\r\nConnection: close\r\n\r\n\(text)"
-        p.conn.send(content: Data(resp.utf8), completion: .contentProcessed { _ in p.conn.cancel() })
-    }
-
-    /// call_join, like Hub::call in server/src/lib.rs.
-    private func callJoin(_ ch: UInt64, from p: Peer) {
-        func deny(_ why: String) { send(.error(code: ServerErrorCode.denied.rawValue, message: why, channel: ch), to: p) }
-        guard let lk = livekit else { return deny("Voice huddles aren't set up on this server yet.") }
-        guard let snap = snapshot else { return deny("There's no workspace on the server yet.") }
-        let view = WorkspaceView(snap)
-        guard let c = view.channels.first(where: { $0.id == ch }) else { return deny("That conversation isn't on the server yet. Try again in a moment.") }
-        let member = p.member ?? 0
-        if requireSignIn, !c.members.isEmpty, !c.members.contains(member) { return deny("You're not in that conversation.") }
-        let identity = "\(member)-\(p.device ?? "device")"
-        let name = view.member(member)?.name ?? ""
-        let jwt = Self.livekitToken(key: lk.key, secret: lk.secret, identity: identity, name: name, room: CallAPI.room(channel: ch))
-        log("call token for \(identity) in \(CallAPI.room(channel: ch))")
-        send(.callToken(channel: ch, url: lk.url, token: jwt), to: p)
-    }
-
-    /// PUT/GET/HEAD /files/<sha256>, like server/src/files.rs (no ranges).
-    private func file(_ p: Peer, method: String, name: String, headers: [String: String], body: Data) {
-        guard name.count == 64, name.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else { return respond(p, 404, ["error": "no such file"]) }
-        if requireSignIn {
-            let auth = headers["authorization"] ?? ""
-            let rest = auth.hasPrefix("Bearer ") ? String(auth.dropFirst(7)) : ""
-            let parts = rest.split(separator: ":", maxSplits: 1).map(String.init)
-            guard parts.count == 2, let t = tokens[parts[1]], t.device == parts[0] else { return respond(p, 401, ["error": "sign in first"]) }
-        }
-        switch method {
-        case "PUT":
-            if files[name] != nil { return respond(p, 200, ["ok": "already here"]) }
-            let sha = SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
-            guard sha == name else { return respond(p, 400, ["error": "contents don't match the name"]) }
-            files[name] = (body, headers["content-type"] ?? "application/octet-stream")
-            log("stored file \(name.prefix(8)) (\(body.count) bytes)")
-            respond(p, 201, ["ok": "stored"])
-        case "GET", "HEAD":
-            guard let f = files[name] else { return respond(p, 404, ["error": "no such file"]) }
-            let head = "HTTP/1.1 200 OK\r\nContent-Type: \(f.type)\r\nContent-Length: \(f.data.count)\r\nConnection: close\r\n\r\n"
-            let payload = method == "GET" ? Data(head.utf8) + f.data : Data(head.utf8)
-            p.conn.send(content: payload, completion: .contentProcessed { _ in p.conn.cancel() })
-        default:
-            respond(p, 404, ["error": "not_found"])
-        }
-    }
-
-    /// A file put here (tests).
-    public func storedFile(_ sha: String) -> Data? { queue.sync { files[sha]?.data } }
-
-    /// A LiveKit access token (HS256 JWT with a video grant).
-    public static func livekitToken(key: String, secret: String, identity: String, name: String, room: String, now: Date = Date()) -> String {
-        func b64(_ d: Data) -> String {
-            d.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        }
-        let t = Int64(now.timeIntervalSince1970)
-        let header: JSON = ["alg": "HS256", "typ": "JWT"]
-        let claims: JSON = [
-            "iss": .string(key), "sub": .string(identity), "name": .string(name),
-            "nbf": .int(t - 10), "exp": .int(t + 6 * 3600),
-            "video": ["room": .string(room), "roomJoin": true, "canPublish": true, "canSubscribe": true],
-        ]
-        let signing = b64(header.data()) + "." + b64(claims.data())
-        let mac = HMAC<SHA256>.authenticationCode(for: Data(signing.utf8), using: SymmetricKey(data: Data(secret.utf8)))
-        return signing + "." + b64(Data(mac))
-    }
-
-    // MARK: WebSocket frames
-
-    private func readFrames(_ p: Peer) {
-        while true {
-            let b = [UInt8](p.buffer.prefix(14))
-            guard b.count >= 2 else { return }
-            let fin = b[0] & 0x80 != 0
-            let opcode = b[0] & 0x0F
-            let masked = b[1] & 0x80 != 0
-            var len = UInt64(b[1] & 0x7F)
-            var at = 2
-            if len == 126 {
-                guard b.count >= 4 else { return }
-                len = UInt64(b[2]) << 8 | UInt64(b[3])
-                at = 4
-            } else if len == 127 {
-                guard b.count >= 10 else { return }
-                len = (2..<10).reduce(UInt64(0)) { $0 << 8 | UInt64(b[$1]) }
-                at = 10
-            }
-            let maskLen = masked ? 4 : 0
-            guard UInt64(p.buffer.count) >= UInt64(at + maskLen) + len else { return }
-            let start = p.buffer.startIndex
-            let mask = masked ? [UInt8](p.buffer[(start + at)..<(start + at + 4)]) : []
-            var payload = [UInt8](p.buffer[(start + at + maskLen)..<(start + at + maskLen + Int(len))])
-            if masked { for i in payload.indices { payload[i] ^= mask[i % 4] } }
-            p.buffer.removeSubrange(start..<(start + at + maskLen + Int(len)))
-            switch opcode {
-            case 0x0, 0x1, 0x2:
-                p.fragments.append(contentsOf: payload)
-                if fin {
-                    let text = String(decoding: p.fragments, as: UTF8.self)
-                    p.fragments = Data()
-                    handle(text, from: p)
-                }
-            case 0x8:
-                frame(p, opcode: 0x8, Data(payload.prefix(2)))
-                drop(p)
-                return
-            case 0x9:
-                frame(p, opcode: 0xA, Data(payload))
-            default:
-                break
-            }
-        }
-    }
-
-    private func frame(_ p: Peer, opcode: UInt8, _ payload: Data) {
-        var head: [UInt8] = [0x80 | opcode]
-        let n = payload.count
-        if n < 126 {
-            head.append(UInt8(n))
-        } else if n <= 0xFFFF {
-            head += [126, UInt8(n >> 8), UInt8(n & 0xFF)]
-        } else {
-            head.append(127)
-            for s in stride(from: 56, through: 0, by: -8) { head.append(UInt8((UInt64(n) >> UInt64(s)) & 0xFF)) }
-        }
-        p.conn.send(content: Data(head) + payload, completion: .contentProcessed { _ in })
-    }
-
     // MARK: protocol
 
-    private func handle(_ text: String, from p: Peer) {
+    func handle(_ text: String, from p: Peer) {
         guard let m = ClientMessage(text: text) else {
             log("unreadable message")
             return
@@ -684,7 +397,7 @@ public final class FakeServer: @unchecked Sendable {
 
     /// Check a hello the way the real server does (first that applies:
     /// reset code, invite, email + password, token).
-    private func hello(_ h: Hello, from p: Peer) {
+    func hello(_ h: Hello, from p: Peer) {
         p.device = h.device
         var newToken: String?
         if requireSignIn {
@@ -748,7 +461,7 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     /// Hub::request: access and backup requests with the real server's rules.
-    private func request(_ m: ClientMessage, from p: Peer) {
+    func request(_ m: ClientMessage, from p: Peer) {
         func deny(_ why: String) { send(.error(code: ServerErrorCode.denied.rawValue, message: why), to: p) }
         if let secs = lateAnswer {
             lateAnswer = nil
@@ -823,7 +536,7 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     /// Keep what goes to `p` for `secs`, then send it in order.
-    private func hold(_ p: Peer, for secs: TimeInterval) {
+    func hold(_ p: Peer, for secs: TimeInterval) {
         if p.held == nil { p.held = [] }
         queue.asyncAfter(deadline: .now() + secs) { [weak self] in
             guard let self, let held = p.held else { return }
@@ -833,7 +546,7 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     /// Hub::access_for: everyone's access as `member` may see it.
-    private func accessFor(_ member: UInt64, answer: Bool = false) -> ServerMessage {
+    func accessFor(_ member: UInt64, answer: Bool = false) -> ServerMessage {
         let viewer = roleOf(member)
         guard viewer.manages else { return .access(people: [], role: viewer, answer: answer) }
         var ids = WorkspaceView(snapshot ?? [:]).members.map(\.id)
@@ -846,25 +559,25 @@ public final class FakeServer: @unchecked Sendable {
         return .access(people: people, role: viewer, answer: answer)
     }
 
-    private func broadcastAccess(except: Peer? = nil) {
+    func broadcastAccess(except: Peer? = nil) {
         for q in peers.values where q.welcomed && q !== except {
             if let m = q.member { send(accessFor(m), to: q) }
         }
     }
 
-    private func addDevice(_ device: String, member: UInt64) -> String {
+    func addDevice(_ device: String, member: UInt64) -> String {
         let token = (0..<4).map { _ in String(format: "%08x", UInt32.random(in: 0...UInt32.max)) }.joined()
         tokens[token] = (member, device)
         return token
     }
 
-    private func memberEmail(_ m: UInt64) -> String? {
+    func memberEmail(_ m: UInt64) -> String? {
         let e = (WorkspaceView(snapshot ?? [:]).member(m)?.email ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         return e.isEmpty ? nil : e
     }
 
     /// error {code: "auth"} and close, like the real server.
-    private func refuse(_ p: Peer, _ why: String) {
+    func refuse(_ p: Peer, _ why: String) {
         log("refused \(p.device?.prefix(8) ?? "?"): \(why)")
         p.welcomed = false
         p.member = nil
@@ -877,7 +590,7 @@ public final class FakeServer: @unchecked Sendable {
         c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in c.cancel() })
     }
 
-    private func setPassword(email: String, password: String, old: String?, from p: Peer) {
+    func setPassword(email: String, password: String, old: String?, from p: Peer) {
         guard let m = p.member else {
             send(.error(code: ServerErrorCode.denied.rawValue, message: "This server has no sign-in."), to: p)
             return
@@ -900,7 +613,7 @@ public final class FakeServer: @unchecked Sendable {
         broadcastAccess()
     }
 
-    private func assignTag(device: String, wanted: UInt64?) -> UInt64 {
+    func assignTag(device: String, wanted: UInt64?) -> UInt64 {
         if let t = tags[device] { return t }
         let used = Set(tags.values)
         var t = wanted.map { $0 % 1024 } ?? 1
@@ -913,7 +626,7 @@ public final class FakeServer: @unchecked Sendable {
 
     /// The tasks in `putBackIds` that a pushed copy changed go back to the
     /// team's version, stamped past the change. True when any did.
-    private func keepTeamVersions(_ s: inout JSON, _ before: JSON) -> Bool {
+    func keepTeamVersions(_ s: inout JSON, _ before: JSON) -> Bool {
         var theirs = SyncMeta(of: s)
         let team = SyncMeta(of: before)
         var tasks = s["tasks"]?.array ?? []
@@ -937,11 +650,11 @@ public final class FakeServer: @unchecked Sendable {
         return refused
     }
 
-    private func broadcast(_ m: ServerMessage) {
+    func broadcast(_ m: ServerMessage) {
         for p in peers.values where p.welcomed { send(m, to: p) }
     }
 
-    private func send(_ m: ServerMessage, to p: Peer) {
+    func send(_ m: ServerMessage, to p: Peer) {
         if p.held != nil { return p.held!.append(m) }
         frame(p, opcode: 0x1, Data(m.text.utf8))
     }

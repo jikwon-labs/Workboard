@@ -1,0 +1,302 @@
+// Popups and menus: opening and closing them, menu rows, and the status,
+// priority and assignee pickers.
+
+use super::*;
+
+/// Opens a popup below `resp` when it is clicked; shows `add` while open.
+pub fn popup<R>(
+    ui: &Ui,
+    resp: &Response,
+    id: egui::Id,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(id));
+    }
+    // a menu taller than the window scrolls inside itself instead of running
+    // off the bottom (egui moves a shorter one up until it fits). Only menus
+    // that were too tall last frame get the scroll area, so ordinary menus
+    // are laid out exactly as before.
+    let screen = ui.ctx().screen_rect();
+    let room = (screen.bottom() - resp.rect.bottom() - 32.0).max(screen.height() * 0.6);
+    let tall_id = id.with("__tall");
+    let tall: f32 = ui.data(|d| d.get_temp(tall_id)).unwrap_or(0.0);
+    // egui only pushes a popup back inside the window, so near the right
+    // edge it touched the edge: move it left to leave a margin (the width
+    // is last frame's, or the minimum before it has been shown)
+    let wide_id = id.with("__wide");
+    let wide: f32 = ui.data(|d| d.get_temp(wide_id)).unwrap_or(width + 24.0);
+    let over = resp.rect.left() + wide + 8.0 - screen.right();
+    let mut at = resp.clone();
+    if over > 0.0 {
+        at.rect = at.rect.translate(vec2(-over, 0.0));
+    }
+    let resp = &at;
+    egui::popup_below_widget(
+        ui,
+        id,
+        resp,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(width);
+            let out = if tall > room {
+                egui::ScrollArea::vertical()
+                    .id_salt(id.with("scroll"))
+                    .max_height(room)
+                    .auto_shrink([true, true])
+                    .show(ui, |ui| {
+                        ui.set_min_width(width);
+                        let r = add(ui);
+                        let h = ui.min_rect().height();
+                        ui.data_mut(|d| d.insert_temp(tall_id, h));
+                        r
+                    })
+                    .inner
+            } else {
+                let top = ui.min_rect().top();
+                let r = add(ui);
+                let h = ui.min_rect().bottom() - top;
+                ui.data_mut(|d| d.insert_temp(tall_id, h));
+                r
+            };
+            // the frame's margin on both sides
+            let w =
+                ui.min_rect().width() + 2.0 * egui::Frame::popup(ui.style()).total_margin().left;
+            ui.data_mut(|d| d.insert_temp(wide_id, w));
+            out
+        },
+    )
+}
+
+/// Opens a real egui menu below `resp` when it is clicked, the same kind a
+/// right click opens: rows draw as menu rows and `ui.menu_button` inside
+/// opens a side submenu instead of a new dropdown over the parent.
+///
+/// egui only opens submenus to the right, so near the right edge of the
+/// window the menu is shifted left to leave room for one.
+pub fn click_menu(resp: &Response, add: impl FnOnce(&mut Ui)) {
+    const MENU_W: f32 = 230.0;
+    const SUB_ROOM: f32 = 240.0;
+    let ctx = &resp.ctx;
+    let bar_id = resp.id.with("__click_menu");
+    let mut st = egui::menu::BarState::load(ctx, bar_id);
+    let open = st.as_ref().is_some_and(|r| r.id == resp.id);
+    let pressed_outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.primary_down())
+        && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
+            !resp.rect.contains(p)
+                && !st
+                    .as_ref()
+                    .is_some_and(|r| r.menu_state.read().area_contains(p))
+        });
+    if open && (resp.clicked() || pressed_outside) {
+        **st = None;
+    } else if resp.clicked() {
+        let screen = ctx.screen_rect();
+        let margin = egui::Frame::menu(&ctx.style()).total_margin().left;
+        let mut pos = resp.rect.left_bottom() + vec2(-margin, ctx.style().spacing.menu_spacing);
+        let max_x = screen.right() - MENU_W - SUB_ROOM;
+        if pos.x > max_x {
+            pos.x = max_x.max(screen.left() + 4.0);
+        }
+        **st = Some(egui::menu::MenuRoot::new(pos, resp.id));
+    }
+    // (MenuRootManager::show returns None while the menu stays open, so
+    // read the state instead)
+    let shown = st.as_ref().is_some_and(|r| r.id == resp.id);
+    st.show(resp, add);
+    st.store(ctx, bar_id);
+    if shown {
+        let nr = ctx.cumulative_pass_nr();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(MENU_SHOWN), nr));
+    }
+}
+
+const MENU_SHOWN: &str = "__wb_click_menu_shown";
+
+/// True when a popup, a right-click menu or a `click_menu` was on screen in
+/// the previous pass. Call it at the start of a pass: egui closes those on
+/// Escape during the pass, so checking later sees them already gone.
+pub fn any_menu_was_open(ctx: &egui::Context) -> bool {
+    let nr = ctx.cumulative_pass_nr();
+    let last: Option<u64> = ctx.data(|d| d.get_temp(egui::Id::new(MENU_SHOWN)));
+    ctx.memory(|m| m.any_popup_open())
+        || ctx.is_context_menu_open()
+        || last.is_some_and(|l| l + 1 >= nr)
+}
+
+pub fn close_popup(ui: &Ui) {
+    ui.memory_mut(|m| m.close_popup());
+}
+
+/// A plain full-width menu row with an optional painted lead.
+pub fn menu_row(
+    ui: &mut Ui,
+    t: &Theme,
+    label: &str,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
+    menu_row_named(ui, t, label, label, selected, lead)
+}
+
+/// A `menu_row` showing `label` whose accessibility name is `name` (a row
+/// that shows a task's name but is called "Pick <name>").
+pub fn menu_row_named(
+    ui: &mut Ui,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
+    let w = ui.available_width().max(160.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    name_it(&resp, name);
+    if resp.hovered() || selected {
+        ui.painter()
+            .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
+    }
+    lead(ui.painter(), rect.left_center() + vec2(14.0, 0.0));
+    ui.painter().text(
+        rect.left_center() + vec2(30.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        t.text,
+    );
+    resp
+}
+
+/// A menu row with no icon: the text starts at the row's edge instead of
+/// after an empty icon slot.
+pub fn menu_row_plain(ui: &mut Ui, t: &Theme, label: &str, selected: bool) -> Response {
+    let w = ui.available_width().max(160.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    name_it(&resp, label);
+    if resp.hovered() || selected {
+        ui.painter()
+            .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
+    }
+    ui.painter().text(
+        rect.left_center() + vec2(10.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        t.text,
+    );
+    resp
+}
+
+pub fn status_menu(ui: &mut Ui, t: &Theme, statuses: &[Status], current: &mut String) -> bool {
+    let mut changed = false;
+    ui.label(egui::RichText::new(tr("Statuses")).small().color(t.text3));
+    for st in statuses {
+        let sel = &st.name == current;
+        let r = menu_row(
+            ui,
+            t,
+            &crate::i18n::status_text(&st.name).to_uppercase(),
+            sel,
+            |p, c| paint_status_circle(p, c, 6.0, st),
+        );
+        if r.clicked() {
+            if !sel {
+                *current = st.name.clone();
+                changed = true;
+            }
+            close_popup(ui);
+        }
+    }
+    changed
+}
+
+pub fn priority_menu(ui: &mut Ui, t: &Theme, current: &mut u8) -> bool {
+    match priority_pick(ui, t, *current) {
+        Some(p) if p != *current => {
+            *current = p;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The priority list; returns the row the user clicked this frame (0 for
+/// Clear), even when it equals `current`. Bulk edit needs "Clear was
+/// clicked" separately from "the value changed".
+pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
+    let mut picked = None;
+    ui.label(
+        egui::RichText::new(tr("Task Priority"))
+            .small()
+            .color(t.text3),
+    );
+    for pr in [1u8, 2, 3, 4] {
+        let col = priority_color(pr, t);
+        let r = menu_row(
+            ui,
+            t,
+            tr(PRIORITIES[pr as usize].label),
+            current == pr,
+            |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0),
+        );
+        if r.clicked() {
+            picked = Some(pr);
+            close_popup(ui);
+        }
+    }
+    ui.separator();
+    let r = menu_row(ui, t, tr("Clear"), false, |p, c| {
+        p.text(
+            c,
+            Align2::CENTER_CENTER,
+            "\u{00D7}",
+            FontId::proportional(10.0),
+            Color32::GRAY,
+        );
+    });
+    if r.clicked() {
+        picked = Some(0);
+        close_popup(ui);
+    }
+    picked
+}
+
+pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>) -> bool {
+    let mut changed = false;
+    ui.label(egui::RichText::new(tr("People")).small().color(t.text3));
+    for m in &data.members {
+        let sel = current.contains(&m.id);
+        let label = if m.id == data.me {
+            crate::trf!("{} (you)", m.name)
+        } else {
+            m.name.clone()
+        };
+        let ring = t.card;
+        let r = menu_row(ui, t, &label, sel, |p, c| paint_avatar(p, c, 9.0, m, ring));
+        if sel {
+            // a drawn tick (the glyph came from the emoji font)
+            let c = r.rect.right_center() - vec2(16.0, 0.0);
+            ui.painter().add(egui::Shape::line(
+                vec![
+                    c + vec2(-4.5, 0.3),
+                    c + vec2(-1.5, 3.3),
+                    c + vec2(4.8, -3.2),
+                ],
+                Stroke::new(1.5_f32, t.selected_text),
+            ));
+        }
+        if r.clicked() {
+            if sel {
+                current.retain(|x| *x != m.id);
+            } else if data.extra.apps.multiple_assignees {
+                current.push(m.id);
+            } else {
+                *current = vec![m.id];
+                close_popup(ui);
+            }
+            changed = true;
+        }
+    }
+    changed
+}

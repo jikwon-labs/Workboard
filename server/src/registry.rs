@@ -170,13 +170,13 @@ impl Registry {
     }
 
     fn hub(&self, id: &str) -> Option<Arc<Hub>> {
-        self.others.lock().unwrap().get(id).cloned()
+        self.others.locked().get(id).cloned()
     }
 
     /// Every workspace, the first one first.
     pub(crate) fn all(&self) -> Vec<Arc<Hub>> {
         let mut v = vec![self.first.clone()];
-        v.extend(self.others.lock().unwrap().values().cloned());
+        v.extend(self.others.locked().values().cloned());
         v
     }
 
@@ -190,17 +190,14 @@ impl Registry {
             "Sign in to a workspace on this server first.".to_string(),
         );
         let (device, token) = bearer(headers).ok_or(unknown.clone())?;
-        let g = self.first.inner.lock().unwrap();
+        let g = self.first.state();
         let Some(d) = g.saved.device_with(device, token) else {
             // a device of another workspace here: signed in, but not of this team
-            let elsewhere = self.others.lock().unwrap().values().any(|h| {
-                h.inner
-                    .lock()
-                    .unwrap()
-                    .saved
-                    .device_with(device, token)
-                    .is_some()
-            });
+            let elsewhere = self
+                .others
+                .locked()
+                .values()
+                .any(|h| h.state().saved.device_with(device, token).is_some());
             return Err(if elsewhere { not_allowed() } else { unknown });
         };
         if !g.saved.role_of(d.member).manages() {
@@ -214,7 +211,7 @@ impl Registry {
 
     /// A new, empty workspace that `owner`'s account sets up.
     fn create(&self, owner: Account) -> Result<String, String> {
-        let mut others = self.others.lock().unwrap();
+        let mut others = self.others.locked();
         if others.len() >= MAX_WORKSPACES {
             return Err(format!(
                 "This server already keeps {} workspaces, the most it can.",
@@ -238,7 +235,7 @@ impl Registry {
         )
         .map_err(|e| format!("Couldn't make the workspace: {}", e))?;
         {
-            let mut g = hub.inner.lock().unwrap();
+            let mut g = hub.state();
             g.saved.seed = Some(owner);
             g.dirty = true;
         }
@@ -254,7 +251,7 @@ impl Registry {
             .all()
             .into_iter()
             .filter(|h| {
-                let g = h.inner.lock().unwrap();
+                let g = h.state();
                 g.canon.is_some() && g.saved.account_member(email).is_some()
             })
             .collect();
@@ -285,11 +282,11 @@ impl Registry {
     /// Remove workspaces made with POST /workspaces that nobody set up within
     /// a day. Returns their ids.
     pub(crate) fn clean_up(&self) -> Vec<String> {
-        let mut others = self.others.lock().unwrap();
+        let mut others = self.others.locked();
         let unclaimed: Vec<String> = others
             .iter()
             .filter(|(_, h)| {
-                let g = h.inner.lock().unwrap();
+                let g = h.state();
                 let empty = g.canon.is_none() && g.saved.devices.is_empty() && g.saved.rev == 0;
                 let old = std::fs::metadata(h.home.join(STATE_FILE))
                     .and_then(|m| m.modified())
@@ -315,7 +312,7 @@ impl Registry {
             StatusCode::UNAUTHORIZED,
             "Sign in to this workspace first.".to_string(),
         ))?;
-        let g = hub.inner.lock().unwrap();
+        let g = hub.state();
         let d = g.saved.device_with(device, token).ok_or((
             StatusCode::UNAUTHORIZED,
             "Sign in to this workspace first.".to_string(),
@@ -334,14 +331,13 @@ impl Registry {
     fn delete(&self, id: &str) -> std::io::Result<PathBuf> {
         let hub = self
             .others
-            .lock()
-            .unwrap()
+            .locked()
             .remove(id)
             .ok_or(std::io::ErrorKind::NotFound)?;
-        self.gone.lock().unwrap().insert(id.to_string());
+        self.gone.locked().insert(id.to_string());
         // its last changes go with it
         hub.flush();
-        let _persistence = hub.persistence.lock().unwrap();
+        let _persistence = hub.persistence.locked();
         hub.closed.send_replace(true);
         let dest = self
             .root
@@ -362,7 +358,7 @@ impl Registry {
         if !id_ok(id) {
             return Err(format!("{} isn't a workspace id.", id));
         }
-        let mut others = self.others.lock().unwrap();
+        let mut others = self.others.locked();
         if others.contains_key(id) {
             return Err(format!("Workspace {} isn't deleted.", id));
         }
@@ -393,7 +389,7 @@ impl Registry {
         .map_err(|e| format!("Couldn't open the workspace: {}", e))?;
         let name = hub.name();
         others.insert(id.to_string(), Arc::new(hub));
-        self.gone.lock().unwrap().remove(id);
+        self.gone.locked().remove(id);
         Ok(name)
     }
 
@@ -404,7 +400,7 @@ impl Registry {
             .into_iter()
             .map(|(id, _, _)| id)
             .collect();
-        self.gone.lock().unwrap().retain(|id| left.contains(id));
+        self.gone.locked().retain(|id| left.contains(id));
         removed
     }
 
@@ -431,7 +427,7 @@ impl Registry {
 
     /// Why there's no workspace `id`: deleted (410) or never was (404).
     fn missing(&self, id: &str) -> Response {
-        if self.gone.lock().unwrap().contains(id) {
+        if self.gone.locked().contains(id) {
             (
                 StatusCode::GONE,
                 Json(json!({ "error": wb_net::WORKSPACE_GONE })),

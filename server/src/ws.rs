@@ -92,11 +92,7 @@ pub(crate) struct Online(Arc<Hub>, String, u64);
 
 impl Online {
     pub(crate) fn new(hub: &Arc<Hub>, device: &str, member: u64) -> Online {
-        *hub.online
-            .lock()
-            .unwrap()
-            .entry(device.to_string())
-            .or_insert(0) += 1;
+        *hub.online.locked().entry(device.to_string()).or_insert(0) += 1;
         hub.member_seen(member, true);
         Online(hub.clone(), device.to_string(), member)
     }
@@ -105,7 +101,7 @@ impl Online {
 impl Drop for Online {
     fn drop(&mut self) {
         {
-            let mut o = self.0.online.lock().unwrap();
+            let mut o = self.0.online.locked();
             if let Some(n) = o.get_mut(&self.1) {
                 *n -= 1;
                 if *n == 0 {
@@ -121,7 +117,7 @@ impl Hub {
     /// A connection of `member` opened (`on`) or closed; tells everyone
     /// when that changes who is online.
     pub(crate) fn member_seen(&self, member: u64, on: bool) {
-        let mut m = self.members_online.lock().unwrap();
+        let mut m = self.members_online.locked();
         if on {
             *m.entry(member).or_insert(0) += 1;
         } else if let Some(n) = m.get_mut(&member) {

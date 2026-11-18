@@ -42,6 +42,8 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::Locked;
+
 pub const APNS_FILE: &str = "apns.json";
 /// Notifications one device gets from one merge before the rest are summed up.
 pub const MAX_PER_DEVICE: usize = 3;
@@ -225,7 +227,7 @@ impl Apns {
 
     /// The JWT to send at `now` (seconds): the same one for JWT_SECS.
     pub fn jwt(&self, now: i64) -> Result<String, String> {
-        let mut g = self.jwt.lock().unwrap();
+        let mut g = self.jwt.locked();
         if let Some((t, made)) = g.as_ref() {
             if now - made < JWT_SECS && now >= *made {
                 return Ok(t.clone());
@@ -257,7 +259,7 @@ impl Apns {
     }
 
     fn forget_jwt(&self) {
-        *self.jwt.lock().unwrap() = None;
+        *self.jwt.locked() = None;
     }
 }
 

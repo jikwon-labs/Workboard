@@ -22,7 +22,7 @@ impl Hub {
             let tries = reset_tries(email);
             let _slot = HashSlot::take(&self.hashing)?;
             {
-                let mut g = self.inner.lock().unwrap();
+                let mut g = self.state();
                 if let Some(why) = g.locked(&tries) {
                     return Err(why);
                 }
@@ -35,7 +35,7 @@ impl Hub {
                 g.failed(&tries);
             }
             let hashed = Account::new("", pw);
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             let key = norm_email(email);
             let fresh = g.resets.get(&key).is_some_and(|(c, t)| {
                 same(&normalize_code(c), &normalize_code(code))
@@ -61,7 +61,7 @@ impl Hub {
         }
         if let Some(code) = given(&h.invite) {
             // a made-up code costs no hashing (checked again below)
-            if self.inner.lock().unwrap().saved.find_invite(code).is_none() {
+            if self.state().saved.find_invite(code).is_none() {
                 return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
             }
             let _slot = match h.new_password {
@@ -74,7 +74,7 @@ impl Hub {
                 .as_deref()
                 .filter(|pw| password_problem(pw).is_none())
                 .map(|pw| Account::new("", pw));
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             let Some(key) = g.saved.find_invite(code) else {
                 return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
             };
@@ -119,7 +119,7 @@ impl Hub {
             return Ok(self.signed_in(g, device, member, h.tag));
         }
         if let Some(token) = &h.token {
-            let g = self.inner.lock().unwrap();
+            let g = self.state();
             return match g.saved.device_with(device, token) {
                 Some(d) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
                 _ => Err("This computer isn't signed in to this server anymore. Sign in with your email and password, or ask the owner or an admin for a new invite code.".into()),
@@ -135,7 +135,7 @@ impl Hub {
                 .as_deref()
                 .filter(|pw| password_problem(pw).is_none())
                 .map(|pw| Account::new("", pw));
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             // a server that once had a workspace (its revision moved past 0)
             // but lost workspace.json is never up for grabs: its owner brings
             // the workspace back with `workboard-server restore`.
@@ -217,7 +217,7 @@ impl Hub {
         // the try counts as a wrong one until the password proves right,
         // so many tries at once can't get past MAX_TRIES while they hash
         let stored = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             if let Some(why) = g.locked(email) {
                 return Err(why);
             }
@@ -234,7 +234,7 @@ impl Hub {
                 false
             }
         };
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.state();
         // the account may have changed or gone meanwhile
         let member = stored
             .filter(|(m, a)| ok && g.saved.accounts.get(m) == Some(a))
@@ -264,7 +264,7 @@ impl Hub {
 
     /// `device` is still signed in here as `member`.
     pub(crate) fn device_is(&self, device: &str, member: u64) -> bool {
-        let g = self.inner.lock().unwrap();
+        let g = self.state();
         g.saved
             .devices
             .get(device)
@@ -282,7 +282,7 @@ impl Hub {
         old: Option<&str>,
     ) -> Result<Msg, String> {
         let existing = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             // a device whose access was taken back (Revoke deletes the
             // password) can't set up a new one
             if !g
@@ -315,7 +315,7 @@ impl Hub {
             }
         }
         let fresh = Account::new(email, password);
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.state();
         // the current password was right: that try doesn't count
         if let Some(a) = &existing {
             g.unfail(&a.email);
@@ -360,7 +360,7 @@ impl Hub {
             return true;
         }
         let target = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             let key = norm_email(email);
             let now = now_ms();
             // at most one mail a minute per address
@@ -412,7 +412,7 @@ impl Hub {
             return (None, None);
         };
         let (to, workspace, inviter) = {
-            let g = self.inner.lock().unwrap();
+            let g = self.state();
             let c = g.canon.as_ref();
             (
                 member_field(c, who, "email"),
@@ -450,7 +450,7 @@ impl Hub {
         role: Role,
         token: Option<String>,
     ) -> (String, Vec<u64>) {
-        let g = self.inner.lock().unwrap();
+        let g = self.state();
         let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
         let manages = g.saved.role_of(member).manages();
         let (snapshot, hidden) = match g

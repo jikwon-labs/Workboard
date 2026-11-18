@@ -20,7 +20,7 @@ impl Hub {
         spaces::clamp_future(&mut data, now_ms() + FUTURE_SKEW_MS);
         // only conversations this copy has can get new messages from it
         let chans = push::channel_ids(&data);
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.state();
         let members_before = member_ids(g.canon.as_ref());
         // the messages already there, to tell which ones are new (only when
         // someone could be notified)
@@ -102,7 +102,7 @@ impl Hub {
         if notes.is_empty() {
             return;
         }
-        let online = self.online.lock().unwrap().clone();
+        let online = self.online.locked().clone();
         let mut jobs: Vec<(String, push::PushToken, Value)> = vec![];
         for (device, tok) in &saved.push {
             let Some(d) = saved.devices.get(device) else {
@@ -126,7 +126,7 @@ impl Hub {
                     push::Outcome::Sent => {}
                     push::Outcome::Gone => {
                         // the app was removed (or the token was never good): forget it
-                        let mut g = hub.inner.lock().unwrap();
+                        let mut g = hub.state();
                         if g.saved
                             .push
                             .get(&device)
@@ -146,7 +146,7 @@ impl Hub {
 
     /// An iPhone's push token (`push_token`).
     pub(crate) fn set_push_token(&self, device: &str, token: &str, platform: &str, env: &str) {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.state();
         if g.saved.set_push_token(device, token, platform, env) {
             g.dirty = true;
         }

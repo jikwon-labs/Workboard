@@ -69,7 +69,7 @@ impl Hub {
     pub(crate) fn call(&self, member: u64, device: &str, channel: u64) -> Result<Msg, String> {
         let cfg = load_livekit(self.setup_home(LIVEKIT_FILE))
             .ok_or("Voice huddles aren't set up on this server yet.")?;
-        let g = self.inner.lock().unwrap();
+        let g = self.state();
         let canon = g
             .canon
             .as_ref()

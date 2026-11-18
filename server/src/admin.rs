@@ -6,7 +6,7 @@ use super::*;
 impl Hub {
     /// The whole team's copy `member` gets, and what is hidden from them.
     pub(crate) fn latest(&self, member: u64) -> Option<(String, Vec<u64>)> {
-        let g = self.inner.lock().unwrap();
+        let g = self.state();
         g.canon.as_ref().map(|c| {
             let manages = g.saved.role_of(member).manages();
             let (data, hidden) =
@@ -26,7 +26,7 @@ impl Hub {
 
     /// `answer`: whether it answers that connection's own request.
     pub(crate) fn access_for(&self, member: u64, answer: bool) -> Msg {
-        let g = self.inner.lock().unwrap();
+        let g = self.state();
         let role = g.saved.role_of(member);
         let people = if role.manages() {
             g.saved.people(g.canon.as_ref(), role)
@@ -44,7 +44,7 @@ impl Hub {
     pub(crate) fn request(&self, member: u64, from: u64, msg: Msg) -> Reply {
         // backups: the owner only (a restore changes everyone's workspace)
         if matches!(msg, Msg::BackupList | Msg::Restore { .. }) {
-            if self.inner.lock().unwrap().saved.role_of(member) != Role::Owner {
+            if self.state().saved.role_of(member) != Role::Owner {
                 return Reply::Denied("Only the owner can see and restore backups.".into());
             }
             return match msg {
@@ -59,7 +59,7 @@ impl Hub {
                 }),
             };
         }
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.state();
         let me = g.saved.role_of(member);
         if !me.manages() {
             return Reply::Denied("Only the owner or an admin can do that.".into());
@@ -190,8 +190,8 @@ impl Hub {
     /// Create a plain member through the same canon and broadcast as app edits.
     pub(crate) fn invite_email(&self, email: &str) -> Result<Value, String> {
         let email = normalize_invite_email(email)?;
-        let _persistence = self.persistence.lock().unwrap();
-        let mut g = self.inner.lock().unwrap();
+        let _persistence = self.persistence.locked();
+        let mut g = self.state();
         let canon = g
             .canon
             .as_ref()
@@ -334,7 +334,7 @@ impl Hub {
                 .get("role")
                 .and_then(|r| serde_json::from_value(r.clone()).ok())
                 .unwrap_or_default();
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             if g.canon.is_some() && !member_exists(g.canon.as_ref(), member) {
                 return json!({"ok": false, "message": format!("No member with id {} in the workspace (see `workboard-server people`).", member)});
             }

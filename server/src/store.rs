@@ -249,7 +249,7 @@ impl Hub {
         {
             mark_restored(&mut data, now_ms());
             let data = wb_sync::shareable(&data);
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             if let Some(cur) = &g.canon {
                 let keep = self.home.join(BACKUP_DIR).join(format!(
                     "before-restore-{}.json",

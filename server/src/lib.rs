@@ -443,6 +443,11 @@ impl Hub {
         })
     }
 
+    /// The workspace's state, locked (see `Locked`).
+    fn state(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner.locked()
+    }
+
     /// Where apps reach this workspace below the server's address: "" for
     /// the first workspace, "/w/<id>" for the others.
     fn prefix(&self) -> String {
@@ -473,7 +478,7 @@ impl Hub {
 
     /// The workspace's name, as its copy says.
     fn name(&self) -> String {
-        let g = self.inner.lock().unwrap();
+        let g = self.state();
         g.canon
             .as_ref()
             .and_then(|c| c.get("workspace"))
@@ -502,13 +507,13 @@ impl Hub {
     /// Apps keep their own copy, so changes a crash loses meanwhile come
     /// back with their next push.
     fn save(&self, now: bool) {
-        let _persistence = self.persistence.lock().unwrap();
+        let _persistence = self.persistence.locked();
         if *self.closed.borrow() {
             return;
         }
         let first_copy = !self.home.join(WORKSPACE_FILE).exists();
         let (canon, saved) = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             let settled = g.canon_due.is_some_and(|(first, last)| {
                 now || first_copy || last.elapsed() >= SAVE_QUIET || first.elapsed() >= SAVE_AT_MOST
             });
@@ -535,7 +540,7 @@ impl Hub {
             .map_err(|e| eprintln!("couldn't save {}: {}", STATE_FILE, e))
             .is_ok();
         if !ok {
-            self.inner.lock().unwrap().dirty = true;
+            self.state().dirty = true;
         }
     }
 
@@ -545,8 +550,7 @@ impl Hub {
         }
         let canon = self
             .inner
-            .lock()
-            .unwrap()
+            .locked()
             .canon
             .as_ref()
             .map(|c| serde_json::to_string(c).unwrap_or_default());
@@ -561,7 +565,7 @@ impl Hub {
     /// and forget wrong sign-in tries that no longer count.
     fn clean_up(&self) {
         let canon = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.state();
             g.prune_fails(now_ms());
             g.canon
                 .as_ref()

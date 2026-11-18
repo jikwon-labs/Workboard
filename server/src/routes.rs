@@ -183,7 +183,7 @@ pub(crate) async fn health(
     if through_proxy(&headers) {
         return Json(json!({ "ok": true })).into_response();
     }
-    let g = hub.inner.lock().unwrap();
+    let g = hub.state();
     let backups = backup_files(&hub.home.join(BACKUP_DIR), "hourly")
         .last()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));

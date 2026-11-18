@@ -14,6 +14,21 @@ pub fn home_dir() -> PathBuf {
     Path::new(&home).join("Library/Application Support/WorkboardServer")
 }
 
+/// Taking a lock that a panicking thread left poisoned: what it guards is
+/// used as it is, instead of every later request for the workspace failing.
+/// (The real server ends on a panic anyway, see main.rs; this keeps a
+/// server running in-process, and any lock taken after a caught panic,
+/// working.)
+pub(crate) trait Locked<T> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> Locked<T> for Mutex<T> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 /// How long the server remembers what a deleted message said (see
 /// Saved::graves): after that, only owners and admins bring it back.
 pub(crate) const GRAVE_DAYS: i64 = 365;
@@ -160,4 +175,23 @@ pub(crate) fn normalize_code(c: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric())
         .map(|c| c.to_ascii_uppercase())
         .collect()
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn a_lock_poisoned_by_a_panic_still_opens() {
+        let m = Arc::new(Mutex::new(1));
+        let m2 = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock().unwrap();
+            panic!("on purpose");
+        })
+        .join();
+        assert!(m.is_poisoned());
+        *m.locked() += 1;
+        assert_eq!(*m.locked(), 2);
+    }
 }

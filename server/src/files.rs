@@ -48,7 +48,7 @@ fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
     let Some((device, token)) = bearer(headers) else {
         return false;
     };
-    let g = hub.inner.lock().unwrap();
+    let g = hub.state();
     g.saved.device_with(device, token).is_some()
 }
 

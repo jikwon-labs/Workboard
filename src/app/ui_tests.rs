@@ -771,6 +771,70 @@ fn drag_board_card_to_another_column() {
     );
 }
 
+/// A long List draws only the rows in view: a row far down is still there
+/// by name (and for the arrow keys), but its controls are drawn only once
+/// it's scrolled to, and then they work. The Board does the same with the
+/// cards in a long column.
+#[test]
+fn a_long_list_draws_the_rows_in_view_and_the_rest_on_scrolling() {
+    let mut h = Ui1::new();
+    let list = h.app.data.tasks[0].list_id;
+    for i in 0..300 {
+        h.app.apply(Action::Add {
+            list,
+            name: format!("Bulk task {:03}", i),
+            status: None,
+            priority: 0,
+            assignees: vec![],
+            due: None,
+            parent: None,
+            open: false,
+        });
+    }
+    h.app.actions.push(Action::Go(Location::List(list)));
+    h.settle();
+    let far = "Bulk task 299";
+    assert!(
+        h.has(&format!("Task {}", far)),
+        "a row out of view keeps its name"
+    );
+    assert!(
+        !h.has(&format!("Status of {}", far)),
+        "but its controls aren't drawn"
+    );
+    assert!(
+        h.app.row_order.len() > 300,
+        "and it keeps its place for the arrow keys"
+    );
+    // down to it with the mouse wheel
+    h.frame(vec![egui::Event::PointerMoved(pos2(700.0, 500.0))]);
+    for _ in 0..4 {
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -20_000.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    h.scroll_into_view(&format!("Task {}", far));
+    assert!(h.has(&format!("Status of {}", far)), "drawn once in view");
+    assert!(
+        !h.has("Status of Bulk task 000"),
+        "and the top rows aren't any more"
+    );
+    h.click(&format!("Status of {}", far));
+    h.click("IN PROGRESS");
+    let t = h.app.data.tasks.iter().find(|t| t.name == far).unwrap();
+    assert_eq!(t.status, "in progress");
+
+    h.click("View Board");
+    h.settle();
+    let card = "Card Bulk task 000";
+    assert!(h.has(card));
+    h.click(card);
+    assert!(h.app.open_task.is_some(), "a card far down opens");
+}
+
 #[test]
 fn right_click_delete_then_restore_from_trash() {
     let mut h = Ui1::new();

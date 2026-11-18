@@ -3770,9 +3770,13 @@ impl App {
         self.list_keys(ui.ctx());
         self.row_order = self.row_spots.drain(..).map(|s| s.id).collect();
         self.row_groups.clear();
-        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
-        let refs: Vec<&Task> = tasks.iter().collect();
-        let groups = self.groups(&refs, false);
+        // the tasks by id: each row looks its task up when it's drawn, so
+        // the list isn't copied on every frame
+        let (groups, shown) = {
+            let refs = self.filtered();
+            let shown: HashSet<u64> = refs.iter().map(|t| t.id).collect();
+            (self.groups(&refs, false), shown)
+        };
         // one column header row for the whole list
         let w = ui.available_width();
         let (hr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
@@ -3969,7 +3973,7 @@ impl App {
                     });
                 }
                 for g in &groups {
-                    self.list_group(ui, g, &tasks);
+                    self.list_group(ui, g, &shown);
                     ui.add_space(12.0);
                 }
                 self.finish_row_drag(ui);
@@ -3993,7 +3997,7 @@ impl App {
         }
     }
 
-    fn list_group(&mut self, ui: &mut Ui, g: &Group, tasks: &[Task]) {
+    fn list_group(&mut self, ui: &mut Ui, g: &Group, shown: &HashSet<u64>) {
         let t = self.t();
         self.row_groups.push(g.clone());
         let collapsed = self.collapsed.contains(&g.key);
@@ -4054,28 +4058,25 @@ impl App {
         if collapsed {
             return;
         }
-        let rows: Vec<&Task> = g
-            .tasks
-            .iter()
-            .filter_map(|id| tasks.iter().find(|x| x.id == *id))
-            .collect();
-        for task in rows {
-            self.task_row(ui, task, 0);
-            if self.subtasks_open || self.expanded_tasks.contains(&task.id) {
+        for &id in g.tasks.iter().filter(|id| shown.contains(id)) {
+            self.task_row_by_id(ui, id, 0);
+            if self.subtasks_open || self.expanded_tasks.contains(&id) {
                 // a subtask that is a row of its own here (my subtasks on My
                 // Tasks) isn't shown a second time under its parent
-                let subs: Vec<Task> = self
-                    .subtasks(task.id)
+                let subs: Vec<u64> = self
+                    .subtasks(id)
                     .into_iter()
-                    .filter(|s| !tasks.iter().any(|x| x.id == s.id))
-                    .cloned()
+                    .filter(|s| !shown.contains(&s.id))
+                    .map(|s| s.id)
                     .collect();
-                for s in &subs {
-                    self.task_row(ui, s, 1);
+                for s in subs {
+                    self.task_row_by_id(ui, s, 1);
                 }
             }
-            if self.sub_adding.as_ref().is_some_and(|(p, _)| *p == task.id) {
-                self.sub_add_row(ui, task);
+            if self.sub_adding.as_ref().is_some_and(|(p, _)| *p == id) {
+                if let Some(task) = self.task(id).cloned() {
+                    self.sub_add_row(ui, &task);
+                }
             }
         }
         let w = ui.available_width();
@@ -4141,14 +4142,47 @@ impl App {
         }
     }
 
-    fn task_row(&mut self, ui: &mut Ui, task: &Task, depth: usize) {
-        let t = self.t();
-        let w = ui.available_width();
-        let row_h = if self.data.extra.labs.iter().any(|l| l == "compact") {
+    fn list_row_h(&self) -> f32 {
+        if self.data.extra.labs.iter().any(|l| l == "compact") {
             30.0
         } else {
             36.0
-        };
+        }
+    }
+
+    /// A List row by task id. A row scrolled out of view keeps its place,
+    /// its name and its spot for the arrow keys and dragging, but isn't
+    /// drawn and its task isn't copied: a long list draws only what shows.
+    fn task_row_by_id(&mut self, ui: &mut Ui, id: u64, depth: usize) {
+        let row_h = self.list_row_h();
+        let w = ui.available_width();
+        let next = Rect::from_min_size(ui.cursor().min, vec2(w, row_h));
+        let busy =
+            self.row_drag == Some(id) || self.row_rename.as_ref().is_some_and(|(r, _)| *r == id);
+        if !ui.is_rect_visible(next) && !busy {
+            let Some(task) = self.task(id) else {
+                return;
+            };
+            let (name, parent) = (format!("Task {}", task.name), task.parent);
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::click_and_drag());
+            name_it(&resp, &name);
+            self.row_spots.push(super::listview::RowSpot {
+                id,
+                parent,
+                rect,
+                group: self.row_groups.len().saturating_sub(1),
+            });
+            return;
+        }
+        if let Some(task) = self.task(id).cloned() {
+            self.task_row(ui, &task, depth);
+        }
+    }
+
+    fn task_row(&mut self, ui: &mut Ui, task: &Task, depth: usize) {
+        let t = self.t();
+        let w = ui.available_width();
+        let row_h = self.list_row_h();
         // drag a row to put it in a new place (Sort: Manual) or group
         let (rect, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::click_and_drag());
         name_it(&resp, &format!("Task {}", task.name));
@@ -4188,8 +4222,7 @@ impl App {
         let st = self.data.status_of(task);
         let closed = matches!(st.kind, StatusKind::Closed | StatusKind::Done);
         let mut x = rect.left() + 14.0 + depth as f32 * 26.0;
-        let subs: Vec<Task> = self.subtasks(task.id).into_iter().cloned().collect();
-        let nsub = subs.len();
+        let nsub = self.subtasks(task.id).len();
         if nsub > 0 {
             let ar = Rect::from_center_size(pos2(x, rect.center().y), vec2(16.0, 16.0));
             let a = ui.interact(ar, id.with("exp"), Sense::click());
@@ -4591,9 +4624,12 @@ impl App {
 
     pub(super) fn board_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
-        let refs: Vec<&Task> = tasks.iter().collect();
-        let groups = self.groups(&refs, true);
+        // the cards by id: each looks its task up when it's drawn, so the
+        // board isn't copied on every frame
+        let groups = {
+            let refs = self.filtered();
+            self.groups(&refs, true)
+        };
         // closed tasks are hidden by default: their columns say how many
         // instead of a plain 0
         let mut hidden_closed: HashMap<String, usize> = HashMap::new();
@@ -4602,7 +4638,7 @@ impl App {
             for x in self.filtered() {
                 if self.data.is_closed(x) {
                     *hidden_closed
-                        .entry(self.data.status_of(x).name.clone())
+                        .entry(self.data.status_ref(x).name.clone())
                         .or_default() += 1;
                 }
             }
@@ -4716,15 +4752,17 @@ impl App {
                                     .auto_shrink([false, true])
                                     .max_height(ui.available_height() - 60.0)
                                     .show(ui, |ui| {
-                                        for id in &g.tasks {
-                                            if let Some(task) = tasks.iter().find(|x| x.id == *id) {
-                                                let resp = self.board_card(ui, task, col_w - 16.0);
-                                                name_it(&resp, &format!("Card {}", task.name));
-                                                let tid = task.id;
-                                                resp.context_menu(|ui| self.task_menu(ui, tid));
-                                                if resp.clicked() {
-                                                    self.actions.push(Action::Open(task.id));
-                                                }
+                                        for &tid in &g.tasks {
+                                            let Some(name) =
+                                                self.task(tid).map(|x| format!("Card {}", x.name))
+                                            else {
+                                                continue;
+                                            };
+                                            let resp = self.board_card_by_id(ui, tid, col_w - 16.0);
+                                            name_it(&resp, &name);
+                                            resp.context_menu(|ui| self.task_menu(ui, tid));
+                                            if resp.clicked() {
+                                                self.actions.push(Action::Open(tid));
                                             }
                                         }
                                         if hidden > 0 {
@@ -4884,6 +4922,27 @@ impl App {
     /// open, with its assignee, date and priority boxes and "..." clickable
     /// on top. (egui's drag source covers what's inside it, so the card
     /// takes its drag and click under the boxes instead.)
+    /// A Board card by task id. A card scrolled out of its column's view
+    /// (its height known from when it was drawn) keeps its place and name
+    /// but isn't drawn and its task isn't copied.
+    fn board_card_by_id(&mut self, ui: &mut Ui, tid: u64, w: f32) -> Response {
+        let id = egui::Id::new(("card", tid));
+        let known: Option<f32> = ui.data(|d| d.get_temp(id.with("h")));
+        if let Some(h) = known {
+            let rect = Rect::from_min_size(ui.cursor().min, vec2(w, h));
+            if !ui.is_rect_visible(rect) && !ui.ctx().is_being_dragged(id) {
+                let resp = ui.interact(rect, id, Sense::click_and_drag());
+                ui.allocate_rect(rect, Sense::hover());
+                ui.add_space(6.0);
+                return resp;
+            }
+        }
+        match self.task(tid).cloned() {
+            Some(task) => self.board_card(ui, &task, w),
+            None => ui.allocate_response(egui::Vec2::ZERO, Sense::hover()),
+        }
+    }
+
     fn board_card(&mut self, ui: &mut Ui, task: &Task, w: f32) -> Response {
         let id = egui::Id::new(("card", task.id));
         let h_id = id.with("h");

@@ -40,6 +40,54 @@ fn add_task(a: &mut App, list: u64, name: &str) -> u64 {
         .expect("task was added")
 }
 
+/// Tasks are looked up by id and by parent through an index made once per
+/// change; it gives the right answer right after tasks are added, deleted,
+/// moved under another and changed by hand, before and after a frame.
+#[test]
+fn task_lookups_stay_right_as_tasks_change() {
+    let mut a = app();
+    let ctx = egui::Context::default();
+    let frame = |a: &mut App| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| a.ui_frame(ctx));
+    };
+    frame(&mut a);
+    let list = list_ids(&a)[0];
+    let p = add_task(&mut a, list, "Parent");
+    let c = add_task(&mut a, list, "Child");
+    assert_eq!(a.task(c).unwrap().name, "Child", "before a frame");
+    frame(&mut a);
+    assert_eq!(a.task(p).unwrap().name, "Parent");
+    assert!(a.subtasks(p).is_empty());
+
+    // made a subtask (an edit, taken in on the next frame)
+    let mut child = a.task(c).unwrap().clone();
+    child.parent = Some(p);
+    a.apply(Action::Replace(child));
+    assert_eq!(a.subtasks(p).len(), 1, "right away");
+    frame(&mut a);
+    assert_eq!(a.subtasks(p)[0].id, c);
+
+    // tasks shuffled by hand: a stale place is never taken for another task
+    a.data.tasks.reverse();
+    assert_eq!(a.task(c).unwrap().id, c);
+    assert_eq!(a.task(p).unwrap().id, p);
+
+    // deleted
+    a.apply(Action::DeleteTask(c));
+    frame(&mut a);
+    assert!(a.task(c).is_none());
+    assert!(a.subtasks(p).is_empty());
+    assert_eq!(a.task(p).unwrap().name, "Parent");
+
+    // a status is lent, not copied, and is the list's own
+    let t = a.task(p).unwrap();
+    assert_eq!(a.data.status_ref(t).name, a.data.status_of(t).name);
+    assert!(std::ptr::eq(
+        a.data.status_ref(t),
+        &a.data.statuses_ref(list)[0]
+    ));
+}
+
 #[test]
 fn create_task_gets_first_status_and_activity() {
     let mut a = app();

@@ -61,6 +61,12 @@ pub fn default_statuses() -> Vec<Status> {
     ]
 }
 
+/// `default_statuses`, made once, to lend out.
+pub fn default_statuses_ref() -> &'static [Status] {
+    static D: std::sync::OnceLock<Vec<Status>> = std::sync::OnceLock::new();
+    D.get_or_init(default_statuses)
+}
+
 /// Priority levels: 0 = none, 1 = urgent, 2 = high, 3 = normal, 4 = low.
 pub struct PriorityDef {
     pub label: &'static str,
@@ -2486,22 +2492,35 @@ impl Data {
     }
 
     pub fn statuses_for_list(&self, list_id: u64) -> Vec<Status> {
-        self.space_of_list(list_id)
-            .map(|s| s.statuses.clone())
-            .unwrap_or_else(default_statuses)
+        self.statuses_ref(list_id).to_vec()
+    }
+
+    /// The statuses of a list's space (the default ones outside any), without
+    /// copying them: views ask for them for every task on every frame.
+    pub fn statuses_ref(&self, list_id: u64) -> &[Status] {
+        match self.space_of_list(list_id) {
+            Some(s) => &s.statuses,
+            None => default_statuses_ref(),
+        }
     }
 
     pub fn status_of(&self, t: &Task) -> Status {
-        let sts = self.statuses_for_list(t.list_id);
+        self.status_ref(t).clone()
+    }
+
+    /// The task's status as set up in its space (its first status when the
+    /// name isn't there any more), without copying it.
+    pub fn status_ref(&self, t: &Task) -> &Status {
+        let sts = self.statuses_ref(t.list_id);
         sts.iter()
             .find(|s| s.name == t.status)
-            .cloned()
-            .unwrap_or_else(|| sts[0].clone())
+            .or(sts.first())
+            .unwrap_or(&default_statuses_ref()[0])
     }
 
     pub fn is_closed(&self, t: &Task) -> bool {
         matches!(
-            self.status_of(t).kind,
+            self.status_ref(t).kind,
             StatusKind::Closed | StatusKind::Done
         )
     }

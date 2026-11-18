@@ -355,6 +355,58 @@ struct Drafts {
     thread_picked: DraftBox<Vec<u64>>,
 }
 
+/// What a task's list says about it: whose private space it's in, whether
+/// it or its folder or space is archived, and its space's statuses.
+struct ListInfo<'a> {
+    private_owner: Option<u64>,
+    archived: bool,
+    statuses: &'a [Status],
+}
+
+/// Every list's `ListInfo`, for going over many tasks at once (looking each
+/// task's list up on its own walks all the spaces every time).
+fn list_infos(d: &Data) -> HashMap<u64, ListInfo<'_>> {
+    let mut out = HashMap::new();
+    for s in &d.spaces {
+        let info = |l: &ListItem, folder_archived: bool| ListInfo {
+            private_owner: s.private_owner,
+            archived: l.archived || folder_archived || s.archived,
+            statuses: &s.statuses,
+        };
+        for l in &s.lists {
+            out.entry(l.id).or_insert_with(|| info(l, false));
+        }
+        for f in &s.folders {
+            for l in &f.lists {
+                out.entry(l.id).or_insert_with(|| info(l, f.archived));
+            }
+        }
+    }
+    out
+}
+
+/// `Data::is_closed` with the lists looked up already.
+fn closed_in(info: &HashMap<u64, ListInfo>, t: &Task) -> bool {
+    let sts = info
+        .get(&t.list_id)
+        .map_or(default_statuses_ref(), |l| l.statuses);
+    let st = sts
+        .iter()
+        .find(|s| s.name == t.status)
+        .or(sts.first())
+        .unwrap_or(&default_statuses_ref()[0]);
+    matches!(st.kind, StatusKind::Closed | StatusKind::Done)
+}
+
+/// See `App::task_index`.
+#[derive(Default)]
+pub(super) struct TaskIndex {
+    /// The workspace's change count and number of tasks it was made for.
+    key: Option<(u64, usize)>,
+    at: HashMap<u64, usize>,
+    children: HashMap<u64, Vec<usize>>,
+}
+
 pub struct App {
     /// A popup or menu was open when this pass began (egui closes them on
     /// Escape partway through the pass, so later checks see them gone).
@@ -408,6 +460,8 @@ pub struct App {
     data_gen: std::cell::Cell<u64>,
     /// The Inbox rows and counts asked for on every frame (nav.rs).
     inbox_cache: std::cell::RefCell<nav::InboxCache>,
+    /// Tasks by id and by parent (`task_index`).
+    task_index: std::cell::RefCell<TaskIndex>,
     screenshot: Option<PathBuf>,
     frames: u32,
     shot_sent: bool,
@@ -754,6 +808,7 @@ impl App {
             save_due: std::cell::Cell::new(None),
             data_gen: std::cell::Cell::new(0),
             inbox_cache: Default::default(),
+            task_index: Default::default(),
             screenshot,
             frames: 0,
             shot_sent: false,
@@ -926,18 +981,63 @@ impl App {
 
     // ---------------------------------------------------------------- data helpers
 
+    /// Where each task is (by id) and which tasks are under each parent, so
+    /// views can look tasks up for every row on every frame. Made again
+    /// once the workspace changed (`data_changed`) or the number of tasks
+    /// did; until then a stale entry can only miss, never give the wrong
+    /// task, since every lookup checks what it found.
+    fn task_index(&self) -> std::cell::Ref<'_, TaskIndex> {
+        let key = (self.data_gen.get(), self.data.tasks.len());
+        if self.task_index.borrow().key != Some(key) {
+            let mut ix = self.task_index.borrow_mut();
+            ix.key = Some(key);
+            ix.at.clear();
+            ix.children.clear();
+            for (i, t) in self.data.tasks.iter().enumerate() {
+                ix.at.insert(t.id, i);
+                if let Some(p) = t.parent {
+                    ix.children.entry(p).or_default().push(i);
+                }
+            }
+        }
+        self.task_index.borrow()
+    }
+
     fn task(&self, id: u64) -> Option<&Task> {
+        let found = {
+            let ix = self.task_index();
+            match ix.at.get(&id) {
+                Some(&i) => Some(i),
+                // the index is up to date and has no such task
+                None if !self.dirty => return None,
+                None => None,
+            }
+        };
+        if let Some(t) = found.and_then(|i| self.data.tasks.get(i)) {
+            if t.id == id {
+                return Some(t);
+            }
+        }
+        // a change not taken in yet moved things: look the slow way
         self.data.tasks.iter().find(|t| t.id == id)
     }
 
     fn subtasks(&self, id: u64) -> Vec<&Task> {
         // archived subtasks only show with the Archived filter on
-        let mut v: Vec<&Task> = self
-            .data
-            .tasks
-            .iter()
-            .filter(|t| t.parent == Some(id) && (self.filter.archived || !t.archived))
-            .collect();
+        let shows = |t: &Task| t.parent == Some(id) && (self.filter.archived || !t.archived);
+        let mut v: Vec<&Task> = if self.dirty {
+            // a change not taken in yet may have moved one under it
+            self.data.tasks.iter().filter(|t| shows(t)).collect()
+        } else {
+            let ix = self.task_index();
+            ix.children
+                .get(&id)
+                .into_iter()
+                .flatten()
+                .filter_map(|&i| self.data.tasks.get(i))
+                .filter(|t| shows(t))
+                .collect()
+        };
         v.sort_by_key(|t| t.order);
         v
     }
@@ -947,6 +1047,8 @@ impl App {
     fn filtered(&self) -> Vec<&Task> {
         let lists = self.data.lists_in(self.loc);
         let q = self.search.to_lowercase();
+        // each list's space and statuses, found once instead of per task
+        let info = list_infos(&self.data);
         let mut v: Vec<&Task> = self
             .data
             .tasks
@@ -968,10 +1070,10 @@ impl App {
             })
             .filter(|t| q.is_empty() || t.name.to_lowercase().contains(&q) || t.tags.iter().any(|g| g.to_lowercase().contains(&q)))
             .filter(|t| !self.me_mode || t.assignees.contains(&self.data.me))
-            .filter(|t| self.data.space_of_list(t.list_id).and_then(|s| s.private_owner).map(|o| o == self.data.me).unwrap_or(true))
-            .filter(|t| matches!(self.loc, Location::List(_)) || !self.data.list_archived(t.list_id))
+            .filter(|t| info.get(&t.list_id).and_then(|l| l.private_owner).map(|o| o == self.data.me).unwrap_or(true))
+            .filter(|t| matches!(self.loc, Location::List(_)) || !info.get(&t.list_id).is_some_and(|l| l.archived))
             .filter(|t| self.assignee_filter.map(|a| t.assignees.contains(&a)).unwrap_or(true))
-            .filter(|t| self.show_closed || self.filter.archived || !self.data.is_closed(t))
+            .filter(|t| self.show_closed || self.filter.archived || !closed_in(&info, t))
             .filter(|t| self.filter.matches(t, &self.data))
             .collect();
         self.sort(&mut v);
@@ -998,7 +1100,8 @@ impl App {
             SortBy::Priority => {
                 v.sort_by_key(|t| (if t.priority == 0 { 9 } else { t.priority }, t.order))
             }
-            SortBy::Name => v.sort_by_key(|t| t.name.to_lowercase()),
+            // each name lowered once, not on every comparison
+            SortBy::Name => v.sort_by_cached_key(|t| t.name.to_lowercase()),
             SortBy::Created => v.sort_by_key(|t| std::cmp::Reverse(t.created)),
             SortBy::Updated => v.sort_by_key(|t| std::cmp::Reverse(t.updated)),
             // a day without a time first (it starts with the day), then by time
@@ -1015,11 +1118,11 @@ impl App {
                     .into_iter()
                     .map(|s| s.name)
                     .collect();
-                v.sort_by_key(|t| {
+                v.sort_by_cached_key(|t| {
                     (
                         order
                             .iter()
-                            .position(|n| *n == self.data.status_of(t).name)
+                            .position(|n| *n == self.data.status_ref(t).name)
                             .unwrap_or(usize::MAX),
                         t.order,
                     )
@@ -1096,7 +1199,7 @@ impl App {
                     }
                     let ids: Vec<u64> = tasks
                         .iter()
-                        .filter(|x| self.data.status_of(x).name == st.name)
+                        .filter(|x| self.data.status_ref(x).name == st.name)
                         .map(|x| x.id)
                         .collect();
                     if ids.is_empty() && !include_empty {
@@ -1187,14 +1290,20 @@ impl App {
                 keys.push(format!("+{}", DUE_GROUP_CAP));
                 keys.push("null".into());
                 keys.push("done".into());
+                // each task's bucket worked out once, not once per bucket
+                let task_keys: Vec<String> = tasks
+                    .iter()
+                    .map(|x| due_group_key(x.due, self.data.is_closed(x)))
+                    .collect();
                 for k in keys {
                     if k == "done" && !self.show_closed && !include_empty {
                         continue;
                     }
                     let ids: Vec<u64> = tasks
                         .iter()
-                        .filter(|x| due_group_key(x.due, self.data.is_closed(x)) == k)
-                        .map(|x| x.id)
+                        .zip(&task_keys)
+                        .filter(|(_, tk)| **tk == k)
+                        .map(|(x, _)| x.id)
                         .collect();
                     if ids.is_empty() && !include_empty {
                         continue;

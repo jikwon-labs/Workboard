@@ -98,7 +98,7 @@ impl Hub {
         let token = call_token(
             &cfg,
             &self.room(channel),
-            &format!("{}-{}", member, device),
+            &wb_net::call_identity(member, device),
             &name,
             now_ms() / 1000,
         );

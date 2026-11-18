@@ -189,6 +189,19 @@ fn pct_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// A huddle participant's LiveKit identity, "<member id>-<device>": the
+/// server writes it into the call token (one identity per computer, so the
+/// same person can be in a call from two), and apps read the member back
+/// out of it (`identity_member`).
+pub fn call_identity(member: u64, device: &str) -> String {
+    format!("{}-{}", member, device)
+}
+
+/// The member a huddle participant is, from their identity (`call_identity`).
+pub fn identity_member(identity: &str) -> Option<u64> {
+    identity.split('-').next()?.parse().ok()
+}
+
 /// A backup of the team's copy on the server.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Backup {
@@ -1405,6 +1418,13 @@ mod tests {
             "https://wb.example.com:8443/updates/appcast.xml"
         );
         assert!(server_url("h:port").is_err());
+    }
+
+    #[test]
+    fn a_call_identity_names_its_member() {
+        assert_eq!(call_identity(42, "dev-1"), "42-dev-1");
+        assert_eq!(identity_member(&call_identity(42, "dev-1")), Some(42));
+        assert_eq!(identity_member("someone"), None);
     }
 
     #[test]

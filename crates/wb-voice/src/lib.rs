@@ -61,7 +61,7 @@ pub enum Audio {
 /// Someone in the call.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Person {
-    /// LiveKit identity: "<member id>-<device>" (see workboard-server).
+    /// LiveKit identity: "<member id>-<device>" (`wb_net::call_identity`).
     pub identity: String,
     pub name: String,
     pub me: bool,
@@ -78,7 +78,7 @@ pub struct Person {
 impl Person {
     /// The workspace member this person is.
     pub fn member(&self) -> Option<u64> {
-        self.identity.split('-').next()?.parse().ok()
+        wb_net::identity_member(&self.identity)
     }
 }
 

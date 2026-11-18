@@ -1756,8 +1756,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Copy link")).clicked() {
-            ui.ctx().copy_text(format!("workboard://doc/{}", id));
-            self.toast(tr("Link copied"));
+            self.copy_link(ui, nav::doc_link(id));
             close_any(ui);
         }
         if ui.button(tr("Duplicate")).clicked() {

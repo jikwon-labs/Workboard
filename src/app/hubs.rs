@@ -1017,8 +1017,7 @@ impl App {
                             }
                         }
                         if ui.add(ghost(egui::Button::new(tr("Copy link")))).clicked() {
-                            ui.ctx().copy_text(format!("workboard://doc/{}", id));
-                            self.toast(tr("Link copied"));
+                            self.copy_link(ui, nav::doc_link(id));
                         }
                         let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else {
                             return;

@@ -75,6 +75,16 @@ pub(crate) fn location_link(loc: Location) -> String {
     }
 }
 
+/// The workboard:// link of a task (read back by `parse_link`).
+pub(crate) fn task_link(id: u64) -> String {
+    format!("workboard://task/{}", id)
+}
+
+/// The workboard:// link of a doc (read back by `parse_link`).
+pub(crate) fn doc_link(id: u64) -> String {
+    format!("workboard://doc/{}", id)
+}
+
 /// The workboard:// links in a text that `parse_link` can read, with the
 /// character range each one takes (start, end), in order.
 pub(crate) fn find_links(text: &str) -> Vec<(usize, usize, String)> {
@@ -175,6 +185,12 @@ pub(super) struct InboxCache {
 }
 
 impl App {
+    /// Copies a workboard:// link (Copy link in the menus) and says so.
+    pub(crate) fn copy_link(&mut self, ui: &Ui, link: String) {
+        ui.ctx().copy_text(link);
+        self.toast(tr("Link copied"));
+    }
+
     /// Something in the workspace changed: what was worked out from it (the
     /// Inbox rows) is worked out again when next asked for.
     pub(super) fn data_changed(&self) {

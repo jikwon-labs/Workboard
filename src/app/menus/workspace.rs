@@ -521,8 +521,7 @@ impl App {
             }
             if icon_button(ui, t, "link", tr("Copy link"), "Copy link", true).clicked() {
                 // the same kind of link the app opens (search, messages, macOS)
-                ui.ctx().copy_text(super::nav::location_link(self.loc));
-                self.toast(tr("Link copied"));
+                self.copy_link(ui, super::nav::location_link(self.loc));
             }
         });
         close

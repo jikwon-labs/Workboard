@@ -301,8 +301,7 @@ impl App {
                                 close_popup(ui);
                             }
                             if ui.button(tr("Copy link")).clicked() {
-                                ui.ctx().copy_text(format!("workboard://task/{}", tid));
-                                self.toast(tr("Link copied"));
+                                self.copy_link(ui, nav::task_link(tid));
                                 close_popup(ui);
                             }
                             if ui

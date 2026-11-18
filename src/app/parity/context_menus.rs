@@ -15,8 +15,7 @@ impl App {
         ui.set_min_width(220.0);
         ui.horizontal(|ui| {
             if ui.button(tr("Copy link")).clicked() {
-                ui.ctx().copy_text(format!("workboard://task/{}", tid));
-                self.toast(tr("Link copied"));
+                self.copy_link(ui, nav::task_link(tid));
                 close_any(ui);
             }
             if ui.button(tr("Copy ID")).clicked() {
@@ -292,8 +291,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Copy link")).clicked() {
-            ui.ctx().copy_text(format!("workboard://list/{}", lid));
-            self.toast(tr("Link copied"));
+            self.copy_link(ui, nav::location_link(Location::List(lid)));
             close_any(ui);
         }
         if ui.button(tr("List Info")).clicked() {
@@ -419,8 +417,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Copy link")).clicked() {
-            ui.ctx().copy_text(format!("workboard://folder/{}", fid));
-            self.toast(tr("Link copied"));
+            self.copy_link(ui, nav::location_link(Location::Folder(fid)));
             close_any(ui);
         }
         ui.separator();
@@ -554,8 +551,7 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Copy link")).clicked() {
-            ui.ctx().copy_text(format!("workboard://space/{}", sid));
-            self.toast(tr("Link copied"));
+            self.copy_link(ui, nav::location_link(Location::Space(sid)));
             close_any(ui);
         }
         let personal = self

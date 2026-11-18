@@ -57,7 +57,7 @@ use tokio::sync::{broadcast, watch};
 use tokio_tungstenite::tungstenite::protocol::{Role as WsRole, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
-use wb_net::{Backup, Msg, Person, Role, CODE_AUTH, CODE_DENIED, MIN_PASSWORD};
+use wb_net::{Backup, Msg, Person, Role, SignIn, CODE_AUTH, CODE_DENIED, MIN_PASSWORD};
 
 mod files;
 pub use files::{collect_garbage, file_name_ok, parse_range, FILES_DIR, FILE_KEEP_DAYS, MAX_FILE};
@@ -232,19 +232,9 @@ fn reset_tries(email: &str) -> String {
     format!("reset code {}", norm_email(email))
 }
 
-/// What a hello asked for.
-#[derive(Default)]
-struct Hello {
-    device: String,
-    tag: Option<u16>,
-    token: Option<String>,
-    invite: Option<String>,
-    claim: Option<u64>,
-    email: Option<String>,
-    password: Option<String>,
-    new_password: Option<String>,
-    reset_code: Option<String>,
-}
+/// What a hello asked for: how the app signs in, as wb_net reads it from
+/// the message (`SignIn::try_from`).
+type Hello = SignIn;
 
 fn given(s: &Option<String>) -> Option<&str> {
     s.as_deref().filter(|v| !v.trim().is_empty())

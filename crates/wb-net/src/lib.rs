@@ -752,6 +752,65 @@ pub struct SignIn {
     pub full_copies: bool,
 }
 
+/// The hello a computer signs in with.
+impl From<&SignIn> for Msg {
+    fn from(s: &SignIn) -> Msg {
+        Msg::Hello {
+            device: s.device.clone(),
+            tag: s.tag,
+            token: s.token.clone(),
+            invite: s.invite.clone(),
+            claim: s.claim,
+            email: s.email.clone(),
+            password: s.password.clone(),
+            new_password: s.new_password.clone(),
+            reset_code: s.reset_code.clone(),
+            app: s.app.clone(),
+            sync: s.sync,
+            deltas: !s.full_copies,
+        }
+    }
+}
+
+/// How a hello signs in (the server's side). Any other message comes back
+/// as the error.
+impl TryFrom<Msg> for SignIn {
+    type Error = Msg;
+
+    fn try_from(m: Msg) -> Result<SignIn, Msg> {
+        match m {
+            Msg::Hello {
+                device,
+                tag,
+                token,
+                invite,
+                claim,
+                email,
+                password,
+                new_password,
+                reset_code,
+                app,
+                sync,
+                deltas,
+            } => Ok(SignIn {
+                device,
+                tag,
+                token,
+                invite,
+                claim,
+                email,
+                password,
+                new_password,
+                reset_code,
+                app,
+                sync,
+                full_copies: !deltas,
+            }),
+            m => Err(m),
+        }
+    }
+}
+
 impl SignIn {
     /// After a welcome: sign in with the token next time, not with the
     /// password or a code that is used up now.
@@ -983,20 +1042,7 @@ fn session(
     queued: &mut Vec<Msg>,
     tries: &mut u64,
 ) -> End {
-    let hello = Msg::Hello {
-        device: sign_in.device.clone(),
-        tag: sign_in.tag,
-        token: sign_in.token.clone(),
-        invite: sign_in.invite.clone(),
-        claim: sign_in.claim,
-        email: sign_in.email.clone(),
-        password: sign_in.password.clone(),
-        new_password: sign_in.new_password.clone(),
-        reset_code: sign_in.reset_code.clone(),
-        app: sign_in.app.clone(),
-        sync: sign_in.sync,
-        deltas: !sign_in.full_copies,
-    };
+    let hello = Msg::from(&*sign_in);
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
     }
@@ -1357,6 +1403,60 @@ mod tests {
             "https://wb.example.com:8443/updates/appcast.xml"
         );
         assert!(server_url("h:port").is_err());
+    }
+
+    #[test]
+    fn a_sign_in_becomes_its_hello_and_back_byte_for_byte() {
+        let full = SignIn {
+            device: "d1".into(),
+            tag: Some(3),
+            token: Some("t".into()),
+            invite: Some("ABCD-EFGH-JKLM".into()),
+            claim: Some(7),
+            email: Some("a@b.co".into()),
+            password: Some("pw".into()),
+            new_password: Some("new pw".into()),
+            reset_code: Some("R".into()),
+            app: Some("0.1.7".into()),
+            sync: Some(4),
+            full_copies: false,
+        };
+        let by_hand = Msg::Hello {
+            device: "d1".into(),
+            tag: Some(3),
+            token: Some("t".into()),
+            invite: Some("ABCD-EFGH-JKLM".into()),
+            claim: Some(7),
+            email: Some("a@b.co".into()),
+            password: Some("pw".into()),
+            new_password: Some("new pw".into()),
+            reset_code: Some("R".into()),
+            app: Some("0.1.7".into()),
+            sync: Some(4),
+            deltas: true,
+        };
+        assert_eq!(Msg::from(&full).to_json(), by_hand.to_json());
+        assert_eq!(
+            Msg::from(&full).to_json(),
+            r#"{"type":"hello","device":"d1","tag":3,"token":"t","invite":"ABCD-EFGH-JKLM","claim":7,"email":"a@b.co","password":"pw","new_password":"new pw","reset_code":"R","app":"0.1.7","sync":4,"deltas":true}"#
+        );
+        let back = SignIn::try_from(Msg::parse(&by_hand.to_json()).unwrap()).unwrap();
+        assert_eq!(back, full);
+        // whole copies (no deltas) and nothing else: only the device goes
+        let bare = SignIn {
+            device: "d2".into(),
+            full_copies: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Msg::from(&bare).to_json(),
+            r#"{"type":"hello","device":"d2"}"#
+        );
+        assert_eq!(
+            SignIn::try_from(Msg::parse(r#"{"type":"hello","device":"d2"}"#).unwrap()),
+            Ok(bare)
+        );
+        assert_eq!(SignIn::try_from(Msg::Ping), Err(Msg::Ping));
     }
 
     #[test]

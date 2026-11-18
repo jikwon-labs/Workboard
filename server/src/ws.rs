@@ -183,35 +183,16 @@ async fn hello(
     let Ok(Some(Ok(Message::Text(t)))) = hello else {
         return None;
     };
-    let Some(Msg::Hello {
-        device,
-        tag,
-        token,
-        invite,
-        claim,
-        email,
-        password,
-        new_password,
-        reset_code,
-        app,
-        sync,
-        deltas,
-    }) = Msg::parse(t.as_str())
-    else {
+    let Some(Ok(hello)) = Msg::parse(t.as_str()).map(Hello::try_from) else {
         let _ = send(socket, &Msg::error("Say hello first.", None).to_json()).await;
         return None;
     };
-    let hello = Hello {
-        device: device.clone(),
-        tag,
-        token,
-        invite,
-        claim,
-        email,
-        password,
-        new_password,
-        reset_code,
-    };
+    let (device, app, sync, deltas) = (
+        hello.device.clone(),
+        hello.app.clone(),
+        hello.sync,
+        !hello.full_copies,
+    );
     let h = hub.clone();
     // password hashing takes a moment
     let signed = off_thread(move || h.sign_in(&hello)).await;

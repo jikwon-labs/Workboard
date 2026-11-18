@@ -125,7 +125,7 @@ struct GoalDetailView: View {
                         Text("\(Int((v.progress(of: g) * 100).rounded()))%").monospacedDigit().accessibilityIdentifier("goalProgress")
                     }
                     if let due = g.due {
-                        DatePicker("Due", selection: Binding(get: { CustomFieldRow.day(due) ?? Date() }, set: { new in client.edit { d, _ in Edits.setGoalDue(&d, goal: g.id, to: dayString(new)) } }), displayedComponents: .date)
+                        DatePicker("Due", selection: Binding(get: { DayFormat.date(fromDay: due) ?? Date() }, set: { new in client.edit { d, _ in Edits.setGoalDue(&d, goal: g.id, to: dayString(new)) } }), displayedComponents: .date)
                         Button("Remove due date") { client.edit { d, _ in Edits.setGoalDue(&d, goal: g.id, to: nil) } }
                     } else {
                         Button("Set a due date") { client.edit { d, _ in Edits.setGoalDue(&d, goal: g.id, to: dayString(Date().addingTimeInterval(86400 * 30))) } }
@@ -480,10 +480,7 @@ struct MeetingDetailView: View {
     }
 
     static func when(_ m: MeetingView) -> Date {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.date(from: "\(m.date) \(m.time)") ?? Date()
+        DayFormat.date(day: m.date, time: m.time) ?? Date()
     }
 }
 
@@ -1028,7 +1025,7 @@ struct FormDetailView: View {
         case "checkbox":
             Toggle(fld.label, isOn: Binding(get: { answers[i] == "Yes" }, set: { answers[i] = $0 ? "Yes" : "" }))
         case "due":
-            DatePicker("Date", selection: Binding(get: { CustomFieldRow.day(answers[i] ?? "") ?? Date() }, set: { answers[i] = dayString($0) }), displayedComponents: .date)
+            DatePicker("Date", selection: Binding(get: { DayFormat.date(fromDay: answers[i] ?? "") ?? Date() }, set: { answers[i] = dayString($0) }), displayedComponents: .date)
         case "description":
             TextField("Answer", text: text, axis: .vertical).lineLimit(3...).accessibilityIdentifier("formAnswer-\(i)")
         default:

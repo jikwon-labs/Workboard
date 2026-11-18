@@ -303,10 +303,7 @@ struct TaskDateSheet: View {
     }
 
     func load() {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = field == .start ? "yyyy-MM-dd" : "HH:mm"
-        if let c = current, let d = f.date(from: c) {
+        if let c = current, let d = field == .start ? DayFormat.date(fromDay: c) : DayFormat.date(fromTime: c) {
             if field == .start {
                 date = d
             } else {
@@ -641,7 +638,7 @@ struct CustomFieldRow: View {
                     if value.isEmpty {
                         Button("Set") { set(dayString()) }.buttonStyle(.borderless)
                     } else {
-                        DatePicker("", selection: Binding(get: { Self.day(value) ?? Date() }, set: { set(dayString($0)) }), displayedComponents: .date)
+                        DatePicker("", selection: Binding(get: { DayFormat.date(fromDay: value) ?? Date() }, set: { set(dayString($0)) }), displayedComponents: .date)
                             .labelsHidden()
                         Button { set("") } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                             .buttonStyle(.borderless)
@@ -676,13 +673,6 @@ struct CustomFieldRow: View {
 
     func set(_ v: String) {
         client.edit { d, _ in Edits.setCustom(&d, task: task.id, field: field.id, to: v, ts: nowTs()) }
-    }
-
-    static func day(_ s: String) -> Date? {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f.date(from: s)
     }
 }
 

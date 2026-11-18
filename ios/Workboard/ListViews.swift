@@ -344,23 +344,15 @@ struct BarsView: View {
     @State private var dayWidth: CGFloat = 36
     @State private var drag: (id: UInt64, dx: CGFloat)?
 
-    static let f: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
     var body: some View {
         let v = client.view
         let tasks = v.tasks(inList: listId)
         let dated = tasks.filter { calendarSpan($0) != nil }
         let cal = Calendar(identifier: .gregorian)
         let today = cal.startOfDay(for: Date())
-        let first = dated.compactMap { calendarSpan($0).flatMap { Self.f.date(from: $0.0) } }.min().map { min($0, today) } ?? today
+        let first = dated.compactMap { calendarSpan($0).flatMap { DayFormat.date(fromDay: $0.0) } }.min().map { min($0, today) } ?? today
         let start = cal.date(byAdding: .day, value: -3, to: first)!
-        let last = dated.compactMap { calendarSpan($0).flatMap { Self.f.date(from: $0.1) } }.max().map { max($0, today) } ?? today
+        let last = dated.compactMap { calendarSpan($0).flatMap { DayFormat.date(fromDay: $0.1) } }.max().map { max($0, today) } ?? today
         let days = max(21, (cal.dateComponents([.day], from: start, to: last).day ?? 0) + 8)
         let rows: [(String, [TaskView])] = lanes
             ? (v.members.map { m in (m.name, dated.filter { $0.assignees.contains(m.id) }) } + [("No assignee", dated.filter { $0.assignees.isEmpty })]).filter { !$0.1.isEmpty }
@@ -418,7 +410,7 @@ struct BarsView: View {
 
     func bar(_ t: TaskView, start: Date, cal: Calendar) -> some View {
         let span = calendarSpan(t)!
-        let s = Self.f.date(from: span.0) ?? start, e = Self.f.date(from: span.1) ?? start
+        let s = DayFormat.date(fromDay: span.0) ?? start, e = DayFormat.date(fromDay: span.1) ?? start
         let x = CGFloat(cal.dateComponents([.day], from: start, to: s).day ?? 0) * dayWidth
         let w = CGFloat((cal.dateComponents([.day], from: s, to: e).day ?? 0) + 1) * dayWidth
         let st = client.view.status(of: t)

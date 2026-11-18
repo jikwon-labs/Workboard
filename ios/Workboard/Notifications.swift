@@ -254,18 +254,15 @@ final class Notifier {
         }
         // meetings I attend, a few minutes before
         if prefs.meetings {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.dateFormat = "yyyy-MM-dd HH:mm"
             for m in view.meetings(data) where m.attendees.contains(me) {
-                guard let start = f.date(from: "\(m.date) \(m.time)"), start > now, start < now.addingTimeInterval(7 * 86400) else { continue }
+                guard let start = DayFormat.date(day: m.date, time: m.time), start > now, start < now.addingTimeInterval(7 * 86400) else { continue }
                 add("meeting-\(m.id)", m.title, String(localized: "Starts in \(prefs.meetingMinutes) minutes"), start.addingTimeInterval(-Double(prefs.meetingMinutes) * 60))
             }
         }
         // my goals due today, at the chosen time
         if prefs.goals, parts.count == 2 {
             for g in view.goals(data) where g.owner == me {
-                guard let due = g.due, let day = CustomFieldRow.day(due), let when = at(day, parts[0], parts[1]) else { continue }
+                guard let due = g.due, let day = DayFormat.date(fromDay: due), let when = at(day, parts[0], parts[1]) else { continue }
                 add("goal-\(g.id)", String(localized: "Goal due today"), g.name, when)
             }
         }

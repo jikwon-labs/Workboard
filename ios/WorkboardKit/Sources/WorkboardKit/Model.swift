@@ -562,20 +562,3 @@ public struct WorkspaceView: Sendable {
     }
 }
 
-/// "YYYY-MM-DD" in the device's time zone, as the Mac app's dates are local.
-/// The time of day as "HH:mm" (what `TaskView.isOverdue` compares).
-public func timeString(_ date: Date = Date()) -> String {
-    let f = DateFormatter()
-    f.calendar = Calendar(identifier: .gregorian)
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.dateFormat = "HH:mm"
-    return f.string(from: date)
-}
-
-public func dayString(_ date: Date = Date()) -> String {
-    let f = DateFormatter()
-    f.calendar = Calendar(identifier: .gregorian)
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.dateFormat = "yyyy-MM-dd"
-    return f.string(from: date)
-}

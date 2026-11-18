@@ -76,10 +76,7 @@ enum Fmt {
 
     /// "14:30" as the phone shows times ("2:30 PM", "오후 2:30").
     static func clock(_ hhmm: String) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm"
-        guard let d = f.date(from: hhmm) else { return hhmm }
+        guard let d = DayFormat.date(fromTime: hhmm) else { return hhmm }
         return d.formatted(date: .omitted, time: .shortened)
     }
 
@@ -99,10 +96,7 @@ enum Fmt {
         if day == today { return String(localized: "Today") }
         if day == dayString(Date().addingTimeInterval(86400)) { return String(localized: "Tomorrow") }
         if day == dayString(Date().addingTimeInterval(-86400)) { return String(localized: "Yesterday") }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        guard let d = f.date(from: day) else { return day }
+        guard let d = DayFormat.date(fromDay: day) else { return day }
         return d.formatted(.dateTime.month(.abbreviated).day())
     }
 }

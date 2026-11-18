@@ -167,9 +167,6 @@ extension Edits {
 
 enum CustomDate {
     static func valid(_ s: String) -> Bool {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f.date(from: s) != nil
+        DayFormat.date(fromDay: s) != nil
     }
 }

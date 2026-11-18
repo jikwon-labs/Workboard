@@ -542,12 +542,8 @@ extension Edits {
     @discardableResult
     public static func shiftDates(_ data: inout JSON, task: UInt64, days: Int, me: UInt64, ts: Int64, today: Date = Date()) -> Bool {
         guard days != 0, let t = (data["tasks"]?.array ?? []).first(where: { $0["id"]?.uint == task }) else { return false }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy-MM-dd"
         let cal = Calendar(identifier: .gregorian)
-        let move = { (s: String?) -> String? in s.flatMap(f.date(from:)).flatMap { cal.date(byAdding: .day, value: days, to: $0) }.map(f.string(from:)) }
+        let move = { (s: String?) -> String? in s.flatMap(DayFormat.date(fromDay:)).flatMap { cal.date(byAdding: .day, value: days, to: $0) }.map { DayFormat.day($0) } }
         var changed = false
         if let s = move(t["start"]?.string) { changed = setStart(&data, task: task, to: s, me: me, ts: ts, today: today) || changed }
         if let d = move(t["due"]?.string) { changed = setDue(&data, task: task, to: d, me: me, ts: ts, today: today) || changed }

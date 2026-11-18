@@ -683,10 +683,7 @@ private struct DuePicker: View {
                     }
                 }
                 .onAppear {
-                    let f = DateFormatter()
-                    f.dateFormat = "yyyy-MM-dd"
-                    f.locale = Locale(identifier: "en_US_POSIX")
-                    if let d = task.due.flatMap(f.date(from:)) { date = d }
+                    if let d = task.due.flatMap(DayFormat.date(fromDay:)) { date = d }
                 }
         }
     }

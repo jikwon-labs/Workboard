@@ -261,13 +261,9 @@ public enum Edits {
     /// opens again with its dates moved on.
     static func rollRecurring(_ j: inout JSON, wasClosing: Bool, closes: (String) -> Bool, first: String, me: UInt64, ts: Int64, today: Date) {
         guard let r = j["recur"]?.string, !wasClosing, closes(j["status"]?.string ?? "") else { return }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy-MM-dd"
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = f.timeZone
-        guard let base = j["due"]?.string.flatMap(f.date(from:)) ?? f.date(from: f.string(from: today)) else { return }
+        cal.timeZone = DayFormat.timeZone
+        guard let base = j["due"]?.string.flatMap(DayFormat.date(fromDay:)) ?? DayFormat.date(fromDay: DayFormat.day(today)) else { return }
         let next: Date
         switch r {
         case "daily": next = cal.date(byAdding: .day, value: 1, to: base) ?? base
@@ -277,10 +273,10 @@ public enum Edits {
         default: next = base
         }
         let shift = cal.dateComponents([.day], from: base, to: next).day ?? 0
-        let nextDay = f.string(from: next)
+        let nextDay = DayFormat.day(next)
         j["due"] = .string(nextDay)
-        if let s = j["start"]?.string.flatMap(f.date(from:)), let moved = cal.date(byAdding: .day, value: shift, to: s) {
-            j["start"] = .string(f.string(from: moved))
+        if let s = j["start"]?.string.flatMap(DayFormat.date(fromDay:)), let moved = cal.date(byAdding: .day, value: shift, to: s) {
+            j["start"] = .string(DayFormat.day(moved))
         }
         j["status"] = .string(first)
         // it's open again: no Date done / Date closed until it next closes
@@ -461,23 +457,24 @@ public enum Edits {
 
     /// fmt_date in src/widgets.rs: Today / Tomorrow / Yesterday / weekday / "Mar 3" / "3/3/27".
     public static func macDate(_ day: String, today: Date = Date()) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy-MM-dd"
-        guard let d = f.date(from: day), let t = f.date(from: f.string(from: today)) else { return day }
+        guard let d = DayFormat.date(fromDay: day), let t = DayFormat.date(fromDay: DayFormat.day(today)) else { return day }
         let diff = Int((d.timeIntervalSince(t) / 86400).rounded())
+        let out: DateFormatter
         switch diff {
         case 0: return "Today"
         case 1: return "Tomorrow"
         case -1: return "Yesterday"
-        case 2...6: f.dateFormat = "EEE"
+        case 2...6: out = macWeekday
         default:
             let cal = Calendar(identifier: .gregorian)
-            f.dateFormat = cal.component(.year, from: d) == cal.component(.year, from: t) ? "MMM d" : "M/d/yy"
+            out = cal.component(.year, from: d) == cal.component(.year, from: t) ? macMonthDay : macShortDate
         }
-        return f.string(from: d)
+        return out.string(from: d)
     }
+
+    private static let macWeekday = DayFormat.posix("EEE")
+    private static let macMonthDay = DayFormat.posix("MMM d")
+    private static let macShortDate = DayFormat.posix("M/d/yy")
 
     // MARK: reactions
 

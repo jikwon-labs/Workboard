@@ -90,13 +90,8 @@ impl Hub {
         if !members.is_empty() && !members.contains(&member) {
             return Err("You're not in that conversation.".into());
         }
-        let name = canon
-            .get("members")
-            .and_then(|m| m.as_array())
-            .and_then(|a| {
-                a.iter()
-                    .find(|m| m.get("id").and_then(|i| i.as_u64()) == Some(member))
-            })
+        // as written (member_field trims it)
+        let name = member_record(Some(canon), member)
             .and_then(|m| m.get("name")?.as_str())
             .unwrap_or("")
             .to_string();

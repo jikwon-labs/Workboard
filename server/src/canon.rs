@@ -15,8 +15,8 @@ pub(crate) fn member_ids(canon: Option<&Value>) -> Vec<u64> {
         .unwrap_or_default()
 }
 
-/// A text field of a member in the team's copy ("name", "email").
-pub(crate) fn member_field(canon: Option<&Value>, member: u64, field: &str) -> String {
+/// A member's entry in the team's copy.
+pub(crate) fn member_record(canon: Option<&Value>, member: u64) -> Option<&Value> {
     canon
         .and_then(|c| c.get("members"))
         .and_then(|m| m.as_array())
@@ -24,6 +24,11 @@ pub(crate) fn member_field(canon: Option<&Value>, member: u64, field: &str) -> S
             a.iter()
                 .find(|m| m.get("id").and_then(|i| i.as_u64()) == Some(member))
         })
+}
+
+/// A text field of a member in the team's copy ("name", "email"), trimmed.
+pub(crate) fn member_field(canon: Option<&Value>, member: u64, field: &str) -> String {
+    member_record(canon, member)
         .and_then(|m| m.get(field))
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -32,13 +37,7 @@ pub(crate) fn member_field(canon: Option<&Value>, member: u64, field: &str) -> S
 }
 
 pub(crate) fn member_exists(canon: Option<&Value>, member: u64) -> bool {
-    canon
-        .and_then(|c| c.get("members"))
-        .and_then(|m| m.as_array())
-        .is_some_and(|a| {
-            a.iter()
-                .any(|m| m.get("id").and_then(|i| i.as_u64()) == Some(member))
-        })
+    member_record(canon, member).is_some()
 }
 
 /// Reserve even orphaned references and sync tombstones: reusing an old

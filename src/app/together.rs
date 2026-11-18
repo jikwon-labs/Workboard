@@ -927,12 +927,7 @@ impl App {
             self.data.extra.slack_map.keys().cloned().collect();
         let mut v = self.data_value();
         let mut changed = sync::merge(&mut v, others);
-        let on_server = self
-            .data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some());
+        let on_server = self.on_server();
         let gone = if on_server {
             // the server says what our role keeps from us (spaces shared
             // with chosen people); our own copy adds only what no role
@@ -1580,12 +1575,7 @@ impl App {
         form.code = j.code.clone();
         form.email = j.email.clone().unwrap_or_default();
         form.note.clear();
-        let on_server = self
-            .data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some());
+        let on_server = self.on_server();
         let addr = j.server.unwrap_or_default();
         if self.login.is_some() {
             // on the sign-in screen: it fills in the invite there
@@ -2101,6 +2091,21 @@ impl App {
         }
     }
 
+    /// Whether I'm an owner or admin by the role in People (on a server,
+    /// a copy of the server's; [`Self::may_manage`] asks the server first).
+    pub(super) fn i_manage(&self) -> bool {
+        self.data.member(self.data.me).is_some_and(Member::manages)
+    }
+
+    /// A member's name, or "Someone" for one not (or no longer) here.
+    pub(super) fn who(&self, id: u64) -> String {
+        self.data
+            .member(id)
+            .map(|m| m.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| tr("Someone").into())
+    }
+
     /// Whether I may bring new people into the workspace and change its
     /// name and colour. On a team server
     /// only its owner and admins: what the server last said, or before it
@@ -2108,21 +2113,13 @@ impl App {
     /// in a shared folder anyone may, as the People page there lets anyone
     /// manage people.
     pub(super) fn may_manage(&self) -> bool {
-        let server = self
-            .data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some());
+        let server = self.on_server();
         if !server {
             return true;
         }
         match self.sync_rt.role {
             Some(r) => r.manages(),
-            None => self
-                .data
-                .member(self.data.me)
-                .is_some_and(|m| m.role == "Owner" || m.role == "Admin"),
+            None => self.i_manage(),
         }
     }
 
@@ -3154,14 +3151,7 @@ impl App {
     ) -> bool {
         let mut close = false;
         // why it's a browser call rather than a huddle here
-        if self
-            .data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some())
-            && self.sync_rt.net_status != Some(NetStatus::Connected)
-        {
+        if self.on_server() && self.sync_rt.net_status != Some(NetStatus::Connected) {
             ui.label(RichText::new(tr("The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.")).color(WARN));
             ui.add_space(6.0);
         }

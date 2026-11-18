@@ -222,6 +222,11 @@ pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64>
 }
 
 impl Member {
+    /// An owner or admin, by the role in People.
+    pub fn manages(&self) -> bool {
+        self.role == "Owner" || self.role == "Admin"
+    }
+
     pub fn initials(&self) -> String {
         let mut s: String = self
             .name

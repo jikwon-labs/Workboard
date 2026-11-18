@@ -1469,12 +1469,7 @@ impl App {
                 });
                 ui.add_space(8.0);
                 let shared = self.data.extra.shared.is_some();
-                let on_server = self
-                    .data
-                    .extra
-                    .shared
-                    .as_ref()
-                    .is_some_and(|c| c.server.is_some());
+                let on_server = self.on_server();
                 // codes are made by the server, by its owner and admins
                 let connected = self.sync_rt.net_status == Some(wb_net::Status::Connected);
                 let manages = self.sync_rt.role.is_some_and(|r| r.manages());
@@ -2042,7 +2037,7 @@ impl App {
                 };
                 egui::ScrollArea::vertical().id_salt("notify_settings").max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
                     let persist = self.persist;
-                    let manages = self.data.member(self.data.me).is_some_and(|m| m.role == "Owner" || m.role == "Admin");
+                    let manages = self.i_manage();
                     let n = &mut self.data.extra.notify;
                     let mut ch = false;
                     ui.label(RichText::new(tr("Show in your Inbox when...")).strong());
@@ -2935,14 +2930,7 @@ impl App {
                     close = true;
                 }
             }
-            Modal::SwitchUser
-                if self
-                    .data
-                    .extra
-                    .shared
-                    .as_ref()
-                    .is_some_and(|c| c.server.is_some()) =>
-            {
+            Modal::SwitchUser if self.on_server() => {
                 // the server knows this computer as the person who signed in
                 // on it: being someone else takes their sign-in
                 let name = self
@@ -3122,14 +3110,7 @@ impl App {
                 .joining
                 .as_ref()
                 .is_some_and(|j| matches!(j.how, super::together::How::Claim { .. }));
-            if setting_up
-                || self
-                    .data
-                    .extra
-                    .shared
-                    .as_ref()
-                    .is_some_and(|c| c.server.is_some())
-            {
+            if setting_up || self.on_server() {
                 self.sync_rt.auto_invite.push((
                     id,
                     if role == "Admin" {

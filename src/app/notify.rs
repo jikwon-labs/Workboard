@@ -111,20 +111,6 @@ fn cut(s: &str, n: usize) -> String {
 }
 
 impl App {
-    fn who(&self, id: u64) -> String {
-        self.data
-            .member(id)
-            .map(|m| m.name.clone())
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| tr("Someone").into())
-    }
-
-    fn i_manage(&self) -> bool {
-        self.data
-            .member(self.data.me)
-            .is_some_and(|m| m.role == "Owner" || m.role == "Admin")
-    }
-
     /// Everything that is news for me in the data as it is, with when it
     /// happened (i64::MAX: not known). Turned-off kinds are left out.
     pub(super) fn notify_candidates(&self, n: &NotifySettings) -> Vec<(i64, Note)> {
@@ -775,12 +761,7 @@ impl App {
     /// The team server connection: announced when it has been down a while,
     /// and when it comes back after that.
     pub(super) fn notify_connection(&mut self, now: i64) {
-        let on_server = self
-            .data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some());
+        let on_server = self.on_server();
         let status = self.sync_rt.net_status.clone();
         match status {
             Some(NetStatus::Connected) => {

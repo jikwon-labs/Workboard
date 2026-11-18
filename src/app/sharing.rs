@@ -32,11 +32,7 @@ fn level_help(l: Level) -> &'static str {
 impl App {
     /// On a team server, the only place sharing is enforced.
     pub(super) fn sharing_enforced(&self) -> bool {
-        self.data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some())
+        self.on_server()
     }
 
     /// What I may do in space `sid` (Full unless a team server enforces sharing).

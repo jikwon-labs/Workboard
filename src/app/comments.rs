@@ -196,11 +196,7 @@ impl App {
                     continue;
                 }
                 shown += 1;
-                let who = self
-                    .data
-                    .member(a.author)
-                    .map(|m| m.name.clone())
-                    .unwrap_or_else(|| tr("Someone").into());
+                let who = self.who(a.author);
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(format!(
@@ -357,11 +353,7 @@ impl App {
     ) {
         let me = self.data.me;
         let mine = a.author == me;
-        let who = self
-            .data
-            .member(a.author)
-            .map(|m| m.name.clone())
-            .unwrap_or_else(|| tr("Someone").into());
+        let who = self.who(a.author);
         let fill = if a.post { t.accent_bg } else { t.card };
         egui::Frame::new()
             .fill(fill)

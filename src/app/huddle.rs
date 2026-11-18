@@ -179,12 +179,7 @@ pub(super) fn huddle_channel(link: &str) -> Option<u64> {
 impl App {
     /// In-app huddles need a signed-in server connection.
     pub(super) fn huddles_on_server(&self) -> bool {
-        self.data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some())
-            && self.sync_rt.net_status == Some(wb_net::Status::Connected)
+        self.on_server() && self.sync_rt.net_status == Some(wb_net::Status::Connected)
     }
 
     /// Start a huddle in a conversation and tell everyone in it.
@@ -240,12 +235,7 @@ impl App {
             return;
         }
         if !self.huddles_on_server() {
-            let has_server = self
-                .data
-                .extra
-                .shared
-                .as_ref()
-                .is_some_and(|c| c.server.is_some());
+            let has_server = self.on_server();
             self.toast(if has_server {
                     tr("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.")
                 } else {
@@ -451,14 +441,7 @@ impl App {
             }
         }
         // the server connection went away or the workspace changed
-        if self.huddle.channel.is_some()
-            && !self
-                .data
-                .extra
-                .shared
-                .as_ref()
-                .is_some_and(|c| c.server.is_some())
-        {
+        if self.huddle.channel.is_some() && !self.on_server() {
             self.leave_huddle();
         }
     }

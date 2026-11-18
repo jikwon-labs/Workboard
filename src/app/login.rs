@@ -598,11 +598,7 @@ impl App {
 
     /// The workspace open is on a team server: Log out is offered.
     pub(super) fn on_team_server(&self) -> bool {
-        self.data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some())
+        self.on_server()
     }
 
     /// Asking before logging out: what goes, and what may be lost.

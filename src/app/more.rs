@@ -276,7 +276,7 @@ impl App {
                     });
                 });
                 ui.label(RichText::new(trf!("Manage who can access {}", self.data.workspace)).color(t.text2));
-                let server = self.data.extra.shared.as_ref().is_some_and(|c| c.server.is_some());
+                let server = self.on_server();
                 if server && self.sync_rt.role.is_none() {
                     // the server says who may manage people, once it's reached
                     ui.label(RichText::new(tr("Changing roles and removing people need the team's server. They come back once it's connected.")).small().color(super::together::WARN));
@@ -4086,12 +4086,7 @@ impl App {
             // cancelling an invite takes the not-yet-joined person out the
             // same way, and the server drops their code
             "person" | "invite" => {
-                let server = self
-                    .data
-                    .extra
-                    .shared
-                    .as_ref()
-                    .is_some_and(|c| c.server.is_some());
+                let server = self.on_server();
                 if server {
                     // their computers are signed out by the server; without it,
                     // nothing changes here either

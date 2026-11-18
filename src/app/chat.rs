@@ -321,18 +321,11 @@ impl App {
     /// role in People alone or in a shared folder.
     pub(super) fn may_manage_channel(&self, c: &Channel) -> bool {
         let me = self.data.me;
-        let server = self
-            .data
-            .extra
-            .shared
-            .as_ref()
-            .is_some_and(|c| c.server.is_some());
+        let server = self.on_server();
         let admin = if server {
             self.sync_rt.role.is_some_and(|r| r.manages())
         } else {
-            self.data
-                .member(me)
-                .is_some_and(|m| m.role == "Owner" || m.role == "Admin")
+            self.i_manage()
         };
         admin || c.creator == me || (c.creator == 0 && c.members.contains(&me))
     }
@@ -1395,11 +1388,7 @@ impl App {
                 ui.set_width(w - 50.0);
                 if !compact {
                     ui.horizontal(|ui| {
-                        let name = self
-                            .data
-                            .member(m.author)
-                            .map(|x| x.name.clone())
-                            .unwrap_or_else(|| tr("Someone").into());
+                        let name = self.who(m.author);
                         ui.label(RichText::new(name).strong());
                         let time = local(m.ts).map(|x| x.text("%-I:%M %p")).unwrap_or_default();
                         ui.label(RichText::new(time).small().color(t.text3));
@@ -1902,11 +1891,7 @@ impl App {
             .max_height(420.0)
             .show(ui, |ui| {
                 for (ch, label, parent, m) in &found {
-                    let who = self
-                        .data
-                        .member(m.author)
-                        .map(|x| x.name.clone())
-                        .unwrap_or_else(|| tr("Someone").into());
+                    let who = self.who(m.author);
                     let body = m
                         .post_title
                         .clone()
@@ -2238,11 +2223,7 @@ impl App {
                     let Some((author, text, title)) = found else {
                         continue;
                     };
-                    let who = self
-                        .data
-                        .member(author)
-                        .map(|x| x.name.clone())
-                        .unwrap_or_else(|| tr("Someone").into());
+                    let who = self.who(author);
                     let body = title.filter(|x| !x.is_empty()).unwrap_or(text);
                     // the reminder is this person's own: in their language
                     let what = trf!(

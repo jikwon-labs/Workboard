@@ -21,25 +21,6 @@ fn hub_frame(t: &Theme) -> egui::Frame {
         .inner_margin(egui::Margin::symmetric(8, 6))
 }
 
-fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
-    egui::Frame::new()
-        .fill(t.bg)
-        .stroke(Stroke::new(1.0_f32, t.border))
-        .corner_radius(10)
-        .inner_margin(egui::Margin::symmetric(10, 14))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(glyph)
-                        .size(16.0)
-                        .color(Color32::from_rgb(0xf8, 0xae, 0x00)),
-                );
-                ui.label(RichText::new(text).size(13.0).color(t.text2));
-            });
-        });
-}
-
 /// A template card as in the galleries: round coloured icon (`glyph` is a
 /// line icon kind, or "+"), title, description.
 fn gallery_card(

@@ -553,13 +553,6 @@ pub(crate) fn merge_arr<'a>(
     out
 }
 
-pub(crate) fn meta_of(v: &Value) -> SyncMeta {
-    v.get("extra")
-        .and_then(|e| e.get("sync"))
-        .and_then(|s| serde_json::from_value(s.clone()).ok())
-        .unwrap_or_default()
-}
-
 /// Merge other people's copies into this one. Returns true when anything changed.
 pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     // copies from before activity had ids: give their entries the same ids

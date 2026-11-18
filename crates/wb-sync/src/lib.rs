@@ -25,6 +25,7 @@
 // single settings are shared too (`SHARED_VALUES`, newest change wins), and
 // a few maps entry by entry (`SHARED_MAPS`: newest change per key wins).
 
+pub mod json;
 pub mod mentions;
 
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,8 @@ pub use merge::*;
 pub use meta::*;
 pub use stamp::*;
 pub use visibility::*;
+
+use json::*;
 
 #[cfg(test)]
 mod tests;

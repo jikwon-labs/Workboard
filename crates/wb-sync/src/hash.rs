@@ -70,12 +70,6 @@ pub fn random_u64() -> u64 {
     h.finish()
 }
 
-/// An item's id. 0 is no id: apps leave an id out of the file until one is
-/// given (a stroke just drawn), and one written as 0 means the same.
-pub(crate) fn id_of(v: &Value) -> Option<u64> {
-    v.get("id")?.as_u64().filter(|i| *i != 0)
-}
-
 /// A non-empty array of objects of which at least one has an id: its
 /// entries with ids are items, merged one by one. Entries without one (a
 /// stroke drawn before it got its id) don't make the others any less items;
@@ -98,26 +92,6 @@ pub(crate) fn loose_entries(v: &Value) -> Vec<Value> {
         .filter(|x| id_of(x).is_none())
         .cloned()
         .collect()
-}
-
-pub(crate) fn get_path<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut cur = v;
-    for part in path.split('.') {
-        cur = cur.get(part)?;
-    }
-    Some(cur)
-}
-
-pub(crate) fn set_path(v: &mut Value, path: &str, new: Value) {
-    let parts: Vec<&str> = path.split('.').collect();
-    let mut cur = v;
-    for part in &parts[..parts.len() - 1] {
-        if cur.get(*part).is_none() {
-            cur[*part] = Value::Object(Map::new());
-        }
-        cur = cur.get_mut(*part).unwrap();
-    }
-    cur[parts[parts.len() - 1]] = new;
 }
 
 /// Fingerprint of an item's own fields (not the items inside it, not personal fields).
@@ -390,12 +364,4 @@ pub fn parents_of(data: &Value) -> BTreeMap<u64, u64> {
         }
     }
     out
-}
-
-pub(crate) fn get_path_mut<'a>(v: &'a mut Value, path: &str) -> Option<&'a mut Value> {
-    let mut cur = v;
-    for part in path.split('.') {
-        cur = cur.get_mut(part)?;
-    }
-    Some(cur)
 }

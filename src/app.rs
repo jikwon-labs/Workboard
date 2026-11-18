@@ -2702,8 +2702,10 @@ impl App {
                             .show_inside(ui, |ui| match self.loc {
                                 Location::Home => self.home(ui),
                                 Location::Inbox => self.inbox_page(ui),
-                                Location::Replies => self.inbox(ui, 1),
-                                Location::Assigned => self.inbox(ui, 2),
+                                Location::Replies => self.comments_page(ui, CommentsPage::Replies),
+                                Location::Assigned => {
+                                    self.comments_page(ui, CommentsPage::Assigned)
+                                }
                                 _ => {
                                     self.header(ui);
                                     let rect = ui.available_rect_before_wrap();
@@ -4573,64 +4575,53 @@ impl App {
         })
     }
 
-    fn inbox(&mut self, ui: &mut Ui, mode: u8) {
+    fn comments_page(&mut self, ui: &mut Ui, feed: CommentsPage) {
         let t = self.t();
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(24, 16))
             .show(ui, |ui| {
-                let (title, sub) = match mode {
-                    1 => ("Replies", "Comments from others on tasks and chat replies"),
-                    2 => (
+                let (title, sub) = match feed {
+                    CommentsPage::Replies => ("Replies", "Comments from others on tasks and chat replies"),
+                    CommentsPage::Assigned => (
                         "Assigned Comments",
                         "Task comments assigned to someone, or that @mention them, until resolved. Chat @mentions are in Inbox.",
                     ),
-                    _ => ("Inbox", "Recent activity across your workspace"),
                 };
                 ui.label(RichText::new(tr(title)).size(20.0).strong());
                 ui.label(RichText::new(tr(sub)).color(t.text2));
                 ui.add_space(8.0);
                 // tabs: Unread / Read for Replies, Assigned to me / Delegated by me for comments
-                let tab_id = egui::Id::new(("inbox_tab", mode));
+                let tab_id = egui::Id::new(("inbox_tab", feed as u8));
                 let mut tab: u8 = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
-                if mode != 0 {
-                    ui.horizontal(|ui| {
-                        let labels = if mode == 1 {
-                            ["Unread", "Read"]
-                        } else {
-                            ["Assigned to me", "Delegated by me"]
-                        };
-                        for (i, l) in labels.iter().enumerate() {
-                            if ui.selectable_label(tab == i as u8, tr(l)).clicked() {
-                                tab = i as u8;
-                            }
+                ui.horizontal(|ui| {
+                    let labels = if feed == CommentsPage::Replies {
+                        ["Unread", "Read"]
+                    } else {
+                        ["Assigned to me", "Delegated by me"]
+                    };
+                    for (i, l) in labels.iter().enumerate() {
+                        if ui.selectable_label(tab == i as u8, tr(l)).clicked() {
+                            tab = i as u8;
                         }
-                        if mode == 1 && tab == 0 {
-                            // off with nothing unread (known from the last frame's list)
-                            let any: bool = ui
-                                .data(|d| d.get_temp(egui::Id::new("replies_unread")))
-                                .unwrap_or(true);
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui
-                                    .add_enabled(any, egui::Button::new(tr("Mark all as read")))
-                                    .clicked()
-                                {
-                                    self.data.extra.replies_seen = now_ts();
-                                    self.dirty = true;
-                                }
-                            });
-                        }
-                    });
-                    ui.data_mut(|d| d.insert_temp(tab_id, tab));
-                }
-                let seen = self.data.extra.replies_seen;
-                if mode == 0 {
-                    self.reminders_block(ui);
-                    if icons::icon_button(ui, &t, "alarm", tr("Create Reminder"), "Create Reminder", true)
-                        .clicked()
-                    {
-                        self.modal = Some(Modal::reminder(String::new(), today()));
                     }
-                }
+                    if feed == CommentsPage::Replies && tab == 0 {
+                        // off with nothing unread (known from the last frame's list)
+                        let any: bool = ui
+                            .data(|d| d.get_temp(egui::Id::new("replies_unread")))
+                            .unwrap_or(true);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add_enabled(any, egui::Button::new(tr("Mark all as read")))
+                                .clicked()
+                            {
+                                self.data.extra.replies_seen = now_ts();
+                                self.dirty = true;
+                            }
+                        });
+                    }
+                });
+                ui.data_mut(|d| d.insert_temp(tab_id, tab));
+                let seen = self.data.extra.replies_seen;
                 ui.add_space(10.0);
                 // a reply marked read on its own counts as read too
                 let read_list = self.data.extra.replies_read.clone();
@@ -4644,8 +4635,8 @@ impl App {
                     .unwrap_or_default();
                 for task in &self.data.tasks {
                     for a in &task.activity {
-                        let keep = match (mode, tab) {
-                            (1, 0) => {
+                        let keep = match (feed, tab) {
+                            (CommentsPage::Replies, 0) => {
                                 a.comment
                                     && a.author != me
                                     && a.ts > seen
@@ -4655,7 +4646,7 @@ impl App {
                                         a.author,
                                     ))
                             }
-                            (1, _) => {
+                            (CommentsPage::Replies, _) => {
                                 a.comment
                                     && a.author != me
                                     && (a.ts <= seen
@@ -4666,7 +4657,7 @@ impl App {
                                         )))
                             }
                             // assigned to me, or (when assigned to no one) mentioning me
-                            (2, 0) => {
+                            (CommentsPage::Assigned, 0) => {
                                 a.comment
                                     && !a.resolved
                                     && (a.assignee == Some(me)
@@ -4674,14 +4665,13 @@ impl App {
                                             && !my_name.is_empty()
                                             && a.text.contains(&my_name)))
                             }
-                            (2, _) => {
+                            (CommentsPage::Assigned, _) => {
                                 a.comment
                                     && !a.resolved
                                     && a.author == me
                                     && (a.assignee.is_some_and(|x| x != me)
                                         || (a.assignee.is_none() && a.text.contains('@')))
                             }
-                            _ => true,
                         };
                         if keep {
                             items.push((
@@ -4694,7 +4684,7 @@ impl App {
                     }
                 }
                 // chat replies in threads I started or wrote in
-                if mode == 1 {
+                if feed == CommentsPage::Replies {
                     for r in self.chat_replies() {
                         if (tab == 0)
                             == (r.ts > seen && !read_one(&reply_key(r.src, r.ts, r.author)))
@@ -4715,7 +4705,7 @@ impl App {
                     }
                 }
                 items.sort_by_key(|x| std::cmp::Reverse(x.0));
-                if mode == 1 && tab == 0 {
+                if feed == CommentsPage::Replies && tab == 0 {
                     let any = !items.is_empty();
                     ui.data_mut(|d| d.insert_temp(egui::Id::new("replies_unread"), any));
                 }
@@ -4771,7 +4761,7 @@ impl App {
                             );
                             // tick off an assigned comment right here
                             let mut resolved = false;
-                            if let (2, nav::InboxSrc::Task(tid)) = (mode, src) {
+                            if let (CommentsPage::Assigned, nav::InboxSrc::Task(tid)) = (feed, src) {
                                 let br = Rect::from_center_size(
                                     r.right_center() - vec2(118.0, 0.0),
                                     vec2(26.0, 26.0),
@@ -4796,7 +4786,7 @@ impl App {
                                 }
                             }
                             // Replies: mark one read without opening it
-                            if mode == 1 && tab == 0 {
+                            if feed == CommentsPage::Replies && tab == 0 {
                                 let br = Rect::from_min_size(
                                     pos2(r.right() - 230.0, r.center().y - 13.0),
                                     vec2(90.0, 26.0),
@@ -4817,7 +4807,7 @@ impl App {
                                 }
                             }
                             if resp.clicked() && !resolved {
-                                if mode == 1 {
+                                if feed == CommentsPage::Replies {
                                     let k = reply_key(src, ts, a.author);
                                     if !self.data.extra.replies_read.contains(&k) {
                                         self.data.extra.replies_read.push(k);
@@ -5752,6 +5742,15 @@ fn kind_label(k: StatusKind) -> &'static str {
         StatusKind::Done => "Done",
         StatusKind::Closed => "Closed",
     }
+}
+
+/// Which list of comments `comments_page` shows: Replies (comments from
+/// others and chat replies) or Assigned Comments. The number goes into the
+/// tab's egui id.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CommentsPage {
+    Replies = 1,
+    Assigned = 2,
 }
 
 fn truncate(s: &str, n: usize) -> String {

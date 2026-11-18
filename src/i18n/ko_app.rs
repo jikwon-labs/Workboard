@@ -56,7 +56,6 @@ pub const T: &[(&str, &str)] = &[
     ("Replies", "답장"),
     ("Comments from others on tasks and chat replies", "작업에 달린 다른 사람의 댓글과 채팅 답장"),
     ("Assigned Comments", "할당된 댓글"),
-    ("Recent activity across your workspace", "워크스페이스 전체의 최근 활동"),
     ("Unread", "읽지 않음"),
     ("Read", "읽음"),
     ("Assigned to me", "나에게 할당됨"),

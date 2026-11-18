@@ -1136,8 +1136,33 @@ impl App {
             .as_ref()
             .map(|n| n.events())
             .unwrap_or_default();
+        self.take_net_events(events)
+    }
+
+    /// What the server connection said since the last frame. Teammates'
+    /// changes that came one after another are merged in together: each
+    /// merge goes over the whole workspace, so a busy channel's messages
+    /// arriving in one frame cost one merge instead of one each. They are
+    /// all merged (a change carries only what changed, not the whole copy),
+    /// with the last hidden list, which is the whole list as of then.
+    /// Anything else the server said is taken after the changes before it.
+    /// True when something new arrived.
+    pub(super) fn take_net_events(&mut self, events: Vec<NetEvent>) -> bool {
         let mut changed = false;
+        let mut updates = vec![];
+        let mut hidden_now = vec![];
         for e in events {
+            let e = match e {
+                NetEvent::Update { data, hidden, .. } => {
+                    updates.push(data);
+                    hidden_now = hidden;
+                    continue;
+                }
+                e => e,
+            };
+            if !updates.is_empty() {
+                changed |= self.merge_in(&std::mem::take(&mut updates), &hidden_now);
+            }
             match e {
                 NetEvent::Status(s) => {
                     match &s {
@@ -1202,7 +1227,7 @@ impl App {
                     }
                     changed |= self.net_welcome(tag, snapshot, member, &hidden);
                 }
-                NetEvent::Update { data, hidden, .. } => changed |= self.merge_in(&[data], &hidden),
+                NetEvent::Update { .. } => unreachable!("taken in above"),
                 NetEvent::Invite {
                     member,
                     code,
@@ -1279,6 +1304,9 @@ impl App {
                     self.access_request(NetMsg::BackupList);
                 }
             }
+        }
+        if !updates.is_empty() {
+            changed |= self.merge_in(&updates, &hidden_now);
         }
         changed
     }

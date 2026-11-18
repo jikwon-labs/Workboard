@@ -8025,6 +8025,66 @@ fn just_made_an_admin_my_copy_keeps_a_space_the_server_sent() {
     assert!(!a.data.channels.iter().any(|c| c.id == 7401));
 }
 
+/// Teammates' changes that arrive in one frame are merged in together (one
+/// merge over the workspace instead of one each), with the same result as
+/// taking them one by one: every change counts, a later change to the same
+/// task wins, and the last hidden list is the one that holds. Anything else
+/// the server said in between is taken in its place.
+#[test]
+fn changes_arriving_together_are_merged_in_once() {
+    let shared = || crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "d".into(),
+        tag: 1,
+        server: Some("127.0.0.1:1".into()),
+    };
+    let mut a = app();
+    a.data.extra.shared = Some(shared());
+    a.sync_note_change();
+    // a teammate with the same copy, and what the server already has
+    let mut b = App::build(None, Some(a.data.clone()));
+    b.data.extra.shared = Some(shared());
+    let mut known = crate::sync::Summary::of(&crate::sync::shareable(
+        &serde_json::to_value(&b.data).unwrap(),
+    ));
+    let (t0, t1) = (a.data.tasks[0].id, a.data.tasks[1].id);
+    let mut change = |b: &mut App, edit: &dyn Fn(&mut Data)| {
+        // a later change has a later clock
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        edit(&mut b.data);
+        b.sync_note_change();
+        let d = crate::sync::delta(
+            &known,
+            &crate::sync::shareable(&serde_json::to_value(&b.data).unwrap()),
+        )
+        .expect("something changed");
+        known.absorb(&d);
+        wb_net::Event::Update {
+            data: d,
+            rev: 0,
+            hidden: vec![],
+        }
+    };
+    let first = change(&mut b, &|d| d.tasks[0].name = "Renamed once".into());
+    let second = change(&mut b, &|d| d.tasks[1].name = "Other task renamed".into());
+    let third = change(&mut b, &|d| d.tasks[0].name = "Renamed twice".into());
+
+    let merges = a.data_gen.get();
+    assert!(a.take_net_events(vec![first, second, third]));
+    assert_eq!(a.data_gen.get(), merges + 1, "one merge for all three");
+    assert_eq!(a.task(t0).unwrap().name, "Renamed twice");
+    assert_eq!(a.task(t1).unwrap().name, "Other task renamed");
+
+    // something else in between: the changes before it go in first
+    let fourth = change(&mut b, &|d| d.tasks[1].name = "Fourth".into());
+    let fifth = change(&mut b, &|d| d.tasks[1].name = "Fifth".into());
+    let merges = a.data_gen.get();
+    a.take_net_events(vec![fourth, wb_net::Event::Presence(vec![2]), fifth]);
+    assert_eq!(a.data_gen.get(), merges + 2);
+    assert_eq!(a.sync_rt.online, Some(vec![2]));
+    assert_eq!(a.task(t1).unwrap().name, "Fifth");
+}
+
 #[test]
 fn an_older_file_notes_changes_before_the_first_sync_field_by_field() {
     let mut a = app();

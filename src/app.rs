@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 #[cfg(test)]
 mod account_tests;
+mod board;
 mod chat;
 mod comments;
 mod delete_ws;

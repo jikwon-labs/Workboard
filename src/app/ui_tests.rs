@@ -11272,16 +11272,18 @@ fn new_workspace_needs_a_name_and_goes_back() {
 fn a_new_workspace_can_go_on_the_team_server_or_stay_here() {
     let _home = own_home("wizard-server");
     let mut h = Ui1::new();
-    // this workspace is on a team server, signed in with an account
+    // this workspace is on a team server, signed in with an account (a
+    // device of its own: a test that stops sharing as "dev1" forgets that
+    // token while this one runs)
     h.app.data.extra.shared = Some(crate::sync::SharedCfg {
         folder: String::new(),
-        device: "dev1".into(),
+        device: "dev-wizard".into(),
         tag: 1,
         server: Some("127.0.0.1:1".into()),
     });
     h.app.sync_rt.account = Some("me@team.io".into());
     h.app.sync_rt.role = Some(wb_net::Role::Owner);
-    together::save_token("127.0.0.1:1", "dev1", "tok");
+    together::save_token("127.0.0.1:1", "dev-wizard", "tok");
     let before = h.app.ws_file.clone();
 
     // on the server is the choice it starts with

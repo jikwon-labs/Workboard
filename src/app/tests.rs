@@ -783,6 +783,77 @@ fn custom_field_values_are_kept_per_task() {
 /// take turns: HOME is one for the whole test run.
 pub(super) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// A change isn't written the moment it's made: the workspace is handed to
+/// the background writer once changes stop for a second (or five seconds
+/// after the first one, for steady typing), as compact text. Quitting saves
+/// at once, and a copy still waiting never lands on top of a newer save.
+#[test]
+fn edits_are_saved_once_they_settle_off_the_screens_thread() {
+    use std::time::{Duration, Instant};
+    let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = std::env::temp_dir().join(format!("wb-home-save-{:x}", crate::sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    let mut a = app();
+    a.persist = true;
+    a.save_now();
+    let ctx = egui::Context::default();
+    let frame = |a: &mut App| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| a.ui_frame(ctx));
+    };
+    let on_disk = || {
+        Data::finish_saving();
+        std::fs::read_to_string(Data::path()).unwrap_or_default()
+    };
+    let list = list_ids(&a)[0];
+    // the first frames tidy the workspace up (a change of their own), and
+    // after that a frame with nothing done leaves nothing to save
+    for _ in 0..3 {
+        frame(&mut a);
+    }
+    a.save_now();
+    frame(&mut a);
+    assert!(a.save_due.get().is_none(), "an idle frame changes nothing");
+
+    add_task(&mut a, list, "Saved later");
+    frame(&mut a);
+    assert!(
+        !on_disk().contains("Saved later"),
+        "not written on the change itself"
+    );
+    assert!(a.save_due.get().is_some(), "but waiting to be");
+    let quiet = Instant::now() - SAVE_QUIET - Duration::from_millis(10);
+    a.save_due.set(Some((quiet, quiet)));
+    frame(&mut a);
+    assert!(a.save_due.get().is_none());
+    let text = on_disk();
+    assert!(text.contains("Saved later"), "written once changes stopped");
+    assert!(!text.contains("\n "), "as compact text");
+
+    // steady changes (one every frame) are still written after a while
+    add_task(&mut a, list, "Typed steadily");
+    frame(&mut a);
+    let first = Instant::now() - SAVE_AT_MOST - Duration::from_millis(10);
+    a.save_due.set(Some((first, Instant::now())));
+    frame(&mut a);
+    assert!(on_disk().contains("Typed steadily"));
+
+    // quitting doesn't wait
+    add_task(&mut a, list, "Saved on quit");
+    frame(&mut a);
+    eframe::App::on_exit(&mut a, None);
+    assert!(on_disk().contains("Saved on quit"));
+    assert!(a.save_due.get().is_none());
+
+    // an older copy still queued is written before a save made after it
+    let mut older = a.data.clone();
+    older.workspace = "An older copy".into();
+    older.save_later(Data::path());
+    a.data.save();
+    assert!(!on_disk().contains("An older copy"));
+    assert!(on_disk().contains("Saved on quit"));
+}
+
 #[test]
 fn workspaces_can_be_created_and_switched() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());

@@ -676,6 +676,9 @@ impl App {
             } else {
                 Data::dir().join(&file)
             };
+            // a save still waiting would put the deleted copy back
+            self.save_due.set(None);
+            Data::finish_saving();
             let _ = std::fs::remove_file(gone);
             let mut list = Data::workspaces();
             list.retain(|w| w.file != file);
@@ -695,7 +698,7 @@ impl App {
         self.data = d;
         self.ws_file = "data.json".into();
         if self.persist {
-            self.data.save();
+            self.save_now();
         }
         self.ws_places.clear();
         self.loc = self

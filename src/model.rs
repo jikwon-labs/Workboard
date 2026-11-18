@@ -3,7 +3,7 @@
 
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StatusKind {
@@ -798,6 +798,100 @@ pub const SLACK_MAP: &str = "extra.slack_map";
 
 /// See `Data::take_unreadable`.
 static UNREADABLE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Writes workspace files off the screen's thread. Saving a large workspace
+/// (turning it into text and writing it) takes long enough to be felt when
+/// it happens on every key press, so the app hands a copy to this writer
+/// instead and goes on drawing. Writes to one file keep their order: a newer
+/// copy waiting for the same file replaces the older one.
+mod writer {
+    use super::Data;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Condvar, Mutex, OnceLock};
+
+    #[derive(Default)]
+    struct State {
+        waiting: Vec<(PathBuf, Data)>,
+        busy: bool,
+    }
+
+    struct Writer {
+        state: Mutex<State>,
+        changed: Condvar,
+    }
+
+    static WRITER: OnceLock<&'static Writer> = OnceLock::new();
+
+    fn writer() -> &'static Writer {
+        WRITER.get_or_init(|| {
+            let w: &'static Writer = Box::leak(Box::new(Writer {
+                state: Mutex::new(State::default()),
+                changed: Condvar::new(),
+            }));
+            std::thread::Builder::new()
+                .name("workboard-save".into())
+                .spawn(move || run(w))
+                .expect("start the save thread");
+            w
+        })
+    }
+
+    fn run(w: &'static Writer) {
+        loop {
+            let batch = {
+                let mut g = w.state.lock().unwrap_or_else(|e| e.into_inner());
+                while g.waiting.is_empty() {
+                    g = w.changed.wait(g).unwrap_or_else(|e| e.into_inner());
+                }
+                g.busy = true;
+                std::mem::take(&mut g.waiting)
+            };
+            for (p, d) in batch {
+                write(&d, &p);
+            }
+            w.state.lock().unwrap_or_else(|e| e.into_inner()).busy = false;
+            w.changed.notify_all();
+        }
+    }
+
+    pub(super) fn queue(p: PathBuf, d: Data) {
+        let w = writer();
+        let mut g = w.state.lock().unwrap_or_else(|e| e.into_inner());
+        match g.waiting.iter_mut().find(|(q, _)| *q == p) {
+            Some(slot) => slot.1 = d,
+            None => g.waiting.push((p, d)),
+        }
+        drop(g);
+        w.changed.notify_all();
+    }
+
+    /// Wait until nothing is queued or being written (without starting the
+    /// writer when nothing ever was).
+    pub(super) fn flush() {
+        let Some(w) = WRITER.get() else {
+            return;
+        };
+        let mut g = w.state.lock().unwrap_or_else(|e| e.into_inner());
+        while !g.waiting.is_empty() || g.busy {
+            g = w.changed.wait(g).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// The whole file at once: written beside it, then moved over it, so a
+    /// crash midway leaves the last whole copy. Compact text (no
+    /// indentation) is smaller and quicker to write and to read back.
+    pub(super) fn write(d: &Data, p: &Path) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(s) = serde_json::to_vec(d) {
+            let tmp = p.with_extension("json.tmp");
+            if std::fs::write(&tmp, s).is_ok() {
+                let _ = std::fs::rename(&tmp, p);
+            }
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Data {
@@ -1751,14 +1845,36 @@ impl Data {
     }
 
     pub fn save_file(&self, file: &str) {
-        let p = Self::dir().join(file);
-        let _ = std::fs::create_dir_all(Self::dir());
-        if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
+        self.save_to(&Self::dir().join(file));
+    }
+
+    /// Where `save_file(file)` writes ("data.json" is the first workspace's
+    /// own place, which `WORKBOARD_HOME` can move).
+    pub fn file_path(file: &str) -> PathBuf {
+        if file == "data.json" {
+            Self::path()
+        } else {
+            Self::dir().join(file)
         }
+    }
+
+    /// Write now and wait for it. Writes still queued by `save_later` go
+    /// first, so an older copy can't land on top of this one.
+    fn save_to(&self, p: &Path) {
+        writer::flush();
+        writer::write(self, p);
+    }
+
+    /// Write on the background writer: the caller doesn't wait for the
+    /// serializing or the disk. A newer copy for the same file replaces one
+    /// still waiting.
+    pub fn save_later(self, p: PathBuf) {
+        writer::queue(p, self);
+    }
+
+    /// Wait until every write queued by `save_later` is on disk.
+    pub fn finish_saving() {
+        writer::flush();
     }
 
     /// A fresh workspace with one space and list, owned by `owner`.
@@ -2091,16 +2207,7 @@ impl Data {
     }
 
     pub fn save(&self) {
-        let p = Self::path();
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
-        }
+        self.save_to(&Self::path());
     }
 
     pub fn member(&self, id: u64) -> Option<&Member> {

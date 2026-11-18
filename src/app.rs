@@ -406,6 +406,9 @@ pub struct App {
     tag_text: String,
     dirty: bool,
     persist: bool,
+    /// Changes not saved yet: when the first and the latest of them were
+    /// made (see `save_tick`).
+    save_due: std::cell::Cell<Option<(std::time::Instant, std::time::Instant)>>,
     screenshot: Option<PathBuf>,
     frames: u32,
     shot_sent: bool,
@@ -746,6 +749,7 @@ impl App {
             tag_text: String::new(),
             dirty: false,
             persist,
+            save_due: std::cell::Cell::new(None),
             screenshot,
             frames: 0,
             shot_sent: false,
@@ -6589,18 +6593,17 @@ impl App {
             self.data.fix_activity_ids();
             self.sync_note_change();
         }
-        if self.dirty && self.persist {
-            if self.ws_file == "data.json" {
-                self.data.save();
-            } else {
-                self.data.save_file(&self.ws_file);
-            }
+        if self.dirty {
+            self.save_soon();
         }
         self.dirty = false;
         if self.persist {
             self.making_ws_tick();
             self.sync_tick(ctx);
         }
+        // after sync_tick, whose merges also leave a save due, so the wake-up
+        // for it is asked for in this frame
+        self.save_tick(Some(ctx));
         self.huddle_tick(Some(ctx));
         self.notify_tick(Some(ctx));
         self.huddle_bar(ctx);
@@ -6741,16 +6744,61 @@ impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if self.persist {
             self.finish_before_quit();
-            if self.ws_file == "data.json" {
-                self.data.save();
-            } else {
-                self.data.save_file(&self.ws_file);
-            }
+            self.save_now();
         }
     }
 }
 
+/// Saving waits until changes stop for this long, so typing a name or a
+/// doc saves once instead of on every key press...
+const SAVE_QUIET: std::time::Duration = std::time::Duration::from_secs(1);
+/// ...but no longer than this after the first unsaved change, so steady
+/// typing is still saved.
+const SAVE_AT_MOST: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl App {
+    /// Save the open workspace a moment from now (`save_tick`), on the
+    /// background writer.
+    pub(super) fn save_soon(&self) {
+        if !self.persist {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let first = self.save_due.get().map_or(now, |(first, _)| first);
+        self.save_due.set(Some((first, now)));
+    }
+
+    /// Once a frame: hand the workspace to the background writer once the
+    /// changes have settled, or wake up when they will have.
+    fn save_tick(&mut self, ctx: Option<&egui::Context>) {
+        let Some((first, last)) = self.save_due.get() else {
+            return;
+        };
+        let wait = SAVE_QUIET
+            .saturating_sub(last.elapsed())
+            .min(SAVE_AT_MOST.saturating_sub(first.elapsed()));
+        if wait.is_zero() {
+            self.save_due.set(None);
+            self.data.clone().save_later(Data::file_path(&self.ws_file));
+        } else if let Some(ctx) = ctx {
+            ctx.request_repaint_after(wait);
+        }
+    }
+
+    /// Save the open workspace right away and wait for it (quitting,
+    /// leaving it for another one), after anything still queued.
+    pub(super) fn save_now(&self) {
+        if !self.persist {
+            return;
+        }
+        self.save_due.set(None);
+        if self.ws_file == "data.json" {
+            self.data.save();
+        } else {
+            self.data.save_file(&self.ws_file);
+        }
+    }
+
     /// Quitting: stop my running timer cleanly so tracked time is kept (only
     /// mine: a teammate's timer keeps running), and let the team have it and
     /// anything else not sent yet. The change is recorded now, so the next

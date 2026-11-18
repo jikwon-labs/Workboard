@@ -872,14 +872,7 @@ impl App {
     }
 
     fn save_local(&self) {
-        if !self.persist {
-            return;
-        }
-        if self.ws_file == "data.json" {
-            self.data.save();
-        } else {
-            self.data.save_file(&self.ws_file);
-        }
+        self.save_now();
     }
 
     /// Read teammates' copies and merge them in. Returns true when something new arrived.
@@ -988,7 +981,9 @@ impl App {
         if changed {
             // what's new for me is announced on the next frame (notify.rs)
             self.notify_rt.pending = true;
-            self.save_local();
+            // teammates' changes come often: saved like my own edits, once
+            // they settle and off the screen's thread
+            self.save_soon();
             self.sync_rt.pending = true;
         }
         changed
@@ -1761,7 +1756,7 @@ impl App {
         // the workspace left was chosen past the sign-in screen
         self.data.extra.welcome = false;
         if self.persist {
-            self.data.save_file(&self.ws_file);
+            self.save_now();
             let mut list = Data::workspaces();
             if list.is_empty() {
                 list.push(WsEntry {

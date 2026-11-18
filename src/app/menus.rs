@@ -512,7 +512,7 @@ impl App {
         // the next workspace
         self.finish_status_edit();
         if self.persist {
-            self.data.save_file(&self.ws_file);
+            self.save_now();
         }
         let d = if file == "data.json" {
             Some(Data::load())

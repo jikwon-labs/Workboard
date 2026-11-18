@@ -188,6 +188,56 @@ pub struct SyncMeta {
     /// id -> fingerprint of each part when last saved (this computer only).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub field_hashes: BTreeMap<u64, BTreeMap<String, u32>>,
+    /// Set in a saved file that left out this computer's fingerprints
+    /// (`hashes`, `field_hashes`, `parents`, `value_hashes`) because they
+    /// were exactly what the file's content gives: opening it works them
+    /// out again (see `refill_hashes`). Never set in memory.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub rehash: bool,
+}
+
+/// Leave this computer's fingerprints out of a workspace about to be saved
+/// (`data`, with its bookkeeping at "extra.sync") when they are exactly what
+/// its content gives, and mark it to have them worked out again on opening.
+/// They are about half of a synced workspace's file. Fingerprints that
+/// differ from the content (a change not recorded yet, or made the way an
+/// older version made them) say something the content can't, so they stay.
+pub fn leave_out_hashes(data: &mut Value) {
+    let Some(meta) = data.pointer("/extra/sync").cloned() else {
+        return;
+    };
+    let meta: SyncMeta = serde_json::from_value(meta).unwrap_or_default();
+    // no fingerprints is itself news: nothing recorded yet
+    if meta.hashes.is_empty()
+        || meta.hashes != fingerprints(data)
+        || meta.field_hashes != part_hashes(data)
+        || meta.parents != parents_of(data)
+        || meta.value_hashes != value_hashes(data)
+    {
+        return;
+    }
+    if let Some(s) = data
+        .pointer_mut("/extra/sync")
+        .and_then(|s| s.as_object_mut())
+    {
+        for k in ["hashes", "field_hashes", "parents", "value_hashes"] {
+            s.remove(k);
+        }
+        s.insert("rehash".into(), Value::Bool(true));
+    }
+}
+
+/// Opening a file saved by `leave_out_hashes`: its fingerprints again, from
+/// its content as it was saved (before anything else changes it).
+pub fn refill_hashes(meta: &mut SyncMeta, data: &Value) {
+    if !meta.rehash {
+        return;
+    }
+    meta.hashes = fingerprints(data);
+    meta.field_hashes = part_hashes(data);
+    meta.parents = parents_of(data);
+    meta.value_hashes = value_hashes(data);
+    meta.rehash = false;
 }
 
 pub fn fnv(bytes: &[u8]) -> u64 {
@@ -507,7 +557,7 @@ pub fn fingerprints(data: &Value) -> BTreeMap<u64, u64> {
 }
 
 /// id -> the item it sits in, for every shared item inside another one.
-fn parents_of(data: &Value) -> BTreeMap<u64, u64> {
+pub fn parents_of(data: &Value) -> BTreeMap<u64, u64> {
     fn go(v: &Value, parent: Option<u64>, out: &mut BTreeMap<u64, u64>) {
         for item in v.as_array().into_iter().flatten() {
             if let (Some(id), Some(obj)) = (id_of(item), item.as_object()) {

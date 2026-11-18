@@ -891,12 +891,18 @@ mod writer {
 
     /// The whole file at once: written beside it, then moved over it, so a
     /// crash midway leaves the last whole copy. Compact text (no
-    /// indentation) is smaller and quicker to write and to read back.
+    /// indentation) is smaller and quicker to write and to read back, and
+    /// this computer's sync fingerprints are left out when opening the file
+    /// can work them out again (`leave_out_hashes`).
     pub(super) fn write(d: &Data, p: &Path) {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(s) = serde_json::to_vec(d) {
+        let Ok(mut v) = serde_json::to_value(d) else {
+            return;
+        };
+        crate::sync::leave_out_hashes(&mut v);
+        if let Ok(s) = serde_json::to_vec(&v) {
             let tmp = p.with_extension("json.tmp");
             if std::fs::write(&tmp, s).is_ok() {
                 let _ = std::fs::rename(&tmp, p);
@@ -1640,11 +1646,23 @@ impl Data {
         }
     }
 
+    /// Just opened: the sync fingerprints a file left out
+    /// (`sync::leave_out_hashes`), from the content as it was saved, so
+    /// first, before anything opening it changes.
+    fn refill_hashes(&mut self) {
+        if !self.extra.sync.rehash {
+            return;
+        }
+        let v = serde_json::to_value(&*self).unwrap_or_default();
+        crate::sync::refill_hashes(&mut self.extra.sync, &v);
+    }
+
     pub fn load_file(file: &str) -> Option<Self> {
         let s = std::fs::read_to_string(Self::dir().join(file)).ok()?;
         let mut d: Option<Data> = serde_json::from_str(&s).ok();
         match d.as_mut() {
             Some(d) => {
+                d.refill_hashes();
                 d.keep_old_bookmarks_personal();
                 d.keep_slack_under_me_personal();
             }
@@ -1967,6 +1985,7 @@ impl Data {
     pub fn load() -> Self {
         if let Ok(s) = std::fs::read_to_string(Self::path()) {
             if let Ok(mut d) = serde_json::from_str::<Data>(&s) {
+                d.refill_hashes();
                 d.keep_old_bookmarks_personal();
                 d.keep_slack_under_me_personal();
                 // move the earlier default colours to the measured ones

@@ -835,6 +835,55 @@ pub(super) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// the background writer once changes stop for a second (or five seconds
 /// after the first one, for steady typing), as compact text. Quitting saves
 /// at once, and a copy still waiting never lands on top of a newer save.
+/// A synced workspace's file leaves out this computer's fingerprints when
+/// they are just what its content gives, and opening it works them out
+/// again: the same bookkeeping comes back. Fingerprints a change hasn't
+/// been recorded against stay in the file, so that change is still found
+/// after opening it.
+#[test]
+fn a_saved_workspace_leaves_out_fingerprints_it_can_work_out_again() {
+    let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = std::env::temp_dir().join(format!("wb-home-hashes-{:x}", crate::sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    let mut a = app();
+    a.persist = true;
+    a.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "d".into(),
+        tag: 1,
+        server: Some("127.0.0.1:1".into()),
+    });
+    a.sync_note_change();
+    assert!(!a.data.extra.sync.hashes.is_empty());
+    a.save_now();
+    let text = std::fs::read_to_string(Data::path()).unwrap();
+    assert!(!text.contains("\"field_hashes\""), "left out");
+    assert!(!text.contains("\"hashes\""));
+    assert!(text.contains("\"rehash\":true"));
+    let opened = Data::load();
+    assert_eq!(
+        opened.extra.sync, a.data.extra.sync,
+        "the same bookkeeping, worked out again"
+    );
+
+    // a change not recorded yet: the old fingerprints stay and still show it
+    let t = a.data.tasks[0].id;
+    a.data.tasks[0].name = "Renamed before it was recorded".into();
+    a.save_now();
+    let text = std::fs::read_to_string(Data::path()).unwrap();
+    assert!(text.contains("\"hashes\""), "kept");
+    assert!(!text.contains("\"rehash\""));
+    let mut b = App::build(None, Some(Data::load()));
+    let before = b.data.extra.sync.stamps.get(&t).copied();
+    b.sync_note_change();
+    assert_ne!(
+        b.data.extra.sync.stamps.get(&t).copied(),
+        before,
+        "the change is still recorded"
+    );
+}
+
 #[test]
 fn edits_are_saved_once_they_settle_off_the_screens_thread() {
     use std::time::{Duration, Instant};

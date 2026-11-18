@@ -157,3 +157,13 @@ pub fn next_recur(d: NaiveDate, r: &str) -> NaiveDate {
         _ => d,
     }
 }
+
+/// `s` cut to its first `n` characters with an ellipsis after them (so up to
+/// n + 1 characters), or whole when it fits.
+pub fn truncate_chars(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        format!("{}\u{2026}", s.chars().take(n).collect::<String>())
+    }
+}

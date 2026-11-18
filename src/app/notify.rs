@@ -102,12 +102,7 @@ fn preview(m: &Message) -> String {
 }
 
 fn cut(s: &str, n: usize) -> String {
-    let s = s.replace('\n', " ");
-    if s.chars().count() <= n {
-        s
-    } else {
-        format!("{}\u{2026}", s.chars().take(n).collect::<String>())
-    }
+    truncate_chars(&s.replace('\n', " "), n)
 }
 
 impl App {

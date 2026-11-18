@@ -6,14 +6,6 @@ use super::super::icons::{
 };
 use super::*;
 
-fn truncate_chars(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", s.chars().take(n).collect::<String>())
-    }
-}
-
 impl App {
     fn list_row_h(&self) -> f32 {
         if self.data.extra.labs.iter().any(|l| l == "compact") {

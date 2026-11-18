@@ -101,6 +101,11 @@ enum Fmt {
     }
 }
 
+extension Array {
+    /// The element at `i`, or nil when there is none.
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
 /// The app icon's mark ("W into a check") on its dark tile, for the setup screen.
 struct WMark: View {
     var body: some View {

@@ -246,15 +246,12 @@ impl App {
                 .shared
                 .as_ref()
                 .is_some_and(|c| c.server.is_some());
-            self.toast = Some((
-                if has_server {
+            self.toast(if has_server {
                     tr("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.")
                 } else {
                     tr("Huddles need the team's server. Connect in Work together.")
                 }
-                .into(),
-                now_ts(),
-            ));
+                );
             return;
         }
         let (audio, video) = (self.huddle.audio, self.huddle.video);
@@ -367,10 +364,8 @@ impl App {
                 .is_some_and(|t| t.elapsed() >= std::time::Duration::from_secs(HUDDLE_JOIN_SECS))
         {
             self.leave_huddle();
-            self.toast = Some((
-                tr("The server didn't answer, so the huddle didn't start. Try again in a moment.")
-                    .into(),
-                now_ts(),
+            self.toast(tr(
+                "The server didn't answer, so the huddle didn't start. Try again in a moment.",
             ));
         } else if self.huddle.waiting {
             if let Some(c) = ctx {
@@ -412,7 +407,7 @@ impl App {
                 VoiceEvent::Trouble(why) => {
                     // so far only the camera says this: turn it back off
                     self.set_huddle_camera(false);
-                    self.toast = Some((why, now_ts()));
+                    self.toast(why);
                 }
                 VoiceEvent::ScreenEnded(why) => {
                     self.huddle.screen = None;
@@ -424,20 +419,18 @@ impl App {
                             self.huddle.screen_problem = Some(ScreenTrouble::NotAllowed);
                         }
                         Some(ScreenTrouble::Gone) => {
-                            self.toast = Some((
-                                tr("The screen or window you shared is gone, so sharing stopped.")
-                                    .into(),
-                                now_ts(),
+                            self.toast(tr(
+                                "The screen or window you shared is gone, so sharing stopped.",
                             ));
                         }
                         Some(ScreenTrouble::Failed(m)) => {
-                            self.toast = Some((trf!("Screen sharing stopped: {}", m), now_ts()));
+                            self.toast(trf!("Screen sharing stopped: {}", m));
                         }
                     }
                 }
                 VoiceEvent::Left(why) => {
                     if let Some(why) = why {
-                        self.toast = Some((why, now_ts()));
+                        self.toast(why);
                     }
                     self.leave_huddle();
                 }

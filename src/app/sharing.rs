@@ -218,7 +218,7 @@ impl App {
         }
         if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://space/{}", sid));
-            self.toast = Some((tr("Link copied").into(), now_ts()));
+            self.toast(tr("Link copied"));
             close_any(ui);
         }
         if level >= Level::Edit {

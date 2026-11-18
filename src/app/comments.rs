@@ -324,7 +324,7 @@ impl App {
                     if editing.as_ref().is_some_and(|(e, _)| *e == id) {
                         editing = None;
                     }
-                    self.toast = Some((tr("Comment deleted").into(), now_ts()));
+                    self.toast(tr("Comment deleted"));
                 }
                 Act::Assign { id, to } => {
                     if let Some(i) = find(task, id) {

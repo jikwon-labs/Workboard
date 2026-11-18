@@ -1537,12 +1537,9 @@ impl App {
             self.chat_files.len()
         };
         if count >= MAX_PER_MESSAGE {
-            self.toast = Some((
-                trf!(
-                    "You can send up to {} pictures or videos in one message.",
-                    MAX_PER_MESSAGE
-                ),
-                now_ts(),
+            self.toast(trf!(
+                "You can send up to {} pictures or videos in one message.",
+                MAX_PER_MESSAGE
             ));
             return false;
         }
@@ -2131,17 +2128,12 @@ impl App {
                             if let Some(path) = &local {
                                 if b(ui, tr("Save to Downloads")).clicked() {
                                     match save_copy(path, &a.name) {
-                                        Ok(dest) => {
-                                            self.toast = Some((
-                                                trf!(
-                                                    "Saved {}",
-                                                    dest.file_name()
-                                                        .map(|n| n.to_string_lossy().to_string())
-                                                        .unwrap_or_default()
-                                                ),
-                                                now_ts(),
-                                            ))
-                                        }
+                                        Ok(dest) => self.toast(trf!(
+                                            "Saved {}",
+                                            dest.file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_default()
+                                        )),
                                         Err(e) => {
                                             self.toast =
                                                 Some((trf!("Couldn't save: {}", e), now_ts()))

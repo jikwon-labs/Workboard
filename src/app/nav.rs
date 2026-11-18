@@ -655,18 +655,8 @@ impl App {
                 self.section = Section::Docs;
                 self.doc_open = Some(id);
             }
-            (_, Some(false)) => {
-                self.toast = Some((
-                    tr("This link points to something archived or private").into(),
-                    now_ts(),
-                ))
-            }
-            _ => {
-                self.toast = Some((
-                    tr("This link can't be opened in this Workspace").into(),
-                    now_ts(),
-                ))
-            }
+            (_, Some(false)) => self.toast(tr("This link points to something archived or private")),
+            _ => self.toast(tr("This link can't be opened in this Workspace")),
         }
         shown == Some(true)
     }

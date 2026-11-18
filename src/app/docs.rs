@@ -1757,12 +1757,12 @@ impl App {
         }
         if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://doc/{}", id));
-            self.toast = Some((tr("Link copied").into(), now_ts()));
+            self.toast(tr("Link copied"));
             close_any(ui);
         }
         if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_doc(id) {
-                self.toast = Some((tr("Doc duplicated").into(), now_ts()));
+                self.toast(tr("Doc duplicated"));
                 if self.doc_open.is_some() {
                     self.doc_open = Some(n);
                 }
@@ -1771,7 +1771,7 @@ impl App {
         }
         if self.may_manage() && ui.button(tr("Save as template")).clicked() {
             if self.save_doc_as_template(id).is_some() {
-                self.toast = Some((tr("Saved as a template").into(), now_ts()));
+                self.toast(tr("Saved as a template"));
             }
             close_any(ui);
         }

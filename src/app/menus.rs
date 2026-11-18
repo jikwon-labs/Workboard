@@ -532,7 +532,7 @@ impl App {
             Data::load_file(file)
         };
         if let Some(p) = Data::take_unreadable() {
-            self.toast = Some((super::unreadable_note(&p), now_ts()));
+            self.toast(super::unreadable_note(&p));
         }
         if let Some(mut d) = d {
             d.fold_legacy_slack();
@@ -656,17 +656,11 @@ impl App {
                                 self.data.extra.muted_until =
                                     if secs == 0 { 0 } else { now_ts() + secs };
                                 self.dirty = true;
-                                self.toast = Some((
-                                    if secs == 0 {
-                                        tr("Notifications on").into()
-                                    } else {
-                                        crate::trf!(
-                                            "Notifications muted {}",
-                                            tr(label).to_lowercase()
-                                        )
-                                    },
-                                    now_ts(),
-                                ));
+                                self.toast(if secs == 0 {
+                                    tr("Notifications on").into()
+                                } else {
+                                    crate::trf!("Notifications muted {}", tr(label).to_lowercase())
+                                });
                                 close_popup(ui);
                             }
                         }
@@ -997,9 +991,8 @@ impl App {
         {
             // no Space to put it in: say so and make the Space first
             if self.open_spaces().is_empty() {
-                self.toast = Some((
-                    tr("Lists live in a Space. Make a Space first: it comes with a List.").into(),
-                    now_ts(),
+                self.toast(tr(
+                    "Lists live in a Space. Make a Space first: it comes with a List.",
                 ));
             }
             self.offer_new_list(space);
@@ -1514,7 +1507,7 @@ impl App {
                         let send = ui.add_enabled(!valid.is_empty(), Tint(primary_btn(t, tr("Send invite"))));
                         if send.clicked() {
                             self.invite_people(&valid, role);
-                            self.toast = Some((if on_server && !connected { crate::trf!("Invited {} people. Their invite codes are asked for once the server is back.", valid.len()) } else if on_server && !manages { crate::trf!("Invited {} people. The owner or an admin gives them their invite codes.", valid.len()) } else if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) }, now_ts()));
+                            self.toast(if on_server && !connected { crate::trf!("Invited {} people. Their invite codes are asked for once the server is back.", valid.len()) } else if on_server && !manages { crate::trf!("Invited {} people. The owner or an admin gives them their invite codes.", valid.len()) } else if on_server { crate::trf!("Invited {} people. Their invite codes are on the way (Work together > People shows them too).", valid.len()) } else if self.data.extra.shared.is_some() { crate::trf!("Invited {} people. When they join the shared folder they pick their name.", valid.len()) } else { crate::trf!("Invited {} people. Share the workspace (Work together) so they can join.", valid.len()) });
                             self.dirty = true;
                             close = true;
                         }
@@ -2105,7 +2098,7 @@ impl App {
                         if persist {
                             crate::notifier::post("Workboard", &tr("Notifications are working."), "inbox", n.sound);
                         }
-                        self.toast = Some((tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.").into(), now_ts()));
+                        self.toast(tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications."));
                     }
                     if ch {
                         self.dirty = true;
@@ -2686,7 +2679,7 @@ impl App {
                     if icon_button(ui, t, "link", tr("Copy link"), "Copy link", true).clicked() {
                         // the same kind of link the app opens (search, messages, macOS)
                         ui.ctx().copy_text(super::nav::location_link(self.loc));
-                        self.toast = Some((tr("Link copied").into(), now_ts()));
+                        self.toast(tr("Link copied"));
                     }
                 });
             }
@@ -2832,7 +2825,7 @@ impl App {
                         ..Default::default()
                     });
                     self.dirty = true;
-                    self.toast = Some((tr("Reminder created").into(), now_ts()));
+                    self.toast(tr("Reminder created"));
                     close = true;
                 }
             }
@@ -3089,12 +3082,9 @@ impl App {
             0
         };
         if invited > 0 {
-            self.toast = Some((
-                crate::trf!(
-                    "Invited {} people. Share the workspace (Work together) so they can join.",
-                    invited
-                ),
-                now_ts(),
+            self.toast(crate::trf!(
+                "Invited {} people. Share the workspace (Work together) so they can join.",
+                invited
             ));
         }
     }
@@ -3382,10 +3372,8 @@ impl App {
                                 .extra
                                 .trash
                                 .insert(i.min(self.data.extra.trash.len()), item);
-                            self.toast = Some((
-                                tr("There is no list to restore it into. Make a list first.")
-                                    .into(),
-                                now_ts(),
+                            self.toast(tr(
+                                "There is no list to restore it into. Make a list first.",
                             ));
                             return;
                         };
@@ -3409,7 +3397,7 @@ impl App {
                     }
                     self.data.tasks.extend(tasks);
                     if let Some(n) = note {
-                        self.toast = Some((n, now_ts()));
+                        self.toast(n);
                     }
                 }
             }
@@ -3450,13 +3438,10 @@ impl App {
                         let home = self.data.spaces[si].name.clone();
                         self.data.spaces[si].lists.push(lt.list);
                         if lt.folder.is_some() || space.is_none() {
-                            self.toast = Some((
-                                crate::trf!(
-                                    "\"{}\" was restored to {} because its old place is gone",
-                                    name,
-                                    home
-                                ),
-                                now_ts(),
+                            self.toast(crate::trf!(
+                                "\"{}\" was restored to {} because its old place is gone",
+                                name,
+                                home
                             ));
                         }
                         into = si;
@@ -3465,9 +3450,8 @@ impl App {
                             .extra
                             .trash
                             .insert(i.min(self.data.extra.trash.len()), item);
-                        self.toast = Some((
-                            tr("There is no space to restore it into. Make a space first.").into(),
-                            now_ts(),
+                        self.toast(tr(
+                            "There is no space to restore it into. Make a space first.",
                         ));
                         return;
                     }
@@ -3478,13 +3462,10 @@ impl App {
                     self.data.tasks.extend(tasks);
                     // its Folder or Space is archived: it is back, but hidden with them
                     if self.data.list_archived(lid) {
-                        self.toast = Some((
-                            crate::trf!(
+                        self.toast(crate::trf!(
                                 "\"{}\" is back in an archived Folder or Space. Restore that from Settings > Spaces.",
                                 name
-                            ),
-                            now_ts(),
-                        ));
+                            ));
                     }
                 }
             }
@@ -3509,9 +3490,8 @@ impl App {
                             .extra
                             .trash
                             .insert(i.min(self.data.extra.trash.len()), item);
-                        self.toast = Some((
-                            tr("There is no space to restore it into. Make a space first.").into(),
-                            now_ts(),
+                        self.toast(tr(
+                            "There is no space to restore it into. Make a space first.",
                         ));
                         return;
                     };
@@ -3522,13 +3502,10 @@ impl App {
                         .any(|s| s.folders.iter().any(|f| f.id == ft.folder.id))
                     {
                         if space.is_none() {
-                            self.toast = Some((
-                                crate::trf!(
-                                    "\"{}\" was restored to {} because its old place is gone",
-                                    ft.folder.name,
-                                    self.data.spaces[si].name
-                                ),
-                                now_ts(),
+                            self.toast(crate::trf!(
+                                "\"{}\" was restored to {} because its old place is gone",
+                                ft.folder.name,
+                                self.data.spaces[si].name
                             ));
                         }
                         self.data.spaces[si].folders.push(ft.folder);
@@ -3969,10 +3946,7 @@ impl App {
                             parent: None,
                             open: false,
                         });
-                        self.toast = Some((
-                            trf!("Task created in {}", self.data.list_name(list)),
-                            now_ts(),
-                        ));
+                        self.toast(trf!("Task created in {}", self.data.list_name(list)));
                     } else {
                         self.need_a_list();
                     }

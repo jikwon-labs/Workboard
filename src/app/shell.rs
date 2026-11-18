@@ -2790,7 +2790,7 @@ impl App {
                     Location::Space(id) => {
                         self.set_space_archived(id, false);
                         let name = self.data.location_name(self.loc);
-                        self.toast = Some((trf!("Restored \"{}\".", name), now_ts()));
+                        self.toast(trf!("Restored \"{}\".", name));
                     }
                     Location::Folder(id) => self.set_folder_archived(id, false),
                     Location::List(id) => self.set_list_archived(id, false),
@@ -3097,7 +3097,7 @@ impl App {
                                         close_popup(ui);
                                     }
                                     if ui.button(tr("Export to CSV")).clicked() {
-                                        self.toast = Some((self.export_csv(), now_ts()));
+                                        self.toast(self.export_csv());
                                         close_popup(ui);
                                     }
                                     if ui

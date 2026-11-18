@@ -776,14 +776,11 @@ impl App {
             t.updated = now_ts();
         }
         self.dirty = true;
-        self.toast = Some((
-            if ids.len() == 1 {
-                trf!("Moved to {}", lname)
-            } else {
-                trf!("Moved {} tasks to {}", ids.len(), lname)
-            },
-            now_ts(),
-        ));
+        self.toast(if ids.len() == 1 {
+            trf!("Moved to {}", lname)
+        } else {
+            trf!("Moved {} tasks to {}", ids.len(), lname)
+        });
     }
 
     /// Copies a task with its subtasks; returns the copy's id.
@@ -856,16 +853,13 @@ impl App {
         }
         self.selected.retain(|s| !ids.contains(s));
         self.dirty = true;
-        self.toast = Some((
-            if !archived {
-                tr("Unarchived").into()
-            } else if ids.len() == 1 {
-                trf!("Archived {} task", ids.len())
-            } else {
-                trf!("Archived {} tasks", ids.len())
-            },
-            now_ts(),
-        ));
+        self.toast(if !archived {
+            tr("Unarchived").into()
+        } else if ids.len() == 1 {
+            trf!("Archived {} task", ids.len())
+        } else {
+            trf!("Archived {} tasks", ids.len())
+        });
     }
 
     /// Moves a list to another space or folder.
@@ -915,17 +909,14 @@ impl App {
                 t.status = statuses[0].name.clone();
             }
         }
-        self.toast = Some((
-            trf!(
-                "Moved {} to {}",
-                item.name,
-                self.data.location_name(
-                    folder
-                        .map(Location::Folder)
-                        .unwrap_or(Location::Space(space))
-                )
-            ),
-            now_ts(),
+        self.toast(trf!(
+            "Moved {} to {}",
+            item.name,
+            self.data.location_name(
+                folder
+                    .map(Location::Folder)
+                    .unwrap_or(Location::Space(space))
+            )
         ));
         self.dirty = true;
     }
@@ -1192,12 +1183,12 @@ impl App {
         ui.horizontal(|ui| {
             if ui.button(tr("Copy link")).clicked() {
                 ui.ctx().copy_text(format!("workboard://task/{}", tid));
-                self.toast = Some((tr("Link copied").into(), now_ts()));
+                self.toast(tr("Link copied"));
                 close_any(ui);
             }
             if ui.button(tr("Copy ID")).clicked() {
                 ui.ctx().copy_text(format!("{}", tid));
-                self.toast = Some((tr("Task ID copied").into(), now_ts()));
+                self.toast(tr("Task ID copied"));
                 close_any(ui);
             }
         });
@@ -1388,7 +1379,7 @@ impl App {
         }
         if ui.button(tr("Duplicate")).clicked() {
             if self.duplicate_task(tid).is_some() {
-                self.toast = Some((tr("Task duplicated").into(), now_ts()));
+                self.toast(tr("Task duplicated"));
             }
             close_any(ui);
         }
@@ -1424,7 +1415,7 @@ impl App {
                 priority: task.priority,
                 ..Default::default()
             });
-            self.toast = Some((tr("Saved as a template").into(), now_ts()));
+            self.toast(tr("Saved as a template"));
             self.dirty = true;
             close_any(ui);
         }
@@ -1469,7 +1460,7 @@ impl App {
         }
         if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://list/{}", lid));
-            self.toast = Some((tr("Link copied").into(), now_ts()));
+            self.toast(tr("Link copied"));
             close_any(ui);
         }
         if ui.button(tr("List Info")).clicked() {
@@ -1544,13 +1535,13 @@ impl App {
             if let Some(n) = self.duplicate_list(lid) {
                 self.section = Section::Home;
                 self.loc = Location::List(n);
-                self.toast = Some((tr("List duplicated").into(), now_ts()));
+                self.toast(tr("List duplicated"));
             }
             close_any(ui);
         }
         if self.may_manage() && ui.button(tr("Save as template")).clicked() {
             if self.save_list_as_template(lid).is_some() {
-                self.toast = Some((tr("Saved as a template").into(), now_ts()));
+                self.toast(tr("Saved as a template"));
             }
             close_any(ui);
         }
@@ -1596,7 +1587,7 @@ impl App {
         }
         if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://folder/{}", fid));
-            self.toast = Some((tr("Link copied").into(), now_ts()));
+            self.toast(tr("Link copied"));
             close_any(ui);
         }
         ui.separator();
@@ -1630,7 +1621,7 @@ impl App {
         if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_folder(fid) {
                 self.actions.push(Action::Go(Location::Folder(n)));
-                self.toast = Some((tr("Folder duplicated").into(), now_ts()));
+                self.toast(tr("Folder duplicated"));
             }
             close_any(ui);
         }
@@ -1673,7 +1664,7 @@ impl App {
         } else {
             trf!("Restored \"{}\".", name)
         };
-        self.toast = Some((msg, now_ts()));
+        self.toast(msg);
     }
 
     /// Moves a folder, with its lists, to the end of another space.
@@ -1712,13 +1703,10 @@ impl App {
                 t.status = statuses[0].name.clone();
             }
         }
-        self.toast = Some((
-            trf!(
-                "Moved {} to {}",
-                name,
-                self.data.location_name(Location::Space(space))
-            ),
-            now_ts(),
+        self.toast(trf!(
+            "Moved {} to {}",
+            name,
+            self.data.location_name(Location::Space(space))
         ));
         self.dirty = true;
     }
@@ -1886,7 +1874,7 @@ impl App {
         } else {
             trf!("Restored \"{}\".", name)
         };
-        self.toast = Some((msg, now_ts()));
+        self.toast(msg);
     }
 
     pub(super) fn set_space_archived(&mut self, sid: u64, archived: bool) {
@@ -2100,7 +2088,7 @@ impl App {
         }
         if ui.button(tr("Copy link")).clicked() {
             ui.ctx().copy_text(format!("workboard://space/{}", sid));
-            self.toast = Some((tr("Link copied").into(), now_ts()));
+            self.toast(tr("Link copied"));
             close_any(ui);
         }
         let personal = self
@@ -2223,7 +2211,7 @@ impl App {
         if ui.button(tr("Duplicate")).clicked() {
             if let Some(n) = self.duplicate_space(sid) {
                 self.actions.push(Action::Go(Location::Space(n)));
-                self.toast = Some((tr("Space duplicated").into(), now_ts()));
+                self.toast(tr("Space duplicated"));
             }
             close_any(ui);
         }
@@ -2246,10 +2234,8 @@ impl App {
                 self.dirty = true;
             }
             if !hidden {
-                self.toast = Some((
-                    tr("Space hidden from the sidebar. Show it again from Settings > Spaces.")
-                        .into(),
-                    now_ts(),
+                self.toast(tr(
+                    "Space hidden from the sidebar. Show it again from Settings > Spaces.",
                 ));
             }
             close_any(ui);
@@ -3104,14 +3090,11 @@ impl App {
                                 for id in &ids {
                                     self.duplicate_task(*id);
                                 }
-                                self.toast = Some((
-                                    if ids.len() == 1 {
-                                        tr("Duplicated 1 task").to_string()
-                                    } else {
-                                        trf!("Duplicated {} tasks", ids.len())
-                                    },
-                                    now_ts(),
-                                ));
+                                self.toast(if ids.len() == 1 {
+                                    tr("Duplicated 1 task").to_string()
+                                } else {
+                                    trf!("Duplicated {} tasks", ids.len())
+                                });
                                 self.selected.clear();
                             }
                             // archived tasks (Show archived tasks only) can be brought back

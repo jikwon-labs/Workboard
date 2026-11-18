@@ -1334,9 +1334,9 @@ impl App {
                     for n in make_tasks {
                         self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.clone(), due: None, parent: None, open: false });
                     }
-                    self.toast = Some((trf!("Tasks created from the meeting notes in {}", self.data.list_name(list)), now_ts()));
+                    self.toast(trf!("Tasks created from the meeting notes in {}", self.data.list_name(list)));
                 } else {
-                    self.toast = Some((tr("Make a List first: action items become tasks in a List").into(), now_ts()));
+                    self.toast(tr("Make a List first: action items become tasks in a List"));
                 }
             }
             if delete {
@@ -1903,7 +1903,7 @@ impl App {
                             Err(e) => self.sweep.form_error = Some(e),
                             Ok(_) if self.data.space_of_list(f.list_id).is_none() => {
                                 // the List was never chosen or has been deleted
-                                self.toast = Some((tr("This form has no List for its answers. Choose one under Edit.").into(), now_ts()));
+                                self.toast(tr("This form has no List for its answers. Choose one under Edit."));
                                 self.sweep.form_error = None;
                                 self.form_mode_fill = false;
                             }
@@ -1915,7 +1915,7 @@ impl App {
                                 self.pending_log = Some(format!("submitted the form {}", f.name));
                                 self.form_fill.clear();
                                 self.sweep.form_error = None;
-                                self.toast = Some((trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)), now_ts()));
+                                self.toast(trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)));
                             }
                         }
                     }

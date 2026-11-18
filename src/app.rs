@@ -914,6 +914,11 @@ impl App {
         theme::theme_accent(self.data.dark, &self.data.extra.accent)
     }
 
+    /// Show `msg` in the toast at the bottom of the window for a few seconds.
+    fn toast(&mut self, msg: impl Into<String>) {
+        self.toast = Some((msg.into(), now_ts()));
+    }
+
     // ---------------------------------------------------------------- data helpers
 
     fn task(&self, id: u64) -> Option<&Task> {
@@ -1484,7 +1489,7 @@ impl App {
         let me = self.data.me;
         // a space shared with me to view or comment only (the server would put it back)
         if let Some(why) = self.refused_here(&a) {
-            self.toast = Some((tr(why).into(), now_ts()));
+            self.toast(tr(why));
             return;
         }
         match a {
@@ -1607,10 +1612,7 @@ impl App {
                                 && matches!(s.kind, StatusKind::Closed | StatusKind::Done)
                         });
                         if closes {
-                            self.toast = Some((
-                                trf!("\u{1F389} Nice! \"{}\" is complete", new.name),
-                                now_ts(),
-                            ));
+                            self.toast(trf!("\u{1F389} Nice! \"{}\" is complete", new.name));
                         }
                     }
                     let mut move_to = None;
@@ -2288,10 +2290,8 @@ impl App {
         }
         self.commit_status_renames(si, &mut orig, &mut rules);
         if self.settle_status_names(si, &orig) {
-            self.toast = Some((
-                tr("A status name that was empty or already used went back to its last name")
-                    .into(),
-                now_ts(),
+            self.toast(tr(
+                "A status name that was empty or already used went back to its last name",
             ));
         }
     }
@@ -2526,7 +2526,7 @@ impl App {
         } else {
             "Tasks live in a List. Make one first."
         };
-        self.toast = Some((tr(msg).into(), now_ts()));
+        self.toast(tr(msg));
         self.offer_new_list(self.current_space());
     }
 
@@ -3168,7 +3168,7 @@ impl App {
                     .on_hover_text(tr("Save the tasks in this view as a CSV file"))
                     .clicked()
                 {
-                    self.toast = Some((self.export_csv(), now_ts()));
+                    self.toast(self.export_csv());
                 }
                 let undated = tasks
                     .iter()
@@ -4838,7 +4838,7 @@ impl App {
                                     .clicked()
                                 {
                                     ui.ctx().copy_text(tid.to_string());
-                                    self.toast = Some((tr("Task ID copied").into(), now_ts()));
+                                    self.toast(tr("Task ID copied"));
                                 }
                                 self.watchers_header(ui, &t, win_id, &mut task);
                                 popup(ui, &r, win_id.with("more"), 200.0, |ui| {
@@ -4881,7 +4881,7 @@ impl App {
                                     }
                                     if ui.button(tr("Copy ID")).clicked() {
                                         ui.ctx().copy_text(tid.to_string());
-                                        self.toast = Some((tr("Task ID copied").into(), now_ts()));
+                                        self.toast(tr("Task ID copied"));
                                         close_popup(ui);
                                     }
                                     if ui
@@ -4922,7 +4922,7 @@ impl App {
                                     }
                                     if ui.button(tr("Copy link")).clicked() {
                                         ui.ctx().copy_text(format!("workboard://task/{}", tid));
-                                        self.toast = Some((tr("Link copied").into(), now_ts()));
+                                        self.toast(tr("Link copied"));
                                         close_popup(ui);
                                     }
                                     if ui

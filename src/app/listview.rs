@@ -211,10 +211,7 @@ impl App {
                 self.actions.push(Action::Replace(e));
             }
         } else if !manual {
-            self.toast = Some((
-                tr("Sort by Manual to drag tasks into your own order").into(),
-                now_ts(),
-            ));
+            self.toast(tr("Sort by Manual to drag tasks into your own order"));
         }
     }
 

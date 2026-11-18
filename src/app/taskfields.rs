@@ -1208,7 +1208,7 @@ impl App {
                     let _ = std::process::Command::new("open").arg(p).spawn();
                 }
             } else {
-                self.toast = Some((trf!("{} is still downloading", a.name), now_ts()));
+                self.toast(trf!("{} is still downloading", a.name));
             }
         }
         // files on their way: getting ready, going up, or why not (with

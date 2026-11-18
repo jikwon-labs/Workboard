@@ -1019,10 +1019,11 @@ impl App {
                             .on_hover_text(tr("Save as a Markdown file"))
                             .clicked()
                         {
-                            self.toast = Some(match self.export_doc(id) {
-                                Some(p) => (trf!("Saved {}", p.display()), now_ts()),
-                                None => (tr("Couldn't save the file").into(), now_ts()),
-                            });
+                            let msg = match self.export_doc(id) {
+                                Some(p) => trf!("Saved {}", p.display()),
+                                None => tr("Couldn't save the file").into(),
+                            };
+                            self.toast(msg);
                         }
                         if ui
                             .add(ghost(egui::Button::new(tr("Duplicate"))))
@@ -1031,12 +1032,12 @@ impl App {
                         {
                             if let Some(n) = self.duplicate_doc(id) {
                                 self.doc_open = Some(n);
-                                self.toast = Some((tr("Doc duplicated").into(), now_ts()));
+                                self.toast(tr("Doc duplicated"));
                             }
                         }
                         if ui.add(ghost(egui::Button::new(tr("Copy link")))).clicked() {
                             ui.ctx().copy_text(format!("workboard://doc/{}", id));
-                            self.toast = Some((tr("Link copied").into(), now_ts()));
+                            self.toast(tr("Link copied"));
                         }
                         let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else {
                             return;
@@ -1941,7 +1942,7 @@ impl App {
                                                     let none = rows.is_empty();
                                                     self.add_sheet_rows(ws, rows);
                                                     if none {
-                                                        self.toast = Some((tr("No open tasks are assigned to you").into(), now_ts()));
+                                                        self.toast(tr("No open tasks are assigned to you"));
                                                     }
                                                 }
                                                 "Last week's tasks" => {
@@ -1950,7 +1951,7 @@ impl App {
                                                     let none = rows.is_empty();
                                                     self.add_sheet_rows(ws, rows);
                                                     if none {
-                                                        self.toast = Some((tr("No time was tracked last week").into(), now_ts()));
+                                                        self.toast(tr("No time was tracked last week"));
                                                     }
                                                 }
                                                 "Individual tasks" => {
@@ -1959,7 +1960,7 @@ impl App {
                                                 }
                                                 // nothing to pick from: say why instead of an empty list
                                                 _ if !self.data.tasks.iter().any(|x| self.data.task_live(x)) => {
-                                                    self.toast = Some((tr("Make a task first: time is tracked on tasks").into(), now_ts()));
+                                                    self.toast(tr("Make a task first: time is tracked on tasks"));
                                                 }
                                                 _ => {
                                                     let first = self.data.tasks.iter().find(|x| x.assignees.contains(&me) && self.data.task_live(x)).map(|x| x.id).unwrap_or(0);
@@ -2356,10 +2357,7 @@ impl App {
                 });
             if !there {
                 self.sweep.entry_edit = None;
-                self.toast = Some((
-                    tr("The time entry you were changing was changed somewhere else, so it was closed without saving.").into(),
-                    now_ts(),
-                ));
+                self.toast(tr("The time entry you were changing was changed somewhere else, so it was closed without saving."));
             }
         }
         // (start, end, task name, task, whose as saved)

@@ -1029,7 +1029,7 @@ impl App {
                 if r.clicked() {
                     self.data.extra.templates.retain(|x| x.id != id);
                     self.dirty = true;
-                    self.toast = Some((tr("Template deleted").into(), now_ts()));
+                    self.toast(tr("Template deleted"));
                     gone = true;
                 }
                 if ui.button(tr("Cancel")).clicked() {
@@ -1262,7 +1262,7 @@ impl App {
                         .is_some(),
                 };
                 if made {
-                    self.toast = Some((tr("Made from the template").into(), now_ts()));
+                    self.toast(tr("Made from the template"));
                 }
             }
         });

@@ -150,7 +150,7 @@ impl App {
                 match how {
                     DeleteHow::Here | DeleteHow::Folder => {
                         self.leave_deleted_workspace();
-                        self.toast = Some((trf!("Deleted {}", name), now_ts()));
+                        self.toast(trf!("Deleted {}", name));
                         close = true;
                     }
                     DeleteHow::Server(addr) => self.delete_on_server(&addr, ui.ctx().clone()),
@@ -173,9 +173,8 @@ impl App {
             return;
         };
         let Some(token) = load_token(addr, &cfg.device) else {
-            self.toast = Some((
-                tr("Sign in to the team server again, then delete the workspace.").into(),
-                now_ts(),
+            self.toast(tr(
+                "Sign in to the team server again, then delete the workspace.",
             ));
             return;
         };
@@ -211,10 +210,7 @@ impl App {
         let d = self.deleting_ws.take().expect("checked above");
         match answer {
             Err(e) => {
-                self.toast = Some((
-                    trf!("Couldn't delete the workspace: {}", server_text(&e)),
-                    now_ts(),
-                ));
+                self.toast(trf!("Couldn't delete the workspace: {}", server_text(&e)));
             }
             Ok(()) => {
                 if self.ws_file == d.file {
@@ -224,7 +220,7 @@ impl App {
                     // another one opened meanwhile: only the file goes
                     self.remove_workspace_file(&d.file);
                 }
-                self.toast = Some((trf!("Deleted {}", d.name), now_ts()));
+                self.toast(trf!("Deleted {}", d.name));
             }
         }
     }
@@ -235,7 +231,7 @@ impl App {
         let name = self.data.workspace.clone();
         self.leave_deleted_workspace();
         self.modal = None;
-        self.toast = Some((trf!("Removed {} from this computer", name), now_ts()));
+        self.toast(trf!("Removed {} from this computer", name));
     }
 
     /// Delete a workspace file that isn't open, and its line in the list.

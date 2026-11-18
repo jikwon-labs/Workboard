@@ -722,6 +722,6 @@ impl App {
             ..Default::default()
         };
         self.login = Some(LoginScreen::new(LoginPage::SignIn, &addr));
-        self.toast = Some((tr("Logged out").into(), now_ts()));
+        self.toast(tr("Logged out"));
     }
 }

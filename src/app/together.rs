@@ -748,9 +748,8 @@ impl App {
             return;
         };
         let Some(token) = load_token(&addr, &cfg.device) else {
-            self.toast = Some((
-                tr("Sign in to the team server again, then make the workspace.").into(),
-                now_ts(),
+            self.toast(tr(
+                "Sign in to the team server again, then make the workspace.",
             ));
             return;
         };
@@ -773,10 +772,7 @@ impl App {
             role: role.to_string(),
             email,
         });
-        self.toast = Some((
-            tr("Making the workspace on the team server...").into(),
-            now_ts(),
-        ));
+        self.toast(tr("Making the workspace on the team server..."));
     }
 
     /// The server answered a make_workspace_on_server: open the new
@@ -796,10 +792,7 @@ impl App {
         let addr = match answer {
             Ok(a) => a,
             Err(e) => {
-                self.toast = Some((
-                    trf!("Couldn't make the workspace: {}", server_text(&e)),
-                    now_ts(),
-                ));
+                self.toast(trf!("Couldn't make the workspace: {}", server_text(&e)));
                 return;
             }
         };
@@ -817,7 +810,7 @@ impl App {
             password: String::new(),
         };
         if let Err(e) = self.connect_with(&addr, how) {
-            self.toast = Some((server_text(&e), now_ts()));
+            self.toast(server_text(&e));
             return;
         }
         self.invite_people(&m.invite, &m.role);
@@ -869,9 +862,8 @@ impl App {
             return;
         }
         if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v, APP_VERSION).is_err() {
-            self.toast = Some((
-                tr("Couldn't write to the shared folder. Is it still there?").into(),
-                now_ts(),
+            self.toast(tr(
+                "Couldn't write to the shared folder. Is it still there?",
             ));
         }
         self.sync_rt.pending = false;
@@ -898,14 +890,11 @@ impl App {
         if !self.sync_rt.told_old_app {
             if let Some(v) = others.iter().find_map(|o| sync::older_app(o, APP_VERSION)) {
                 self.sync_rt.told_old_app = true;
-                self.toast = Some((
-                    if v.is_empty() {
+                self.toast(if v.is_empty() {
                         tr("Someone in this shared folder uses an older version of Workboard. Ask them to update, or their changes can undo yours.").to_string()
                     } else {
                         trf!("Someone in this shared folder uses Workboard {}, an older version. Ask them to update, or their changes can undo yours.", v)
-                    },
-                    now_ts(),
-                ));
+                    });
             }
         }
         self.merge_in(&others, &[])
@@ -972,7 +961,7 @@ impl App {
                 // most likely saved by a newer version of the app
                 if !self.sync_rt.told_unreadable {
                     eprintln!("workboard: couldn't take in the team's changes: {}", e);
-                    self.toast = Some((tr("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard.").into(), now_ts()));
+                    self.toast(tr("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard."));
                     self.sync_rt.told_unreadable = true;
                 }
                 return false;
@@ -1029,12 +1018,9 @@ impl App {
             }
         }
         if mine.is_empty() {
-            self.toast = Some((
-                trf!(
-                    "You're no longer in #{}, so it was taken off your list.",
-                    name
-                ),
-                now_ts(),
+            self.toast(trf!(
+                "You're no longer in #{}, so it was taken off your list.",
+                name
             ));
             return;
         }
@@ -1047,7 +1033,7 @@ impl App {
             trf!("Written in #{} before you were taken out of it:", name),
             mine.join("\n")
         ));
-        self.toast = Some((trf!("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", name), now_ts()));
+        self.toast(trf!("You're no longer in #{}. What you wrote there in the last few minutes is in your Notepad.", name));
     }
 
     /// What the top bar says about a team server that isn't working: can't
@@ -1180,10 +1166,7 @@ impl App {
                         self.sync_rt.online = None;
                     }
                     if matches!(s, NetStatus::Gone(_)) && self.sync_rt.joining.is_none() {
-                        self.toast = Some((
-                            tr("This workspace was deleted from the server by its owner. Remove it from this computer in Work together.").into(),
-                            now_ts(),
-                        ));
+                        self.toast(tr("This workspace was deleted from the server by its owner. Remove it from this computer in Work together."));
                     }
                     self.sync_rt.net_status = Some(s)
                 }
@@ -1209,7 +1192,7 @@ impl App {
                         save_token(&addr, &device, &t);
                     }
                     if self.sync_rt.resign.take().is_some() {
-                        self.toast = Some((tr("Signed in again.").into(), now_ts()));
+                        self.toast(tr("Signed in again."));
                     }
                     self.sync_rt.account = email;
                     self.sync_rt.form = Form::default();
@@ -1248,26 +1231,20 @@ impl App {
                         .map(|m| m.name.clone())
                         .unwrap_or_default();
                     if let Some(to) = emailed {
-                        self.toast = Some((
-                            crate::i18n::particles(&trf!(
-                                "Emailed {}'s invite code to {}.",
-                                name,
-                                to
-                            )),
-                            now_ts(),
-                        ));
+                        self.toast(crate::i18n::particles(&trf!(
+                            "Emailed {}'s invite code to {}.",
+                            name,
+                            to
+                        )));
                     } else if let Some(why) = mail_error {
-                        self.toast = Some((trf!("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", name, why), now_ts()));
+                        self.toast(trf!("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", name, why));
                     }
                 }
                 NetEvent::Account(email) => {
-                    self.toast = Some((
-                        crate::i18n::particles(&trf!(
-                            "Password saved. Sign in with {} on your other computers and phones.",
-                            email
-                        )),
-                        now_ts(),
-                    ));
+                    self.toast(crate::i18n::particles(&trf!(
+                        "Password saved. Sign in with {} on your other computers and phones.",
+                        email
+                    )));
                     self.sync_rt.account = Some(email);
                     self.sync_rt.acct = Form::default();
                 }
@@ -1278,15 +1255,15 @@ impl App {
                 }
                 NetEvent::Denied(why) => {
                     self.huddle_denied_unnamed();
-                    self.toast = Some((server_text(&why), now_ts()));
+                    self.toast(server_text(&why));
                 }
                 NetEvent::PutBack(why) => {
                     // the team's version of what was put back comes with the next update
-                    self.toast = Some((server_text(&why), now_ts()));
+                    self.toast(server_text(&why));
                 }
                 NetEvent::CallDenied { channel, why } => {
                     self.huddle_denied(channel);
-                    self.toast = Some((server_text(&why), now_ts()));
+                    self.toast(server_text(&why));
                 }
                 NetEvent::CallToken {
                     channel,
@@ -1297,12 +1274,9 @@ impl App {
                 NetEvent::Presence(online) => self.sync_rt.online = Some(online),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();
-                    self.toast = Some((
-                        trf!(
-                            "Restored the team's workspace to {}. Everyone gets it now.",
-                            label
-                        ),
-                        now_ts(),
+                    self.toast(trf!(
+                        "Restored the team's workspace to {}. Everyone gets it now.",
+                        label
                     ));
                     self.sync_rt.restore_confirm = None;
                     // the copy from before the restore is a new backup
@@ -1366,10 +1340,7 @@ impl App {
                     self.sync_rt.net = None;
                     self.sync_rt.net_status = None;
                     self.sync_rt.role = None;
-                    self.toast = Some((
-                        tr("That server has no team yet. To set it up, open a workspace that's only on this computer and connect it from Work together.").into(),
-                        now_ts(),
-                    ));
+                    self.toast(tr("That server has no team yet. To set it up, open a workspace that's only on this computer and connect it from Work together."));
                 }
                 None => {
                     // an empty server: this workspace becomes the team's
@@ -1379,9 +1350,8 @@ impl App {
                     self.write_shared();
                     self.save_local();
                     self.share_cached_files();
-                    self.toast = Some((
-                        tr("Connected. This workspace is now on the server for your team.").into(),
-                        now_ts(),
+                    self.toast(tr(
+                        "Connected. This workspace is now on the server for your team.",
                     ));
                     self.signed_in_now();
                 }
@@ -1409,15 +1379,12 @@ impl App {
                             .member(member)
                             .map(|m| m.name.clone())
                             .unwrap_or_default();
-                        self.toast = Some((
-                            crate::i18n::particles(&trf!("Joined as {}.", name)),
-                            now_ts(),
-                        ));
+                        self.toast(crate::i18n::particles(&trf!("Joined as {}.", name)));
                         self.signed_in_now();
                     }
                     Err(e) => {
                         self.sync_rt.net = None;
-                        self.toast = Some((e, now_ts()));
+                        self.toast(e);
                     }
                 },
             }
@@ -1655,12 +1622,7 @@ impl App {
                 }
                 n.send(msg)
             }
-            _ => {
-                self.toast = Some((
-                    tr("Not connected to the server right now.").into(),
-                    now_ts(),
-                ))
-            }
+            _ => self.toast(tr("Not connected to the server right now.")),
         }
     }
 
@@ -2070,23 +2032,18 @@ impl App {
         let archived = d.archived;
         self.dirty = true;
         if archived {
-            self.toast = Some(match self.export_doc(id) {
-                Some(p) => (
-                    trf!(
-                        "Archived. A copy was saved in {}",
-                        p.parent()
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_default()
-                    ),
-                    now_ts(),
+            let msg = match self.export_doc(id) {
+                Some(p) => trf!(
+                    "Archived. A copy was saved in {}",
+                    p.parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
                 ),
-                None => (
-                    tr("Archived. (The Markdown copy couldn't be saved.)").into(),
-                    now_ts(),
-                ),
-            });
+                None => tr("Archived. (The Markdown copy couldn't be saved.)").into(),
+            };
+            self.toast(msg);
         } else {
-            self.toast = Some((tr("Moved back to Docs").into(), now_ts()));
+            self.toast(tr("Moved back to Docs"));
         }
     }
 
@@ -2262,7 +2219,7 @@ impl App {
                             );
                             if row_button(ui, tr("Copy")).clicked() {
                                 ui.ctx().copy_text(code.clone());
-                                self.toast = Some((tr("Invite code copied").into(), now_ts()));
+                                self.toast(tr("Invite code copied"));
                             }
                         });
                     }
@@ -3112,7 +3069,7 @@ impl App {
                         if primary_button(ui, t, tr("Share this workspace here")).clicked() {
                             match self.share_here(path) {
                                 Ok(()) => {
-                                    self.toast = Some((tr("Shared. Now share the folder with your teammates in your sync app.").into(), now_ts()));
+                                    self.toast(tr("Shared. Now share the folder with your teammates in your sync app."));
                                     close = true;
                                 }
                                 Err(e) => *result = e,

@@ -2271,7 +2271,7 @@ impl App {
                                 ..Default::default()
                             });
                             self.dirty = true;
-                            self.toast = Some((tr("Reminder created").into(), now_ts()));
+                            self.toast(tr("Reminder created"));
                         }
                         None => {
                             self.modal = Some(Modal::Reminder {
@@ -2283,7 +2283,7 @@ impl App {
                         }
                     }
                 }
-                ChatAction::Copied => self.toast = Some((tr("Copied").into(), now_ts())),
+                ChatAction::Copied => self.toast(tr("Copied")),
                 ChatAction::OpenMedia { ch, msg, index } => {
                     // a picture that failed to load tries again right away
                     let file = self

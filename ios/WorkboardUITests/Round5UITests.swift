@@ -7,18 +7,9 @@
 
 import XCTest
 
-final class Round5UITests: XCTestCase {
-    override func setUp() { continueAfterFailure = false }
-
-    func launch(_ args: [String]) -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = args + testArgs
-        a.launch()
-        return a
-    }
-
+final class Round5UITests: WorkboardUITestCase {
     func testImportedSlackMessageDoesNotNotify() {
-        let a = launch(["-wbReset", "YES", "-wbServer", "ws://127.0.0.1:18789", "-wbMe", "1", "-wbTab", "chat"])
+        let a = launchFresh(["-wbTab", "chat"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let card = a.buttons["notifyCardButton"]
         if card.waitForExistence(timeout: 8) {
@@ -41,7 +32,7 @@ final class Round5UITests: XCTestCase {
     }
 
     func testLateRoleChangeShowsANoteUntilItsAnswerComes() {
-        let a = launch(["-wbReset", "YES", "-wbServer", signInServer, "-wbAskTimeout", "2"])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer, "-wbAskTimeout", "2"])
         join(a, member: 1, email: "jamie@example.com", password: "jamie-password-5")
         a.buttons["settingsButton"].tap()
         let people = a.buttons["peopleLink"]

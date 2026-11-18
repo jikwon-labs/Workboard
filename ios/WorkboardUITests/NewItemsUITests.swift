@@ -4,52 +4,9 @@
 
 import XCTest
 
-final class NewItemsUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
-    func app(_ args: [String]) -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = args + testArgs
-        a.launch()
-        return a
-    }
-
-    func waitEnabled(_ e: XCUIElement) {
-        XCTAssertTrue(e.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: e)
-        wait(for: [enabled], timeout: 10)
-    }
-
-    /// Scrolls the form up until `e` is there (rows below the fold aren't made yet).
-    func scrollTo(_ e: XCUIElement, in a: XCUIApplication) {
-        var swiped = false
-        // until it is well clear of the comment box at the bottom; once it is
-        // on screen, small drags, so a whole swipe doesn't carry it past the top
-        for i in 0..<24 where !(e.exists && e.isHittable && e.frame.maxY < a.frame.height * 0.7) {
-            if e.exists && e.frame.maxY < a.frame.height * 0.15 {
-                // above: back down a little
-                let from = a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
-                from.press(forDuration: 0.05, thenDragTo: a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)))
-            } else if !e.exists && i >= 10 {
-                // not found going down: it is further up
-                a.swipeDown()
-            } else if e.exists && e.frame.minY > 0 && e.frame.minY < a.frame.height {
-                let from = a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
-                from.press(forDuration: 0.05, thenDragTo: a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
-            } else {
-                a.swipeUp()
-            }
-            swiped = true
-        }
-        XCTAssertTrue(e.waitForExistence(timeout: 5))
-        // let the scroll come to rest, or a tap lands where the row was
-        if swiped { usleep(800_000) }
-    }
-
+final class NewItemsUITests: WorkboardUITestCase {
     func testStartADirectMessageAndOpenTheOneThereIs() {
-        let a = app(["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbTab", "chat"])
+        let a = launchFresh(["-wbTab", "chat"])
         let new = a.buttons["newDMButton"]
         waitEnabled(new)
         new.tap()
@@ -76,7 +33,7 @@ final class NewItemsUITests: XCTestCase {
     }
 
     func testAddASubtaskAndUseTheChecklist() {
-        let a = app(["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "task:204"])
+        let a = launchFresh(["-wbOpen", "task:204"])
         let name = a.descendants(matching: .any)["taskName"].firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 10))
         let tag = "\(Int.random(in: 100000...999999))"

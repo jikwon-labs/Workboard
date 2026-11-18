@@ -4,25 +4,9 @@
 
 import XCTest
 
-final class NotificationUITests: XCTestCase {
-    let server = "ws://127.0.0.1:18789"
-
-    override func setUp() { continueAfterFailure = false }
-
-    func say(_ text: String, channel: Int = 301, author: Int = 2) {
-        var c = URLComponents(string: "http://127.0.0.1:18789/admin/say")!
-        c.queryItems = [.init(name: "channel", value: "\(channel)"), .init(name: "author", value: "\(author)"), .init(name: "text", value: text)]
-        var req = URLRequest(url: c.url!)
-        req.httpMethod = "POST"
-        let done = expectation(description: "say")
-        URLSession.shared.dataTask(with: req) { _, _, _ in done.fulfill() }.resume()
-        wait(for: [done], timeout: 10)
-    }
-
+final class NotificationUITests: WorkboardUITestCase {
     func testBannerForNewMessageOpensConversation() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-wbReset", "YES", "-wbServer", server, "-wbMe", "1", "-wbTab", "chat"] + testArgs
-        app.launch()
+        let app = launchFresh(["-wbTab", "chat"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
         // turn on notifications from the card in the chat list (once per install)
@@ -37,7 +21,7 @@ final class NotificationUITests: XCTestCase {
         app.tabBars.buttons["Home"].tap()
         XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
         let text = "Banner check \(Int(Date().timeIntervalSince1970) % 100000)"
-        say("@Jamie Park " + text)
+        say("@Jamie Park " + text, channel: 301)
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 10), "banner shown")
         banner.tap()
@@ -46,9 +30,7 @@ final class NotificationUITests: XCTestCase {
     }
 
     func testAChannelSetToAllMessagesNotifiesWithoutAMention() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-wbReset", "YES", "-wbServer", server, "-wbMe", "1", "-wbOpen", "settings"] + testArgs
-        app.launch()
+        let app = launchFresh(["-wbOpen", "settings"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let turnOn = app.buttons["notifyButton"]
         if turnOn.waitForExistence(timeout: 3) {
@@ -67,7 +49,7 @@ final class NotificationUITests: XCTestCase {
         app.buttons["Done"].firstMatch.tap()
 
         let text = "Plain note \(Int(Date().timeIntervalSince1970) % 100000)"
-        say(text)
+        say(text, channel: 301)
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 10), "a channel set to all messages notifies without a mention")
     }

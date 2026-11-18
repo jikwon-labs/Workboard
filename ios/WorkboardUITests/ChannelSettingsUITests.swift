@@ -4,21 +4,9 @@
 
 import XCTest
 
-final class ChannelSettingsUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
-    func waitEnabled(_ e: XCUIElement) {
-        XCTAssertTrue(e.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: e)
-        wait(for: [enabled], timeout: 10)
-    }
-
+final class ChannelSettingsUITests: WorkboardUITestCase {
     func testMakeAGroupConversationAndRenameIt() {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbTab", "chat"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbTab", "chat"])
         let tag = "\(Int.random(in: 100000...999999))"
         let newChannel = a.buttons["newChannelButton"]
         waitEnabled(newChannel)
@@ -48,9 +36,7 @@ final class ChannelSettingsUITests: XCTestCase {
     }
 
     func testAddAnAutomationAndTurnItOff() {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "settings"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbOpen", "settings"])
         let link = a.buttons["automationsLink"]
         for _ in 0..<5 where !link.isHittable { a.swipeUp() }
         XCTAssertTrue(link.waitForExistence(timeout: 10))
@@ -81,9 +67,7 @@ final class ChannelSettingsUITests: XCTestCase {
     }
 
     func testWriteAPostSaveItAndMakeATaskFromIt() {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "channel:302"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbOpen", "channel:302"])
         let write = a.buttons["writePostButton"]
         waitEnabled(write)
         write.tap()

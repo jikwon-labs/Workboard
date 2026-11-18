@@ -5,18 +5,9 @@
 
 import XCTest
 
-final class Round3UITests: XCTestCase {
-    override func setUp() { continueAfterFailure = false }
-
-    func launch(_ args: [String]) -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = args + testArgs
-        a.launch()
-        return a
-    }
-
+final class Round3UITests: WorkboardUITestCase {
     func testOwnerMakesACodeChangesARoleAndRestoresABackup() {
-        let a = launch(["-wbReset", "YES", "-wbServer", signInServer])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 1, email: "jamie@example.com", password: "jamie-password-1")
         a.buttons["settingsButton"].tap()
         let people = a.buttons["peopleLink"]
@@ -64,7 +55,7 @@ final class Round3UITests: XCTestCase {
     }
 
     func testMembersDontSeeTheTeamSection() {
-        let a = launch(["-wbReset", "YES", "-wbServer", signInServer])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 3, password: "sam-password-r3")
         a.buttons["settingsButton"].tap()
         XCTAssertTrue(reveal(a.buttons["trashLink"], in: a))
@@ -75,12 +66,9 @@ final class Round3UITests: XCTestCase {
     }
 
     func testDeletedTaskComesBackFromTrash() {
-        let open = "ws://127.0.0.1:18787"
-        let a = launch(["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "list:100:120"])
+            let a = launchFresh(["-wbOpen", "list:100:120"])
         let add = a.buttons["addTaskButton"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: add)
-        wait(for: [enabled], timeout: 10)
+        waitEnabled(add)
         let name = "Trash me \(Int.random(in: 1000...9999))"
         add.tap()
         let tf = a.textFields["newTaskField"]
@@ -100,7 +88,7 @@ final class Round3UITests: XCTestCase {
         a.terminate()
 
         // Trash is kept on the phone across launches
-        let b = launch(["-wbServer", open, "-wbOpen", "settings"])
+        let b = launchApp(["-wbServer", openServer, "-wbOpen", "settings"])
         let trash = b.buttons["trashLink"]
         XCTAssertTrue(reveal(trash, in: b, timeout: 10))
         trash.tap()
@@ -113,7 +101,7 @@ final class Round3UITests: XCTestCase {
         XCTAssertFalse(restore.exists)
         b.terminate()
 
-        let c = launch(["-wbServer", open, "-wbOpen", "list:100:120"])
+        let c = launchApp(["-wbServer", openServer, "-wbOpen", "list:100:120"])
         XCTAssertTrue(c.staticTexts[name].firstMatch.waitForExistence(timeout: 10), "the task is back in its list")
     }
 }

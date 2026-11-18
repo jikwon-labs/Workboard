@@ -6,22 +6,11 @@
 
 import XCTest
 
-final class Round4UITests: XCTestCase {
-    override func setUp() { continueAfterFailure = false }
-
-    func launch(_ args: [String]) -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = args + testArgs
-        a.launch()
-        return a
-    }
-
+final class Round4UITests: WorkboardUITestCase {
     func testMentionPickedFromTheList() {
-        let a = launch(["-wbReset", "YES", "-wbServer", "ws://127.0.0.1:18787", "-wbMe", "1", "-wbOpen", "channel:301"])
+        let a = launchFresh(["-wbOpen", "channel:301"])
         let box = a.textFields["composer"]
-        XCTAssertTrue(box.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: box)
-        wait(for: [enabled], timeout: 10)
+        waitEnabled(box)
         box.tap()
         box.typeText("Look @Al")
         let alex = a.buttons["mention-2"]
@@ -39,14 +28,12 @@ final class Round4UITests: XCTestCase {
     }
 
     func testTrashIsEmptyForTheNextPersonAfterSignOut() {
-        let a = launch(["-wbReset", "YES", "-wbServer", signInServer])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 3, password: "sam-password-r4")
         a.terminate()
-        let b = launch(["-wbServer", signInServer, "-wbOpen", "list:100:120"])
+        let b = launchApp(["-wbServer", signInServer, "-wbOpen", "list:100:120"])
         let add = b.buttons["addTaskButton"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: add)
-        wait(for: [enabled], timeout: 10)
+        waitEnabled(add)
         let name = "Sam's secret \(Int.random(in: 1000...9999))"
         add.tap()
         let tf = b.textFields["newTaskField"]
@@ -63,7 +50,7 @@ final class Round4UITests: XCTestCase {
         XCTAssertTrue(b.navigationBars["Backlog"].waitForExistence(timeout: 5))
         b.terminate()
 
-        let c = launch(["-wbServer", signInServer, "-wbOpen", "settings"])
+        let c = launchApp(["-wbServer", signInServer, "-wbOpen", "settings"])
         let trash = c.buttons["trashLink"]
         XCTAssertTrue(reveal(trash, in: c, timeout: 10))
         trash.tap()

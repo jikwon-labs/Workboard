@@ -4,24 +4,11 @@
 
 import XCTest
 
-final class MessageActionsUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
-    func app(_ args: [String]) -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = args + testArgs
-        a.launch()
-        return a
-    }
-
+final class MessageActionsUITests: WorkboardUITestCase {
     func testEditPinAndDeleteMyMessage() {
-        let a = app(["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "channel:302"])
+        let a = launchFresh(["-wbOpen", "channel:302"])
         let box = a.textFields["composer"]
-        XCTAssertTrue(box.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: box)
-        wait(for: [enabled], timeout: 10)
+        waitEnabled(box)
         let tag = "\(Int.random(in: 100000...999999))"
         let text = "Typo heer \(tag)"
         box.tap()
@@ -60,11 +47,9 @@ final class MessageActionsUITests: XCTestCase {
     }
 
     func testCreateChannelAndDeleteTask() {
-        let a = app(["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbTab", "chat"])
+        let a = launchFresh(["-wbTab", "chat"])
         let new = a.buttons["newChannelButton"]
-        XCTAssertTrue(new.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: new)
-        wait(for: [enabled], timeout: 10)
+        waitEnabled(new)
         new.tap()
         let name = "ui test \(Int.random(in: 1000...9999))"
         let field = a.textFields["channelNameField"]
@@ -76,7 +61,7 @@ final class MessageActionsUITests: XCTestCase {
         a.terminate()
 
         // a task made here, then deleted
-        let b = app(["-wbServer", open, "-wbOpen", "list:100:120"])
+        let b = launchApp(["-wbServer", openServer, "-wbOpen", "list:100:120"])
         let add = b.buttons["addTaskButton"]
         if add.waitForExistence(timeout: 10) {
             add.tap()

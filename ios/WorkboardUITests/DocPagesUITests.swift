@@ -3,19 +3,11 @@
 
 import XCTest
 
-final class DocPagesUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
+final class DocPagesUITests: WorkboardUITestCase {
     func testAddASubPageAndFindItUnderItsDoc() {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "doc:402"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbOpen", "doc:402"])
         let more = a.buttons["docMoreMenu"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: more)
-        wait(for: [enabled], timeout: 10)
+        waitEnabled(more)
         more.tap()
         a.buttons["addPageButton"].tap()
         // the new page opens for writing

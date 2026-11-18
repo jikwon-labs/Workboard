@@ -4,17 +4,7 @@
 
 import XCTest
 
-final class SpacesUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
-    func waitEnabled(_ e: XCUIElement) {
-        XCTAssertTrue(e.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: e)
-        wait(for: [enabled], timeout: 10)
-    }
-
+final class SpacesUITests: WorkboardUITestCase {
     func name(_ text: String, in a: XCUIApplication, button: String) {
         let field = a.alerts.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -23,9 +13,7 @@ final class SpacesUITests: XCTestCase {
     }
 
     func testMakeASpaceWithAFolderAndListThenEditStatusesAndArchive() {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbTab", "tasks"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbTab", "tasks"])
         let tag = "\(Int.random(in: 100000...999999))"
 
         let new = a.buttons["newSpaceButton"]

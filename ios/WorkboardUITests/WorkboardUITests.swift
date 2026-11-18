@@ -6,18 +6,11 @@
 
 import XCTest
 
-final class WorkboardUITests: XCTestCase {
-    var server: String { ProcessInfo.processInfo.environment["WB_SERVER"] ?? "ws://127.0.0.1:18787" }
-
-    override func setUp() {
-        continueAfterFailure = false
-    }
+final class WorkboardUITests: WorkboardUITestCase {
+    var server: String { ProcessInfo.processInfo.environment["WB_SERVER"] ?? openServer }
 
     func launch(_ extra: [String] = [], connect: Bool = true) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-wbReset", "YES"] + (connect ? ["-wbServer", server, "-wbMe", "1"] : []) + extra + testArgs
-        app.launch()
-        return app
+        connect ? launchFresh(extra, server: server) : launchApp(["-wbReset", "YES"] + extra)
     }
 
     func testFirstRunConnectsAndChoosesMember() {

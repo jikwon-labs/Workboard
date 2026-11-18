@@ -8,124 +8,9 @@
 
 import XCTest
 
-let signInServer = "ws://127.0.0.1:18788"
-/// Added to every launch: no saved or strong passwords offered, so iOS's
-/// "Use Strong Password" sheet never takes over the keyboard mid-typing.
-/// Every UI test runs the app in English, whatever language the simulator
-/// is set to (KoreanUITests checks the Korean screens).
-let testArgs = ["-wbNoPasswordAutoFill", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-
-/// Waits for a row of a long form (Settings), scrolling down to it: rows
-/// below the screen aren't made until they come into view.
-func reveal(_ e: XCUIElement, in a: XCUIApplication, timeout: TimeInterval = 5) -> Bool {
-    // clear of the bars at the top and the bottom
-    func shown() -> Bool {
-        e.exists && e.isHittable && e.frame.minY > a.frame.height * 0.15 && e.frame.maxY < a.frame.height * 0.9
-    }
-    if e.waitForExistence(timeout: timeout) && shown() { return true }
-    // above the screen: back up; otherwise further down
-    if e.exists && e.frame.minY <= a.frame.height * 0.15 {
-        for _ in 0..<6 where !shown() { a.swipeDown() }
-    } else {
-        for _ in 0..<8 where !shown() { a.swipeUp() }
-        for _ in 0..<10 where !shown() { a.swipeDown() }
-    }
-    usleep(500_000)
-    return shown()
-}
-
-extension XCTestCase {
-    /// Test-only admin call on the sign-in server (blocking; UI tests run on the main thread).
-    @discardableResult
-    func admin(_ path: String) -> [String: Any] { admin(port: 18788, path) }
-
-    /// Test-only admin call on a fake server started with --admin-http.
-    @discardableResult
-    func admin(port: Int, _ path: String) -> [String: Any] {
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/admin/\(path)")!)
-        req.httpMethod = "POST"
-        var out: [String: Any] = [:]
-        let done = expectation(description: "admin \(path)")
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            out = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-            done.fulfill()
-        }.resume()
-        wait(for: [done], timeout: 10)
-        return out
-    }
-
-    func waitLabel(_ e: XCUIElement, contains s: String, timeout: TimeInterval = 8, file: StaticString = #filePath, line: UInt = #line) {
-        let ok = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", s), object: e)], timeout: timeout)
-        XCTAssertEqual(ok, .completed, "\"\(s)\" not in \"\(e.exists ? e.label : "(missing)")\"", file: file, line: line)
-    }
-
-    func type(_ field: XCUIElement, _ text: String) {
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "\(field) missing")
-        field.tap()
-        if let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count))
-        }
-        guard field.elementType == .secureTextField, !text.isEmpty else {
-            field.typeText(text)
-            return
-        }
-        // launched with -wbNoPasswordAutoFill (testArgs), the app asks for
-        // no strong password, so the typing lands whole; wait until the
-        // field shows every character. Should iOS still offer one, close it
-        // once it is up and type again.
-        field.typeText(text)
-        let app = XCUIApplication()
-        func count() -> Int { ((field.value as? String).flatMap { $0 == field.placeholderValue ? nil : $0 } ?? "").count }
-        let full = NSPredicate { _, _ in count() == text.count }
-        for _ in 0..<3 {
-            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: full, object: field)], timeout: 3) == .completed { return }
-            let offer = app.buttons["GenerateStrongPasswordButton"]
-            if offer.exists {
-                app.buttons["xmark"].tap()
-                let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: offer)
-                _ = XCTWaiter().wait(for: [closed], timeout: 3)
-            }
-            if !((field.value(forKey: "hasKeyboardFocus") as? Bool) ?? false) { field.tap() }
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(count(), 1)) + text)
-        }
-        XCTFail("could not type into \(field)")
-    }
-
-    /// Join with a fresh invite code from the sign-in screen, choosing a password.
-    func join(_ a: XCUIApplication, member: Int, email: String? = nil, password: String) {
-        let code = admin("invite?member=\(member)")["code"] as! String
-        let toInvite = a.buttons["inviteModeButton"]
-        XCTAssertTrue(toInvite.waitForExistence(timeout: 10), "sign-in screen")
-        toInvite.tap()
-        type(a.textFields["inviteField"], code)
-        if let email { type(a.textFields["inviteEmailField"], email) }
-        type(a.secureTextFields["newPasswordField"], password)
-        type(a.secureTextFields["confirmPasswordField"], password)
-        a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in")
-    }
-
-    func signOut(_ a: XCUIApplication) {
-        a.buttons["settingsButton"].tap()
-        let out = a.buttons["signOutButton"]
-        XCTAssertTrue(out.waitForExistence(timeout: 5))
-        out.tap()
-        XCTAssertTrue(a.textFields["emailField"].waitForExistence(timeout: 10), "back on the sign-in screen")
-    }
-}
-
-final class AccountUITests: XCTestCase {
-    override func setUp() { continueAfterFailure = false }
-
-    func app(_ args: [String]) -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = args + testArgs
-        a.launch()
-        return a
-    }
-
+final class AccountUITests: WorkboardUITestCase {
     func testInviteCodeWithPasswordThenEmailSignInOnAnotherDevice() {
-        let a = app(["-wbReset", "YES", "-wbServer", signInServer])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         XCTAssertTrue(a.textFields["emailField"].waitForExistence(timeout: 10), "a new device is asked to sign in")
         a.buttons["inviteModeButton"].tap()
 
@@ -158,7 +43,7 @@ final class AccountUITests: XCTestCase {
     }
 
     func testForgotPasswordWithResetCode() {
-        let a = app(["-wbReset", "YES", "-wbServer", signInServer])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 3, password: "forgotten-pass-1")
         signOut(a)
 
@@ -184,12 +69,12 @@ final class AccountUITests: XCTestCase {
     }
 
     func testSetAndChangePasswordFromSettings() {
-        var a = app(["-wbReset", "YES", "-wbServer", signInServer])
+        var a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 2, email: "alex@example.test", password: "alex-password-1")
         // as if this device had been signed in before passwords existed
         admin("drop-account?member=2")
         a.terminate()
-        a = app(["-wbServer", signInServer])
+        a = launchApp(["-wbServer", signInServer])
         XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with the saved token")
         a.buttons["settingsButton"].tap()
         waitLabel(a.staticTexts["accountEmail"], contains: "No password yet")
@@ -219,7 +104,7 @@ final class AccountUITests: XCTestCase {
 
     func testInviteLinkOpensTheJoinForm() {
         let code = admin("invite?member=2")["code"] as! String
-        let a = app(["-wbReset", "YES"])
+        let a = launchApp(["-wbReset", "YES"])
         XCTAssertTrue(a.textFields["serverField"].waitForExistence(timeout: 10), "first launch, no server yet")
         a.open(URL(string: "workboard://join?server=127.0.0.1%3A18788&code=\(code)&email=alex%40example.test")!)
         let field = a.textFields["inviteField"]
@@ -234,7 +119,7 @@ final class AccountUITests: XCTestCase {
 
     func testPastedInviteEmailFillsTheForm() {
         let code = admin("invite?member=2")["code"] as! String
-        let a = app(["-wbReset", "YES", "-wbServer", signInServer])
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         let toInvite = a.buttons["inviteModeButton"]
         XCTAssertTrue(toInvite.waitForExistence(timeout: 10))
         toInvite.tap()

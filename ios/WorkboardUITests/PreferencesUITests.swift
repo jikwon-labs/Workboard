@@ -4,15 +4,9 @@
 
 import XCTest
 
-final class PreferencesUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
+final class PreferencesUITests: WorkboardUITestCase {
     func settings() -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "settings"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbOpen", "settings"])
         return a
     }
 

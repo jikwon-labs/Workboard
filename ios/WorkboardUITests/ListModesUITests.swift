@@ -3,15 +3,9 @@
 
 import XCTest
 
-final class ListModesUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
+final class ListModesUITests: WorkboardUITestCase {
     func openList() -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1", "-wbOpen", "list:100:112"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbOpen", "list:100:112"])
         let menu = a.buttons["viewModeMenu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         return a

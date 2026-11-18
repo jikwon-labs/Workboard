@@ -4,25 +4,9 @@
 
 import XCTest
 
-final class InboxUITests: XCTestCase {
-    let server = "ws://127.0.0.1:18789"
-
-    override func setUp() { continueAfterFailure = false }
-
-    func say(_ text: String, channel: Int = 302, author: Int = 2) {
-        var c = URLComponents(string: "http://127.0.0.1:18789/admin/say")!
-        c.queryItems = [.init(name: "channel", value: "\(channel)"), .init(name: "author", value: "\(author)"), .init(name: "text", value: text)]
-        var req = URLRequest(url: c.url!)
-        req.httpMethod = "POST"
-        let done = expectation(description: "say")
-        URLSession.shared.dataTask(with: req) { _, _, _ in done.fulfill() }.resume()
-        wait(for: [done], timeout: 10)
-    }
-
+final class InboxUITests: WorkboardUITestCase {
     func home() -> XCUIApplication {
-        let a = XCUIApplication()
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", server, "-wbMe", "1", "-wbTab", "home"] + testArgs
-        a.launch()
+        let a = launchFresh(["-wbTab", "home"], server: adminServer)
         XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
         return a
     }
@@ -30,7 +14,7 @@ final class InboxUITests: XCTestCase {
     func testAMentionShowsInTheInboxAndIsCleared() {
         let a = home()
         let tag = "\(Int.random(in: 100000...999999))"
-        say("@Jamie Park please check \(tag)")
+        say("@Jamie Park please check \(tag)", channel: 302)
         let row = a.buttons.matching(NSPredicate(format: "label CONTAINS %@", tag)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the mention is in Primary")
         XCTAssertTrue(row.label.contains("mentioned you"))

@@ -4,15 +4,11 @@
 
 import XCTest
 
-final class KoreanUITests: XCTestCase {
-    let open = "ws://127.0.0.1:18787"
-
-    override func setUp() { continueAfterFailure = false }
-
+final class KoreanUITests: WorkboardUITestCase {
     func launch(_ args: [String]) -> XCUIApplication {
         let a = XCUIApplication()
         // testArgs sets English; Korean comes after it and wins
-        a.launchArguments = ["-wbReset", "YES", "-wbServer", open, "-wbMe", "1"] + args + testArgs + ["-AppleLanguages", "(ko)", "-AppleLocale", "ko_KR"]
+        a.launchArguments = ["-wbReset", "YES", "-wbServer", openServer, "-wbMe", "1"] + args + testArgs + ["-AppleLanguages", "(ko)", "-AppleLocale", "ko_KR"]
         a.launch()
         return a
     }

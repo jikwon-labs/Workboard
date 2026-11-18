@@ -16,6 +16,15 @@ extension JSON {
         return true
     }
 
+    /// Like `updateItem`, but `change` may refuse: when it returns false the
+    /// array is left as it was and this returns false too.
+    @discardableResult
+    mutating func tryUpdateItem(at path: String, id: UInt64, _ change: (inout JSON) -> Bool) -> Bool {
+        guard var arr = at(path)?.array, let i = arr.firstIndex(where: { $0["id"]?.uint == id }), change(&arr[i]) else { return false }
+        set(path, .array(arr))
+        return true
+    }
+
     mutating func append(at path: String, _ item: JSON) {
         var arr = at(path)?.array ?? []
         arr.append(item)

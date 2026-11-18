@@ -130,10 +130,7 @@ extension Edits {
     }
 
     private static func changeGoal(_ data: inout JSON, _ id: UInt64, _ change: (inout JSON) -> Bool) -> Bool {
-        var goals = data.at("extra.goals")?.array ?? []
-        guard let i = goals.firstIndex(where: { $0["id"]?.uint == id }), change(&goals[i]) else { return false }
-        data.set("extra.goals", .array(goals))
-        return true
+        data.tryUpdateItem(at: "extra.goals", id: id, change)
     }
 
     @discardableResult
@@ -207,26 +204,22 @@ extension Edits {
     /// Changes a meeting's title, date, time, agenda or notes (nil leaves it).
     @discardableResult
     public static func updateMeeting(_ data: inout JSON, meeting: UInt64, title: String? = nil, date: String? = nil, time: String? = nil, agenda: String? = nil, notes: String? = nil) -> Bool {
-        var ms = data.at("extra.meetings")?.array ?? []
-        guard let i = ms.firstIndex(where: { $0["id"]?.uint == meeting }) else { return false }
-        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { ms[i]["title"] = .string(title) }
-        if let date { ms[i]["date"] = .string(date) }
-        if let time { ms[i]["time"] = .string(time) }
-        if let agenda { ms[i]["agenda"] = .string(agenda) }
-        if let notes { ms[i]["notes"] = .string(notes) }
-        data.set("extra.meetings", .array(ms))
-        return true
+        data.updateItem(at: "extra.meetings", id: meeting) { m in
+            if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { m["title"] = .string(title) }
+            if let date { m["date"] = .string(date) }
+            if let time { m["time"] = .string(time) }
+            if let agenda { m["agenda"] = .string(agenda) }
+            if let notes { m["notes"] = .string(notes) }
+        }
     }
 
     @discardableResult
     public static func toggleAttendee(_ data: inout JSON, meeting: UInt64, member: UInt64) -> Bool {
-        var ms = data.at("extra.meetings")?.array ?? []
-        guard let i = ms.firstIndex(where: { $0["id"]?.uint == meeting }) else { return false }
-        var a = (ms[i]["attendees"]?.array ?? []).compactMap(\.uint)
-        if let k = a.firstIndex(of: member) { a.remove(at: k) } else { a.append(member) }
-        ms[i]["attendees"] = .array(a.map(JSON.id))
-        data.set("extra.meetings", .array(ms))
-        return true
+        data.updateItem(at: "extra.meetings", id: meeting) { m in
+            var a = (m["attendees"]?.array ?? []).compactMap(\.uint)
+            if let k = a.firstIndex(of: member) { a.remove(at: k) } else { a.append(member) }
+            m["attendees"] = .array(a.map(JSON.id))
+        }
     }
 
     @discardableResult
@@ -295,11 +288,7 @@ extension Edits {
 
     @discardableResult
     public static func setReminderDone(_ data: inout JSON, reminder: UInt64, _ done: Bool) -> Bool {
-        var rs = data.at("extra.reminders")?.array ?? []
-        guard let i = rs.firstIndex(where: { $0["id"]?.uint == reminder }) else { return false }
-        rs[i]["done"] = .bool(done)
-        data.set("extra.reminders", .array(rs))
-        return true
+        data.updateItem(at: "extra.reminders", id: reminder) { $0["done"] = .bool(done) }
     }
 
     @discardableResult

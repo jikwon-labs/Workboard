@@ -69,10 +69,7 @@ extension Edits {
     }
 
     private static func changeBoard(_ data: inout JSON, _ id: UInt64, _ change: (inout JSON) -> Bool) -> Bool {
-        var bs = data.at("extra.whiteboards")?.array ?? []
-        guard let i = bs.firstIndex(where: { $0["id"]?.uint == id }), change(&bs[i]) else { return false }
-        data.set("extra.whiteboards", .array(bs))
-        return true
+        data.tryUpdateItem(at: "extra.whiteboards", id: id, change)
     }
 
     @discardableResult

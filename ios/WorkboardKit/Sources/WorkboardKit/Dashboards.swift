@@ -125,11 +125,8 @@ extension Edits {
     @discardableResult
     public static func renameDashboard(_ data: inout JSON, dashboard: UInt64, to name: String) -> Bool {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        var ds = data.at("extra.dashboards")?.array ?? []
-        guard !clean.isEmpty, let i = ds.firstIndex(where: { $0["id"]?.uint == dashboard }) else { return false }
-        ds[i]["name"] = .string(clean)
-        data.set("extra.dashboards", .array(ds))
-        return true
+        guard !clean.isEmpty else { return false }
+        return data.updateItem(at: "extra.dashboards", id: dashboard) { $0["name"] = .string(clean) }
     }
 
     @discardableResult
@@ -175,11 +172,7 @@ extension Edits {
     }
 
     private static func changeTeam(_ data: inout JSON, _ id: UInt64, _ change: (inout JSON) -> Void) -> Bool {
-        var ts = data.at("extra.teams")?.array ?? []
-        guard let i = ts.firstIndex(where: { $0["id"]?.uint == id }) else { return false }
-        change(&ts[i])
-        data.set("extra.teams", .array(ts))
-        return true
+        data.updateItem(at: "extra.teams", id: id, change)
     }
 
     @discardableResult

@@ -64,11 +64,7 @@ extension Edits {
 
     @discardableResult
     public static func setAutomationEnabled(_ data: inout JSON, automation: UInt64, _ on: Bool) -> Bool {
-        var rules = data.at("extra.automations")?.array ?? []
-        guard let i = rules.firstIndex(where: { $0["id"]?.uint == automation }) else { return false }
-        rules[i]["enabled"] = .bool(on)
-        data.set("extra.automations", .array(rules))
-        return true
+        data.updateItem(at: "extra.automations", id: automation) { $0["enabled"] = .bool(on) }
     }
 
     @discardableResult

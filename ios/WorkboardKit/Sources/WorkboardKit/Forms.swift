@@ -77,10 +77,7 @@ extension Edits {
     }
 
     private static func changeForm(_ data: inout JSON, _ id: UInt64, _ change: (inout JSON) -> Bool) -> Bool {
-        var fs = data.at("extra.forms")?.array ?? []
-        guard let i = fs.firstIndex(where: { $0["id"]?.uint == id }), change(&fs[i]) else { return false }
-        data.set("extra.forms", .array(fs))
-        return true
+        data.tryUpdateItem(at: "extra.forms", id: id, change)
     }
 
     @discardableResult

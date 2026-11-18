@@ -563,6 +563,70 @@ fn click_channel_and_send_message() {
     assert_eq!(ch.messages.last().unwrap().text, "hello from a click test");
 }
 
+/// A channel with a long history draws its newest messages; "Show earlier
+/// messages" at the top of the list brings the earlier ones a page at a time.
+#[test]
+fn a_long_channel_shows_its_newest_messages_and_earlier_ones_on_asking() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat_open.unwrap();
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap();
+    let before = ch.messages.len();
+    let old = 450;
+    for i in 0..old {
+        // long before the channel's other messages
+        ch.messages.push(super::slack::new_message(
+            900_000 + i as u64,
+            2,
+            format!("Old message {}", i),
+            1_600_000_000 + i as i64 * 60,
+        ));
+    }
+    ch.messages.sort_by_key(|m| m.ts);
+    let total = before + old;
+    h.settle();
+    assert!(
+        h.has(&format!("Old message {}", old - 1)),
+        "the newest of them shows"
+    );
+    assert!(!h.has("Old message 0"), "the oldest waits");
+    let up = |h: &mut Ui1| {
+        // to the top of the list
+        let at = pos2(500.0, 400.0);
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..6 {
+            h.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 20_000.0),
+                modifiers: Default::default(),
+            }]);
+        }
+        h.settle();
+    };
+    up(&mut h);
+    h.click(&format!("Show {} earlier messages", chat::CHAT_PAGE));
+    assert!(!h.has("Old message 0"));
+    up(&mut h);
+    let rest = total - 2 * chat::CHAT_PAGE;
+    h.click(&format!("Show {} earlier messages", rest));
+    assert!(h.has("Old message 0"), "all of them now");
+    assert!(!h.has(&format!("Show {} earlier messages", rest)));
+
+    // another conversation starts again from its newest messages
+    h.app.chat_window = Some((cid + 1, 10));
+    h.settle();
+    assert!(
+        h.has(&format!("Show {} earlier messages", chat::CHAT_PAGE)),
+        "only the conversation it was asked in keeps more"
+    );
+}
+
 #[test]
 fn click_more_docs_new_doc() {
     let mut h = Ui1::new();

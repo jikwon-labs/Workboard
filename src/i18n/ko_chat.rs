@@ -28,6 +28,9 @@ pub const T: &[(&str, &str)] = &[
     ("Add bookmarks, notes, and more", "북마크, 메모 등 추가"),
     ("Messages with replies", "답장이 있는 메시지"),
     ("Messages turned into tasks", "작업으로 만든 메시지"),
+    // a long channel shows its newest messages first
+    ("Show 1 earlier message", "이전 메시지 1개 보기"),
+    ("Show {} earlier messages", "이전 메시지 {}개 보기"),
     // empty channel
     ("Chat in {}", "{}에서 채팅"),
     ("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.", "작업과 대화를 오가며 자연스럽게 협업하세요. 팀과 채팅을 시작하거나 작업을 연결해 할 일을 놓치지 마세요."),

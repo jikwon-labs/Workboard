@@ -393,6 +393,9 @@ pub struct App {
     chat_picked: Vec<u64>,
     /// The same for the open thread's reply box (kept with its draft).
     thread_picked: Vec<u64>,
+    /// How many messages the open conversation draws after "Show earlier
+    /// messages" (by conversation; `CHAT_PAGE` for any other).
+    chat_window: Option<(u64, usize)>,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -742,6 +745,7 @@ impl App {
             comment_picked: vec![],
             chat_picked: vec![],
             thread_picked: vec![],
+            chat_window: None,
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),

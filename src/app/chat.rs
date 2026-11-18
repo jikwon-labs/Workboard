@@ -8,6 +8,11 @@ use super::*;
 
 const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F389}"];
 
+/// How many of a conversation's newest messages are drawn, and how many
+/// more each "Show earlier messages" adds. Every drawn row is laid out on
+/// every frame, so a channel with years of history draws only its end.
+pub(super) const CHAT_PAGE: usize = 200;
+
 /// The emoji grid behind "Add reaction" and the message box's emoji button.
 pub(super) const EMOJIS: [&str; 40] = [
     "\u{1F44D}",
@@ -522,18 +527,18 @@ impl App {
             }
             return;
         };
-        let Some(mut channel) = self.data.channels.iter().find(|c| c.id == cid).cloned() else {
+        let Some(ci) = self.data.channels.iter().position(|c| c.id == cid) else {
             self.chat_open = None;
             return;
         };
         // a second copy of a direct message opens as the one that shows
-        let primary = self.dm_primary(&channel);
+        let primary = self.dm_primary(&self.data.channels[ci]);
         if primary != cid {
             self.chat_open = Some(primary);
             // a thread opened in that copy (from a notification or the
             // Inbox) stays open: the shown copy has its messages too
             let keep = self.thread_open.is_some_and(|tid| {
-                self.conversation(&channel)
+                self.conversation(&self.data.channels[ci])
                     .iter()
                     .any(|d| d.messages.iter().any(|m| m.id == tid))
             });
@@ -542,17 +547,25 @@ impl App {
             }
             return;
         }
-        // with the messages of its duplicates, in time order
-        let others: Vec<Message> = self
-            .conversation(&channel)
+        // the copies whose messages show here: this one and its duplicates
+        let copies: Vec<usize> = self
+            .conversation(&self.data.channels[ci])
             .iter()
-            .skip(1)
-            .flat_map(|d| d.messages.iter().cloned())
+            .filter_map(|d| self.data.channels.iter().position(|c| c.id == d.id))
             .collect();
-        if !others.is_empty() {
-            channel.messages.extend(others);
-            channel.messages.sort_by_key(|m| m.ts);
-        }
+        // where each message is, in time order (the messages themselves are
+        // copied below only for the rows drawn: a long channel's history
+        // isn't copied on every frame)
+        let mut at: Vec<(usize, usize)> = copies
+            .iter()
+            .flat_map(|&c| (0..self.data.channels[c].messages.len()).map(move |m| (c, m)))
+            .collect();
+        at.sort_by_key(|&(c, m)| self.data.channels[c].messages[m].ts);
+        let no_messages = at.is_empty();
+        // the channel's own settings, without its messages
+        let messages = std::mem::take(&mut self.data.channels[ci].messages);
+        let channel = self.data.channels[ci].clone();
+        self.data.channels[ci].messages = messages;
         if self.chat_keep_unread.is_some_and(|k| k != cid) {
             self.chat_keep_unread = None;
         }
@@ -566,7 +579,12 @@ impl App {
         // ---- thread panel
         let mut thread_rect: Option<Rect> = None;
         if let Some(tid) = self.thread_open {
-            if let Some(parent) = channel.messages.iter().find(|m| m.id == tid).cloned() {
+            let parent = at
+                .iter()
+                .filter_map(|&(c, m)| self.data.channels.get(c)?.messages.get(m))
+                .find(|m| m.id == tid)
+                .cloned();
+            if let Some(parent) = parent {
                 let panel = egui::SidePanel::right("thread")
                     .exact_width(360.0)
                     .resizable(false)
@@ -780,9 +798,9 @@ impl App {
             let composer_h = 140.0 + if self.chat_files.is_empty() { 0.0 } else { 76.0 };
             let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
             let panel = self.channel_panel;
-            let shown: Vec<Message> = channel
-                .messages
+            let matching: Vec<&Message> = at
                 .iter()
+                .filter_map(|&(c, m)| self.data.channels.get(c)?.messages.get(m))
                 .filter(|m| q.is_empty() || m.text.to_lowercase().contains(&q) || m.post_title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false))
                 .filter(|m| match panel {
                     1 => m.pinned,
@@ -791,11 +809,26 @@ impl App {
                     4 => m.saved || m.replies.iter().any(|r| r.saved),
                     _ => true,
                 })
-                .cloned()
                 .collect();
+            // the newest messages; earlier ones a page at a time on asking
+            let limit = match self.chat_window {
+                Some((c, n)) if c == cid => n,
+                _ => CHAT_PAGE,
+            };
+            let earlier = matching.len().saturating_sub(limit);
+            let shown: Vec<Message> = matching[earlier..].iter().map(|m| (*m).clone()).collect();
             egui::ScrollArea::vertical().id_salt(("chat_scroll", cid)).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 10)).show(ui, |ui| {
-                    if channel.messages.is_empty() {
+                    if earlier > 0 {
+                        ui.vertical_centered(|ui| {
+                            let label = if earlier == 1 { tr("Show 1 earlier message").to_string() } else { trf!("Show {} earlier messages", earlier.min(CHAT_PAGE)) };
+                            if ui.add(egui::Button::new(RichText::new(label).size(13.0).color(t.text2)).corner_radius(14)).clicked() {
+                                self.chat_window = Some((cid, limit + CHAT_PAGE));
+                            }
+                        });
+                        ui.add_space(6.0);
+                    }
+                    if no_messages {
                         // empty state, as in the original
                         ui.add_space(50.0);
                         let w = ui.available_width();

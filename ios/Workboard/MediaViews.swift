@@ -10,6 +10,7 @@
 import AVFoundation
 import AVKit
 import CoreTransferable
+import ImageIO
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -38,6 +39,50 @@ private func boxSize(_ a: AttachmentView) -> CGSize {
     return CGSize(width: max(80, w * k), height: max(80, h * k))
 }
 
+/// The longest side, in pixels, a picture needs to fill `box` (scaledToFill
+/// crops the rest), so it can be decoded at that size instead of whole.
+private func fillPixels(_ a: AttachmentView, box: CGSize, scale: CGFloat) -> Int {
+    var side = max(box.width, box.height)
+    if a.w > 0, a.h > 0 {
+        let fill = max(box.width / CGFloat(a.w), box.height / CGFloat(a.h))
+        side = CGFloat(max(a.w, a.h)) * fill
+    }
+    return max(1, Int((side * scale).rounded(.up)))
+}
+
+/// Pictures decoded at the size they are shown, kept while there is memory
+/// for them. A phone photo decoded whole takes tens of megabytes for a
+/// bubble of 240 points, and scrolling back used to decode it again.
+@MainActor
+enum PictureCache {
+    static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.totalCostLimit = 64 * 1024 * 1024
+        return c
+    }()
+
+    /// The picture at `url` with its longest side at most `maxPixels`,
+    /// decoded off the main thread. `key` names the file (its sha256).
+    static func thumbnail(_ url: URL, key: String, maxPixels: Int) async -> UIImage? {
+        let k = "\(key)-\(maxPixels)" as NSString
+        if let hit = cache.object(forKey: k) { return hit }
+        let made = await Task.detached(priority: .userInitiated) { () -> (UIImage, Int)? in
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            ]
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+            return (UIImage(cgImage: cg), cg.bytesPerRow * cg.height)
+        }.value
+        guard let (image, cost) = made else { return nil }
+        cache.setObject(image, forKey: k, cost: cost)
+        return image
+    }
+}
+
 /// Downloads a file once per view and keeps where it landed.
 @MainActor
 @Observable
@@ -61,7 +106,9 @@ final class FileLoad {
 struct PictureView: View {
     @Environment(SyncClient.self) private var client
     let attachment: AttachmentView
+    @Environment(\.displayScale) private var displayScale
     @State private var file = FileLoad()
+    /// Decoded at the size of the box; the full picture only opens large.
     @State private var image: UIImage?
     @State private var showLarge = false
 
@@ -91,21 +138,27 @@ struct PictureView: View {
         .accessibilityIdentifier("picture-\(attachment.file.prefix(12))")
         .task(id: attachment.file) {
             await file.load(attachment, client: client)
-            if let u = file.url { image = await Task.detached { UIImage(contentsOfFile: u.path) }.value }
+            if let u = file.url {
+                image = await PictureCache.thumbnail(u, key: attachment.file, maxPixels: fillPixels(attachment, box: boxSize(attachment), scale: displayScale))
+            }
         }
         .fullScreenCover(isPresented: $showLarge) {
-            if let image { LargePicture(image: image, name: attachment.name) }
+            if let image, let u = file.url { LargePicture(url: u, preview: image, name: attachment.name) }
         }
     }
 }
 
 private struct LargePicture: View {
     @Environment(\.dismiss) private var dismiss
-    let image: UIImage
+    let url: URL
+    /// The small copy from the message, shown until the full one is ready.
+    let preview: UIImage
     let name: String
+    @State private var full: UIImage?
     @State private var scale: CGFloat = 1
 
     var body: some View {
+        let image = full ?? preview
         NavigationStack {
             Image(uiImage: image)
                 .resizable()
@@ -123,11 +176,20 @@ private struct LargePicture: View {
                     }
                 }
         }
+        .task {
+            // decoded here, not on the main thread when first drawn
+            let path = url.path
+            full = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                let i = UIImage(contentsOfFile: path)
+                return i?.preparingForDisplay() ?? i
+            }.value
+        }
     }
 }
 
 struct VideoTile: View {
     @Environment(SyncClient.self) private var client
+    @Environment(\.displayScale) private var displayScale
     let attachment: AttachmentView
     @State private var file = FileLoad()
     @State private var loading = false
@@ -177,7 +239,7 @@ struct VideoTile: View {
         .task(id: attachment.thumb) {
             guard let t = attachment.thumb, still == nil else { return }
             if let u = try? await FileAPI.download(server: client.settings.server, auth: client.fileAuth, sha: t, ext: "jpg") {
-                still = await Task.detached { UIImage(contentsOfFile: u.path) }.value
+                still = await PictureCache.thumbnail(u, key: t, maxPixels: fillPixels(attachment, box: boxSize(attachment), scale: displayScale))
             }
         }
         .fullScreenCover(isPresented: Binding(get: { player != nil }, set: { if !$0 { player?.pause(); player = nil } })) {

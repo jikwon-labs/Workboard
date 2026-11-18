@@ -399,6 +399,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
             canon,
             saved,
             dirty: false,
+            canon_due: None,
             resets: Default::default(),
             mailed: Default::default(),
             fails: Default::default(),
@@ -433,6 +434,7 @@ fn wrong_tries_are_forgotten_and_never_pile_up() {
         canon: None,
         saved: Saved::default(),
         dirty: false,
+        canon_due: None,
         resets: Default::default(),
         mailed: Default::default(),
         fails: Default::default(),
@@ -1261,6 +1263,67 @@ fn a_broken_named_record_deletes_nothing_and_starts_the_clock_again() {
     assert_eq!(
         collect_garbage(&home, Some(&without), now + day * FILE_KEEP_DAYS as u32),
         vec![trashed.clone()]
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Changes to the team's copy come several a second while people work, and
+/// each write is the whole copy: it's written once they stop for a moment
+/// (or a while after the first one, while they go on). The first copy and
+/// stopping write at once, and so do other changes (people, devices).
+#[test]
+fn the_team_copy_is_written_once_changes_settle() {
+    use std::time::Instant;
+    let home = std::env::temp_dir().join(format!("wb-settle-{:x}", wb_sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    let path = home.join(WORKSPACE_FILE);
+    let hub = test_hub(&home, Some(json!({"workspace": "one"})), Saved::default());
+    let change = |name: &str| {
+        let mut g = hub.inner.lock().unwrap();
+        g.canon.as_mut().unwrap()["workspace"] = json!(name);
+        hub.broadcast_canon(&mut g, false);
+    };
+    let on_disk = || {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .map(|v| v["workspace"].as_str().unwrap_or("").to_string())
+    };
+
+    change("one");
+    hub.save_tick();
+    assert_eq!(on_disk().as_deref(), Some("one"), "the first copy at once");
+
+    change("two");
+    hub.save_tick();
+    assert_eq!(on_disk().as_deref(), Some("one"), "not on every change");
+    let quiet = Instant::now() - SAVE_QUIET - Duration::from_millis(10);
+    hub.inner.lock().unwrap().canon_due = Some((quiet, quiet));
+    hub.save_tick();
+    assert_eq!(on_disk().as_deref(), Some("two"), "once they stop");
+
+    // changes that go on are still written after a while
+    change("three");
+    let first = Instant::now() - SAVE_AT_MOST - Duration::from_millis(10);
+    hub.inner.lock().unwrap().canon_due = Some((first, Instant::now()));
+    hub.save_tick();
+    assert_eq!(on_disk().as_deref(), Some("three"));
+
+    // a change to people or devices goes at once, with the copy
+    change("four");
+    hub.inner.lock().unwrap().dirty = true;
+    hub.save_tick();
+    assert_eq!(on_disk().as_deref(), Some("four"));
+
+    // stopping writes what is left, and the revision with it
+    change("five");
+    hub.save_tick();
+    assert_eq!(on_disk().as_deref(), Some("four"));
+    hub.flush();
+    assert_eq!(on_disk().as_deref(), Some("five"));
+    assert_eq!(
+        load_saved(&home).unwrap().rev,
+        hub.inner.lock().unwrap().saved.rev
     );
     let _ = std::fs::remove_dir_all(&home);
 }

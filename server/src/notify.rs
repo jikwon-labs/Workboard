@@ -14,16 +14,19 @@ impl Hub {
             );
             return false;
         }
-        let mut data = wb_sync::shareable(&data);
+        let mut data = data;
+        wb_sync::make_shareable(&mut data);
         // no change time from the future (see clamp_future)
         spaces::clamp_future(&mut data, now_ms() + FUTURE_SKEW_MS);
+        // only conversations this copy has can get new messages from it
+        let chans = push::channel_ids(&data);
         let mut g = self.inner.lock().unwrap();
         let members_before = member_ids(g.canon.as_ref());
         // the messages already there, to tell which ones are new (only when
         // someone could be notified)
         let before = match &g.canon {
             Some(c) if self.pusher.is_some() && !g.saved.push.is_empty() => {
-                Some(push::message_ids(c))
+                Some(push::message_ids_in(c, Some(&chans)))
             }
             _ => None,
         };
@@ -56,7 +59,8 @@ impl Hub {
                 let written = spaces::written_marks(c);
                 let changed = wb_sync::merge(c, &[data]);
                 if changed {
-                    *c = wb_sync::shareable(c);
+                    // the merge's fingerprints are this server's own
+                    wb_sync::make_shareable(c);
                 }
                 // what was turned down goes back to its sender with everyone's update
                 spaces::put_back(c, &fix);
@@ -76,7 +80,7 @@ impl Hub {
         };
         if changed {
             if let (Some(before), Some(canon)) = (&before, &g.canon) {
-                let notes = push::notes(canon, before, &[member], now_ms() / 1000);
+                let notes = push::notes_in(canon, before, Some(&chans), &[member], now_ms() / 1000);
                 self.notify(&g.saved, notes);
             }
             self.broadcast_canon(&mut g, false);

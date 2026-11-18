@@ -126,6 +126,9 @@ struct Inner {
     canon: Option<Value>,
     saved: Saved,
     dirty: bool,
+    /// The team's copy changed and isn't on disk yet: when the first and the
+    /// latest of those changes were made (see `Hub::save`).
+    canon_due: Option<(std::time::Instant, std::time::Instant)>,
     /// email (normalized) -> (reset code, when made); kept in memory only
     resets: std::collections::HashMap<String, (String, i64)>,
     /// email (normalized) -> (wrong tries in a row, time of the last one)
@@ -253,6 +256,11 @@ enum Reply {
     Denied(String),
 }
 
+/// The team's copy is written once its changes stop for this long...
+const SAVE_QUIET: Duration = Duration::from_secs(3);
+/// ...or this long after the first change not written, while they go on.
+const SAVE_AT_MOST: Duration = Duration::from_secs(15);
+
 /// What an app hears when changes in its copy were turned down: a space
 /// shared with its person at a level that doesn't allow them (spaces.rs).
 const PUT_BACK: &str =
@@ -264,8 +272,10 @@ const PUT_BACK_QUIET_SECS: u64 = 10;
 struct Canon {
     data: Value,
     rev: u64,
-    /// the whole copy as an update message, for people nothing is hidden from
-    json: String,
+    /// the whole copy as an update message, for people nothing is hidden
+    /// from; made the first time one needs it (apps that take changes only
+    /// never do)
+    json: std::sync::OnceLock<String>,
     /// what changed since the last revision (None: send the whole copy)
     delta: Option<Value>,
     /// owners and admins when it was made (they see every shared space)
@@ -275,12 +285,7 @@ struct Canon {
 impl Canon {
     fn new(data: &Value, rev: u64, delta: Option<Value>, saved: &Saved) -> Canon {
         Canon {
-            json: Msg::Update {
-                data: data.clone(),
-                rev,
-                hidden: vec![],
-            }
-            .to_json(),
+            json: std::sync::OnceLock::new(),
             data: data.clone(),
             rev,
             delta,
@@ -308,8 +313,20 @@ impl Canon {
                     gone,
                 )
             }
-            None => (self.json.clone(), vec![]),
+            None => (self.whole_json().to_string(), vec![]),
         }
+    }
+
+    /// The whole copy as an update message (`json`).
+    fn whole_json(&self) -> &str {
+        self.json.get_or_init(|| {
+            Msg::Update {
+                data: self.data.clone(),
+                rev: self.rev,
+                hidden: vec![],
+            }
+            .to_json()
+        })
     }
 
     /// What changed for `member`, whose last copy left out `was_hidden`
@@ -404,6 +421,7 @@ impl Hub {
                 canon,
                 saved,
                 dirty: false,
+                canon_due: None,
                 resets: Default::default(),
                 mailed: Default::default(),
                 fails: Default::default(),
@@ -464,17 +482,41 @@ impl Hub {
             .to_string()
     }
 
+    /// Write everything not on disk yet, now (stopping, a workspace made or
+    /// deleted).
     fn flush(&self) {
+        self.save(true);
+    }
+
+    /// Once a second: write what changed, the team's copy once its changes
+    /// settle (see `save`).
+    fn save_tick(&self) {
+        self.save(false);
+    }
+
+    /// Write the team's copy and server.json. A change to people, devices or
+    /// settings (`dirty`) is written at once. Changes to the team's copy
+    /// come several a second while people work and each write is the whole
+    /// copy, so it waits until they stop for SAVE_QUIET (or SAVE_AT_MOST
+    /// after the first one), unless `now`; the very first copy goes at once.
+    /// Apps keep their own copy, so changes a crash loses meanwhile come
+    /// back with their next push.
+    fn save(&self, now: bool) {
         let _persistence = self.persistence.lock().unwrap();
         if *self.closed.borrow() {
             return;
         }
+        let first_copy = !self.home.join(WORKSPACE_FILE).exists();
         let (canon, saved) = {
             let mut g = self.inner.lock().unwrap();
-            if !g.dirty {
+            let settled = g.canon_due.is_some_and(|(first, last)| {
+                now || first_copy || last.elapsed() >= SAVE_QUIET || first.elapsed() >= SAVE_AT_MOST
+            });
+            if !g.dirty && !settled {
                 return;
             }
             g.dirty = false;
+            g.canon_due = None;
             (
                 g.canon
                     .as_ref()
@@ -536,7 +578,9 @@ impl Hub {
     /// after which apps send their whole copy back).
     fn broadcast_canon(&self, g: &mut Inner, whole: bool) {
         g.saved.rev += 1;
-        g.dirty = true;
+        let now = std::time::Instant::now();
+        let first = g.canon_due.map_or(now, |(first, _)| first);
+        g.canon_due = Some((first, now));
         if let Some(c) = &g.canon {
             let delta = match &g.summary {
                 Some(s) if !whole => {
@@ -633,7 +677,7 @@ pub async fn serve_on(
                 let registry = registry.clone();
                 let _ = tokio::task::spawn_blocking(move || {
                     for hub in registry.all() {
-                        hub.flush();
+                        hub.save_tick();
                         hub.admin_file();
                         if tick % 60 == 1 {
                             hub.backup_now();

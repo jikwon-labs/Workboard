@@ -388,8 +388,24 @@ impl Sender for Apns {
 
 /// The ids of every message and reply in a copy.
 pub fn message_ids(copy: &Value) -> HashSet<u64> {
+    message_ids_in(copy, None)
+}
+
+/// The ids of the channels and DMs in a copy (a whole one or a change).
+pub fn channel_ids(copy: &Value) -> HashSet<u64> {
+    arr(copy.get("channels"))
+        .iter()
+        .filter_map(|c| num(c, "id"))
+        .collect()
+}
+
+/// `message_ids`, of the conversations in `only` alone (all when None).
+pub fn message_ids_in(copy: &Value, only: Option<&HashSet<u64>>) -> HashSet<u64> {
     let mut s = HashSet::new();
     for ch in arr(copy.get("channels")) {
+        if only.is_some_and(|o| !num(ch, "id").is_some_and(|i| o.contains(&i))) {
+            continue;
+        }
         for m in arr(ch.get("messages")) {
             s.extend(m.get("id").and_then(|i| i.as_u64()));
             for r in arr(m.get("replies")) {
@@ -470,6 +486,19 @@ fn secs(ts: i64) -> i64 {
 /// not in `before` call for. `skip`: members who get nothing (the one whose
 /// app sent them).
 pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) -> Vec<Note> {
+    notes_in(canon, before, None, skip, now_secs)
+}
+
+/// `notes`, looking at the conversations in `only` alone (all when None):
+/// after a merge, only those the incoming copy has can hold new messages,
+/// so a busy workspace isn't read through for every change.
+pub fn notes_in(
+    canon: &Value,
+    before: &HashSet<u64>,
+    only: Option<&HashSet<u64>>,
+    skip: &[u64],
+    now_secs: i64,
+) -> Vec<Note> {
     let people: Vec<(u64, String)> = arr(canon.get("members"))
         .iter()
         .filter_map(|m| Some((num(m, "id")?, text(m, "name").trim().to_string())))
@@ -502,6 +531,9 @@ pub fn notes(canon: &Value, before: &HashSet<u64>, skip: &[u64], now_secs: i64) 
     let mut out = vec![];
     for ch in arr(canon.get("channels")) {
         let Some(cid) = num(ch, "id") else { continue };
+        if only.is_some_and(|o| !o.contains(&cid)) {
+            continue;
+        }
         let back_at = revived(cid).map(secs);
         let restored = |m: &Value| {
             let ts = secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
@@ -643,6 +675,28 @@ mod tests {
             n[0].payload,
             json!({"aps": {"alert": {"title": "Alex Kim", "body": "lunch?"}, "sound": "default", "thread-id": "ch-301"}, "channel": 301})
         );
+    }
+
+    /// After a merge only the conversations the incoming copy brought are
+    /// looked at: the rest of the workspace can't hold its new messages.
+    #[test]
+    fn only_the_conversations_a_change_brought_are_looked_at() {
+        let c = ws(json!([
+            {"id": 301, "name": "", "kind": "Direct", "members": [1, 2], "messages": [msg(5, 1, "lunch?")]},
+            {"id": 302, "name": "", "kind": "Direct", "members": [1, 3], "messages": [msg(6, 1, "later?")]}
+        ]));
+        let change = json!({"channels": [{"id": 302, "messages": [msg(6, 1, "later?")]}]});
+        let only = channel_ids(&change);
+        assert_eq!(only, [302].into_iter().collect());
+        let before = message_ids_in(&c, Some(&only));
+        assert_eq!(
+            before,
+            [6].into_iter().collect(),
+            "this conversation's alone"
+        );
+        let n = notes_in(&c, &HashSet::new(), Some(&only), &[], now());
+        assert_eq!(who(&n), vec![(3, 6)], "not the DM the change didn't bring");
+        assert_eq!(who(&notes(&c, &HashSet::new(), &[], now())).len(), 2);
     }
 
     #[test]

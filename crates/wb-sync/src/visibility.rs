@@ -40,10 +40,17 @@ pub(crate) const PERSONAL_EXTRA: &[&str] = &[
 /// computer's fingerprints left out.
 pub fn shareable(data: &Value) -> Value {
     let mut v = data.clone();
+    make_shareable(&mut v);
+    v
+}
+
+/// `shareable` in place, for a copy that is changed anyway (the server's
+/// copy after a merge): no second copy of the whole workspace.
+pub fn make_shareable(v: &mut Value) {
     // items marked personal (bookmarks a person had before bookmarks were
     // shared) stay on this computer
     for path in SHARED {
-        if let Some(a) = get_path_mut(&mut v, path).and_then(|a| a.as_array_mut()) {
+        if let Some(a) = get_path_mut(v, path).and_then(|a| a.as_array_mut()) {
             a.retain(|x| x.get("personal").and_then(|p| p.as_bool()) != Some(true));
         }
     }
@@ -65,7 +72,6 @@ pub fn shareable(data: &Value) -> Value {
             s.remove("field_hashes");
         }
     }
-    v
 }
 
 /// A DM or a private channel with a member list that doesn't include

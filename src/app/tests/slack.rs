@@ -7,7 +7,7 @@ use super::*;
 /// A small Slack export: two people, #general with a thread and a file,
 /// and #random. `Mia` is a member here by email, `ghost` isn't.
 fn slack_export() -> std::path::PathBuf {
-    let root = temp_folder("slack").join("My Slack export");
+    let root = temp_home("slack").join("My Slack export");
     std::fs::create_dir_all(root.join("general")).unwrap();
     std::fs::create_dir_all(root.join("random")).unwrap();
     let w = |p: &str, v: serde_json::Value| std::fs::write(root.join(p), v.to_string()).unwrap();
@@ -160,7 +160,7 @@ fn people_not_added_from_slack_come_in_under_my_name() {
 #[test]
 fn a_slack_export_zip_opens_and_anything_else_says_why() {
     let dir = slack_export();
-    let zip = temp_folder("slackzip").with_extension("zip");
+    let zip = temp_home("slackzip").with_extension("zip");
     let ok = std::process::Command::new("/usr/bin/ditto")
         .args(["-c", "-k", "--keepParent"])
         .arg(dir.join("My Slack export"))
@@ -176,7 +176,7 @@ fn a_slack_export_zip_opens_and_anything_else_says_why() {
         _ => panic!("the import dialog opens"),
     }
     a.modal = None;
-    let junk = temp_folder("junk").with_extension("zip");
+    let junk = temp_home("junk").with_extension("zip");
     std::fs::write(&junk, b"not a zip").unwrap();
     a.open_slack_export(&junk);
     assert!(a.modal.is_none());
@@ -190,7 +190,7 @@ fn slack_from(
     Vec<crate::app::slack::SlackUser>,
     Vec<crate::app::slack::SlackChannel>,
 ) {
-    let root = temp_folder("slack2");
+    let root = temp_home("slack2");
     for (p, v) in files {
         let path = root.join(p);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1044,7 +1044,7 @@ fn slack_next(a: &App, sid: &str) -> Option<crate::app::slack::Assign> {
 #[test]
 fn concurrent_slack_reassignments_end_with_the_later_one_everywhere() {
     use crate::app::slack::{plan, Assign};
-    let dir = temp_folder("slack-sync");
+    let dir = temp_home("slack-sync");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
@@ -1131,7 +1131,7 @@ fn concurrent_slack_reassignments_end_with_the_later_one_everywhere() {
 #[test]
 fn different_slack_people_sent_to_one_member_at_once_are_both_kept() {
     use crate::app::slack::{plan, Assign};
-    let dir = temp_folder("slack-sync2");
+    let dir = temp_home("slack-sync2");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
@@ -1164,7 +1164,7 @@ fn different_slack_people_sent_to_one_member_at_once_are_both_kept() {
 #[test]
 fn my_second_computer_updating_later_still_gets_under_my_name() {
     use crate::app::slack::{plan, Assign};
-    let dir = temp_folder("slack-sync3");
+    let dir = temp_home("slack-sync3");
     let folder = dir.to_str().unwrap().to_string();
     // written by the earlier version, on both of my computers
     let mut a = app();
@@ -1206,7 +1206,7 @@ fn my_second_computer_updating_later_still_gets_under_my_name() {
 #[test]
 fn slack_matches_from_an_earlier_version_move_into_the_map_without_an_edit() {
     use crate::app::slack::Assign;
-    let dir = temp_folder("slack-sync4");
+    let dir = temp_home("slack-sync4");
     let folder = dir.to_str().unwrap().to_string();
     let (alex, sam, jordan) = (2, 3, 4);
     let mut a = app();
@@ -1407,7 +1407,7 @@ fn an_overturned_slack_match_from_an_earlier_version_stays_overturned() {
 /// still wins.
 #[test]
 fn an_unfingerprinted_slack_match_is_not_an_edit_after_opening() {
-    let dir = temp_folder("slack-baseline");
+    let dir = temp_home("slack-baseline");
     let folder = dir.to_str().unwrap().to_string();
     let alex = 2;
     let mut a = app();
@@ -1457,7 +1457,7 @@ fn a_slack_id_on_two_older_lists_falls_back_to_the_other_one() {
 #[test]
 fn a_slack_decision_made_before_sharing_stays_one_after() {
     use crate::app::slack::{plan, Assign};
-    let dir = temp_folder("slack-share");
+    let dir = temp_home("slack-share");
     let mut a = app();
     let (alex, sam) = (2, 3);
     a.data
@@ -1516,7 +1516,7 @@ fn importing_a_slack_id_on_two_older_lists_keeps_it_out_of_the_map() {
 #[test]
 fn a_plain_import_over_a_deleted_members_match_does_not_beat_a_teammates_choice() {
     use crate::app::slack::{plan, Assign};
-    let dir = temp_folder("slack-gone");
+    let dir = temp_home("slack-gone");
     let folder = dir.to_str().unwrap().to_string();
     let (alex, sam, jordan) = (2, 3, 4);
     let mut a = app();
@@ -1561,7 +1561,7 @@ fn a_plain_import_over_a_deleted_members_match_does_not_beat_a_teammates_choice(
 #[test]
 fn a_carried_slack_match_falls_back_to_an_older_list_that_came_later() {
     use crate::app::slack::Assign;
-    let dir = temp_folder("slack-late");
+    let dir = temp_home("slack-late");
     let folder = dir.to_str().unwrap().to_string();
     let (alex, sam, jordan) = (2, 3, 4);
     let mut a = app();
@@ -1604,7 +1604,7 @@ fn a_carried_slack_match_falls_back_to_an_older_list_that_came_later() {
 #[test]
 fn a_teammates_decision_merged_in_stops_my_carried_fallback() {
     use crate::app::slack::{plan, Assign};
-    let dir = temp_folder("slack-stale");
+    let dir = temp_home("slack-stale");
     let folder = dir.to_str().unwrap().to_string();
     let (alex, sam, jordan) = (2, 3, 4);
     let mut a = app();
@@ -1641,7 +1641,7 @@ fn a_teammates_decision_merged_in_stops_my_carried_fallback() {
 #[test]
 fn a_carried_slack_match_from_a_teammate_falls_back_on_my_computer_too() {
     use crate::app::slack::Assign;
-    let dir = temp_folder("slack-carried-b");
+    let dir = temp_home("slack-carried-b");
     let folder = dir.to_str().unwrap().to_string();
     let (alex, sam, jordan) = (2, 3, 4);
     let mut a = app();
@@ -1679,7 +1679,7 @@ fn a_carried_slack_match_from_a_teammate_falls_back_on_my_computer_too() {
 /// in the workspace it left.
 #[test]
 fn joining_a_team_forgets_my_old_carried_slack_matches() {
-    let dir = temp_folder("slack-join-carried");
+    let dir = temp_home("slack-join-carried");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();

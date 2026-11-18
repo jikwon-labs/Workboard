@@ -16,7 +16,7 @@ use super::*;
 #[test]
 fn a_saved_workspace_leaves_out_fingerprints_it_can_work_out_again() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("wb-home-hashes-{:x}", crate::sync::random_u64()));
+    let home = temp_home("home-hashes");
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
     let mut a = app();
@@ -59,7 +59,7 @@ fn a_saved_workspace_leaves_out_fingerprints_it_can_work_out_again() {
 
 #[test]
 fn two_computers_work_in_one_shared_folder() {
-    let dir = temp_folder("share");
+    let dir = temp_home("share");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
@@ -191,7 +191,7 @@ fn invite_code_for_sam(a: &mut App, server: &TestServer) -> String {
 #[test]
 fn joining_another_team_keeps_the_workspace_already_here() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("wb-home-join-{:x}", crate::sync::random_u64()));
+    let home = temp_home("home-join");
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
 
@@ -505,7 +505,7 @@ fn old_shared_settings_still_load() {
 
 #[test]
 fn team_settings_and_moved_lists_reach_everyone_once() {
-    let dir = temp_folder("move");
+    let dir = temp_home("move");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.data.extra.accent = "pink".into();
@@ -605,7 +605,7 @@ fn team_settings_and_moved_lists_reach_everyone_once() {
 
 #[test]
 fn quitting_sends_my_stopped_timer_to_the_team() {
-    let dir = temp_folder("quit");
+    let dir = temp_home("quit");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
@@ -645,7 +645,7 @@ fn quitting_sends_my_stopped_timer_to_the_team() {
 
 #[test]
 fn a_change_not_recorded_before_a_merge_still_reaches_the_team() {
-    let dir = temp_folder("unrecorded");
+    let dir = temp_home("unrecorded");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
@@ -752,7 +752,7 @@ fn fields_added_later_read_the_same_to_sync_when_left_unset() {
 
     // fingerprints saved while these fields were always written don't make
     // everything look edited after updating
-    let dir = temp_folder("shape");
+    let dir = temp_home("shape");
     let mut a = app();
     a.data.extra.dashboards.push(Dashboard {
         id: 7001,
@@ -862,7 +862,7 @@ fn seen_ids_keep_the_newest_and_cover_from_the_oldest_of_them() {
 
 #[test]
 fn joining_a_shared_workspace_forgets_history() {
-    let dir = temp_folder("join-history");
+    let dir = temp_home("join-history");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
@@ -970,7 +970,7 @@ fn whiteboard_strokes_and_notes_get_the_ids_every_app_works_out() {
 
 #[test]
 fn a_shared_folder_copy_from_an_older_app_is_pointed_out_once() {
-    let dir = temp_folder("old-app");
+    let dir = temp_home("old-app");
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();

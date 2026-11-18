@@ -311,73 +311,29 @@ fn a_teammates_message_through_the_server_becomes_a_notification() {
     assert!(b.notify_rt.sent.is_empty(), "{:?}", b.notify_rt.sent);
 }
 
-/// A local livekit-server for huddle tests (None when it isn't installed).
-struct TestLiveKit(std::process::Child, u16);
-
-impl Drop for TestLiveKit {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 const LK_SECRET: &str = "app-test-secret-app-test-secret-0123456";
 
-fn test_livekit() -> Option<TestLiveKit> {
-    use std::process::{Command, Stdio};
-    let bin = [
-        "livekit-server",
-        "/opt/homebrew/bin/livekit-server",
-        "/usr/local/bin/livekit-server",
-    ]
-    .into_iter()
-    .find(|b| {
-        Command::new(b)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    })?;
-    let free = || {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    };
-    let (port, rtc) = (free(), free());
-    let config = format!("port: {port}\nbind_addresses: [\"127.0.0.1\"]\nrtc:\n  tcp_port: {rtc}\n  udp_port: {rtc}\n  use_external_ip: false\n  node_ip: 127.0.0.1\nkeys:\n  appkey: {LK_SECRET}\nlogging:\n  level: warn\n");
-    let child = Command::new(bin)
-        .arg("--config-body")
-        .arg(config)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
-        assert!(
-            std::time::Instant::now() < until,
-            "livekit-server didn't start"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    Some(TestLiveKit(child, port))
+/// A local livekit-server for huddle tests (None when it isn't installed).
+fn test_livekit() -> Option<workboard_server::testing::LiveKit> {
+    let bin = workboard_server::testing::livekit_bin()?;
+    workboard_server::testing::start_livekit(&bin, "appkey", LK_SECRET).ok()
 }
 
 /// Keep both apps' connections and calls going until `cond` holds.
 fn huddle_until(a: &mut App, b: &mut App, what: &str, cond: impl Fn(&App, &App) -> bool) {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(25);
-    while std::time::Instant::now() < until {
-        for x in [&mut *a, &mut *b] {
-            x.net_tick(None);
-            x.huddle_tick(None);
-        }
-        if cond(a, b) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(30));
+    let held = wait_until(
+        std::time::Duration::from_secs(25),
+        std::time::Duration::from_millis(30),
+        || {
+            for x in [&mut *a, &mut *b] {
+                x.net_tick(None);
+                x.huddle_tick(None);
+            }
+            cond(a, b)
+        },
+    );
+    if held {
+        return;
     }
     panic!(
         "timed out waiting for: {} (A {:?} / B {:?})",
@@ -397,7 +353,7 @@ fn a_huddle_on_the_server_connects_two_computers() {
     let server = TestServer::start();
     // the server makes its folder when it starts serving; don't race it
     std::fs::create_dir_all(&server.home).unwrap();
-    std::fs::write(server.home.join(workboard_server::LIVEKIT_FILE), serde_json::json!({"url": format!("ws://127.0.0.1:{}", lk.1), "key": "appkey", "secret": LK_SECRET}).to_string()).unwrap();
+    std::fs::write(server.home.join(workboard_server::LIVEKIT_FILE), serde_json::json!({"url": format!("ws://127.0.0.1:{}", lk.port), "key": "appkey", "secret": LK_SECRET}).to_string()).unwrap();
     let addr = format!("127.0.0.1:{}", server.port);
 
     // A sets the server up, Sam (member 3) joins with a code

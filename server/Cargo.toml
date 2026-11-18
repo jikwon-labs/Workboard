@@ -26,7 +26,15 @@ base64 = "0.22"
 # Apple push notifications: the ES256 JWT for APNs (see src/push.rs)
 ring = "0.17"
 
+[features]
+# testing: the test helpers in src/testing.rs (a server on a local port,
+# livekit-server, temporary folders) for the tests of this crate, the app
+# and wb-voice
+testing = []
+
 [dev-dependencies]
+# this crate's own tests use its testing helpers
+workboard-server = { path = ".", features = ["testing"] }
 # a bare connection for protocol tests (the same version wb-net uses)
 tungstenite = "0.30"
 # a TLS front before the server in tests, like Cloudflare Tunnel's

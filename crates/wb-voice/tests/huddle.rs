@@ -3,114 +3,15 @@
 // arrives. Skipped (with a note) when livekit-server isn't installed.
 
 use serde_json::{json, Value};
-use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Role, SignIn, Status};
 use wb_voice::{
     screen_key, Audio, Call, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME,
 };
+use workboard_server::testing::{livekit_bin, start_livekit, wait_until, TestServer};
 
 const SECRET: &str = "test-secret-test-secret-test-secret-0123";
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
-struct LiveKit(Child);
-
-impl Drop for LiveKit {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn livekit_bin() -> Option<String> {
-    [
-        "livekit-server",
-        "/opt/homebrew/bin/livekit-server",
-        "/usr/local/bin/livekit-server",
-    ]
-    .into_iter()
-    .find(|b| {
-        Command::new(b)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    })
-    .map(|s| s.to_string())
-}
-
-fn start_livekit(bin: &str) -> (LiveKit, u16) {
-    let port = free_port();
-    let rtc = free_port();
-    let config = format!(
-        "port: {port}\nbind_addresses: [\"127.0.0.1\"]\nrtc:\n  tcp_port: {rtc}\n  udp_port: {udp}\n  use_external_ip: false\n  node_ip: 127.0.0.1\nkeys:\n  testkey: {SECRET}\nlogging:\n  level: warn\n",
-        udp = rtc
-    );
-    let child = Command::new(bin)
-        .arg("--config-body")
-        .arg(config)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("start livekit-server");
-    let until = Instant::now() + Duration::from_secs(15);
-    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
-        assert!(Instant::now() < until, "livekit-server didn't start");
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    (LiveKit(child), port)
-}
-
-struct Server {
-    port: u16,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Server {
-    fn start(home: std::path::PathBuf) -> Server {
-        let (ptx, prx) = std::sync::mpsc::channel();
-        let (stx, srx) = tokio::sync::oneshot::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(async move {
-                    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                    ptx.send(l.local_addr().unwrap().port()).unwrap();
-                    workboard_server::serve(l, home, async {
-                        let _ = srx.await;
-                    })
-                    .await
-                    .unwrap();
-                })
-        });
-        Server {
-            port: prx.recv_timeout(Duration::from_secs(10)).unwrap(),
-            stop: Some(stx),
-            thread: Some(thread),
-        }
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        if let Some(s) = self.stop.take() {
-            let _ = s.send(());
-        }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
 
 /// A signed-in app connection, just enough to ask for codes and call tokens.
 struct App {
@@ -163,13 +64,12 @@ impl App {
     }
 
     fn until(&mut self, what: &str, cond: impl Fn(&App) -> bool) {
-        let until = Instant::now() + Duration::from_secs(20);
-        while Instant::now() < until {
+        let held = wait_until(Duration::from_secs(20), Duration::from_millis(20), || {
             self.pump();
-            if cond(self) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+            cond(self)
+        });
+        if held {
+            return;
         }
         panic!("timed out waiting for: {} (denied {:?})", what, self.denied);
     }
@@ -271,8 +171,9 @@ fn two_people_hear_each_other_in_a_huddle() {
         eprintln!("skipped: livekit-server isn't installed (brew install livekit)");
         return;
     };
-    let (_lk, lk_port) = start_livekit(&bin);
-    let home = std::env::temp_dir().join(format!("wb-voice-{:x}", wb_sync::random_u64()));
+    let lk = start_livekit(&bin, "testkey", SECRET).expect("start livekit-server");
+    let lk_port = lk.port;
+    let home = workboard_server::testing::temp_home("voice");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         home.join(workboard_server::LIVEKIT_FILE),
@@ -280,7 +181,7 @@ fn two_people_hear_each_other_in_a_huddle() {
             .to_string(),
     )
     .unwrap();
-    let server = Server::start(home.clone());
+    let server = TestServer::start_in(&home);
 
     // Ann sets up the workspace: #general has Ann and Bo, Cy isn't in it
     let workspace = json!({

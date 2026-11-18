@@ -67,6 +67,8 @@ pub mod push;
 pub use push::{load_apns, ApnsCfg, APNS_FILE};
 pub mod registry;
 pub mod spaces;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";

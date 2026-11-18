@@ -13,7 +13,7 @@ fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
     h.settle();
     assert!(!h.has("\u{2699}  Integrate"), "no button that does nothing");
     // a Slack export zip, "chosen" in the file picker
-    let root = std::env::temp_dir().join(format!("wb-ui-slack-{:x}", crate::sync::random_u64()));
+    let root = temp_home("ui-slack");
     let ex = root.join("export");
     std::fs::create_dir_all(ex.join("design")).unwrap();
     std::fs::write(
@@ -61,7 +61,7 @@ fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
     let mut h = Ui1::new();
     h.app.section = Section::Chat;
     h.settle();
-    let root = std::env::temp_dir().join(format!("wb-ui-slack2-{:x}", crate::sync::random_u64()));
+    let root = temp_home("ui-slack2");
     let ex = root.join("export");
     std::fs::create_dir_all(ex.join("design")).unwrap();
     std::fs::write(
@@ -127,7 +127,7 @@ fn the_slack_matching_picker_tells_members_of_one_name_apart() {
     });
     h.app.section = Section::Chat;
     h.settle();
-    let root = std::env::temp_dir().join(format!("wb-ui-slack3-{:x}", crate::sync::random_u64()));
+    let root = temp_home("ui-slack3");
     let ex = root.join("export");
     std::fs::create_dir_all(ex.join("design")).unwrap();
     std::fs::write(
@@ -182,7 +182,7 @@ fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     let mut h = Ui1::new();
     h.app.section = Section::Chat;
     h.settle();
-    let root = std::env::temp_dir().join(format!("wb-ui-slack3-{:x}", crate::sync::random_u64()));
+    let root = temp_home("ui-slack3");
     let ex = root.join("export");
     std::fs::create_dir_all(ex.join("design")).unwrap();
     std::fs::write(

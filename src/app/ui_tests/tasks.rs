@@ -1714,7 +1714,7 @@ fn joining_a_team_finishes_the_status_edits_and_leaves_the_teams_statuses_alone(
         .find(|s| s.name == "to do")
         .unwrap();
     st.name = "queued".into();
-    let folder = std::env::temp_dir().join(format!("wb-r5-join-{:x}", crate::sync::random_u64()));
+    let folder = temp_home("r5-join");
     team.share_here(folder.to_str().unwrap()).unwrap();
     let team_names: Vec<String> = team.data.spaces[0]
         .statuses

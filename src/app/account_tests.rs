@@ -2,92 +2,10 @@
 // when setting up the server, signs in on a second computer with it, invites
 // someone (the code goes out by mail) who joins with the code and a password.
 
+use super::tests::net_until;
 use super::together::How;
 use super::*;
-
-struct Server {
-    port: u16,
-    home: std::path::PathBuf,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Server {
-    /// A server that writes its mails to outbox/ instead of sending them.
-    fn start() -> Server {
-        let home =
-            std::env::temp_dir().join(format!("wb-accounts-{:x}", crate::sync::random_u64()));
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(
-            home.join(workboard_server::MAIL_FILE),
-            r#"{"transport": "folder"}"#,
-        )
-        .unwrap();
-        let h = home.clone();
-        let (port_tx, port_rx) = std::sync::mpsc::channel();
-        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                port_tx.send(listener.local_addr().unwrap().port()).unwrap();
-                workboard_server::serve(listener, h, async {
-                    let _ = stop_rx.await;
-                })
-                .await
-                .unwrap();
-            });
-        });
-        let port = port_rx
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .unwrap();
-        Server {
-            port,
-            home,
-            stop: Some(stop_tx),
-            thread: Some(thread),
-        }
-    }
-
-    fn mails_to(&self, to: &str) -> Vec<String> {
-        let mut files: Vec<_> = std::fs::read_dir(self.home.join(workboard_server::OUTBOX_DIR))
-            .map(|d| d.flatten().map(|e| e.path()).collect())
-            .unwrap_or_default();
-        files.sort();
-        files
-            .iter()
-            .filter_map(|p| std::fs::read_to_string(p).ok())
-            .filter(|t| t.starts_with(&format!("To: {}\n", to)))
-            .collect()
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        if let Some(s) = self.stop.take() {
-            let _ = s.send(());
-        }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-        let _ = std::fs::remove_dir_all(&self.home);
-    }
-}
-
-fn until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while std::time::Instant::now() < end {
-        a.net_tick(None);
-        if cond(a) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    panic!(
-        "timed out waiting for: {} ({:?}, toast {:?})",
-        what, a.sync_rt.net_status, a.toast
-    );
-}
+use workboard_server::testing::{temp_home, TestServer};
 
 fn computer(name: &str) -> App {
     App::build(
@@ -109,7 +27,7 @@ fn connected(a: &App) -> bool {
 
 #[test]
 fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
-    let server = Server::start();
+    let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
 
     // the owner sets up the empty server and chooses a password
@@ -122,7 +40,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         },
     )
     .unwrap();
-    until(&mut a, "A on the server", |a| {
+    net_until(&mut a, "A on the server", |a| {
         a.data.extra.shared.is_some() && connected(a)
     });
     assert_eq!(a.sync_rt.account.as_deref(), Some("owner@team.io"));
@@ -146,7 +64,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         },
     )
     .unwrap();
-    until(&mut a2, "A's laptop joins", |a| {
+    net_until(&mut a2, "A's laptop joins", |a| {
         a.data.extra.shared.is_some() && connected(a)
     });
     assert_eq!(
@@ -164,7 +82,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         },
     )
     .unwrap();
-    until(&mut x, "refused", |x| !x.sync_rt.form.note.is_empty());
+    net_until(&mut x, "refused", |x| !x.sync_rt.form.note.is_empty());
     assert!(
         x.sync_rt.form.note.contains("don't match"),
         "{}",
@@ -183,7 +101,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         .id;
     a.sync_note_change();
     a.write_shared();
-    until(&mut a, "the code is made and emailed", |a| {
+    net_until(&mut a, "the code is made and emailed", |a| {
         a.toast
             .as_ref()
             .is_some_and(|t| t.0.contains("Emailed") && t.0.contains("new.person@team.io"))
@@ -213,7 +131,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         },
     )
     .unwrap();
-    until(&mut c, "C joins", |c| {
+    net_until(&mut c, "C joins", |c| {
         c.data.extra.shared.is_some() && connected(c)
     });
     assert_eq!(c.data.me, new_id);
@@ -224,7 +142,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         password: "their-pass-2".into(),
         old_password: Some("their-pass-1".into()),
     });
-    until(&mut c, "password changed", |c| {
+    net_until(&mut c, "password changed", |c| {
         c.toast
             .as_ref()
             .is_some_and(|t| t.0.starts_with("Password saved"))
@@ -233,14 +151,14 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
     // signed out by the owner: back in with email and password is no longer possible,
     // a new invite code with a new password is
     a.access_request(wb_net::Msg::Revoke { member: new_id });
-    until(&mut c, "C signed out", |c| {
+    net_until(&mut c, "C signed out", |c| {
         matches!(c.sync_rt.net_status, Some(wb_net::Status::Refused(_)))
     });
     c.sign_in_with(How::Account {
         email: "new.person@team.io".into(),
         password: "their-pass-2".into(),
     });
-    until(
+    net_until(
         &mut c,
         "the account is gone",
         |c| matches!(&c.sync_rt.net_status, Some(wb_net::Status::Refused(why)) if why.contains("don't match")),
@@ -249,7 +167,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         member: new_id,
         role: wb_net::Role::Member,
     });
-    until(&mut a, "new code", |a| {
+    net_until(&mut a, "new code", |a| {
         a.sync_rt
             .people
             .iter()
@@ -267,7 +185,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         email: String::new(),
         password: "their-pass-3".into(),
     });
-    until(&mut c, "C back in", connected);
+    net_until(&mut c, "C back in", connected);
     assert!(c.sync_rt.resign.is_none() && c.sync_rt.account.is_some());
 }
 
@@ -315,7 +233,7 @@ fn sign_in_fields_become_the_hello() {
 
 #[test]
 fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back() {
-    let server = Server::start();
+    let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
     let mut a = computer("Ours");
     a.connect_with(
@@ -326,7 +244,7 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
         },
     )
     .unwrap();
-    until(&mut a, "A on the server", |a| {
+    net_until(&mut a, "A on the server", |a| {
         a.data.extra.shared.is_some() && connected(a)
     });
     while !server.home.join(workboard_server::WORKSPACE_FILE).is_file() {
@@ -344,7 +262,7 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
         },
     )
     .unwrap();
-    until(&mut b, "the laptop joins", |b| {
+    net_until(&mut b, "the laptop joins", |b| {
         b.data.extra.shared.is_some() && connected(b)
     });
     let device = b.data.extra.shared.as_ref().unwrap().device.clone();
@@ -373,7 +291,7 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
     assert!(together::load_token(&addr, &device).is_none());
     assert!(!has(&b.data), "the laptop's copy is gone");
     // what was written last still reached the team
-    until(&mut a, "the last message at A", |a| has(&a.data));
+    net_until(&mut a, "the last message at A", |a| has(&a.data));
 
     // signing in again brings the team's workspace back
     b.connect_with(
@@ -384,7 +302,7 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
         },
     )
     .unwrap();
-    until(&mut b, "the laptop back in", |b| {
+    net_until(&mut b, "the laptop back in", |b| {
         b.data.extra.shared.is_some() && connected(b)
     });
     assert!(b.login.is_none() && !b.data.extra.welcome);
@@ -404,11 +322,10 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
     let _home = super::tests::HOME_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let home =
-        std::env::temp_dir().join(format!("wb-home-several-{:x}", crate::sync::random_u64()));
+    let home = temp_home("home-several");
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
-    let server = Server::start();
+    let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
 
     // the owner sets up the server with an account
@@ -421,7 +338,7 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         },
     )
     .unwrap();
-    until(&mut a, "A on the server", |a| {
+    net_until(&mut a, "A on the server", |a| {
         a.data.extra.shared.is_some() && connected(a)
     });
     assert_eq!(a.server_for_new_workspace(), Some(addr.clone()));
@@ -441,7 +358,7 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     assert!(a.making_ws.is_none(), "the server answered: {:?}", a.toast);
-    until(&mut a, "the second workspace is up", |a| {
+    net_until(&mut a, "the second workspace is up", |a| {
         a.data.workspace == "Side project" && connected(a)
     });
     let second = a.ws_file.clone();
@@ -487,13 +404,13 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         },
     )
     .unwrap();
-    until(&mut b, "the choices", |b| b.sync_rt.choices.is_some());
+    net_until(&mut b, "the choices", |b| b.sync_rt.choices.is_some());
     let (list, how) = b.sync_rt.choices.clone().unwrap();
     let mut names: Vec<&str> = list.iter().map(|(_, n)| n.as_str()).collect();
     names.sort();
     assert_eq!(names, vec!["Ours", "Side project"]);
     b.open_or_join(&addr2, how.clone());
-    until(&mut b, "B joined the second", |b| {
+    net_until(&mut b, "B joined the second", |b| {
         b.data.workspace == "Side project" && connected(b)
     });
     let b_second = b.ws_file.clone();
@@ -501,7 +418,7 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
 
     // the first one too, then the second again: that opens the copy here
     b.open_or_join(&addr, how.clone());
-    until(&mut b, "B joined the first", |b| {
+    net_until(&mut b, "B joined the first", |b| {
         b.data.workspace == "Ours" && connected(b)
     });
     assert_eq!(Data::workspaces().len(), files + 1);
@@ -513,9 +430,9 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         },
     )
     .unwrap();
-    until(&mut b, "the choices again", |b| b.sync_rt.choices.is_some());
+    net_until(&mut b, "the choices again", |b| b.sync_rt.choices.is_some());
     b.open_or_join(&addr2, how);
-    until(&mut b, "the second opened", |b| {
+    net_until(&mut b, "the second opened", |b| {
         b.data.workspace == "Side project"
     });
     assert_eq!(b.ws_file, b_second, "the copy already here");
@@ -532,10 +449,10 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
     let _home = super::tests::HOME_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("wb-home-delws-{:x}", crate::sync::random_u64()));
+    let home = temp_home("home-delws");
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
-    let server = Server::start();
+    let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
 
     let mut a = keeping_computer("Ours");
@@ -547,7 +464,7 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         },
     )
     .unwrap();
-    until(&mut a, "A on the server", |a| {
+    net_until(&mut a, "A on the server", |a| {
         a.data.extra.shared.is_some() && connected(a)
     });
     let first = a.ws_file.clone();
@@ -564,7 +481,7 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         a.making_ws_tick();
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    until(&mut a, "the second workspace is up", |a| {
+    net_until(&mut a, "the second workspace is up", |a| {
         a.data.workspace == "Side project" && connected(a)
     });
     let second = a.ws_file.clone();
@@ -592,10 +509,10 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         },
     )
     .unwrap();
-    until(&mut b, "the choices", |b| b.sync_rt.choices.is_some());
+    net_until(&mut b, "the choices", |b| b.sync_rt.choices.is_some());
     let (_, how) = b.sync_rt.choices.clone().unwrap();
     b.open_or_join(&addr2, how);
-    until(&mut b, "B has the second", |b| {
+    net_until(&mut b, "B has the second", |b| {
         b.data.workspace == "Side project" && connected(b)
     });
 
@@ -620,7 +537,7 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
     assert_eq!(a.data.workspace, "Ours");
     assert!(!Data::workspaces().iter().any(|w| w.file == second));
     assert!(!Data::dir().join(&second).exists());
-    until(&mut a, "A back on the first", connected);
+    net_until(&mut a, "A back on the first", connected);
     // nothing still queued for the background writer brings it back
     Data::finish_saving();
     assert!(!Data::dir().join(&second).exists());
@@ -628,7 +545,7 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
     assert_eq!(workboard_server::registry::deleted(&server.home).len(), 1);
 
     // B hears it and stops; it removes its copy
-    until(&mut b, "B told it's gone", |b| {
+    net_until(&mut b, "B told it's gone", |b| {
         matches!(b.sync_rt.net_status, Some(wb_net::Status::Gone(_)))
     });
     b.remove_gone_workspace();

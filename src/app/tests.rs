@@ -5,6 +5,7 @@ use super::chat::ChatAction;
 use super::comments::{parse_link, segments, toggle_comment_check, toggle_reaction, Seg};
 use super::nav::Link as LinkTo;
 use super::*;
+use workboard_server::testing::{temp_home, wait_until, TestServer};
 
 mod attachments;
 mod chat;
@@ -441,7 +442,7 @@ fn invite_adds_people_once_and_joins_general() {
 #[test]
 fn csv_import_and_export() {
     let mut a = app();
-    let dir = std::env::temp_dir().join(format!("wb-test-{}", now_ts()));
+    let dir = temp_home("test");
     std::fs::create_dir_all(&dir).unwrap();
     let csv = dir.join("in.csv");
     std::fs::write(&csv, "name,status,priority,due,assignee\nShip v2,in progress,High,2026-12-01,Sam Lee\nPlan party,,,,\n").unwrap();
@@ -654,7 +655,7 @@ pub(super) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn edits_are_saved_once_they_settle_off_the_screens_thread() {
     use std::time::{Duration, Instant};
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("wb-home-save-{:x}", crate::sync::random_u64()));
+    let home = temp_home("home-save");
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
     let mut a = app();
@@ -720,7 +721,7 @@ fn edits_are_saved_once_they_settle_off_the_screens_thread() {
 #[test]
 fn workspaces_can_be_created_and_switched() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("wb-home-{}", now_ts()));
+    let home = temp_home("home");
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
     let mut a = app();
@@ -765,13 +766,9 @@ fn workspaces_can_be_created_and_switched() {
     assert_eq!(a.data.workspace, "My Workspace");
 }
 
-fn temp_folder(tag: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("wb-{}-{:x}", tag, crate::sync::random_u64()))
-}
-
 #[test]
 fn archiving_a_doc_saves_a_markdown_copy() {
-    let dir = temp_folder("arch");
+    let dir = temp_home("arch");
     let mut a = app();
     a.share_here(dir.to_str().unwrap()).unwrap();
     let id = a.data.docs[0].id;
@@ -1047,68 +1044,22 @@ fn recent_items_remember_tasks_lists_and_docs() {
 }
 
 /// A real workboard-server on a free local port, data in a temporary folder.
-struct TestServer {
-    port: u16,
-    home: std::path::PathBuf,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl TestServer {
-    fn start() -> TestServer {
-        let home = temp_folder("server");
-        let h = home.clone();
-        let (port_tx, port_rx) = std::sync::mpsc::channel();
-        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                port_tx.send(listener.local_addr().unwrap().port()).unwrap();
-                workboard_server::serve(listener, h, async {
-                    let _ = stop_rx.await;
-                })
-                .await
-                .unwrap();
-            });
-        });
-        let port = port_rx
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .unwrap();
-        TestServer {
-            port,
-            home,
-            stop: Some(stop_tx),
-            thread: Some(thread),
-        }
-    }
-}
-
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        if let Some(s) = self.stop.take() {
-            let _ = s.send(());
-        }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-        let _ = std::fs::remove_dir_all(&self.home);
-    }
-}
-
 /// Keep taking in what the server sends until `cond` holds.
-fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while std::time::Instant::now() < until {
-        a.net_tick(None);
-        if cond(a) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
+pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
+    let held = wait_until(
+        std::time::Duration::from_secs(15),
+        std::time::Duration::from_millis(20),
+        || {
+            a.net_tick(None);
+            cond(a)
+        },
+    );
+    if held {
+        return;
     }
     panic!(
-        "timed out waiting for: {} ({:?})",
-        what, a.sync_rt.net_status
+        "timed out waiting for: {} ({:?}, toast {:?})",
+        what, a.sync_rt.net_status, a.toast
     );
 }
 
@@ -1746,7 +1697,7 @@ fn csv_export_reads_back_with_commas_quotes_and_line_breaks() {
         add_task(&mut a, list, n);
     }
     let text = a.csv_text();
-    let dir = std::env::temp_dir().join(format!("wb-csv-{}", now_ts()));
+    let dir = temp_home("csv");
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("round.csv");
     std::fs::write(&f, &text).unwrap();

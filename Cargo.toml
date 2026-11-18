@@ -20,7 +20,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 # tests run the real server; it is not part of the app build
-workboard-server = { path = "server" }
+workboard-server = { path = "server", features = ["testing"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
 accesskit = "0.17"
 

@@ -9,79 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Person, Role, SignIn, Status};
 use wb_sync::SyncMeta;
-
-struct Server {
-    port: u16,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Server {
-    fn start(home: &PathBuf, port: u16) -> Server {
-        Self::start_with(home, port, workboard_server::Options::default())
-    }
-
-    fn start_with(home: &PathBuf, port: u16, options: workboard_server::Options) -> Server {
-        let home = home.clone();
-        let (port_tx, port_rx) = std::sync::mpsc::channel();
-        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                // the same port again after a restart (it can take a moment to free up)
-                let mut tries = 0;
-                let listener = loop {
-                    match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
-                        Ok(l) => break l,
-                        Err(e) if tries < 50 => {
-                            tries += 1;
-                            let _ = e;
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                        Err(e) => panic!("bind: {}", e),
-                    }
-                };
-                port_tx.send(listener.local_addr().unwrap().port()).unwrap();
-                workboard_server::serve_with(listener, home, options, async {
-                    let _ = stop_rx.await;
-                })
-                .await
-                .unwrap();
-            });
-        });
-        let port = port_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("server started");
-        Server {
-            port,
-            stop: Some(stop_tx),
-            thread: Some(thread),
-        }
-    }
-
-    fn stop(mut self) {
-        self.halt();
-    }
-
-    fn halt(&mut self) {
-        if let Some(s) = self.stop.take() {
-            let _ = s.send(());
-        }
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.halt();
-    }
-}
-
-fn temp_home(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("wb-server-{}-{:x}", tag, wb_sync::random_u64()))
-}
+use workboard_server::testing::{temp_home, wait_until, TestServer as Server};
 
 /// Milliseconds, like the app's change stamps.
 fn now() -> i64 {
@@ -233,13 +161,12 @@ impl App {
 
     /// Wait until `cond` holds for this app's connection details.
     fn until(&mut self, what: &str, cond: impl Fn(&App) -> bool) {
-        let until = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < until {
+        let held = wait_until(Duration::from_secs(15), Duration::from_millis(20), || {
             self.pump();
-            if cond(self) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+            cond(self)
+        });
+        if held {
+            return;
         }
         panic!(
             "timed out waiting for: {} (status {:?}, role {:?}, denied {:?})",
@@ -361,13 +288,12 @@ impl App {
     }
 
     fn wait(&mut self, what: &str, cond: impl Fn(&Value) -> bool) {
-        let until = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < until {
+        let held = wait_until(Duration::from_secs(15), Duration::from_millis(20), || {
             self.pump();
-            if !self.data.is_null() && cond(&self.data) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+            !self.data.is_null() && cond(&self.data)
+        });
+        if held {
+            return;
         }
         panic!(
             "timed out waiting for: {} (status {:?})\n{}",
@@ -376,13 +302,12 @@ impl App {
     }
 
     fn wait_status(&mut self, want: fn(&Status) -> bool, what: &str) {
-        let until = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < until {
+        let held = wait_until(Duration::from_secs(15), Duration::from_millis(20), || {
             self.pump();
-            if self.status.as_ref().is_some_and(want) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+            self.status.as_ref().is_some_and(want)
+        });
+        if held {
+            return;
         }
         panic!(
             "timed out waiting for status {} (have {:?})",
@@ -449,7 +374,7 @@ fn two_apps(port: u16) -> (App, App) {
 #[test]
 fn a_chat_message_from_a_reaches_b() {
     let home = temp_home("chat");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(say("hello from A", 2001));
     b.wait("A's message at B", |d| {
@@ -466,7 +391,7 @@ fn a_chat_message_from_a_reaches_b() {
 #[test]
 fn edits_to_different_tasks_at_once_both_stay() {
     let home = temp_home("edits");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // both edit before seeing the other's change
     a.change(|d| d["tasks"][0]["name"] = json!("Plan (A)"));
@@ -481,7 +406,7 @@ fn edits_to_different_tasks_at_once_both_stay() {
 #[test]
 fn a_task_deleted_by_a_does_not_come_back_from_b() {
     let home = temp_home("delete");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
         d["tasks"]
@@ -514,7 +439,7 @@ fn a_task_deleted_by_a_does_not_come_back_from_b() {
 #[test]
 fn the_team_copy_survives_a_server_restart() {
     let home = temp_home("restart");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(say("before the restart", 2002));
     b.wait("message at B", |d| {
@@ -529,7 +454,7 @@ fn the_team_copy_survives_a_server_restart() {
         "saved when the server stopped"
     );
 
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     // A's computer signs in again with its token
     let mut c = App::start(
         server.port,
@@ -550,7 +475,7 @@ fn the_team_copy_survives_a_server_restart() {
 #[test]
 fn messages_written_while_disconnected_merge_after_reconnecting() {
     let home = temp_home("offline");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let (mut a, mut b) = two_apps(port);
     a.change(say("online", 2003));
@@ -571,7 +496,7 @@ fn messages_written_while_disconnected_merge_after_reconnecting() {
     a.change(say("written offline by A", 2004));
     b.change(|d| d["tasks"][0]["name"] = json!("Plan (offline B)"));
 
-    let server = Server::start(&home, port);
+    let server = Server::start_at(&home, port);
     a.wait_status(|s| *s == Status::Connected, "A reconnects by itself");
     b.wait("A's offline message at B", |d| {
         texts(d).contains(&"written offline by A".to_string())
@@ -586,7 +511,7 @@ fn messages_written_while_disconnected_merge_after_reconnecting() {
 #[test]
 fn everyone_sees_who_is_connected() {
     let home = temp_home("presence");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     b.until("B sees A and itself online", |b| {
         b.online.as_deref() == Some(&[1, 2])
@@ -603,7 +528,7 @@ fn everyone_sees_who_is_connected() {
 #[test]
 fn only_invited_people_get_in_and_only_admins_invite() {
     let home = temp_home("access");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let (mut a, mut b) = two_apps(port);
 
@@ -741,7 +666,7 @@ fn http_get_with(port: u16, path: &str, headers: &str) -> (String, Vec<u8>) {
 #[test]
 fn app_updates_are_served_from_the_updates_folder() {
     let home = temp_home("updates");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     // nothing published yet
     let (head, _) = http_get(server.port, "/updates/appcast.xml");
     assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
@@ -781,7 +706,7 @@ fn app_updates_are_served_from_the_updates_folder() {
 #[test]
 fn email_invite_cli_creates_member_and_reaches_connected_apps() {
     let home = temp_home("email-invite-cli");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut owner = App::connect(server.port, Some(workspace()));
     owner.until("owner ready", |a| a.role == Some(Role::Owner));
     owner.wait("workspace ready", |d| d["workspace"] == "Team");
@@ -830,7 +755,7 @@ fn email_invite_cli_creates_member_and_reaches_connected_apps() {
         .any(|m| m["id"] == id));
     drop(owner);
     server.stop();
-    let restarted = Server::start(&home, 0);
+    let restarted = Server::start_at(&home, 0);
     let mut joined = App::join(restarted.port, &code);
     joined.until("member after restart", |a| {
         a.member == Some(id) && a.role == Some(Role::Member)
@@ -857,7 +782,7 @@ fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
     ] {
         for reinvite in [false, true] {
             let home = temp_home("email-invite-write-failure");
-            let server = Server::start(&home, 0);
+            let server = Server::start_at(&home, 0);
             let mut owner = App::connect(server.port, Some(workspace()));
             owner.until("owner ready", |a| a.role == Some(Role::Owner));
             let old_code = if reinvite {
@@ -929,7 +854,7 @@ fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
             server.stop();
             if file == workboard_server::WORKSPACE_FILE {
                 if let Some(code) = &old_code {
-                    let restarted = Server::start(&home, 0);
+                    let restarted = Server::start_at(&home, 0);
                     let mut joined = App::join(restarted.port, code);
                     joined.until("old code still works after restart", |a| {
                         a.role == Some(Role::Member)
@@ -950,7 +875,7 @@ fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
 #[test]
 fn email_invite_survives_stale_client_push_with_concurrent_general_edits() {
     let home = temp_home("email-stale-push");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut owner = App::connect(server.port, Some(workspace()));
     owner.until("owner ready", |a| a.role == Some(Role::Owner));
     local_admin(&home, json!({"people": true}));
@@ -1029,7 +954,7 @@ fn local_admin(home: &PathBuf, request: Value) -> Value {
 #[test]
 fn email_invite_reuses_unregistered_member_case_insensitively_with_fresh_code() {
     let home = temp_home("email-reinvite");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut data = workspace();
     data["members"][1]["email"] = json!("Pending.Member@example.test");
     data["members"][1]["invited"] = json!(true);
@@ -1113,7 +1038,7 @@ fn email_invite_protects_privileged_registered_and_ambiguous_identities() {
         serde_json::to_vec(&saved).unwrap(),
     )
     .unwrap();
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     for email in [
         "OWNER@example.test",
         "admin@example.test",
@@ -1162,7 +1087,7 @@ fn email_invite_rejects_invalid_addresses_before_queuing_and_on_server() {
         !home.exists(),
         "invalid CLI input must not create a pending request"
     );
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut owner = App::connect(server.port, Some(workspace()));
     owner.until("ready", |a| a.role == Some(Role::Owner));
     for email in [
@@ -1237,7 +1162,7 @@ fn email_invite_cli_and_admin_explicitly_refuse_role_overrides() {
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("invite-email EMAIL"));
     assert!(help.contains("Owner recovery") && help.contains("teammate"));
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut owner = App::connect(server.port, Some(workspace()));
     owner.until("ready", |a| a.role == Some(Role::Owner));
     for request in [
@@ -1261,7 +1186,7 @@ fn email_invite_cli_and_admin_explicitly_refuse_role_overrides() {
 #[test]
 fn email_invite_rejects_ambiguous_member_ids_without_changing_either_identity() {
     let home = temp_home("email-id-duplicate");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut data = workspace();
     data["members"][1]["email"] = json!("pending@example.test");
     data["members"][2]["id"] = json!(2);
@@ -1295,7 +1220,7 @@ fn email_invite_preserves_unrelated_sync_stamps_and_general_fields() {
         data.to_string(),
     )
     .unwrap();
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let res = local_admin(&home, json!({"invite_email": "fresh@example.test"}));
     assert_eq!(res["ok"], true);
     let disk: Value = serde_json::from_slice(
@@ -1341,7 +1266,7 @@ fn email_invite_fails_closed_on_malformed_workspace_metadata_or_role() {
             data.to_string(),
         )
         .unwrap();
-        let server = Server::start(&home, 0);
+        let server = Server::start_at(&home, 0);
         let res = local_admin(&home, json!({"invite_email": "pending@example.test"}));
         assert_eq!(
             res["ok"], false,
@@ -1364,7 +1289,7 @@ fn email_invite_fails_closed_on_malformed_workspace_metadata_or_role() {
 #[test]
 fn health_and_admin_commands_answer() {
     let home = temp_home("health");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (_a, _b) = two_apps(server.port);
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", server.port)).unwrap();
@@ -1408,7 +1333,7 @@ fn health_and_admin_commands_answer() {
 #[test]
 fn restoring_a_backup_reaches_every_app() {
     let home = temp_home("restore");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // the backup taken now has both tasks
     let backup_path = home.join("manual-backup.json");
@@ -1452,7 +1377,7 @@ fn restoring_a_backup_reaches_every_app() {
 #[test]
 fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
     let home = temp_home("race");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut theirs = workspace();
     theirs["tasks"] = json!([{"id": 900, "name": "Their own task", "activity": []}]);
     theirs["members"] = json!([{"id": 1, "name": "Other person"}]);
@@ -1519,7 +1444,7 @@ fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
 #[test]
 fn the_owner_restores_a_backup_from_the_app() {
     let home = temp_home("apprestore");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // wait for the first backup (made within a minute of having a workspace)
     let dir = home.join(workboard_server::BACKUP_DIR);
@@ -1621,7 +1546,7 @@ fn no_progress() -> impl FnMut(u64, u64) -> bool {
 #[test]
 fn a_picture_goes_up_from_a_and_comes_down_at_b() {
     let home = temp_home("files");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
     b.until("B has a token", |b| b.token.is_some());
@@ -1698,7 +1623,7 @@ fn a_picture_goes_up_from_a_and_comes_down_at_b() {
 #[test]
 fn files_need_a_valid_token_and_honest_contents() {
     let home = temp_home("files-auth");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
     b.until("B has a token", |b| b.token.is_some());
@@ -1827,7 +1752,7 @@ fn files_over_the_limit_are_refused() {
 #[test]
 fn a_broken_download_continues_where_it_stopped() {
     let home = temp_home("files-resume");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, _b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
     let addr = format!("127.0.0.1:{}", server.port);
@@ -1870,7 +1795,7 @@ fn a_broken_download_continues_where_it_stopped() {
 #[test]
 fn attachments_survive_an_app_that_does_not_know_them() {
     let home = temp_home("files-old-app");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let pic = json!([{"file": "ab".repeat(32), "name": "photo.jpg", "kind": "Image", "bytes": 1234, "w": 640, "h": 480, "secs": 0.0}]);
     let p2 = pic.clone();
@@ -1997,7 +1922,7 @@ fn wait_for_mail(home: &PathBuf, to: &str, n: usize) -> String {
 #[test]
 fn an_emailed_invite_sets_a_password_that_signs_in_on_any_device() {
     let home = mail_home("accounts");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
 
     // the owner sets up the server and chooses a password at the same time
@@ -2184,7 +2109,7 @@ fn an_emailed_invite_sets_a_password_that_signs_in_on_any_device() {
 #[test]
 fn a_forgotten_password_is_reset_with_an_emailed_code() {
     let home = mail_home("forgot");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let mut a = App::start(
         port,
@@ -2280,7 +2205,7 @@ fn a_forgotten_password_is_reset_with_an_emailed_code() {
 
     // without mail.json the server says it can't email
     std::fs::remove_file(home.join(workboard_server::MAIL_FILE)).unwrap();
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     assert_eq!(
         wb_net::forgot_password(&format!("127.0.0.1:{}", server.port), "ann@team.io"),
         Ok(false)
@@ -2292,7 +2217,7 @@ fn a_forgotten_password_is_reset_with_an_emailed_code() {
 #[test]
 fn someone_signed_in_without_a_password_sets_one_up_later() {
     let home = temp_home("set-password");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let mut a = App::connect(port, Some(emailed_workspace()));
     a.until("owner in", |a| a.role == Some(Role::Owner));
@@ -2357,7 +2282,7 @@ fn someone_signed_in_without_a_password_sets_one_up_later() {
 #[test]
 fn the_join_page_opens_the_app_with_the_invite() {
     let home = temp_home("join-page");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (head, body) = http_get(server.port, "/join?code=ABCD-EFGH-JKMN&email=bo%40team.io");
     let body = String::from_utf8(body).unwrap();
     assert!(
@@ -2396,7 +2321,7 @@ fn channel<'a>(d: &'a Value, id: u64) -> Option<&'a Value> {
 #[test]
 fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
     let home = temp_home("private");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
         d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 3], "messages": [{"id": 21, "author": 1, "text": "secret", "ts": now()}], "last_read": 0}));
@@ -2552,7 +2477,7 @@ fn raw_first_message(port: u16, payload: &[u8]) -> Vec<u8> {
 #[test]
 fn a_huge_message_before_signing_in_is_refused_but_big_copies_go_after() {
     let home = temp_home("hello-size");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     // a small first message that isn't hello gets an answer
     let small = raw_first_message(server.port, br#"{"type":"ping"}"#);
     assert!(String::from_utf8_lossy(&small).contains("Say hello first"));
@@ -2673,7 +2598,7 @@ fn a_claim_whose_app_quit_can_be_made_again() {
 #[test]
 fn a_broken_first_copy_is_ignored_and_the_server_keeps_working() {
     let home = temp_home("broken");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut a = App::start(
         server.port,
         Value::Null,
@@ -2711,7 +2636,7 @@ fn a_broken_first_copy_is_ignored_and_the_server_keeps_working() {
 #[test]
 fn only_the_newest_copies_from_before_a_restore_are_kept() {
     let home = temp_home("prune");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, _b) = two_apps(server.port);
     let dir = home.join(workboard_server::BACKUP_DIR);
     std::fs::create_dir_all(&dir).unwrap();
@@ -2766,7 +2691,7 @@ fn only_the_newest_copies_from_before_a_restore_are_kept() {
 #[test]
 fn a_request_made_while_reconnecting_goes_once_back_in() {
     let home = temp_home("queued");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let (mut a, _b) = two_apps(port);
     server.stop();
@@ -2779,7 +2704,7 @@ fn a_request_made_while_reconnecting_goes_once_back_in() {
         role: Role::Member,
     });
     std::thread::sleep(Duration::from_millis(300));
-    let server = Server::start(&home, port);
+    let server = Server::start_at(&home, port);
     a.wait_status(|s| *s == Status::Connected, "A reconnects");
     a.until("the code asked for while offline", |a| {
         a.invites.iter().any(|(m, _)| *m == 3)
@@ -2791,7 +2716,7 @@ fn a_request_made_while_reconnecting_goes_once_back_in() {
 #[test]
 fn a_refused_call_says_which_conversation() {
     let home = temp_home("calldenied");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (_a, b) = two_apps(server.port);
     // voice isn't set up on this server: the refusal names the conversation
     b.client.send(Msg::CallJoin { channel: 10 });
@@ -2827,7 +2752,7 @@ fn chan_mut(d: &mut Value, id: u64) -> &mut Value {
 #[test]
 fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
     let home = temp_home("removed");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
         d["channels"].as_array_mut().unwrap().push(json!({"id": 30, "name": "plans", "kind": "Channel", "private": true, "topic": "", "members": [1, 2, 3], "messages": [{"id": 31, "author": 1, "text": "plans for all three", "ts": now()}], "last_read": 0}));
@@ -2881,7 +2806,7 @@ fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
 #[test]
 fn personal_spaces_and_private_docs_stay_with_their_owner() {
     let home = temp_home("personal");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut ws = workspace();
     ws["spaces"] = json!([
         {"id": 50, "name": "Personal", "color": [1, 2, 3], "statuses": [], "folders": [], "lists": [{"id": 51, "name": "Ann's list"}], "private_owner": 1},
@@ -3223,7 +3148,7 @@ fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
 #[test]
 fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
     let home = temp_home("nopush");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let bo = "b2".repeat(32);
     phone(&mut a, server.port, 2, &bo, &home);
@@ -3255,7 +3180,7 @@ fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
 #[test]
 fn two_people_editing_one_task_at_once_both_keep_their_change() {
     let home = temp_home("fields");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // both edit task 100 before seeing the other's change: different fields
     a.change(|d| d["tasks"][0]["name"] = json!("Plan (A)"));
@@ -3292,7 +3217,7 @@ fn two_people_editing_one_task_at_once_both_keep_their_change() {
 #[test]
 fn an_app_too_old_to_know_every_field_gets_changes_but_cannot_send_them() {
     let home = temp_home("old-app");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // B's computer runs an app from before the hello said its version
     let token = b.token.clone();
@@ -3349,7 +3274,7 @@ fn all_ids(v: &Value) -> Vec<u64> {
 #[test]
 fn after_the_first_copy_only_what_changed_travels() {
     let home = temp_home("deltas");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     b.updates.clear();
     a.change(|d| d["tasks"][0]["name"] = json!("Plan (A)"));
@@ -3416,7 +3341,7 @@ fn after_the_first_copy_only_what_changed_travels() {
 #[test]
 fn an_app_that_was_away_catches_up_on_every_change() {
     let home = temp_home("deltas-away");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, b) = two_apps(server.port);
     let (token, device, kept) = (b.token.clone(), b.device.clone(), b.data.clone());
     drop(b);
@@ -3492,7 +3417,7 @@ impl Raw {
 #[test]
 fn a_missed_revision_brings_the_whole_copy_and_partial_pushes_merge() {
     let home = temp_home("deltas-raw");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let mut raw = Raw::connect(
         server.port,
@@ -3540,7 +3465,7 @@ fn a_missed_revision_brings_the_whole_copy_and_partial_pushes_merge() {
 #[test]
 fn change_times_from_the_future_dont_win_over_later_edits() {
     let home = temp_home("future-stamps");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let mut raw = Raw::connect(
         server.port,
@@ -3585,7 +3510,7 @@ fn change_times_from_the_future_dont_win_over_later_edits() {
 #[test]
 fn a_deleted_message_comes_back_only_as_it_was() {
     let home = temp_home("graves");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| d["channels"][0]["messages"] = json!([]));
     b.wait("Ann's message gone at Bo", |d| texts(d).is_empty());
@@ -3617,7 +3542,7 @@ fn a_deleted_message_comes_back_only_as_it_was() {
 #[test]
 fn a_plain_member_cant_move_someone_elses_message_away() {
     let home = temp_home("move-away");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // Bo's own private channel
     b.change(|d| {
@@ -3658,7 +3583,7 @@ fn a_plain_member_cant_move_someone_elses_message_away() {
 #[test]
 fn a_plain_member_cant_make_a_shared_space_or_doc_their_own() {
     let home = temp_home("take-private");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let mut ws = plans_workspace("edit");
     ws["docs"]
         .as_array_mut()
@@ -3715,7 +3640,7 @@ fn a_plain_member_cant_make_a_shared_space_or_doc_their_own() {
 #[test]
 fn a_private_channel_stays_closed_when_its_last_member_leaves() {
     let home = temp_home("last-leaves");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     b.change(|d| {
         d["channels"].as_array_mut().unwrap().push(json!({
@@ -3741,7 +3666,7 @@ fn a_private_channel_stays_closed_when_its_last_member_leaves() {
 #[test]
 fn hidden_items_never_leak_through_deltas() {
     let home = temp_home("deltas-hidden");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let code = a.invite(3, Role::Member);
     let mut cy = App::join(server.port, &code);
@@ -3829,7 +3754,7 @@ fn hidden_items_never_leak_through_deltas() {
 #[test]
 fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
     let home = temp_home("changuard");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
         let c = d["channels"].as_array_mut().unwrap();
@@ -4004,7 +3929,7 @@ fn round_trip(from: &mut App, to: &mut App, text: &str, id: u64) {
 #[test]
 fn a_space_shared_with_chosen_people_reaches_only_them() {
     let home = temp_home("sharehide");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     assert!(has_all(&b.data), "Bo gets Plans: {}", b.data);
     assert!(has_none(&c.data), "Cy gets none of it: {}", c.data);
@@ -4047,7 +3972,7 @@ fn a_space_shared_with_chosen_people_reaches_only_them() {
 #[test]
 fn a_view_only_member_changes_nothing_and_gets_the_teams_version_back() {
     let home = temp_home("shareview");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("view"));
     b.change(|d| {
         find_mut(d, "tasks", 72)["name"] = json!("Bo was here");
@@ -4132,7 +4057,7 @@ fn a_view_only_member_changes_nothing_and_gets_the_teams_version_back() {
 #[test]
 fn a_comment_member_comments_but_changes_nothing_else() {
     let home = temp_home("sharecomment");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("comment"));
     let comment = |d: &Value, id: u64| -> Option<Value> {
         find(d, "tasks", 72)?["activity"]
@@ -4200,7 +4125,7 @@ fn a_comment_member_comments_but_changes_nothing_else() {
 #[test]
 fn only_full_members_and_admins_change_a_spaces_sharing() {
     let home = temp_home("sharefull");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b, mut c) = ann_bo_cy(server.port, plans_workspace("edit"));
     b.change(|d| {
         find_mut(d, "tasks", 72)["name"] = json!("Edited by Bo");
@@ -4287,7 +4212,7 @@ fn only_full_members_and_admins_change_a_spaces_sharing() {
 #[test]
 fn losing_access_to_a_space_deletes_nothing() {
     let home = temp_home("sharelose");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("edit"));
     let stale = b.data.clone();
     a.change(|d| find_mut(d, "spaces", 70)["sharing"]["people"] = json!([]));
@@ -4333,7 +4258,7 @@ fn losing_access_to_a_space_deletes_nothing() {
 #[test]
 fn a_folder_moved_into_a_space_someone_sees_comes_with_its_lists() {
     let home = temp_home("sharemove");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, _b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     assert!(has_none(&c.data), "Cy gets none of Plans: {}", c.data);
     a.change(|d| {
@@ -4379,7 +4304,7 @@ fn a_folder_moved_into_a_space_someone_sees_comes_with_its_lists() {
 #[test]
 fn a_new_role_arrives_before_the_copy_it_opens_up() {
     let home = temp_home("roleorder");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (a, _b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     assert!(has_none(&c.data));
     c.heard.clear();
@@ -4451,7 +4376,7 @@ fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
     assert_eq!(wb_net::OLDEST_SYNC, 4);
     assert_eq!(wb_sync::META_V, wb_net::OLDEST_SYNC);
     let home = temp_home("sync-3");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, b) = two_apps(server.port);
     let token = b.token.clone();
     let device = b.device.clone();
@@ -4511,7 +4436,7 @@ fn until_pong(raw: &mut Raw) -> Vec<Value> {
 #[test]
 fn each_access_request_gets_one_answer_on_its_connection() {
     let home = temp_home("one-answer");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (a, _b) = two_apps(server.port);
     let hello =
         json!({"type": "hello", "device": a.device, "token": a.token, "sync": wb_sync::META_V});
@@ -4638,7 +4563,7 @@ fn trust_test_certificate() {
 fn apps_work_through_an_https_front() {
     trust_test_certificate();
     let home = temp_home("https-front");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let front = tls_front(server.port, "cert.der", "key.der");
     let addr = format!("https://localhost:{}", front);
 
@@ -4707,7 +4632,7 @@ fn apps_work_through_an_https_front() {
 fn a_front_with_a_certificate_nobody_trusts_is_refused() {
     trust_test_certificate();
     let home = temp_home("https-untrusted");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let front = tls_front(server.port, "untrusted-cert.der", "untrusted-key.der");
     let addr = format!("https://localhost:{}", front);
     let mut a = App::connect_at(&addr, workspace());
@@ -4735,7 +4660,7 @@ const VIA_TUNNEL: &str = "Host: wb.example.com\r\nX-Forwarded-Proto: https\r\nX-
 #[test]
 fn through_the_tunnel_links_are_https_and_health_says_little() {
     let home = temp_home("via-tunnel");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
 
     // the join page gives the address the browser came to, as https
     let (_, body) = http_get_with(server.port, "/join?code=ABCD-EFGH-JKMN", VIA_TUNNEL);
@@ -4833,7 +4758,7 @@ fn one_server_answers_on_two_addresses_as_one_team() {
 #[test]
 fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version_back() {
     let home = temp_home("memberguard");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // the workspace has a colour, and Bo's app has saved once, so a changed
     // setting gets a stamp (as in the app)
@@ -4950,7 +4875,7 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
 #[test]
 fn a_plain_member_cant_write_as_someone_else_or_change_their_words() {
     let home = temp_home("authors");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
         d["tasks"][0]["activity"] = json!([
@@ -5048,7 +4973,7 @@ fn a_plain_member_cant_write_as_someone_else_or_change_their_words() {
 #[test]
 fn a_plain_member_cant_change_who_slack_users_come_in_as() {
     let home = temp_home("slackmap");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| d["extra"]["slack_map"] = json!({"U1": 1}));
     b.wait("the map reaches Bo", |d| d["extra"]["slack_map"]["U1"] == 1);
@@ -5069,7 +4994,7 @@ fn a_plain_member_cant_change_who_slack_users_come_in_as() {
 #[test]
 fn only_the_owner_changes_or_removes_another_admin() {
     let home = temp_home("adminadmin");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.client.send(Msg::SetRole {
         member: 2,
@@ -5125,7 +5050,7 @@ fn only_the_owner_changes_or_removes_another_admin() {
 #[test]
 fn an_admin_cant_change_or_remove_the_owners_entry() {
     let home = temp_home("ownerentry");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| d["members"][0]["email"] = json!("ann@team.io"));
     a.client.send(Msg::SetRole {
@@ -5193,7 +5118,7 @@ fn stamped(mut d: Value) -> Value {
 #[test]
 fn only_the_first_workspaces_owner_or_admins_make_workspaces() {
     let home = temp_home("makews");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let addr = format!("127.0.0.1:{}", port);
     let mut a = App::start(
@@ -5265,7 +5190,7 @@ fn only_the_first_workspaces_owner_or_admins_make_workspaces() {
 #[test]
 fn one_server_keeps_several_workspaces_apart() {
     let home = mail_home("several");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let addr = format!("127.0.0.1:{}", port);
 
@@ -5435,7 +5360,7 @@ fn one_server_keeps_several_workspaces_apart() {
     let device2 = a2.device.clone();
     drop((a, a2, b, b2, cy, other));
     server.stop();
-    let server = Server::start(&home, port);
+    let server = Server::start_at(&home, port);
     let mut again = App::start_at(
         &addr2,
         Value::Null,
@@ -5463,7 +5388,7 @@ fn one_server_keeps_several_workspaces_apart() {
 #[test]
 fn an_owner_deletes_a_workspace_and_it_can_come_back() {
     let home = temp_home("deletews");
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let port = server.port;
     let addr = format!("127.0.0.1:{}", port);
     let mut a = App::start(
@@ -5597,7 +5522,7 @@ fn deleted_workspaces_stay_deleted_after_a_restart() {
         .unwrap()
         .as_secs();
     std::fs::create_dir_all(gone.join(format!("def.{}", recent))).unwrap();
-    let server = Server::start(&home, 0);
+    let server = Server::start_at(&home, 0);
     let (head, _) = http_get(server.port, "/w/def/health");
     assert!(head.starts_with("HTTP/1.1 410"), "{}", head);
     let (head, _) = http_get(server.port, "/w/nosuch/health");

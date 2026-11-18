@@ -1,0 +1,218 @@
+// What the tests need to run things for real: the server on a local port
+// with its data in a temporary folder, a local livekit-server for calls,
+// temporary folders and a wait loop. Used by this crate's tests, the app's
+// tests and wb-voice's tests; built only with the `testing` feature, which
+// their dev-dependencies turn on.
+
+use crate::{serve_with, Options, MAIL_FILE, OUTBOX_DIR};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// A new temporary folder path, wb-<tag>-<random>; not made yet.
+pub fn temp_home(tag: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("wb-{}-{:x}", tag, wb_sync::random_u64()))
+}
+
+/// Calls `f` every `step` until it returns true, for at most `timeout`;
+/// whether it did. Callers fail the test with what they were waiting for
+/// and the state they have then.
+pub fn wait_until(timeout: Duration, step: Duration, mut f: impl FnMut() -> bool) -> bool {
+    let end = Instant::now() + timeout;
+    while Instant::now() < end {
+        if f() {
+            return true;
+        }
+        std::thread::sleep(step);
+    }
+    false
+}
+
+/// A workboard-server running on its own thread, stopped when dropped.
+pub struct TestServer {
+    pub port: u16,
+    pub home: PathBuf,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    /// Started on a folder only this server uses: the folder is removed
+    /// when it stops, and a panic on its thread is left alone. A server
+    /// from `start_with` keeps its folder and passes such a panic on.
+    own_home: bool,
+}
+
+impl TestServer {
+    /// A server on a free port with its data in a new temporary folder.
+    pub fn start() -> TestServer {
+        Self::start_in(&temp_home("server"))
+    }
+
+    /// `start`, with the mails written to outbox/ in its folder instead of
+    /// sent (read them with `mails_to`).
+    pub fn with_mail_folder() -> TestServer {
+        let home = temp_home("accounts");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(MAIL_FILE), r#"{"transport": "folder"}"#).unwrap();
+        Self::start_in(&home)
+    }
+
+    /// A server on a free port with its data in `home`, a folder the test
+    /// made for it (it is removed when the server stops).
+    pub fn start_in(home: &Path) -> TestServer {
+        Self::spawn(home, 0, Options::default(), true)
+    }
+
+    /// `start_with` with the default options.
+    pub fn start_at(home: &Path, port: u16) -> TestServer {
+        Self::start_with(home, port, Options::default())
+    }
+
+    /// A server with its data in `home` (kept when it stops, so a test can
+    /// start another on it) on `port`, 0 for a free one. The same port again
+    /// after a restart is waited for while it frees up.
+    pub fn start_with(home: &Path, port: u16, options: Options) -> TestServer {
+        Self::spawn(home, port, options, false)
+    }
+
+    fn spawn(home: &Path, port: u16, options: Options, own_home: bool) -> TestServer {
+        let h = home.to_path_buf();
+        let (port_tx, port_rx) = std::sync::mpsc::channel();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                // the same port again after a restart (it can take a moment to free up)
+                let mut tries = 0;
+                let listener = loop {
+                    match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                        Ok(l) => break l,
+                        Err(e) if tries < 50 => {
+                            tries += 1;
+                            let _ = e;
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        Err(e) => panic!("bind: {}", e),
+                    }
+                };
+                port_tx.send(listener.local_addr().unwrap().port()).unwrap();
+                serve_with(listener, h, options, async {
+                    let _ = stop_rx.await;
+                })
+                .await
+                .unwrap();
+            });
+        });
+        let port = port_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("server started");
+        TestServer {
+            port,
+            home: home.to_path_buf(),
+            stop: Some(stop_tx),
+            thread: Some(thread),
+            own_home,
+        }
+    }
+
+    /// The mails to `to` in outbox/ (see `with_mail_folder`), oldest first.
+    pub fn mails_to(&self, to: &str) -> Vec<String> {
+        let mut files: Vec<_> = std::fs::read_dir(self.home.join(OUTBOX_DIR))
+            .map(|d| d.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        files
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok())
+            .filter(|t| t.starts_with(&format!("To: {}\n", to)))
+            .collect()
+    }
+
+    pub fn stop(mut self) {
+        self.halt();
+    }
+
+    fn halt(&mut self) {
+        if let Some(s) = self.stop.take() {
+            let _ = s.send(());
+        }
+        if let Some(t) = self.thread.take() {
+            if self.own_home {
+                let _ = t.join();
+            } else {
+                t.join().unwrap();
+            }
+        }
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        self.halt();
+        if self.own_home {
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+}
+
+/// A free local TCP port.
+pub fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// A local livekit-server, stopped when dropped.
+pub struct LiveKit {
+    child: Child,
+    pub port: u16,
+}
+
+impl Drop for LiveKit {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// The installed livekit-server command; None when there is none (tests
+/// that need it say so and skip).
+pub fn livekit_bin() -> Option<String> {
+    [
+        "livekit-server",
+        "/opt/homebrew/bin/livekit-server",
+        "/usr/local/bin/livekit-server",
+    ]
+    .into_iter()
+    .find(|b| {
+        Command::new(b)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    })
+    .map(|s| s.to_string())
+}
+
+/// Starts livekit-server `bin` on free local ports with one API key and
+/// waits until it takes connections. Err when it can't be started.
+pub fn start_livekit(bin: &str, key: &str, secret: &str) -> std::io::Result<LiveKit> {
+    let port = free_port();
+    let rtc = free_port();
+    let config = format!(
+        "port: {port}\nbind_addresses: [\"127.0.0.1\"]\nrtc:\n  tcp_port: {rtc}\n  udp_port: {rtc}\n  use_external_ip: false\n  node_ip: 127.0.0.1\nkeys:\n  {key}: {secret}\nlogging:\n  level: warn\n"
+    );
+    let child = Command::new(bin)
+        .arg("--config-body")
+        .arg(config)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let lk = LiveKit { child, port };
+    let up = wait_until(Duration::from_secs(15), Duration::from_millis(100), || {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    });
+    assert!(up, "livekit-server didn't start");
+    Ok(lk)
+}

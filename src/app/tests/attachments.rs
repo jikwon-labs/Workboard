@@ -5,7 +5,7 @@
 use super::*;
 
 fn picture_file(name: &str, w: u32, h: u32) -> std::path::PathBuf {
-    let dir = temp_folder("pic");
+    let dir = temp_home("pic");
     std::fs::create_dir_all(&dir).unwrap();
     let mut img = image::RgbaImage::new(w, h);
     for (x, _, p) in img.enumerate_pixels_mut() {
@@ -235,7 +235,7 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
         .find(|m| m["attachments"].is_null());
     assert!(plain.is_some());
     // things that aren't pictures or videos are refused
-    let doc = temp_folder("doc").join("plan.pdf");
+    let doc = temp_home("doc").join("plan.pdf");
     std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
     std::fs::write(&doc, b"%PDF").unwrap();
     a.chat.files.clear();
@@ -254,7 +254,7 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
 
 #[test]
 fn in_a_shared_folder_pictures_go_into_its_files_folder() {
-    let folder = temp_folder("shared-files");
+    let folder = temp_home("shared-files");
     let mut a = app();
     a.share_here(&folder.to_string_lossy()).unwrap();
     assert_eq!(
@@ -273,7 +273,7 @@ fn in_a_shared_folder_pictures_go_into_its_files_folder() {
         .all(|(p, _)| p.extension().is_some_and(|e| e == "json")));
     // another computer copies it from there into its own cache
     let b = App::build(None, Some(Data::seed()));
-    let mut bf = crate::app::files::Files::new(temp_folder("b-cache"));
+    let mut bf = crate::app::files::Files::new(temp_home("b-cache"));
     let remote = crate::app::files::Remote::Folder(folder.clone());
     bf.want(&files[0], crate::app::files::THUMB);
     let sha = files[0].file.clone();
@@ -290,7 +290,7 @@ fn a_video_shows_a_still_from_the_cache() {
         eprintln!("skipped: ffmpeg isn't installed");
         return;
     };
-    let dir = temp_folder("video");
+    let dir = temp_home("video");
     std::fs::create_dir_all(&dir).unwrap();
     let clip = dir.join("Holiday.MP4");
     let ok = std::process::Command::new(ffmpeg)
@@ -361,7 +361,7 @@ fn one_message_takes_at_most_ten_pictures() {
 
 #[test]
 fn a_missing_file_is_fetched_again_later() {
-    let folder = temp_folder("retry-files");
+    let folder = temp_home("retry-files");
     std::fs::create_dir_all(folder.join("files")).unwrap();
     let pic = picture_file("later.png", 30, 20);
     let (sha, bytes) = wb_net::sha256_file(&pic).unwrap();
@@ -375,7 +375,7 @@ fn a_missing_file_is_fetched_again_later() {
         secs: 0.0,
         thumb: None,
     };
-    let mut f = crate::app::files::Files::new(temp_folder("retry-cache"));
+    let mut f = crate::app::files::Files::new(temp_home("retry-cache"));
     let remote = crate::app::files::Remote::Folder(folder.clone());
     // not in the shared folder yet: the first try fails and the next one waits
     f.settle(&remote, |f| {
@@ -445,7 +445,7 @@ fn sharing_a_folder_brings_earlier_pictures_along() {
         parent: None,
         files: files.clone(),
     }]);
-    let folder = temp_folder("share-later");
+    let folder = temp_home("share-later");
     a.share_here(&folder.to_string_lossy()).unwrap();
     let dest = folder.join("files").join(&files[0].file);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -535,7 +535,7 @@ fn file_errors_are_shown_in_the_interface_language() {
 #[test]
 fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
     let mut a = app();
-    let folder = temp_folder("trash-reupload");
+    let folder = temp_home("trash-reupload");
     a.share_here(&folder.to_string_lossy()).unwrap();
     a.add_media(false, Some(picture_file("trash.png", 24, 24)), None);
     let files = until_ready(&mut a, false);
@@ -704,7 +704,7 @@ fn make_clip(name: &str) -> Option<std::path::PathBuf> {
     let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
         .into_iter()
         .find(|p| std::path::Path::new(p).exists())?;
-    let dir = temp_folder("clip");
+    let dir = temp_home("clip");
     std::fs::create_dir_all(&dir).unwrap();
     let clip = dir.join(name);
     let ok = std::process::Command::new(ffmpeg)
@@ -735,7 +735,7 @@ fn a_video_goes_with_a_small_still_and_others_show_that_first() {
         eprintln!("skipped: ffmpeg isn't installed");
         return;
     };
-    let folder = temp_folder("still-share");
+    let folder = temp_home("still-share");
     let mut a = app();
     a.share_here(&folder.to_string_lossy()).unwrap();
     a.add_media(false, Some(clip), None);
@@ -760,7 +760,7 @@ fn a_video_goes_with_a_small_still_and_others_show_that_first() {
         "old ones show as before"
     );
     // another computer shows the still without fetching the video
-    let mut bf = crate::app::files::Files::new(temp_folder("still-b"));
+    let mut bf = crate::app::files::Files::new(temp_home("still-b"));
     let remote = crate::app::files::Remote::Folder(folder.clone());
     let shown = crate::app::files::shown(&v);
     assert_eq!(shown.file, still);
@@ -812,7 +812,7 @@ fn old_file(p: &std::path::Path, days: u64) {
 fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size() {
     use crate::app::files::clean_cache;
     use std::collections::HashSet;
-    let dir = temp_folder("clean-cache");
+    let dir = temp_home("clean-cache");
     std::fs::create_dir_all(&dir).unwrap();
     let sha = |c: char| c.to_string().repeat(64);
     let put = |c: char, bytes: usize, days: u64| {
@@ -868,7 +868,7 @@ fn the_cache_drops_unused_files_after_a_while_and_old_team_files_past_its_size()
 #[test]
 fn the_shared_folder_drops_files_nobody_refers_to_once_they_are_a_month_old() {
     use crate::app::files::{clean_shared_folder, folder_refs};
-    let folder = temp_folder("clean-folder");
+    let folder = temp_home("clean-folder");
     let files = folder.join("files");
     std::fs::create_dir_all(&files).unwrap();
     let sha = |c: char| c.to_string().repeat(64);
@@ -918,7 +918,7 @@ fn the_shared_folder_drops_files_nobody_refers_to_once_they_are_a_month_old() {
 
 #[test]
 fn every_workspace_on_this_computer_counts_for_the_cache() {
-    let dir = temp_folder("clean-spaces");
+    let dir = temp_home("clean-spaces");
     std::fs::create_dir_all(&dir).unwrap();
     let sha = |c: char| c.to_string().repeat(64);
     std::fs::write(
@@ -1014,7 +1014,7 @@ fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
 fn the_cache_never_drops_files_only_a_trash_refers_to_to_stay_under_its_size() {
     use crate::app::files::{clean_cache, SpaceRefs};
     use std::collections::HashSet;
-    let dir = temp_folder("clean-trash");
+    let dir = temp_home("clean-trash");
     std::fs::create_dir_all(&dir).unwrap();
     let sha = |c: char| c.to_string().repeat(64);
     for (c, days) in [('a', 50), ('b', 40), ('c', 30)] {
@@ -1061,7 +1061,7 @@ fn the_cache_never_drops_files_only_a_trash_refers_to_to_stay_under_its_size() {
 fn the_shared_folder_keeps_a_deleted_messages_file_while_it_was_named_lately() {
     use crate::app::files::{clean_shared_folder, FOLDER_GRACE, FOLDER_NAMED, FOLDER_NAMED_GRACE};
     use std::collections::HashSet;
-    let folder = temp_folder("clean-named");
+    let folder = temp_home("clean-named");
     let files = folder.join("files");
     std::fs::create_dir_all(&files).unwrap();
     let sha = |c: char| c.to_string().repeat(64);

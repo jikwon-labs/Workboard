@@ -4,7 +4,7 @@ use super::*;
 
 /// A picture file for attachment tests.
 fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("wb-ui-pic-{:x}", crate::sync::random_u64()));
+    let dir = temp_home("ui-pic");
     std::fs::create_dir_all(&dir).unwrap();
     let mut img = image::RgbaImage::new(w, h);
     for (x, y, p) in img.enumerate_pixels_mut() {

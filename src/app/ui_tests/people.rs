@@ -248,8 +248,7 @@ fn work_together_in_a_shared_folder_says_how_teammates_join_and_keeps_the_path_o
         assert!(hint(&h, "Paste a folder path, or pick one above"));
     }
     h.key(egui::Key::Escape);
-    let dir = std::env::temp_dir()
-        .join(format!("wb-ui-{:x}", crate::sync::random_u64()))
+    let dir = temp_home("ui")
         .join("audit-states-shared-folder")
         .join("team-workspace-folder")
         .join("_shared");

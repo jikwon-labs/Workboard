@@ -17,7 +17,7 @@ block = "0.1"
 
 
 [dev-dependencies]
-workboard-server = { path = "../../server" }
+workboard-server = { path = "../../server", features = ["testing"] }
 wb-net = { path = "../wb-net" }
 wb-sync = { path = "../wb-sync" }
 serde_json = "1"

@@ -6103,6 +6103,7 @@ dependencies = [
  "tungstenite 0.30.0",
  "wb-net",
  "wb-sync",
+ "workboard-server",
 ]
 
 [[package]]

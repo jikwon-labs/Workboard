@@ -8,8 +8,7 @@ fn own_home(tag: &str) -> std::sync::MutexGuard<'static, ()> {
     let guard = crate::app::tests::HOME_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let home =
-        std::env::temp_dir().join(format!("wb-home-{}-{:x}", tag, crate::sync::random_u64()));
+    let home = temp_home(&format!("home-{}", tag));
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
     guard

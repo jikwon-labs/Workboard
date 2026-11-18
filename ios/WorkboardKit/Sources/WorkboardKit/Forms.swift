@@ -83,7 +83,7 @@ extension Edits {
     @discardableResult
     public static func updateForm(_ data: inout JSON, form: UInt64, name: String? = nil, description: String? = nil, list: UInt64? = nil) -> Bool {
         changeForm(&data, form) { f in
-            if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { f["name"] = .string(name) }
+            if let name, !name.isBlank { f["name"] = .string(name) }
             if let description { f["description"] = .string(description) }
             if let list { f["list_id"] = .id(list) }
             return true
@@ -92,7 +92,7 @@ extension Edits {
 
     @discardableResult
     public static func setFormField(_ data: inout JSON, form: UInt64, index: Int?, to field: FormFieldView) -> Bool {
-        guard !field.label.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard !field.label.isBlank else { return false }
         return changeForm(&data, form) { f in
             var fields = f["fields"]?.array ?? []
             if let index {

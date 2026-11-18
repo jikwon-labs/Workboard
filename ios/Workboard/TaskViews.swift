@@ -237,7 +237,7 @@ struct ListTasksView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if adding {
                     Button("Add", action: add)
-                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(newName.isBlank)
                 } else {
                     AddButton("New task", id: "addTaskButton") {
                         adding = true

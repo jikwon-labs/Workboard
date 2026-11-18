@@ -189,7 +189,7 @@ private struct FormEditor: View {
                     client.edit { d, _ in Edits.setFormField(&d, form: form.id, index: nil, to: FormFieldView(label: label, map: newKind, options: options)) }
                     newLabel = ""
                 }
-                .disabled(newLabel.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(newLabel.isBlank)
                 .accessibilityIdentifier("addQuestion")
             }
             Section {

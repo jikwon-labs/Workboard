@@ -145,7 +145,7 @@ struct NewChannelSheet: View {
                 CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create", action: create)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.isBlank)
                         .accessibilityIdentifier("createChannelButton")
                 }
             }

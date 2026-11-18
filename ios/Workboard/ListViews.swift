@@ -91,7 +91,7 @@ struct BoardColumn: View {
             Button("Add") {
                 let name = newName
                 newName = ""
-                guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                guard !name.isBlank else { return }
                 client.edit { d, me in Edits.addTask(&d, list: listId, name: name, assignees: [me], status: status.name, me: me, id: client.newId(), ts: nowTs()) }
             }
         }

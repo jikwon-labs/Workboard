@@ -215,7 +215,7 @@ private struct NewTargetView: View {
                         client.edit { d, _ in Edits.addTarget(&d, goal: goal, GoalTargetView(name: name, kind: k)) }
                         dismiss()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(name.isBlank)
                     .accessibilityIdentifier("targetAdd")
                 }
             }

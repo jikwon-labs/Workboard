@@ -157,7 +157,7 @@ extension Edits {
 
     @discardableResult
     public static func addTarget(_ data: inout JSON, goal: UInt64, _ target: GoalTargetView) -> Bool {
-        guard !target.name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard !target.name.isBlank else { return false }
         return changeGoal(&data, goal) { g in
             var t = g["targets"]?.array ?? []
             t.append(target.json)
@@ -205,7 +205,7 @@ extension Edits {
     @discardableResult
     public static func updateMeeting(_ data: inout JSON, meeting: UInt64, title: String? = nil, date: String? = nil, time: String? = nil, agenda: String? = nil, notes: String? = nil) -> Bool {
         data.updateItem(at: "extra.meetings", id: meeting) { m in
-            if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { m["title"] = .string(title) }
+            if let title, !title.isBlank { m["title"] = .string(title) }
             if let date { m["date"] = .string(date) }
             if let time { m["time"] = .string(time) }
             if let agenda { m["agenda"] = .string(agenda) }

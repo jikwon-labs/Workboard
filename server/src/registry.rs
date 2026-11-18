@@ -189,28 +189,17 @@ impl Registry {
             StatusCode::UNAUTHORIZED,
             "Sign in to a workspace on this server first.".to_string(),
         );
-        let (device, token) = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .and_then(|v| v.split_once(':'))
-            .ok_or(unknown.clone())?;
+        let (device, token) = bearer(headers).ok_or(unknown.clone())?;
         let g = self.first.inner.lock().unwrap();
-        let signed_in = g
-            .saved
-            .devices
-            .get(device)
-            .filter(|d| same(&d.token, &hash_token(token)));
-        let Some(d) = signed_in else {
+        let Some(d) = g.saved.device_with(device, token) else {
             // a device of another workspace here: signed in, but not of this team
             let elsewhere = self.others.lock().unwrap().values().any(|h| {
                 h.inner
                     .lock()
                     .unwrap()
                     .saved
-                    .devices
-                    .get(device)
-                    .is_some_and(|d| same(&d.token, &hash_token(token)))
+                    .device_with(device, token)
+                    .is_some()
             });
             return Err(if elsewhere { not_allowed() } else { unknown });
         };
@@ -322,25 +311,15 @@ impl Registry {
     /// Whether the device a request names (`Bearer <device>:<token>`) is
     /// signed in to workspace `hub` as one of its owners.
     fn owner_of(hub: &Hub, headers: &axum::http::HeaderMap) -> Result<(), (StatusCode, String)> {
-        let (device, token) = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .and_then(|v| v.split_once(':'))
-            .ok_or((
-                StatusCode::UNAUTHORIZED,
-                "Sign in to this workspace first.".to_string(),
-            ))?;
+        let (device, token) = bearer(headers).ok_or((
+            StatusCode::UNAUTHORIZED,
+            "Sign in to this workspace first.".to_string(),
+        ))?;
         let g = hub.inner.lock().unwrap();
-        let d = g
-            .saved
-            .devices
-            .get(device)
-            .filter(|d| same(&d.token, &hash_token(token)))
-            .ok_or((
-                StatusCode::UNAUTHORIZED,
-                "Sign in to this workspace first.".to_string(),
-            ))?;
+        let d = g.saved.device_with(device, token).ok_or((
+            StatusCode::UNAUTHORIZED,
+            "Sign in to this workspace first.".to_string(),
+        ))?;
         if g.saved.role_of(d.member) != Role::Owner {
             return Err((
                 StatusCode::FORBIDDEN,

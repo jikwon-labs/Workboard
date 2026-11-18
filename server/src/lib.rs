@@ -230,6 +230,16 @@ fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
+/// The `<device>:<token>` pair of an `Authorization: Bearer` header, which
+/// is how the app signs its HTTP requests.
+fn bearer(headers: &axum::http::HeaderMap) -> Option<(&str, &str)> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|v| v.split_once(':'))
+}
+
 /// XXXX-XXXX-XXXX without look-alike letters.
 fn new_code() -> String {
     const ABC: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -399,6 +409,14 @@ pub struct Saved {
 }
 
 impl Saved {
+    /// Device `device`, if `token` is the one this server gave it. Compares
+    /// in constant time so a wrong guess doesn't tell how close it was.
+    fn device_with(&self, device: &str, token: &str) -> Option<&Device> {
+        self.devices
+            .get(device)
+            .filter(|d| same(&d.token, &hash_token(token)))
+    }
+
     pub fn role_of(&self, member: u64) -> Role {
         self.roles.get(&member).copied().unwrap_or_default()
     }
@@ -991,8 +1009,8 @@ fn swap_hidden(canon: &Value, data: &mut Value, member: u64, role: Role) {
 fn persist_email_invite(home: &Path, canon: &Value, saved: &Saved) -> Result<(), String> {
     let workspace = home.join(WORKSPACE_FILE);
     let state = home.join(STATE_FILE);
-    let workspace_tmp = workspace.with_extension("json.tmp");
-    let state_tmp = state.with_extension("json.tmp");
+    let workspace_tmp = tmp_path(&workspace);
+    let state_tmp = tmp_path(&state);
     let result = (|| -> std::io::Result<()> {
         let before = match std::fs::read(&workspace) {
             Ok(bytes) => Some(bytes),
@@ -1007,14 +1025,11 @@ fn persist_email_invite(home: &Path, canon: &Value, saved: &Saved) -> Result<(),
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
             _ => {}
         }
-        std::fs::write(&workspace_tmp, serde_json::to_vec(canon)?)?;
-        std::fs::write(&state_tmp, serde_json::to_vec_pretty(saved)?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&state_tmp, std::fs::Permissions::from_mode(0o600))?;
-        }
-        commit_email_invite(&workspace, &state, before.as_deref())
+        write_private(&workspace_tmp, &serde_json::to_vec(canon)?)?;
+        write_private(&state_tmp, &serde_json::to_vec_pretty(saved)?)?;
+        commit_email_invite(&workspace, &state, before.as_deref())?;
+        sync_folder(&workspace);
+        Ok(())
     })();
     // Never remove a directory (including a fault-injection blocker).
     let _ = std::fs::remove_file(&workspace_tmp);
@@ -1030,11 +1045,11 @@ fn commit_email_invite(
     state: &Path,
     before: Option<&[u8]>,
 ) -> std::io::Result<()> {
-    let workspace_tmp = workspace.with_extension("json.tmp");
+    let workspace_tmp = tmp_path(workspace);
     std::fs::rename(&workspace_tmp, workspace)?;
-    if let Err(e) = std::fs::rename(state.with_extension("json.tmp"), state) {
+    if let Err(e) = std::fs::rename(tmp_path(state), state) {
         let rollback = match before {
-            Some(bytes) => std::fs::write(&workspace_tmp, bytes)
+            Some(bytes) => write_private(&workspace_tmp, bytes)
                 .and_then(|()| std::fs::rename(&workspace_tmp, workspace)),
             None => std::fs::remove_file(workspace),
         };
@@ -1048,24 +1063,48 @@ fn commit_email_invite(
     Ok(())
 }
 
-/// Write a file whole or not at all. Only this user may read it: the
-/// workspace holds everyone's messages, server.json the sign-ins.
-fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+/// Replace a file whole or not at all, even across a power loss: write a
+/// temp file next to it, flush that to disk, rename it over, then flush the
+/// folder. Only this user may read it: the workspace holds everyone's
+/// messages, server.json the sign-ins.
+fn write_atomic(path: &Path, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let tmp = tmp_path(path);
+    write_private(&tmp, bytes.as_ref())?;
+    std::fs::rename(&tmp, path)?;
+    sync_folder(path);
+    Ok(())
+}
+
+/// Where [`write_atomic`] stages `path`: `workspace.json.tmp` and so on.
+fn tmp_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    path.with_file_name(name)
+}
+
+/// Write `bytes` to `path` readable by this user only, and flush it to disk.
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    let tmp = path.with_extension("json.tmp");
     let mut open = std::fs::OpenOptions::new();
     open.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         open.mode(0o600);
-        // (an older tmp file keeps its mode when opened again)
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        // (an older file keeps its mode when opened again)
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
-    let mut f = open.open(&tmp)?;
-    f.write_all(text.as_bytes())?;
-    drop(f);
-    std::fs::rename(&tmp, path)
+    let mut f = open.open(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
+}
+
+/// Flush the folder holding `path`, so a rename into it lasts too (not
+/// supported everywhere, so failures are ignored).
+fn sync_folder(path: &Path) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    }
 }
 
 fn read_json(path: &Path) -> std::io::Result<Option<Value>> {
@@ -1527,11 +1566,6 @@ impl Hub {
         ok &= write_atomic(&state, &saved)
             .map_err(|e| eprintln!("couldn't save {}: {}", STATE_FILE, e))
             .is_ok();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o600));
-        }
         if !ok {
             self.inner.lock().unwrap().dirty = true;
         }
@@ -1707,8 +1741,8 @@ impl Hub {
         }
         if let Some(token) = &h.token {
             let g = self.inner.lock().unwrap();
-            return match g.saved.devices.get(device) {
-                Some(d) if same(&d.token, &hash_token(token)) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
+            return match g.saved.device_with(device, token) {
+                Some(d) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
                 _ => Err("This computer isn't signed in to this server anymore. Sign in with your email and password, or ask the owner or an admin for a new invite code.".into()),
             };
         }
@@ -4513,7 +4547,65 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+        assert!(!path.with_extension("json.tmp").exists());
+        // replacing it keeps it whole and private, and leaves no temp file
+        write_atomic(&path, b"{\"a\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(!path.with_extension("json.tmp").exists());
+        // the files folder's dot-file stages next to itself the same way
+        assert_eq!(
+            tmp_path(&home.join(files::NAMED_FILE)),
+            home.join(".named.json.tmp")
+        );
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn an_email_invite_saves_both_files_for_this_user_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("wb-invmode-{:x}", wb_sync::random_u64()));
+        std::fs::create_dir_all(&home).unwrap();
+        persist_email_invite(&home, &json!({"members": []}), &Saved::default()).unwrap();
+        for file in [WORKSPACE_FILE, STATE_FILE] {
+            let path = home.join(file);
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{file}");
+            assert!(!path.with_extension("json.tmp").exists(), "{file}");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_request_is_signed_in_only_with_the_devices_own_token() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut saved = Saved::default();
+        saved.devices.insert(
+            "mac-1".into(),
+            Device {
+                tag: 1,
+                member: 2,
+                token: hash_token("right"),
+                created: 0,
+            },
+        );
+        let auth = |v: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::AUTHORIZATION, HeaderValue::from_str(v).unwrap());
+            h
+        };
+        assert_eq!(
+            bearer(&auth("Bearer mac-1:right")),
+            Some(("mac-1", "right"))
+        );
+        assert_eq!(bearer(&auth("Bearer mac-1")), None);
+        assert_eq!(bearer(&auth("Basic mac-1:right")), None);
+        assert_eq!(bearer(&HeaderMap::new()), None);
+        assert!(saved.device_with("mac-1", "right").is_some());
+        assert!(saved.device_with("mac-1", "wrong").is_none());
+        assert!(saved.device_with("mac-1", "").is_none());
+        assert!(saved.device_with("mac-2", "right").is_none());
     }
 
     #[test]

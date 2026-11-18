@@ -45,21 +45,11 @@ pub fn file_name_ok(name: &str) -> bool {
 
 /// The request carries a device token this server issued (and hasn't taken back).
 fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
-    let Some(rest) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-    else {
-        return false;
-    };
-    let Some((device, token)) = rest.split_once(':') else {
+    let Some((device, token)) = bearer(headers) else {
         return false;
     };
     let g = hub.inner.lock().unwrap();
-    g.saved
-        .devices
-        .get(device)
-        .is_some_and(|d| d.token == hash_token(token))
+    g.saved.device_with(device, token).is_some()
 }
 
 fn status(code: StatusCode, why: &'static str) -> Response {
@@ -399,7 +389,7 @@ pub fn collect_garbage(
     // remember only files still here
     last.retain(|n, _| dir.join(n).is_file());
     if dir.is_dir() {
-        if let Err(err) = write_durably(
+        if let Err(err) = write_atomic(
             &record,
             serde_json::to_string(&last).unwrap_or_default().as_bytes(),
         ) {
@@ -407,26 +397,4 @@ pub fn collect_garbage(
         }
     }
     gone
-}
-
-/// Replace `path` with `bytes` so that a power loss leaves either the old
-/// contents or the new, never a cut-short file: write a temp file next to
-/// it, flush it to disk, rename it over, then flush the folder.
-fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let tmp = path.with_file_name(format!("{}.tmp", name));
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(bytes)?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp, path)?;
-    if let Some(dir) = path.parent() {
-        // makes the rename itself last (not supported everywhere)
-        let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
-    }
-    Ok(())
 }

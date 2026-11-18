@@ -341,8 +341,8 @@ pub fn fmt_ago(ts: i64) -> String {
             crate::trf!("{} hours ago", h)
         }
     } else {
-        let dt = chrono::DateTime::from_timestamp(ts, 0)
-            .map(|x| x.with_timezone(&chrono::Local).text("%b %-d at %-I:%M %p"))
+        let dt = crate::timefmt::local(ts)
+            .map(|x| x.text("%b %-d at %-I:%M %p"))
             .unwrap_or_default();
         dt
     }

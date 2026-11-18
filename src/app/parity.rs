@@ -206,9 +206,7 @@ fn start_matches(which: u8, start: Option<NaiveDate>) -> bool {
 }
 
 fn age_matches(which: u8, ts: i64) -> bool {
-    let day = chrono::DateTime::from_timestamp(ts, 0)
-        .map(|d| d.with_timezone(&chrono::Local).date_naive())
-        .unwrap_or_else(today);
+    let day = local_date(ts);
     let age = (today() - day).num_days();
     match which {
         1 => age == 0,
@@ -2275,8 +2273,8 @@ impl App {
     /// The text a property column shows for a task.
     pub(super) fn prop_text(&self, t: &Task, name: &str) -> String {
         let day = |ts: i64| {
-            chrono::DateTime::from_timestamp(ts, 0)
-                .map(|d| fmt_date(d.with_timezone(&chrono::Local).date_naive()))
+            local(ts)
+                .map(|d| fmt_date(d.date_naive()))
                 .unwrap_or_default()
         };
         match name {

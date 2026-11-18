@@ -207,8 +207,8 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
     let mut remove = None;
     for (i, e) in task.time_entries.iter().enumerate().rev() {
         ui.horizontal(|ui| {
-            let day = chrono::DateTime::from_timestamp(e.start, 0)
-                .map(|d| d.with_timezone(&chrono::Local).format("%b %-d").to_string())
+            let day = local(e.start)
+                .map(|d| d.format("%b %-d").to_string())
                 .unwrap_or_default();
             ui.label(RichText::new(day).color(t.text2));
             ui.label(fmt_duration(e.end - e.start));

@@ -27,12 +27,6 @@ fn week_start(d: NaiveDate) -> NaiveDate {
     d - Duration::days(d.weekday().num_days_from_sunday() as i64)
 }
 
-fn ts_date(ts: i64) -> NaiveDate {
-    chrono::DateTime::from_timestamp(ts, 0)
-        .map(|d| d.with_timezone(&chrono::Local).date_naive())
-        .unwrap_or_else(today)
-}
-
 fn bar_row(
     ui: &mut Ui,
     t: &Theme,
@@ -1011,7 +1005,7 @@ impl App {
                 let mut per: HashMap<u64, i64> = HashMap::new();
                 for task in scope {
                     for e in &task.time_entries {
-                        if (0..7).contains(&(ts_date(e.start) - ws).num_days()) {
+                        if (0..7).contains(&(local_date(e.start) - ws).num_days()) {
                             let o = match task.entry_owner(e) {
                                 0 if solo => me,
                                 o => o,
@@ -1023,7 +1017,7 @@ impl App {
                         let Some(by) = by.or(if solo { Some(me) } else { None }) else {
                             continue;
                         };
-                        if (0..7).contains(&(ts_date(st) - ws).num_days()) {
+                        if (0..7).contains(&(local_date(st) - ws).num_days()) {
                             *per.entry(by).or_default() += now - st;
                         }
                     }
@@ -1050,13 +1044,13 @@ impl App {
                 let mut per_day = [0i64; 7];
                 for task in scope {
                     for e in &task.time_entries {
-                        let i = (ts_date(e.start) - ws).num_days();
+                        let i = (local_date(e.start) - ws).num_days();
                         if (0..7).contains(&i) {
                             per_day[i as usize] += e.end - e.start;
                         }
                     }
                     for (_, st) in task.running_timers() {
-                        let i = (ts_date(st) - ws).num_days();
+                        let i = (local_date(st) - ws).num_days();
                         if (0..7).contains(&i) {
                             per_day[i as usize] += now - st;
                         }

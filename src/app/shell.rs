@@ -4479,9 +4479,7 @@ impl App {
             status_pill(&mut child, &st, Sense::hover());
         }
         if cols.created.width() > 0.0 {
-            let created = chrono::DateTime::from_timestamp(task.created, 0)
-                .map(|d| d.with_timezone(&chrono::Local).date_naive())
-                .unwrap_or_else(today);
+            let created = local_date(task.created);
             ui.painter_at(cols.created).text(
                 cols.created.left_center(),
                 Align2::LEFT_CENTER,

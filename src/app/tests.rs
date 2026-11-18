@@ -265,7 +265,7 @@ fn timesheet_hours_replace_the_day() {
         .unwrap()
         .time_entries
         .iter()
-        .filter(|e| super::hubs::ts_day(e.start) == day)
+        .filter(|e| crate::timefmt::local_date(e.start) == day)
         .map(|e| e.end - e.start)
         .sum();
     assert_eq!(secs, 4500);
@@ -275,7 +275,7 @@ fn timesheet_hours_replace_the_day() {
         .unwrap()
         .time_entries
         .iter()
-        .any(|e| super::hubs::ts_day(e.start) == day));
+        .any(|e| crate::timefmt::local_date(e.start) == day));
 }
 
 #[test]

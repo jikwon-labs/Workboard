@@ -110,20 +110,6 @@ fn cut(s: &str, n: usize) -> String {
     }
 }
 
-/// "HH:MM" as minutes after midnight.
-fn minutes_of(hhmm: &str) -> Option<u32> {
-    let (h, m) = hhmm.trim().split_once(':')?;
-    let (h, m): (u32, u32) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
-    (h < 24 && m < 60).then_some(h * 60 + m)
-}
-
-fn local_ts(d: NaiveDate, minutes: u32) -> Option<i64> {
-    d.and_hms_opt(minutes / 60, minutes % 60, 0)?
-        .and_local_timezone(chrono::Local)
-        .earliest()
-        .map(|x| x.timestamp())
-}
-
 impl App {
     fn who(&self, id: u64) -> String {
         self.data
@@ -622,14 +608,9 @@ impl App {
     pub(super) fn notify_clock(&mut self, now: i64) {
         let n = self.data.extra.notify.clone();
         let me = self.data.me;
-        let local = chrono::DateTime::from_timestamp(now, 0)
-            .map(|d| d.with_timezone(&chrono::Local))
-            .unwrap_or_else(chrono::Local::now);
+        let local = local(now).unwrap_or_else(chrono::Local::now);
         let day = local.date_naive();
-        let minute = local.format("%H:%M").to_string();
-        let after_due_time = minutes_of(&minute)
-            .zip(minutes_of(&n.due_time))
-            .is_some_and(|(now_m, at)| now_m >= at);
+        let after_due_time = parse_time_of_day(&n.due_time).is_some_and(|at| local.time() >= at);
         // ---- tasks due today and overdue, once a day
         let key = format!("due:{}", day);
         if n.due && after_due_time && !self.fired(&key) {
@@ -725,7 +706,7 @@ impl App {
                 .cloned()
                 .collect();
             for m in soon {
-                let Some(start) = minutes_of(&m.time).and_then(|mins| local_ts(m.date, mins))
+                let Some(start) = parse_time_of_day(&m.time).and_then(|at| local_ts(m.date, at))
                 else {
                     continue;
                 };

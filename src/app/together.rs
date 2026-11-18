@@ -1991,12 +1991,8 @@ impl App {
             .member(d.owner)
             .map(|m| m.name.clone())
             .unwrap_or_default();
-        let when = chrono::DateTime::from_timestamp(d.updated, 0)
-            .map(|x| {
-                x.with_timezone(&chrono::Local)
-                    .format("%Y-%m-%d %H:%M")
-                    .to_string()
-            })
+        let when = local(d.updated)
+            .map(|x| x.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_default();
         let mut text = format!(
             "# {}\n\n_{} \u{2022} last updated {}_\n\n{}\n",

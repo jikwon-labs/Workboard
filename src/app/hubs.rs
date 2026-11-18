@@ -1912,7 +1912,7 @@ impl App {
                 match self.hub_filter.min(1) {
                     1 => self.all_timesheets(ui, ws),
                     _ => {
-                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows(ws).is_empty() || self.sheet_force;
+                        let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (local_date(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows(ws).is_empty() || self.sheet_force;
                         if !has_any {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
@@ -1947,7 +1947,7 @@ impl App {
                                                 }
                                                 "Last week's tasks" => {
                                                     let lw = ws - Duration::days(7);
-                                                    let rows: Vec<u64> = self.data.tasks.iter().filter(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - lw).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) })).map(|x| x.id).collect();
+                                                    let rows: Vec<u64> = self.data.tasks.iter().filter(|x| x.time_entries.iter().any(|e| { let i = (local_date(e.start) - lw).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) })).map(|x| x.id).collect();
                                                     let none = rows.is_empty();
                                                     self.add_sheet_rows(ws, rows);
                                                     if none {
@@ -1988,7 +1988,7 @@ impl App {
         let mut ids: Vec<u64> = self.my_sheet_rows(ws);
         for x in &self.data.tasks {
             let any = x.time_entries.iter().any(|e| {
-                let i = (ts_day(e.start) - ws).num_days();
+                let i = (local_date(e.start) - ws).num_days();
                 (0..7).contains(&i) && self.data.is_my_entry(x, e)
             }) || self.data.is_my_timer(x);
             if any && !ids.contains(&x.id) {
@@ -2046,13 +2046,13 @@ impl App {
                         .iter()
                         .filter(|e| self.data.is_my_entry(&self.data.tasks[ti], e))
                     {
-                        let i = (ts_day(e.start) - ws).num_days();
+                        let i = (local_date(e.start) - ws).num_days();
                         if (0..7).contains(&i) {
                             per[i as usize] += e.end - e.start;
                         }
                     }
                     if let Some(st) = self.data.my_timer_start(&self.data.tasks[ti]) {
-                        let i = (ts_day(st) - ws).num_days();
+                        let i = (local_date(st) - ws).num_days();
                         if (0..7).contains(&i) {
                             per[i as usize] += now - st;
                         }
@@ -2145,7 +2145,7 @@ impl App {
                             .time_entries
                             .iter()
                             .map(|e| {
-                                !((0..7).contains(&(ts_day(e.start) - ws).num_days())
+                                !((0..7).contains(&(local_date(e.start) - ws).num_days())
                                     && self.data.is_my_entry(task, e))
                             })
                             .collect();
@@ -2275,14 +2275,14 @@ impl App {
         let running = self
             .data
             .my_timer_start(task)
-            .filter(|st| ts_day(*st) == day)
+            .filter(|st| local_date(*st) == day)
             .map(|st| now - st)
             .unwrap_or(0);
         let mine: Vec<usize> = task
             .time_entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| ts_day(e.start) == day && self.data.is_my_entry(task, e))
+            .filter(|(_, e)| local_date(e.start) == day && self.data.is_my_entry(task, e))
             .map(|(k, _)| k)
             .collect();
         let have: i64 = mine
@@ -2292,11 +2292,7 @@ impl App {
         let want = ((hours * 3600.0).round() as i64 - running).max(0);
         let task = &mut self.data.tasks[ti];
         if want > have {
-            let start = day
-                .and_hms_opt(9, 0, 0)
-                .and_then(|x| x.and_local_timezone(chrono::Local).single())
-                .map(|x| x.timestamp())
-                .unwrap_or(now);
+            let start = local_ts(day, nine_am()).unwrap_or(now);
             // one entry typed in the grid per day: grow it instead of adding
             // a new one on every step of a drag
             if let Some(e) = task
@@ -2364,7 +2360,7 @@ impl App {
         let mut rows: Vec<(i64, i64, String, u64, u64)> = vec![];
         for x in &self.data.tasks {
             for e in &x.time_entries {
-                let i = (ts_day(e.start) - ws).num_days();
+                let i = (local_date(e.start) - ws).num_days();
                 if (0..7).contains(&i) && self.data.is_my_entry(x, e) {
                     // time on an archived task still counts: mark the entry so
                     let name = if self.data.task_live(x) {
@@ -2390,8 +2386,7 @@ impl App {
                 let mut save = None;
                 for (s, e, name, id, member) in &rows {
                     ui.horizontal(|ui| {
-                        let local = chrono::DateTime::from_timestamp(*s, 0)
-                            .map(|d| d.with_timezone(&chrono::Local));
+                        let local = local(*s);
                         let when = local
                             .map(|d| d.text("%a %b %-d, %-I:%M %p"))
                             .unwrap_or_default();
@@ -2421,13 +2416,7 @@ impl App {
                             ui.label(name.as_str());
                             if ui.button(tr("Save")).clicked() {
                                 let day = local.map(|d| d.date_naive()).unwrap_or_else(today);
-                                save = Some((
-                                    *id,
-                                    *member,
-                                    *s,
-                                    super::more::reminder_ts(day, &ed.at),
-                                    ed.hours,
-                                ));
+                                save = Some((*id, *member, *s, reminder_ts(day, &ed.at), ed.hours));
                             }
                             if ui.button(tr("Cancel")).clicked() {
                                 self.sweep.entry_edit = None;
@@ -2518,7 +2507,7 @@ impl App {
                 let mut per: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
                 for x in &self.data.tasks {
                     for e in &x.time_entries {
-                        let i = (ts_day(e.start) - ws).num_days();
+                        let i = (local_date(e.start) - ws).num_days();
                         if (0..7).contains(&i) {
                             let owner = match x.entry_owner(e) {
                                 0 if solo => me,
@@ -2556,12 +2545,6 @@ impl App {
                 }
             });
     }
-}
-
-pub(super) fn ts_day(ts: i64) -> NaiveDate {
-    chrono::DateTime::from_timestamp(ts, 0)
-        .map(|d| d.with_timezone(&chrono::Local).date_naive())
-        .unwrap_or_else(today)
 }
 
 /// How a week is stored with a timesheet row: its first day, counted in days.

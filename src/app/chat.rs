@@ -853,7 +853,7 @@ impl App {
                     let mut last_day: Option<NaiveDate> = None;
                     let mut prev: Option<(u64, i64)> = None;
                     for m in &shown {
-                        let d = chrono::DateTime::from_timestamp(m.ts, 0).map(|x| x.with_timezone(&chrono::Local).date_naive()).unwrap_or_else(today);
+                        let d = local_date(m.ts);
                         if last_day != Some(d) {
                             last_day = Some(d);
                             ui.add_space(6.0);
@@ -1379,9 +1379,7 @@ impl App {
                     ar.expand2(vec2(0.0, 6.0))
                         .union(Rect::from_min_size(ar.min, vec2(w, 22.0))),
                 ) {
-                    let time = chrono::DateTime::from_timestamp(m.ts, 0)
-                        .map(|x| x.with_timezone(&chrono::Local).text("%-I:%M"))
-                        .unwrap_or_default();
+                    let time = local(m.ts).map(|x| x.text("%-I:%M")).unwrap_or_default();
                     ui.painter().text(
                         ar.center(),
                         Align2::CENTER_CENTER,
@@ -1403,9 +1401,7 @@ impl App {
                             .map(|x| x.name.clone())
                             .unwrap_or_else(|| tr("Someone").into());
                         ui.label(RichText::new(name).strong());
-                        let time = chrono::DateTime::from_timestamp(m.ts, 0)
-                            .map(|x| x.with_timezone(&chrono::Local).text("%-I:%M %p"))
-                            .unwrap_or_default();
+                        let time = local(m.ts).map(|x| x.text("%-I:%M %p")).unwrap_or_default();
                         ui.label(RichText::new(time).small().color(t.text3));
                         if m.edited.is_some() {
                             ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
@@ -1766,11 +1762,7 @@ impl App {
                 self.chat_delete = None;
             }
             let now = now_ts();
-            let tomorrow = (today() + Duration::days(1))
-                .and_hms_opt(9, 0, 0)
-                .and_then(|x| x.and_local_timezone(chrono::Local).single())
-                .map(|x| x.timestamp())
-                .unwrap_or(now + 86400);
+            let tomorrow = local_ts(today() + Duration::days(1), nine_am()).unwrap_or(now + 86400);
             popup(ui, &mb, more_id, 220.0, |ui| {
                 let row = |ui: &mut Ui, label: &str| menu_row_plain(ui, &t, tr(label), false);
                 if !m.text.is_empty() && row(ui, "Copy text").clicked() {

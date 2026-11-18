@@ -2564,8 +2564,8 @@ impl App {
                 } else {
                     ui.label(text);
                 }
-                let when = chrono::DateTime::from_timestamp(r.due_ts, 0)
-                    .map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p"))
+                let when = local(r.due_ts)
+                    .map(|d| d.text("%b %-d, %-I:%M %p"))
                     .unwrap_or_default();
                 ui.label(
                     RichText::new(when)
@@ -2614,8 +2614,7 @@ impl App {
                 let ed = ui.add(ghost(egui::Button::new(RichText::new(tr("Edit")).small())));
                 name_it(&ed, &format!("Edit {}", r.text));
                 if ed.clicked() {
-                    let local = chrono::DateTime::from_timestamp(r.due_ts, 0)
-                        .map(|d| d.with_timezone(&chrono::Local));
+                    let local = local(r.due_ts);
                     let date = local.map(|d| d.date_naive());
                     let time = local
                         .map(|d| d.format("%H:%M").to_string())
@@ -2684,8 +2683,8 @@ impl App {
                 "Reminders",
                 rs.iter()
                     .map(|r| {
-                        let when = chrono::DateTime::from_timestamp(r.due_ts, 0)
-                            .map(|d| d.with_timezone(&chrono::Local).text("%b %-d, %-I:%M %p"))
+                        let when = local(r.due_ts)
+                            .map(|d| d.text("%b %-d, %-I:%M %p"))
                             .unwrap_or_default();
                         (r.text.clone(), when, format!("reminder:{}", r.id))
                     })
@@ -3260,18 +3259,6 @@ impl App {
                 });
             });
     }
-}
-
-/// A local date and "HH:MM" as a timestamp (bad times fall back to 9:00).
-pub fn reminder_ts(d: NaiveDate, time: &str) -> i64 {
-    let (h, m) = time
-        .split_once(':')
-        .map(|(h, m)| (h.trim().parse().unwrap_or(9), m.trim().parse().unwrap_or(0)))
-        .unwrap_or((9, 0));
-    d.and_hms_opt(u32::min(h, 23), u32::min(m, 59), 0)
-        .and_then(|x| x.and_local_timezone(chrono::Local).single())
-        .map(|x| x.timestamp())
-        .unwrap_or_else(now_ts)
 }
 
 // Apps sweep: Home, Planner, Reminders, Notepad, Trash and the hubs.

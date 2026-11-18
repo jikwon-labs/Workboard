@@ -7,6 +7,7 @@ mod notifier;
 use wb_sync as sync;
 mod media;
 mod theme;
+mod timefmt;
 mod updater;
 mod widgets;
 

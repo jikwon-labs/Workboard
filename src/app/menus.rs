@@ -2800,18 +2800,7 @@ impl App {
                 });
                 if primary_button(ui, t, tr("Create Reminder")).clicked() && !text.trim().is_empty()
                 {
-                    let d = date.unwrap_or_else(today);
-                    let (h, m) = time
-                        .split_once(':')
-                        .map(|(h, m)| {
-                            (h.trim().parse().unwrap_or(9), m.trim().parse().unwrap_or(0))
-                        })
-                        .unwrap_or((9, 0));
-                    let ts = d
-                        .and_hms_opt(h.min(23), m.min(59), 0)
-                        .and_then(|x| x.and_local_timezone(chrono::Local).single())
-                        .map(|x| x.timestamp())
-                        .unwrap_or_else(now_ts);
+                    let ts = reminder_ts(date.unwrap_or_else(today), time);
                     let id = self.data.new_id();
                     let (task, message) = std::mem::take(&mut self.reminder_about);
                     self.data.extra.reminders.push(Reminder {

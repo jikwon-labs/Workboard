@@ -5,6 +5,7 @@
 use crate::i18n::{tr, DateText};
 use crate::model::*;
 use crate::theme::{self, rgb, Theme};
+use crate::timefmt::{local, local_date, local_ts, nine_am, reminder_ts};
 use crate::trf;
 use crate::widgets::*;
 use chrono::{Datelike, Duration, NaiveDate};
@@ -3908,9 +3909,7 @@ impl App {
                                 }
                             }
                             TableCol::Created => {
-                                let created = chrono::DateTime::from_timestamp(task.created, 0)
-                                    .map(|d| d.with_timezone(&chrono::Local).date_naive())
-                                    .unwrap_or(td_default());
+                                let created = local_date(task.created);
                                 ui.painter().text(
                                     cell.left_center() + vec2(8.0, 0.0),
                                     Align2::LEFT_CENTER,
@@ -5741,8 +5740,8 @@ impl App {
                 );
                 right_ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("Comments")).size(15.0).strong());
-                    let created = chrono::DateTime::from_timestamp(task.created, 0)
-                        .map(|d| d.with_timezone(&chrono::Local).text("%b %-d"))
+                    let created = local(task.created)
+                        .map(|d| d.text("%b %-d"))
                         .unwrap_or_default();
                     ui.label(RichText::new(trf!("Created {}", created)).color(t.text3));
                 });
@@ -7016,10 +7015,6 @@ fn truncate(s: &str, n: usize) -> String {
         o.push('\u{2026}');
         o
     }
-}
-
-fn td_default() -> NaiveDate {
-    today()
 }
 
 pub(crate) fn setup_fonts(ctx: &egui::Context) {

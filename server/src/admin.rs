@@ -66,111 +66,32 @@ impl Hub {
         }
         let mut kicked: Vec<String> = vec![];
         let mut told = false;
-        let reply = match msg {
+        let done = match msg {
             // nothing changed: only the asker hears
             Msg::AccessList => {
                 told = true;
-                None
+                Ok(None)
             }
             Msg::CreateInvite { member: who, role } => {
-                if role == Role::Owner {
-                    return Reply::Denied(
-                        "There is one owner. Invite them as an admin instead.".into(),
-                    );
-                }
-                if !member_exists(g.canon.as_ref(), who) {
-                    return Reply::Denied(
-                        "That person isn't in the workspace yet. Add them with Invite first."
-                            .into(),
-                    );
-                }
-                // a code for the owner signs in as the owner: only the owner makes one
-                if g.saved.role_of(who) == Role::Owner && me != Role::Owner {
-                    return Reply::Denied("Only the owner can make a code for the owner.".into());
-                }
-                // a code signs in as that person: admins make them only for
-                // members who haven't set up an account yet
-                if me != Role::Owner && !g.saved.admin_may_invite(who) {
-                    return Reply::Denied("Only the owner can make a code for an admin or for someone who has already signed in. They can sign in with their email and password, or use Forgot password.".into());
-                }
-                g.saved.drop_expired_invites(now_ms());
-                let code = g.saved.make_invite(who, role);
-                g.dirty = true;
-                Some(Msg::Invite {
-                    member: who,
-                    code,
-                    emailed: None,
-                    mail_error: None,
-                })
+                self.create_invite(&mut g, me, who, role).map(Some)
             }
             Msg::SetRole { member: who, role } => {
-                if role == Role::Owner || g.saved.role_of(who) == Role::Owner {
-                    return Reply::Denied("The owner's role can't be changed here.".into());
-                }
-                // admins are the owner's choice: an admin changes only their own
-                if me != Role::Owner && g.saved.role_of(who) == Role::Admin && who != member {
-                    return Reply::Denied("Only the owner can change another admin's role.".into());
-                }
-                g.saved.set_role(who, role);
-                // a code made earlier doesn't bring back a role taken away
-                g.saved
-                    .invites
-                    .retain(|_, i| i.member != who || i.role <= role);
-                g.dirty = true;
-                // their apps hear the new role before the copy it lets them
-                // see (an app goes by its role for what it may see)
-                let _ = self.access.send(from);
                 told = true;
-                let relabeled = g.canon.as_mut().is_some_and(|c| label_role(c, who, role));
-                if relabeled {
-                    self.broadcast_canon(&mut g, false);
-                }
-                None
+                self.set_role(&mut g, me, member, from, who, role)
+                    .map(|()| None)
             }
             Msg::Revoke { member: who } => {
-                if g.saved.role_of(who) == Role::Owner {
-                    return Reply::Denied("The owner's access can't be removed.".into());
-                }
-                // it also deletes their account: only the owner removes an admin
-                if me != Role::Owner && g.saved.role_of(who) == Role::Admin && who != member {
-                    return Reply::Denied(
-                        "Only the owner can remove another admin's access.".into(),
-                    );
-                }
-                kicked = g
-                    .saved
-                    .devices
-                    .iter()
-                    .filter(|(_, d)| d.member == who)
-                    .map(|(id, _)| id.clone())
-                    .collect();
-                g.saved.devices.retain(|_, d| d.member != who);
-                let devices = &g.saved.devices;
-                let push: BTreeMap<String, push::PushToken> = g
-                    .saved
-                    .push
-                    .iter()
-                    .filter(|(d, _)| devices.contains_key(*d))
-                    .map(|(d, t)| (d.clone(), t.clone()))
-                    .collect();
-                g.saved.push = push;
-                g.saved.invites.retain(|_, i| i.member != who);
-                // and the password that would let them back in
-                g.saved.accounts.remove(&who);
-                // removing access also takes back admin rights
-                g.saved.set_role(who, Role::Member);
-                g.dirty = true;
-                let _ = self.access.send(from);
                 told = true;
-                if g.canon
-                    .as_mut()
-                    .is_some_and(|c| label_role(c, who, Role::Member))
-                {
-                    self.broadcast_canon(&mut g, false);
-                }
-                None
+                self.revoke(&mut g, me, member, from, who).map(|k| {
+                    kicked = k;
+                    None
+                })
             }
-            _ => return Reply::Denied("Unknown request.".into()),
+            _ => Err("Unknown request.".into()),
+        };
+        let reply = match done {
+            Ok(r) => r,
+            Err(why) => return Reply::Denied(why),
         };
         drop(g);
         if !kicked.is_empty() {
@@ -183,6 +104,120 @@ impl Hub {
             Some(m) => Reply::To(m),
             None => Reply::To(self.access_for(member, true)),
         }
+    }
+
+    /// CreateInvite from someone whose role is `me`: a code that signs in
+    /// as `who` with `role`.
+    fn create_invite(&self, g: &mut Inner, me: Role, who: u64, role: Role) -> Result<Msg, String> {
+        if role == Role::Owner {
+            return Err("There is one owner. Invite them as an admin instead.".into());
+        }
+        if !member_exists(g.canon.as_ref(), who) {
+            return Err(
+                "That person isn't in the workspace yet. Add them with Invite first.".into(),
+            );
+        }
+        // a code for the owner signs in as the owner: only the owner makes one
+        if g.saved.role_of(who) == Role::Owner && me != Role::Owner {
+            return Err("Only the owner can make a code for the owner.".into());
+        }
+        // a code signs in as that person: admins make them only for
+        // members who haven't set up an account yet
+        if me != Role::Owner && !g.saved.admin_may_invite(who) {
+            return Err("Only the owner can make a code for an admin or for someone who has already signed in. They can sign in with their email and password, or use Forgot password.".into());
+        }
+        g.saved.drop_expired_invites(now_ms());
+        let code = g.saved.make_invite(who, role);
+        g.dirty = true;
+        Ok(Msg::Invite {
+            member: who,
+            code,
+            emailed: None,
+            mail_error: None,
+        })
+    }
+
+    /// SetRole from `member` (whose role is `me`) on connection `from`.
+    fn set_role(
+        &self,
+        g: &mut Inner,
+        me: Role,
+        member: u64,
+        from: u64,
+        who: u64,
+        role: Role,
+    ) -> Result<(), String> {
+        if role == Role::Owner || g.saved.role_of(who) == Role::Owner {
+            return Err("The owner's role can't be changed here.".into());
+        }
+        // admins are the owner's choice: an admin changes only their own
+        if me != Role::Owner && g.saved.role_of(who) == Role::Admin && who != member {
+            return Err("Only the owner can change another admin's role.".into());
+        }
+        g.saved.set_role(who, role);
+        // a code made earlier doesn't bring back a role taken away
+        g.saved
+            .invites
+            .retain(|_, i| i.member != who || i.role <= role);
+        g.dirty = true;
+        // their apps hear the new role before the copy it lets them
+        // see (an app goes by its role for what it may see)
+        let _ = self.access.send(from);
+        let relabeled = g.canon.as_mut().is_some_and(|c| label_role(c, who, role));
+        if relabeled {
+            self.broadcast_canon(g, false);
+        }
+        Ok(())
+    }
+
+    /// Revoke from `member` (whose role is `me`) on connection `from`: the
+    /// devices signed out.
+    fn revoke(
+        &self,
+        g: &mut Inner,
+        me: Role,
+        member: u64,
+        from: u64,
+        who: u64,
+    ) -> Result<Vec<String>, String> {
+        if g.saved.role_of(who) == Role::Owner {
+            return Err("The owner's access can't be removed.".into());
+        }
+        // it also deletes their account: only the owner removes an admin
+        if me != Role::Owner && g.saved.role_of(who) == Role::Admin && who != member {
+            return Err("Only the owner can remove another admin's access.".into());
+        }
+        let kicked: Vec<String> = g
+            .saved
+            .devices
+            .iter()
+            .filter(|(_, d)| d.member == who)
+            .map(|(id, _)| id.clone())
+            .collect();
+        g.saved.devices.retain(|_, d| d.member != who);
+        let devices = &g.saved.devices;
+        let push: BTreeMap<String, push::PushToken> = g
+            .saved
+            .push
+            .iter()
+            .filter(|(d, _)| devices.contains_key(*d))
+            .map(|(d, t)| (d.clone(), t.clone()))
+            .collect();
+        g.saved.push = push;
+        g.saved.invites.retain(|_, i| i.member != who);
+        // and the password that would let them back in
+        g.saved.accounts.remove(&who);
+        // removing access also takes back admin rights
+        g.saved.set_role(who, Role::Member);
+        g.dirty = true;
+        let _ = self.access.send(from);
+        if g.canon
+            .as_mut()
+            .is_some_and(|c| label_role(c, who, Role::Member))
+        {
+            self.broadcast_canon(g, false);
+        }
+        Ok(kicked)
     }
 }
 

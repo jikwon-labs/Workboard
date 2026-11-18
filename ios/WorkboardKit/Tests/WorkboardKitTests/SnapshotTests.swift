@@ -5,20 +5,13 @@ import WorkboardFakeServer
 /// snapshot.json written a moment after changes stop, off the main thread,
 /// and the Inbox rows worked out once per change.
 @MainActor
-final class SnapshotTests: XCTestCase {
-    var dirs: [URL] = []
+final class SnapshotTests: FakeServerTestCase {
     var clients: [SyncClient] = []
 
     override func tearDown() async throws {
         // nothing still on its way recreates a folder after it is removed
         for c in clients { c.flushSnapshot() }
-        for d in dirs { try? FileManager.default.removeItem(at: d) }
-    }
-
-    func storage() -> Storage {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
-        dirs.append(d)
-        return Storage(folder: d)
+        try await super.tearDown()
     }
 
     /// A client with the sample workspace saved on this device (no server).
@@ -34,14 +27,6 @@ final class SnapshotTests: XCTestCase {
 
     func savedName(_ s: Storage, task: UInt64 = 201) -> String? {
         s.loadSnapshot().flatMap { WorkspaceView($0).tasks.first { $0.id == task }?.name }
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
     }
 
     func testTheCopyIsSavedOnceChangesStop() async {

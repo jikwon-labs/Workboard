@@ -130,36 +130,7 @@ final class AccountTests: XCTestCase {
 }
 
 @MainActor
-final class ClientTests: XCTestCase {
-    var dirs: [URL] = []
-
-    override func tearDown() async throws {
-        for d in dirs { try? FileManager.default.removeItem(at: d) }
-    }
-
-    func storage() -> Storage {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
-        dirs.append(d)
-        return Storage(folder: d)
-    }
-
-    func client(_ url: String, me: UInt64, storage s: Storage? = nil) -> SyncClient {
-        let c = SyncClient(storage: s ?? storage(), tokens: MemoryTokenStore())
-        c.pushDelay = 0.05
-        c.maxRetryDelay = 0.3
-        c.setMe(me)
-        c.setServer(url)
-        return c
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
+final class ClientTests: FakeServerTestCase {
     func testTwoClientsSeeEachOthersChanges() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make())
         let port = try await server.start(port: 0)
@@ -251,21 +222,9 @@ final class ClientTests: XCTestCase {
         }
     }
 
-    func signInServer(_ server: FakeServer) async throws -> String {
-        let port = try await server.start(port: 0)
-        return "ws://127.0.0.1:\(port)"
-    }
-
-    func device(_ url: String, tokens: MemoryTokenStore = MemoryTokenStore()) -> SyncClient {
-        let c = SyncClient(storage: storage(), tokens: tokens)
-        c.maxRetryDelay = 0.3
-        c.setServer(url)
-        return c
-    }
-
     func testInviteCodeWithNewPasswordThenPasswordOnASecondDevice() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let tokens = MemoryTokenStore()
         let c = device(url, tokens: tokens)
@@ -333,7 +292,7 @@ final class ClientTests: XCTestCase {
 
     func testInviteWithoutRecordedEmailNeedsOne() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let c = device(url)
         await until("asked to sign in") { c.state == .signIn }
@@ -348,7 +307,7 @@ final class ClientTests: XCTestCase {
 
     func testStoredTokenTheServerDoesNotKnowIsDropped() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let tokens = MemoryTokenStore()
         tokens.setToken("old-token", for: url)
@@ -360,7 +319,7 @@ final class ClientTests: XCTestCase {
 
     func testForgotPasswordThenResetCode() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let first = device(url)
         await until("asked") { first.state == .signIn }
@@ -401,7 +360,7 @@ final class ClientTests: XCTestCase {
 
     func testSetAndChangePasswordFromASignedInDevice() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let c = device(url)
         await until("asked") { c.state == .signIn }
@@ -511,19 +470,7 @@ final class HTTPTests: XCTestCase {
 
 /// Huddles over the WebSocket (call_join -> call_token), as on the real server.
 @MainActor
-final class CallTests: XCTestCase {
-    func storage() -> Storage {
-        Storage(folder: FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)"))
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
+final class CallTests: FakeServerTestCase {
     func testCallJoinGivesATokenForTheRoom() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true, livekit: .dev)
         let port = try await server.start(port: 0)
@@ -583,19 +530,7 @@ final class CallTests: XCTestCase {
 
 /// Round 2: stamps in milliseconds, moving to another server, files, empty servers.
 @MainActor
-final class Round2ClientTests: XCTestCase {
-    func storage() -> Storage {
-        Storage(folder: FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)"))
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
+final class Round2ClientTests: FakeServerTestCase {
     func testEditsAreStampedInMilliseconds() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make())
         let port = try await server.start(port: 0)
@@ -696,47 +631,7 @@ final class Round2ClientTests: XCTestCase {
 
 /// Round 3: push tokens taken back, managing access and backups.
 @MainActor
-final class Round3ClientTests: XCTestCase {
-    var dirs: [URL] = []
-
-    override func tearDown() async throws {
-        for d in dirs { try? FileManager.default.removeItem(at: d) }
-    }
-
-    func storage() -> Storage {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
-        dirs.append(d)
-        return Storage(folder: d)
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
-    func client(_ url: String, me: UInt64) -> SyncClient {
-        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
-        c.pushDelay = 0.05
-        c.maxRetryDelay = 0.3
-        c.setMe(me)
-        c.setServer(url)
-        return c
-    }
-
-    func signInServer(_ server: FakeServer) async throws -> String {
-        "ws://127.0.0.1:\(try await server.start(port: 0))"
-    }
-
-    func device(_ url: String, tokens: MemoryTokenStore = MemoryTokenStore()) -> SyncClient {
-        let c = SyncClient(storage: storage(), tokens: tokens)
-        c.maxRetryDelay = 0.3
-        c.setServer(url)
-        return c
-    }
-
+final class Round3ClientTests: FakeServerTestCase {
     /// Signs a new device in as `member` with a fresh invite code.
     func signedIn(_ server: FakeServer, _ url: String, member: UInt64, tokens: MemoryTokenStore = MemoryTokenStore()) async -> SyncClient {
         let c = device(url, tokens: tokens)
@@ -788,7 +683,7 @@ final class Round3ClientTests: XCTestCase {
 
     func testSignOutStopsPushesFromThatServer() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let c = await signedIn(server, url, member: 3)
         c.setPushToken("a1b2c3", env: "development")
@@ -907,7 +802,7 @@ final class Round3ClientTests: XCTestCase {
 
     func testOwnerAndAdminManageAccess() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let owner = await signedIn(server, url, member: 1)
         XCTAssertEqual(owner.myRole, .owner)
@@ -968,7 +863,7 @@ final class Round3ClientTests: XCTestCase {
         let server = FakeServer(snapshot: now, requireSignIn: true)
         server.addBackup(name: "daily-20261115.json", snapshot: old)
         server.addBackup(name: "hourly-20261116-03.json", snapshot: SampleWorkspace.make())
-        let url = try await signInServer(server)
+        let url = try await start(server)
         defer { server.stop() }
         let owner = await signedIn(server, url, member: 1)
         owner.requestBackups()
@@ -1041,11 +936,7 @@ final class Round3ClientTests: XCTestCase {
 /// Deltas (wb_sync::delta, wb-net's session): after the first whole copy
 /// only what changed travels, both ways.
 @MainActor
-final class DeltaTests: XCTestCase {
-    func ws(_ tasks: JSON, _ channels: JSON) -> JSON {
-        ["workspace": "W", "spaces": [], "tasks": tasks, "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": channels, "docs": [], "extra": ["sync": SyncMeta().json]]
-    }
-
+final class DeltaTests: FakeServerTestCase {
     func save(_ v: inout JSON, _ now: Int64) {
         var m = SyncMeta(of: v)
         Sync.stamp(v, &m, now: now)
@@ -1095,24 +986,6 @@ final class DeltaTests: XCTestCase {
         XCTAssertTrue(w.deltas)
     }
 
-    func client(_ url: String, me: UInt64) -> SyncClient {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wb-delta-\(UUID().uuidString)")
-        let c = SyncClient(storage: Storage(folder: dir), tokens: MemoryTokenStore())
-        c.pushDelay = 0.05
-        c.maxRetryDelay = 0.3
-        c.setMe(me)
-        c.setServer(url)
-        return c
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
     final class Pushes: @unchecked Sendable {
         let lock = NSLock()
         var all: [JSON] = []
@@ -1160,36 +1033,8 @@ final class DeltaTests: XCTestCase {
 /// Round 4: Trash that leaves with its person, notifications only for news,
 /// admin answers matched to their requests, files sent again after a restore.
 @MainActor
-final class Round4ClientTests: XCTestCase {
-    var dirs: [URL] = []
-
-    override func tearDown() async throws {
-        for d in dirs { try? FileManager.default.removeItem(at: d) }
-    }
-
-    func folder() -> URL {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
-        dirs.append(d)
-        return d
-    }
-
-    func storage() -> Storage { Storage(folder: folder()) }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
-    func device(_ url: String, storage s: Storage? = nil, tokens: MemoryTokenStore = MemoryTokenStore()) -> SyncClient {
-        let c = SyncClient(storage: s ?? storage(), tokens: tokens)
-        c.pushDelay = 0.05
-        c.maxRetryDelay = 0.3
-        c.setServer(url)
-        return c
-    }
+final class Round4ClientTests: FakeServerTestCase {
+    override var devicePushDelay: TimeInterval? { 0.05 }
 
     func signedIn(_ server: FakeServer, _ url: String, member: UInt64, storage s: Storage? = nil) async -> SyncClient {
         let c = device(url, storage: s)
@@ -1447,64 +1292,31 @@ final class Round4ClientTests: XCTestCase {
 
 /// The fake server going away at the same address (what the offline UI test uses).
 @MainActor
-final class OfflineServerTests: XCTestCase {
+final class OfflineServerTests: FakeServerTestCase {
     func testAnEditMadeWhileTheServerIsAwayGoesUpWhenItIsBack() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make())
         let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
         defer { server.stop() }
-        let c = SyncClient(storage: Storage(folder: FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")), tokens: MemoryTokenStore())
+        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
         c.maxRetryDelay = 0.3
         c.setMe(1)
         c.setServer(url)
-        func until(_ what: String, _ cond: () -> Bool) async {
-            let end = Date().addingTimeInterval(8)
-            while !cond() {
-                if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-                try? await Task.sleep(nanoseconds: 20_000_000)
-            }
-        }
-        await until("connected") { c.state.isConnected && c.canEdit }
+        await until("connected", timeout: 8) { c.state.isConnected && c.canEdit }
         server.goOffline(for: 30)
-        await until("offline") { if case .waiting = c.state { return true } else { return false } }
+        await until("offline", timeout: 8) { if case .waiting = c.state { return true } else { return false } }
         try await Task.sleep(nanoseconds: 700_000_000)
         XCTAssertFalse(c.state.isConnected, "turned away while offline")
         c.edit { d, me in Edits.sendMessage(&d, channel: 302, text: "Written on the train", me: me, id: c.newId(), ts: nowTs()) }
         XCTAssertEqual(c.waitingCount, 1)
         server.goOnline()
-        await until("sent and shown back") { c.state.isConnected && c.waitingCount == 0 }
+        await until("sent and shown back", timeout: 8) { c.state.isConnected && c.waitingCount == 0 }
         XCTAssertTrue(server.current!.serialized().contains("Written on the train"))
     }
 }
 
 @MainActor
-final class Round5ClientTests: XCTestCase {
-    var dirs: [URL] = []
-
-    override func tearDown() async throws {
-        for d in dirs { try? FileManager.default.removeItem(at: d) }
-    }
-
-    func storage() -> Storage {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
-        dirs.append(d)
-        return Storage(folder: d)
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
-    func device(_ url: String) -> SyncClient {
-        let c = SyncClient(storage: storage(), tokens: MemoryTokenStore())
-        c.pushDelay = 0.05
-        c.maxRetryDelay = 0.3
-        c.setServer(url)
-        return c
-    }
+final class Round5ClientTests: FakeServerTestCase {
+    override var devicePushDelay: TimeInterval? { 0.05 }
 
     func signedIn(_ server: FakeServer, _ url: String, member: UInt64) async -> SyncClient {
         let c = device(url)
@@ -1783,27 +1595,7 @@ final class Round5ClientTests: XCTestCase {
 
 /// Round 9: a copy saved by a build from before shared maps.
 @MainActor
-final class Round9ClientTests: XCTestCase {
-    var dirs: [URL] = []
-
-    override func tearDown() async throws {
-        for d in dirs { try? FileManager.default.removeItem(at: d) }
-    }
-
-    func storage() -> Storage {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("wbkit-\(UUID().uuidString)")
-        dirs.append(d)
-        return Storage(folder: d)
-    }
-
-    func until(_ what: String, timeout: TimeInterval = 5, _ cond: @escaping () -> Bool) async {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { XCTFail("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
+final class Round9ClientTests: FakeServerTestCase {
     /// An older build kept the Slack matches the team's copy brought in
     /// (it keeps fields it doesn't know) but fingerprinted only the shared
     /// settings. The first edit after the update, made offline, is not a

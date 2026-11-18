@@ -5,7 +5,6 @@ import WorkboardFakeServer
 /// The task fields the Mac app has and the phone now edits too, written the
 /// way src/app.rs and src/app/taskfields.rs write them.
 final class TaskFieldTests: XCTestCase {
-    func task(_ d: JSON, _ id: UInt64) -> JSON { d["tasks"]!.array!.first { $0["id"]?.uint == id }! }
     func lastLine(_ d: JSON, _ id: UInt64) -> String { task(d, id)["activity"]!.array!.last!["text"]!.string! }
     let today = ISO8601DateFormatter().date(from: "2026-11-17T12:00:00Z")!
 

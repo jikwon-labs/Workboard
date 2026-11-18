@@ -4,10 +4,6 @@ import WorkboardFakeServer
 
 /// The four tests in src/sync.rs, ported one to one.
 final class RustPortTests: XCTestCase {
-    func ws(_ tasks: JSON, _ channels: JSON, _ meta: SyncMeta) -> JSON {
-        ["workspace": "W", "spaces": [], "tasks": tasks, "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": channels, "docs": [], "extra": ["sync": meta.json]]
-    }
-
     func texts(_ v: JSON, _ path: (JSON) -> JSON?) -> [String] {
         (path(v)?.array ?? []).compactMap { $0["text"]?.string }
     }
@@ -366,10 +362,6 @@ final class RustPortTests2: XCTestCase {
         XCTAssertEqual(out.at("extra.sync.fields.1.name"), 10)
     }
 
-    func ws(_ tasks: JSON, _ meta: SyncMeta) -> JSON {
-        ["workspace": "W", "spaces": [], "tasks": tasks, "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": [], "docs": [], "extra": ["sync": meta.json]]
-    }
-
     func testADeleteWinsEvenWithAClockBehind() {
         var m = SyncMeta()
         let a = ws([["id": 1, "name": "t"]], m)
@@ -513,10 +505,6 @@ final class DefaultFieldTests: XCTestCase {
 /// Field-level merging (wb_sync merge_fields), ported one to one from the
 /// Rust tests of the same names.
 final class FieldMergeTests: XCTestCase {
-    func ws(_ tasks: JSON, _ channels: JSON, _ meta: SyncMeta) -> JSON {
-        ["workspace": "W", "spaces": [], "tasks": tasks, "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": channels, "docs": [], "extra": ["sync": meta.json]]
-    }
-
     func save(_ v: inout JSON, _ m: inout SyncMeta, _ now: Int64) {
         Sync.fillActivityIds(&v)
         Sync.fillBoardIds(&v)

@@ -315,8 +315,6 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(ran, ["Automation ran: assign to Sam Lee", "Automation ran: set priority to Urgent", "Automation ran: comment \"Please review\""])
     }
 
-    func task(_ d: JSON, _ id: UInt64) -> JSON { d["tasks"]!.array!.first { $0["id"]?.uint == id }! }
-
     func testAssignAutomationLogsTheTargetAndReplacesWhenSingleAssignee() {
         var d = SampleWorkspace.make()
         d.set("extra.automations", [["id": 1, "enabled": true, "trigger_status": "review", "action": "assign", "value": "3", "list": nil]])

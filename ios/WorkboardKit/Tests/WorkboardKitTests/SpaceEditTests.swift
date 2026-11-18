@@ -6,7 +6,6 @@ import WorkboardFakeServer
 final class SpaceEditTests: XCTestCase {
     let spaceRequired = ["id", "name", "color", "statuses", "folders", "lists"]
     func space(_ d: JSON, _ id: UInt64) -> JSON { d["spaces"]!.array!.first { $0["id"]?.uint == id }! }
-    func task(_ d: JSON, _ id: UInt64) -> JSON { d["tasks"]!.array!.first { $0["id"]?.uint == id }! }
 
     func testNewSpaceHasDefaultStatusesAndAList() {
         var d = SampleWorkspace.make()

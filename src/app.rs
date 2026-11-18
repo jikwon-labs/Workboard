@@ -410,6 +410,10 @@ pub struct App {
     /// Changes not saved yet: when the first and the latest of them were
     /// made (see `save_tick`).
     save_due: std::cell::Cell<Option<(std::time::Instant, std::time::Instant)>>,
+    /// Goes up when the workspace changes (`data_changed`).
+    data_gen: std::cell::Cell<u64>,
+    /// The Inbox rows and counts asked for on every frame (nav.rs).
+    inbox_cache: std::cell::RefCell<nav::InboxCache>,
     screenshot: Option<PathBuf>,
     frames: u32,
     shot_sent: bool,
@@ -753,6 +757,8 @@ impl App {
             dirty: false,
             persist,
             save_due: std::cell::Cell::new(None),
+            data_gen: std::cell::Cell::new(0),
+            inbox_cache: Default::default(),
             screenshot,
             frames: 0,
             shot_sent: false,
@@ -4441,29 +4447,32 @@ impl App {
     }
 
     /// The replies Replies lists under Unread, counted for the sidebar.
+    /// Asked for on every frame, so kept until the workspace changes.
     pub(super) fn unread_replies(&self) -> usize {
-        let seen = self.data.extra.replies_seen;
-        let read = &self.data.extra.replies_read;
-        let unread = |k: String| !read.contains(&k);
-        let me = self.data.me;
-        let on_tasks = self
-            .data
-            .tasks
-            .iter()
-            .flat_map(|t| t.activity.iter().map(move |a| (t.id, a)))
-            .filter(|(id, a)| {
-                a.comment
-                    && a.author != me
-                    && a.ts > seen
-                    && unread(reply_key(nav::InboxSrc::Task(*id), a.ts, a.author))
-            })
-            .count();
-        let in_chat = self
-            .chat_replies()
-            .into_iter()
-            .filter(|r| r.ts > seen && unread(reply_key(r.src, r.ts, r.author)))
-            .count();
-        on_tasks + in_chat
+        self.kept_unread_replies(|| {
+            let seen = self.data.extra.replies_seen;
+            let read = &self.data.extra.replies_read;
+            let unread = |k: String| !read.contains(&k);
+            let me = self.data.me;
+            let on_tasks = self
+                .data
+                .tasks
+                .iter()
+                .flat_map(|t| t.activity.iter().map(move |a| (t.id, a)))
+                .filter(|(id, a)| {
+                    a.comment
+                        && a.author != me
+                        && a.ts > seen
+                        && unread(reply_key(nav::InboxSrc::Task(*id), a.ts, a.author))
+                })
+                .count();
+            let in_chat = self
+                .inbox_items()
+                .iter()
+                .filter(|r| r.reply && r.ts > seen && unread(reply_key(r.src, r.ts, r.author)))
+                .count();
+            on_tasks + in_chat
+        })
     }
 
     fn inbox(&mut self, ui: &mut Ui, mode: u8) {
@@ -6598,6 +6607,7 @@ impl App {
             self.sync_note_change();
         }
         if self.dirty {
+            self.data_changed();
             self.save_soon();
         }
         self.dirty = false;

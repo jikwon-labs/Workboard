@@ -544,6 +544,7 @@ impl App {
             self.task_files.clear();
             self.task_files_saved = None;
             self.data = d;
+            self.data_changed();
             self.ws_file = file.to_string();
             if self.persist {
                 Data::set_last_workspace(file);

@@ -143,14 +143,110 @@ pub(super) struct InboxItem {
     pub imported: bool,
 }
 
+/// What the Inbox rows were last built from. The sidebar and the Dock badge
+/// ask for the rows on every frame, and building them walks every task's
+/// history and every message, so they're kept until something here changes:
+/// the workspace was changed (`App::data_changed`), or, as a check for a
+/// change that didn't say so, a count below.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct InboxKey {
+    gen: u64,
+    me: u64,
+    tasks: usize,
+    activity: usize,
+    channels: usize,
+    messages: usize,
+    replies: usize,
+    channel_members: usize,
+    private_channels: usize,
+    members: usize,
+    cleared: usize,
+    later: usize,
+    replies_read: usize,
+    replies_seen: i64,
+    settings: [bool; 4],
+}
+
+/// The Inbox rows and the Replies count, with what they were built from.
+#[derive(Default)]
+pub(super) struct InboxCache {
+    rows: Option<(InboxKey, std::rc::Rc<Vec<InboxItem>>)>,
+    unread_replies: Option<(InboxKey, usize)>,
+}
+
 impl App {
+    /// Something in the workspace changed: what was worked out from it (the
+    /// Inbox rows) is worked out again when next asked for.
+    pub(super) fn data_changed(&self) {
+        self.data_gen.set(self.data_gen.get().wrapping_add(1));
+    }
+
+    /// The key the Inbox rows are kept under; none while a change is
+    /// waiting to be taken in (`dirty`), when they're built fresh.
+    fn inbox_key(&self) -> Option<InboxKey> {
+        if self.dirty {
+            return None;
+        }
+        let d = &self.data;
+        let n = &d.extra.notify;
+        Some(InboxKey {
+            gen: self.data_gen.get(),
+            me: d.me,
+            tasks: d.tasks.len(),
+            activity: d.tasks.iter().map(|t| t.activity.len()).sum(),
+            channels: d.channels.len(),
+            messages: d.channels.iter().map(|c| c.messages.len()).sum(),
+            replies: d
+                .channels
+                .iter()
+                .flat_map(|c| &c.messages)
+                .map(|m| m.replies.len())
+                .sum(),
+            channel_members: d.channels.iter().map(|c| c.members.len()).sum(),
+            private_channels: d.channels.iter().filter(|c| c.private).count(),
+            members: d.members.len(),
+            cleared: d.extra.inbox_cleared.len(),
+            later: d.extra.inbox_later.len(),
+            replies_read: d.extra.replies_read.len(),
+            replies_seen: d.extra.replies_seen,
+            settings: [n.comments, n.mentions, n.assigned, n.replies],
+        })
+    }
+
+    /// The Inbox rows (all four tabs, see `build_inbox_items`), built again
+    /// only after the workspace changed.
+    pub(super) fn inbox_items(&self) -> std::rc::Rc<Vec<InboxItem>> {
+        let key = self.inbox_key();
+        if let (Some(k), Some((kept, rows))) = (key, &self.inbox_cache.borrow().rows) {
+            if k == *kept {
+                return rows.clone();
+            }
+        }
+        let rows = std::rc::Rc::new(self.build_inbox_items());
+        self.inbox_cache.borrow_mut().rows = key.map(|k| (k, rows.clone()));
+        rows
+    }
+
+    /// The count `unread_replies` works out, kept like the Inbox rows.
+    pub(super) fn kept_unread_replies(&self, count: impl FnOnce() -> usize) -> usize {
+        let key = self.inbox_key();
+        if let (Some(k), Some((kept, n))) = (key, self.inbox_cache.borrow().unread_replies) {
+            if k == kept {
+                return n;
+            }
+        }
+        let n = count();
+        self.inbox_cache.borrow_mut().unread_replies = key.map(|k| (k, n));
+        n
+    }
+
     /// The Inbox rows (all four tabs). Primary holds what the notification
     /// settings ask for: comments on tasks I'm assigned to or created,
     /// @mentions of me (task comments and chat), tasks assigned to me and
     /// chat replies in threads I'm in. My own actions are left out.
     /// Mentions and assignments are matched by member id; entries written
     /// before ids were kept are matched by name.
-    pub(super) fn inbox_items(&self) -> Vec<InboxItem> {
+    fn build_inbox_items(&self) -> Vec<InboxItem> {
         let me = self.data.me;
         let n = &self.data.extra.notify;
         let my_name = self
@@ -372,7 +468,11 @@ impl App {
     /// Chat replies for the Replies page: replies by others in threads I
     /// started or wrote in.
     pub(super) fn chat_replies(&self) -> Vec<InboxItem> {
-        self.inbox_items().into_iter().filter(|i| i.reply).collect()
+        self.inbox_items()
+            .iter()
+            .filter(|i| i.reply)
+            .cloned()
+            .collect()
     }
 
     // ---------------------------------------------------------------- history

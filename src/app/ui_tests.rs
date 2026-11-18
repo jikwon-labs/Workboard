@@ -9029,7 +9029,7 @@ fn home_lists_card_says_when_there_are_no_lists_and_offers_one() {
 fn inbox_with_reminders_waiting_is_not_all_caught_up() {
     let mut h = Ui1::new();
     h.click("Inbox");
-    h.app.data.extra.inbox_cleared = h.app.inbox_items().into_iter().map(|i| i.key).collect();
+    h.app.data.extra.inbox_cleared = h.app.inbox_items().iter().cloned().map(|i| i.key).collect();
     h.settle();
     assert!(h.has("You're all caught up") || h.has("Looking to collaborate?"));
     let id = h.app.data.new_id();

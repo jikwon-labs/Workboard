@@ -271,7 +271,7 @@ impl App {
             .member(me)
             .map(|m| m.name.clone())
             .unwrap_or_default();
-        for it in self.inbox_items() {
+        for it in self.inbox_items().iter() {
             if it.author == me || it.imported {
                 continue;
             }

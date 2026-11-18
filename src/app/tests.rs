@@ -4668,7 +4668,8 @@ fn inbox_primary_and_badge_follow_the_settings() {
     push(&mut a, mine, now - 5, 1, "my own note", true);
     let primary = |a: &App| {
         a.inbox_items()
-            .into_iter()
+            .iter()
+            .cloned()
             .filter(|i| i.tab == 0)
             .map(|i| i.text)
             .collect::<Vec<_>>()
@@ -4693,7 +4694,8 @@ fn inbox_primary_and_badge_follow_the_settings() {
     // clearing and Later take rows off the badge
     let keys: Vec<String> = a
         .inbox_items()
-        .into_iter()
+        .iter()
+        .cloned()
         .filter(|i| i.tab == 0)
         .map(|i| i.key)
         .collect();
@@ -4822,6 +4824,61 @@ fn reminders_alert_once_when_due() {
     });
     a.reminder_tick(None);
     assert!(a.toast.is_none());
+}
+
+/// The sidebar and the Dock badge ask for the Inbox rows on every frame:
+/// they're built once and kept until the workspace changes, and a change
+/// (made here, merged in from the team, or one a count gives away) builds
+/// them again.
+#[test]
+fn inbox_rows_are_kept_between_frames_until_the_workspace_changes() {
+    let mut a = app();
+    let ctx = egui::Context::default();
+    let frame = |a: &mut App| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| a.ui_frame(ctx));
+    };
+    for _ in 0..3 {
+        frame(&mut a);
+    }
+    let kept = a.inbox_items();
+    frame(&mut a);
+    frame(&mut a);
+    assert!(
+        std::rc::Rc::ptr_eq(&kept, &a.inbox_items()),
+        "idle frames don't build them again"
+    );
+    let badge = a.inbox_badge();
+
+    // a new message that mentions me
+    let g = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && !c.private)
+        .unwrap()
+        .id;
+    let id = a.data.new_id();
+    let ch = a.data.channels.iter_mut().find(|c| c.id == g).unwrap();
+    ch.messages.push(chat_msg(id, 2, "hello all", now_ts()));
+    assert_eq!(a.inbox_badge(), badge, "not a mention");
+
+    // the same message edited into one (no count changes): an edit made
+    // here leaves the workspace changed for the next frame
+    let ch = a.data.channels.iter_mut().find(|c| c.id == g).unwrap();
+    ch.messages.last_mut().unwrap().text = "@Me look at this".into();
+    a.dirty = true;
+    assert_eq!(a.inbox_badge(), badge + 1, "a change not taken in yet");
+    frame(&mut a);
+    assert_eq!(a.inbox_badge(), badge + 1);
+    let kept = a.inbox_items();
+    frame(&mut a);
+    assert!(std::rc::Rc::ptr_eq(&kept, &a.inbox_items()));
+
+    // and so does a change merged in from the team
+    let ch = a.data.channels.iter_mut().find(|c| c.id == g).unwrap();
+    ch.messages.last_mut().unwrap().text = "never mind".into();
+    a.data_changed();
+    assert_eq!(a.inbox_badge(), badge);
 }
 
 #[test]
@@ -5962,7 +6019,8 @@ fn comments_on_a_task_i_duplicated_go_to_primary() {
     });
     let row = a
         .inbox_items()
-        .into_iter()
+        .iter()
+        .cloned()
         .find(|i| i.src == super::nav::InboxSrc::Task(copy) && i.text == "looks good")
         .unwrap();
     assert_eq!(row.tab, 0);
@@ -5980,7 +6038,8 @@ fn as_member<R>(a: &mut App, who: u64, f: impl FnOnce(&mut App) -> R) -> R {
 /// The tasks with an "assigned" row in Primary for the person using the app.
 fn assigned_in_primary(a: &App) -> Vec<u64> {
     a.inbox_items()
-        .into_iter()
+        .iter()
+        .cloned()
         .filter(|i| i.assigned && i.tab == 0)
         .filter_map(|i| match i.src {
             nav::InboxSrc::Task(t) => Some(t),
@@ -5991,7 +6050,8 @@ fn assigned_in_primary(a: &App) -> Vec<u64> {
 
 fn mentioned_in_primary(a: &App) -> Vec<String> {
     a.inbox_items()
-        .into_iter()
+        .iter()
+        .cloned()
         .filter(|i| i.mention && i.tab == 0)
         .map(|i| i.text)
         .collect()
@@ -7600,7 +7660,8 @@ fn imported_mentions_and_replies_are_not_news_in_anyones_inbox() {
     assert_eq!(mention.text, format!("hey @{}", my_name));
     let rows: Vec<_> = a
         .inbox_items()
-        .into_iter()
+        .iter()
+        .cloned()
         .filter(|i| matches!(i.src, super::nav::InboxSrc::Chat { ch: c, .. } if c == ch.id))
         .collect();
     assert_eq!(rows.len(), 2, "the mention and the reply are in the Inbox");

@@ -446,7 +446,8 @@ impl App {
         // collect items (what is on which tab: inbox_items)
         let mut items: Vec<super::nav::InboxItem> = self
             .inbox_items()
-            .into_iter()
+            .iter()
+            .cloned()
             .filter(|x| x.tab == self.inbox_tab)
             .collect();
         match self.inbox_filter {

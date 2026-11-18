@@ -955,6 +955,7 @@ impl App {
         match serde_json::from_value::<Data>(v) {
             Ok(d) => {
                 self.data = d;
+                self.data_changed();
                 self.data.note_carried_slack(&slack_before);
                 // fingerprints of what the app writes, which can differ a
                 // little from what came in (fields an older app left out)
@@ -1803,6 +1804,7 @@ impl App {
             self.ws_file = file;
         }
         self.data = d;
+        self.data_changed();
         // a huddle in the workspace left ends there (its conversation isn't here)
         self.leave_huddle();
         Ok(())

@@ -304,6 +304,7 @@ impl App {
         super::together::fill_sync_baseline(&mut d);
         d.extra.welcome = true;
         self.data = d;
+        self.data_changed();
         self.ws_file = "data.json".into();
         if self.persist {
             self.save_now();

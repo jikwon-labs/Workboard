@@ -19,6 +19,7 @@
 // (the URL scheme is registered in Config/Info.plist) opens the invite form.
 
 import SwiftUI
+import UIKit
 import WorkboardKit
 
 @main
@@ -49,6 +50,7 @@ struct WorkboardApp: App {
         _nav = State(initialValue: nav)
     }
 
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("accent") private var accent = "workboard"
 
@@ -66,6 +68,10 @@ struct WorkboardApp: App {
                     if let link = InviteLink.parse(url.absoluteString) { nav.openedLink = link }
                 }
                 .task { await notifier.refresh() }
+                // the copy is saved a moment after changes; leaving the app
+                // writes it now, since iOS may stop the app before that
+                .onChange(of: scenePhase) { _, p in if p != .active { client.flushSnapshot() } }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in client.flushSnapshot() }
         }
     }
 

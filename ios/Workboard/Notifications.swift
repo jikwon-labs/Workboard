@@ -110,8 +110,10 @@ final class Notifier {
     func scan(client: SyncClient, nav: Nav) {
         guard let data = client.data, let me = client.me else { return }
         let manager = ["owner", "admin"].contains(client.settings.role ?? "")
-        let found = Notify.candidates(data, prefs: prefs, me: me, manager: manager)
-        let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager).map(\.key)
+        // worked out once for both lists and the icon's number
+        let inbox = client.inboxItems(me: me)
+        let found = Notify.candidates(data, prefs: prefs, me: me, manager: manager, inbox: inbox)
+        let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager, inbox: inbox).map(\.key)
         if !seeded {
             seen = Set(all).union(found.map(\.key))
             seeded = true
@@ -121,7 +123,7 @@ final class Notifier {
             fresh.removeAll { active && visible($0.target, nav: nav) }
             deliver(fresh, view: client.view)
         }
-        updateBadge(data, view: client.view, me: me)
+        updateBadge(data, view: client.view, me: me, inbox: inbox)
         scheduleClock(client: client)
     }
 
@@ -198,8 +200,8 @@ final class Notifier {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: key, content: content, trigger: nil))
     }
 
-    func updateBadge(_ data: JSON, view: WorkspaceView, me: UInt64) {
-        let n = prefs.badge ? Notify.badge(data, view: view, me: me) : 0
+    func updateBadge(_ data: JSON, view: WorkspaceView, me: UInt64, inbox: [InboxItem]) {
+        let n = prefs.badge ? Notify.badge(data, view: view, me: me, inbox: inbox) : 0
         UNUserNotificationCenter.current().setBadgeCount(n)
     }
 

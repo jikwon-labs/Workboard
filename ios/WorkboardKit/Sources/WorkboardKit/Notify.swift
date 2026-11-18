@@ -118,8 +118,9 @@ public enum Notify {
     }
 
     /// notify_candidates: everything the choices ask to be told about.
-    /// `manager`: I'm an owner or admin (people joining).
-    public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool) -> [Note] {
+    /// `manager`: I'm an owner or admin (people joining). `inbox`: the
+    /// Inbox rows when the caller has them already (SyncClient.inboxItems).
+    public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool, inbox: [InboxItem]? = nil) -> [Note] {
         let members = Mentions.members(of: data)
         let who = { (id: UInt64) in members.first { $0.id == id }?.name ?? "Someone" }
         var out: [Note] = []
@@ -177,7 +178,7 @@ public enum Notify {
         let myName = who(me)
         let tasks = Dictionary((data["tasks"]?.array ?? []).compactMap { t in t["id"]?.uint.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
         let channels = data["channels"]?.array ?? []
-        for it in Inbox.items(data, me: me) where it.author != me {
+        for it in inbox ?? Inbox.items(data, me: me) where it.author != me {
             let key: String, target: Note.Target
             var task: JSON?
             switch it.source {
@@ -288,8 +289,8 @@ public enum Notify {
     }
 
     /// The app icon's number: Primary Inbox rows plus unread direct messages.
-    public static func badge(_ data: JSON, view: WorkspaceView, me: UInt64) -> Int {
-        let inbox = Inbox.items(data, me: me).filter { $0.tab == .primary }.count
+    public static func badge(_ data: JSON, view: WorkspaceView, me: UInt64, inbox items: [InboxItem]? = nil) -> Int {
+        let inbox = (items ?? Inbox.items(data, me: me)).filter { $0.tab == .primary }.count
         let dms = view.visibleChannels(me: me).filter { $0.kind == .direct }.reduce(0) { $0 + $1.unread(me: me) }
         return inbox + dms
     }

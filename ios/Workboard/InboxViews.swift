@@ -11,7 +11,7 @@ struct InboxView: View {
 
     var body: some View {
         let me = client.me ?? 0
-        let all = client.data.map { Inbox.items($0, me: me) } ?? []
+        let all = client.inboxItems(me: me)
         let rows = all.filter { $0.tab == tab }
         Section {
             Picker("Inbox", selection: $tab) {

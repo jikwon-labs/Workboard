@@ -130,6 +130,29 @@ public struct Storage: Sendable {
     }
 }
 
+/// Writes snapshot.json on a queue of its own, so encoding the whole
+/// workspace and writing it never holds up the screens. One serial queue
+/// keeps the writes in order: an older copy can't land after a newer one,
+/// and a removal can't be undone by a write that was already on its way.
+final class SnapshotWriter: Sendable {
+    let storage: Storage
+    private let queue = DispatchQueue(label: "workboard.snapshot", qos: .utility)
+
+    init(storage: Storage) { self.storage = storage }
+
+    func write(_ snapshot: JSON) {
+        let s = storage
+        queue.async { s.save(snapshot: snapshot) }
+    }
+
+    func writeAndWait(_ snapshot: JSON) { queue.sync { storage.save(snapshot: snapshot) } }
+
+    func remove() { queue.sync { try? FileManager.default.removeItem(at: storage.snapshotURL) } }
+
+    /// Returns once every write asked for so far is on disk.
+    func wait() { queue.sync {} }
+}
+
 /// Why the sign-in screen is up.
 public enum SignInReason: Equatable, Sendable {
     /// The server wants a sign-in and this device had nothing to show.
@@ -165,7 +188,12 @@ public struct IncomingMessage: Equatable, Sendable {
 public final class SyncClient {
     public private(set) var state: ConnectionState = .idle
     /// This device's copy of the workspace, nil until the first snapshot.
-    public private(set) var data: JSON?
+    public private(set) var data: JSON? {
+        didSet { dataRevision &+= 1 }
+    }
+    /// Bumped on every change to `data` (what the Inbox cache checks).
+    @ObservationIgnored public private(set) var dataRevision = 0
+    @ObservationIgnored private var inboxCache: (rev: Int, me: UInt64, items: [InboxItem])?
     /// Read-only view of `data` for the screens.
     public private(set) var view: WorkspaceView = .empty
     public private(set) var rev: Int64 = 0
@@ -266,9 +294,19 @@ public final class SyncClient {
     @ObservationIgnored public var silenceLimit: TimeInterval = 75
     @ObservationIgnored public var pushDelay: TimeInterval = 0.25
     @ObservationIgnored public var maxRetryDelay: TimeInterval = 30
+    /// snapshot.json is written this long after the last change, and at
+    /// most `saveMaxDelay` after the first one not yet written: each write
+    /// encodes the whole workspace, so not on every message that comes in.
+    @ObservationIgnored public var saveDelay: TimeInterval = 1
+    @ObservationIgnored public var saveMaxDelay: TimeInterval = 5
+    @ObservationIgnored let snapshots: SnapshotWriter
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// When the oldest change not yet on disk was made (nil: all saved).
+    @ObservationIgnored private var firstUnsaved: Date?
 
     public init(storage: Storage = .standard, tokens: TokenStore = KeychainTokenStore()) {
         self.storage = storage
+        self.snapshots = SnapshotWriter(storage: storage)
         self.tokens = tokens
         self.settings = storage.loadSettings()
         let cfg = URLSessionConfiguration.default
@@ -349,9 +387,11 @@ public final class SyncClient {
             settings.waitingStamps = [:]
             settings.waitingTombs = [:]
             settings.reuploads = []
-            try? FileManager.default.removeItem(at: storage.snapshotURL)
+            dropSnapshot()
             // Trash holds the other workspace's items
             setTrash([])
+        } else {
+            flushSnapshot()
         }
         settings.accountEmail = nil
         settings.role = nil
@@ -519,6 +559,7 @@ public final class SyncClient {
         settings.role = nil
         clearAdmin()
         storage.save(settings)
+        flushSnapshot()
         // the next person to sign in here doesn't see what this one deleted
         setTrash([])
         pendingSignIn = nil
@@ -940,7 +981,7 @@ public final class SyncClient {
         data = nil
         view = .empty
         rev = 0
-        try? FileManager.default.removeItem(at: storage.snapshotURL)
+        dropSnapshot()
         storage.save(settings)
         setTrash([])
         signInReason = .gone
@@ -1101,6 +1142,67 @@ public final class SyncClient {
     private func refresh() {
         guard let d = data else { return }
         view = WorkspaceView(d)
-        storage.save(snapshot: d)
+        scheduleSave()
+    }
+
+    // MARK: saving the copy
+
+    private func scheduleSave() {
+        let now = Date()
+        let first = firstUnsaved ?? now
+        firstUnsaved = first
+        let at = min(now.addingTimeInterval(saveDelay), first.addingTimeInterval(saveMaxDelay))
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            let wait = at.timeIntervalSinceNow
+            if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+            guard let self, !Task.isCancelled else { return }
+            self.saveNow()
+        }
+    }
+
+    /// Hand the copy to the writer (a value copy: encoding and writing
+    /// happen off the main thread).
+    private func saveNow() {
+        saveTask?.cancel()
+        saveTask = nil
+        firstUnsaved = nil
+        if let d = data { snapshots.write(d) }
+    }
+
+    /// Put the newest copy on disk before returning (the app going to the
+    /// background, signing out, a relaunch in tests).
+    public func flushSnapshot() {
+        saveTask?.cancel()
+        saveTask = nil
+        if firstUnsaved != nil, let d = data {
+            firstUnsaved = nil
+            snapshots.writeAndWait(d)
+        } else {
+            firstUnsaved = nil
+            snapshots.wait()
+        }
+    }
+
+    /// Forget the saved copy. Goes through the writer so a write already on
+    /// its way can't bring the copy back afterwards.
+    private func dropSnapshot() {
+        saveTask?.cancel()
+        saveTask = nil
+        firstUnsaved = nil
+        snapshots.remove()
+    }
+
+    // MARK: Inbox
+
+    /// Every Inbox row (Inbox.items), worked out once per change to `data`
+    /// and shared by the Inbox screen, notifications and the icon's number.
+    /// Reading `data` here keeps a screen that calls it observing changes.
+    public func inboxItems(me: UInt64) -> [InboxItem] {
+        guard let d = data else { return [] }
+        if let c = inboxCache, c.rev == dataRevision, c.me == me { return c.items }
+        let items = Inbox.items(d, me: me)
+        inboxCache = (dataRevision, me, items)
+        return items
     }
 }

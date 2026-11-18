@@ -212,6 +212,8 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(a.waitingCount, 3, "a new message, a task change and its activity line (which has an id now)")
 
         // a fresh launch while the server is down shows the saved copy with the offline edits
+        // (the app writes it when it goes to the background)
+        a.flushSnapshot()
         let relaunch = SyncClient(storage: s, tokens: MemoryTokenStore())
         XCTAssertEqual(relaunch.view.channels.first { $0.id == 301 }?.messages.last?.text, "written offline")
         XCTAssertEqual(relaunch.waitingCount, 3, "waiting marks are saved")

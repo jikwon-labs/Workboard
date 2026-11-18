@@ -804,17 +804,8 @@ impl App {
                 emails: String::new(),
                 role: "Member".into(),
             }),
-            Some("automations") => Some(Modal::Automations {
-                status: "complete".into(),
-                action: "comment".into(),
-                value: String::new(),
-                scope: None,
-            }),
-            Some("fields") => Some(Modal::CustomFields {
-                name: String::new(),
-                kind: "text".into(),
-                opts: String::new(),
-            }),
+            Some("automations") => Some(Modal::automations(None)),
+            Some("fields") => Some(Modal::custom_fields()),
             Some("themes") => Some(Modal::Themes),
             Some("together") => Some(Modal::Together {
                 path: String::new(),
@@ -826,11 +817,7 @@ impl App {
                 ch: data.channels.first().map(|c| c.id).unwrap_or(0),
                 link: String::new(),
             }),
-            Some("reminder") => Some(Modal::Reminder {
-                text: String::new(),
-                date: Some(today()),
-                time: "09:00".into(),
-            }),
+            Some("reminder") => Some(Modal::reminder(String::new(), today())),
             _ => None,
         };
         App {
@@ -4653,11 +4640,7 @@ impl App {
                     if icons::icon_button(ui, &t, "alarm", tr("Create Reminder"), "Create Reminder", true)
                         .clicked()
                     {
-                        self.modal = Some(Modal::Reminder {
-                            text: String::new(),
-                            date: Some(today()),
-                            time: "09:00".into(),
-                        });
+                        self.modal = Some(Modal::reminder(String::new(), today()));
                     }
                 }
                 ui.add_space(10.0);

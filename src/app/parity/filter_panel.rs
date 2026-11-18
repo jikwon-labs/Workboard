@@ -154,7 +154,7 @@ impl App {
                 });
                 ui.separator();
                 if self.may_manage() && ui.button(tr("+ Create new field")).clicked() {
-                    self.modal = Some(Modal::CustomFields { name: String::new(), kind: "text".into(), opts: String::new() });
+                    self.modal = Some(Modal::custom_fields());
                     close = true;
                 }
             });

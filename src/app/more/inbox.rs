@@ -133,11 +133,7 @@ impl App {
                         }
                         if icon_button(ui, &t, "alarm", tr("Reminder"), "Reminder", true).clicked()
                         {
-                            self.modal = Some(Modal::Reminder {
-                                text: String::new(),
-                                date: Some(today()),
-                                time: "09:00".into(),
-                            });
+                            self.modal = Some(Modal::reminder(String::new(), today()));
                         }
                     });
                 });

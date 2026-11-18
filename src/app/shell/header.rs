@@ -347,11 +347,7 @@ impl App {
                                 }
                             }
                             if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
-                                self.modal = Some(Modal::CustomFields {
-                                    name: String::new(),
-                                    kind: "text".into(),
-                                    opts: String::new(),
-                                });
+                                self.modal = Some(Modal::custom_fields());
                                 close_popup(ui);
                             }
                             if ui.button(tr("Export to CSV")).clicked() {
@@ -389,12 +385,7 @@ impl App {
                             .map(|s| Location::Space(s.id)),
                         _ => None,
                     };
-                    self.modal = Some(Modal::Automations {
-                        status: "complete".into(),
-                        action: "comment".into(),
-                        value: String::new(),
-                        scope,
-                    });
+                    self.modal = Some(Modal::automations(scope));
                 }
                 if hb(ui, "\u{260E}")
                     .on_hover_text(tr("Start a huddle"))

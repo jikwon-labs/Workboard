@@ -819,11 +819,7 @@ impl App {
             .clicked()
             && self.may_manage()
         {
-            self.modal = Some(Modal::CustomFields {
-                name: String::new(),
-                kind: "text".into(),
-                opts: String::new(),
-            });
+            self.modal = Some(Modal::custom_fields());
         }
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])

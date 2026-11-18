@@ -321,6 +321,35 @@ impl Modal {
             on_server: true,
         }
     }
+
+    /// The Create Reminder dialog with `text` filled in, on `date` at 9:00.
+    pub(super) fn reminder(text: String, date: NaiveDate) -> Modal {
+        Modal::Reminder {
+            text,
+            date: Some(date),
+            time: "09:00".into(),
+        }
+    }
+
+    /// The Custom fields dialog with an empty new text field.
+    pub(super) fn custom_fields() -> Modal {
+        Modal::CustomFields {
+            name: String::new(),
+            kind: "text".into(),
+            opts: String::new(),
+        }
+    }
+
+    /// The Automations dialog with an empty new rule (when complete, comment);
+    /// new rules run in `scope`, a List or Space, or the whole Workspace.
+    pub(super) fn automations(scope: Option<Location>) -> Modal {
+        Modal::Automations {
+            status: "complete".into(),
+            action: "comment".into(),
+            value: String::new(),
+            scope,
+        }
+    }
 }
 
 pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
@@ -419,17 +448,8 @@ impl App {
                 self.modal = Some(match label {
                     "Apps" => Modal::ClickApps,
                     "Templates" => self.template_center(super::templates::Category::All, None),
-                    "Custom fields" => Modal::CustomFields {
-                        name: String::new(),
-                        kind: "text".into(),
-                        opts: String::new(),
-                    },
-                    "Automations" => Modal::Automations {
-                        status: "complete".into(),
-                        action: "comment".into(),
-                        value: String::new(),
-                        scope: None,
-                    },
+                    "Custom fields" => Modal::custom_fields(),
+                    "Automations" => Modal::automations(None),
                     _ => Modal::TagManager {
                         from: String::new(),
                         to: String::new(),
@@ -853,13 +873,7 @@ impl App {
             "notepad" => self.notepad_open = !self.notepad_open,
             "clip" => self.modal = Some(unavailable("Record a Clip")),
             "stt" => self.modal = Some(unavailable("Talk to Text")),
-            "reminder" => {
-                self.modal = Some(Modal::Reminder {
-                    text: String::new(),
-                    date: Some(today()),
-                    time: "09:00".into(),
-                })
-            }
+            "reminder" => self.modal = Some(Modal::reminder(String::new(), today())),
             "doc" => self.new_doc(None),
             "whiteboard" => self.new_whiteboard(),
             "people" => self.section = Section::People,

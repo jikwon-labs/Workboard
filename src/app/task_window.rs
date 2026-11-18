@@ -254,11 +254,10 @@ impl App {
                                 close_popup(ui);
                             }
                             if ui.button(tr("Remind me")).clicked() {
-                                self.modal = Some(Modal::Reminder {
-                                    text: task.name.clone(),
-                                    date: Some(today() + Duration::days(1)),
-                                    time: "09:00".into(),
-                                });
+                                self.modal = Some(Modal::reminder(
+                                    task.name.clone(),
+                                    today() + Duration::days(1),
+                                ));
                                 self.reminder_about = (Some(task.id), None);
                                 close_popup(ui);
                             }

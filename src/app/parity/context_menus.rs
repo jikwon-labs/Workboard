@@ -216,11 +216,10 @@ impl App {
             close_any(ui);
         }
         if ui.button(tr("Remind me")).clicked() {
-            self.modal = Some(Modal::Reminder {
-                text: task.name.clone(),
-                date: Some(today() + Duration::days(1)),
-                time: "09:00".into(),
-            });
+            self.modal = Some(Modal::reminder(
+                task.name.clone(),
+                today() + Duration::days(1),
+            ));
             self.reminder_about = (Some(task.id), None);
             close_any(ui);
         }
@@ -341,20 +340,11 @@ impl App {
             }
         }
         if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
-            self.modal = Some(Modal::CustomFields {
-                name: String::new(),
-                kind: "text".into(),
-                opts: String::new(),
-            });
+            self.modal = Some(Modal::custom_fields());
             close_any(ui);
         }
         if self.may_manage() && ui.button(tr("Automations")).clicked() {
-            self.modal = Some(Modal::Automations {
-                status: "complete".into(),
-                action: "comment".into(),
-                value: String::new(),
-                scope: Some(Location::List(lid)),
-            });
+            self.modal = Some(Modal::automations(Some(Location::List(lid))));
             close_any(ui);
         }
         ui.separator();
@@ -654,20 +644,11 @@ impl App {
             close_any(ui);
         }
         if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
-            self.modal = Some(Modal::CustomFields {
-                name: String::new(),
-                kind: "text".into(),
-                opts: String::new(),
-            });
+            self.modal = Some(Modal::custom_fields());
             close_any(ui);
         }
         if self.may_manage() && ui.button(tr("Automations")).clicked() {
-            self.modal = Some(Modal::Automations {
-                status: "complete".into(),
-                action: "comment".into(),
-                value: String::new(),
-                scope: Some(Location::Space(sid)),
-            });
+            self.modal = Some(Modal::automations(Some(Location::Space(sid))));
             close_any(ui);
         }
         ui.separator();

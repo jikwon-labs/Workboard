@@ -52,22 +52,13 @@ impl App {
             },
             "Trash" => Modal::Trash,
             "Apps" => Modal::ClickApps,
-            "Custom fields" => Modal::CustomFields {
-                name: String::new(),
-                kind: "text".into(),
-                opts: String::new(),
-            },
+            "Custom fields" => Modal::custom_fields(),
             "Tag manager" => Modal::TagManager {
                 from: String::new(),
                 to: String::new(),
             },
             "Templates" => self.template_center(super::templates::Category::All, None),
-            "Automations" => Modal::Automations {
-                status: "complete".into(),
-                action: "comment".into(),
-                value: String::new(),
-                scope: None,
-            },
+            "Automations" => Modal::automations(None),
             "Work together" => self.together_modal(),
             "My settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();

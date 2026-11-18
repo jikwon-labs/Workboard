@@ -2281,11 +2281,7 @@ impl App {
                             self.toast(tr("Reminder created"));
                         }
                         None => {
-                            self.modal = Some(Modal::Reminder {
-                                text: what,
-                                date: Some(today()),
-                                time: "09:00".into(),
-                            });
+                            self.modal = Some(Modal::reminder(what, today()));
                             self.reminder_about = (None, Some((ch, msg)));
                         }
                     }

@@ -228,11 +228,7 @@ impl App {
             if ctx.input(|i| i.key_pressed(egui::Key::T)) {
                 self.open_quick_add(None);
             } else if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-                self.modal = Some(Modal::Reminder {
-                    text: String::new(),
-                    date: Some(today()),
-                    time: "09:00".into(),
-                });
+                self.modal = Some(Modal::reminder(String::new(), today()));
             } else if ctx.input(|i| i.key_pressed(egui::Key::N) || i.key_pressed(egui::Key::P)) {
                 self.notepad_open = !self.notepad_open;
             }

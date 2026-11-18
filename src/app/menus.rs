@@ -561,7 +561,7 @@ impl App {
                 .unwrap_or(Location::Home);
             self.section = Section::Home;
             self.open_task = None;
-            self.chat_open = None;
+            self.chat.open = None;
             self.recent.clear();
             self.clear_history();
             self.sync_rt = Default::default();
@@ -2265,7 +2265,7 @@ impl App {
         }
         if let Some(id) = go {
             self.section = Section::Chat;
-            self.chat_open = Some(id);
+            self.chat.open = Some(id);
             open = false;
         }
         if open {

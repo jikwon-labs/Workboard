@@ -186,7 +186,7 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         "chat channel".into(),
         Box::new(move |a: &mut App| {
             a.section = Section::Chat;
-            a.chat_open = ch;
+            a.chat.open = ch;
         }),
     ));
     v.push((

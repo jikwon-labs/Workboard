@@ -187,7 +187,7 @@ impl App {
     /// change order (and take the group's value when dropped into another
     /// group); subtasks move only within their parent.
     pub(super) fn drop_row(&mut self, dragged: u64, spot: usize, after: bool) {
-        let Some(s) = self.row_spots.get(spot) else {
+        let Some(s) = self.row.spots.get(spot) else {
             return;
         };
         let (target, target_parent, gi) = (s.id, s.parent, s.group);
@@ -201,7 +201,7 @@ impl App {
         if manual {
             self.reorder_task(dragged, target, after);
         }
-        let group = self.row_groups.get(gi).cloned();
+        let group = self.row.groups.get(gi).cloned();
         let other_group =
             parent.is_none() && group.as_ref().is_some_and(|g| !g.tasks.contains(&dragged));
         if let (true, Some(g)) = (other_group, group) {
@@ -218,23 +218,24 @@ impl App {
     /// While a row is dragged: the drop line and the moving name; on release,
     /// the drop. Call after all rows are drawn, inside the scroll area.
     pub(super) fn finish_row_drag(&mut self, ui: &mut Ui) {
-        let Some(d) = self.row_drag else { return };
+        let Some(d) = self.row.drag else { return };
         let t = self.t();
         let pos = ui.ctx().pointer_latest_pos();
         let released = ui.input(|i| !i.pointer.primary_down());
         let hit = pos.and_then(|p| {
             let i = self
-                .row_spots
+                .row
+                .spots
                 .iter()
                 .position(|s| p.y >= s.rect.top() && p.y < s.rect.bottom())?;
-            Some((i, p.y > self.row_spots[i].rect.center().y))
+            Some((i, p.y > self.row.spots[i].rect.center().y))
         });
         if let (Some((i, after)), Some(p)) = (hit, pos) {
-            let r = self.row_spots[i].rect;
+            let r = self.row.spots[i].rect;
             let y = if after { r.bottom() } else { r.top() };
             let x0 = r.left()
                 + 28.0
-                + if self.row_spots[i].parent.is_some() {
+                + if self.row.spots[i].parent.is_some() {
                     26.0
                 } else {
                     0.0
@@ -258,9 +259,9 @@ impl App {
             lp.galley(br.min + vec2(10.0, 6.0), g, t.text);
         }
         if released {
-            self.row_drag = None;
+            self.row.drag = None;
             if let Some((i, after)) = hit {
-                if self.row_spots[i].id != d {
+                if self.row.spots[i].id != d {
                     self.drop_row(d, i, after);
                 }
             }
@@ -276,11 +277,11 @@ impl App {
     pub(super) fn select_click(&mut self, tid: u64, shift: bool) {
         if shift {
             if let Some(anchor) = self.select_anchor {
-                let a = self.row_order.iter().position(|x| *x == anchor);
-                let b = self.row_order.iter().position(|x| *x == tid);
+                let a = self.row.order.iter().position(|x| *x == anchor);
+                let b = self.row.order.iter().position(|x| *x == tid);
                 if let (Some(a), Some(b)) = (a, b) {
                     let (lo, hi) = (a.min(b), a.max(b));
-                    for id in &self.row_order[lo..=hi] {
+                    for id in &self.row.order[lo..=hi] {
                         self.selected.insert(*id);
                     }
                     return;
@@ -304,14 +305,14 @@ impl App {
             || self.palette.is_some()
             || self.rename.is_some()
             || self.open_task.is_some()
-            || self.row_rename.is_some()
+            || self.row.rename.is_some()
             || self.confirm_bulk_delete
             || self.menu_was_open
         {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
-            self.selected.extend(self.row_order.iter().copied());
+            self.selected.extend(self.row.order.iter().copied());
             return;
         }
         let plain = ctx.input(|i| !i.modifiers.command && !i.modifiers.alt && !i.modifiers.ctrl);
@@ -327,24 +328,25 @@ impl App {
         }
         let down = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown));
         let up = ctx.input(|i| i.key_pressed(egui::Key::ArrowUp));
-        if (down || up) && !self.row_order.is_empty() {
+        if (down || up) && !self.row.order.is_empty() {
             let at = self
-                .row_focus
-                .and_then(|f| self.row_order.iter().position(|x| *x == f));
+                .row
+                .focus
+                .and_then(|f| self.row.order.iter().position(|x| *x == f));
             let next = match at {
                 None => {
                     if down {
                         0
                     } else {
-                        self.row_order.len() - 1
+                        self.row.order.len() - 1
                     }
                 }
-                Some(i) if down => (i + 1).min(self.row_order.len() - 1),
+                Some(i) if down => (i + 1).min(self.row.order.len() - 1),
                 Some(i) => i.saturating_sub(1),
             };
-            self.row_focus = Some(self.row_order[next]);
+            self.row.focus = Some(self.row.order[next]);
         }
-        if let Some(f) = self.row_focus.filter(|f| self.row_order.contains(f)) {
+        if let Some(f) = self.row.focus.filter(|f| self.row.order.contains(f)) {
             if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
                 self.actions.push(Action::Open(f));
             }
@@ -551,7 +553,7 @@ impl App {
                 }
                 "Rename" => {
                     if resp.clicked() {
-                        self.row_rename = Some((task.id, task.name.clone()));
+                        self.row.rename = Some((task.id, task.name.clone()));
                     }
                 }
                 _ => {
@@ -592,7 +594,7 @@ impl App {
 
     /// The name field shown in place of a row's name while renaming it.
     pub(super) fn row_rename_field(&mut self, ui: &mut Ui, r: Rect, task: &Task) {
-        let Some((_, text)) = self.row_rename.as_mut() else {
+        let Some((_, text)) = self.row.rename.as_mut() else {
             return;
         };
         let mut child = ui.new_child(
@@ -610,7 +612,7 @@ impl App {
         let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
         let esc = child.input(|i| i.key_pressed(egui::Key::Escape));
         if esc {
-            self.row_rename = None;
+            self.row.rename = None;
         } else if resp.lost_focus() || enter {
             let name = text.trim().to_string();
             if !name.is_empty() && name != task.name {
@@ -618,7 +620,7 @@ impl App {
                 e.name = name;
                 self.actions.push(Action::Replace(e));
             }
-            self.row_rename = None;
+            self.row.rename = None;
         }
     }
 

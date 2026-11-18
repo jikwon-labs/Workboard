@@ -705,8 +705,8 @@ impl App {
             .unwrap_or(Location::Home);
         self.section = Section::Home;
         self.open_task = None;
-        self.chat_open = None;
-        self.thread_open = None;
+        self.chat.open = None;
+        self.chat.thread_open = None;
         self.recent.clear();
         self.clear_history();
         self.palette = None;

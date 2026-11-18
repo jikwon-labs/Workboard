@@ -461,8 +461,8 @@ impl App {
             return;
         }
         self.section = Section::Chat;
-        self.chat_open = Some(ch);
-        self.thread_open = thread;
+        self.chat.open = Some(ch);
+        self.chat.thread_open = thread;
     }
 
     /// Chat replies for the Replies page: replies by others in threads I
@@ -480,7 +480,7 @@ impl App {
     /// The page shown now, for the back / forward history.
     pub(super) fn nav_spot(&self) -> NavSpot {
         let item = match self.section {
-            Section::Chat => self.chat_open,
+            Section::Chat => self.chat.open,
             Section::Docs => self.doc_open,
             Section::Whiteboards => self.wb_open,
             Section::Forms => self.form_open,
@@ -534,10 +534,10 @@ impl App {
         self.loc = s.loc;
         match s.section {
             Section::Chat => {
-                if self.chat_open != s.item {
-                    self.thread_open = None;
+                if self.chat.open != s.item {
+                    self.chat.thread_open = None;
                 }
-                self.chat_open = s.item;
+                self.chat.open = s.item;
             }
             Section::Docs => self.doc_open = s.item,
             Section::Whiteboards => self.wb_open = s.item,
@@ -549,10 +549,10 @@ impl App {
 
     /// Forgets the back / forward history (another workspace was opened).
     pub(super) fn clear_history(&mut self) {
-        self.nav_back.clear();
-        self.nav_fwd.clear();
-        self.nav_last = None;
-        self.nav_skip = false;
+        self.nav.back.clear();
+        self.nav.fwd.clear();
+        self.nav.last = None;
+        self.nav.skip = false;
     }
 
     // ---------------------------------------------------------------- links

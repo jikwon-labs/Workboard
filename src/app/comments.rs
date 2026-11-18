@@ -142,19 +142,19 @@ impl App {
     /// Each task keeps its own unsent comment: put the box's text away for
     /// the task it was typed in and bring back what was typed for `id`.
     pub(super) fn swap_comment_draft(&mut self, id: u64) {
-        if self.comment_for == Some(id) {
+        if self.comment.for_task == Some(id) {
             return;
         }
-        let text = std::mem::take(&mut self.comment_text);
-        if let Some(prev) = self.comment_for {
+        let text = std::mem::take(&mut self.comment.text);
+        if let Some(prev) = self.comment.for_task {
             if text.trim().is_empty() {
-                self.comment_drafts.remove(&prev);
+                self.comment.drafts.remove(&prev);
             } else {
-                self.comment_drafts.insert(prev, text);
+                self.comment.drafts.insert(prev, text);
             }
         }
-        self.comment_text = self.comment_drafts.remove(&id).unwrap_or_default();
-        self.comment_for = Some(id);
+        self.comment.text = self.comment.drafts.remove(&id).unwrap_or_default();
+        self.comment.for_task = Some(id);
     }
 
     /// The task window's comments and activity lines, oldest first.

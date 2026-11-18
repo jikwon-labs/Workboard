@@ -389,7 +389,7 @@ fn automations_run_on_status_change() {
 fn templates_fill_the_new_task() {
     let mut a = app();
     let list = list_ids(&a)[0];
-    a.pending_template = Some(TaskTemplate {
+    a.pending.template = Some(TaskTemplate {
         id: 9,
         name: "Bug".into(),
         task_name: "Bug report".into(),
@@ -2142,7 +2142,7 @@ fn a_huddle_on_the_server_connects_two_computers() {
 
     // A presses Huddle in #general: a huddle message goes out and A joins
     a.section = Section::Chat;
-    a.chat_open = Some(ch);
+    a.chat.open = Some(ch);
     a.open_call_dialog();
     assert!(a.modal.is_none(), "no browser-call dialog on the server");
     assert_eq!(a.huddle.channel, Some(ch));
@@ -2235,7 +2235,7 @@ fn without_a_server_the_huddle_button_still_opens_a_browser_call() {
     let mut a = app();
     let ch = a.data.channels[0].id;
     a.section = Section::Chat;
-    a.chat_open = Some(ch);
+    a.chat.open = Some(ch);
     a.open_call_dialog();
     assert!(matches!(a.modal, Some(Modal::Call { .. })));
     assert!(a.huddle.channel.is_none());
@@ -2266,9 +2266,9 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
         a.net_tick(None);
         let (ok, files) = a.pending_ready(thread);
         let list = if thread {
-            &a.thread_files
+            &a.chat.thread_files
         } else {
-            &a.chat_files
+            &a.chat.files
         };
         if let Some(e) = list.iter().find_map(|p| p.error.clone()) {
             panic!("attachment refused: {}", e);
@@ -2278,7 +2278,7 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    panic!("attachments never got ready: {:?}", a.chat_files);
+    panic!("attachments never got ready: {:?}", a.chat.files);
 }
 
 #[test]
@@ -2405,22 +2405,22 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     let mut a = app();
     let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).take(2).collect();
     a.section = Section::Chat;
-    a.chat_open = Some(chans[0]);
-    a.drafts.chat_files.swap(a.chat_open, &mut a.chat_files);
+    a.chat.open = Some(chans[0]);
+    a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
     // no server, no folder: the picture is ready once it's in the cache
     assert_eq!(a.media_remote(), super::files::Remote::None);
     a.add_media(false, Some(picture_file("one.png", 50, 40)), None);
     let files = until_ready(&mut a, false);
     assert!(a.files.local(&files[0].file).is_some());
     // another channel has its own (empty) box; coming back brings the picture back
-    a.chat_open = Some(chans[1]);
-    a.drafts.chat_files.swap(a.chat_open, &mut a.chat_files);
-    assert!(a.chat_files.is_empty());
-    a.chat_open = Some(chans[0]);
-    a.drafts.chat_files.swap(a.chat_open, &mut a.chat_files);
-    assert_eq!(a.chat_files.len(), 1);
+    a.chat.open = Some(chans[1]);
+    a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
+    assert!(a.chat.files.is_empty());
+    a.chat.open = Some(chans[0]);
+    a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
+    assert_eq!(a.chat.files.len(), 1);
     assert_eq!(
-        a.chat_files[0].att.as_ref().map(|x| x.file.clone()),
+        a.chat.files[0].att.as_ref().map(|x| x.file.clone()),
         Some(files[0].file.clone())
     );
     // a pasted screenshot arrives as PNG bytes
@@ -2480,14 +2480,14 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     let doc = temp_folder("doc").join("plan.pdf");
     std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
     std::fs::write(&doc, b"%PDF").unwrap();
-    a.chat_files.clear();
+    a.chat.files.clear();
     a.add_media(false, Some(doc), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while a.chat_files[0].error.is_none() && std::time::Instant::now() < end {
+    while a.chat.files[0].error.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert!(a.chat_files[0]
+    assert!(a.chat.files[0]
         .error
         .as_deref()
         .unwrap()
@@ -2588,7 +2588,7 @@ fn one_message_takes_at_most_ten_pictures() {
         .map(|_| a.add_media(false, Some(pic.clone()), None))
         .collect();
     assert_eq!(added.iter().filter(|x| **x).count(), 10);
-    assert_eq!(a.chat_files.len(), super::files::MAX_PER_MESSAGE);
+    assert_eq!(a.chat.files.len(), super::files::MAX_PER_MESSAGE);
     assert!(a
         .toast
         .as_ref()
@@ -2596,9 +2596,9 @@ fn one_message_takes_at_most_ten_pictures() {
     // the thread's box counts on its own
     assert!(a.add_media(true, Some(pic.clone()), None));
     // removing one makes room again
-    a.chat_files.pop();
+    a.chat.files.pop();
     assert!(a.add_media(false, Some(pic), None));
-    assert_eq!(a.chat_files.len(), 10);
+    assert_eq!(a.chat.files.len(), 10);
 }
 
 // ---- task comments and activity (sf-comments)
@@ -2805,14 +2805,14 @@ fn each_task_keeps_its_own_comment_draft() {
     let mut a = app();
     let (t1, t2) = (a.data.tasks[0].id, a.data.tasks[1].id);
     a.apply(Action::Open(t1));
-    a.comment_text = "half a thought".into();
+    a.comment.text = "half a thought".into();
     a.apply(Action::Open(t2));
-    assert!(a.comment_text.is_empty());
-    a.comment_text = "other".into();
+    assert!(a.comment.text.is_empty());
+    a.comment.text = "other".into();
     a.apply(Action::Open(t1));
-    assert_eq!(a.comment_text, "half a thought");
+    assert_eq!(a.comment.text, "half a thought");
     a.apply(Action::Open(t2));
-    assert_eq!(a.comment_text, "other");
+    assert_eq!(a.comment.text, "other");
 }
 
 #[test]
@@ -4218,10 +4218,10 @@ fn closing_a_dm_hides_it_for_me_until_a_new_message() {
         .unwrap()
         .id;
     let n = a.data.channels.len();
-    a.chat_open = Some(dm);
+    a.chat.open = Some(dm);
     a.close_dm(dm);
     assert_eq!(a.data.channels.len(), n, "nothing is deleted");
-    assert_eq!(a.chat_open, None);
+    assert_eq!(a.chat.open, None);
     let listed = |a: &App| a.listed(a.data.channels.iter().find(|c| c.id == dm).unwrap());
     assert!(!listed(&a));
     // only this computer remembers it: it's not in what the team shares
@@ -4242,7 +4242,7 @@ fn closing_a_dm_hides_it_for_me_until_a_new_message() {
     a.close_dm(dm);
     assert!(!listed(&a));
     a.apply_chat(vec![ChatAction::Dm(2)]);
-    assert_eq!(a.chat_open, Some(dm));
+    assert_eq!(a.chat.open, Some(dm));
 }
 
 #[test]
@@ -4270,7 +4270,7 @@ fn two_dms_with_the_same_people_show_as_one() {
     assert!(a.listed(&get(&a, older)));
     assert!(!a.listed(&get(&a, newer)), "the newer empty copy gives way");
     a.apply_chat(vec![ChatAction::Dm(3)]);
-    assert_eq!(a.chat_open, Some(older));
+    assert_eq!(a.chat.open, Some(older));
     // a copy with messages wins over an empty one
     let id = a.data.new_id();
     a.data
@@ -4331,11 +4331,11 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
     );
     a.add_media(false, Some(picture_file("wait.png", 20, 20)), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while a.chat_files[0].att.is_none() && std::time::Instant::now() < end {
+    while a.chat.files[0].att.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    let att = a.chat_files[0].att.clone().unwrap();
+    let att = a.chat.files[0].att.clone().unwrap();
     assert_eq!(
         a.files.state(&att.file),
         Some(super::files::Transfer::Failed(
@@ -4667,16 +4667,16 @@ fn back_returns_to_the_previous_channel() {
     let mut a = app();
     let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).collect();
     a.section = Section::Chat;
-    a.chat_open = Some(chans[0]);
+    a.chat.open = Some(chans[0]);
     a.track_history();
-    a.chat_open = Some(chans[1]);
+    a.chat.open = Some(chans[1]);
     a.track_history();
     a.go_back();
     a.track_history();
-    assert_eq!((a.section, a.chat_open), (Section::Chat, Some(chans[0])));
+    assert_eq!((a.section, a.chat.open), (Section::Chat, Some(chans[0])));
     a.go_forward();
     a.track_history();
-    assert_eq!(a.chat_open, Some(chans[1]));
+    assert_eq!(a.chat.open, Some(chans[1]));
 }
 
 #[test]
@@ -4700,7 +4700,7 @@ fn back_skips_deleted_pages_and_new_workspace_forgets_history() {
     a.track_history();
     assert_eq!(a.loc, Location::List(lists[0]));
     a.clear_history();
-    assert!(a.nav_back.is_empty() && a.nav_fwd.is_empty());
+    assert!(a.nav.back.is_empty() && a.nav.fwd.is_empty());
 }
 
 fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
@@ -4844,7 +4844,7 @@ fn chat_mentions_and_thread_replies_reach_the_inbox() {
     let src = items.iter().find(|i| i.reply).unwrap().src;
     a.open_inbox_src(src);
     assert_eq!(
-        (a.section, a.chat_open, a.thread_open),
+        (a.section, a.chat.open, a.chat.thread_open),
         (Section::Chat, Some(cid), Some(900))
     );
 }
@@ -5961,10 +5961,10 @@ fn joining_a_shared_workspace_forgets_history() {
     b.track_history();
     b.apply(Action::Go(Location::Home));
     b.track_history();
-    assert!(!b.nav_back.is_empty());
+    assert!(!b.nav.back.is_empty());
     b.join_shared(&folder).unwrap();
     assert!(
-        b.nav_back.is_empty() && b.nav_fwd.is_empty(),
+        b.nav.back.is_empty() && b.nav.fwd.is_empty(),
         "Back doesn't lead into the old workspace"
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -6995,13 +6995,13 @@ fn sharing_brings_task_attachments_along_too() {
     let mut a = app();
     a.add_media(false, Some(picture_file("task.png", 16, 16)), None);
     let att = until_ready(&mut a, false).remove(0);
-    a.chat_files.clear();
+    a.chat.files.clear();
     let tid = a.data.tasks[0].id;
     a.data.tasks[0].attachments.push(att.clone());
     // and one in a deleted message in the Trash
     a.add_media(false, Some(picture_file("trash.png", 18, 18)), None);
     let gone = until_ready(&mut a, false).remove(0);
-    a.chat_files.clear();
+    a.chat.files.clear();
     a.data.extra.trash.push(TrashItem {
         id: 1,
         kind: "message".into(),

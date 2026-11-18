@@ -636,7 +636,7 @@ impl App {
             .map(|s| s.name)
             .collect();
         for x in &tp.tasks {
-            self.pending_template = Some(TaskTemplate {
+            self.pending.template = Some(TaskTemplate {
                 description: x.description.clone(),
                 checklist: x.checklist.clone(),
                 tags: x.tags.clone(),
@@ -653,7 +653,7 @@ impl App {
                 open: false,
             });
         }
-        self.pending_template = None;
+        self.pending.template = None;
         self.section = Section::Home;
         self.loc = Location::List(lid);
         self.view = ViewKind::List;
@@ -673,7 +673,7 @@ impl App {
             "" => tp.task_name.clone(),
             n => n.to_string(),
         };
-        self.pending_template = Some(tp.clone());
+        self.pending.template = Some(tp.clone());
         self.apply(Action::Add {
             list,
             name,
@@ -684,7 +684,7 @@ impl App {
             parent: None,
             open: false,
         });
-        self.pending_template = None;
+        self.pending.template = None;
         let id = self.data.tasks.last().map(|t| t.id)?;
         self.section = Section::Home;
         self.loc = Location::List(list);

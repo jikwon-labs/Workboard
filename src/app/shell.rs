@@ -409,7 +409,7 @@ impl App {
 
     pub(super) fn track_history(&mut self) {
         let cur = self.nav_spot();
-        match self.nav_last {
+        match self.nav.last {
             // a page filling in its default item (Chat opening the first
             // channel) is not a move
             Some(last)
@@ -418,39 +418,39 @@ impl App {
                     && last.loc == cur.loc
                     && last.item.is_none() => {}
             Some(last) if last != cur => {
-                if self.nav_skip {
-                    self.nav_skip = false;
+                if self.nav.skip {
+                    self.nav.skip = false;
                 } else {
-                    self.nav_back.push(last);
-                    self.nav_fwd.clear();
+                    self.nav.back.push(last);
+                    self.nav.fwd.clear();
                 }
             }
             _ => {}
         }
-        self.nav_last = Some(cur);
+        self.nav.last = Some(cur);
     }
 
     pub(super) fn go_back(&mut self) {
         // pages deleted since are dropped from the history
-        while let Some(prev) = self.nav_back.pop() {
+        while let Some(prev) = self.nav.back.pop() {
             if !self.nav_spot_exists(&prev) {
                 continue;
             }
-            self.nav_fwd.push(self.nav_spot());
+            self.nav.fwd.push(self.nav_spot());
             self.show_nav_spot(prev);
-            self.nav_skip = true;
+            self.nav.skip = true;
             break;
         }
     }
 
     pub(super) fn go_forward(&mut self) {
-        while let Some(next) = self.nav_fwd.pop() {
+        while let Some(next) = self.nav.fwd.pop() {
             if !self.nav_spot_exists(&next) {
                 continue;
             }
-            self.nav_back.push(self.nav_spot());
+            self.nav.back.push(self.nav_spot());
             self.show_nav_spot(next);
-            self.nav_skip = true;
+            self.nav.skip = true;
             break;
         }
     }
@@ -564,8 +564,8 @@ impl App {
                 let sw = 287.0f32.min(full.width() * 0.25).max(220.0);
                 let sr = Rect::from_center_size(full.center() + vec2(40.0, 0.0), vec2(sw, 28.0));
                 for (i, (glyph, enabled, tip)) in [
-                    ("\u{2190}", !self.nav_back.is_empty(), "Go back"),
-                    ("\u{2192}", !self.nav_fwd.is_empty(), "Go forward"),
+                    ("\u{2190}", !self.nav.back.is_empty(), "Go back"),
+                    ("\u{2192}", !self.nav.fwd.is_empty(), "Go forward"),
                 ]
                 .into_iter()
                 .enumerate()
@@ -1271,7 +1271,7 @@ impl App {
     }
 
     fn matches_search(&self, label: &str) -> bool {
-        match &self.side_search {
+        match &self.side.search {
             Some(q) if !q.trim().is_empty() => {
                 // built-in rows are found by the name shown (Korean) as well as the English one
                 let q = q.trim().to_lowercase();
@@ -1282,7 +1282,8 @@ impl App {
     }
 
     fn side_searching(&self) -> bool {
-        self.side_search
+        self.side
+            .search
             .as_ref()
             .is_some_and(|q| !q.trim().is_empty())
     }
@@ -1409,8 +1410,8 @@ impl App {
                     );
                     let resp = ui.interact(br, ui.id().with(("side_ic", i)), Sense::click());
                     name_it(&resp, tip);
-                    let active = (i == 0 && self.side_search.is_some())
-                        || (i == 1 && self.side_filter.is_some());
+                    let active = (i == 0 && self.side.search.is_some())
+                        || (i == 1 && self.side.filter.is_some());
                     if resp.hovered() || active {
                         ui.painter().rect_filled(br, 6.0, t.row_selected);
                     }
@@ -1427,15 +1428,15 @@ impl App {
                     if resp.on_hover_text(tr(tip)).clicked() {
                         match i {
                             0 => {
-                                self.side_search = if self.side_search.is_some() {
+                                self.side.search = if self.side.search.is_some() {
                                     None
                                 } else {
                                     Some(String::new())
                                 };
-                                self.side_search_focus = self.side_search.is_some();
+                                self.side.search_focus = self.side.search.is_some();
                             }
                             1 => {
-                                self.side_filter = if self.side_filter.is_some() {
+                                self.side.filter = if self.side.filter.is_some() {
                                     None
                                 } else {
                                     Some("")
@@ -1445,18 +1446,18 @@ impl App {
                         }
                     }
                 }
-                if let Some(mut q) = self.side_search.take() {
+                if let Some(mut q) = self.side.search.take() {
                     let r = ui.add(
                         field(&mut q)
                             .hint_text(tr("Search the sidebar"))
                             .desired_width(f32::INFINITY),
                     );
-                    if std::mem::take(&mut self.side_search_focus) {
+                    if std::mem::take(&mut self.side.search_focus) {
                         r.request_focus();
                     }
-                    self.side_search = Some(q);
+                    self.side.search = Some(q);
                 }
-                if let Some(f) = self.side_filter {
+                if let Some(f) = self.side.filter {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         for (key, label) in
@@ -1494,13 +1495,13 @@ impl App {
                                 if on { t.on_primary } else { t.text2 },
                             );
                             if resp.clicked() {
-                                self.side_filter = Some(if on { "" } else { key });
+                                self.side.filter = Some(if on { "" } else { key });
                             }
                         }
                     });
                 }
                 ui.add_space(4.0);
-                let filter = self.side_filter.unwrap_or("");
+                let filter = self.side.filter.unwrap_or("");
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -1968,7 +1969,7 @@ impl App {
                                 }
                                 let unread = if muted { 0 } else { real_unread };
                                 let sel =
-                                    self.section == Section::Chat && self.chat_open == Some(id);
+                                    self.section == Section::Chat && self.chat.open == Some(id);
                                 let sub = if name == "general" {
                                     Some(format!("- {}", ws))
                                 } else {
@@ -2024,8 +2025,8 @@ impl App {
                                     self.modal = Some(Modal::ChannelSettings(id));
                                 } else if r.clicked() {
                                     self.section = Section::Chat;
-                                    self.chat_open = Some(id);
-                                    self.thread_open = None;
+                                    self.chat.open = Some(id);
+                                    self.chat.thread_open = None;
                                 }
                             }
                             if let Some(mut name) = self.new_channel.take() {
@@ -2076,7 +2077,7 @@ impl App {
                                                 ..Default::default()
                                             });
                                             self.section = Section::Chat;
-                                            self.chat_open = Some(id);
+                                            self.chat.open = Some(id);
                                             self.dirty = true;
                                         }
                                         keep = false;
@@ -2136,7 +2137,7 @@ impl App {
                                     continue;
                                 }
                                 let sel =
-                                    self.section == Section::Chat && self.chat_open == Some(id);
+                                    self.section == Section::Chat && self.chat.open == Some(id);
                                 let who = other.clone().or_else(|| self.data.member(me).cloned());
                                 let bg = t.sidebar;
                                 let grey = t.text3;
@@ -2198,8 +2199,8 @@ impl App {
                                     self.modal = Some(Modal::ChannelSettings(id));
                                 } else if r.clicked() {
                                     self.section = Section::Chat;
-                                    self.chat_open = Some(id);
-                                    self.thread_open = None;
+                                    self.chat.open = Some(id);
+                                    self.chat.thread_open = None;
                                 }
                             }
                             if filter.is_empty() && self.add_row(ui, "New message").clicked() {
@@ -3212,7 +3213,7 @@ impl App {
                             id
                         });
                         self.section = Section::Chat;
-                        self.chat_open = Some(id);
+                        self.chat.open = Some(id);
                     }
                     ui.add_space(8.0);
                     // Overview only covers a space or a folder
@@ -3768,8 +3769,8 @@ impl App {
     pub(super) fn list_view(&mut self, ui: &mut Ui) {
         let t = self.t();
         self.list_keys(ui.ctx());
-        self.row_order = self.row_spots.drain(..).map(|s| s.id).collect();
-        self.row_groups.clear();
+        self.row.order = self.row.spots.drain(..).map(|s| s.id).collect();
+        self.row.groups.clear();
         // the tasks by id: each row looks its task up when it's drawn, so
         // the list isn't copied on every frame
         let (groups, shown) = {
@@ -3999,7 +4000,7 @@ impl App {
 
     fn list_group(&mut self, ui: &mut Ui, g: &Group, shown: &HashSet<u64>) {
         let t = self.t();
-        self.row_groups.push(g.clone());
+        self.row.groups.push(g.clone());
         let collapsed = self.collapsed.contains(&g.key);
         let w = ui.available_width();
         let (hr, hresp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
@@ -4158,7 +4159,7 @@ impl App {
         let w = ui.available_width();
         let next = Rect::from_min_size(ui.cursor().min, vec2(w, row_h));
         let busy =
-            self.row_drag == Some(id) || self.row_rename.as_ref().is_some_and(|(r, _)| *r == id);
+            self.row.drag == Some(id) || self.row.rename.as_ref().is_some_and(|(r, _)| *r == id);
         if !ui.is_rect_visible(next) && !busy {
             let Some(task) = self.task(id) else {
                 return;
@@ -4166,11 +4167,11 @@ impl App {
             let (name, parent) = (format!("Task {}", task.name), task.parent);
             let (rect, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::click_and_drag());
             name_it(&resp, &name);
-            self.row_spots.push(super::listview::RowSpot {
+            self.row.spots.push(super::listview::RowSpot {
                 id,
                 parent,
                 rect,
-                group: self.row_groups.len().saturating_sub(1),
+                group: self.row.groups.len().saturating_sub(1),
             });
             return;
         }
@@ -4188,21 +4189,21 @@ impl App {
         name_it(&resp, &format!("Task {}", task.name));
         let id = ui.id().with(("row", task.id));
         let apps = self.data.extra.apps.clone();
-        self.row_spots.push(super::listview::RowSpot {
+        self.row.spots.push(super::listview::RowSpot {
             id: task.id,
             parent: task.parent,
             rect,
-            group: self.row_groups.len().saturating_sub(1),
+            group: self.row.groups.len().saturating_sub(1),
         });
-        if resp.drag_started() && self.row_rename.is_none() {
-            self.row_drag = Some(task.id);
+        if resp.drag_started() && self.row.rename.is_none() {
+            self.row.drag = Some(task.id);
         }
         if self.selected.contains(&task.id) {
             ui.painter().rect_filled(rect, 0.0, t.selected_bg);
-        } else if resp.hovered() || self.row_drag == Some(task.id) {
+        } else if resp.hovered() || self.row.drag == Some(task.id) {
             ui.painter().rect_filled(rect, 0.0, t.hover);
         }
-        if self.row_focus == Some(task.id) {
+        if self.row.focus == Some(task.id) {
             ui.painter().rect_stroke(
                 rect.shrink(1.0),
                 3.0,
@@ -4210,9 +4211,9 @@ impl App {
                 egui::StrokeKind::Inside,
             );
         }
-        let row_hover = (ui.rect_contains_pointer(rect) && self.row_drag.is_none())
+        let row_hover = (ui.rect_contains_pointer(rect) && self.row.drag.is_none())
             || Self::quick_tags_open(ui, task.id);
-        let renaming = self.row_rename.as_ref().is_some_and(|(r, _)| *r == task.id);
+        let renaming = self.row.rename.as_ref().is_some_and(|(r, _)| *r == task.id);
         ui.painter().hline(
             rect.left() + 28.0..=rect.right(),
             rect.bottom() - 0.5,

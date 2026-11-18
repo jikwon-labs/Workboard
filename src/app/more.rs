@@ -792,8 +792,8 @@ impl App {
         self.page_bar(ui, tr("Posts"), |s, ui| {
             let tt = s.t();
             if primary_button(ui, &tt, tr("New Post")).clicked() {
-                s.post_title.clear();
-                s.post_body.clear();
+                s.post.title.clear();
+                s.post.body.clear();
             }
         });
         egui::ScrollArea::vertical()
@@ -828,7 +828,7 @@ impl App {
                                     ui.label(RichText::new(tr("Channel:")).color(t.text2));
                                     let cur = chans
                                         .iter()
-                                        .find(|c| c.0 == self.post_channel)
+                                        .find(|c| c.0 == self.post.channel)
                                         .map(|c| format!("# {}", c.1))
                                         .unwrap_or_else(|| tr("Select Channel").into());
                                     egui::ComboBox::from_id_salt("post_ch")
@@ -836,7 +836,7 @@ impl App {
                                         .show_ui(ui, |ui| {
                                             for (id, n) in &chans {
                                                 ui.selectable_value(
-                                                    &mut self.post_channel,
+                                                    &mut self.post.channel,
                                                     *id,
                                                     format!("# {}", n),
                                                 );
@@ -847,12 +847,12 @@ impl App {
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(tr("Type:")).color(t.text2));
                                     egui::ComboBox::from_id_salt("post_type")
-                                        .selected_text(tr(&self.post_type))
+                                        .selected_text(tr(&self.post.kind))
                                         .show_ui(ui, |ui| {
                                             for k in ["Announcement", "Update", "Idea", "Question"]
                                             {
                                                 ui.selectable_value(
-                                                    &mut self.post_type,
+                                                    &mut self.post.kind,
                                                     k.to_string(),
                                                     tr(k),
                                                 );
@@ -864,7 +864,7 @@ impl App {
                                     ui.label(RichText::new(tr("Title:")).color(t.text2));
                                     // frameless like the body below, so a hint shows where to type
                                     let r = ui.add(
-                                        egui::TextEdit::singleline(&mut self.post_title)
+                                        egui::TextEdit::singleline(&mut self.post.title)
                                             .hint_text(tr("Add a title"))
                                             .frame(false)
                                             .desired_width(f32::INFINITY),
@@ -873,7 +873,7 @@ impl App {
                                 });
                                 ui.separator();
                                 ui.add(
-                                    egui::TextEdit::multiline(&mut self.post_body)
+                                    egui::TextEdit::multiline(&mut self.post.body)
                                         .hint_text(tr("Share an announcement..."))
                                         .frame(false)
                                         .desired_rows(3)
@@ -896,15 +896,15 @@ impl App {
                                         };
                                         if b.on_hover_text(tr(tip)).clicked() {
                                             match g {
-                                                "@" => self.post_body.push('@'),
-                                                "smile" => self.post_body.push_str("\u{1F44D}"),
+                                                "@" => self.post.body.push('@'),
+                                                "smile" => self.post.body.push_str("\u{1F44D}"),
                                                 _ => self.open_quick_add(None),
                                             }
                                         }
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let ready = !self.post_title.trim().is_empty()
-                                            && self.post_channel != 0;
+                                        let ready = !self.post.title.trim().is_empty()
+                                            && self.post.channel != 0;
                                         let b =
                                             Tint(
                                                 egui::Button::new(RichText::new(tr("Post")).color(
@@ -916,7 +916,7 @@ impl App {
                                             );
                                         if ui
                                             .add(b)
-                                            .on_hover_text(if self.post_channel == 0 {
+                                            .on_hover_text(if self.post.channel == 0 {
                                                 tr("Select a channel first")
                                             } else {
                                                 ""
@@ -931,20 +931,20 @@ impl App {
                                                 imported: None,
                                                 mentions: self
                                                     .data
-                                                    .mentions_in(self.post_body.trim()),
+                                                    .mentions_in(self.post.body.trim()),
                                                 attachments: vec![],
                                                 id,
                                                 author: me,
-                                                text: self.post_body.trim().to_string(),
+                                                text: self.post.body.trim().to_string(),
                                                 ts: now_ts(),
                                                 reactions: vec![],
                                                 replies: vec![],
                                                 saved: false,
                                                 task: None,
                                                 post_title: Some(
-                                                    self.post_title.trim().to_string(),
+                                                    self.post.title.trim().to_string(),
                                                 ),
-                                                post_type: self.post_type.clone(),
+                                                post_type: self.post.kind.clone(),
                                                 pinned: false,
                                                 call: None,
                                             };
@@ -952,13 +952,13 @@ impl App {
                                                 .data
                                                 .channels
                                                 .iter_mut()
-                                                .find(|c| c.id == self.post_channel)
+                                                .find(|c| c.id == self.post.channel)
                                             {
                                                 c.messages.push(m);
                                                 c.last_read = now_ts();
                                             }
-                                            self.post_title.clear();
-                                            self.post_body.clear();
+                                            self.post.title.clear();
+                                            self.post.body.clear();
                                             self.dirty = true;
                                         }
                                     });
@@ -975,13 +975,13 @@ impl App {
                     ui.add_space(pad);
                     let fol = Tint(
                         egui::Button::new(RichText::new(tr("Channels I'm Following")).color(
-                            if self.post_following {
+                            if self.post.following {
                                 t.accent_text
                             } else {
                                 t.text2
                             },
                         ))
-                        .fill(if self.post_following {
+                        .fill(if self.post.following {
                             t.accent_bg
                         } else {
                             t.bg
@@ -989,7 +989,7 @@ impl App {
                         .corner_radius(13),
                     );
                     if ui.add(fol).clicked() {
-                        self.post_following = !self.post_following;
+                        self.post.following = !self.post.following;
                     }
                     let chans: Vec<(u64, String)> = self
                         .data
@@ -999,28 +999,29 @@ impl App {
                         .map(|c| (c.id, c.name.clone()))
                         .collect();
                     let cl = self
-                        .post_f_channel
+                        .post
+                        .f_channel
                         .and_then(|id| chans.iter().find(|c| c.0 == id))
                         .map(|c| format!("#  {}", c.1))
                         .unwrap_or_else(|| tr("#  Channel").into());
                     let cr = ui.add(egui::Button::new(cl).corner_radius(13));
                     popup(ui, &cr, ui.id().with("pf_ch"), 180.0, |ui| {
                         if ui
-                            .selectable_label(self.post_f_channel.is_none(), tr("All channels"))
+                            .selectable_label(self.post.f_channel.is_none(), tr("All channels"))
                             .clicked()
                         {
-                            self.post_f_channel = None;
+                            self.post.f_channel = None;
                             close_popup(ui);
                         }
                         for (id, n) in &chans {
                             if ui
                                 .selectable_label(
-                                    self.post_f_channel == Some(*id),
+                                    self.post.f_channel == Some(*id),
                                     format!("# {}", n),
                                 )
                                 .clicked()
                             {
-                                self.post_f_channel = Some(*id);
+                                self.post.f_channel = Some(*id);
                                 close_popup(ui);
                             }
                         }
@@ -1032,49 +1033,51 @@ impl App {
                         .map(|m| (m.id, m.name.clone()))
                         .collect();
                     let al = self
-                        .post_f_author
+                        .post
+                        .f_author
                         .and_then(|id| members.iter().find(|m| m.0 == id))
                         .map(|m| format!("@  {}", m.1))
                         .unwrap_or_else(|| tr("@  Author").into());
                     let ar = ui.add(egui::Button::new(al).corner_radius(13));
                     popup(ui, &ar, ui.id().with("pf_au"), 180.0, |ui| {
                         if ui
-                            .selectable_label(self.post_f_author.is_none(), tr("Anyone"))
+                            .selectable_label(self.post.f_author.is_none(), tr("Anyone"))
                             .clicked()
                         {
-                            self.post_f_author = None;
+                            self.post.f_author = None;
                             close_popup(ui);
                         }
                         for (id, n) in &members {
                             if ui
-                                .selectable_label(self.post_f_author == Some(*id), n)
+                                .selectable_label(self.post.f_author == Some(*id), n)
                                 .clicked()
                             {
-                                self.post_f_author = Some(*id);
+                                self.post.f_author = Some(*id);
                                 close_popup(ui);
                             }
                         }
                     });
                     let tl = self
-                        .post_f_type
+                        .post
+                        .f_type
                         .clone()
                         .map(|t| tr(&t).to_string())
                         .unwrap_or_else(|| tr("Type").into());
                     let tyr = icon_button(ui, &t, "shapes", &tl, "Post type filter", true);
                     popup(ui, &tyr, ui.id().with("pf_ty"), 180.0, |ui| {
                         if ui
-                            .selectable_label(self.post_f_type.is_none(), tr("Any type"))
+                            .selectable_label(self.post.f_type.is_none(), tr("Any type"))
                             .clicked()
                         {
-                            self.post_f_type = None;
+                            self.post.f_type = None;
                             close_popup(ui);
                         }
                         for k in ["Announcement", "Update", "Idea", "Question"] {
                             if ui
-                                .selectable_label(self.post_f_type.as_deref() == Some(k), tr(k))
+                                .selectable_label(self.post.f_type.as_deref() == Some(k), tr(k))
                                 .clicked()
                             {
-                                self.post_f_type = Some(k.to_string());
+                                self.post.f_type = Some(k.to_string());
                                 close_popup(ui);
                             }
                         }
@@ -1082,14 +1085,14 @@ impl App {
                     ui.add_space((cw - 520.0).max(10.0));
                     ui.label(RichText::new(tr("Sort:")).color(t.text2));
                     egui::ComboBox::from_id_salt("post_sort")
-                        .selected_text(if self.post_sort_old {
+                        .selected_text(if self.post.sort_old {
                             tr("Oldest")
                         } else {
                             tr("Newest")
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.post_sort_old, false, tr("Newest"));
-                            ui.selectable_value(&mut self.post_sort_old, true, tr("Oldest"));
+                            ui.selectable_value(&mut self.post.sort_old, false, tr("Newest"));
+                            ui.selectable_value(&mut self.post.sort_old, true, tr("Oldest"));
                         });
                 });
                 ui.add_space(12.0);
@@ -1110,11 +1113,12 @@ impl App {
                     .map(|c| c.id)
                     .collect();
                 posts.retain(|p| {
-                    (!self.post_following || following.contains(&p.1))
-                        && self.post_f_channel.map(|c| c == p.1).unwrap_or(true)
-                        && self.post_f_author.map(|a| a == p.2.author).unwrap_or(true)
+                    (!self.post.following || following.contains(&p.1))
+                        && self.post.f_channel.map(|c| c == p.1).unwrap_or(true)
+                        && self.post.f_author.map(|a| a == p.2.author).unwrap_or(true)
                         && self
-                            .post_f_type
+                            .post
+                            .f_type
                             .as_ref()
                             .map(|ty| {
                                 (if p.2.post_type.is_empty() {
@@ -1126,7 +1130,7 @@ impl App {
                             .unwrap_or(true)
                 });
                 posts.sort_by_key(|p| p.2.ts);
-                if !self.post_sort_old {
+                if !self.post.sort_old {
                     posts.reverse();
                 }
                 if posts.is_empty() {
@@ -1182,7 +1186,7 @@ impl App {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         if ui.link(tr("Open in channel")).clicked() {
                                             self.section = Section::Chat;
-                                            self.chat_open = Some(cid);
+                                            self.chat.open = Some(cid);
                                         }
                                     });
                                 });
@@ -1910,9 +1914,9 @@ impl App {
                             Ok(a) => {
                                 let name = if a.name.trim().is_empty() { format!("{} submission", f.name) } else { a.name };
                                 self.actions.push(Action::Add { list: f.list_id, name, status: None, priority: a.priority, assignees: a.assignees, due: a.due, parent: None, open: false });
-                                self.pending_description = Some(a.description.trim().to_string());
+                                self.pending.description = Some(a.description.trim().to_string());
                                 // tells the form's owner (notify.rs); shared history, so in English
-                                self.pending_log = Some(format!("submitted the form {}", f.name));
+                                self.pending.log = Some(format!("submitted the form {}", f.name));
                                 self.form_fill.clear();
                                 self.sweep.form_error = None;
                                 self.toast(trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)));
@@ -3725,8 +3729,8 @@ impl App {
             }
             Hit::Chat(id) => {
                 self.section = Section::Chat;
-                self.chat_open = Some(id);
-                self.thread_open = None;
+                self.chat.open = Some(id);
+                self.chat.thread_open = None;
             }
             Hit::Whiteboard(id) => {
                 self.wb_open = Some(id);

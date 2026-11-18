@@ -719,8 +719,8 @@ impl App {
             creator: me,
         });
         self.section = Section::Chat;
-        self.chat_open = Some(id);
-        self.thread_open = None;
+        self.chat.open = Some(id);
+        self.chat.thread_open = None;
         self.dirty = true;
         id
     }
@@ -1198,10 +1198,10 @@ impl App {
         if ui.button(tr("Rename")).clicked() {
             if self.view == ViewKind::List
                 && self.open_task.is_none()
-                && self.row_order.contains(&tid)
+                && self.row.order.contains(&tid)
             {
                 // a row on screen is renamed in place
-                self.row_rename = Some((tid, task.name.clone()));
+                self.row.rename = Some((tid, task.name.clone()));
             } else {
                 self.actions.push(Action::StartRename(Target::Task(tid)));
             }

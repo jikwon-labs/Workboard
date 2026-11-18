@@ -143,8 +143,8 @@ impl App {
                         deleted: now_ts(),
                         payload: serde_json::to_string(&gone).unwrap_or_default(),
                     });
-                    if self.chat_open == Some(cid) {
-                        self.chat_open = None;
+                    if self.chat.open == Some(cid) {
+                        self.chat.open = None;
                     }
                     self.dirty = true;
                     close = true;

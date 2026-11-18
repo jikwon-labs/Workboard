@@ -481,7 +481,7 @@ impl App {
     pub(super) fn target_visible(&self, target: &str) -> bool {
         let mut p = target.split(':');
         match (p.next(), p.next().and_then(|x| x.parse::<u64>().ok())) {
-            (Some("chat"), Some(ch)) => self.section == Section::Chat && self.chat_open == Some(ch),
+            (Some("chat"), Some(ch)) => self.section == Section::Chat && self.chat.open == Some(ch),
             (Some("task"), Some(id)) => self.open_task == Some(id),
             _ => false,
         }

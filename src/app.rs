@@ -436,19 +436,22 @@ pub struct App {
     status_edit: Option<(u64, Vec<Option<String>>, Vec<Option<String>>)>,
     palette: Option<String>,
     quick_add: Option<QuickAdd>,
-    comment_text: String,
-    /// People picked from the @mention list while writing a comment, so a
-    /// name two people share means the one picked.
-    comment_picked: Vec<u64>,
-    /// People picked from the @mention list in the channel's message box
-    /// (kept with its draft), so a name two people share means the one
-    /// picked.
-    chat_picked: Vec<u64>,
-    /// The same for the open thread's reply box (kept with its draft).
-    thread_picked: Vec<u64>,
-    /// How many messages the open conversation draws after "Show earlier
-    /// messages" (by conversation; `CHAT_PAGE` for any other).
-    chat_window: Option<(u64, usize)>,
+    /// The open channel and thread: what is being written, edited or deleted.
+    chat: ChatUi,
+    /// The Posts page: the post being written and the filters.
+    post: PostsUi,
+    /// List rows: keyboard focus, the order drawn, dragging and renaming.
+    row: RowUi,
+    /// Back and forward through the places visited.
+    nav: NavHistory,
+    /// What the next task created gets.
+    pending: PendingTask,
+    /// The comment being written in the task window.
+    comment: CommentUi,
+    /// The Docs hub's sort, filters and search.
+    docs: DocsUi,
+    /// The sidebar's search and filter.
+    side: SideUi,
     sub_text: String,
     check_text: String,
     tag_text: String,
@@ -477,16 +480,10 @@ pub struct App {
     doc_open: Option<u64>,
     planner_week: NaiveDate,
     sheet_week: NaiveDate,
-    chat_open: Option<u64>,
-    nav_last: Option<nav::NavSpot>,
-    nav_back: Vec<nav::NavSpot>,
-    nav_fwd: Vec<nav::NavSpot>,
-    nav_skip: bool,
     assignee_filter: Option<u64>,
     show_search: bool,
     // focus the toolbar search box once, on the frame it opens
     search_focus: bool,
-    side_search_focus: bool,
     subtasks_open: bool,
     modal: Option<Modal>,
     /// The sign-in screen, filling the window in place of the app (see login.rs).
@@ -504,12 +501,6 @@ pub struct App {
     ws_places: HashMap<String, &'static str>,
     create_text: String,
     new_message_open: bool,
-    pending_template: Option<TaskTemplate>,
-    pending_description: Option<String>,
-    /// A history line for the next task added (a form answer says which form).
-    pending_log: Option<String>,
-    /// Tags for the next task created from the Create Task window.
-    pending_tags: Vec<String>,
     wb_open: Option<u64>,
     wb_tool: u8,
     wb_color: [u8; 3],
@@ -519,15 +510,9 @@ pub struct App {
     dash_open: Option<u64>,
     meeting_open: Option<u64>,
     goal_open: Option<u64>,
-    post_channel: u64,
-    post_title: String,
-    post_body: String,
     ws_file: String,
-    side_filter: Option<&'static str>,
-    side_search: Option<String>,
     sidebar_collapsed: bool,
     force_menu: Option<String>,
-    post_type: String,
     inbox_tab: u8,
     channel_find: Option<String>,
     channel_panel: u8,
@@ -538,33 +523,12 @@ pub struct App {
     team_open: Option<u64>,
     sheet_entries: bool,
     composer_mode: u8,
-    post_sort_old: bool,
     my_tasks_open: bool,
-    docs_sort: u8,
-    docs_mine: bool,
     sheet_force: bool,
-    post_following: bool,
-    post_f_channel: Option<u64>,
-    post_f_author: Option<u64>,
-    post_f_type: Option<String>,
     inbox_filter: u8,
-    /// The message being written in the open channel (`chat_open`).
-    chat_text: String,
-    thread_open: Option<u64>,
-    /// The reply being written in the open thread (`thread_open`).
-    thread_text: String,
-    /// The message being changed in place: (channel, message, new text).
-    chat_edit: Option<(u64, u64, String)>,
-    /// A message waiting for a second click on "Delete message".
-    chat_delete: Option<u64>,
-    /// A channel marked unread while open: it stays unread until left.
-    chat_keep_unread: Option<u64>,
     /// Unsent messages and replies of the channels and threads not on
     /// screen, by channel / message id (kept until the app quits).
     drafts: Drafts,
-    /// Pictures and videos waiting in the channel and thread message boxes.
-    chat_files: Vec<files::Pending>,
-    thread_files: Vec<files::Pending>,
     files: files::Files,
     /// A picture or video opened large.
     viewer: Option<files::Viewer>,
@@ -595,30 +559,12 @@ pub struct App {
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
-    /// Unsent comment text of tasks other than the one `comment_text` is for.
-    comment_drafts: HashMap<u64, String>,
-    /// The task `comment_text` belongs to.
-    comment_for: Option<u64>,
-    /// The Docs hub's own search box and tag filter (not the task list's).
-    docs_search: String,
-    docs_tag: Option<String>,
     /// View settings per location (see listview.rs), and the location they
     /// were last brought in for with what was showing then.
     view_prefs: HashMap<String, listview::ViewPrefs>,
     view_prefs_at: Option<(String, listview::ViewPrefs)>,
     /// The last row clicked into the selection (Shift-click selects from it).
     select_anchor: Option<u64>,
-    /// The row the Up / Down keys highlight (Enter opens it).
-    row_focus: Option<u64>,
-    /// Rows of the List in the order drawn last frame.
-    row_order: Vec<u64>,
-    /// Rows and groups drawn this frame (for dropping a dragged row).
-    row_spots: Vec<listview::RowSpot>,
-    row_groups: Vec<Group>,
-    /// The List row being dragged to a new place.
-    row_drag: Option<u64>,
-    /// A List row being renamed in place: (task, new name).
-    row_rename: Option<(u64, String)>,
     /// The inline new-subtask field: (parent, name).
     sub_adding: Option<(u64, String)>,
     /// Trash entries of the tasks just deleted, for the Undo bar.
@@ -640,6 +586,116 @@ pub struct App {
     reminder_about: (Option<u64>, Option<(u64, u64)>),
     /// A workboard:// link clicked in a message, opened after the pass.
     link_pending: Option<String>,
+}
+
+/// The open channel and thread: what is being written, edited or deleted.
+#[derive(Default)]
+struct ChatUi {
+    open: Option<u64>,
+    /// The message being written in the open channel (`open`).
+    text: String,
+    /// The message being changed in place: (channel, message, new text).
+    edit: Option<(u64, u64, String)>,
+    /// A message waiting for a second click on "Delete message".
+    delete: Option<u64>,
+    /// A channel marked unread while open: it stays unread until left.
+    keep_unread: Option<u64>,
+    /// Pictures and videos waiting in the channel and thread message boxes.
+    files: Vec<files::Pending>,
+    /// People picked from the @mention list in the channel's message box
+    /// (kept with its draft), so a name two people share means the one
+    /// picked.
+    picked: Vec<u64>,
+    /// How many messages the open conversation draws after "Show earlier
+    /// messages" (by conversation; `CHAT_PAGE` for any other).
+    window: Option<(u64, usize)>,
+    thread_open: Option<u64>,
+    /// The reply being written in the open thread (`thread_open`).
+    thread_text: String,
+    thread_files: Vec<files::Pending>,
+    /// The same for the open thread's reply box (kept with its draft).
+    thread_picked: Vec<u64>,
+}
+
+/// The Posts page: the post being written and the filters.
+#[derive(Default)]
+struct PostsUi {
+    channel: u64,
+    title: String,
+    body: String,
+    kind: String,
+    sort_old: bool,
+    following: bool,
+    f_channel: Option<u64>,
+    f_author: Option<u64>,
+    f_type: Option<String>,
+}
+
+/// List rows: keyboard focus, the order drawn, dragging and renaming.
+#[derive(Default)]
+struct RowUi {
+    /// The row the Up / Down keys highlight (Enter opens it).
+    focus: Option<u64>,
+    /// Rows of the List in the order drawn last frame.
+    order: Vec<u64>,
+    /// Rows and groups drawn this frame (for dropping a dragged row).
+    spots: Vec<listview::RowSpot>,
+    groups: Vec<Group>,
+    /// The List row being dragged to a new place.
+    drag: Option<u64>,
+    /// A List row being renamed in place: (task, new name).
+    rename: Option<(u64, String)>,
+}
+
+/// Back and forward through the places visited.
+#[derive(Default)]
+struct NavHistory {
+    last: Option<nav::NavSpot>,
+    back: Vec<nav::NavSpot>,
+    fwd: Vec<nav::NavSpot>,
+    skip: bool,
+}
+
+/// What the next task created gets.
+#[derive(Default)]
+struct PendingTask {
+    template: Option<TaskTemplate>,
+    description: Option<String>,
+    /// A history line for the next task added (a form answer says which form).
+    log: Option<String>,
+    /// Tags for the next task created from the Create Task window.
+    tags: Vec<String>,
+}
+
+/// The comment being written in the task window.
+#[derive(Default)]
+struct CommentUi {
+    text: String,
+    /// People picked from the @mention list while writing a comment, so a
+    /// name two people share means the one picked.
+    picked: Vec<u64>,
+    /// Unsent comment text of tasks other than the one `text` is for.
+    drafts: HashMap<u64, String>,
+    /// The task `text` belongs to.
+    for_task: Option<u64>,
+}
+
+/// The Docs hub's sort, filters and search.
+#[derive(Default)]
+struct DocsUi {
+    sort: u8,
+    mine: bool,
+    /// The Docs hub's own search box and tag filter (not the task list's).
+    search: String,
+    tag: Option<String>,
+}
+
+/// The sidebar's search and filter.
+#[derive(Default)]
+struct SideUi {
+    search_focus: bool,
+    filter: Option<&'static str>,
+    search: Option<String>,
 }
 
 impl App {
@@ -796,11 +852,17 @@ impl App {
             status_edit: None,
             palette: None,
             quick_add: None,
-            comment_text: String::new(),
-            comment_picked: vec![],
-            chat_picked: vec![],
-            thread_picked: vec![],
-            chat_window: None,
+            chat: Default::default(),
+            post: PostsUi {
+                kind: "Announcement".into(),
+                ..Default::default()
+            },
+            row: Default::default(),
+            nav: Default::default(),
+            pending: Default::default(),
+            comment: Default::default(),
+            docs: Default::default(),
+            side: Default::default(),
             sub_text: String::new(),
             check_text: String::new(),
             tag_text: String::new(),
@@ -836,15 +898,9 @@ impl App {
             doc_open: None,
             planner_week: t - Duration::days(t.weekday().num_days_from_sunday() as i64),
             sheet_week: t - Duration::days(t.weekday().num_days_from_sunday() as i64),
-            chat_open: None,
-            nav_last: None,
-            nav_back: vec![],
-            nav_fwd: vec![],
-            nav_skip: false,
             assignee_filter: None,
             show_search: false,
             search_focus: false,
-            side_search_focus: false,
             subtasks_open: false,
             modal: start_modal,
             login: start_login,
@@ -863,10 +919,6 @@ impl App {
             ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
-            pending_template: None,
-            pending_description: None,
-            pending_log: None,
-            pending_tags: vec![],
             wb_open: None,
             wb_tool: 0,
             wb_color: [32, 32, 32],
@@ -876,15 +928,9 @@ impl App {
             dash_open: None,
             meeting_open: None,
             goal_open: None,
-            post_channel: 0,
-            post_title: String::new(),
-            post_body: String::new(),
             ws_file,
-            side_filter: None,
-            side_search: None,
             sidebar_collapsed: false,
             force_menu: arg("--menu"),
-            post_type: "Announcement".into(),
             inbox_tab: 0,
             channel_find: None,
             channel_panel: 0,
@@ -894,25 +940,10 @@ impl App {
             team_open: None,
             sheet_entries: false,
             composer_mode: 0,
-            post_sort_old: false,
             my_tasks_open: true,
-            docs_sort: 0,
-            docs_mine: false,
             sheet_force: false,
-            post_following: false,
-            post_f_channel: None,
-            post_f_author: None,
-            post_f_type: None,
             inbox_filter: 0,
-            chat_text: String::new(),
-            thread_open: None,
-            thread_text: String::new(),
-            chat_edit: None,
-            chat_delete: None,
-            chat_keep_unread: None,
             drafts: Drafts::default(),
-            chat_files: vec![],
-            thread_files: vec![],
             files: files::Files::new(if persist {
                 Data::dir().join("files")
             } else {
@@ -942,10 +973,6 @@ impl App {
             doc_preview: false,
             settings_tab: 0,
             settings_state: None,
-            comment_drafts: HashMap::new(),
-            comment_for: None,
-            docs_search: String::new(),
-            docs_tag: None,
             view_prefs: if persist {
                 listview::load_prefs()
             } else {
@@ -953,12 +980,6 @@ impl App {
             },
             view_prefs_at: None,
             select_anchor: None,
-            row_focus: None,
-            row_order: vec![],
-            row_spots: vec![],
-            row_groups: vec![],
-            row_drag: None,
-            row_rename: None,
             sub_adding: None,
             undo_trash: None,
             confirm_bulk_delete: false,
@@ -1510,7 +1531,7 @@ impl App {
             return false;
         };
         if let Some(tag) = Self::group_tag(g).filter(|x| !x.is_empty()) {
-            self.pending_tags.push(tag.to_string());
+            self.pending.tags.push(tag.to_string());
         }
         let mut assignees = vec![];
         if let Some(a) = g.assignee {
@@ -1868,7 +1889,7 @@ impl App {
                     linked: vec![],
                     attachments: vec![],
                 });
-                if let Some(tp) = self.pending_template.take() {
+                if let Some(tp) = self.pending.template.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         t.description = tp.description.clone();
                         t.tags = tp.tags.clone();
@@ -1883,17 +1904,17 @@ impl App {
                             .collect();
                     }
                 }
-                if let Some(desc) = self.pending_description.take() {
+                if let Some(desc) = self.pending.description.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         t.description = desc;
                     }
                 }
-                if let Some(line) = self.pending_log.take() {
+                if let Some(line) = self.pending.log.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         Self::log(t, me, line);
                     }
                 }
-                let tags = std::mem::take(&mut self.pending_tags);
+                let tags = std::mem::take(&mut self.pending.tags);
                 if !tags.is_empty() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         for tag in tags {
@@ -5205,9 +5226,9 @@ impl App {
             if create && !qa.name.trim().is_empty() {
                 let desc = qa.description.trim().to_string();
                 if !desc.is_empty() {
-                    self.pending_description = Some(desc);
+                    self.pending.description = Some(desc);
                 }
-                self.pending_tags = std::mem::take(&mut qa.tags);
+                self.pending.tags = std::mem::take(&mut qa.tags);
                 self.actions.push(Action::Add {
                     list: qa.list,
                     name: qa.name.clone(),
@@ -5234,22 +5255,22 @@ impl App {
 
     fn ui_frame_inner(&mut self, ctx: &egui::Context) {
         self.menu_was_open = any_menu_was_open(ctx);
-        self.drafts.chat.swap(self.chat_open, &mut self.chat_text);
+        self.drafts.chat.swap(self.chat.open, &mut self.chat.text);
         self.drafts
             .thread
-            .swap(self.thread_open, &mut self.thread_text);
+            .swap(self.chat.thread_open, &mut self.chat.thread_text);
         self.drafts
             .chat_files
-            .swap(self.chat_open, &mut self.chat_files);
+            .swap(self.chat.open, &mut self.chat.files);
         self.drafts
             .thread_files
-            .swap(self.thread_open, &mut self.thread_files);
+            .swap(self.chat.thread_open, &mut self.chat.thread_files);
         self.drafts
             .chat_picked
-            .swap(self.chat_open, &mut self.chat_picked);
+            .swap(self.chat.open, &mut self.chat.picked);
         self.drafts
             .thread_picked
-            .swap(self.thread_open, &mut self.thread_picked);
+            .swap(self.chat.thread_open, &mut self.chat.thread_picked);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
         self.sync_view_prefs();

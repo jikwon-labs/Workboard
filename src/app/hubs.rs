@@ -651,7 +651,7 @@ impl App {
                                         ui,
                                         &t,
                                         "filter",
-                                        if self.docs_mine {
+                                        if self.docs.mine {
                                             tr("Filters \u{2022} 1")
                                         } else {
                                             tr("Filters")
@@ -660,12 +660,12 @@ impl App {
                                         true,
                                     );
                                     popup(ui, &r, ui.id().with("docs_filters"), 200.0, |ui| {
-                                        check(ui, &mut self.docs_mine, tr("Only Docs I created"));
+                                        check(ui, &mut self.docs.mine, tr("Only Docs I created"));
                                     });
                                     let sort_text = trf!(
                                         "Sort: {}",
                                         tr(["Date updated", "Name", "Date created"]
-                                            [self.docs_sort as usize % 3])
+                                            [self.docs.sort as usize % 3])
                                     );
                                     let sr =
                                         icon_button(ui, &t, "sort", &sort_text, "Docs sort", true);
@@ -675,15 +675,15 @@ impl App {
                                             .enumerate()
                                         {
                                             if ui
-                                                .selectable_label(self.docs_sort == i as u8, tr(l))
+                                                .selectable_label(self.docs.sort == i as u8, tr(l))
                                                 .clicked()
                                             {
-                                                self.docs_sort = i as u8;
+                                                self.docs.sort = i as u8;
                                                 close_popup(ui);
                                             }
                                         }
                                     });
-                                    let tag_label = match &self.docs_tag {
+                                    let tag_label = match &self.docs.tag {
                                         Some(g) => trf!("Tags: {}", g),
                                         None => tr("Tags").to_string(),
                                     };
@@ -707,30 +707,30 @@ impl App {
                                         }
                                         if ui
                                             .selectable_label(
-                                                self.docs_tag.is_none(),
+                                                self.docs.tag.is_none(),
                                                 tr("Any tag"),
                                             )
                                             .clicked()
                                         {
-                                            self.docs_tag = None;
+                                            self.docs.tag = None;
                                             close_popup(ui);
                                         }
                                         for g in all_tags {
                                             if ui
                                                 .selectable_label(
-                                                    self.docs_tag.as_ref() == Some(&g),
+                                                    self.docs.tag.as_ref() == Some(&g),
                                                     RichText::new(&g).color(tag_color(&g)),
                                                 )
                                                 .clicked()
                                             {
-                                                self.docs_tag = Some(g);
+                                                self.docs.tag = Some(g);
                                                 close_popup(ui);
                                             }
                                         }
                                     });
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         let r = ui.add(
-                                            field(&mut self.docs_search)
+                                            field(&mut self.docs.search)
                                                 .hint_text(tr("Search"))
                                                 .desired_width(160.0),
                                         );
@@ -761,11 +761,11 @@ impl App {
                                     hr.bottom(),
                                     Stroke::new(1.0_f32, t.border),
                                 );
-                                let q = self.docs_search.to_lowercase();
-                                let tag = self.docs_tag.clone();
+                                let q = self.docs.search.to_lowercase();
+                                let tag = self.docs.tag.clone();
                                 let filter = self.hub_filter;
-                                let mine_only = self.docs_mine;
-                                let sort = self.docs_sort;
+                                let mine_only = self.docs.mine;
+                                let sort = self.docs.sort;
                                 let mut docs: Vec<Doc> = self
                                     .data
                                     .docs

@@ -108,7 +108,7 @@ fn a_direct_message_is_announced_once_and_opens_the_conversation() {
     let target = n.target.clone();
     a.open_target(&target);
     assert_eq!(a.section, Section::Chat);
-    assert_eq!(a.chat_open, Some(dm));
+    assert_eq!(a.chat.open, Some(dm));
 }
 
 #[test]
@@ -469,7 +469,7 @@ fn a_form_answer_is_logged_and_tells_the_forms_owner() {
         owner: 1,
     });
     // the submit button leaves this line on the new task
-    a.pending_log = Some("submitted the form Bug report".into());
+    a.pending.log = Some("submitted the form Bug report".into());
     a.apply(Action::Add {
         list,
         name: "Crash on start".into(),

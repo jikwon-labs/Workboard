@@ -545,7 +545,7 @@ fn click_channel_and_send_message() {
     let mut h = Ui1::new();
     h.click("general");
     assert_eq!(h.app.section, Section::Chat);
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     let n = h
         .app
         .data
@@ -569,7 +569,7 @@ fn click_channel_and_send_message() {
 fn a_long_channel_shows_its_newest_messages_and_earlier_ones_on_asking() {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     let ch = h
         .app
         .data
@@ -619,7 +619,7 @@ fn a_long_channel_shows_its_newest_messages_and_earlier_ones_on_asking() {
     assert!(!h.has(&format!("Show {} earlier messages", rest)));
 
     // another conversation starts again from its newest messages
-    h.app.chat_window = Some((cid + 1, 10));
+    h.app.chat.window = Some((cid + 1, 10));
     h.settle();
     assert!(
         h.has(&format!("Show {} earlier messages", chat::CHAT_PAGE)),
@@ -803,7 +803,7 @@ fn a_long_list_draws_the_rows_in_view_and_the_rest_on_scrolling() {
         "but its controls aren't drawn"
     );
     assert!(
-        h.app.row_order.len() > 300,
+        h.app.row.order.len() > 300,
         "and it keeps its place for the arrow keys"
     );
     // down to it with the mouse wheel
@@ -1114,7 +1114,7 @@ fn click_message_replies_opens_thread() {
     let mut h = Ui1::new();
     h.click("general");
     h.click("1 reply");
-    assert!(h.app.thread_open.is_some(), "the thread panel opens");
+    assert!(h.app.chat.thread_open.is_some(), "the thread panel opens");
 }
 
 #[test]
@@ -1142,9 +1142,9 @@ fn click_every_rail_more_app() {
 fn click_thread_reply_and_hover_reaction() {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     h.click("1 reply");
-    let mid = h.app.thread_open.unwrap();
+    let mid = h.app.chat.thread_open.unwrap();
     h.click("Reply composer");
     h.type_text("on it");
     h.key(egui::Key::Enter);
@@ -1184,7 +1184,7 @@ fn click_huddle_starts_a_call_in_general() {
     h.click("Start call");
     assert!(h.app.modal.is_none());
     assert_eq!(h.app.section, Section::Chat);
-    let ch = h.app.chat_open.unwrap();
+    let ch = h.app.chat.open.unwrap();
     let m = h
         .app
         .data
@@ -1924,7 +1924,7 @@ fn calls_say_why_there_is_no_huddle_when_the_server_is_down_and_when_nobody_else
         .unwrap()
         .id;
     h.app.section = Section::Chat;
-    h.app.chat_open = Some(general);
+    h.app.chat.open = Some(general);
     // a team in #general, no server: the browser call, no extra words
     h.app.open_call_dialog();
     h.settle();
@@ -1952,7 +1952,7 @@ fn calls_say_why_there_is_no_huddle_when_the_server_is_down_and_when_nobody_else
         c.members.retain(|id| *id == me);
     }
     solo.app.section = Section::Chat;
-    solo.app.chat_open = Some(general);
+    solo.app.chat.open = Some(general);
     solo.app.open_call_dialog();
     solo.settle();
     assert!(solo.has(alone_note));
@@ -2012,7 +2012,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
         call: Some(format!("{}{}", huddle::HUDDLE_PREFIX, ch)),
     });
     h.app.section = Section::Chat;
-    h.app.chat_open = Some(ch);
+    h.app.chat.open = Some(ch);
     h.settle();
     h.click("Join huddle");
     assert!(
@@ -2113,12 +2113,12 @@ fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
     assert!(h.has("Rail Invite"));
     h.app.data.channels.clear();
     h.app.section = Section::Chat;
-    h.app.chat_open = None;
+    h.app.chat.open = None;
     h.settle();
     h.click("Create a Channel");
     assert_eq!(h.app.data.channels.len(), 1);
     assert_eq!(h.app.data.channels[0].name, "general");
-    assert_eq!(h.app.chat_open, Some(h.app.data.channels[0].id));
+    assert_eq!(h.app.chat.open, Some(h.app.data.channels[0].id));
 }
 
 #[test]
@@ -2522,7 +2522,7 @@ fn escape_closes_the_task_menu_first_then_the_task() {
 fn chat_drafts_stay_with_their_channel() {
     let mut h = Ui1::new();
     h.click("general");
-    let a = h.app.chat_open.unwrap();
+    let a = h.app.chat.open.unwrap();
     h.click("Message composer");
     h.type_text("hello");
     // move to another channel, write and send there
@@ -2535,8 +2535,8 @@ fn chat_drafts_stay_with_their_channel() {
         .expect("seed has two channels")
         .clone();
     h.click_side(&b.name, false);
-    assert_eq!(h.app.chat_open, Some(b.id));
-    assert_eq!(h.app.chat_text, "", "the other channel starts empty");
+    assert_eq!(h.app.chat.open, Some(b.id));
+    assert_eq!(h.app.chat.text, "", "the other channel starts empty");
     h.click("Message composer");
     h.type_text("first message");
     h.key(egui::Key::Enter);
@@ -2555,7 +2555,7 @@ fn chat_drafts_stay_with_their_channel() {
     assert_eq!(sent, "first message");
     // back to the first channel: the unsent text is still there
     h.click_side("general", false);
-    assert_eq!(h.app.chat_text, "hello");
+    assert_eq!(h.app.chat.text, "hello");
 }
 
 #[test]
@@ -2847,7 +2847,7 @@ fn new_message_window_searches_people_and_channels() {
         .unwrap()
         .id;
     assert_eq!(h.app.section, Section::Chat);
-    assert_eq!(h.app.chat_open, Some(ch));
+    assert_eq!(h.app.chat.open, Some(ch));
     assert!(!h.app.new_message_open);
     // reopened, the old search is gone; the avatar row opens a DM
     h.app.new_message_open = true;
@@ -2862,7 +2862,7 @@ fn new_message_window_searches_people_and_channels() {
         .unwrap()
         .clone();
     h.click(&format!("Message {}", other.name));
-    let open = h.app.chat_open.unwrap();
+    let open = h.app.chat.open.unwrap();
     let c = h.app.data.channels.iter().find(|c| c.id == open).unwrap();
     assert_eq!(c.kind, ChannelKind::Direct);
     assert!(c.members.contains(&other.id));
@@ -2892,7 +2892,7 @@ fn create_channel_window_with_private_and_list() {
     assert!(c.private);
     let lid = c.list.expect("a List tied to the channel");
     assert_eq!(h.app.data.list_name(lid), "Design Team");
-    assert_eq!(h.app.chat_open, Some(c.id));
+    assert_eq!(h.app.chat.open, Some(c.id));
     assert!(h.app.modal.is_none());
     // the channel's List tab opens that List
     h.click("List");
@@ -2978,7 +2978,7 @@ fn task_window_comment_post_tabs_tools_and_search() {
         "the people list opens"
     );
     h.click("Alex Kim");
-    assert_eq!(h.app.comment_text, "@Alex Kim ");
+    assert_eq!(h.app.comment.text, "@Alex Kim ");
     h.type_text("please check");
     h.click("Emoji");
     h.click("\u{1F44D}");
@@ -3589,7 +3589,7 @@ fn open_toolbar_search_does_not_steal_the_comment_box() {
     h.type_text("zzleak");
     h.settle();
     assert_eq!(
-        h.app.comment_text, "zzleak",
+        h.app.comment.text, "zzleak",
         "typing lands in the comment box"
     );
     assert!(h.app.search.is_empty(), "the toolbar search stays empty");
@@ -3818,7 +3818,7 @@ fn sidebar_search_filters_spaces_folders_and_lists() {
         })
         .expect("a list in a folder");
     let q: String = list.name.to_lowercase().chars().take(5).collect();
-    h.app.side_search = Some(q.clone());
+    h.app.side.search = Some(q.clone());
     h.settle();
     assert!(
         in_side(&h, &space.name) && in_side(&h, &folder.name) && in_side(&h, &list.name),
@@ -3857,7 +3857,7 @@ fn sidebar_search_filters_spaces_folders_and_lists() {
         );
     }
     // an empty query shows everything again
-    h.app.side_search = Some(String::new());
+    h.app.side.search = Some(String::new());
     h.settle();
     for s in &spaces {
         assert!(in_side(&h, &s.name));
@@ -3896,7 +3896,7 @@ fn unread_filter_still_lists_unread_chats_while_muted() {
     assert!(h.app.data.extra.muted_until > now_ts());
     h.click("Filter your sidebar");
     h.click("Sidebar filter Unread");
-    assert_eq!(h.app.side_filter, Some("unread"));
+    assert_eq!(h.app.side.filter, Some("unread"));
     assert!(
         h.tree
             .iter()
@@ -4083,10 +4083,10 @@ fn sidebar_search_hides_the_favorites_heading_without_a_match() {
     }
     assert!(heading(&h), "Favorites shows before searching");
     let fav = h.app.data.location_name(h.app.data.favorites[0]);
-    h.app.side_search = Some("zzz".into());
+    h.app.side.search = Some("zzz".into());
     h.settle();
     assert!(!heading(&h), "no favorite matches: no heading");
-    h.app.side_search = Some(fav.to_lowercase());
+    h.app.side.search = Some(fav.to_lowercase());
     h.settle();
     assert!(heading(&h), "a matching favorite keeps the heading");
 }
@@ -4235,7 +4235,7 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     });
     super::together::save_token("127.0.0.1:9", "dev-ui-offline-pic", "tok");
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     h.dropped = vec![egui::DroppedFile {
         path: Some(test_picture("offline.png", 60, 40)),
         ..Default::default()
@@ -4245,7 +4245,8 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while !matches!(
         h.app
-            .chat_files
+            .chat
+            .files
             .first()
             .and_then(|p| p.transfer(&h.app.files)),
         Some(super::files::Transfer::Failed(_))
@@ -4254,7 +4255,7 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
         h.frame(vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    let Some(super::files::Transfer::Failed(why)) = h.app.chat_files[0].transfer(&h.app.files)
+    let Some(super::files::Transfer::Failed(why)) = h.app.chat.files[0].transfer(&h.app.files)
     else {
         panic!("the upload failed");
     };
@@ -4296,7 +4297,7 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
 fn drop_a_picture_send_it_and_open_it_large() {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     let n = h
         .app
         .data
@@ -4340,7 +4341,7 @@ fn drop_a_picture_send_it_and_open_it_large() {
         ),
         (600, 400, MediaKind::Image)
     );
-    assert!(h.app.chat_files.is_empty(), "the box is empty again");
+    assert!(h.app.chat.files.is_empty(), "the box is empty again");
     assert!(!h.has("Attachment beach.png"));
     // it shows in the conversation; clicking opens it large, Esc closes
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -4375,13 +4376,13 @@ fn drop_a_picture_send_it_and_open_it_large() {
     }];
     h.frame(vec![]);
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while h.app.chat_files.first().is_some_and(|p| p.error.is_none())
+    while h.app.chat.files.first().is_some_and(|p| p.error.is_none())
         && std::time::Instant::now() < until
     {
         h.frame(vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert!(h.app.chat_files[0]
+    assert!(h.app.chat.files[0]
         .error
         .as_deref()
         .unwrap_or("")
@@ -4391,14 +4392,14 @@ fn drop_a_picture_send_it_and_open_it_large() {
         "can't send with a refused file"
     );
     h.click("Remove notes.txt");
-    assert!(h.app.chat_files.is_empty());
+    assert!(h.app.chat.files.is_empty());
 }
 
 // send a message in #general and show its hover toolbar
 fn general_with_my_message(text: &str) -> (Ui1, u64) {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     h.click("Message composer");
     h.type_text(text);
     h.key(egui::Key::Enter);
@@ -4425,7 +4426,7 @@ fn click_more_actions_edit_my_message() {
     h.click("More actions");
     h.click("Edit message");
     assert!(
-        h.app.chat_edit.is_some(),
+        h.app.chat.edit.is_some(),
         "the message turns into a text box"
     );
     h.click("Edit message");
@@ -4434,7 +4435,7 @@ fn click_more_actions_edit_my_message() {
     }
     h.type_text("final words");
     h.key(egui::Key::Enter);
-    assert!(h.app.chat_edit.is_none());
+    assert!(h.app.chat.edit.is_none());
     let m = general_msg(&h, cid, "final words").expect("text changed");
     assert!(m.edited.is_some(), "marked as edited");
     assert!(h.has("(edited)"));
@@ -4447,14 +4448,14 @@ fn escape_cancels_an_edit_and_up_arrow_starts_one() {
     h.key(egui::Key::ArrowUp);
     let mid = general_msg(&h, cid, "keep me").unwrap().id;
     assert_eq!(
-        h.app.chat_edit.as_ref().map(|e| e.1),
+        h.app.chat.edit.as_ref().map(|e| e.1),
         Some(mid),
         "Up in an empty box edits my last message"
     );
     h.click("Edit message");
     h.type_text(" changed");
     h.key(egui::Key::Escape);
-    assert!(h.app.chat_edit.is_none());
+    assert!(h.app.chat.edit.is_none());
     let m = general_msg(&h, cid, "keep me").unwrap();
     assert_eq!(m.text, "keep me", "Escape leaves the text as it was");
     assert!(m.edited.is_none());
@@ -4505,7 +4506,7 @@ fn click_more_reactions_picks_any_emoji() {
 fn click_mark_unread_keeps_the_channel_unread() {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     let text = "Reminder: newsletter draft is due Thursday.";
     let p = h.find(text).unwrap();
     h.hover(p);
@@ -4557,16 +4558,16 @@ fn composer_mention_and_emoji_pickers() {
     h.click("general");
     h.click("Mention someone");
     h.click("Alex Kim");
-    assert_eq!(h.app.chat_text, "@Alex Kim ");
+    assert_eq!(h.app.chat.text, "@Alex Kim ");
     h.click("Emoji");
     h.click("\u{1F525}");
-    assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525}");
+    assert_eq!(h.app.chat.text, "@Alex Kim \u{1F525}");
     // typing "@" opens the list by itself and the pick replaces the "@"
     h.type_text(" @");
     assert!(h.has("Jordan Park"), "typing @ offers people");
     // (the right-most "Jordan Park" is the list's row, not a name in the feed)
     h.click_side("Jordan Park", true);
-    assert_eq!(h.app.chat_text, "@Alex Kim \u{1F525} @Jordan Park ");
+    assert_eq!(h.app.chat.text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
 
 // ---- task comments and activity (sf-comments)
@@ -4630,7 +4631,7 @@ fn comment_send_with_cmd_enter_then_react_edit_reply_delete() {
     assert_eq!(c.len(), 1, "Cmd+Enter sends");
     assert_eq!(c[0].text, "First thoughts");
     assert_ne!(c[0].id, 0);
-    assert!(h.app.comment_text.is_empty());
+    assert!(h.app.comment.text.is_empty());
     // react
     h.click("Add reaction");
     h.click("\u{1F44D}");
@@ -4757,7 +4758,7 @@ fn typing_at_opens_the_people_list() {
         .map(|(_, r)| r.center())
         .unwrap();
     h.click_at(pick);
-    assert_eq!(h.app.comment_text, "hey @Sam Lee ");
+    assert_eq!(h.app.comment.text, "hey @Sam Lee ");
 }
 
 #[test]
@@ -5038,10 +5039,10 @@ fn docs_list_right_click_search_and_tags() {
     // the Docs search box is its own, not the task list's filter
     h.click("Search Docs");
     h.type_text("zzz");
-    assert_eq!(h.app.docs_search, "zzz");
+    assert_eq!(h.app.docs.search, "zzz");
     assert!(h.app.search.is_empty());
     assert!(!h.has("Doc Project brief"));
-    h.app.docs_search.clear();
+    h.app.docs.search.clear();
     h.settle();
     // right click: favorite, meeting note, rename
     h.right_click("Doc Project brief", 60.0);
@@ -5088,9 +5089,9 @@ fn docs_list_right_click_search_and_tags() {
     h.open_docs_list();
     h.click("Docs tag filter");
     h.click("spec");
-    assert_eq!(h.app.docs_tag.as_deref(), Some("spec"));
+    assert_eq!(h.app.docs.tag.as_deref(), Some("spec"));
     assert!(h.has("Doc Project brief v2"));
-    h.app.docs_tag = Some("other".into());
+    h.app.docs.tag = Some("other".into());
     h.settle();
     assert!(
         !h.has("Doc Project brief v2"),
@@ -5458,7 +5459,7 @@ fn row_quick_actions_rename_subtask_and_tag() {
     h.key(egui::Key::Escape);
     h.right_click("Task Set up analytics dashboard", 60.0);
     h.click("Rename");
-    assert!(h.app.row_rename.is_some() && h.app.rename.is_none());
+    assert!(h.app.row.rename.is_some() && h.app.rename.is_none());
     h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("Analytics");
     h.key(egui::Key::Enter);
@@ -5878,7 +5879,7 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
         ..Default::default()
     }];
     h.frame(vec![]);
-    assert!(h.app.chat_files.is_empty(), "not taken by the chat box");
+    assert!(h.app.chat.files.is_empty(), "not taken by the chat box");
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while h.app.task(id).unwrap().attachments.is_empty() && std::time::Instant::now() < until {
         h.frame(vec![]);
@@ -7270,7 +7271,7 @@ fn password_boxes_show_on_the_eye_and_take_english_only() {
 fn enter_in_the_middle_sends_without_a_line_break_and_shift_enter_keeps_one() {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     h.click("Message composer");
     h.type_text("helloworld");
     for _ in 0..5 {
@@ -7312,7 +7313,7 @@ fn enter_in_the_middle_sends_without_a_line_break_and_shift_enter_keeps_one() {
         modifiers: shift,
     }]);
     h.type_text("two");
-    assert_eq!(h.app.chat_text, "one\ntwo");
+    assert_eq!(h.app.chat.text, "one\ntwo");
 }
 
 #[test]
@@ -7324,11 +7325,11 @@ fn others_never_see_a_private_channel_even_when_it_was_left_open() {
     // Sam signs in on this computer with the private channel still open
     h.app.data.me = 3;
     h.app.section = Section::Chat;
-    h.app.chat_open = Some(secret);
+    h.app.chat.open = Some(secret);
     h.settle();
     assert!(!h.has("hush"), "not in the sidebar");
     assert_ne!(
-        h.app.chat_open,
+        h.app.chat.open,
         Some(secret),
         "the chat moved to a channel Sam may see"
     );
@@ -7348,7 +7349,7 @@ fn others_never_see_a_private_channel_even_when_it_was_left_open() {
 fn a_message_from_a_clock_ahead_is_read_once() {
     let mut h = Ui1::new();
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     let ahead = now_ts() + 3600;
     let id = h.app.data.new_id();
     let c = h
@@ -7494,7 +7495,7 @@ fn option_t_while_typing_and_enter_in_search() {
     h.settle();
     h.key(egui::Key::Enter);
     h.settle();
-    assert_eq!((h.app.section, h.app.chat_open), (Section::Chat, Some(ch)));
+    assert_eq!((h.app.section, h.app.chat.open), (Section::Chat, Some(ch)));
 }
 
 #[test]
@@ -7642,7 +7643,7 @@ fn saved_messages_from_every_channel_open_from_the_sidebar() {
     h.click("Saved messages");
     assert!(matches!(h.app.modal, Some(Modal::SavedMessages)));
     h.click("Saved message");
-    assert_eq!((h.app.section, h.app.chat_open), (Section::Chat, Some(cid)));
+    assert_eq!((h.app.section, h.app.chat.open), (Section::Chat, Some(cid)));
     assert!(h.app.modal.is_none());
 }
 
@@ -7674,7 +7675,7 @@ fn add_channel_doesnt_open_someone_elses_private_channel() {
     h.app.apply(Action::Go(Location::List(list)));
     h.settle();
     h.click("Add Channel");
-    let open = h.app.chat_open.unwrap();
+    let open = h.app.chat.open.unwrap();
     assert_ne!(open, secret);
     assert!(h
         .app
@@ -7962,11 +7963,11 @@ fn sidebar_leaves_out_other_peoples_private_docs() {
         "someone else's Private doc stays out of the space tree"
     );
     // and out of the sidebar search
-    h.app.side_search = Some("brief".into());
+    h.app.side.search = Some("brief".into());
     h.settle();
     assert!(!h.has("Project brief"));
     // my own Private doc stays
-    h.app.side_search = None;
+    h.app.side.search = None;
     h.app
         .data
         .docs
@@ -8013,7 +8014,7 @@ fn mention_picked_from_the_list_keeps_that_person_when_names_are_shared() {
         .copied()
         .fold(rows[0], |a, b| if b.y > a.y { b } else { a });
     h.click_at(lowest);
-    assert_eq!(h.app.comment_text, "@Alex Kim ");
+    assert_eq!(h.app.comment.text, "@Alex Kim ");
     h.type_text("this one");
     h.click("Send Comment");
     let c = h
@@ -8088,7 +8089,7 @@ fn click_the_channel_bell_to_choose_what_it_notifies() {
         .unwrap()
         .id;
     h.app.section = Section::Chat;
-    h.app.chat_open = Some(g);
+    h.app.chat.open = Some(g);
     h.settle();
     h.click("Channel notifications");
     h.click("Every new message");
@@ -8130,7 +8131,7 @@ fn click_a_notification_toast_to_open_the_conversation() {
     assert_ne!(h.app.section, Section::Chat);
     h.click(&format!("Open {}", toast));
     assert_eq!(h.app.section, Section::Chat);
-    assert_eq!(h.app.chat_open, Some(dm));
+    assert_eq!(h.app.chat.open, Some(dm));
 }
 
 // ---- wikis, doc links and the Docs hub list (r3-work)
@@ -8913,9 +8914,9 @@ fn a_reply_notice_from_a_duplicate_dm_copy_opens_its_thread() {
     h.app.data.channels.push(dup);
     h.app.open_target(&format!("chat:{}:{}", dup_id, parent));
     h.settle();
-    assert_eq!(h.app.chat_open, Some(pid), "the shown copy opens");
+    assert_eq!(h.app.chat.open, Some(pid), "the shown copy opens");
     assert_eq!(
-        h.app.thread_open,
+        h.app.chat.thread_open,
         Some(parent),
         "with the thread still open"
     );
@@ -9188,7 +9189,7 @@ fn frameless_buttons_show_the_hand_and_a_hover_fill() {
         .unwrap()
         .id;
     h.app.section = Section::Chat;
-    h.app.chat_open = Some(g);
+    h.app.chat.open = Some(g);
     h.settle();
     // the channel header's bell, like Ask and Integrate next to it
     let bell = h.find("Channel notifications").unwrap();
@@ -9373,7 +9374,7 @@ fn a_space_shared_to_view_or_comment_reads_only() {
     assert_eq!(h.app.open_task, Some(task.id));
     h.click("Comment box");
     h.type_text("hello");
-    assert!(h.app.comment_text.is_empty(), "the comment box is off");
+    assert!(h.app.comment.text.is_empty(), "the comment box is off");
     // an edit that gets through some other way is turned down
     let mut renamed = task.clone();
     renamed.name = "Renamed".into();
@@ -9616,7 +9617,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
     rows.dedup();
     assert_eq!(rows.len(), 2, "both are offered");
     h.click_at(rows[1].center());
-    assert_eq!(h.app.chat_text, "@Sam Lee ");
+    assert_eq!(h.app.chat.text, "@Sam Lee ");
     h.type_text("can you look?");
     h.key(egui::Key::Enter);
     let general = h
@@ -9630,7 +9631,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
     assert_eq!(m.text, "@Sam Lee can you look?");
     assert_eq!(m.mentions, vec![sam2], "the one picked, not both");
     assert!(!m.mentions.contains(&sam));
-    assert!(h.app.chat_picked.is_empty(), "used up by the message");
+    assert!(h.app.chat.picked.is_empty(), "used up by the message");
     // typed by hand, without the list: both (it can't tell which)
     h.type_text("@Sam Lee again");
     h.key(egui::Key::Enter);
@@ -10957,9 +10958,9 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
         ..Default::default()
     });
     h.click("general");
-    let cid = h.app.chat_open.unwrap();
+    let cid = h.app.chat.open.unwrap();
     h.click("1 reply");
-    let mid = h.app.thread_open.unwrap();
+    let mid = h.app.chat.thread_open.unwrap();
     let before: Vec<egui::Rect> = h
         .tree
         .iter()
@@ -10977,9 +10978,9 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
     rows.dedup();
     assert_eq!(rows.len(), 2, "both are offered in the thread's list");
     h.click_at(rows[1].center());
-    assert_eq!(h.app.thread_text, "@Sam Lee ");
-    assert!(h.app.chat_text.is_empty(), "not into the channel's box");
-    assert_eq!(h.app.thread_picked, vec![sam2]);
+    assert_eq!(h.app.chat.thread_text, "@Sam Lee ");
+    assert!(h.app.chat.text.is_empty(), "not into the channel's box");
+    assert_eq!(h.app.chat.thread_picked, vec![sam2]);
     h.type_text("see this");
     h.key(egui::Key::Enter);
     let reply = |h: &Ui1| {
@@ -11001,7 +11002,7 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
     let r = reply(&h);
     assert_eq!(r.text, "@Sam Lee see this");
     assert_eq!(r.mentions, vec![sam2], "the one picked, not both");
-    assert!(h.app.thread_picked.is_empty(), "used up by the reply");
+    assert!(h.app.chat.thread_picked.is_empty(), "used up by the reply");
     // typing "@" opens the same list
     h.click("Reply composer");
     h.type_text("@");
@@ -11017,7 +11018,10 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
         .min_by(|a, b| a.center().y.total_cmp(&b.center().y))
         .unwrap();
     h.click_at(first.center());
-    assert_eq!(h.app.thread_text, "@Sam Lee ", "the typed @ is replaced");
+    assert_eq!(
+        h.app.chat.thread_text, "@Sam Lee ",
+        "the typed @ is replaced"
+    );
     h.type_text("too");
     h.key(egui::Key::Enter);
     assert_eq!(reply(&h).mentions, vec![sam]);

@@ -198,7 +198,7 @@ impl App {
         // the "Started a huddle" card goes out when the token comes (huddle_token)
         self.huddle.announce = true;
         self.section = Section::Chat;
-        self.chat_open = Some(ch);
+        self.chat.open = Some(ch);
     }
 
     /// Tell everyone in the conversation that a huddle started.

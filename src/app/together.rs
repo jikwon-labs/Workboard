@@ -1812,7 +1812,7 @@ impl App {
             .unwrap_or(Location::Home);
         self.section = Section::Home;
         self.open_task = None;
-        self.chat_open = None;
+        self.chat.open = None;
         self.recent.clear();
         self.clear_history();
         // a workspace I just joined: what is in it already isn't news
@@ -1931,7 +1931,7 @@ impl App {
             c.last_read = now_ts();
         }
         self.section = Section::Chat;
-        self.chat_open = Some(ch);
+        self.chat.open = Some(ch);
         self.dirty = true;
         if let Some(ctx) = ctx {
             ctx.open_url(egui::OpenUrl::new_tab(&link));
@@ -3235,7 +3235,7 @@ impl App {
     /// The call to open from a Huddle / call button: the open conversation, else #general.
     pub(super) fn open_call_dialog(&mut self) {
         let ch = if self.section == Section::Chat {
-            self.chat_open
+            self.chat.open
         } else {
             None
         }

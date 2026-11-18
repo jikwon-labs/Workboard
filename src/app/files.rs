@@ -1325,7 +1325,7 @@ impl App {
         let remote = self.media_remote();
         self.files.tick(ctx, &remote);
         for (local, result) in self.files.take_prepared() {
-            let boxes = [&mut self.chat_files, &mut self.thread_files]
+            let boxes = [&mut self.chat.files, &mut self.chat.thread_files]
                 .into_iter()
                 .chain(self.drafts.chat_files.saved.values_mut())
                 .chain(self.drafts.thread_files.saved.values_mut());
@@ -1366,10 +1366,10 @@ impl App {
             }
         }
         if let Some(p) = self.pasted.take() {
-            if self.section == Section::Chat && self.chat_open.is_some() {
+            if self.section == Section::Chat && self.chat.open.is_some() {
                 let thread = ctx
                     .is_some_and(|c| c.memory(|m| m.focused()) == Some(egui::Id::new(THREAD_BOX)))
-                    && self.thread_open.is_some();
+                    && self.chat.thread_open.is_some();
                 if p.files.is_empty() {
                     if let Some(png) = p.png {
                         self.add_media(thread, None, Some(png));
@@ -1386,7 +1386,7 @@ impl App {
     /// The attachments in every message box (this one and the ones kept
     /// with other channels).
     fn boxed_attachments(&self) -> Vec<Attachment> {
-        let boxes = [&self.chat_files, &self.thread_files]
+        let boxes = [&self.chat.files, &self.chat.thread_files]
             .into_iter()
             .chain(self.drafts.chat_files.saved.values())
             .chain(self.drafts.thread_files.saved.values());
@@ -1532,9 +1532,9 @@ impl App {
         png: Option<Vec<u8>>,
     ) -> bool {
         let count = if thread {
-            self.thread_files.len()
+            self.chat.thread_files.len()
         } else {
-            self.chat_files.len()
+            self.chat.files.len()
         };
         if count >= MAX_PER_MESSAGE {
             self.toast(trf!(
@@ -1546,9 +1546,9 @@ impl App {
         let remote = self.media_remote();
         let p = self.files.add(path, png, &remote);
         if thread {
-            self.thread_files.push(p);
+            self.chat.thread_files.push(p);
         } else {
-            self.chat_files.push(p);
+            self.chat.files.push(p);
         }
         true
     }
@@ -1577,8 +1577,8 @@ impl App {
         if dropped.is_empty() || self.open_task.is_some() {
             return;
         }
-        let thread =
-            self.thread_open.is_some() && thread_rect.zip(at).is_some_and(|(r, p)| r.contains(p));
+        let thread = self.chat.thread_open.is_some()
+            && thread_rect.zip(at).is_some_and(|(r, p)| r.contains(p));
         for f in dropped {
             self.add_media(thread, Some(f), None);
         }
@@ -1622,9 +1622,9 @@ impl App {
     /// button and how far the upload is.
     pub(super) fn pending_strip(&mut self, ui: &mut Ui, thread: bool) {
         let list = if thread {
-            &self.thread_files
+            &self.chat.thread_files
         } else {
-            &self.chat_files
+            &self.chat.files
         };
         if list.is_empty() {
             return;
@@ -1769,9 +1769,9 @@ impl App {
         }
         if let Some(l) = remove {
             let list = if thread {
-                &mut self.thread_files
+                &mut self.chat.thread_files
             } else {
-                &mut self.chat_files
+                &mut self.chat.files
             };
             let gone = list
                 .iter()
@@ -1791,9 +1791,9 @@ impl App {
     /// Whether a message box may send, and the attachments it would send.
     pub(super) fn pending_ready(&self, thread: bool) -> (bool, Vec<Attachment>) {
         let list = if thread {
-            &self.thread_files
+            &self.chat.thread_files
         } else {
-            &self.chat_files
+            &self.chat.files
         };
         let ok = list.iter().all(|p| p.sendable(&self.files));
         (

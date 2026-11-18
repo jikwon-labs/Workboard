@@ -1078,11 +1078,11 @@ impl App {
                     .layout(Layout::left_to_right(Align::Center)),
             );
             if !alone && bui.button(tr("@  Mention a teammate")).clicked() {
-                if !self.comment_text.ends_with('@') {
-                    if !self.comment_text.is_empty() && !self.comment_text.ends_with(' ') {
-                        self.comment_text.push(' ');
+                if !self.comment.text.ends_with('@') {
+                    if !self.comment.text.is_empty() && !self.comment.text.ends_with(' ') {
+                        self.comment.text.push(' ');
                     }
-                    self.comment_text.push('@');
+                    self.comment.text.push('@');
                 }
                 bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
                 bui.memory_mut(|m| m.request_focus(comment_id));
@@ -1164,7 +1164,7 @@ impl App {
         let send_key = right_ui.memory(|m| m.has_focus(comment_id))
             && right_ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
         let cr = right_ui.add(
-            field_multi(&mut self.comment_text)
+            field_multi(&mut self.comment.text)
                 .id(comment_id)
                 .hint_text(if post {
                     tr("Write a post...")
@@ -1179,7 +1179,7 @@ impl App {
         name_field(&cr, "Comment box");
         let mention_id = win_id.with("mention_open");
         // typing "@" (or a name after it) brings up the people list
-        let typed_at = mention_word(&self.comment_text).map(str::to_string);
+        let typed_at = mention_word(&self.comment.text).map(str::to_string);
         if cr.changed() && typed_at.as_deref() == Some("") {
             right_ui.data_mut(|d| d.insert_temp(mention_id, true));
         }
@@ -1214,7 +1214,7 @@ impl App {
                     .clicked()
                     {
                         insert = Some(format!("@{} ", name));
-                        self.comment_picked.push(*id);
+                        self.comment.picked.push(*id);
                         close_popup(ui);
                     }
                 }
@@ -1248,7 +1248,7 @@ impl App {
             });
             let ck = icons::icon_button(ui, &t, "task", "", "Checklist item in comment", false);
             if ck.on_hover_text(tr("Add a checklist item")).clicked() {
-                let lead = if self.comment_text.is_empty() || self.comment_text.ends_with('\n') {
+                let lead = if self.comment.text.is_empty() || self.comment.text.ends_with('\n') {
                     ""
                 } else {
                     "\n"
@@ -1259,13 +1259,13 @@ impl App {
                 let label = if post { "Post" } else { "Comment" };
                 let send = primary_button(ui, &t, tr(label));
                 name_it(&send, &format!("Send {}", label));
-                if (send.clicked() || send_key) && !self.comment_text.trim().is_empty() {
+                if (send.clicked() || send_key) && !self.comment.text.trim().is_empty() {
                     let id = self.data.new_id();
-                    let text = self.comment_text.trim().to_string();
+                    let text = self.comment.text.trim().to_string();
                     let mentions = crate::model::mentioned_ids(
                         &text,
                         &self.data.members,
-                        &self.comment_picked,
+                        &self.comment.picked,
                     );
                     task.activity.push(Activity {
                         ts: now_ts(),
@@ -1277,8 +1277,8 @@ impl App {
                         mentions,
                         ..Default::default()
                     });
-                    self.comment_text.clear();
-                    self.comment_picked.clear();
+                    self.comment.text.clear();
+                    self.comment.picked.clear();
                     close_popup(ui);
                 }
             });
@@ -1286,14 +1286,14 @@ impl App {
         if let Some(text) = insert {
             // a picked @name replaces the "@" (and part of a name) already typed
             if text.starts_with('@') {
-                if let Some(w) = mention_word(&self.comment_text) {
-                    let keep = self.comment_text.len() - w.len() - 1;
-                    self.comment_text.truncate(keep);
+                if let Some(w) = mention_word(&self.comment.text) {
+                    let keep = self.comment.text.len() - w.len() - 1;
+                    self.comment.text.truncate(keep);
                 }
             }
-            self.comment_text.push_str(&text);
+            self.comment.text.push_str(&text);
             right_ui.memory_mut(|m| m.request_focus(comment_id));
-            let n = self.comment_text.chars().count();
+            let n = self.comment.text.chars().count();
             let mut st = egui::TextEdit::load_state(right_ui.ctx(), comment_id).unwrap_or_default();
             st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
                 egui::text::CCursor::new(n),

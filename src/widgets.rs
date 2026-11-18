@@ -162,6 +162,14 @@ pub fn side_panel_frame(t: &Theme, margin: egui::Margin) -> egui::Frame {
         .inner_margin(margin)
 }
 
+/// A card on a page: a thin border, rounded by 12, with 16 inside.
+pub fn card_frame(t: &Theme) -> egui::Frame {
+    egui::Frame::new()
+        .stroke(Stroke::new(1.0_f32, t.border))
+        .corner_radius(12)
+        .inner_margin(egui::Margin::same(16))
+}
+
 /// Dialog heading: title on the left, round close button on the right.
 /// Returns true when the close button was clicked.
 pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {

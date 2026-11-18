@@ -438,20 +438,15 @@ impl App {
 
     fn ov_card(&mut self, ui: &mut Ui, w: f32, title: &str, add: impl FnOnce(&mut Self, &mut Ui)) {
         let t = self.t();
-        egui::Frame::new()
-            .fill(t.card)
-            .stroke(Stroke::new(1.0_f32, t.border))
-            .corner_radius(12)
-            .inner_margin(egui::Margin::same(16))
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(w - 34.0);
-                    ui.set_min_height(150.0);
-                    ui.label(RichText::new(tr(title)).size(15.0));
+        card_frame(&t).fill(t.card).show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(w - 34.0);
+                ui.set_min_height(150.0);
+                ui.label(RichText::new(tr(title)).size(15.0));
 
-                    ui.add_space(8.0);
-                    add(self, ui);
-                });
+                ui.add_space(8.0);
+                add(self, ui);
             });
+        });
     }
 }

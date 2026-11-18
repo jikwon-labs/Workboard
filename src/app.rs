@@ -4205,11 +4205,7 @@ impl App {
                         };
                         ui.with_layout(layout, |ui| {
                             // My Work card
-                            egui::Frame::new()
-                                .stroke(Stroke::new(1.0_f32, t.border))
-                                .corner_radius(12)
-                                .inner_margin(egui::Margin::same(16))
-                                .show(ui, |ui| {
+                            card_frame(&t).show(ui, |ui| {
                                     ui.vertical(|ui| {
                                         ui.set_width(card_w - 34.0);
                                         ui.label(RichText::new(tr("My Work")).size(16.0).strong());
@@ -4368,11 +4364,7 @@ impl App {
                                 });
                             ui.add_space(12.0);
                             // Recents / lists overview
-                            egui::Frame::new()
-                                .stroke(Stroke::new(1.0_f32, t.border))
-                                .corner_radius(12)
-                                .inner_margin(egui::Margin::same(16))
-                                .show(ui, |ui| {
+                            card_frame(&t).show(ui, |ui| {
                                     ui.vertical(|ui| {
                                         ui.set_width(card_w - 34.0);
                                         ui.label(RichText::new(tr("Lists")).size(16.0).strong());

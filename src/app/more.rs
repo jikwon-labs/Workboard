@@ -21,18 +21,6 @@ pub use forms::form_answers;
 pub use search::Hit;
 pub use whiteboard::{WbUndo, WbView};
 
-fn list_panel_frame(t: &Theme) -> egui::Frame {
-    egui::Frame::new()
-        .fill(t.sidebar)
-        .corner_radius(egui::CornerRadius {
-            nw: 8,
-            ne: 0,
-            sw: 8,
-            se: 0,
-        })
-        .inner_margin(egui::Margin::symmetric(10, 12))
-}
-
 /// Screen state of the app pages (not saved).
 #[derive(Default)]
 pub struct SweepUi {
@@ -248,7 +236,7 @@ impl App {
         egui::SidePanel::left("meet_list")
             .exact_width(260.0)
             .resizable(false)
-            .frame(list_panel_frame(&t))
+            .frame(side_panel_frame(&t, egui::Margin::symmetric(10, 12)))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("Meetings")).size(16.0));

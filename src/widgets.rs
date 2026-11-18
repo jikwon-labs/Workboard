@@ -148,6 +148,20 @@ pub fn dialog_frame(t: &Theme) -> egui::Frame {
         .inner_margin(egui::Margin::same(20))
 }
 
+/// The grey panel on the left of a page (the sidebar, a hub's or a page's
+/// list), rounded on its left corners, with `margin` inside.
+pub fn side_panel_frame(t: &Theme, margin: egui::Margin) -> egui::Frame {
+    egui::Frame::new()
+        .fill(t.sidebar)
+        .corner_radius(egui::CornerRadius {
+            nw: 8,
+            ne: 0,
+            sw: 8,
+            se: 0,
+        })
+        .inner_margin(margin)
+}
+
 /// Dialog heading: title on the left, round close button on the right.
 /// Returns true when the close button was clicked.
 pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {

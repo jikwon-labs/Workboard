@@ -22,17 +22,7 @@ impl App {
             egui::SidePanel::left("sidebar_c")
                 .exact_width(40.0)
                 .resizable(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(t.sidebar)
-                        .corner_radius(egui::CornerRadius {
-                            nw: 8,
-                            ne: 0,
-                            sw: 8,
-                            se: 0,
-                        })
-                        .inner_margin(egui::Margin::same(6)),
-                )
+                .frame(side_panel_frame(&t, egui::Margin::same(6)))
                 .show_inside(ui, |ui| {
                     if ui
                         .add(ghost(egui::Button::new(
@@ -50,17 +40,7 @@ impl App {
             .resizable(true)
             .default_width(255.0)
             .width_range(200.0..=400.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(t.sidebar)
-                    .corner_radius(egui::CornerRadius {
-                        nw: 8,
-                        ne: 0,
-                        sw: 8,
-                        se: 0,
-                    })
-                    .inner_margin(egui::Margin::symmetric(8, 6)),
-            )
+            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
             .show_inside(ui, |ui| {
                 // header: Home, (hover) search / filter / close, + Create
                 self.sidebar_top(ui, t);

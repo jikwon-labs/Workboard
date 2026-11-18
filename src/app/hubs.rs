@@ -9,18 +9,6 @@ use super::*;
 /// `dash_open` for the built-in Workspace overview (not a saved dashboard).
 pub(super) const WORKSPACE_OVERVIEW: u64 = 0;
 
-fn hub_frame(t: &Theme) -> egui::Frame {
-    egui::Frame::new()
-        .fill(t.sidebar)
-        .corner_radius(egui::CornerRadius {
-            nw: 8,
-            ne: 0,
-            sw: 8,
-            se: 0,
-        })
-        .inner_margin(egui::Margin::symmetric(8, 6))
-}
-
 /// A template card as in the galleries: round coloured icon (`glyph` is a
 /// line icon kind, or "+"), title, description.
 fn gallery_card(
@@ -159,7 +147,7 @@ impl App {
         egui::SidePanel::left(egui::Id::new(("hub", id)))
             .exact_width(255.0)
             .resizable(false)
-            .frame(hub_frame(&t))
+            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
             .show_inside(ui, |ui| {
                 let w = ui.available_width();
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());

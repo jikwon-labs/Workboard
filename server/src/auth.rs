@@ -3,6 +3,12 @@
 
 use super::*;
 
+/// A device signed in: (member, role, tag, new token).
+pub(crate) type Signed = (u64, Role, u16, Option<String>);
+
+/// Why a hello that signs in no way that works is turned away.
+const HAS_WORKSPACE: &str = "This server already has a workspace. Sign in with your email and password, or ask its owner or an admin for an invite code.";
+
 impl Hub {
     /// Check a hello. Ok: (member, role, tag, new token).
     ///
@@ -10,199 +16,222 @@ impl Hub {
     /// hub's lock: what's needed is read under the lock, hashed without it,
     /// and the result committed under the lock again, after checking that
     /// nothing it relied on changed meanwhile.
-    pub(crate) fn sign_in(&self, h: &Hello) -> Result<(u64, Role, u16, Option<String>), String> {
-        let device = h.device.as_str();
+    pub(crate) fn sign_in(&self, h: &Hello) -> Result<Signed, String> {
         // a password-reset code from the email POST /auth/forgot sent
         if let Some(code) = given(&h.reset_code) {
-            let email = given(&h.email).ok_or("Type the email you sign in with.")?;
-            let pw = h.new_password.as_deref().unwrap_or("");
-            // wrong codes are counted apart from wrong passwords: someone
-            // locking an email with wrong passwords doesn't stop its owner
-            // from resetting it
-            let tries = reset_tries(email);
-            let _slot = HashSlot::take(&self.hashing)?;
-            {
-                let mut g = self.state();
-                if let Some(why) = g.locked(&tries) {
-                    return Err(why);
-                }
-                // a new password that won't do isn't a wrong try
-                if let Some(why) = password_problem(pw) {
-                    return Err(why);
-                }
-                // a wrong try until the code proves right (as signing in
-                // with a password), so many at once can't get past MAX_TRIES
-                g.failed(&tries);
-            }
-            let hashed = Account::new("", pw);
-            let mut g = self.state();
-            let key = norm_email(email);
-            let fresh = g.resets.get(&key).is_some_and(|(c, t)| {
-                same(&normalize_code(c), &normalize_code(code))
-                    && now_ms() - t < RESET_MINUTES * 60_000
-            });
-            let member = g.saved.account_member(email).filter(|_| fresh);
-            let Some(member) = member else {
-                return Err(format!("That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.", RESET_MINUTES));
-            };
-            g.resets.remove(&key);
-            g.fails.remove(&key);
-            g.fails.remove(&tries);
-            let kept = g.saved.accounts[&member].email.clone();
-            g.saved.accounts.insert(member, hashed.with_email(&kept));
-            // a new password: codes made for them earlier no longer sign in
-            g.saved.invites.retain(|_, i| i.member != member);
-            // and whoever knew the old one (or took a device) is signed out
-            let gone = g.saved.sign_out_others(member, device);
-            if !gone.is_empty() {
-                let _ = self.kicks.send(Arc::new(gone));
-            }
-            return Ok(self.signed_in(g, device, member, h.tag));
+            return self.sign_in_with_reset(h, code);
         }
         if let Some(code) = given(&h.invite) {
-            // a made-up code costs no hashing (checked again below)
-            if self.state().saved.find_invite(code).is_none() {
-                return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
-            }
-            let _slot = match h.new_password {
-                Some(_) => Some(HashSlot::take(&self.hashing)?),
-                None => None,
-            };
-            // a password to choose, hashed before the lock (checked below)
-            let hashed = h
-                .new_password
-                .as_deref()
-                .filter(|pw| password_problem(pw).is_none())
-                .map(|pw| Account::new("", pw));
-            let mut g = self.state();
-            let Some(key) = g.saved.find_invite(code) else {
-                return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
-            };
-            let member = g.saved.invites[&key].member;
-            // choosing a password: check it all before the code is used up.
-            // Someone who already has a password keeps it: a code signs this
-            // computer in, it doesn't take over their account (they use their
-            // password, or Forgot password, to change it).
-            let account = match h.new_password.as_deref() {
-                Some(_) if g.saved.accounts.contains_key(&member) => None,
-                Some(pw) => {
-                    let email = given(&h.email)
-                        .map(|e| e.trim().to_string())
-                        .unwrap_or_else(|| member_field(g.canon.as_ref(), member, "email"));
-                    if email.is_empty() {
-                        return Err("Type your email too: you sign in with it on your other computers and phones.".into());
-                    }
-                    if let Some(why) = g.saved.account_problem(member, &email, pw) {
-                        return Err(why);
-                    }
-                    match hashed {
-                        Some(a) => Some(a.with_email(&email)),
-                        None => {
-                            return Err(password_problem(pw)
-                                .unwrap_or_else(|| "Choose another password.".into()))
-                        }
-                    }
-                }
-                None => None,
-            };
-            let inv = g.saved.invites.remove(&key).expect("found above");
-            if let Some(a) = account {
-                g.saved.accounts.insert(member, a);
-            }
-            if inv.role > g.saved.role_of(member) {
-                g.saved.set_role(member, inv.role);
-            }
-            return Ok(self.signed_in(g, device, member, h.tag));
+            return self.sign_in_with_invite(h, code);
         }
         if let (Some(email), Some(pw)) = (given(&h.email), h.password.as_deref()) {
             let (g, member) = self.check_password(email, pw)?;
-            return Ok(self.signed_in(g, device, member, h.tag));
+            return Ok(self.signed_in(g, &h.device, member, h.tag));
         }
         if let Some(token) = &h.token {
-            let g = self.state();
-            return match g.saved.device_with(device, token) {
-                Some(d) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
-                _ => Err("This computer isn't signed in to this server anymore. Sign in with your email and password, or ask the owner or an admin for a new invite code.".into()),
-            };
+            return self.sign_in_with_token(&h.device, token);
         }
         if let Some(member) = h.claim {
-            let _slot = match h.new_password {
-                Some(_) => Some(HashSlot::take(&self.hashing)?),
-                None => None,
-            };
-            let hashed = h
-                .new_password
-                .as_deref()
-                .filter(|pw| password_problem(pw).is_none())
-                .map(|pw| Account::new("", pw));
+            return self.claim(h, member);
+        }
+        Err(HAS_WORKSPACE.into())
+    }
+
+    /// Signing in with a password-reset code, choosing a new password.
+    fn sign_in_with_reset(&self, h: &Hello, code: &str) -> Result<Signed, String> {
+        let device = h.device.as_str();
+        let email = given(&h.email).ok_or("Type the email you sign in with.")?;
+        let pw = h.new_password.as_deref().unwrap_or("");
+        // wrong codes are counted apart from wrong passwords: someone
+        // locking an email with wrong passwords doesn't stop its owner
+        // from resetting it
+        let tries = reset_tries(email);
+        let _slot = HashSlot::take(&self.hashing)?;
+        {
             let mut g = self.state();
-            // a server that once had a workspace (its revision moved past 0)
-            // but lost workspace.json is never up for grabs: its owner brings
-            // the workspace back with `workboard-server restore`.
-            if g.canon.is_none() && g.saved.rev > 0 {
-                return Err("This server lost its workspace file. Ask its owner to restore a backup on the server (workboard-server restore).".into());
+            if let Some(why) = g.locked(&tries) {
+                return Err(why);
             }
-            // only the very first claim wins: two people setting up the same
-            // empty server at once must not end up with their workspaces merged.
-            // A claim that never brought its workspace (the app quit right
-            // after) can be made again from the same computer, and gives way
-            // to anyone after claim_wait.
-            if g.canon.is_none() && !g.saved.devices.is_empty() {
-                let same_device =
-                    g.saved.devices.len() == 1 && g.saved.devices.contains_key(device);
-                let stale = g
-                    .saved
-                    .devices
-                    .values()
-                    .all(|d| now_ms() - d.created >= self.claim_wait.as_millis() as i64);
-                if !same_device && !stale {
-                    return Err("Someone else is setting up this server right now. Ask them for an invite code.".into());
-                }
-                let gone: Vec<String> = g
-                    .saved
-                    .devices
-                    .keys()
-                    .filter(|d| d.as_str() != device)
-                    .cloned()
-                    .collect();
-                g.saved.devices.clear();
-                g.saved.roles.clear();
-                g.saved.invites.clear();
-                g.saved.accounts.clear();
-                if !gone.is_empty() {
-                    let _ = self.kicks.send(Arc::new(gone));
-                }
+            // a new password that won't do isn't a wrong try
+            if let Some(why) = password_problem(pw) {
+                return Err(why);
             }
-            if g.canon.is_none() && g.saved.devices.is_empty() {
-                // a workspace made with POST /workspaces is for the person
-                // who made it: they sign in to it with the account they
-                // already have on this server (registry.rs)
-                if let Some(seed) = g.saved.seed.clone() {
-                    let email = given(&h.email).unwrap_or("");
-                    if !same(&norm_email(email), &norm_email(&seed.email)) {
-                        return Err("This workspace is being set up by someone else.".into());
-                    }
-                    g.saved.seed = None;
-                    if h.new_password.is_none() {
-                        g.saved.accounts.insert(member, seed);
-                    }
+            // a wrong try until the code proves right (as signing in
+            // with a password), so many at once can't get past MAX_TRIES
+            g.failed(&tries);
+        }
+        let hashed = Account::new("", pw);
+        let mut g = self.state();
+        let key = norm_email(email);
+        let fresh = g.resets.get(&key).is_some_and(|(c, t)| {
+            same(&normalize_code(c), &normalize_code(code)) && now_ms() - t < RESET_MINUTES * 60_000
+        });
+        let member = g.saved.account_member(email).filter(|_| fresh);
+        let Some(member) = member else {
+            return Err(format!("That reset code doesn't work. It may be used already or expired (codes last {} minutes). Ask for a new one.", RESET_MINUTES));
+        };
+        g.resets.remove(&key);
+        g.fails.remove(&key);
+        g.fails.remove(&tries);
+        let kept = g.saved.accounts[&member].email.clone();
+        g.saved.accounts.insert(member, hashed.with_email(&kept));
+        // a new password: codes made for them earlier no longer sign in
+        g.saved.invites.retain(|_, i| i.member != member);
+        // and whoever knew the old one (or took a device) is signed out
+        let gone = g.saved.sign_out_others(member, device);
+        if !gone.is_empty() {
+            let _ = self.kicks.send(Arc::new(gone));
+        }
+        Ok(self.signed_in(g, device, member, h.tag))
+    }
+
+    /// Signing in with a one-time invite code, maybe choosing a password.
+    fn sign_in_with_invite(&self, h: &Hello, code: &str) -> Result<Signed, String> {
+        let device = h.device.as_str();
+        // a made-up code costs no hashing (checked again below)
+        if self.state().saved.find_invite(code).is_none() {
+            return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
+        }
+        let _slot = match h.new_password {
+            Some(_) => Some(HashSlot::take(&self.hashing)?),
+            None => None,
+        };
+        // a password to choose, hashed before the lock (checked below)
+        let hashed = h
+            .new_password
+            .as_deref()
+            .filter(|pw| password_problem(pw).is_none())
+            .map(|pw| Account::new("", pw));
+        let mut g = self.state();
+        let Some(key) = g.saved.find_invite(code) else {
+            return Err("That invite code doesn't work. It may be used already or expired (codes last 7 days). Ask for a new one.".into());
+        };
+        let member = g.saved.invites[&key].member;
+        // choosing a password: check it all before the code is used up.
+        // Someone who already has a password keeps it: a code signs this
+        // computer in, it doesn't take over their account (they use their
+        // password, or Forgot password, to change it).
+        let account = match h.new_password.as_deref() {
+            Some(_) if g.saved.accounts.contains_key(&member) => None,
+            Some(pw) => {
+                let email = given(&h.email)
+                    .map(|e| e.trim().to_string())
+                    .unwrap_or_else(|| member_field(g.canon.as_ref(), member, "email"));
+                if email.is_empty() {
+                    return Err("Type your email too: you sign in with it on your other computers and phones.".into());
                 }
-                if let Some(pw) = h.new_password.as_deref() {
-                    let email = given(&h.email).unwrap_or("").trim().to_string();
-                    if let Some(why) = g.saved.account_problem(member, &email, pw) {
-                        return Err(why);
-                    }
-                    let Some(a) = hashed else {
+                if let Some(why) = g.saved.account_problem(member, &email, pw) {
+                    return Err(why);
+                }
+                match hashed {
+                    Some(a) => Some(a.with_email(&email)),
+                    None => {
                         return Err(password_problem(pw)
-                            .unwrap_or_else(|| "Choose another password.".into()));
-                    };
-                    g.saved.accounts.insert(member, a.with_email(&email));
+                            .unwrap_or_else(|| "Choose another password.".into()))
+                    }
                 }
-                g.saved.set_role(member, Role::Owner);
-                return Ok(self.signed_in(g, device, member, h.tag));
+            }
+            None => None,
+        };
+        let inv = g.saved.invites.remove(&key).expect("found above");
+        if let Some(a) = account {
+            g.saved.accounts.insert(member, a);
+        }
+        if inv.role > g.saved.role_of(member) {
+            g.saved.set_role(member, inv.role);
+        }
+        Ok(self.signed_in(g, device, member, h.tag))
+    }
+
+    /// Signing in again with the token an earlier welcome gave this device.
+    fn sign_in_with_token(&self, device: &str, token: &str) -> Result<Signed, String> {
+        let g = self.state();
+        match g.saved.device_with(device, token) {
+            Some(d) => Ok((d.member, g.saved.role_of(d.member), d.tag, None)),
+            _ => Err("This computer isn't signed in to this server anymore. Sign in with your email and password, or ask the owner or an admin for a new invite code.".into()),
+        }
+    }
+
+    /// Setting up an empty server: `member` of the workspace the app brings
+    /// becomes its owner.
+    fn claim(&self, h: &Hello, member: u64) -> Result<Signed, String> {
+        let device = h.device.as_str();
+        let _slot = match h.new_password {
+            Some(_) => Some(HashSlot::take(&self.hashing)?),
+            None => None,
+        };
+        let hashed = h
+            .new_password
+            .as_deref()
+            .filter(|pw| password_problem(pw).is_none())
+            .map(|pw| Account::new("", pw));
+        let mut g = self.state();
+        // a server that once had a workspace (its revision moved past 0)
+        // but lost workspace.json is never up for grabs: its owner brings
+        // the workspace back with `workboard-server restore`.
+        if g.canon.is_none() && g.saved.rev > 0 {
+            return Err("This server lost its workspace file. Ask its owner to restore a backup on the server (workboard-server restore).".into());
+        }
+        // only the very first claim wins: two people setting up the same
+        // empty server at once must not end up with their workspaces merged.
+        // A claim that never brought its workspace (the app quit right
+        // after) can be made again from the same computer, and gives way
+        // to anyone after claim_wait.
+        if g.canon.is_none() && !g.saved.devices.is_empty() {
+            let same_device = g.saved.devices.len() == 1 && g.saved.devices.contains_key(device);
+            let stale = g
+                .saved
+                .devices
+                .values()
+                .all(|d| now_ms() - d.created >= self.claim_wait.as_millis() as i64);
+            if !same_device && !stale {
+                return Err("Someone else is setting up this server right now. Ask them for an invite code.".into());
+            }
+            let gone: Vec<String> = g
+                .saved
+                .devices
+                .keys()
+                .filter(|d| d.as_str() != device)
+                .cloned()
+                .collect();
+            g.saved.devices.clear();
+            g.saved.roles.clear();
+            g.saved.invites.clear();
+            g.saved.accounts.clear();
+            if !gone.is_empty() {
+                let _ = self.kicks.send(Arc::new(gone));
             }
         }
-        Err("This server already has a workspace. Sign in with your email and password, or ask its owner or an admin for an invite code.".into())
+        if g.canon.is_none() && g.saved.devices.is_empty() {
+            // a workspace made with POST /workspaces is for the person
+            // who made it: they sign in to it with the account they
+            // already have on this server (registry.rs)
+            if let Some(seed) = g.saved.seed.clone() {
+                let email = given(&h.email).unwrap_or("");
+                if !same(&norm_email(email), &norm_email(&seed.email)) {
+                    return Err("This workspace is being set up by someone else.".into());
+                }
+                g.saved.seed = None;
+                if h.new_password.is_none() {
+                    g.saved.accounts.insert(member, seed);
+                }
+            }
+            if let Some(pw) = h.new_password.as_deref() {
+                let email = given(&h.email).unwrap_or("").trim().to_string();
+                if let Some(why) = g.saved.account_problem(member, &email, pw) {
+                    return Err(why);
+                }
+                let Some(a) = hashed else {
+                    return Err(
+                        password_problem(pw).unwrap_or_else(|| "Choose another password.".into())
+                    );
+                };
+                g.saved.accounts.insert(member, a.with_email(&email));
+            }
+            g.saved.set_role(member, Role::Owner);
+            return Ok(self.signed_in(g, device, member, h.tag));
+        }
+        Err(HAS_WORKSPACE.into())
     }
 
     /// The member whose account `email` and `pw` are, counting a wrong try

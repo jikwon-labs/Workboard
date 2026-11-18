@@ -113,6 +113,10 @@ pub(crate) async fn put_file(
         return status(StatusCode::PAYLOAD_TOO_LARGE, "file is too large");
     }
     let kind = clean_type(req.headers());
+    // the workspace was deleted: don't make its folder again
+    if *hub.closed.borrow() {
+        return status(StatusCode::GONE, wb_net::WORKSPACE_GONE);
+    }
     if tokio::fs::create_dir_all(&dir).await.is_err() {
         return status(StatusCode::INTERNAL_SERVER_ERROR, "can't write files");
     }

@@ -39,8 +39,8 @@ mod conn;
 mod files;
 pub use conn::{trust_certificate, Conn};
 pub use files::{
-    create_workspace, download, forgot_password, list_workspaces, name_ok, remote_size,
-    sha256_file, upload, Auth, FileError,
+    create_workspace, delete_workspace, download, forgot_password, list_workspaces, name_ok,
+    remote_size, sha256_file, upload, Auth, FileError,
 };
 
 pub const DEFAULT_PORT: u16 = 8787;
@@ -239,6 +239,9 @@ pub const CODE_AUTH: &str = "auth";
 /// A request the person isn't allowed to make. The connection stays.
 pub const CODE_DENIED: &str = "denied";
 
+/// Said when the workspace an app connects to was deleted from the server.
+pub const WORKSPACE_GONE: &str = "This workspace was deleted from the server by its owner.";
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
@@ -431,6 +434,10 @@ pub enum Msg {
         /// like any refusal).
         #[serde(default, skip_serializing_if = "is_false")]
         put_back: bool,
+        /// Set (with code "auth", so older apps stop like for any refusal)
+        /// when the workspace was deleted from the server.
+        #[serde(default, skip_serializing_if = "is_false")]
+        gone: bool,
     },
 }
 
@@ -449,6 +456,7 @@ impl Msg {
             code: code.map(|c| c.to_string()),
             channel: None,
             put_back: false,
+            gone: false,
         }
     }
 
@@ -459,6 +467,7 @@ impl Msg {
             code: Some(CODE_DENIED.to_string()),
             channel: Some(channel),
             put_back: false,
+            gone: false,
         }
     }
 
@@ -469,6 +478,19 @@ impl Msg {
             code: Some(CODE_DENIED.to_string()),
             channel: None,
             put_back: true,
+            gone: false,
+        }
+    }
+
+    /// The workspace was deleted: the connection ends and the app stops
+    /// trying (see `Status::Gone`).
+    pub fn gone() -> Msg {
+        Msg::Error {
+            message: WORKSPACE_GONE.to_string(),
+            code: Some(CODE_AUTH.to_string()),
+            channel: None,
+            put_back: false,
+            gone: true,
         }
     }
 
@@ -654,6 +676,8 @@ pub enum Status {
     /// The server won't let this computer in (no or bad invite, access
     /// removed). Not trying again.
     Refused(String),
+    /// The workspace was deleted from the server. Not trying again.
+    Gone(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -792,13 +816,14 @@ impl Line {
     }
 }
 
-fn connect(addr: &str) -> Result<WebSocket<Conn>, String> {
-    let (host, port, url) = server_url(addr)?;
-    let stream = conn::dial(&host, port, is_secure(&url), Duration::from_secs(5))?;
+fn connect(addr: &str) -> Result<WebSocket<Conn>, End> {
+    let (host, port, url) = server_url(addr).map_err(End::Lost)?;
+    let stream =
+        conn::dial(&host, port, is_secure(&url), Duration::from_secs(5)).map_err(End::Lost)?;
     stream
         .tcp()
         .set_read_timeout(Some(Duration::from_secs(10)))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| End::Lost(e.to_string()))?;
     let cfg = WebSocketConfig::default()
         .max_message_size(Some(MAX_MESSAGE))
         .max_frame_size(Some(MAX_MESSAGE));
@@ -810,17 +835,21 @@ fn connect(addr: &str) -> Result<WebSocket<Conn>, String> {
             }
         })
         .map_err(|e| match e {
+            // the workspace was deleted (410 Gone): stop trying
+            tungstenite::Error::Http(r) if r.status().as_u16() == 410 => {
+                End::Gone(WORKSPACE_GONE.to_string())
+            }
             // rustls reports a certificate it doesn't trust as InvalidData
             tungstenite::Error::Io(e) if e.kind() == ErrorKind::InvalidData => {
-                format!("The secure connection to {} failed: {}", host, e)
+                End::Lost(format!("The secure connection to {} failed: {}", host, e))
             }
-            tungstenite::Error::Io(e) => format!("Can't reach {}:{}: {}", host, port, e),
-            e => format!("The server didn't answer like Workboard: {}", e),
+            tungstenite::Error::Io(e) => End::Lost(format!("Can't reach {}:{}: {}", host, port, e)),
+            e => End::Lost(format!("The server didn't answer like Workboard: {}", e)),
         })?;
     ws.get_ref()
         .tcp()
         .set_read_timeout(Some(Duration::from_millis(100)))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| End::Lost(e.to_string()))?;
     Ok(ws)
 }
 
@@ -876,6 +905,7 @@ enum End {
     Stop,
     Lost(String),
     Refused(String),
+    Gone(String),
 }
 
 fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>, wake: Wake) {
@@ -900,25 +930,28 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
                 let _ = ws.flush();
                 end
             }
-            Err(e) => End::Lost(e),
+            Err(e) => e,
         };
-        match end {
+        let gave_up = match end {
             End::Stop => return,
-            End::Refused(why) => {
-                line.emit(Event::Status(Status::Refused(why)));
-                // stay until the app lets go, so it can read the status
-                while let Ok(c) = crx.recv() {
-                    if matches!(c, Cmd::Stop) {
-                        return;
-                    }
-                }
-                return;
-            }
+            End::Refused(why) => Some(Status::Refused(why)),
+            End::Gone(why) => Some(Status::Gone(why)),
             End::Lost(why) => {
                 if !line.emit(Event::Status(Status::Reconnecting(why))) {
                     return;
                 }
+                None
             }
+        };
+        if let Some(status) = gave_up {
+            line.emit(Event::Status(status));
+            // stay until the app lets go, so it can read the status
+            while let Ok(c) = crx.recv() {
+                if matches!(c, Cmd::Stop) {
+                    return;
+                }
+            }
+            return;
         }
         // 1, 2, 3, 4, 5, 5... seconds
         tries += 1;
@@ -1152,7 +1185,9 @@ fn session(
                         code,
                         channel,
                         put_back,
+                        gone,
                     }) => match code.as_deref() {
+                        Some(CODE_AUTH) if gone => Err(End::Gone(message)),
                         Some(CODE_AUTH) => Err(End::Refused(message)),
                         Some(CODE_DENIED) if put_back => emit(Event::PutBack(message)),
                         Some(CODE_DENIED) => match channel {

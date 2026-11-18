@@ -526,3 +526,110 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
     );
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
+    let _home = super::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home = std::env::temp_dir().join(format!("wb-home-delws-{:x}", crate::sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    let server = Server::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+
+    let mut a = keeping_computer("Ours");
+    a.connect_with(
+        &addr,
+        How::Claim {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut a, "A on the server", |a| {
+        a.data.extra.shared.is_some() && connected(a)
+    });
+    let first = a.ws_file.clone();
+    // the server's first workspace can't be deleted
+    assert_eq!(
+        a.delete_how(),
+        Err(Some(
+            "This is the team server's first workspace. It can't be deleted."
+        ))
+    );
+    a.make_workspace_on_server("Side project", &[], &[], "Member", None);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while a.making_ws.is_some() && std::time::Instant::now() < end {
+        a.making_ws_tick();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    until(&mut a, "the second workspace is up", |a| {
+        a.data.workspace == "Side project" && connected(a)
+    });
+    let second = a.ws_file.clone();
+    let addr2 = a
+        .data
+        .extra
+        .shared
+        .as_ref()
+        .and_then(|c| c.server.clone())
+        .unwrap();
+    let id = addr2.rsplit('/').next().unwrap().to_string();
+    let folder = server.home.join("workspaces").join(&id);
+    while !folder.join(workboard_server::WORKSPACE_FILE).is_file() {
+        a.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // another computer has it open
+    let mut b = computer("Laptop");
+    b.connect_with(
+        &addr,
+        How::Account {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    until(&mut b, "the choices", |b| b.sync_rt.choices.is_some());
+    let (_, how) = b.sync_rt.choices.clone().unwrap();
+    b.open_or_join(&addr2, how);
+    until(&mut b, "B has the second", |b| {
+        b.data.workspace == "Side project" && connected(b)
+    });
+
+    // the owner deletes it
+    assert_eq!(
+        a.delete_how(),
+        Ok(super::delete_ws::DeleteHow::Server(addr2.clone()))
+    );
+    a.delete_on_server(&addr2, egui::Context::default());
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while a.deleting_ws.is_some() && std::time::Instant::now() < end {
+        a.deleting_ws_tick();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(a.deleting_ws.is_none());
+    assert_eq!(
+        a.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Deleted Side project")
+    );
+    // A is back on the first, and the second is gone from this computer
+    assert_eq!(a.ws_file, first);
+    assert_eq!(a.data.workspace, "Ours");
+    assert!(!Data::workspaces().iter().any(|w| w.file == second));
+    assert!(!Data::dir().join(&second).exists());
+    until(&mut a, "A back on the first", connected);
+    assert!(!folder.exists());
+    assert_eq!(workboard_server::registry::deleted(&server.home).len(), 1);
+
+    // B hears it and stops; it removes its copy
+    until(&mut b, "B told it's gone", |b| {
+        matches!(b.sync_rt.net_status, Some(wb_net::Status::Gone(_)))
+    });
+    b.remove_gone_workspace();
+    assert!(b.data.extra.shared.is_none());
+    assert_ne!(b.data.workspace, "Side project");
+    let _ = std::fs::remove_dir_all(&home);
+}

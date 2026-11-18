@@ -1412,6 +1412,9 @@ struct Hub {
     /// the members with an open connection, sorted: each connection tells
     /// its app when it changes (the green dot by someone's name)
     presence: watch::Sender<Vec<u64>>,
+    /// true once the workspace is deleted (registry.rs): its connections
+    /// end, telling their apps, and nothing more is written to its folder
+    closed: watch::Sender<bool>,
 }
 
 impl Hub {
@@ -1453,6 +1456,7 @@ impl Hub {
             online: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
+            closed: watch::channel(false).0,
         })
     }
 
@@ -1497,6 +1501,9 @@ impl Hub {
 
     fn flush(&self) {
         let _persistence = self.persistence.lock().unwrap();
+        if *self.closed.borrow() {
+            return;
+        }
         let (canon, saved) = {
             let mut g = self.inner.lock().unwrap();
             if !g.dirty {
@@ -1531,6 +1538,9 @@ impl Hub {
     }
 
     fn backup_now(&self) {
+        if *self.closed.borrow() {
+            return;
+        }
         let canon = self
             .inner
             .lock()
@@ -3073,6 +3083,11 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             return;
         }
     };
+    let mut closed = hub.closed.subscribe();
+    if *closed.borrow_and_update() {
+        let _ = send(&mut socket, &Msg::gone().to_json()).await;
+        return;
+    }
     let _online = Online::new(&hub, &device, member);
     // an app too old to know every field would erase the ones it doesn't
     // know when its copy wins: it gets the team's copy but sends no changes
@@ -3129,6 +3144,10 @@ async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) 
             // by its role for what it may see
             biased;
             _ = stop.changed() => break,
+            _ = closed.changed() => {
+                let _ = send(&mut socket, &Msg::gone().to_json()).await;
+                break;
+            }
             k = kicks.recv() => {
                 let out = match k {
                     Ok(list) => list.contains(&device),
@@ -3338,9 +3357,17 @@ pub async fn serve_on(
                             hub.clean_up();
                         }
                     }
+                    registry.admin_file();
                     if tick % 3600 == 900 {
                         for id in registry.clean_up() {
                             println!("removed workspace {}: nobody set it up", id);
+                        }
+                        for id in registry.purge() {
+                            println!(
+                                "removed deleted workspace {} for good after {} days",
+                                id,
+                                registry::KEEP_DELETED_DAYS
+                            );
                         }
                     }
                 })
@@ -3386,13 +3413,40 @@ pub async fn serve_on(
 /// Leave a request for the running server (or the next start) and wait for
 /// its answer. None when the server didn't answer in time.
 pub fn admin_request(home: &Path, req: &Value, wait: Duration) -> std::io::Result<Option<Value>> {
+    request_files(home, (REQUEST_FILE, RESULT_FILE), req, wait)
+}
+
+/// Leave a request for the running server's list of workspaces (undelete)
+/// and wait for its answer, like `admin_request`.
+pub fn workspaces_request(
+    root: &Path,
+    req: &Value,
+    wait: Duration,
+) -> std::io::Result<Option<Value>> {
+    request_files(
+        root,
+        (
+            registry::WORKSPACES_REQUEST_FILE,
+            registry::WORKSPACES_RESULT_FILE,
+        ),
+        req,
+        wait,
+    )
+}
+
+fn request_files(
+    home: &Path,
+    (request, result): (&str, &str),
+    req: &Value,
+    wait: Duration,
+) -> std::io::Result<Option<Value>> {
     std::fs::create_dir_all(home)?;
-    let _ = std::fs::remove_file(home.join(RESULT_FILE));
-    write_atomic(&home.join(REQUEST_FILE), &req.to_string())?;
+    let _ = std::fs::remove_file(home.join(result));
+    write_atomic(&home.join(request), &req.to_string())?;
     let until = std::time::Instant::now() + wait;
     while std::time::Instant::now() < until {
-        if let Ok(Some(v)) = read_json(&home.join(RESULT_FILE)) {
-            let _ = std::fs::remove_file(home.join(RESULT_FILE));
+        if let Ok(Some(v)) = read_json(&home.join(result)) {
+            let _ = std::fs::remove_file(home.join(result));
             return Ok(Some(v));
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -3822,6 +3876,7 @@ mod tests {
             online: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
+            closed: watch::channel(false).0,
         }
     }
 

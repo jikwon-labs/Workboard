@@ -11,6 +11,9 @@
 //                         (printed by wb-fake-server) instead of mailed
 //   PUT/GET /files/<sha256>  pictures and videos (server/src/files.rs), with
 //                         Authorization: Bearer <device>:<token>
+//   DELETE /w/<id>     an owner deletes the workspace (registry.rs): every
+//                         app is told and connecting answers 410 afterwards
+//                         (reach it at ws://HOST:PORT/w/<id>; any id does)
 // so the WebSocket handshake and frames are done by hand on a TCP listener.
 // Huddles go over the WebSocket like the real server: call_join {channel}
 // -> call_token {channel, url, token}, or error {code: "denied", channel}.
@@ -65,6 +68,10 @@ public final class FakeServer: @unchecked Sendable {
     private var invites: [String: UInt64] = [:]
     /// token -> (member, device)
     private var tokens: [String: (member: UInt64, device: String)] = [:]
+    /// DELETE /w/<id> came from an owner: the workspace is gone
+    private var deleted = false
+    /// Whether an owner deleted the workspace (tests).
+    public var isDeleted: Bool { queue.sync { deleted } }
     private var pushTokens: [String: String] = [:]
     /// member -> account
     private var accounts: [UInt64: Account] = [:]
@@ -349,6 +356,9 @@ public final class FakeServer: @unchecked Sendable {
         if headers["upgrade"]?.lowercased() == "websocket", let until = offlineUntil, until > Date() {
             return respond(p, 503, ["error": "offline"])
         }
+        if deleted, path.hasPrefix("/w/") {
+            return respond(p, 410, ["error": .string(WorkspaceAPI.goneMessage)])
+        }
         if headers["upgrade"]?.lowercased() == "websocket", let key = headers["sec-websocket-key"] {
             let accept = Data(Insecure.SHA1.hash(data: Data((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
             let resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
@@ -362,6 +372,8 @@ public final class FakeServer: @unchecked Sendable {
             respond(p, 200, ["ok": true, "rev": .int(rev), "workspace": .bool(snapshot != nil), "devices": .int(Int64(tokens.count))])
         case ("POST", "/auth/forgot"):
             forgot(p, body: body)
+        case ("DELETE", _) where path.hasPrefix("/w/"):
+            deleteWorkspace(p, headers: headers)
         case (_, _) where path.hasPrefix("/files/"):
             file(p, method: method, name: String(path.dropFirst(7)), headers: headers, body: body)
         case ("POST", _) where adminHTTP && path.hasPrefix("/admin/"):
@@ -442,6 +454,27 @@ public final class FakeServer: @unchecked Sendable {
         }
     }
 
+    /// DELETE /w/<id>: an owner's device deletes the workspace, like
+    /// registry.rs; its apps are told and stop.
+    private func deleteWorkspace(_ p: Peer, headers: [String: String]) {
+        let auth = headers["authorization"] ?? ""
+        let rest = auth.hasPrefix("Bearer ") ? String(auth.dropFirst(7)) : ""
+        let parts = rest.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let t = tokens[parts[1]], t.device == parts[0] else {
+            return respond(p, 401, ["error": "Sign in to this workspace first."])
+        }
+        guard roleOf(t.member) == .owner else {
+            return respond(p, 403, ["error": "Only an owner of this workspace can delete it."])
+        }
+        deleted = true
+        tokens = [:]
+        log("workspace deleted by member \(t.member)")
+        for peer in peers.values where peer.isWebSocket {
+            refuse(peer, WorkspaceAPI.goneMessage)
+        }
+        respond(p, 200, ["deleted": "fake"])
+    }
+
     /// POST /auth/forgot: always ok; a code only when the account exists.
     private func forgot(_ p: Peer, body: Data) {
         let email = ((try? JSON(parsing: body))?["email"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -457,7 +490,7 @@ public final class FakeServer: @unchecked Sendable {
 
     private func respond(_ p: Peer, _ status: Int, _ body: JSON) {
         let text = body.serialized()
-        let reason = [200: "OK", 201: "Created", 401: "Unauthorized", 404: "Not Found", 400: "Bad Request", 501: "Not Implemented", 503: "Service Unavailable"][status] ?? "Error"
+        let reason = [200: "OK", 201: "Created", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 410: "Gone", 400: "Bad Request", 501: "Not Implemented", 503: "Service Unavailable"][status] ?? "Error"
         let resp = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(text.utf8.count)\r\nConnection: close\r\n\r\n\(text)"
         p.conn.send(content: Data(resp.utf8), completion: .contentProcessed { _ in p.conn.cancel() })
     }

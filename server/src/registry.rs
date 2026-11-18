@@ -22,6 +22,14 @@
 //                           "name"}]}: every workspace that account signs in
 //                           to ("" is the first one). Wrong tries count as
 //                           they do when signing in.
+//   DELETE /w/<id>          Authorization: Bearer <device>:<token>, a device
+//                           of an owner of that workspace. -> {"deleted": id}.
+//                           Its folder moves to deleted/<id>.<unix seconds>
+//                           and is removed for good after KEEP_DELETED_DAYS;
+//                           until then `workboard-server undelete ID` brings
+//                           it back. Its apps are told (wb_net::Msg::gone) and
+//                           its addresses answer 410 Gone. The server's first
+//                           workspace can't be deleted.
 
 use super::*;
 use axum::extract::Path as UrlPath;
@@ -32,6 +40,52 @@ pub const MAX_WORKSPACES: usize = 50;
 pub const WORKSPACES_DIR: &str = "workspaces";
 /// A made workspace nobody set up is removed after this long.
 const UNCLAIMED_SECS: u64 = 24 * 3600;
+/// Where deleted workspaces wait in the server folder, as <id>.<unix seconds>.
+pub const DELETED_DIR: &str = "deleted";
+/// How long a deleted workspace is kept before it is removed for good.
+pub const KEEP_DELETED_DAYS: u64 = 30;
+/// A request for the server's list of workspaces (undelete), left in the
+/// server folder like `REQUEST_FILE`, and its answer.
+pub const WORKSPACES_REQUEST_FILE: &str = "workspaces-request.json";
+pub const WORKSPACES_RESULT_FILE: &str = "workspaces-result.json";
+
+/// The deleted workspaces kept in `root`: (id, when, folder), oldest first.
+pub fn deleted(root: &Path) -> Vec<(String, u64, PathBuf)> {
+    let mut v: Vec<(String, u64, PathBuf)> = std::fs::read_dir(root.join(DELETED_DIR))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            let (id, when) = name.rsplit_once('.')?;
+            let when: u64 = when.parse().ok()?;
+            id_ok(id).then(|| (id.to_string(), when, e.path()))
+        })
+        .collect();
+    v.sort_by_key(|(_, when, _)| *when);
+    v
+}
+
+/// Remove the deleted workspaces in `root` kept longer than
+/// KEEP_DELETED_DAYS before `now` (unix seconds). Their ids.
+pub fn remove_old_deleted(root: &Path, now: u64) -> Vec<String> {
+    let cutoff = now.saturating_sub(KEEP_DELETED_DAYS * 86_400);
+    let mut removed = vec![];
+    for (id, when, dir) in deleted(root) {
+        if when <= cutoff && std::fs::remove_dir_all(&dir).is_ok() {
+            removed.push(id);
+        }
+    }
+    removed
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 /// A workspace id: what POST /workspaces makes (16 lowercase hex digits),
 /// or a folder someone made by hand of letters, digits and dashes.
@@ -47,6 +101,8 @@ pub(crate) struct Registry {
     root: PathBuf,
     first: Arc<Hub>,
     others: Mutex<BTreeMap<String, Arc<Hub>>>,
+    /// ids of deleted workspaces still kept: their addresses answer 410
+    gone: Mutex<std::collections::BTreeSet<String>>,
     options: Options,
     pusher: Option<Arc<dyn push::Sender>>,
     stop: watch::Receiver<bool>,
@@ -93,10 +149,16 @@ impl Registry {
                 }
             }
         }
+        let gone = deleted(&root)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .filter(|id| !others.contains_key(id))
+            .collect();
         Ok(Registry {
             root,
             first,
             others: Mutex::new(others),
+            gone: Mutex::new(gone),
             options,
             pusher,
             stop,
@@ -256,6 +318,150 @@ impl Registry {
         }
         unclaimed
     }
+
+    /// Whether the device a request names (`Bearer <device>:<token>`) is
+    /// signed in to workspace `hub` as one of its owners.
+    fn owner_of(hub: &Hub, headers: &axum::http::HeaderMap) -> Result<(), (StatusCode, String)> {
+        let (device, token) = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .and_then(|v| v.split_once(':'))
+            .ok_or((
+                StatusCode::UNAUTHORIZED,
+                "Sign in to this workspace first.".to_string(),
+            ))?;
+        let g = hub.inner.lock().unwrap();
+        let d = g
+            .saved
+            .devices
+            .get(device)
+            .filter(|d| same(&d.token, &hash_token(token)))
+            .ok_or((
+                StatusCode::UNAUTHORIZED,
+                "Sign in to this workspace first.".to_string(),
+            ))?;
+        if g.saved.role_of(d.member) != Role::Owner {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Only an owner of this workspace can delete it.".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Delete workspace `id`: its apps are told and its folder moves to
+    /// deleted/, where it stays KEEP_DELETED_DAYS.
+    fn delete(&self, id: &str) -> std::io::Result<PathBuf> {
+        let hub = self
+            .others
+            .lock()
+            .unwrap()
+            .remove(id)
+            .ok_or(std::io::ErrorKind::NotFound)?;
+        self.gone.lock().unwrap().insert(id.to_string());
+        // its last changes go with it
+        hub.flush();
+        let _persistence = hub.persistence.lock().unwrap();
+        hub.closed.send_replace(true);
+        let dest = self
+            .root
+            .join(DELETED_DIR)
+            .join(format!("{}.{}", id, unix_now()));
+        std::fs::create_dir_all(self.root.join(DELETED_DIR))?;
+        if let Err(e) = std::fs::rename(&hub.home, &dest) {
+            // still gone for the apps; the folder stays where it was and
+            // isn't opened again (see open)
+            eprintln!("couldn't move workspace {} to {}: {}", id, DELETED_DIR, e);
+            return Err(e);
+        }
+        Ok(dest)
+    }
+
+    /// Bring back deleted workspace `id` (its newest copy in deleted/).
+    fn undelete(&self, id: &str) -> Result<String, String> {
+        if !id_ok(id) {
+            return Err(format!("{} isn't a workspace id.", id));
+        }
+        let mut others = self.others.lock().unwrap();
+        if others.contains_key(id) {
+            return Err(format!("Workspace {} isn't deleted.", id));
+        }
+        let Some((_, _, from)) = deleted(&self.root)
+            .into_iter()
+            .rev()
+            .find(|(i, _, _)| i == id)
+        else {
+            return Err(format!(
+                "There's no deleted workspace {} (see `workboard-server workspaces`).",
+                id
+            ));
+        };
+        let home = self.root.join(WORKSPACES_DIR).join(id);
+        if home.exists() {
+            return Err(format!("{} is in the way.", home.display()));
+        }
+        std::fs::create_dir_all(self.root.join(WORKSPACES_DIR)).map_err(|e| e.to_string())?;
+        std::fs::rename(&from, &home).map_err(|e| e.to_string())?;
+        let hub = Hub::open(
+            home,
+            self.root.clone(),
+            Some(id.to_string()),
+            &self.options,
+            self.pusher.clone(),
+            self.stop.clone(),
+        )
+        .map_err(|e| format!("Couldn't open the workspace: {}", e))?;
+        let name = hub.name();
+        others.insert(id.to_string(), Arc::new(hub));
+        self.gone.lock().unwrap().remove(id);
+        Ok(name)
+    }
+
+    /// Remove deleted workspaces kept longer than KEEP_DELETED_DAYS. Their ids.
+    pub(crate) fn purge(&self) -> Vec<String> {
+        let removed = remove_old_deleted(&self.root, unix_now());
+        let left: std::collections::BTreeSet<String> = deleted(&self.root)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        self.gone.lock().unwrap().retain(|id| left.contains(id));
+        removed
+    }
+
+    /// Pick up a request left for the list of workspaces
+    /// (`WORKSPACES_REQUEST_FILE`, from `workboard-server undelete`).
+    pub(crate) fn admin_file(&self) {
+        let req_path = self.root.join(WORKSPACES_REQUEST_FILE);
+        let Ok(Some(req)) = read_json(&req_path) else {
+            return;
+        };
+        let _ = std::fs::remove_file(&req_path);
+        let res = match req.get("undelete").and_then(|v| v.as_str()) {
+            Some(id) => match self.undelete(id) {
+                Ok(name) => {
+                    println!("brought back workspace {}", id);
+                    json!({"ok": true, "message": format!("Workspace {} ({}) is back, with everyone's accounts. Its apps sign in again by themselves only if they kept it; others sign in again.", id, name)})
+                }
+                Err(why) => json!({"ok": false, "message": why}),
+            },
+            None => json!({"ok": false, "message": "unknown request"}),
+        };
+        let _ = write_atomic(&self.root.join(WORKSPACES_RESULT_FILE), &res.to_string());
+    }
+
+    /// Why there's no workspace `id`: deleted (410) or never was (404).
+    fn missing(&self, id: &str) -> Response {
+        if self.gone.lock().unwrap().contains(id) {
+            (
+                StatusCode::GONE,
+                Json(json!({ "error": wb_net::WORKSPACE_GONE })),
+            )
+                .into_response()
+        } else {
+            no_workspace()
+        }
+    }
 }
 
 fn not_allowed() -> (StatusCode, String) {
@@ -268,7 +474,7 @@ fn not_allowed() -> (StatusCode, String) {
 fn no_workspace() -> Response {
     (
         StatusCode::NOT_FOUND,
-        "There's no such workspace on this server.",
+        Json(json!({ "error": "There's no such workspace on this server." })),
     )
         .into_response()
 }
@@ -314,6 +520,33 @@ async fn list_route(State(r): State<Arc<Registry>>, body: axum::body::Bytes) -> 
     }
 }
 
+async fn delete_route(
+    State(r): State<Arc<Registry>>,
+    UrlPath(id): UrlPath<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let Some(hub) = r.hub(&id) else {
+        return r.missing(&id);
+    };
+    if let Err((code, why)) = Registry::owner_of(&hub, &headers) {
+        return (code, Json(json!({ "error": why }))).into_response();
+    }
+    drop(hub);
+    let r2 = r.clone();
+    let id2 = id.clone();
+    match tokio::task::spawn_blocking(move || r2.delete(&id2)).await {
+        Ok(Ok(dir)) => {
+            println!("deleted workspace {} (kept in {})", id, dir.display());
+            Json(json!({ "deleted": id })).into_response()
+        }
+        // already deleted by another request
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => r.missing(&id),
+        // gone for the apps all the same
+        Ok(Err(_)) => Json(json!({ "deleted": id })).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 async fn w_ws(
     State(r): State<Arc<Registry>>,
     UrlPath(id): UrlPath<String>,
@@ -321,7 +554,7 @@ async fn w_ws(
 ) -> Response {
     match r.hub(&id) {
         Some(h) => ws_route(State(h), req).await,
-        None => no_workspace(),
+        None => r.missing(&id),
     }
 }
 
@@ -333,7 +566,7 @@ async fn w_get_file(
 ) -> Response {
     match r.hub(&id) {
         Some(h) => files::get_file(UrlPath(file), State(h), method, headers).await,
-        None => no_workspace(),
+        None => r.missing(&id),
     }
 }
 
@@ -344,7 +577,7 @@ async fn w_put_file(
 ) -> Response {
     match r.hub(&id) {
         Some(h) => files::put_file(UrlPath(file), State(h), req).await,
-        None => no_workspace(),
+        None => r.missing(&id),
     }
 }
 
@@ -355,7 +588,7 @@ async fn w_forgot(
 ) -> Response {
     match r.hub(&id) {
         Some(h) => forgot_route(State(h), body).await,
-        None => no_workspace(),
+        None => r.missing(&id),
     }
 }
 
@@ -367,7 +600,7 @@ async fn w_join(
 ) -> Response {
     match r.hub(&id) {
         Some(h) => join_route(State(h), q, headers).await,
-        None => no_workspace(),
+        None => r.missing(&id),
     }
 }
 
@@ -378,7 +611,7 @@ async fn w_health(
 ) -> Response {
     match r.hub(&id) {
         Some(h) => health(State(h), headers).await,
-        None => no_workspace(),
+        None => r.missing(&id),
     }
 }
 
@@ -387,6 +620,7 @@ pub(crate) fn routes(r: Arc<Registry>) -> Router {
     Router::new()
         .route("/workspaces", axum::routing::post(create_route))
         .route("/auth/workspaces", axum::routing::post(list_route))
+        .route("/w/{id}", axum::routing::delete(delete_route))
         .route("/w/{id}/ws", get(w_ws))
         .route("/w/{id}/files/{file}", get(w_get_file).put(w_put_file))
         .route("/w/{id}/auth/forgot", axum::routing::post(w_forgot))

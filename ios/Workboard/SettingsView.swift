@@ -119,6 +119,16 @@ struct SettingsView: View {
                             }
                             .accessibilityIdentifier("backupsLink")
                         }
+                        if client.canDeleteWorkspace {
+                            NavigationLink {
+                                // gone: Settings closes with it, onto the sign-in screen
+                                DeleteWorkspaceView(onDeleted: { dismiss() })
+                            } label: {
+                                Label("Delete workspace", systemImage: "trash.slash")
+                                    .foregroundStyle(.red)
+                            }
+                            .accessibilityIdentifier("deleteWorkspaceLink")
+                        }
                     } header: {
                         Text("Team")
                     } footer: {
@@ -265,5 +275,57 @@ struct PasswordView: View {
         localError = nil
         guard password == confirm else { localError = "The two passwords don't match."; return }
         localError = client.setPassword(email: email, password: password, oldPassword: hasAccount ? old : nil)
+    }
+}
+
+/// Delete this workspace from the team server, as its owner, after typing
+/// its name. Everyone's apps lose it; the server keeps it 30 days.
+struct DeleteWorkspaceView: View {
+    @Environment(SyncClient.self) private var client
+    var onDeleted: () -> Void = {}
+    @State private var typed = ""
+    @State private var deleting = false
+    @State private var failure: String?
+
+    var name: String { client.view.name }
+    var ready: Bool { !deleting && typed.trimmingCharacters(in: .whitespaces) == name.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        Form {
+            Section {
+                Text("It is deleted from the team server for everyone: their apps lose it too. The server keeps a copy for 30 days, which whoever runs the server can bring back.")
+                TextField(name, text: $typed)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .disabled(deleting)
+                    .accessibilityIdentifier("deleteWorkspaceName")
+            } header: {
+                Text("Delete \(name)?")
+            } footer: {
+                if let failure {
+                    Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("deleteWorkspaceError")
+                } else {
+                    Text("Type the workspace's name to confirm.")
+                }
+            }
+            Section {
+                Button(role: .destructive) {
+                    deleting = true
+                    failure = nil
+                    Task {
+                        failure = await client.deleteWorkspace()
+                        deleting = false
+                        if failure == nil { onDeleted() }
+                    }
+                } label: {
+                    if deleting { ProgressView() } else { Text("Delete workspace") }
+                }
+                .disabled(!ready)
+                .accessibilityIdentifier("deleteWorkspaceButton")
+            }
+        }
+        .navigationTitle("Delete workspace")
     }
 }

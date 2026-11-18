@@ -16,6 +16,7 @@ use std::path::PathBuf;
 mod account_tests;
 mod chat;
 mod comments;
+mod delete_ws;
 mod docs;
 #[cfg(test)]
 mod due_time_tests;
@@ -442,6 +443,8 @@ pub struct App {
     sync_rt: together::SyncRt,
     /// A workspace being made on the team server (see together.rs).
     making_ws: Option<together::MakingWs>,
+    /// a delete asked of the team server, waiting for its answer
+    deleting_ws: Option<delete_ws::DeletingWs>,
     huddle: huddle::HuddleRt,
     notify_rt: notify::NotifyRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
@@ -797,6 +800,7 @@ impl App {
             },
             sync_rt: Default::default(),
             making_ws: None,
+            deleting_ws: None,
             huddle: Default::default(),
             notify_rt: Default::default(),
             ws_places: HashMap::new(),
@@ -6599,6 +6603,7 @@ impl App {
         self.dirty = false;
         if self.persist {
             self.making_ws_tick();
+            self.deleting_ws_tick();
             self.sync_tick(ctx);
         }
         // after sync_tick, whose merges also leave a save due, so the wake-up

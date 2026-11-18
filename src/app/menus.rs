@@ -164,6 +164,11 @@ pub enum Modal {
     },
     /// Asking before logging out of the team server (login.rs).
     LogOut,
+    /// Asking before deleting the open workspace, its name typed in
+    /// (delete_ws.rs).
+    DeleteWorkspace {
+        typed: String,
+    },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -445,7 +450,9 @@ impl App {
             ui.separator();
             section_label(ui, &t, tr("Switch Workspace"));
             let mut all = others;
-            if self.ws_file != "data.json" && !all.iter().any(|w| w.file == "data.json") {
+            // this computer's own workspace, unless it was deleted
+            let own = !self.persist || Data::path().is_file();
+            if own && self.ws_file != "data.json" && !all.iter().any(|w| w.file == "data.json") {
                 all.insert(
                     0,
                     WsEntry {
@@ -506,7 +513,6 @@ impl App {
     }
 
     pub(super) fn switch_workspace(&mut self, file: &str) {
-        self.ws_places.clear();
         // a status editor still open: its edits are done (and saved with
         // this workspace) like on closing it, and it doesn't stay open on
         // the next workspace
@@ -514,6 +520,13 @@ impl App {
         if self.persist {
             self.save_now();
         }
+        self.open_workspace(file);
+    }
+
+    /// Open workspace `file` in place of the one open, which isn't saved
+    /// (switch_workspace saves it first). Nothing changes when it can't be read.
+    pub(super) fn open_workspace(&mut self, file: &str) {
+        self.ws_places.clear();
         let d = if file == "data.json" {
             Some(Data::load())
         } else {
@@ -1271,6 +1284,7 @@ impl App {
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
             Modal::JoinTeam { .. } => tr("Join a team").into(),
             Modal::LogOut => tr("Log out").into(),
+            Modal::DeleteWorkspace { .. } => tr("Delete workspace").into(),
             Modal::Call { .. } => tr("Start a call").into(),
             Modal::NewList { .. } => tr("Create List").into(),
             Modal::NewSpace { .. } => tr("Create a Space").into(),
@@ -1367,6 +1381,7 @@ impl App {
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
             Modal::JoinTeam { addr } => close = self.join_team_body(ui, t, addr),
             Modal::LogOut => close = self.log_out_body(ui, t),
+            Modal::DeleteWorkspace { typed } => close = self.delete_workspace_body(ui, t, typed),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList {
                 name,
@@ -1569,6 +1584,12 @@ impl App {
                         Data::save_workspaces(&list);
                     }
                     self.dirty = true;
+                    close = true;
+                }
+                if self.delete_workspace_row(ui, t) {
+                    self.modal = Some(Modal::DeleteWorkspace {
+                        typed: String::new(),
+                    });
                     close = true;
                 }
             }

@@ -138,6 +138,8 @@ public enum SignInReason: Equatable, Sendable {
     case signedOut
     /// A sign-in attempt was refused.
     case failed
+    /// The workspace was deleted from the server; this iPhone's copy is gone.
+    case gone
 }
 
 /// A set_password request from settings.
@@ -641,7 +643,13 @@ public final class SyncClient {
                 @unknown default: break
                 }
             } catch {
-                lost(gen, error.localizedDescription)
+                guard generation == gen else { return }
+                if (ws.response as? HTTPURLResponse)?.statusCode == 410 {
+                    // the workspace was deleted while this iPhone was away
+                    workspaceDeleted(WorkspaceAPI.goneMessage)
+                } else {
+                    lost(gen, error.localizedDescription)
+                }
                 return
             }
         }
@@ -717,6 +725,8 @@ public final class SyncClient {
             } else if putBack || message == Self.updateNeeded {
                 // about pushed changes, not an answer to a request
                 notice = message
+            } else if code == ServerErrorCode.auth.rawValue, message == WorkspaceAPI.goneMessage {
+                workspaceDeleted(message)
             } else {
                 handleError(code.flatMap(ServerErrorCode.init(rawValue:)), message: message)
             }
@@ -882,6 +892,62 @@ public final class SyncClient {
             }
         }
         return out
+    }
+
+    /// The owner of this workspace may delete it (not the server's first).
+    public var canDeleteWorkspace: Bool {
+        settings.meFromServer && myRole == .owner && ServerAddress.workspaceID(settings.server) != nil
+    }
+
+    /// Delete this workspace from the server, as its owner. Returns why it
+    /// couldn't, or nil once it is deleted (and gone from this iPhone).
+    public func deleteWorkspace() async -> String? {
+        guard canDeleteWorkspace else { return "Only an owner of this workspace can delete it." }
+        guard let token = tokens.token(for: settings.server), !token.isEmpty else {
+            return "Sign in again, then delete the workspace."
+        }
+        let name = view.name
+        do {
+            try await WorkspaceAPI.delete(server: settings.server, device: settings.device, token: token, session: session)
+        } catch AuthError.failed(let why) {
+            return why
+        } catch {
+            return error.localizedDescription
+        }
+        workspaceDeleted(name.isEmpty ? "The workspace was deleted from the server." : "\(name) was deleted from the server.")
+        return nil
+    }
+
+    /// The workspace was deleted from the server (here or by its owner
+    /// elsewhere): sign out and forget this iPhone's copy, saying why on the
+    /// sign-in screen.
+    func workspaceDeleted(_ message: String) {
+        generation += 1
+        closeSocket()
+        retryTask?.cancel()
+        retryTask = nil
+        pendingSignIn = nil
+        tokens.setToken(nil, for: settings.server)
+        if let sent = settings.pushSentTo, ServerAddress.same(sent, settings.server) { settings.pushSentTo = nil }
+        clearAdmin()
+        settings.me = nil
+        settings.meFromServer = false
+        settings.accountEmail = nil
+        settings.role = nil
+        settings.waitingStamps = [:]
+        settings.waitingTombs = [:]
+        settings.reuploads = []
+        data = nil
+        view = .empty
+        rev = 0
+        try? FileManager.default.removeItem(at: storage.snapshotURL)
+        storage.save(settings)
+        setTrash([])
+        signInReason = .gone
+        signInMessage = message
+        needsSignIn = true
+        state = .signIn
+        attempt = 0
     }
 
     private func lost(_ gen: Int, _ why: String) {

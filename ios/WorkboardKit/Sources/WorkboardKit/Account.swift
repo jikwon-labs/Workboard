@@ -197,6 +197,40 @@ public enum AuthAPI {
     public static let emptyServerNote = "This server has no workspace yet. Set it up from Workboard on the Mac first (it brings its workspace and makes you the owner), then make an invite code there or set a password, and sign in here."
 }
 
+/// Deleting a workspace other than the server's first, as its owner
+/// (server/src/registry.rs):
+///
+///   DELETE http(s)://HOST:PORT/w/<id>   Authorization: Bearer <device>:<token>
+///   -> 200 {"deleted": id}; 403/401 {"error"}; 410 when it is gone already
+///
+/// Its apps are then told with error {code: "auth", message: goneMessage,
+/// gone: true}, and connecting to it answers 410.
+public enum WorkspaceAPI {
+    /// What the server says to the apps of a deleted workspace (wb_net::WORKSPACE_GONE).
+    public static let goneMessage = "This workspace was deleted from the server by its owner."
+
+    /// Delete the workspace at `server` (an address with /w/<id>).
+    public static func delete(server: String, device: String, token: String, session: URLSession = .shared) async throws {
+        guard ServerAddress.workspaceID(server) != nil else {
+            throw AuthError.failed("The server's first workspace can't be deleted.")
+        }
+        guard let url = ServerAddress.http(server, path: "") else { throw AuthError.badAddress }
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(device):\(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp): (Data, URLResponse)
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch {
+            throw AuthError.failed(error.localizedDescription)
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 200 || status == 410 { return }
+        let said = (try? JSON(parsing: data))?["error"]?.string
+        throw AuthError.failed(said ?? (status == 404 || status == 405 ? "This server can't delete workspaces yet. Update workboard-server first." : "The server answered \(status)."))
+    }
+}
+
 /// Turning what a person typed into the addresses the app uses, the way the
 /// Mac app does (wb_net::server_url): "macmini", "host:9000",
 /// "ws://host:8787" and "ws://host:8787/ws" all work.

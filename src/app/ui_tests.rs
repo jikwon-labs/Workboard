@@ -11375,3 +11375,138 @@ fn a_workspace_on_this_computer_only_has_no_server_choice() {
     assert!(!h.has("On this computer only"));
     assert!(!h.has("Where"));
 }
+
+#[test]
+fn a_workspace_on_this_computer_is_deleted_after_typing_its_name() {
+    let mut h = Ui1::new();
+    let name = h.app.data.workspace.clone();
+    let first_task = h.app.data.tasks[0].name.clone();
+    h.app.open_settings("General");
+    h.frame(vec![]);
+    assert!(h.has("Everything in it is deleted from this computer."));
+    h.click("Delete workspace...");
+    assert!(matches!(h.app.modal, Some(Modal::DeleteWorkspace { .. })));
+    assert!(h.has(&format!("Delete {}?", name)));
+    // not before the name is typed
+    h.click("Delete");
+    assert!(matches!(h.app.modal, Some(Modal::DeleteWorkspace { .. })));
+    assert!(h.app.data.tasks.iter().any(|t| t.name == first_task));
+    h.click("Cancel");
+    assert!(h.app.modal.is_none());
+    assert!(h.app.data.tasks.iter().any(|t| t.name == first_task));
+
+    h.app.open_settings("General");
+    h.frame(vec![]);
+    h.click("Delete workspace...");
+    h.click("Workspace name to delete");
+    h.type_text("not it");
+    h.click("Delete");
+    assert!(matches!(h.app.modal, Some(Modal::DeleteWorkspace { .. })));
+    h.app.modal = Some(Modal::DeleteWorkspace {
+        typed: String::new(),
+    });
+    h.frame(vec![]);
+    h.click("Workspace name to delete");
+    h.type_text(&name);
+    h.click("Delete");
+    assert!(
+        !h.app.data.tasks.iter().any(|t| t.name == first_task),
+        "its tasks are gone"
+    );
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.clone()),
+        Some(format!("Deleted {}", name))
+    );
+    // nothing left on this computer: the start screen, as on a first start
+    assert!(h.app.login.is_some() && h.app.data.extra.welcome);
+    assert!(h.app.modal.is_none());
+}
+
+#[test]
+fn only_an_owner_deletes_a_team_server_workspace_and_never_the_first() {
+    let mut h = Ui1::new();
+    let shared = |server: &str| {
+        Some(crate::sync::SharedCfg {
+            folder: String::new(),
+            device: "dev-del".into(),
+            tag: 5,
+            server: Some(server.into()),
+        })
+    };
+    // a plain member: no way to delete it, and nothing said about it
+    h.app.data.extra.shared = shared("127.0.0.1:1/w/abc");
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.app.open_settings("General");
+    h.frame(vec![]);
+    assert!(h.has("Workspace name"));
+    assert!(!h.has("Delete workspace...") && !h.has("Delete workspace"));
+
+    // the owner, signed in
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.frame(vec![]);
+    assert!(h.has("It is deleted from the team server for everyone."));
+    h.click("Delete workspace...");
+    assert!(h.has("It is deleted from the team server for everyone: their apps lose it too. The server keeps a copy for 30 days, which whoever runs the server can bring back."));
+    h.click("Cancel");
+
+    // not signed in yet: who they are isn't known
+    h.app.sync_rt.role = None;
+    h.app.open_settings("General");
+    h.frame(vec![]);
+    assert!(h.has("Connect to the team server to delete this workspace."));
+    assert!(!h.has("Delete workspace..."));
+
+    // the server's first workspace stays
+    h.app.data.extra.shared = shared("127.0.0.1:1");
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.frame(vec![]);
+    assert!(h.has("This is the team server's first workspace. It can't be deleted."));
+    assert!(!h.has("Delete workspace..."));
+
+    // in a shared folder: this computer's copy
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: "/tmp/nowhere".into(),
+        device: "dev-del".into(),
+        tag: 5,
+        server: None,
+    });
+    h.frame(vec![]);
+    assert!(h.has(
+        "This computer's copy is deleted. The shared folder and your teammates' copies stay."
+    ));
+}
+
+#[test]
+fn a_workspace_deleted_on_the_server_says_so_and_comes_off_this_computer() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-gone".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1/w/abc".into()),
+    });
+    together::save_token("127.0.0.1:1/w/abc", "dev-gone", "token-1");
+    let team_task = h.app.data.tasks[0].name.clone();
+    h.app.sync_rt.net_status = Some(wb_net::Status::Gone(wb_net::WORKSPACE_GONE.into()));
+    h.app.modal = Some(h.app.together_modal());
+    h.frame(vec![]);
+    h.frame(vec![]);
+    let gone = wb_net::Status::Gone(wb_net::WORKSPACE_GONE.into());
+    assert_eq!(
+        together::net_status_text(true, Some(&gone), 0),
+        "Deleted from the server"
+    );
+    assert!(h.has(wb_net::WORKSPACE_GONE));
+    assert!(!h.has("Sign in"), "signing in again wouldn't help");
+    h.click("Remove from this computer");
+    assert!(h.app.data.extra.shared.is_none());
+    assert!(!h.app.data.tasks.iter().any(|t| t.name == team_task));
+    assert!(together::load_token("127.0.0.1:1/w/abc", "dev-gone").is_none());
+    assert!(h.app.modal.is_none());
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|t| t.0.starts_with("Removed ")));
+}

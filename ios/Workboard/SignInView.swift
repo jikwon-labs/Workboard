@@ -76,7 +76,12 @@ struct SignInView: View {
         switch mode {
         case .forgot: return "Reset password"
         case .invite: return "Join"
-        case .password: return client.signInReason == .signedOut ? "Signed out" : "Sign in"
+        case .password:
+            switch client.signInReason {
+            case .signedOut: return "Signed out"
+            case .gone: return "Workspace deleted"
+            default: return "Sign in"
+            }
         }
     }
 
@@ -85,6 +90,7 @@ struct SignInView: View {
         if emptyServer { return AuthAPI.emptyServerNote }
         switch client.signInReason {
         case .signedOut: return client.signInMessage ?? "This iPhone isn't signed in on the server any more."
+        case .gone: return (client.signInMessage ?? WorkspaceAPI.goneMessage) + " Sign in to another workspace, or type another server's address."
         case .needed, nil: return mode == .password ? "Sign in with your email and password, or use the invite code you were given." : nil
         case .failed: return nil
         }

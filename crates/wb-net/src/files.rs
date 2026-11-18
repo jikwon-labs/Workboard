@@ -490,12 +490,22 @@ fn post_json(
     auth: Option<&Auth>,
     payload: &serde_json::Value,
 ) -> Result<(u16, String), String> {
+    send_json("POST", addr, path, auth, payload)
+}
+
+fn send_json(
+    method: &str,
+    addr: &str,
+    path: &str,
+    auth: Option<&Auth>,
+    payload: &serde_json::Value,
+) -> Result<(u16, String), String> {
     let (mut s, host, prefix) = open(addr).map_err(|e| e.explain())?;
     let payload = payload.to_string();
     let auth = auth
         .map(|a| format!("Authorization: Bearer {}:{}\r\n", a.device, a.token))
         .unwrap_or_default();
-    let req = format!("POST {}{} HTTP/1.1\r\nHost: {}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", prefix, path, host, auth, payload.len(), payload);
+    let req = format!("{} {}{} HTTP/1.1\r\nHost: {}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", method, prefix, path, host, auth, payload.len(), payload);
     s.write_all(req.as_bytes())
         .map_err(|e| format!("Couldn't reach the server: {}", e))?;
     let mut r = BufReader::new(s);
@@ -543,6 +553,26 @@ pub fn create_workspace(addr: &str, auth: &Auth) -> Result<String, String> {
         .filter(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
         .ok_or("The server's answer didn't make sense.")?;
     Ok(crate::workspace_addr(addr, &id))
+}
+
+/// Delete the workspace at `addr` from its server (DELETE /w/<id>), as its
+/// owner signed in with `auth`. The server keeps it for a while
+/// (`workboard-server undelete`), but everyone's apps lose it now.
+pub fn delete_workspace(addr: &str, auth: &Auth) -> Result<(), String> {
+    if !addr.contains("/w/") {
+        return Err("The server's first workspace can't be deleted.".into());
+    }
+    let (status, json) = send_json("DELETE", addr, "", Some(auth), &serde_json::json!({}))?;
+    match status {
+        200 => Ok(()),
+        // already gone
+        410 => Ok(()),
+        // an older server has no such address
+        404 | 405 if !json.trim_start().starts_with('{') => {
+            Err("This server can't delete workspaces yet. Update workboard-server first.".into())
+        }
+        _ => Err(answer_error(status, &json)),
+    }
 }
 
 /// The workspaces an email and password sign in to on the server `addr` is

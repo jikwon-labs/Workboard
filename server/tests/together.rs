@@ -5456,3 +5456,164 @@ fn one_server_keeps_several_workspaces_apart() {
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }
+
+/// The owner of a workspace other than the server's first deletes it: its
+/// apps are told and stop, its address answers 410, its folder waits in
+/// deleted/ and `workboard-server undelete` brings it back.
+#[test]
+fn an_owner_deletes_a_workspace_and_it_can_come_back() {
+    let home = temp_home("deletews");
+    let server = Server::start(&home, 0);
+    let port = server.port;
+    let addr = format!("127.0.0.1:{}", port);
+    let mut a = App::start(
+        port,
+        stamped(workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            new_password: Some("ann-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    a.until("owner in", |a| {
+        a.role == Some(Role::Owner) && a.token.is_some()
+    });
+    // the server's first workspace can't be deleted
+    assert!(wb_net::delete_workspace(&addr, &auth(&a)).is_err());
+
+    let addr2 = wb_net::create_workspace(&addr, &auth(&a)).unwrap();
+    let id = addr2.rsplit('/').next().unwrap().to_string();
+    let mut a2 = App::start_at(
+        &addr2,
+        stamped(second_workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            ..Default::default()
+        },
+    );
+    a2.until("owner of the second", |a| {
+        a.role == Some(Role::Owner) && a.token.is_some()
+    });
+    a2.change(|d| {
+        d["members"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": 2, "name": "Bo", "role": "Member", "email": "bo@team.io"}))
+    });
+    a2.until("Bo is on the server", |a| {
+        a.people.iter().any(|p| p.member == 2)
+    });
+    let code = a2.invite(2, Role::Member);
+    let mut b2 = App::start_at(
+        &addr2,
+        Value::Null,
+        SignIn {
+            invite: Some(code),
+            ..Default::default()
+        },
+    );
+    b2.until("Bo in", |b| b.token.is_some());
+
+    // a member can't delete it, nor a device of another workspace
+    let refused = wb_net::delete_workspace(&addr2, &auth(&b2)).unwrap_err();
+    assert!(refused.contains("Only an owner"), "{}", refused);
+    assert!(wb_net::delete_workspace(&addr2, &auth(&a)).is_err());
+    assert!(home.join("workspaces").join(&id).is_dir());
+
+    // its owner can: everyone connected is told and stops trying
+    wb_net::delete_workspace(&addr2, &auth(&a2)).unwrap();
+    for app in [&mut a2, &mut b2] {
+        app.wait_status(|s| matches!(s, Status::Gone(_)), "told it's gone");
+    }
+    assert!(!home.join("workspaces").join(&id).exists());
+    let kept = workboard_server::registry::deleted(&home);
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].0, id);
+    assert!(kept[0].2.join(workboard_server::STATE_FILE).is_file());
+    // the first workspace goes on
+    a.change(|d| d["tasks"][0]["name"] = json!("Still here"));
+    assert_eq!(a.status, Some(Status::Connected));
+
+    // coming back later: gone, not "reconnecting"
+    let mut late = App::start_at(
+        &addr2,
+        Value::Null,
+        SignIn {
+            device: b2.device.clone(),
+            token: b2.token.clone(),
+            ..Default::default()
+        },
+    );
+    late.wait_status(|s| matches!(s, Status::Gone(_)), "late app told it's gone");
+    let (head, _) = http_get(port, &format!("/w/{}/health", id));
+    assert!(head.starts_with("HTTP/1.1 410"), "{}", head);
+    // deleting again is fine
+    wb_net::delete_workspace(&addr2, &auth(&a2)).unwrap();
+    // and the list of the account's workspaces leaves it out
+    assert_eq!(
+        wb_net::list_workspaces(&addr, "ann@team.io", "ann-secret-1")
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // brought back with everyone's accounts
+    let res = workboard_server::workspaces_request(
+        &home,
+        &json!({ "undelete": id }),
+        Duration::from_secs(5),
+    )
+    .unwrap()
+    .expect("the server answered");
+    assert_eq!(res["ok"], true, "{}", res);
+    assert!(home.join("workspaces").join(&id).is_dir());
+    assert!(workboard_server::registry::deleted(&home).is_empty());
+    let mut back = App::start_at(
+        &addr2,
+        Value::Null,
+        SignIn {
+            device: a2.device.clone(),
+            token: a2.token.clone(),
+            ..Default::default()
+        },
+    );
+    back.wait("the second copy is back", |d| d["workspace"] == "Second");
+    drop((a, a2, b2, late, back));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Deleted workspaces are removed for good after KEEP_DELETED_DAYS, and a
+/// deleted one isn't opened again when the server starts.
+#[test]
+fn deleted_workspaces_stay_deleted_after_a_restart() {
+    let home = temp_home("deletedkeep");
+    let gone = home.join("deleted");
+    std::fs::create_dir_all(gone.join("abc.100")).unwrap();
+    let recent = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    std::fs::create_dir_all(gone.join(format!("def.{}", recent))).unwrap();
+    let server = Server::start(&home, 0);
+    let (head, _) = http_get(server.port, "/w/def/health");
+    assert!(head.starts_with("HTTP/1.1 410"), "{}", head);
+    let (head, _) = http_get(server.port, "/w/nosuch/health");
+    assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
+    server.stop();
+    let ids: Vec<String> = workboard_server::registry::deleted(&home)
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect();
+    assert_eq!(ids, vec!["abc".to_string(), "def".to_string()]);
+    // the one from 1970 is long past keeping
+    assert_eq!(
+        workboard_server::registry::remove_old_deleted(&home, recent),
+        vec!["abc".to_string()]
+    );
+    assert!(!gone.join("abc.100").exists());
+    assert!(gone.join(format!("def.{}", recent)).is_dir());
+    let _ = std::fs::remove_dir_all(&home);
+}

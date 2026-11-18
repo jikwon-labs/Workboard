@@ -744,6 +744,46 @@ final class Round3ClientTests: XCTestCase {
         return c
     }
 
+    /// An owner deletes the workspace (not the server's first): everyone's
+    /// copy goes, they're signed out with why, and coming back later gets
+    /// the same instead of retrying.
+    func testOwnerDeletesTheWorkspaceAndEveryCopyGoes() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        // the server's first workspace can't be deleted
+        server.setRole(member: 3, role: .owner)
+        let first = await signedIn(server, "ws://127.0.0.1:\(port)", member: 3)
+        XCTAssertFalse(first.canDeleteWorkspace)
+        first.disconnect()
+
+        let url = "ws://127.0.0.1:\(port)/w/abc"
+        let owner = await signedIn(server, url, member: 3)
+        let other = await signedIn(server, url, member: 2)
+        XCTAssertTrue(owner.canDeleteWorkspace)
+        XCTAssertFalse(other.canDeleteWorkspace, "only an owner")
+        XCTAssertNotNil(other.data)
+
+        let failed = await owner.deleteWorkspace()
+        XCTAssertNil(failed)
+        XCTAssertTrue(server.isDeleted)
+        XCTAssertEqual(owner.signInReason, .gone)
+        XCTAssertNil(owner.data, "this iPhone's copy is gone")
+        XCTAssertFalse(owner.hasToken)
+
+        await until("the other iPhone is told") { other.signInReason == .gone }
+        XCTAssertEqual(other.signInMessage, WorkspaceAPI.goneMessage)
+        XCTAssertNil(other.data)
+        XCTAssertFalse(other.hasToken)
+        XCTAssertEqual(other.state, .signIn)
+
+        // one that was away hears it on connecting, and doesn't retry
+        let late = device(url)
+        await until("late one told") { late.signInReason == .gone }
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        XCTAssertEqual(late.state, .signIn, "no retrying a deleted workspace")
+    }
+
     func testSignOutStopsPushesFromThatServer() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
         let url = try await signInServer(server)

@@ -1,7 +1,7 @@
 // workboard-server [--bind ADDRESS] [--port PORT] [--home FOLDER]
 // workboard-server invite-email EMAIL [--home FOLDER]  (new teammates, Member only)
 // workboard-server people | backups | invite MEMBER [--role admin|owner] | restore FILE | mail-test ADDRESS   [--home FOLDER] [--workspace ID]
-// workboard-server workspaces [--home FOLDER]
+// workboard-server workspaces | undelete ID [--home FOLDER]
 //
 // Listens on 127.0.0.1 port 8787 by default. That is where Cloudflare
 // Tunnel's connector (cloudflared) on the same Mac reaches it; the team
@@ -22,7 +22,9 @@ const USAGE: &str = "usage:
       --home   folder that keeps the team's copy
                (default: $WORKBOARD_SERVER_HOME, else ~/Library/Application Support/WorkboardServer)
 
-  workboard-server workspaces                   the workspaces on this server (id, name, people)
+  workboard-server workspaces                   the workspaces on this server (id, name, people),
+                                                and deleted ones still kept
+  workboard-server undelete ID                  bring back a deleted workspace (kept 30 days)
   workboard-server people                       who is in the workspace, their role and computers
   workboard-server backups                      list the backups
   workboard-server restore FILE                 go back to a backup (a file from `backups`)
@@ -93,6 +95,22 @@ fn main() {
     {
         [] => serve(bind, port, root),
         ["workspaces"] => workspaces(&root),
+        ["undelete", id] => {
+            if !workboard_server::registry::id_ok(id) {
+                fail("ID is a workspace id (see `workboard-server workspaces`)");
+            }
+            match workboard_server::workspaces_request(
+                &root,
+                &json!({"undelete": id}),
+                Duration::from_secs(5),
+            ) {
+                Ok(res) => answer(
+                    res,
+                    &root.join(workboard_server::registry::WORKSPACES_RESULT_FILE),
+                ),
+                Err(e) => fail(&e.to_string()),
+            }
+        }
         ["people"] => people(&home),
         ["backups"] => backups(&home),
         ["restore", file] => {
@@ -226,7 +244,15 @@ fn serve(bind: Option<String>, port: u16, home: PathBuf) {
 /// Hand a request to the running server (or the next start).
 fn request(home: &std::path::Path, req: serde_json::Value) {
     match workboard_server::admin_request(home, &req, Duration::from_secs(5)) {
-        Ok(Some(res)) => {
+        Ok(res) => answer(res, &home.join(workboard_server::RESULT_FILE)),
+        Err(e) => fail(&e.to_string()),
+    }
+}
+
+/// Print the running server's answer (None: it isn't running).
+fn answer(res: Option<serde_json::Value>, result_file: &std::path::Path) {
+    match res {
+        Some(res) => {
             println!(
                 "{}",
                 res.get("message").and_then(|m| m.as_str()).unwrap_or("")
@@ -235,11 +261,10 @@ fn request(home: &std::path::Path, req: serde_json::Value) {
                 std::process::exit(1);
             }
         }
-        Ok(None) => println!(
+        None => println!(
             "The server isn't running. It will do this when it starts; the answer will be in {}.",
-            home.join(workboard_server::RESULT_FILE).display()
+            result_file.display()
         ),
-        Err(e) => fail(&e.to_string()),
     }
 }
 
@@ -281,6 +306,29 @@ fn workspaces(root: &std::path::Path) {
                 format!("the server's address + /w/{}", id)
             }
         );
+    }
+    let gone = workboard_server::registry::deleted(root);
+    if !gone.is_empty() {
+        println!();
+        println!(
+            "deleted (kept {} days; bring one back with `workboard-server undelete ID`):",
+            workboard_server::registry::KEEP_DELETED_DAYS
+        );
+        for (id, when, dir) in gone {
+            let name = std::fs::read_to_string(dir.join(workboard_server::WORKSPACE_FILE))
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|c| c.get("workspace")?.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            let at = chrono::DateTime::from_timestamp(when as i64, 0)
+                .map(|t| {
+                    t.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            println!("{:<18} {:<28} deleted {}", id, name, at);
+        }
     }
 }
 

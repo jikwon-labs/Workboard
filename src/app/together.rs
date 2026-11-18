@@ -576,6 +576,7 @@ pub(super) fn net_status_text(net: bool, s: Option<&NetStatus>, fails: u32) -> S
         }
         (true, Some(NetStatus::Reconnecting(_))) => tr("Reconnecting\u{2026}").into(),
         (true, Some(NetStatus::Refused(_))) => tr("Not signed in").into(),
+        (true, Some(NetStatus::Gone(_))) => tr("Deleted from the server").into(),
     }
 }
 
@@ -585,7 +586,7 @@ pub(super) fn net_problem(s: Option<&NetStatus>) -> Option<String> {
         Some(NetStatus::Reconnecting(why)) => {
             Some(trf!("{} Trying again every few seconds.", reach_text(why)))
         }
-        Some(NetStatus::Refused(why)) => Some(server_text(why)),
+        Some(NetStatus::Refused(why) | NetStatus::Gone(why)) => Some(server_text(why)),
         _ => None,
     }
 }
@@ -1082,6 +1083,7 @@ impl App {
             }
             Some(NetStatus::Reconnecting(_)) => Some(tr("Reconnecting\u{2026}").into()),
             Some(NetStatus::Refused(_)) => Some(tr("Not signed in").into()),
+            Some(NetStatus::Gone(_)) => Some(tr("Deleted from the server").into()),
             _ => None,
         }
     }
@@ -1145,6 +1147,12 @@ impl App {
                     if s != NetStatus::Connected {
                         // the list comes again after the next welcome
                         self.sync_rt.online = None;
+                    }
+                    if matches!(s, NetStatus::Gone(_)) && self.sync_rt.joining.is_none() {
+                        self.toast = Some((
+                            tr("This workspace was deleted from the server by its owner. Remove it from this computer in Work together.").into(),
+                            now_ts(),
+                        ));
                     }
                     self.sync_rt.net_status = Some(s)
                 }
@@ -2330,7 +2338,9 @@ impl App {
                 ui.label(RichText::new(why).small().color(WARN));
             }
             // refused: say why and let them fix what they typed
-            if let Some(NetStatus::Refused(why)) = self.sync_rt.net_status.clone() {
+            if let Some(NetStatus::Refused(why) | NetStatus::Gone(why)) =
+                self.sync_rt.net_status.clone()
+            {
                 self.sync_rt.joining = None;
                 self.sync_rt.net = None;
                 self.sync_rt.net_status = None;
@@ -2827,7 +2837,7 @@ impl App {
             );
             let trouble = matches!(
                 self.sync_rt.net_status,
-                Some(NetStatus::Reconnecting(_) | NetStatus::Refused(_))
+                Some(NetStatus::Reconnecting(_) | NetStatus::Refused(_) | NetStatus::Gone(_))
             );
             ui.label(
                 RichText::new(trf!("Status: {}", status)).color(if connected {
@@ -2856,6 +2866,24 @@ impl App {
                     .color(t.text2),
                 );
             }
+            let gone = matches!(self.sync_rt.net_status, Some(NetStatus::Gone(_)));
+            if gone {
+                ui.add_space(6.0);
+                ui.label(RichText::new(tr("What's here stays on this computer until you remove it. Nothing you change here reaches anyone.")).color(t.text2));
+                ui.add_space(4.0);
+                if ui
+                    .add(Tint(
+                        egui::Button::new(
+                            RichText::new(tr("Remove from this computer")).color(Color32::WHITE),
+                        )
+                        .fill(t.danger),
+                    ))
+                    .clicked()
+                {
+                    self.remove_gone_workspace();
+                    return true;
+                }
+            }
             if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
                 ui.add_space(6.0);
                 ui.label(RichText::new(tr("Sign this computer in again with your email and password, or with a new invite code from the owner or an admin.")).color(t.text2));
@@ -2874,6 +2902,8 @@ impl App {
             ui.add_space(8.0);
             let how = if connected {
                 tr("Tasks, chat and docs show up for everyone within a second or two.")
+            } else if gone {
+                tr("The server no longer has this workspace.")
             } else if matches!(self.sync_rt.net_status, Some(NetStatus::Refused(_))) {
                 tr("You can keep working here. Your changes are kept on this computer and go up once it's signed in again.")
             } else {

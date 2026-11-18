@@ -23,6 +23,17 @@ final class KoreanUITests: WorkboardUITestCase {
         XCTAssertTrue(a.buttons["app-goals"].label.contains("목표"))
     }
 
+    func testTheNamePromptIsInKorean() {
+        let a = launch(["-wbTab", "tasks"])
+        let new = a.buttons["newSpaceButton"]
+        waitEnabled(new)
+        new.tap()
+        let alert = a.alerts["새 스페이스"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "the title in Korean")
+        XCTAssertTrue(alert.buttons["만들기"].exists)
+        alert.buttons["취소"].tap()
+    }
+
     func testTaskHistoryReadsInKorean() {
         let a = launch(["-wbOpen", "task:206"])
         XCTAssertTrue(a.descendants(matching: .any)["taskName"].firstMatch.waitForExistence(timeout: 10))

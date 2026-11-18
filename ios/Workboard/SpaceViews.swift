@@ -24,7 +24,8 @@ enum NamePrompt: Identifiable, Equatable {
         }
     }
 
-    var title: String {
+    // keys, not plain strings, so the alert shows them in the phone's language
+    var title: LocalizedStringKey {
         switch self {
         case .newSpace: return "New space"
         case .renameSpace: return "Rename space"
@@ -35,7 +36,7 @@ enum NamePrompt: Identifiable, Equatable {
         }
     }
 
-    var action: String {
+    var action: LocalizedStringKey {
         switch self {
         case .newSpace, .newList, .newFolder: return "Create"
         default: return "Save"

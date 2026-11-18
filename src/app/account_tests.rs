@@ -621,6 +621,9 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
     assert!(!Data::workspaces().iter().any(|w| w.file == second));
     assert!(!Data::dir().join(&second).exists());
     until(&mut a, "A back on the first", connected);
+    // nothing still queued for the background writer brings it back
+    Data::finish_saving();
+    assert!(!Data::dir().join(&second).exists());
     assert!(!folder.exists());
     assert_eq!(workboard_server::registry::deleted(&server.home).len(), 1);
 

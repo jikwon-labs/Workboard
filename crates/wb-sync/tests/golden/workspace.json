@@ -1,0 +1,111 @@
+{
+  "workspace": "Team 팀 \"Q\"",
+  "me": 2,
+  "next_id": 4611686018427387905,
+  "spaces": [
+    {
+      "id": 100,
+      "name": "Engineering",
+      "color": [123, 104, 238],
+      "expanded": true,
+      "folders": [
+        {
+          "id": 110,
+          "name": "Q4 계획",
+          "lists": [
+            {"id": 111, "name": "Sprint 1", "statuses": ["to do", "in progress", "done"]}
+          ]
+        }
+      ],
+      "lists": [{"id": 120, "name": "Backlog", "statuses": []}]
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1001,
+      "list_id": 111,
+      "name": "Ship the \\ release\ttoday\nplease",
+      "status": "in progress",
+      "priority": 2,
+      "assignees": [2, 3],
+      "tags": ["urgent", "백엔드"],
+      "estimate": 1.5,
+      "position": -0.25,
+      "due": "2026-11-20",
+      "due_time": null,
+      "done": false,
+      "custom": {"7001": "Gold", "7002": 3.75, "7003": true},
+      "time_entries": [
+        {"member": 2, "start": 1763000000, "end": 1763003600},
+        {"member": 3, "start": 1763000000, "end": 1763001800},
+        {"member": 2, "start": 1763000000, "end": 1763000600}
+      ],
+      "timer_started": 1763100000,
+      "timer_by": 2,
+      "timers": [{"member": 3, "start": 1763100500}],
+      "activity": [{"id": 4611686018427388000, "ts": 1763000000, "author": 2, "text": "made it"}],
+      "last_read": 99,
+      "checklist": [
+        {"text": "loose item"},
+        {"id": 1101, "text": "write tests", "done": true}
+      ],
+      "subtasks": [
+        {"id": 1002, "name": "Sub ✨", "status": "to do", "assignees": []}
+      ]
+    },
+    {
+      "id": 1003,
+      "list_id": 120,
+      "name": "Tiny",
+      "status": "to do",
+      "priority": 0,
+      "assignees": [],
+      "estimate": 0.1,
+      "big": 18446744073709551615,
+      "neg": -9007199254740993
+    }
+  ],
+  "members": [
+    {"id": 2, "name": "Ji 지원", "email": "ji@example.com", "role": "Owner"},
+    {"id": 3, "name": "Bo", "email": "bo@example.com", "role": "Member", "invited": true}
+  ],
+  "docs": [
+    {
+      "id": 2001,
+      "title": "Spec",
+      "space": 100,
+      "pages": [{"id": 2002, "title": "Intro", "body": "# Hello\n\n- one\n- two 🎉"}]
+    }
+  ],
+  "channels": [
+    {
+      "id": 3001,
+      "name": "general",
+      "kind": "Channel",
+      "members": [],
+      "last_read": 5,
+      "messages": [
+        {
+          "id": 3002,
+          "author": 2,
+          "text": "hi 👋",
+          "ts": 1763000000,
+          "reactions": [
+            {"emoji": "👍", "users": [2, 3, 2]},
+            {"emoji": "🎉", "users": [3]}
+          ]
+        },
+        {"id": 3003, "author": 3, "text": "", "ts": 1763000100, "reactions": []}
+      ]
+    }
+  ],
+  "extra": {
+    "workspace_color": [255, 0, 128],
+    "apps": ["chat", "docs", "goals"],
+    "slack_map": {"U01": 2, "U02": 3},
+    "goals": [{"id": 5001, "name": "Grow", "progress": 0.5, "targets": [{"id": 5002, "name": "Users", "value": 1200}]}],
+    "fields": [{"id": 7001, "name": "Tier", "kind": "dropdown", "options": ["Gold", "Silver"]}],
+    "whiteboards": [{"id": 6001, "name": "Board", "strokes": [{"id": 6002, "points": [[0, 0], [1.5, 2.25]]}]}],
+    "accent": "personal, not shared"
+  }
+}

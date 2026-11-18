@@ -82,12 +82,9 @@ impl Hub {
                     .find(|c| c.get("id").and_then(|i| i.as_u64()) == Some(channel))
             })
             .ok_or("That conversation isn't on the server yet. Try again in a moment.")?;
-        let members: Vec<u64> = ch
-            .get("members")
-            .and_then(|m| m.as_array())
-            .map(|a| a.iter().filter_map(|m| m.as_u64()).collect())
-            .unwrap_or_default();
-        if !members.is_empty() && !members.contains(&member) {
+        // the same rule as seeing it: a public channel is everyone's, a DM
+        // or private channel only its members'
+        if wb_sync::closed_to(ch, member) {
             return Err("You're not in that conversation.".into());
         }
         // as written (member_field trims it)

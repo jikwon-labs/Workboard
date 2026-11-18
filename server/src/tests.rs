@@ -389,6 +389,35 @@ fn odd_copies_never_panic() {
     assert_eq!(ok["members"][0]["role"], "Owner");
 }
 
+#[test]
+fn a_huddle_lets_in_whoever_may_see_its_conversation() {
+    let home = std::env::temp_dir().join(format!("wb-callrule-{:x}", wb_sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join(LIVEKIT_FILE),
+        json!({"url": "ws://x:7880", "key": "k", "secret": "s3cret-s3cret-s3cret-s3cret"})
+            .to_string(),
+    )
+    .unwrap();
+    // Cy (3) is on no list: a public channel with a list, one without, a
+    // private channel and a DM between Ann and Bo
+    let canon = json!({"members": [{"id": 1, "name": "Ann"}, {"id": 2}, {"id": 3}], "channels": [
+        {"id": 10, "kind": "Channel", "members": [1, 2]},
+        {"id": 11, "kind": "Channel", "members": []},
+        {"id": 12, "kind": "Channel", "private": true, "members": [1, 2]},
+        {"id": 13, "kind": "Direct", "members": [1, 2]},
+    ]});
+    let hub = test_hub(&home, Some(canon), Saved::default());
+    let gets_in = |member, ch| matches!(hub.call(member, "dev", ch), Ok(Msg::CallToken { .. }));
+    assert!(gets_in(3, 10), "a public channel is everyone's");
+    assert!(gets_in(3, 11));
+    for ch in [12, 13] {
+        assert!(!gets_in(3, ch), "not in private conversation {ch}");
+        assert!(gets_in(1, ch), "Ann is in {ch}");
+    }
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
     Hub {
         home: home.to_path_buf(),

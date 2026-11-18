@@ -183,11 +183,11 @@ fn two_people_hear_each_other_in_a_huddle() {
     .unwrap();
     let server = TestServer::start_in(&home);
 
-    // Ann sets up the workspace: #general has Ann and Bo, Cy isn't in it
+    // Ann sets up the workspace: private #core has Ann and Bo, Cy isn't in it
     let workspace = json!({
         "workspace": "Team", "spaces": [], "tasks": [], "docs": [], "me": 1, "next_id": 1, "favorites": [],
         "members": [{"id": 1, "name": "Ann"}, {"id": 2, "name": "Bo"}, {"id": 3, "name": "Cy"}],
-        "channels": [{"id": 10, "name": "general", "kind": "Channel", "members": [1, 2], "messages": []}],
+        "channels": [{"id": 10, "name": "core", "kind": "Channel", "private": true, "members": [1, 2], "messages": []}],
         "extra": {"sync": {"stamps": {"1": 1, "2": 1, "3": 1, "10": 1}}}
     });
     let mut ann = App::start(
@@ -221,7 +221,7 @@ fn two_people_hear_each_other_in_a_huddle() {
     );
     cy.until("Cy signed in", |c| c.connected);
 
-    // only people in the conversation get into its huddle
+    // only people in a private conversation get into its huddle
     cy.client.send(Msg::CallJoin { channel: 10 });
     cy.until("Cy is turned away", |c| {
         c.denied

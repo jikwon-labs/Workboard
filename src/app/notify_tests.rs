@@ -6,7 +6,7 @@ use super::notify::Kind;
 use super::*;
 
 fn app() -> App {
-    let mut a = App::build(None, Some(Data::seed()));
+    let mut a = super::tests::app();
     a.notify_scan(); // the first look only remembers what is there
     a.notify_rt.sent.clear();
     a

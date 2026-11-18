@@ -207,17 +207,7 @@ fn a_teammates_message_through_the_server_becomes_a_notification() {
         .invite
         .clone()
         .unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code).unwrap();
     net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
     assert_eq!(b.data.me, 3);
@@ -381,17 +371,7 @@ fn a_huddle_on_the_server_connects_two_computers() {
         .invite
         .clone()
         .unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code).unwrap();
     net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
     b.sync_note_change();

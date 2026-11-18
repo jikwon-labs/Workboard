@@ -1004,17 +1004,7 @@ fn slack_ids(d: &Data, m: u64) -> Vec<String> {
 /// A teammate's computer joining the workspace `folder` shares, as the
 /// member `me`.
 fn slack_joiner(folder: &str, me: u64) -> App {
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.join_shared(folder).unwrap();
     b.become_member(Some(me), "", "");
     b.sync_note_change();
@@ -1310,17 +1300,7 @@ fn concurrent_slack_matches_go_through_a_server() {
         .find(|p| p.member == sam)
         .and_then(|p| p.invite.clone())
         .unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code).unwrap();
     net_until(&mut b, "B joined", |b| {
         b.data.extra.shared.is_some() && b.data.member(alex).is_some()
@@ -1683,17 +1663,7 @@ fn joining_a_team_forgets_my_old_carried_slack_matches() {
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.data.extra.slack_carried = vec!["UOLD".into()];
     b.join_shared(&folder).unwrap();
     assert!(!b.data.extra.slack_carried.contains(&"UOLD".to_string()));

@@ -2,6 +2,7 @@
 // files without them), overdue, sorting, repeats, the history and the
 // due-time notice.
 
+use super::tests::app;
 use super::*;
 use chrono::{NaiveDateTime, NaiveTime};
 
@@ -15,10 +16,6 @@ fn at(d: NaiveDate, h: u32, m: u32) -> NaiveDateTime {
 
 fn seed_task() -> Task {
     Data::seed().tasks[0].clone()
-}
-
-fn app() -> App {
-    App::build(None, Some(Data::seed()))
 }
 
 #[test]

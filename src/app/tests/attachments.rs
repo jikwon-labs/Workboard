@@ -70,17 +70,7 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
         .invite
         .clone()
         .unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code).unwrap();
     net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
 

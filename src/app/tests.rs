@@ -14,8 +14,20 @@ mod filters;
 mod server_sync;
 mod slack;
 
-fn app() -> App {
+pub(super) fn app() -> App {
     App::build(None, Some(Data::seed()))
+}
+
+/// A new workspace named `workspace` with only `name` (member `id`) in it.
+pub(super) fn blank_as(workspace: &str, id: u64, name: &str) -> Data {
+    Data::blank(
+        workspace,
+        Member {
+            id,
+            name: name.into(),
+            ..Default::default()
+        },
+    )
 }
 
 fn list_ids(a: &App) -> Vec<u64> {

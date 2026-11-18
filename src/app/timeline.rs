@@ -352,13 +352,10 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::tests::app;
 
     fn d(n: i64) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 3, 2).unwrap() + Duration::days(n)
-    }
-
-    fn app() -> App {
-        App::build(None, Some(Data::seed()))
     }
 
     fn id_of(a: &App, name: &str) -> u64 {

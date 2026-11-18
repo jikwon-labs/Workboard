@@ -65,17 +65,7 @@ fn two_computers_work_in_one_shared_folder() {
     a.share_here(&folder).unwrap();
 
     // someone else joins from their own computer
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.join_shared(&folder).unwrap();
     assert_eq!(
         b.data.tasks.len(),
@@ -208,17 +198,7 @@ fn joining_another_team_keeps_the_workspace_already_here() {
     // Sam's own workspace, already on Sam's own server
     let mine = TestServer::start();
     let my_addr = format!("127.0.0.1:{}", mine.port);
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Mine",
-            Member {
-                id: 1,
-                name: "Sam".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Mine", 1, "Sam")));
     b.persist = true;
     b.data.save();
     b.connect_server(&my_addr, "").unwrap();
@@ -342,17 +322,7 @@ fn two_computers_work_through_a_server() {
         .unwrap();
 
     // without a code nobody gets in
-    let mut x = App::build(
-        None,
-        Some(Data::blank(
-            "Nope",
-            Member {
-                id: 1,
-                name: "X".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut x = App::build(None, Some(blank_as("Nope", 1, "X")));
     x.connect_server(&addr, "").unwrap();
     net_until(&mut x, "refused", |x| {
         matches!(x.sync_rt.net_status, Some(wb_net::Status::Refused(_)))
@@ -360,17 +330,7 @@ fn two_computers_work_through_a_server() {
     assert!(x.data.extra.shared.is_none(), "nothing changes for them");
 
     // Sam joins from their own computer with the code
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code.to_lowercase()).unwrap();
     net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
     assert_eq!(
@@ -510,17 +470,7 @@ fn team_settings_and_moved_lists_reach_everyone_once() {
     let mut a = app();
     a.data.extra.accent = "pink".into();
     a.share_here(&folder).unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.data.extra.accent = "teal".into();
     b.join_shared(&folder).unwrap();
     assert_eq!(
@@ -609,17 +559,7 @@ fn quitting_sends_my_stopped_timer_to_the_team() {
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.join_shared(&folder).unwrap();
     b.become_member(None, "Bora", "");
     let tid = a.data.tasks[0].id;
@@ -649,17 +589,7 @@ fn a_change_not_recorded_before_a_merge_still_reaches_the_team() {
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.join_shared(&folder).unwrap();
     b.become_member(None, "Bora", "");
     b.sync_note_change();
@@ -866,17 +796,7 @@ fn joining_a_shared_workspace_forgets_history() {
     let folder = dir.to_str().unwrap().to_string();
     let mut a = app();
     a.share_here(&folder).unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.apply(Action::Go(Location::Inbox));
     b.track_history();
     b.apply(Action::Go(Location::Home));
@@ -1230,17 +1150,7 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
         .find(|p| p.member == 3)
         .and_then(|p| p.invite.clone())
         .unwrap();
-    let mut b = App::build(
-        None,
-        Some(Data::blank(
-            "Theirs",
-            Member {
-                id: 1,
-                name: "B".into(),
-                ..Default::default()
-            },
-        )),
-    );
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code).unwrap();
     net_until(&mut b, "Sam has the space, to view", |b| {
         b.data.extra.shared.is_some()

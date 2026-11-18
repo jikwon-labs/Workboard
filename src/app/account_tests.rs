@@ -2,23 +2,13 @@
 // when setting up the server, signs in on a second computer with it, invites
 // someone (the code goes out by mail) who joins with the code and a password.
 
-use super::tests::net_until;
+use super::tests::{blank_as, net_until};
 use super::together::How;
 use super::*;
 use workboard_server::testing::{temp_home, TestServer};
 
 fn computer(name: &str) -> App {
-    App::build(
-        None,
-        Some(Data::blank(
-            name,
-            Member {
-                id: 1,
-                name: "Someone".into(),
-                ..Default::default()
-            },
-        )),
-    )
+    App::build(None, Some(blank_as(name, 1, "Someone")))
 }
 
 fn connected(a: &App) -> bool {

@@ -1324,11 +1324,7 @@ impl App {
                             Some(td - Duration::days(1)),
                             t.danger,
                         ),
-                        "0" => (
-                            tr("TODAY").to_string(),
-                            Some(td),
-                            Color32::from_rgb(0xe1, 0x6b, 0x16),
-                        ),
+                        "0" => (tr("TODAY").to_string(), Some(td), WARN_ORANGE),
                         "1" => (
                             tr("TOMORROW").to_string(),
                             Some(td + Duration::days(1)),

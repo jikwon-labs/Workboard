@@ -74,7 +74,7 @@ pub fn date_color(d: NaiveDate, closed: bool, t: &Theme) -> Color32 {
     if diff < 0 {
         t.danger
     } else if diff == 0 {
-        Color32::from_rgb(0xe1, 0x6b, 0x16)
+        WARN_ORANGE
     } else {
         t.text2
     }

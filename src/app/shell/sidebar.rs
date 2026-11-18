@@ -496,7 +496,7 @@ impl App {
                             Align2::CENTER_CENTER,
                             "\u{2605}",
                             FontId::proportional(12.0),
-                            Color32::from_rgb(0xf8, 0xae, 0x00),
+                            STAR_YELLOW,
                         );
                     },
                     &name,
@@ -535,7 +535,7 @@ impl App {
                             Align2::CENTER_CENTER,
                             "\u{2605}",
                             FontId::proportional(12.0),
-                            Color32::from_rgb(0xf8, 0xae, 0x00),
+                            STAR_YELLOW,
                         );
                     },
                     &name,

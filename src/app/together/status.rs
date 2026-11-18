@@ -26,7 +26,7 @@ pub(crate) fn server_text(s: &str) -> String {
 }
 
 /// The colour of a connection that isn't working.
-pub(crate) const WARN: Color32 = Color32::from_rgb(0xe1, 0x6b, 0x16);
+pub(crate) const WARN: Color32 = crate::widgets::WARN_ORANGE;
 
 /// Failed tries in a row after which "Reconnecting" becomes "Can't reach
 /// the server" (the app keeps trying either way).

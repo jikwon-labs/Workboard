@@ -1047,11 +1047,7 @@ impl App {
                         }
                         let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" })
                             .size(16.0)
-                            .color(if starred {
-                                Color32::from_rgb(0xf8, 0xae, 0x00)
-                            } else {
-                                t.text2
-                            });
+                            .color(if starred { STAR_YELLOW } else { t.text2 });
                         if ui.add(ghost(egui::Button::new(star))).clicked() {
                             if starred {
                                 self.data.extra.starred.retain(|s| s != &key);
@@ -1174,11 +1170,7 @@ impl App {
         let starred = self.data.extra.starred.contains(&key);
         let star = RichText::new(if starred { "\u{2605}" } else { "\u{2606}" })
             .size(16.0)
-            .color(if starred {
-                Color32::from_rgb(0xf8, 0xae, 0x00)
-            } else {
-                t.text2
-            });
+            .color(if starred { STAR_YELLOW } else { t.text2 });
         let r = ui
             .add(ghost(egui::Button::new(star)))
             .on_hover_text(if starred {

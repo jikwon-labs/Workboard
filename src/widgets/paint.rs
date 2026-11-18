@@ -68,8 +68,15 @@ pub fn priority_color(pr: u8, t: &Theme) -> Color32 {
 /// The green of "online" dots.
 pub const ONLINE: Color32 = Color32::from_rgb(48, 164, 108);
 
+/// The orange of warnings and of what needs attention soon (due today,
+/// waiting on, invited, saved messages, a connection that isn't working).
+pub const WARN_ORANGE: Color32 = Color32::from_rgb(0xe1, 0x6b, 0x16);
+
 /// The orange of "notifications muted".
-pub const MUTED: Color32 = Color32::from_rgb(0xe1, 0x6b, 0x16);
+pub const MUTED: Color32 = WARN_ORANGE;
+
+/// The yellow of a favourite's or starred item's star.
+pub const STAR_YELLOW: Color32 = Color32::from_rgb(0xf8, 0xae, 0x00);
 
 /// A presence dot at `c` on an avatar: filled green when `online`, a grey
 /// ring when not; `bg` is what's behind the avatar (it outlines the dot).

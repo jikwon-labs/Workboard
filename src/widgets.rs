@@ -562,11 +562,7 @@ pub fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(glyph)
-                        .size(16.0)
-                        .color(Color32::from_rgb(0xf8, 0xae, 0x00)),
-                );
+                ui.label(RichText::new(glyph).size(16.0).color(STAR_YELLOW));
                 ui.label(RichText::new(text).size(13.0).color(t.text2));
             });
         });

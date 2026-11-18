@@ -211,7 +211,7 @@ impl App {
                             }
                         }
                     }
-                    let (st, col) = if m.invited { ("Invited", Color32::from_rgb(0xe1, 0x6b, 0x16)) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
+                    let (st, col) = if m.invited { ("Invited", WARN_ORANGE) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
                     paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 108.0);
                     if m.id != me && m.role != "Owner" && manages {

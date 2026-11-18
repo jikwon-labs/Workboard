@@ -1430,7 +1430,7 @@ impl App {
                             ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                         }
                         if m.saved {
-                            let c = Color32::from_rgb(0xe1, 0x6b, 0x16);
+                            let c = WARN_ORANGE;
                             small_icon(ui, "bookmark", c);
                             ui.label(RichText::new(tr("Saved")).small().color(c));
                         }

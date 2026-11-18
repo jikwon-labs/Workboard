@@ -830,11 +830,7 @@ impl App {
                 continue;
             }
             let (head, col, kind) = match mode {
-                TaskPick::WaitingOn => (
-                    "Waiting on",
-                    Color32::from_rgb(0xe1, 0x6b, 0x16),
-                    "hourglass",
-                ),
+                TaskPick::WaitingOn => ("Waiting on", WARN_ORANGE, "hourglass"),
                 TaskPick::Blocking => ("Blocking", t.danger, "warning"),
                 _ => ("Linked", t.text2, "link"),
             };

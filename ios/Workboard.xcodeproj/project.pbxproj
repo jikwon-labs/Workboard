@@ -291,7 +291,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.13;
+				MARKETING_VERSION = 0.1.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.seojigwon.workboard;
 				DEVELOPMENT_TEAM = K6599UJ4KM;
 				CODE_SIGN_ENTITLEMENTS = Config/Workboard.entitlements;
@@ -323,7 +323,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.13;
+				MARKETING_VERSION = 0.1.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.seojigwon.workboard;
 				DEVELOPMENT_TEAM = K6599UJ4KM;
 				CODE_SIGN_ENTITLEMENTS = Config/Workboard.entitlements;
@@ -340,7 +340,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.1.13;
+				MARKETING_VERSION = 0.1.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.seojigwon.workboard.uitests;
 				DEVELOPMENT_TEAM = K6599UJ4KM;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -356,7 +356,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.1.13;
+				MARKETING_VERSION = 0.1.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.seojigwon.workboard.uitests;
 				DEVELOPMENT_TEAM = K6599UJ4KM;
 				PRODUCT_NAME = "$(TARGET_NAME)";

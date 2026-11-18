@@ -74,7 +74,7 @@ extension Edits {
 
     @discardableResult
     public static func renameWhiteboard(_ data: inout JSON, board: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return changeBoard(&data, board) { $0["name"] = .string(clean); return true }
     }

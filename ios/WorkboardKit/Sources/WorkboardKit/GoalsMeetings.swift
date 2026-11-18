@@ -122,7 +122,7 @@ extension Edits {
 
     @discardableResult
     public static func addGoal(_ data: inout JSON, name: String, me: UInt64, id: UInt64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         var goals = data.at("extra.goals")?.array ?? []
         goals.append(["id": .id(id), "name": .string(clean.isEmpty ? "New goal" : clean), "color": .array(statusPalette[1].map { .int(Int64($0)) }), "due": nil, "owner": .id(me), "targets": []])
         data.set("extra.goals", .array(goals))
@@ -135,7 +135,7 @@ extension Edits {
 
     @discardableResult
     public static func renameGoal(_ data: inout JSON, goal: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return changeGoal(&data, goal) { $0["name"] = .string(clean); return true }
     }
@@ -194,7 +194,7 @@ extension Edits {
     /// "+ Meeting": today at 10:00 with me attending.
     @discardableResult
     public static func addMeeting(_ data: inout JSON, title: String, date: String, time: String = "10:00", me: UInt64, id: UInt64) -> Bool {
-        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = title.trimmed
         var ms = data.at("extra.meetings")?.array ?? []
         ms.append(["id": .id(id), "title": .string(clean.isEmpty ? "New meeting" : clean), "date": .string(date), "time": .string(time), "attendees": [.id(me)], "agenda": "", "notes": ""])
         data.set("extra.meetings", .array(ms))
@@ -276,7 +276,7 @@ extension Edits {
     /// Reminder in src/model.rs; `task` for "Remind me" on a task.
     @discardableResult
     public static func addReminder(_ data: inout JSON, text: String, dueTs: Int64, task: UInt64? = nil, me: UInt64, id: UInt64) -> Bool {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = text.trimmed
         guard !clean.isEmpty else { return false }
         var rs = data.at("extra.reminders")?.array ?? []
         var r: JSON = ["id": .id(id), "text": .string(clean), "due_ts": .int(dueTs), "done": false, "owner": .id(me), "alerted": false]

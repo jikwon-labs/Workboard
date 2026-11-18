@@ -33,13 +33,13 @@ extension Edits {
 
     @discardableResult
     public static func setChannelTopic(_ data: inout JSON, channel: UInt64, to topic: String) -> Bool {
-        data.updateItem(at: "channels", id: channel) { $0["topic"] = .string(topic.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        data.updateItem(at: "channels", id: channel) { $0["topic"] = .string(topic.trimmed) }
     }
 
     /// Channel names are lower case with dashes, as create_channel writes them.
     @discardableResult
     public static func renameChannel(_ data: inout JSON, channel: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().replacingOccurrences(of: " ", with: "-")
+        let clean = name.trimmed.lowercased().replacingOccurrences(of: " ", with: "-")
         guard !clean.isEmpty else { return false }
         return data.updateItem(at: "channels", id: channel) { c in
             guard c["kind"]?.string == "Channel" else { return }
@@ -54,7 +54,7 @@ extension Edits {
 
     @discardableResult
     public static func addAutomation(_ data: inout JSON, trigger: String, action: String, value: String, list: UInt64?, id: UInt64) -> Bool {
-        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let v = value.trimmed
         guard !trigger.isEmpty, !v.isEmpty, automationActions.contains(where: { $0.value == action }) else { return false }
         var rules = data.at("extra.automations")?.array ?? []
         rules.append(["id": .id(id), "enabled": true, "trigger_status": .string(trigger), "action": .string(action), "value": .string(v), "list": list.map(JSON.id) ?? .null])
@@ -119,8 +119,8 @@ extension Edits {
     /// A post (an announcement with a title) in a channel.
     @discardableResult
     public static func sendPost(_ data: inout JSON, channel: UInt64, title: String, text: String, picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = title.trimmed
+        let body = text.trimmed
         guard !t.isEmpty || !body.isEmpty else { return false }
         let mentions = Mentions.ids(in: body, data: data, picked: picked)
         return data.updateItem(at: "channels", id: channel) { c in

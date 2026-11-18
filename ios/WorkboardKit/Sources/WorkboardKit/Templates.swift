@@ -172,7 +172,7 @@ extension Edits {
     /// the new list's id.
     @discardableResult
     public static func useListTemplate(_ data: inout JSON, _ tp: TemplateView, name: String, space: UInt64?, folder: UInt64? = nil, addStatuses: Bool = true, me: UInt64, ts: Int64, newId: () -> UInt64) -> UInt64? {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         let listName = clean.isEmpty ? tp.taskName : clean
         let statuses = tp.statuses.isEmpty ? StatusView.defaults : tp.statuses
         let lid: UInt64
@@ -205,7 +205,7 @@ extension Edits {
     @discardableResult
     public static func useTaskTemplate(_ data: inout JSON, _ tp: TemplateView, name: String, list: UInt64, me: UInt64, id: UInt64, ts: Int64) -> Bool {
         guard rawLists(data)[list] != nil else { return false }
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         addTemplateTask(&data, list: list, name: clean.isEmpty ? tp.taskName : clean, status: nil, priority: tp.priority,
                         description: tp.description, checklist: tp.checklist, tags: tp.tags, me: me, id: id, ts: ts)
         return true
@@ -214,7 +214,7 @@ extension Edits {
     /// make_doc_from_template: a doc with the template's text.
     @discardableResult
     public static func useDocTemplate(_ data: inout JSON, _ tp: TemplateView, title: String, space: UInt64?, me: UInt64, id: UInt64, ts: Int64) -> Bool {
-        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = title.trimmed
         addDoc(&data, title: clean.isEmpty ? tp.taskName : clean, space: space, me: me, id: id, ts: ts)
         data.updateItem(at: "docs", id: id) { d in
             d["body"] = .string(tp.description)

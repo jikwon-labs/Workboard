@@ -538,7 +538,7 @@ struct MessageRow: View {
                             client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
                             editing = false
                         }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(draft.isBlank)
                         .accessibilityIdentifier("saveEditButton")
                     }
                 }
@@ -691,7 +691,7 @@ struct Composer: View {
                         .font(.system(size: 32))
                         .symbolRenderingMode(.hierarchical)
                 }
-                .disabled(!can || uploading || (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ready.isEmpty))
+                .disabled(!can || uploading || (text.isBlank && ready.isEmpty))
                 .accessibilityLabel("Send")
                 .accessibilityIdentifier("sendButton")
             }
@@ -793,7 +793,7 @@ struct ChannelSettingsView: View {
         guard client.canEdit, c.kind == .channel else { return }
         client.edit { d, _ in
             if name.trimmingCharacters(in: .whitespaces) != c.name { Edits.renameChannel(&d, channel: c.id, to: name) }
-            if topic.trimmingCharacters(in: .whitespacesAndNewlines) != c.topic { Edits.setChannelTopic(&d, channel: c.id, to: topic) }
+            if topic.trimmed != c.topic { Edits.setChannelTopic(&d, channel: c.id, to: topic) }
         }
     }
 }

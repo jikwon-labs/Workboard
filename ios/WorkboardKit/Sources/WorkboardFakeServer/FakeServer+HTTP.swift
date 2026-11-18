@@ -151,7 +151,7 @@ extension FakeServer {
 
     /// POST /auth/forgot: always ok; a code only when the account exists.
     func forgot(_ p: Peer, body: Data) {
-        let email = ((try? JSON(parsing: body))?["email"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let email = ((try? JSON(parsing: body))?["email"]?.string ?? "").trimmed.lowercased()
         if canMail, accounts.values.contains(where: { $0.email == email }) {
             let code = makeCode()
             resets = resets.filter { $0.value.email != email }

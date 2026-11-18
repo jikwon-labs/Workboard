@@ -202,7 +202,7 @@ private struct StatusRow: View {
 
     /// An empty or taken name goes back to the status's name.
     func save() {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard clean != status.name else { taken = false; return }
         let ok = client.edit { d, _ in
             if !Edits.renameStatus(&d, space: spaceId, index: index, to: clean, ts: nowTs()) { taken = true }

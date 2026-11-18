@@ -49,7 +49,7 @@ public enum Edits {
     /// mentions the one picked (kept in `mentions`, as the Mac app does).
     @discardableResult
     public static func sendMessage(_ data: inout JSON, channel: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = text.trimmed
         guard !text.isEmpty || !attachments.isEmpty else { return false }
         let mentions = Mentions.ids(in: text, data: data, picked: picked)
         return data.updateItem(at: "channels", id: channel) { c in
@@ -65,7 +65,7 @@ public enum Edits {
 
     @discardableResult
     public static func sendReply(_ data: inout JSON, channel: UInt64, to parent: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = text.trimmed
         guard !text.isEmpty || !attachments.isEmpty else { return false }
         let mentions = Mentions.ids(in: text, data: data, picked: picked)
         var done = false
@@ -322,7 +322,7 @@ public enum Edits {
     /// minutes is updated instead of adding another). `me` nil: not logged.
     @discardableResult
     public static func rename(_ data: inout JSON, task: UInt64, to name: String, me: UInt64? = nil, ts: Int64) -> Bool {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = name.trimmed
         guard !name.isEmpty else { return false }
         return data.updateItem(at: "tasks", id: task) { j in
             guard j["name"]?.string != name else { return }
@@ -358,7 +358,7 @@ public enum Edits {
         let sts = view.statuses(forList: list)
         let status = sts.first { $0.name == status }?.name ?? sts[0].name
         let order = ((data["tasks"]?.array ?? []).compactMap { $0["order"]?.int }.max() ?? 0) + 1
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         let task: JSON = [
             "id": .id(id), "list_id": .id(list), "parent": parent.map(JSON.id) ?? .null,
             "name": .string(clean.isEmpty ? "Untitled task" : clean),
@@ -377,7 +377,7 @@ public enum Edits {
     /// so comments from several devices are all kept by the merge).
     @discardableResult
     public static func addComment(_ data: inout JSON, task: UInt64, text: String, picked: [UInt64] = [], me: UInt64, ts: Int64) -> Bool {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = text.trimmed
         guard !text.isEmpty else { return false }
         let mentions = Mentions.ids(in: text, data: data, picked: picked)
         return data.updateItem(at: "tasks", id: task) { j in
@@ -511,7 +511,7 @@ public enum Edits {
     /// its `mentions` worked out again from the new text.
     @discardableResult
     public static func editMessage(_ data: inout JSON, channel: UInt64, message: UInt64, text: String, me: UInt64, ts: Int64) -> Bool {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = text.trimmed
         guard !text.isEmpty else { return false }
         let members = Mentions.members(of: data)
         var done = false
@@ -572,7 +572,7 @@ public enum Edits {
     /// public channel has everyone in it, a private one only me.
     @discardableResult
     public static func createChannel(_ data: inout JSON, name: String, isPrivate: Bool, me: UInt64, id: UInt64, ts: Int64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().replacingOccurrences(of: " ", with: "-")
+        let clean = name.trimmed.lowercased().replacingOccurrences(of: " ", with: "-")
         guard !clean.isEmpty else { return false }
         let members: [UInt64] = isPrivate ? [me] : (data["members"]?.array ?? []).compactMap { $0["id"]?.uint }
         data.append(at: "channels", [
@@ -630,7 +630,7 @@ public enum Edits {
     /// "+ Add item": a new unticked item at the end.
     @discardableResult
     public static func addCheckItem(_ data: inout JSON, task: UInt64, text: String, ts: Int64) -> Bool {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = text.trimmed
         guard !clean.isEmpty else { return false }
         return changeChecklist(&data, task: task, ts: ts) { items in
             items.append(["text": .string(clean), "done": false])
@@ -661,7 +661,7 @@ public enum Edits {
 
     /// Like new_doc in src/app/menus.rs: a public doc at the top of the list.
     public static func addDoc(_ data: inout JSON, title: String, space: UInt64?, me: UInt64, id: UInt64, ts: Int64) {
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = title.trimmed
         let doc: JSON = [
             "id": .id(id), "space": space.map(JSON.id) ?? .null, "owner": .id(me), "private": false,
             "archived": false, "meeting_note": false, "parent": nil,

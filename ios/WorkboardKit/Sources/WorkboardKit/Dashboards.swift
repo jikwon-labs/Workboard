@@ -113,7 +113,7 @@ extension Edits {
     /// A dashboard from a template ("simple", "time", "project", or "").
     @discardableResult
     public static func addDashboard(_ data: inout JSON, name: String, kind: String, space: UInt64?, me: UInt64, id: UInt64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         var ds = data.at("extra.dashboards")?.array ?? []
         var d: JSON = ["id": .id(id), "name": .string(clean.isEmpty ? "Dashboard" : clean), "space": space.map(JSON.id) ?? .null, "owner": .id(me)]
         if !kind.isEmpty { d["kind"] = .string(kind) }
@@ -124,7 +124,7 @@ extension Edits {
 
     @discardableResult
     public static func renameDashboard(_ data: inout JSON, dashboard: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return data.updateItem(at: "extra.dashboards", id: dashboard) { $0["name"] = .string(clean) }
     }
@@ -177,7 +177,7 @@ extension Edits {
 
     @discardableResult
     public static func renameTeam(_ data: inout JSON, team: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return changeTeam(&data, team) { $0["name"] = .string(clean) }
     }

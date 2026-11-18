@@ -249,7 +249,7 @@ struct ListTasksView: View {
     }
 
     func add() {
-        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = newName.trimmed
         guard !name.isEmpty else { adding = false; return }
         let ok = client.edit { d, me in
             Edits.addTask(&d, list: listId, name: name, assignees: [me], me: me, id: client.newId(), ts: nowTs())
@@ -594,7 +594,7 @@ struct TaskDetailView: View {
 
     /// Like the Mac app's "Add subtask": in the parent's list, under it.
     func addSubtask(_ t: TaskView) {
-        let n = newSubtask.trimmingCharacters(in: .whitespacesAndNewlines)
+        let n = newSubtask.trimmed
         guard !n.isEmpty else { focus = nil; return }
         let id = client.newId()
         if client.edit({ d, me in Edits.addTask(&d, list: t.listId, name: n, assignees: [], parent: t.id, me: me, id: id, ts: nowTs()) }) {
@@ -604,7 +604,7 @@ struct TaskDetailView: View {
     }
 
     func addCheck(_ t: TaskView) {
-        guard !newCheck.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { focus = nil; return }
+        guard !newCheck.isBlank else { focus = nil; return }
         if client.edit({ d, _ in Edits.addCheckItem(&d, task: t.id, text: newCheck, ts: nowTs()) }) {
             newCheck = ""
             focus = .check
@@ -613,7 +613,7 @@ struct TaskDetailView: View {
 
     func save(_ t: TaskView) {
         guard loaded else { return }
-        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let n = name.trimmed
         let nameChanged = !n.isEmpty && n != t.name
         let descChanged = desc != t.description
         guard nameChanged || descChanged else { return }

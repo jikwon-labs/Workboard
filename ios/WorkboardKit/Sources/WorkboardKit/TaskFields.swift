@@ -64,7 +64,7 @@ extension Edits {
     /// Tags are kept in lower case, as the Mac tag field writes them.
     @discardableResult
     public static func addTag(_ data: inout JSON, task: UInt64, tag: String, me: UInt64, ts: Int64) -> Bool {
-        let tag = tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let tag = tag.trimmed.lowercased()
         guard !tag.isEmpty else { return false }
         var changed = false
         data.updateItem(at: "tasks", id: task) { j in
@@ -238,7 +238,7 @@ extension Edits {
     /// parse_estimate in src/app/taskfields.rs: minutes from "2h 30m",
     /// "1.5h", "45m", "1d" (8 hours), "2:30" or a bare number (hours).
     public static func parseEstimate(_ text: String) -> UInt32? {
-        let s = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let s = text.trimmed.lowercased()
         guard !s.isEmpty else { return nil }
         if let colon = s.firstIndex(of: ":") {
             guard let h = UInt32(s[..<colon].trimmingCharacters(in: .whitespaces)),
@@ -417,7 +417,7 @@ extension Edits {
         data.updateItem(at: "tasks", id: task) { j in
             var custom = j["custom"]?.object ?? [:]
             let key = String(field)
-            let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let clean = value.trimmed
             guard (custom[key]?.string ?? "") != clean else { return }
             if clean.isEmpty { custom[key] = nil } else { custom[key] = .string(clean) }
             j["custom"] = .object(custom)
@@ -442,7 +442,7 @@ extension Edits {
 
     @discardableResult
     public static func renameCheckItem(_ data: inout JSON, task: UInt64, index: Int, to text: String, ts: Int64) -> Bool {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = text.trimmed
         guard !clean.isEmpty else { return false }
         var changed = false
         data.updateItem(at: "tasks", id: task) { j in

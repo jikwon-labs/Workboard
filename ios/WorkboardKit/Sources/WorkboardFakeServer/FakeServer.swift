@@ -401,7 +401,7 @@ public final class FakeServer: @unchecked Sendable {
         p.device = h.device
         var newToken: String?
         if requireSignIn {
-            let email = h.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let email = h.email?.trimmed.lowercased()
             let member: UInt64
             if let code = h.resetCode {
                 guard let r = resets[Self.normalize(code)], Date().timeIntervalSince(r.made) < 30 * 60, r.email == email,
@@ -595,7 +595,7 @@ public final class FakeServer: @unchecked Sendable {
             send(.error(code: ServerErrorCode.denied.rawValue, message: "This server has no sign-in."), to: p)
             return
         }
-        let e = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let e = email.trimmed.lowercased()
         guard e.contains("@") else { return send(.error(code: ServerErrorCode.denied.rawValue, message: "That doesn't look like an email."), to: p) }
         guard password.count >= minPasswordLength else {
             return send(.error(code: ServerErrorCode.denied.rawValue, message: "Use at least 8 characters for the password."), to: p)

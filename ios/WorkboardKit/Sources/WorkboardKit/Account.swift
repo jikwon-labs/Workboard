@@ -64,7 +64,7 @@ public enum SignInRequest: Equatable, Sendable {
 
     /// Trimmed (passwords are kept as typed).
     var cleaned: SignInRequest {
-        func t(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        func t(_ s: String) -> String { s.trimmed }
         switch self {
         case let .password(e, p): return .password(email: t(e), password: p)
         case let .invite(c, e, p): return .invite(code: t(c), email: e.map(t), newPassword: p)
@@ -112,7 +112,7 @@ public struct InviteLink: Equatable, Sendable {
         guard let c = URLComponents(string: s.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,;")))),
               let scheme = c.scheme?.lowercased() else { return nil }
         func q(_ name: String) -> String? {
-            c.queryItems?.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            c.queryItems?.first { $0.name == name }?.value?.trimmed.nilIfEmpty
         }
         guard let code = q("code") else { return nil }
         var server: String?
@@ -168,7 +168,7 @@ public enum AuthAPI {
         var req = URLRequest(url: url, timeoutInterval: 15)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = JSON.object(["email": .string(email.trimmingCharacters(in: .whitespacesAndNewlines))]).data()
+        req.httpBody = JSON.object(["email": .string(email.trimmed)]).data()
         let (data, resp): (Data, URLResponse)
         do {
             (data, resp) = try await session.data(for: req)
@@ -242,7 +242,7 @@ public enum ServerAddress {
 
     /// The WebSocket address, or nil when it can't be one.
     public static func websocket(_ address: String) -> URL? {
-        var a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        var a = address.trimmed
         guard !a.isEmpty, !a.contains(where: \.isWhitespace) else { return nil }
         if !a.contains("://") { a = "ws://" + a }
         guard var c = URLComponents(string: a), let scheme = c.scheme?.lowercased(), let host = c.host, !host.isEmpty else { return nil }

@@ -354,7 +354,7 @@ public final class SyncClient {
     /// Whether moving to `address` means leaving for a different server
     /// (and so starting from a fresh copy of that server's workspace).
     public func isDifferentServer(_ address: String) -> Bool {
-        let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let a = address.trimmed
         return !settings.server.isEmpty && !a.isEmpty && !ServerAddress.same(a, settings.server)
     }
 
@@ -365,7 +365,7 @@ public final class SyncClient {
     /// another way keeps the copy). Ask the person first when there are
     /// edits waiting (`waitingCount`).
     public func setServer(_ address: String, freshCopy: Bool? = nil) {
-        let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let a = address.trimmed
         guard a != settings.server else { return }
         let freshCopy = freshCopy ?? isDifferentServer(a)
         // the server left behind stops sending this device notifications
@@ -462,7 +462,7 @@ public final class SyncClient {
     /// asking the server, or nil.
     @discardableResult
     public func setPassword(email: String, password: String, oldPassword: String?) -> String? {
-        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let e = email.trimmed
         if e.isEmpty { return "Type your email." }
         if let why = passwordProblem(password) { return why }
         if settings.accountEmail != nil, (oldPassword ?? "").isEmpty { return "Type your current password." }

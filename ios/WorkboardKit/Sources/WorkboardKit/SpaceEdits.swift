@@ -26,7 +26,7 @@ extension Edits {
     /// A new space with the default statuses and one list called "List".
     @discardableResult
     public static func createSpace(_ data: inout JSON, name: String, color: [Int], id: UInt64, listId: UInt64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         data.append(at: "spaces", [
             "id": .id(id), "name": .string(clean.isEmpty ? "Space" : clean),
             "color": .array(color.prefix(3).map { .int(Int64($0)) }),
@@ -40,7 +40,7 @@ extension Edits {
     /// A list in a space, or in one of its folders.
     @discardableResult
     public static func createList(_ data: inout JSON, space: UInt64, folder: UInt64?, name: String, id: UInt64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         let item = listJSON(id: id, name: clean.isEmpty ? "List" : clean)
         var done = false
         data.updateItem(at: "spaces", id: space) { s in
@@ -60,7 +60,7 @@ extension Edits {
 
     @discardableResult
     public static func createFolder(_ data: inout JSON, space: UInt64, name: String, id: UInt64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         return data.updateItem(at: "spaces", id: space) { s in
             s["expanded"] = true
             s.append(at: "folders", ["id": .id(id), "name": .string(clean.isEmpty ? "Folder" : clean), "lists": [], "expanded": true])
@@ -71,7 +71,7 @@ extension Edits {
 
     @discardableResult
     public static func renameSpace(_ data: inout JSON, space: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return data.updateItem(at: "spaces", id: space) { $0["name"] = .string(clean) }
     }
@@ -88,7 +88,7 @@ extension Edits {
 
     @discardableResult
     public static func renameFolder(_ data: inout JSON, folder: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return changeFolder(&data, folder) { $0["name"] = .string(clean) }
     }
@@ -101,7 +101,7 @@ extension Edits {
 
     @discardableResult
     public static func renameList(_ data: inout JSON, list: UInt64, to name: String) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty else { return false }
         return changeList(&data, list) { $0["name"] = .string(clean) }
     }
@@ -176,7 +176,7 @@ extension Edits {
     /// name or one another status has is turned down.
     @discardableResult
     public static func renameStatus(_ data: inout JSON, space: UInt64, index: Int, to name: String, ts: Int64) -> Bool {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = name.trimmed
         guard !clean.isEmpty, let (sts, lists) = statusContext(data, space: space), sts.indices.contains(index) else { return false }
         let old = sts[index].name
         guard old != clean, !sts.contains(where: { $0.name == clean }) else { return false }

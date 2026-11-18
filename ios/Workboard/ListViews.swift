@@ -246,7 +246,7 @@ struct CalendarListView: View {
     }
 
     func add() {
-        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = newName.trimmed
         guard !name.isEmpty else { adding = false; return }
         let day = selected
         if client.edit({ d, me in Edits.addTask(&d, list: listId, name: name, assignees: [me], due: day, me: me, id: client.newId(), ts: nowTs()) }) {

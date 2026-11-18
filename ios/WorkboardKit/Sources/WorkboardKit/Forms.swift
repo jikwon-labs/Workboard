@@ -135,7 +135,7 @@ extension Edits {
         guard let f = WorkspaceView(data).forms(data).first(where: { $0.id == form }) else { return .failure(.noList) }
         var name = "", desc = "", priority = 0, due: String?, assignees: [UInt64] = []
         for (i, fld) in f.fields.enumerated() {
-            let v = (answers[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let v = (answers[i] ?? "").trimmed
             if v.isEmpty {
                 if fld.required { return .failure(.answer("Please answer \"\(fld.label)\".")) }
                 continue
@@ -158,7 +158,7 @@ extension Edits {
         addTask(&data, list: f.listId, name: name.isEmpty ? "\(f.name) submission" : name, assignees: assignees, due: due, me: me, id: id, ts: ts)
         data.updateItem(at: "tasks", id: id) { t in
             t["priority"] = .int(Int64(priority))
-            t["description"] = .string(desc.trimmingCharacters(in: .whitespacesAndNewlines))
+            t["description"] = .string(desc.trimmed)
             log(&t, me: me, text: "submitted the form \(f.name)", ts: ts)
         }
         return .success(id)

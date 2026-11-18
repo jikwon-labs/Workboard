@@ -8,9 +8,6 @@ pub struct Theme {
     pub dark: bool,
     pub bg: Color32,
     pub sidebar: Color32,
-    pub top: Color32,
-    pub top_text: Color32,
-    pub top_field: Color32,
     pub text: Color32,
     pub text2: Color32,
     pub text3: Color32,
@@ -87,9 +84,6 @@ pub fn theme(dark: bool) -> Theme {
             dark,
             bg: Color32::WHITE,
             sidebar: Color32::from_rgb(249, 249, 249),
-            top: Color32::WHITE,
-            top_text: Color32::from_rgb(32, 32, 32),
-            top_field: Color32::WHITE,
             text: Color32::from_rgb(32, 32, 32),
             text2: Color32::from_rgb(100, 100, 100),
             text3: Color32::from_rgb(131, 131, 131),
@@ -117,9 +111,6 @@ pub fn theme(dark: bool) -> Theme {
             dark,
             bg: Color32::from_rgb(32, 32, 32),
             sidebar: Color32::from_rgb(25, 25, 25),
-            top: Color32::from_rgb(20, 16, 50),
-            top_text: Color32::from_rgb(230, 230, 240),
-            top_field: Color32::from_rgba_unmultiplied(255, 255, 255, 26),
             text: Color32::from_rgb(232, 232, 232),
             text2: Color32::from_rgb(180, 180, 180),
             text3: Color32::from_rgb(141, 141, 141),
@@ -174,22 +165,22 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
     } else {
         Color32::from_rgb(200, 215, 250)
     };
-    v.selection.stroke = egui::Stroke::new(1.0, t.text);
+    v.selection.stroke = egui::Stroke::new(1.0_f32, t.text);
     // links in the accent text colour, so they read as links (white or
     // near-black bold looked like any label)
     v.hyperlink_color = t.accent_text;
-    v.window_stroke = egui::Stroke::new(1.0, t.border);
+    v.window_stroke = egui::Stroke::new(1.0_f32, t.border);
     v.window_corner_radius = egui::CornerRadius::same(12);
     v.menu_corner_radius = egui::CornerRadius::same(8);
-    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, t.border);
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, t.border);
     v.widgets.inactive.bg_fill = t.hover;
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     // inputs and framed buttons get the original's 1 px border
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, t.border);
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, t.border);
     v.widgets.inactive.bg_fill = t.bg;
     v.widgets.hovered.weak_bg_fill = t.hover;
     v.widgets.hovered.bg_fill = t.hover;
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(187, 187, 187));
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, Color32::from_rgb(187, 187, 187));
     v.widgets.active.weak_bg_fill = t.selected_bg;
     for w in [
         &mut v.widgets.noninteractive,

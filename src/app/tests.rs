@@ -7043,7 +7043,7 @@ fn a_video_goes_with_a_small_still_and_others_show_that_first() {
 
 #[test]
 fn a_video_and_its_still_both_have_to_be_up_before_the_message_goes() {
-    let mut a = app();
+    let a = app();
     let v = Attachment {
         file: "a".repeat(64),
         name: "v.mp4".into(),

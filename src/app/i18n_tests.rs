@@ -300,7 +300,6 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
                 name: String::new(),
                 space,
                 folder: None,
-                private: false,
             }),
         ),
         (

@@ -30,6 +30,7 @@
 // The zip is opened with macOS's own `ditto`.
 
 use super::*;
+#[cfg(not(test))]
 use crate::media;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -131,6 +132,7 @@ impl SlackPlan {
         }
     }
 
+    #[cfg(test)]
     /// People not matched to a member (Slack ids, in the dialog's order).
     pub fn unmatched(&self) -> Vec<String> {
         self.people
@@ -645,6 +647,7 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     /// Bring the export in. Returns (channels, messages) imported.
     pub(super) fn import_slack(&mut self, plan: &SlackPlan) -> (usize, usize) {
         self.import_slack_report(plan).0

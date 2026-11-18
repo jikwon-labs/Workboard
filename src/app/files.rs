@@ -1705,7 +1705,7 @@ impl App {
                     } else {
                         t.danger
                     };
-                    painter.rect_stroke(rect, 8.0, Stroke::new(2.0, c), egui::StrokeKind::Inside);
+                    painter.rect_stroke(rect, 8.0, Stroke::new(2.0_f32, c), egui::StrokeKind::Inside);
                     painter.text(
                         rect.center(),
                         Align2::CENTER_CENTER,
@@ -1757,7 +1757,7 @@ impl App {
                 ] {
                     painter.line_segment(
                         [x.center() + a, x.center() + b],
-                        Stroke::new(1.6, Color32::WHITE),
+                        Stroke::new(1.6_f32, Color32::WHITE),
                     );
                 }
                 if xr.clicked() {

@@ -772,6 +772,7 @@ impl SeenIds {
         self.ids.binary_search(&id).is_ok()
     }
 
+    #[cfg(test)]
     /// A message not seen, inside the time this covers.
     pub fn is_new(&self, id: u64, ts: i64) -> bool {
         ts >= self.floor && !self.has(id)
@@ -2951,7 +2952,7 @@ impl Data {
             tags: vec![],
         });
         // chat
-        let mut msg = |d: &mut Data, author: u64, text: &str, ago: i64| Message {
+        let msg = |d: &mut Data, author: u64, text: &str, ago: i64| Message {
             id: d.new_id(),
             author,
             text: text.into(),

@@ -18,23 +18,8 @@ pub(super) enum SideDrag {
 
 // ------------------------------------------------------------------ icons
 
-pub(super) fn paint_dashed_circle(p: &egui::Painter, c: Pos2, r: f32, color: Color32) {
-    let n = 10;
-    for i in 0..n {
-        let a0 = std::f32::consts::TAU * (i as f32 / n as f32);
-        let a1 = a0 + std::f32::consts::TAU / n as f32 * 0.55;
-        p.line_segment(
-            [
-                c + vec2(a0.cos(), a0.sin()) * r,
-                c + vec2(a1.cos(), a1.sin()) * r,
-            ],
-            Stroke::new(1.4, color),
-        );
-    }
-}
-
 fn paint_checklist_icon(p: &egui::Painter, c: Pos2, color: Color32) {
-    let s = Stroke::new(1.3, color);
+    let s = Stroke::new(1.3_f32, color);
     p.line_segment([c + vec2(-6.0, -3.5), c + vec2(-4.5, -2.0)], s);
     p.line_segment([c + vec2(-4.5, -2.0), c + vec2(-2.0, -5.0)], s);
     p.line_segment([c + vec2(0.0, -3.5), c + vec2(6.0, -3.5)], s);
@@ -43,55 +28,65 @@ fn paint_checklist_icon(p: &egui::Painter, c: Pos2, color: Color32) {
 
 fn paint_calendar_icon(p: &egui::Painter, c: Pos2, color: Color32) {
     let r = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(12.0, 11.0));
-    p.rect_stroke(r, 2.0, Stroke::new(1.2, color), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        r,
+        2.0,
+        Stroke::new(1.2_f32, color),
+        egui::StrokeKind::Inside,
+    );
     p.line_segment(
         [
             pos2(r.left(), r.top() + 3.5),
             pos2(r.right(), r.top() + 3.5),
         ],
-        Stroke::new(1.2, color),
+        Stroke::new(1.2_f32, color),
     );
     p.line_segment(
         [
             pos2(r.left() + 3.0, r.top() - 1.5),
             pos2(r.left() + 3.0, r.top() + 1.0),
         ],
-        Stroke::new(1.2, color),
+        Stroke::new(1.2_f32, color),
     );
     p.line_segment(
         [
             pos2(r.right() - 3.0, r.top() - 1.5),
             pos2(r.right() - 3.0, r.top() + 1.0),
         ],
-        Stroke::new(1.2, color),
+        Stroke::new(1.2_f32, color),
     );
 }
 
 fn paint_person_icon(p: &egui::Painter, c: Pos2, color: Color32) {
-    p.circle_stroke(c + vec2(0.0, -3.0), 3.0, Stroke::new(1.2, color));
+    p.circle_stroke(c + vec2(0.0, -3.0), 3.0, Stroke::new(1.2_f32, color));
     let mut pts = vec![];
     for i in 0..=10 {
         let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
         pts.push(c + vec2(0.0, 6.5) + vec2(a.cos() * 5.5, a.sin() * 4.0));
     }
-    p.add(egui::Shape::line(pts, Stroke::new(1.2, color)));
+    p.add(egui::Shape::line(pts, Stroke::new(1.2_f32, color)));
 }
 
 fn paint_comment_icon(p: &egui::Painter, c: Pos2, color: Color32) {
     let r = Rect::from_center_size(c + vec2(0.0, -1.0), vec2(12.0, 9.0));
-    p.rect_stroke(r, 2.5, Stroke::new(1.2, color), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        r,
+        2.5,
+        Stroke::new(1.2_f32, color),
+        egui::StrokeKind::Inside,
+    );
     p.line_segment(
         [
             pos2(r.left() + 3.0, r.bottom()),
             pos2(r.left() + 2.0, r.bottom() + 3.0),
         ],
-        Stroke::new(1.2, color),
+        Stroke::new(1.2_f32, color),
     );
 }
 
 fn paint_outline_flag(p: &egui::Painter, c: Pos2, color: Color32) {
     let top = c + vec2(-4.0, -6.0);
-    p.line_segment([top, top + vec2(0.0, 12.0)], Stroke::new(1.2, color));
+    p.line_segment([top, top + vec2(0.0, 12.0)], Stroke::new(1.2_f32, color));
     p.add(egui::Shape::closed_line(
         vec![
             top,
@@ -100,7 +95,7 @@ fn paint_outline_flag(p: &egui::Painter, c: Pos2, color: Color32) {
             top + vec2(8.5, 6.5),
             top + vec2(0.0, 6.5),
         ],
-        Stroke::new(1.2, color),
+        Stroke::new(1.2_f32, color),
     ));
 }
 
@@ -151,20 +146,20 @@ fn paint_view_icon(p: &egui::Painter, c: Pos2, v: ViewKind) {
         p.rect_stroke(
             r.shrink(0.5),
             3.0,
-            Stroke::new(1.2, col),
+            Stroke::new(1.2_f32, col),
             egui::StrokeKind::Inside,
         );
         for k in 0..3 {
             let y = r.top() + 4.0 + k as f32 * 3.0;
             p.line_segment(
                 [pos2(r.left() + 3.5, y), pos2(r.right() - 3.5, y)],
-                Stroke::new(1.1, col),
+                Stroke::new(1.1_f32, col),
             );
         }
         return;
     }
     p.rect_filled(r, 3.0, col);
-    let w = Stroke::new(1.3, Color32::WHITE);
+    let w = Stroke::new(1.3_f32, Color32::WHITE);
     match glyph {
         1 => {
             p.line_segment(
@@ -270,8 +265,12 @@ fn pill(
         bg
     };
     ui.painter().rect_filled(r, 6.0, fill);
-    ui.painter()
-        .rect_stroke(r, 6.0, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(
+        r,
+        6.0,
+        Stroke::new(1.0_f32, stroke),
+        egui::StrokeKind::Inside,
+    );
     let ic = pos2(r.left() + 9.0 + 8.0, r.center().y);
     line_icon(ui.painter(), icon, ic, fg);
     if !shown.is_empty() {
@@ -310,6 +309,7 @@ pub(super) fn field_col_key(id: u64) -> String {
 /// Width of a custom field column in the List.
 pub(super) const FIELD_COL_W: f32 = 130.0;
 
+#[cfg(test)]
 /// Column rectangles from the right; hidden columns get an empty rect.
 pub(super) fn col_layout(row: Rect, hidden: &HashSet<String>, show_pr: bool) -> Cols {
     col_layout_with(row, hidden, show_pr, &[])
@@ -526,11 +526,11 @@ impl App {
                 let cv = wr.right_center() - vec2(14.0, 1.0);
                 ui.painter().line_segment(
                     [cv + vec2(-4.0, -2.0), cv + vec2(0.0, 2.0)],
-                    Stroke::new(1.3, t.text2),
+                    Stroke::new(1.3_f32, t.text2),
                 );
                 ui.painter().line_segment(
                     [cv + vec2(0.0, 2.0), cv + vec2(4.0, -2.0)],
-                    Stroke::new(1.3, t.text2),
+                    Stroke::new(1.3_f32, t.text2),
                 );
                 if self.force_menu.as_deref() == Some("workspace") {
                     let pid = ui.id().with("ws_menu");
@@ -613,7 +613,7 @@ impl App {
                 ui.painter().rect_stroke(
                     sr,
                     14.0,
-                    Stroke::new(1.0, t.border),
+                    Stroke::new(1.0_f32, t.border),
                     egui::StrokeKind::Inside,
                 );
                 super::icons::line_icon_scaled(
@@ -714,11 +714,11 @@ impl App {
                     let cv = r.right_center() - vec2(8.0, 1.0);
                     ui.painter().line_segment(
                         [cv + vec2(-3.0, -1.5), cv + vec2(0.0, 1.5)],
-                        Stroke::new(1.2, t.text2),
+                        Stroke::new(1.2_f32, t.text2),
                     );
                     ui.painter().line_segment(
                         [cv + vec2(0.0, 1.5), cv + vec2(3.0, -1.5)],
-                        Stroke::new(1.2, t.text2),
+                        Stroke::new(1.2_f32, t.text2),
                     );
                     if self.force_menu.as_deref() == Some("avatar") {
                         let pid = ui.id().with("avatar_menu");
@@ -1485,7 +1485,7 @@ impl App {
                             ui.painter().rect_stroke(
                                 r,
                                 12.0,
-                                Stroke::new(1.0, t.border),
+                                Stroke::new(1.0_f32, t.border),
                                 egui::StrokeKind::Inside,
                             );
                             ui.painter().galley(
@@ -1739,7 +1739,7 @@ impl App {
                             ui.painter().hline(
                                 r.left() + 6.0..=r.right() - 6.0,
                                 r.top(),
-                                Stroke::new(1.0, t.border),
+                                Stroke::new(1.0_f32, t.border),
                             );
 
                             if !self.hidden("AI Chats") {
@@ -1893,7 +1893,7 @@ impl App {
                                         p.rect_stroke(
                                             Rect::from_center_size(c, vec2(16.0, 16.0)),
                                             4.0,
-                                            Stroke::new(1.0, tc),
+                                            Stroke::new(1.0_f32, tc),
                                             egui::StrokeKind::Inside,
                                         );
                                         p.text(
@@ -2433,13 +2433,13 @@ impl App {
                 fsel,
                 |p, c| {
                     let rr = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(14.0, 11.0));
-                    p.rect_stroke(rr, 2.0, Stroke::new(1.2, tc), egui::StrokeKind::Inside);
+                    p.rect_stroke(rr, 2.0, Stroke::new(1.2_f32, tc), egui::StrokeKind::Inside);
                     p.line_segment(
                         [
                             rr.left_top() + vec2(0.0, 2.5),
                             rr.left_top() + vec2(5.0, 2.5),
                         ],
-                        Stroke::new(1.2, tc),
+                        Stroke::new(1.2_f32, tc),
                     );
                 },
                 &f.name,
@@ -2575,7 +2575,7 @@ impl App {
                         let y = rr.top() + 4.0 + k as f32 * 3.0;
                         p.line_segment(
                             [pos2(rr.left() + 3.0, y), pos2(rr.right() - 3.0, y)],
-                            Stroke::new(1.0, Color32::WHITE),
+                            Stroke::new(1.0_f32, Color32::WHITE),
                         );
                     }
                 },
@@ -2951,7 +2951,7 @@ impl App {
                                 ui.painter().rect_stroke(
                                     Rect::from_center_size(r.center(), vec2(14.0, 11.0)),
                                     2.0,
-                                    Stroke::new(1.2, t.text2),
+                                    Stroke::new(1.2_f32, t.text2),
                                     egui::StrokeKind::Inside,
                                 );
                             }
@@ -2982,11 +2982,11 @@ impl App {
                             let cv = cr.center();
                             ui.painter().line_segment(
                                 [cv + vec2(-3.5, -1.5), cv + vec2(0.0, 2.0)],
-                                Stroke::new(1.3, t.text2),
+                                Stroke::new(1.3_f32, t.text2),
                             );
                             ui.painter().line_segment(
                                 [cv + vec2(0.0, 2.0), cv + vec2(3.5, -1.5)],
-                                Stroke::new(1.3, t.text2),
+                                Stroke::new(1.3_f32, t.text2),
                             );
                         }
                         if !last {
@@ -3047,11 +3047,11 @@ impl App {
                                 let cv = r.right_center() - vec2(9.0, 1.0);
                                 ui.painter().line_segment(
                                     [cv + vec2(-3.0, -1.5), cv + vec2(0.0, 1.5)],
-                                    Stroke::new(1.2, t.text2),
+                                    Stroke::new(1.2_f32, t.text2),
                                 );
                                 ui.painter().line_segment(
                                     [cv + vec2(0.0, 1.5), cv + vec2(3.0, -1.5)],
-                                    Stroke::new(1.2, t.text2),
+                                    Stroke::new(1.2_f32, t.text2),
                                 );
                             } else {
                                 ui.painter().galley(
@@ -3293,7 +3293,7 @@ impl App {
             });
         let r = ui.available_rect_before_wrap();
         ui.painter()
-            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
         // the Overview has cards, not tasks: no task toolbar
         if self.view == ViewKind::Overview {
             ui.add_space(8.0);
@@ -3463,7 +3463,7 @@ impl App {
                         ui.painter().rect_stroke(
                             sr,
                             6.0,
-                            Stroke::new(1.0, t.border),
+                            Stroke::new(1.0_f32, t.border),
                             egui::StrokeKind::Inside,
                         );
                         if sresp.hovered() || self.show_search {
@@ -3497,7 +3497,7 @@ impl App {
                                 ui.painter().circle_stroke(
                                     r.center(),
                                     12.5,
-                                    Stroke::new(1.5, t.text),
+                                    Stroke::new(1.5_f32, t.text),
                                 );
                             }
                             paint_avatar(ui.painter(), r.center(), 10.5, &m, t.bg);
@@ -3662,7 +3662,7 @@ impl App {
             ui.painter().rect_stroke(
                 cell.shrink2(vec2(2.0, 0.0)),
                 4.0,
-                Stroke::new(1.0, t.border),
+                Stroke::new(1.0_f32, t.border),
                 egui::StrokeKind::Inside,
             );
         }
@@ -3674,7 +3674,12 @@ impl App {
             "checkbox" => {
                 let on = v == "true";
                 let b = Rect::from_center_size(at + vec2(7.0, 0.0), vec2(14.0, 14.0));
-                p.rect_stroke(b, 3.0, Stroke::new(1.2, t.text3), egui::StrokeKind::Inside);
+                p.rect_stroke(
+                    b,
+                    3.0,
+                    Stroke::new(1.2_f32, t.text3),
+                    egui::StrokeKind::Inside,
+                );
                 if on {
                     p.rect_filled(b, 3.0, t.primary);
                     p.text(
@@ -3837,7 +3842,7 @@ impl App {
             FontId::proportional(13.0),
             t.bg,
         );
-        p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+        p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
         let add_col = ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click());
         hover_bg(ui, &add_col, add_col.rect, 5.0);
         if add_col
@@ -3894,7 +3899,7 @@ impl App {
                                 if ui
                                     .add(
                                         egui::Button::new(label)
-                                            .stroke(Stroke::new(1.0, t.border))
+                                            .stroke(Stroke::new(1.0_f32, t.border))
                                             .corner_radius(6),
                                     )
                                     .clicked()
@@ -3922,7 +3927,7 @@ impl App {
                                 let ghost_btn = |ui: &mut Ui, label: &str| {
                                     ui.add(
                                         egui::Button::new(label)
-                                            .stroke(Stroke::new(1.0, t.border))
+                                            .stroke(Stroke::new(1.0_f32, t.border))
                                             .corner_radius(6),
                                     )
                                 };
@@ -4177,7 +4182,7 @@ impl App {
         ui.painter().hline(
             rect.left() + 28.0..=rect.right(),
             rect.bottom() - 0.5,
-            Stroke::new(1.0, t.border),
+            Stroke::new(1.0_f32, t.border),
         );
         let cols = self.list_cols(rect);
         let st = self.data.status_of(task);
@@ -4297,7 +4302,7 @@ impl App {
             );
             if closed {
                 ui.painter()
-                    .hline(x..=x + gw, rect.center().y, Stroke::new(1.0, t.text3));
+                    .hline(x..=x + gw, rect.center().y, Stroke::new(1.0_f32, t.text3));
             }
             x += gw + 10.0;
         }
@@ -4912,7 +4917,7 @@ impl App {
             ui.painter().rect_stroke(
                 drawn,
                 8.0,
-                Stroke::new(1.0, hover_line(ui)),
+                Stroke::new(1.0_f32, hover_line(ui)),
                 egui::StrokeKind::Inside,
             );
         }
@@ -4935,7 +4940,7 @@ impl App {
         let mut open = false;
         let frame = egui::Frame::new()
             .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(8)
             .inner_margin(egui::Margin::same(11))
             .show(ui, |ui| {
@@ -4981,7 +4986,12 @@ impl App {
                     b
                 } else {
                     let b = boxed(x);
-                    p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    p.rect_stroke(
+                        b,
+                        6.0,
+                        Stroke::new(1.0_f32, t.border),
+                        egui::StrokeKind::Inside,
+                    );
                     paint_person_icon(&p, b.center(), icon_col);
                     x += 26.0;
                     b
@@ -4995,7 +5005,12 @@ impl App {
                         );
                         let b =
                             Rect::from_min_size(pos2(x, r.top()), vec2(g.size().x + 26.0, 22.0));
-                        p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                        p.rect_stroke(
+                            b,
+                            6.0,
+                            Stroke::new(1.0_f32, t.border),
+                            egui::StrokeKind::Inside,
+                        );
                         paint_calendar_icon(&p, b.left_center() + vec2(11.0, 0.0), icon_col);
                         let gw = g.size().x;
                         p.galley(
@@ -5008,7 +5023,12 @@ impl App {
                     }
                     None => {
                         let b = boxed(x);
-                        p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                        p.rect_stroke(
+                            b,
+                            6.0,
+                            Stroke::new(1.0_f32, t.border),
+                            egui::StrokeKind::Inside,
+                        );
                         paint_calendar_icon(&p, b.center(), icon_col);
                         x += 26.0;
                         b
@@ -5017,7 +5037,12 @@ impl App {
                 let b = boxed(x);
                 let show_pr = self.data.extra.apps.priorities;
                 if show_pr {
-                    p.rect_stroke(b, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    p.rect_stroke(
+                        b,
+                        6.0,
+                        Stroke::new(1.0_f32, t.border),
+                        egui::StrokeKind::Inside,
+                    );
                 }
                 if !show_pr {
                 } else if task.priority > 0 {

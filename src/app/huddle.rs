@@ -561,7 +561,7 @@ impl App {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(t.card)
-                    .stroke(Stroke::new(1.0, t.border))
+                    .stroke(Stroke::new(1.0_f32, t.border))
                     .corner_radius(12)
                     .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
@@ -684,7 +684,7 @@ impl App {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(t.card)
-                    .stroke(Stroke::new(1.0, t.border))
+                    .stroke(Stroke::new(1.0_f32, t.border))
                     .corner_radius(12)
                     .inner_margin(egui::Margin::same(14))
                     .shadow(egui::epaint::Shadow {
@@ -864,7 +864,7 @@ impl App {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(t.card)
-                    .stroke(Stroke::new(1.0, t.border))
+                    .stroke(Stroke::new(1.0_f32, t.border))
                     .corner_radius(12)
                     .inner_margin(egui::Margin::symmetric(14, 10))
                     .shadow(egui::epaint::Shadow {
@@ -920,7 +920,7 @@ impl App {
                                     ui.painter().circle_stroke(
                                         r.center(),
                                         15.0,
-                                        Stroke::new(2.5, green),
+                                        Stroke::new(2.5_f32, green),
                                     );
                                 }
                                 ui.painter().circle_filled(r.center(), 12.0, color);
@@ -947,7 +947,7 @@ impl App {
                                             r.right_bottom() - vec2(8.0, 8.0),
                                             r.right_bottom() - vec2(2.0, 2.0),
                                         ],
-                                        Stroke::new(1.5, Color32::WHITE),
+                                        Stroke::new(1.5_f32, Color32::WHITE),
                                     );
                                 }
                                 let state = if p.muted {

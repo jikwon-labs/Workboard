@@ -25,7 +25,6 @@ pub const T: &[(&str, &str)] = &[
     ("Delete", "삭제"),
     ("Close", "닫기"),
     ("Done", "완료"),
-    ("Add", "추가"),
     ("Edit", "편집"),
     ("Rename", "이름 바꾸기"),
     ("Remove", "제거"),

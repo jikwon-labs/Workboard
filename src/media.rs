@@ -94,8 +94,10 @@ pub struct Pasted {
     pub png: Option<Vec<u8>>,
 }
 
+#[cfg(all(target_os = "macos", not(test)))]
+pub use mac::pick_zip;
 #[cfg(target_os = "macos")]
-pub use mac::{pasteboard, pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
+pub use mac::{pasteboard, pick_files, probe, thumbnail, video_still_jpeg, Player};
 
 /// Longer side of the still sent along with a video.
 pub const STILL: u32 = 480;
@@ -548,6 +550,7 @@ mod mac {
         })
     }
 
+    #[cfg(not(test))]
     /// The system file picker for one .zip file (a Slack export). Blocks
     /// until the person chooses or cancels. Main thread only.
     pub fn pick_zip(message: &str) -> Option<PathBuf> {

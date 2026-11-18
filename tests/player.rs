@@ -5,6 +5,7 @@
 
 #[allow(dead_code)]
 #[path = "../src/media.rs"]
+#[allow(unused_imports)] // the app's re-exports, unused by this test
 mod media;
 
 // media.rs shows its file-picker text through the app's translation; the

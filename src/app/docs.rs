@@ -202,8 +202,11 @@ impl App {
         let pages = Rect::from_min_max(full.min, pos2(full.left() + pages_w, full.bottom()));
         let main = Rect::from_min_max(pos2(full.left() + pages_w, full.top()), full.max);
         ui.painter().rect_filled(pages, 0.0, t.sidebar);
-        ui.painter()
-            .vline(pages.right(), pages.y_range(), Stroke::new(1.0, t.border));
+        ui.painter().vline(
+            pages.right(),
+            pages.y_range(),
+            Stroke::new(1.0_f32, t.border),
+        );
         let mut pui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(pages.shrink(8.0))
@@ -426,7 +429,7 @@ impl App {
             });
         let r = ui.available_rect_before_wrap();
         ui.painter()
-            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
         let focused = ui.memory(|m| m.has_focus(body_id));
         let arm_id = body_id.with("slash_at");
         let slash_sel_id = body_id.with("slash_sel");
@@ -609,20 +612,20 @@ impl App {
                                                 bx.left_center() + vec2(3.5, 0.0),
                                                 bx.center_bottom() + vec2(-1.0, -4.0),
                                             ],
-                                            Stroke::new(1.8, t.on_primary),
+                                            Stroke::new(1.8_f32, t.on_primary),
                                         );
                                         p.line_segment(
                                             [
                                                 bx.center_bottom() + vec2(-1.0, -4.0),
                                                 bx.right_top() + vec2(-3.5, 4.0),
                                             ],
-                                            Stroke::new(1.8, t.on_primary),
+                                            Stroke::new(1.8_f32, t.on_primary),
                                         );
                                     } else {
                                         p.rect_stroke(
                                             bx,
                                             3.0,
-                                            Stroke::new(1.3, t.text3),
+                                            Stroke::new(1.3_f32, t.text3),
                                             egui::StrokeKind::Inside,
                                         );
                                     }
@@ -644,7 +647,7 @@ impl App {
                                     p.hline(
                                         at.x..=out.response.rect.right(),
                                         mid,
-                                        Stroke::new(1.0, t.border),
+                                        Stroke::new(1.0_f32, t.border),
                                     );
                                 }
                                 _ => {}
@@ -951,7 +954,7 @@ impl App {
                             ui.painter().rect_stroke(
                                 r,
                                 0.0,
-                                Stroke::new(1.0, t.border),
+                                Stroke::new(1.0_f32, t.border),
                                 egui::StrokeKind::Inside,
                             );
                             ui.painter().with_clip_rect(r.shrink(2.0)).text(
@@ -1332,7 +1335,7 @@ pub(super) fn doc_layout_job(text: &str, t: &Theme, wrap: f32) -> egui::text::La
             },
             italics: kind == LineKind::Quote,
             strikethrough: if kind == LineKind::Check(true) {
-                Stroke::new(1.0, t.text3)
+                Stroke::new(1.0_f32, t.text3)
             } else {
                 Stroke::NONE
             },

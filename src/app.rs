@@ -47,7 +47,7 @@ mod timeline;
 mod together;
 #[cfg(test)]
 mod ui_tests;
-pub use menus::Modal;
+use menus::Modal;
 pub use pages::Section;
 use parity::TaskFilter;
 pub use taskfields::TaskPick;
@@ -82,17 +82,6 @@ impl ViewKind {
             ViewKind::Gantt => "Gantt",
             ViewKind::Timeline => "Timeline",
             ViewKind::Table => "Table",
-        }
-    }
-    fn icon(self) -> &'static str {
-        match self {
-            ViewKind::Overview => "\u{2139}",
-            ViewKind::List => "\u{2630}",
-            ViewKind::Board => "\u{25A6}",
-            ViewKind::Calendar => "\u{1F4C5}",
-            ViewKind::Gantt => "\u{2261}",
-            ViewKind::Timeline => "\u{2550}",
-            ViewKind::Table => "\u{25A4}",
         }
     }
 }
@@ -180,7 +169,6 @@ pub enum Target {
     Folder(u64),
     List(u64),
     Task(u64),
-    Workspace,
 }
 
 pub enum Action {
@@ -200,8 +188,10 @@ pub enum Action {
     Go(Location),
     ToggleSpace(u64),
     ToggleFolder(u64),
+    #[cfg_attr(not(test), allow(dead_code))] // only tests send it
     NewSpace,
     NewFolder(u64),
+    #[cfg_attr(not(test), allow(dead_code))] // only tests send it
     NewList {
         space: u64,
         folder: Option<u64>,
@@ -1962,7 +1952,6 @@ impl App {
                     Target::Folder(id) => self.data.location_name(Location::Folder(id)),
                     Target::List(id) => self.data.location_name(Location::List(id)),
                     Target::Task(id) => self.task(id).map(|t| t.name.clone()).unwrap_or_default(),
-                    Target::Workspace => self.data.workspace.clone(),
                 };
                 self.rename = Some((tg, name));
             }
@@ -2046,7 +2035,6 @@ impl App {
                     t.name = name;
                 }
             }
-            Target::Workspace => self.data.workspace = name,
         }
         self.dirty = true;
     }
@@ -2138,7 +2126,6 @@ impl App {
                 self.apply(Action::DeleteTask(id));
                 return;
             }
-            Target::Workspace => return,
         }
         self.data.tasks.retain(|t| !lists.contains(&t.list_id));
         let data = &self.data;
@@ -2394,6 +2381,7 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     /// Moves the tasks of a status deleted in the status editor to a status of
     /// the same kind (else the first one) and notes it in each task's history.
     fn move_off_status(&mut self, si: usize, old: &str, kind: StatusKind, orig: &[Option<String>]) {
@@ -2692,7 +2680,7 @@ impl App {
                 ui.painter().rect_stroke(
                     card,
                     8.0,
-                    Stroke::new(1.0, t.border),
+                    Stroke::new(1.0_f32, t.border),
                     egui::StrokeKind::Inside,
                 );
             });
@@ -2867,7 +2855,7 @@ impl App {
             p.rect_stroke(
                 cell,
                 0.0,
-                Stroke::new(0.5, t.border),
+                Stroke::new(0.5_f32, t.border),
                 egui::StrokeKind::Inside,
             );
             let num_pos = cell.left_top() + vec2(10.0, 12.0);
@@ -3096,7 +3084,7 @@ impl App {
                     ui.painter().rect_stroke(
                         r,
                         6.0,
-                        Stroke::new(1.0, t.border),
+                        Stroke::new(1.0_f32, t.border),
                         egui::StrokeKind::Inside,
                     );
                     let st = self.data.status_of(task);
@@ -3230,7 +3218,7 @@ impl App {
                             t.text3,
                         );
                         ui.painter()
-                            .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+                            .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
                         for (task, depth, nsub) in &rows {
                             let (r, resp) =
                                 ui.allocate_exact_size(vec2(name_w, rh), Sense::click());
@@ -3317,7 +3305,7 @@ impl App {
                                 );
                             }
                             ui.painter()
-                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
+                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                             let tid = task.id;
                             resp.context_menu(|ui| self.task_menu(ui, tid));
                             if resp.clicked() && !on_arrow {
@@ -3357,7 +3345,7 @@ impl App {
                     ui.painter().vline(
                         vr.left(),
                         vr.top()..=vr.top() + rows_h,
-                        Stroke::new(1.0, t.border),
+                        Stroke::new(1.0_f32, t.border),
                     );
                     let jump = std::mem::take(&mut self.gantt_jump);
                     let mut sa = egui::ScrollArea::horizontal()
@@ -3374,7 +3362,7 @@ impl App {
                         timebar::paint_axis(&p, &t, area, head, &sc, td);
                         for (k, (task, _, _)) in rows.iter().enumerate() {
                             let y = area.top() + head + rh * k as f32;
-                            p.hline(area.x_range(), y + rh, Stroke::new(0.5, t.border));
+                            p.hline(area.x_range(), y + rh, Stroke::new(0.5_f32, t.border));
                             let day_at = |x: f32| sc.day_at(area.left(), x);
                             let Some((s, e)) = timebar::bar_range(task.start, task.due) else {
                                 // no dates yet: click a day, or drag across days, to schedule it
@@ -3606,7 +3594,7 @@ impl App {
                         };
                     }
                     ui.painter()
-                        .vline(x, hr.y_range(), Stroke::new(0.5, t.border));
+                        .vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
                     x += widths[i];
                 }
                 // "+" at the end: choose the columns
@@ -3671,7 +3659,7 @@ impl App {
                         ui.painter().rect_filled(rr, 0.0, t.hover);
                     }
                     ui.painter()
-                        .hline(rr.x_range(), rr.bottom(), Stroke::new(0.5, t.border));
+                        .hline(rr.x_range(), rr.bottom(), Stroke::new(0.5_f32, t.border));
                     let mut cells = vec![];
                     let mut x = rr.left();
                     for w in &widths {
@@ -3680,7 +3668,7 @@ impl App {
                             vec2(*w, rr.height()),
                         ));
                         ui.painter()
-                            .vline(x, rr.y_range(), Stroke::new(0.5, t.border));
+                            .vline(x, rr.y_range(), Stroke::new(0.5_f32, t.border));
                         x += w;
                     }
                     let st = self.data.status_of(task);
@@ -4100,7 +4088,7 @@ impl App {
                         ui.with_layout(layout, |ui| {
                             // My Work card
                             egui::Frame::new()
-                                .stroke(Stroke::new(1.0, t.border))
+                                .stroke(Stroke::new(1.0_f32, t.border))
                                 .corner_radius(12)
                                 .inner_margin(egui::Margin::same(16))
                                 .show(ui, |ui| {
@@ -4263,7 +4251,7 @@ impl App {
                             ui.add_space(12.0);
                             // Recents / lists overview
                             egui::Frame::new()
-                                .stroke(Stroke::new(1.0, t.border))
+                                .stroke(Stroke::new(1.0_f32, t.border))
                                 .corner_radius(12)
                                 .inner_margin(egui::Margin::same(16))
                                 .show(ui, |ui| {
@@ -4414,7 +4402,7 @@ impl App {
                                                 if archived > 0 {
                                                     let b = ui.add(
                                                         egui::Button::new(tr("See archived Lists"))
-                                                            .stroke(Stroke::new(1.0, t.border))
+                                                            .stroke(Stroke::new(1.0_f32, t.border))
                                                             .corner_radius(7),
                                                     );
                                                     name_it(&b, "Home archived lists");
@@ -4430,7 +4418,7 @@ impl App {
                                                 };
                                                 let b = ui.add(
                                                     egui::Button::new(tr(label))
-                                                        .stroke(Stroke::new(1.0, t.border))
+                                                        .stroke(Stroke::new(1.0_f32, t.border))
                                                         .corner_radius(7),
                                                 );
                                                 name_it(&b, "Home new list");
@@ -4638,7 +4626,7 @@ impl App {
                                 ui.painter().rect_filled(r, 8.0, t.hover);
                             }
                             ui.painter()
-                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
+                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                             if let Some(m) = self.data.member(a.author) {
                                 paint_avatar(
                                     ui.painter(),
@@ -4782,7 +4770,7 @@ impl App {
                 egui::Frame::new()
                     .fill(t.card)
                     .corner_radius(12)
-                    .stroke(Stroke::new(1.0, t.border)),
+                    .stroke(Stroke::new(1.0_f32, t.border)),
             )
             .show(ctx, |ui| {
                 ui.set_min_size(size);
@@ -4961,7 +4949,7 @@ impl App {
                     });
                 let r = ui.available_rect_before_wrap();
                 ui.painter()
-                    .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+                    .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
                 let body = ui.available_rect_before_wrap();
                 let right_w = 380.0;
                 let left =
@@ -4977,8 +4965,11 @@ impl App {
                     },
                     t.column_bg,
                 );
-                ui.painter()
-                    .vline(right.left(), right.y_range(), Stroke::new(1.0, t.border));
+                ui.painter().vline(
+                    right.left(),
+                    right.y_range(),
+                    Stroke::new(1.0_f32, t.border),
+                );
                 // ---- left
                 let mut left_ui = ui.new_child(
                     egui::UiBuilder::new()
@@ -5457,7 +5448,7 @@ impl App {
                         ui.add_space(14.0);
                         let r = ui.available_rect_before_wrap();
                         ui.painter()
-                            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+                            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
                         ui.add_space(10.0);
                         self.description_field(ui, &t, &mut task);
                         ui.add_space(16.0);
@@ -6148,7 +6139,6 @@ impl App {
                     "task \"{}\"",
                     self.task(id).map(|x| x.name.clone()).unwrap_or_default()
                 ),
-                Target::Workspace => tr("workspace").into(),
             };
             egui::Window::new(tr("Delete")).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
                 ui.label(match tg {

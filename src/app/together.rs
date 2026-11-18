@@ -195,6 +195,7 @@ pub struct SyncRt {
 /// Asking a server which workspaces an email and password sign in to.
 pub struct Listing {
     rx: std::sync::mpsc::Receiver<Result<Vec<(String, String)>, String>>,
+    #[cfg_attr(not(test), allow(dead_code))] // tests check which server was asked
     pub(super) addr: String,
     pub(super) how: How,
 }
@@ -245,6 +246,7 @@ pub struct MakingWs {
 // in data.json). When trying the app with a separate WORKBOARD_HOME folder it
 // lives in that folder instead, and tests keep it in memory.
 
+#[cfg(not(test))]
 const KEYCHAIN_SERVICE: &str = "Workboard server";
 
 /// What a password may hold: English letters, digits, symbols and spaces.
@@ -400,11 +402,13 @@ fn test_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, 
     T.get_or_init(Default::default)
 }
 
+#[cfg(not(test))]
 fn token_file() -> Option<PathBuf> {
     let separate = std::env::var("WORKBOARD_HOME").is_ok_and(|v| !v.is_empty());
     (separate || !cfg!(target_os = "macos")).then(|| Data::dir().join("server-tokens.json"))
 }
 
+#[cfg(not(test))]
 fn read_token_file(p: &Path) -> std::collections::BTreeMap<String, String> {
     std::fs::read_to_string(p)
         .ok()
@@ -412,6 +416,7 @@ fn read_token_file(p: &Path) -> std::collections::BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
+#[cfg(not(test))]
 fn write_token_file(p: &Path, m: &std::collections::BTreeMap<String, String>) {
     let _ = std::fs::create_dir_all(p.parent().unwrap_or(Path::new(".")));
     if std::fs::write(p, serde_json::to_string_pretty(m).unwrap_or_default()).is_ok() {
@@ -1438,6 +1443,7 @@ impl App {
         changed
     }
 
+    #[cfg(test)]
     /// Start connecting to a server: with an invite code, or with none to
     /// set up an empty server.
     pub(super) fn connect_server(&mut self, addr: &str, invite: &str) -> Result<(), String> {
@@ -1562,6 +1568,7 @@ impl App {
         });
     }
 
+    #[cfg(test)]
     /// Sign this computer in again with a new invite code.
     pub(super) fn sign_in_again(&mut self, code: &str) {
         if code.trim().is_empty() {

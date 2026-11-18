@@ -91,7 +91,7 @@ impl App {
         let body = Rect::from_min_max(pos2(full.left() + nav_w, full.top()), full.max);
         ui.painter().rect_filled(nav, 0.0, t.sidebar);
         ui.painter()
-            .vline(nav.right(), nav.y_range(), Stroke::new(1.0, t.border));
+            .vline(nav.right(), nav.y_range(), Stroke::new(1.0_f32, t.border));
         let mut nui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(nav.shrink(10.0))

@@ -188,10 +188,6 @@ pub const T: &[(&str, &str)] = &[
     ("{} open  \u{2022}  {} in progress  \u{2022}  {} done", "열림 {}  \u{2022}  진행 중 {}  \u{2022}  완료 {}"),
     ("{} overdue", "기한 지남 {}"),
     ("No open tasks", "열린 작업 없음"),
-    ("+ Doc", "+ 문서"),
-    ("No docs yet", "아직 문서가 없습니다"),
-    ("Create one with + Doc", "+ 문서로 새로 만드세요"),
-    ("Start writing...", "입력을 시작하세요..."),
     ("Switch", "전환"),
     ("All Spaces", "모든 스페이스"),
     ("+ Dashboard", "+ 대시보드"),
@@ -206,7 +202,6 @@ pub const T: &[(&str, &str)] = &[
     ("Overdue tasks", "기한 지난 작업"),
     ("Nothing is overdue", "기한 지난 작업이 없습니다"),
     ("This week", "이번 주"),
-    ("No time tracked this week. Start a timer from any task.", "이번 주 기록된 시간이 없습니다. 아무 작업에서나 타이머를 시작하세요."),
     ("Add time", "시간 추가"),
     ("Open (tasks)", "열린 작업"),
     // timesheets and dashboards

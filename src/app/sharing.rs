@@ -162,7 +162,6 @@ impl App {
                     Target::Folder(f) => (self.loc_level(Location::Folder(*f)), Level::Edit),
                     Target::List(l) => (self.list_level(*l), Level::Edit),
                     Target::Task(t) => (task_level(*t), Level::Edit),
-                    Target::Workspace => (Level::Full, Level::Full),
                 };
                 (l < need).then(|| match l {
                     Level::Edit => "Only people with Full access can change the space itself.",

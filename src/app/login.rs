@@ -113,7 +113,7 @@ fn outline_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
         text,
         16.0,
         (t.app_bg, t.hover),
-        Stroke::new(1.0, field_line(t)),
+        Stroke::new(1.0_f32, field_line(t)),
         t.text,
     )
 }
@@ -150,7 +150,7 @@ fn or_line(ui: &mut Ui, t: &Theme) {
         .layout_no_wrap(tr("or").to_string(), FontId::proportional(14.0), t.text2);
     let gap = g.size().x / 2.0 + 14.0;
     let y = r.center().y;
-    let line = Stroke::new(1.0, t.border);
+    let line = Stroke::new(1.0_f32, t.border);
     ui.painter().hline(r.left()..=r.center().x - gap, y, line);
     ui.painter().hline(r.center().x + gap..=r.right(), y, line);
     ui.painter().galley(r.center() - g.size() / 2.0, g, t.text2);
@@ -183,10 +183,10 @@ impl App {
                 }
                 // the screen's fields: taller, with a clear outline and the
                 // app's corners
-                let line = Stroke::new(1.0, field_line(&t));
+                let line = Stroke::new(1.0_f32, field_line(&t));
                 let v = ui.visuals_mut();
                 v.widgets.inactive.bg_stroke = line;
-                v.widgets.hovered.bg_stroke = Stroke::new(1.0, t.text3);
+                v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, t.text3);
                 v.widgets.inactive.corner_radius = 6.into();
                 v.widgets.hovered.corner_radius = 6.into();
                 v.widgets.active.corner_radius = 6.into();
@@ -241,7 +241,7 @@ impl App {
         let at = |x: f32, y: f32| pos2(mr.left() + x * s, mr.top() + y * s);
         ui.painter().add(egui::Shape::line(
             vec![at(9.0, 15.5), at(13.0, 19.5), at(21.0, 10.5)],
-            Stroke::new(2.6, t.on_primary),
+            Stroke::new(2.6_f32, t.on_primary),
         ));
         ui.painter().galley(
             pos2(mr.right() + 10.0, cy - name.size().y / 2.0),

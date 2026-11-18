@@ -17,11 +17,11 @@ pub fn paint_status_circle(p: &egui::Painter, center: Pos2, r: f32, st: &Status)
             let a = center + vec2(-r * 0.45, 0.0);
             let b = center + vec2(-r * 0.1, r * 0.38);
             let d = center + vec2(r * 0.5, -r * 0.35);
-            p.line_segment([a, b], Stroke::new(1.6, Color32::WHITE));
-            p.line_segment([b, d], Stroke::new(1.6, Color32::WHITE));
+            p.line_segment([a, b], Stroke::new(1.6_f32, Color32::WHITE));
+            p.line_segment([b, d], Stroke::new(1.6_f32, Color32::WHITE));
         }
         StatusKind::Custom => {
-            p.circle_stroke(center, r, Stroke::new(1.5, c));
+            p.circle_stroke(center, r, Stroke::new(1.5_f32, c));
             // half filled to show progress
             let mut pts = vec![center];
             for i in 0..=16 {
@@ -52,7 +52,7 @@ pub fn paint_dashed(p: &egui::Painter, c: Pos2, r: f32, color: Color32) {
                 c + vec2(a0.cos(), a0.sin()) * r,
                 c + vec2(a1.cos(), a1.sin()) * r,
             ],
-            Stroke::new(1.5, color),
+            Stroke::new(1.5_f32, color),
         );
     }
 }
@@ -60,7 +60,7 @@ pub fn paint_dashed(p: &egui::Painter, c: Pos2, r: f32, color: Color32) {
 pub fn paint_flag(p: &egui::Painter, pos: Pos2, color: Color32, h: f32) {
     let top = pos + vec2(0.0, -h * 0.5);
     let bottom = pos + vec2(0.0, h * 0.5);
-    p.line_segment([top, bottom], Stroke::new(1.5, color));
+    p.line_segment([top, bottom], Stroke::new(1.5_f32, color));
     let w = h * 0.7;
     let pts = vec![top, top + vec2(w, h * 0.18), top + vec2(0.0, h * 0.4)];
     p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
@@ -96,7 +96,7 @@ pub fn paint_presence(
         p.circle_filled(c, r, ONLINE);
     } else {
         p.circle_filled(c, r, bg);
-        p.circle_stroke(c, r - 0.6, Stroke::new(1.2, grey));
+        p.circle_stroke(c, r - 0.6, Stroke::new(1.2_f32, grey));
     }
 }
 
@@ -148,19 +148,19 @@ pub fn paint_avatars(
 }
 
 pub fn paint_empty_avatar(p: &egui::Painter, center: Pos2, r: f32, color: Color32) {
-    p.circle_stroke(center, r, Stroke::new(1.0, color));
+    p.circle_stroke(center, r, Stroke::new(1.0_f32, color));
     // person glyph
     p.circle_stroke(
         center + vec2(0.0, -r * 0.25),
         r * 0.28,
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
     );
     p.line_segment(
         [
             center + vec2(-r * 0.45, r * 0.5),
             center + vec2(r * 0.45, r * 0.5),
         ],
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
     );
 }
 
@@ -201,18 +201,18 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
     match st.kind {
         StatusKind::Open => paint_dashed(ui.painter(), c, 4.5, fg),
         StatusKind::Custom => {
-            ui.painter().circle_stroke(c, 4.5, Stroke::new(1.4, fg));
+            ui.painter().circle_stroke(c, 4.5, Stroke::new(1.4_f32, fg));
             ui.painter().circle_filled(c, 2.0, fg);
         }
         _ => {
             ui.painter().circle_filled(c, 5.0, fg);
             ui.painter().line_segment(
                 [c + vec2(-2.3, 0.0), c + vec2(-0.6, 1.8)],
-                Stroke::new(1.3, fill),
+                Stroke::new(1.3_f32, fill),
             );
             ui.painter().line_segment(
                 [c + vec2(-0.6, 1.8), c + vec2(2.5, -1.8)],
-                Stroke::new(1.3, fill),
+                Stroke::new(1.3_f32, fill),
             );
         }
     }
@@ -692,7 +692,7 @@ pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>
                     c + vec2(-1.5, 3.3),
                     c + vec2(4.8, -3.2),
                 ],
-                Stroke::new(1.5, t.selected_text),
+                Stroke::new(1.5_f32, t.selected_text),
             ));
         }
         if r.clicked() {
@@ -1158,7 +1158,7 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) -> bool
                 } else {
                     Color32::TRANSPARENT
                 })
-                .stroke(Stroke::new(1.0, t.border))
+                .stroke(Stroke::new(1.0_f32, t.border))
                 .min_size(vec2(170.0, 28.0)),
             );
             if ui.add(b).clicked() {
@@ -1218,7 +1218,7 @@ pub fn dialog_frame(t: &Theme) -> egui::Frame {
     egui::Frame::new()
         .fill(t.card)
         .corner_radius(12)
-        .stroke(Stroke::new(1.0, t.border))
+        .stroke(Stroke::new(1.0_f32, t.border))
         .inner_margin(egui::Margin::same(20))
 }
 
@@ -1239,11 +1239,11 @@ pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
             let c = r.center();
             ui.painter().line_segment(
                 [c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)],
-                Stroke::new(1.5, t.text2),
+                Stroke::new(1.5_f32, t.text2),
             );
             ui.painter().line_segment(
                 [c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)],
-                Stroke::new(1.5, t.text2),
+                Stroke::new(1.5_f32, t.text2),
             );
             if resp.on_hover_text(tr("Close")).clicked() {
                 close = true;
@@ -1364,7 +1364,7 @@ impl egui::Widget for Check<'_> {
                         c + vec2(-1.0, 2.8),
                         c + vec2(3.8, -2.6),
                     ],
-                    Stroke::new(1.8, fade(on_accent(ui))),
+                    Stroke::new(1.8_f32, fade(on_accent(ui))),
                 ));
             } else {
                 let line = match (dark, resp.hovered()) {
@@ -1377,7 +1377,7 @@ impl egui::Widget for Check<'_> {
                     b,
                     3.5,
                     ui.visuals().extreme_bg_color,
-                    Stroke::new(1.2, fade(line)),
+                    Stroke::new(1.2_f32, fade(line)),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -1436,7 +1436,7 @@ pub fn radio(ui: &mut Ui, on: bool, text: impl Into<egui::WidgetText>) -> Respon
                 c,
                 D / 2.0 - 0.6,
                 ui.visuals().extreme_bg_color,
-                Stroke::new(1.2, line),
+                Stroke::new(1.2_f32, line),
             );
         }
         if let Some(g) = galley {
@@ -1619,7 +1619,7 @@ pub fn hover_ring(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
         ui.painter().rect_stroke(
             rect,
             radius,
-            Stroke::new(1.5, hover_line(ui)),
+            Stroke::new(1.5_f32, hover_line(ui)),
             egui::StrokeKind::Outside,
         );
     }

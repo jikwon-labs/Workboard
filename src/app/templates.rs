@@ -963,7 +963,7 @@ impl App {
         ui.add_space(8.0);
         ui.label(RichText::new(tr("What it makes")).small().color(t.text3));
         egui::Frame::new()
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(8)
             .inner_margin(egui::Margin::symmetric(12, 10))
             .show(ui, |ui| {

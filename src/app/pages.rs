@@ -33,21 +33,6 @@ fn ts_date(ts: i64) -> NaiveDate {
         .unwrap_or_else(today)
 }
 
-fn day_start_ts(d: NaiveDate) -> i64 {
-    d.and_hms_opt(9, 0, 0)
-        .and_then(|x| x.and_local_timezone(chrono::Local).single())
-        .map(|x| x.timestamp())
-        .unwrap_or_else(now_ts)
-}
-
-fn page_title(ui: &mut Ui, t: &Theme, title: &str, sub: &str) {
-    ui.label(RichText::new(title).size(20.0).strong());
-    if !sub.is_empty() {
-        ui.label(RichText::new(sub).color(t.text2));
-    }
-    ui.add_space(10.0);
-}
-
 fn bar_row(
     ui: &mut Ui,
     t: &Theme,
@@ -293,7 +278,7 @@ impl App {
                                 } else {
                                     t.bg
                                 })
-                                .stroke(Stroke::new(1.0, t.border))
+                                .stroke(Stroke::new(1.0_f32, t.border))
                                 .corner_radius(8)
                                 .inner_margin(egui::Margin::same(6));
                             let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
@@ -342,7 +327,7 @@ impl App {
         let st = self.data.status_of(task);
         egui::Frame::new()
             .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(6)
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
@@ -462,7 +447,7 @@ impl App {
                             let active = open.iter().filter(|x| self.data.status_of(x).kind == StatusKind::Custom).count();
                             let overdue = open.iter().filter(|x| x.is_overdue()).count();
                             let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x) && self.data.task_live(x)).count();
-                            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.set_width(cw - 30.0);
                                     ui.horizontal(|ui| {
@@ -514,182 +499,6 @@ impl App {
                 }
             });
         });
-    }
-
-    // ---------------------------------------------------------------- docs
-
-    pub(super) fn docs(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        egui::SidePanel::left("docs_list")
-            .exact_width(250.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(t.sidebar)
-                    .corner_radius(egui::CornerRadius {
-                        nw: 8,
-                        ne: 0,
-                        sw: 0,
-                        se: 0,
-                    })
-                    .inner_margin(egui::Margin::symmetric(10, 12)),
-            )
-            .show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Docs")).size(16.0).strong());
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary_button(ui, &t, tr("+ Doc")).clicked() {
-                            let id = self.data.new_id();
-                            let now = now_ts();
-                            self.data.docs.insert(
-                                0,
-                                Doc {
-                                    id,
-                                    space: None,
-                                    owner: self.data.me,
-                                    private: false,
-                                    archived: false,
-                                    meeting_note: false,
-                                    wiki: None,
-                                    views: vec![],
-                                    parent: None,
-                                    title: tr("Untitled").into(),
-                                    body: String::new(),
-                                    created: now,
-                                    updated: now,
-                                    tags: vec![],
-                                },
-                            );
-                            self.doc_open = Some(id);
-                            self.dirty = true;
-                        }
-                    });
-                });
-                ui.add_space(8.0);
-                let docs: Vec<(u64, String, i64)> = self
-                    .data
-                    .docs
-                    .iter()
-                    .filter(|d| d.parent.is_none())
-                    .map(|d| (d.id, d.title.clone(), d.updated))
-                    .collect();
-                for (id, title, updated) in docs {
-                    let sel = self.doc_open == Some(id);
-                    let w = ui.available_width();
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
-                    if sel {
-                        ui.painter().rect_filled(r, 6.0, t.selected_bg);
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(r, 6.0, t.hover);
-                    }
-                    super::icons::line_icon(
-                        ui.painter(),
-                        "docs",
-                        r.left_center() + vec2(12.0, 0.0),
-                        t.text2,
-                    );
-                    ui.painter().with_clip_rect(r).text(
-                        r.left_top() + vec2(26.0, 13.0),
-                        Align2::LEFT_CENTER,
-                        &title,
-                        FontId::proportional(13.0),
-                        if sel { t.selected_text } else { t.text },
-                    );
-                    ui.painter().text(
-                        r.left_top() + vec2(26.0, 29.0),
-                        Align2::LEFT_CENTER,
-                        fmt_ago(updated),
-                        FontId::proportional(10.5),
-                        t.text3,
-                    );
-                    if resp.clicked() {
-                        self.doc_open = Some(id);
-                    }
-                }
-            });
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(t.bg)
-                    .inner_margin(egui::Margin::symmetric(48, 24)),
-            )
-            .show_inside(ui, |ui| {
-                let Some(id) = self
-                    .doc_open
-                    .or_else(|| self.data.docs.first().map(|d| d.id))
-                else {
-                    ui.add_space(60.0);
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new(tr("No docs yet")).size(16.0).color(t.text2));
-                        ui.label(RichText::new(tr("Create one with + Doc")).color(t.text3));
-                    });
-                    return;
-                };
-                let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else {
-                    self.doc_open = None;
-                    return;
-                };
-                let mut delete = false;
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(trf!(
-                            "Last updated {}",
-                            fmt_ago(self.data.docs[idx].updated)
-                        ))
-                        .small()
-                        .color(t.text3),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(ghost(egui::Button::new(
-                                RichText::new(tr("Delete")).color(t.danger),
-                            )))
-                            .clicked()
-                        {
-                            delete = true;
-                        }
-                    });
-                });
-                let doc = &mut self.data.docs[idx];
-                let r1 = ui.add(
-                    egui::TextEdit::singleline(&mut doc.title)
-                        .font(FontId::proportional(30.0))
-                        .frame(false)
-                        .desired_width(f32::INFINITY),
-                );
-                ui.add_space(8.0);
-                let r2 = egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut doc.body)
-                                .frame(false)
-                                .hint_text(tr("Start writing..."))
-                                .font(FontId::proportional(15.0))
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(24),
-                        )
-                    })
-                    .inner;
-                if r1.changed() || r2.changed() {
-                    doc.updated = now_ts();
-                    self.dirty = true;
-                }
-                if delete {
-                    let d = self.data.docs[idx].clone();
-                    let tid = self.data.new_id();
-                    self.data.extra.trash.push(TrashItem {
-                        id: tid,
-                        kind: "Doc".into(),
-                        title: d.title.clone(),
-                        deleted: now_ts(),
-                        payload: serde_json::to_string(&d).unwrap_or_default(),
-                    });
-                    self.data.docs.remove(idx);
-                    self.doc_open = None;
-                    self.dirty = true;
-                }
-            });
     }
 
     // ---------------------------------------------------------------- dashboards
@@ -921,7 +730,7 @@ impl App {
                     let cw = if full(&cards[ci].kind) { w } else { half };
                     egui::Frame::new()
                         .fill(t.card)
-                        .stroke(Stroke::new(1.0, t.border))
+                        .stroke(Stroke::new(1.0_f32, t.border))
                         .corner_radius(10)
                         .inner_margin(egui::Margin::same(16))
                         .show(ui, |ui| {
@@ -1077,7 +886,7 @@ impl App {
                     ] {
                         egui::Frame::new()
                             .fill(t.bg)
-                            .stroke(Stroke::new(1.0, t.border))
+                            .stroke(Stroke::new(1.0_f32, t.border))
                             .corner_radius(10)
                             .inner_margin(egui::Margin::same(14))
                             .show(ui, |ui| {
@@ -1318,236 +1127,5 @@ impl App {
             }
         }
         None
-    }
-
-    // ---------------------------------------------------------------- timesheets
-
-    pub(super) fn timesheets(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        let ws = self.sheet_week;
-        let now = now_ts();
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(20, 14))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(tr("Timesheets")).size(20.0).strong());
-                            ui.add_space(16.0);
-                            if ui.button(tr("This week")).clicked() {
-                                self.sheet_week = week_start(today());
-                            }
-                            let (back, fwd) = super::icons::period_arrows(ui, &t);
-                            if back {
-                                self.sheet_week = ws - Duration::days(7);
-                            }
-                            if fwd {
-                                self.sheet_week = ws + Duration::days(7);
-                            }
-                            ui.label(RichText::new(week_range(ws)).size(15.0));
-                        });
-                        ui.add_space(12.0);
-                        // rows: tasks with time in this week
-                        let mut rows: Vec<(u64, String, [i64; 7])> = vec![];
-                        for task in &self.data.tasks {
-                            let mut per = [0i64; 7];
-                            let mut any = false;
-                            for e in &task.time_entries {
-                                let i = (ts_date(e.start) - ws).num_days();
-                                if (0..7).contains(&i) {
-                                    per[i as usize] += e.end - e.start;
-                                    any = true;
-                                }
-                            }
-                            for (_, st) in task.running_timers() {
-                                let i = (ts_date(st) - ws).num_days();
-                                if (0..7).contains(&i) {
-                                    per[i as usize] += now - st;
-                                    any = true;
-                                }
-                            }
-                            if any {
-                                rows.push((task.id, task.name.clone(), per));
-                            }
-                        }
-                        let w = ui.available_width();
-                        let name_w = (w - 8.0 * 90.0).max(220.0);
-                        let col = 90.0;
-                        let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-                        ui.painter().text(
-                            hr.left_center() + vec2(8.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            tr("Task"),
-                            FontId::proportional(12.0),
-                            t.text3,
-                        );
-                        for i in 0..7 {
-                            let d = ws + Duration::days(i);
-                            let x = hr.left() + name_w + col * i as f32;
-                            let c = if d == today() { t.danger } else { t.text3 };
-                            ui.painter().text(
-                                pos2(x + col / 2.0, hr.center().y),
-                                Align2::CENTER_CENTER,
-                                d.text("%a %-d"),
-                                FontId::proportional(12.0),
-                                c,
-                            );
-                        }
-                        ui.painter().text(
-                            pos2(hr.left() + name_w + col * 7.0 + col / 2.0, hr.center().y),
-                            Align2::CENTER_CENTER,
-                            tr("Total"),
-                            FontId::proportional(12.0),
-                            t.text3,
-                        );
-                        ui.painter()
-                            .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-                        let mut totals = [0i64; 7];
-                        for (id, name, per) in &rows {
-                            let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
-                            if resp.hovered() {
-                                ui.painter().rect_filled(r, 0.0, t.hover);
-                            }
-                            ui.painter()
-                                .with_clip_rect(Rect::from_min_max(
-                                    r.min,
-                                    pos2(r.left() + name_w - 8.0, r.bottom()),
-                                ))
-                                .text(
-                                    r.left_center() + vec2(8.0, 0.0),
-                                    Align2::LEFT_CENTER,
-                                    name,
-                                    FontId::proportional(13.0),
-                                    t.text,
-                                );
-                            let mut sum = 0;
-                            for i in 0..7 {
-                                totals[i] += per[i];
-                                sum += per[i];
-                                if per[i] > 0 {
-                                    let x = r.left() + name_w + col * i as f32;
-                                    ui.painter().text(
-                                        pos2(x + col / 2.0, r.center().y),
-                                        Align2::CENTER_CENTER,
-                                        fmt_duration(per[i]),
-                                        FontId::proportional(12.5),
-                                        t.text,
-                                    );
-                                }
-                            }
-                            ui.painter().text(
-                                pos2(r.left() + name_w + col * 7.0 + col / 2.0, r.center().y),
-                                Align2::CENTER_CENTER,
-                                fmt_duration(sum),
-                                FontId::proportional(12.5),
-                                t.text,
-                            );
-                            ui.painter()
-                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
-                            if resp.clicked() {
-                                self.actions.push(Action::Open(*id));
-                            }
-                        }
-                        if rows.is_empty() {
-                            ui.add_space(10.0);
-                            ui.label(
-                                RichText::new(tr(
-                                    "No time tracked this week. Start a timer from any task.",
-                                ))
-                                .color(t.text3),
-                            );
-                        }
-                        let (fr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
-                        ui.painter().text(
-                            fr.left_center() + vec2(8.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            tr("Total"),
-                            FontId::proportional(13.0),
-                            t.text,
-                        );
-                        let mut all = 0;
-                        for (i, v) in totals.iter().enumerate() {
-                            all += v;
-                            let x = fr.left() + name_w + col * i as f32;
-                            ui.painter().text(
-                                pos2(x + col / 2.0, fr.center().y),
-                                Align2::CENTER_CENTER,
-                                if *v > 0 { fmt_duration(*v) } else { "-".into() },
-                                FontId::proportional(12.5),
-                                t.text2,
-                            );
-                        }
-                        ui.painter().text(
-                            pos2(fr.left() + name_w + col * 7.0 + col / 2.0, fr.center().y),
-                            Align2::CENTER_CENTER,
-                            fmt_duration(all),
-                            FontId::proportional(13.0),
-                            t.text,
-                        );
-                        ui.add_space(16.0);
-                        // manual entry
-                        ui.label(RichText::new(tr("Add time")).strong());
-                        let id = ui.id().with("manual_time");
-                        let (mut task_id, mut day, mut mins): (u64, i64, u32) = ui
-                            .data(|d| d.get_temp(id))
-                            .unwrap_or((0, (today() - ws).num_days().clamp(0, 6), 30));
-                        ui.horizontal(|ui| {
-                            let tasks: Vec<(u64, String)> = self
-                                .data
-                                .tasks
-                                .iter()
-                                .map(|x| (x.id, x.name.clone()))
-                                .collect();
-                            if task_id == 0 {
-                                task_id = tasks.first().map(|x| x.0).unwrap_or(0);
-                            }
-                            let cur = tasks
-                                .iter()
-                                .find(|x| x.0 == task_id)
-                                .map(|x| x.1.clone())
-                                .unwrap_or_default();
-                            egui::ComboBox::from_id_salt("ts_task")
-                                .selected_text(truncate(&cur, 30))
-                                .width(240.0)
-                                .show_ui(ui, |ui| {
-                                    for (tid, name) in &tasks {
-                                        ui.selectable_value(&mut task_id, *tid, name);
-                                    }
-                                });
-                            egui::ComboBox::from_id_salt("ts_day")
-                                .selected_text((ws + Duration::days(day)).text("%a %-d"))
-                                .show_ui(ui, |ui| {
-                                    for i in 0..7 {
-                                        ui.selectable_value(
-                                            &mut day,
-                                            i,
-                                            (ws + Duration::days(i)).text("%a %-d"),
-                                        );
-                                    }
-                                });
-                            ui.add(
-                                egui::DragValue::new(&mut mins)
-                                    .range(1..=1440)
-                                    .speed(5)
-                                    .suffix(tr(" min")),
-                            );
-                            if primary_button(ui, &t, tr("Add")).clicked() && task_id != 0 {
-                                let start = day_start_ts(ws + Duration::days(day));
-                                if let Some(task) =
-                                    self.data.tasks.iter_mut().find(|x| x.id == task_id)
-                                {
-                                    task.time_entries.push(TimeEntry {
-                                        start,
-                                        end: start + mins as i64 * 60,
-                                        member: self.data.me,
-                                    });
-                                    self.dirty = true;
-                                }
-                            }
-                        });
-                        ui.data_mut(|d| d.insert_temp(id, (task_id, day, mins)));
-                    });
-            });
     }
 }

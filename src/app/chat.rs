@@ -70,7 +70,6 @@ fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
 }
 
 pub(super) enum ChatAction {
-    Open(u64),
     JoinHuddle(u64),
     React {
         ch: u64,
@@ -94,6 +93,7 @@ pub(super) enum ChatAction {
         files: Vec<Attachment>,
     },
     NewChannel(String),
+    #[cfg_attr(not(test), allow(dead_code))] // only tests send it
     Dm(u64),
     SendPost {
         ch: u64,
@@ -621,7 +621,7 @@ impl App {
                                     ui.painter().hline(
                                         r.x_range(),
                                         r.center().y,
-                                        Stroke::new(1.0, t.border),
+                                        Stroke::new(1.0_f32, t.border),
                                     );
                                 });
                                 for r in &parent.replies {
@@ -721,11 +721,11 @@ impl App {
                 });
             });
             let r = ui.available_rect_before_wrap();
-            ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+            ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
             // right panel: narrower in a small window so the messages keep room
             let panel_w = (ui.available_width() * 0.3).clamp(170.0, 230.0);
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
-                egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+                egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let rows: [(&str, &str, u8); 7] = [("person", "Followers", 10), ("search", "Find in channel", 11), ("reply", "Replies", 2), ("pin", "Pinned messages", 1), ("bookmark", "Saved", 4), ("task", "Turned into tasks", 3), ("settings", "Settings", 12)];
                     for (icon, label, code) in rows {
@@ -782,7 +782,7 @@ impl App {
             // under them reads as cut off by the list, not covered by a chip
             ui.add_space(4.0);
             let line = ui.available_rect_before_wrap();
-            ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5, t.border));
+            ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5_f32, t.border));
             ui.add_space(2.0);
             let composer_h = 140.0 + if self.chat_files.is_empty() { 0.0 } else { 76.0 };
             let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
@@ -859,7 +859,7 @@ impl App {
                             ui.add_space(6.0);
                             let w = ui.available_width();
                             let (r, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
-                            ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, t.border));
+                            ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0_f32, t.border));
                             let label = match (d - today()).num_days() {
                                 0 => tr("Today").to_string(),
                                 -1 => tr("Yesterday").to_string(),
@@ -868,7 +868,7 @@ impl App {
                             let g = ui.painter().layout_no_wrap(label, FontId::proportional(11.5), t.text2);
                             let pill = Rect::from_center_size(r.center(), g.size() + vec2(20.0, 8.0));
                             ui.painter().rect_filled(pill, 11.0, t.bg);
-                            ui.painter().rect_stroke(pill, 11.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                            ui.painter().rect_stroke(pill, 11.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
                             ui.painter().galley(pill.center() - g.size() / 2.0, g, t.text2);
                             prev = None;
                         }
@@ -901,7 +901,7 @@ impl App {
             p.rect_stroke(
                 r.shrink(8.0),
                 12.0,
-                Stroke::new(2.0, t.primary),
+                Stroke::new(2.0_f32, t.primary),
                 egui::StrokeKind::Inside,
             );
             p.text(
@@ -977,7 +977,7 @@ impl App {
         let text_id = egui::Id::new(super::files::CHAT_BOX);
         let bg_id = egui::Id::new("chat_composer_bg");
         let frame_resp = egui::Frame::new()
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(10)
             .inner_margin(egui::Margin::symmetric(12, 8))
             .fill(t.card)
@@ -1192,7 +1192,7 @@ impl App {
         let t = self.t();
         let mut out = None;
         egui::Frame::new()
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(10)
             .inner_margin(egui::Margin::same(8))
             .fill(t.card)
@@ -1451,7 +1451,7 @@ impl App {
                     let here = self.huddle.channel == Some(ch);
                     egui::Frame::new()
                         .fill(Color32::from_rgb(0x00, 0x88, 0x44).gamma_multiply(0.08))
-                        .stroke(Stroke::new(1.0, t.border))
+                        .stroke(Stroke::new(1.0_f32, t.border))
                         .corner_radius(8)
                         .inner_margin(egui::Margin::symmetric(12, 8))
                         .show(ui, |ui| {
@@ -1501,7 +1501,7 @@ impl App {
                 } else if let Some(link) = &m.call {
                     egui::Frame::new()
                         .fill(Color32::from_rgb(0x00, 0x88, 0x44).gamma_multiply(0.08))
-                        .stroke(Stroke::new(1.0, t.border))
+                        .stroke(Stroke::new(1.0_f32, t.border))
                         .corner_radius(8)
                         .inner_margin(egui::Margin::symmetric(12, 8))
                         .show(ui, |ui| {
@@ -1548,7 +1548,7 @@ impl App {
                     if let Some(task) = self.task(tid) {
                         let st = self.data.status_of(task);
                         let r = egui::Frame::new()
-                            .stroke(Stroke::new(1.0, t.border))
+                            .stroke(Stroke::new(1.0_f32, t.border))
                             .corner_radius(6)
                             .inner_margin(egui::Margin::symmetric(8, 4))
                             .show(ui, |ui| {
@@ -1588,7 +1588,7 @@ impl App {
                                 egui::Button::new(RichText::new(txt).size(12.0))
                                     .fill(if mine { t.selected_bg } else { t.hover })
                                     .stroke(Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         if mine { t.primary } else { t.border },
                                     ))
                                     .corner_radius(10),
@@ -1649,7 +1649,7 @@ impl App {
                             ui.painter().hline(
                                 lr.x_range().shrink(2.0),
                                 lr.bottom() - 1.0,
-                                Stroke::new(1.0, col),
+                                Stroke::new(1.0_f32, col),
                             );
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
@@ -1692,7 +1692,7 @@ impl App {
             ui.painter().rect_stroke(
                 bar,
                 7.0,
-                Stroke::new(1.0, t.border),
+                Stroke::new(1.0_f32, t.border),
                 egui::StrokeKind::Inside,
             );
             let mut x = bar.left() + 2.0;
@@ -1837,7 +1837,7 @@ impl App {
         let id = egui::Id::new(("chat_edit", cid, mid));
         let enter = take_enter(ui, id);
         let r = egui::Frame::new()
-            .stroke(Stroke::new(1.0, t.primary))
+            .stroke(Stroke::new(1.0_f32, t.primary))
             .corner_radius(8)
             .inner_margin(egui::Margin::symmetric(10, 6))
             .fill(t.card)
@@ -1948,7 +1948,7 @@ impl App {
                         ui.painter().rect_stroke(
                             r.response.rect,
                             6.0,
-                            Stroke::new(1.0, t.border),
+                            Stroke::new(1.0_f32, t.border),
                             egui::StrokeKind::Inside,
                         );
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -2024,10 +2024,6 @@ impl App {
             };
             match a {
                 ChatAction::JoinHuddle(ch) => self.join_huddle(ch),
-                ChatAction::Open(id) => {
-                    self.chat_open = Some(id);
-                    self.thread_open = None;
-                }
                 ChatAction::Thread(id) => self.thread_open = Some(id),
                 ChatAction::CloseThread => self.thread_open = None,
                 ChatAction::React { ch, msg, emoji } => {

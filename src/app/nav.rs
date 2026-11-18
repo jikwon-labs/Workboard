@@ -694,7 +694,7 @@ impl App {
             let (a, b) = (char_at(s.byte_range.start), char_at(s.byte_range.end));
             if links.iter().any(|(ls, le, _)| a < *le && b > *ls) {
                 s.format.color = t.primary;
-                s.format.underline = Stroke::new(1.0, t.primary);
+                s.format.underline = Stroke::new(1.0_f32, t.primary);
             }
             job.sections.push(s);
         }

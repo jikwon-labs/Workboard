@@ -24,7 +24,7 @@ fn hub_frame(t: &Theme) -> egui::Frame {
 fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
     egui::Frame::new()
         .fill(t.bg)
-        .stroke(Stroke::new(1.0, t.border))
+        .stroke(Stroke::new(1.0_f32, t.border))
         .corner_radius(10)
         .inner_margin(egui::Margin::symmetric(10, 14))
         .show(ui, |ui| {
@@ -59,7 +59,7 @@ fn gallery_card(
     ui.painter().rect_stroke(
         r,
         10.0,
-        Stroke::new(1.0, t.border),
+        Stroke::new(1.0_f32, t.border),
         egui::StrokeKind::Inside,
     );
     let c = r.left_top() + vec2(38.0, 36.0);
@@ -225,7 +225,7 @@ impl App {
                     ui.painter().rect_stroke(
                         br,
                         7.0,
-                        Stroke::new(1.0, t.border),
+                        Stroke::new(1.0_f32, t.border),
                         egui::StrokeKind::Inside,
                     );
                     ui.painter().text(
@@ -314,7 +314,7 @@ impl App {
                 ui.painter().hline(
                     r.left() + 6.0..=r.right() - 6.0,
                     r.top(),
-                    Stroke::new(1.0, t.border),
+                    Stroke::new(1.0_f32, t.border),
                 );
                 ui.add_space(10.0);
                 ui.label(RichText::new(tr("  Favorites")).size(13.0).color(t.text2));
@@ -510,7 +510,7 @@ impl App {
             });
         let r = ui.available_rect_before_wrap();
         ui.painter()
-            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
     }
 
     // ---------------------------------------------------------------- docs
@@ -611,7 +611,7 @@ impl App {
                                         ui.painter().rect_stroke(
                                             r,
                                             10.0,
-                                            Stroke::new(1.0, t.border),
+                                            Stroke::new(1.0_f32, t.border),
                                             egui::StrokeKind::Inside,
                                         );
                                         let c = r.left_center() + vec2(32.0, 0.0);
@@ -759,7 +759,7 @@ impl App {
                                 ui.painter().hline(
                                     hr.x_range(),
                                     hr.bottom(),
-                                    Stroke::new(1.0, t.border),
+                                    Stroke::new(1.0_f32, t.border),
                                 );
                                 let q = self.docs_search.to_lowercase();
                                 let tag = self.docs_tag.clone();
@@ -811,7 +811,7 @@ impl App {
                                     ui.painter().hline(
                                         r.x_range(),
                                         r.bottom(),
-                                        Stroke::new(0.5, t.border),
+                                        Stroke::new(0.5_f32, t.border),
                                     );
                                     let ic = Rect::from_center_size(
                                         r.left_center() + vec2(44.0, 0.0),
@@ -1091,7 +1091,7 @@ impl App {
             });
         let r = ui.available_rect_before_wrap();
         ui.painter()
-            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
         if delete {
             // the page and its sub pages go to Trash together
             self.trash_doc(id);
@@ -1426,19 +1426,19 @@ impl App {
             ui.add_space(30.0);
             let (pr, _) = ui.allocate_exact_size(vec2(480.0, 300.0), Sense::hover());
             ui.painter().rect_filled(pr, 6.0, t.card);
-            ui.painter().rect_stroke(pr, 6.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(pr, 6.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
             let band = Rect::from_min_size(pr.min + vec2(0.0, 34.0), vec2(pr.width(), 100.0));
             ui.painter().rect_filled(band, 0.0, Color32::from_rgb(0xe3, 0x9b, 0x6f));
             let card = Rect::from_min_size(pr.min + vec2(66.0, 76.0), vec2(pr.width() - 132.0, 120.0));
             ui.painter().rect_filled(card, 3.0, t.card);
-            ui.painter().rect_stroke(card, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(card, 3.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
             for (i, c) in [[0x3d, 0xb8, 0x8b], [0x44, 0x66, 0xff], [0xe1, 0x6b, 0x16]].iter().enumerate() {
                 let y = card.top() + 28.0 + i as f32 * 32.0;
                 ui.painter().circle_filled(pos2(card.left() + 18.0, y), 8.0, rgb(*c));
                 ui.painter().rect_filled(Rect::from_min_size(pos2(card.left() + 34.0, y - 3.0), vec2(120.0, 6.0)), 3.0, t.hover);
                 ui.painter().rect_filled(Rect::from_min_size(pos2(card.right() - 110.0, y - 2.0), vec2(96.0, 4.0)), 2.0, t.hover);
             }
-            ui.painter().circle_stroke(pr.min + vec2(80.0, 60.0), 14.0, Stroke::new(3.0, Color32::WHITE));
+            ui.painter().circle_stroke(pr.min + vec2(80.0, 60.0), 14.0, Stroke::new(3.0_f32, Color32::WHITE));
             ui.painter().text(pr.min + vec2(80.0, 60.0), Align2::CENTER_CENTER, "30%", FontId::proportional(8.0), Color32::WHITE);
             ui.add_space(30.0);
             if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(t.on_primary)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
@@ -1552,7 +1552,7 @@ impl App {
                     });
                 }
                 for tm in teams {
-                    let resp = egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                    let resp = egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
                             let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
@@ -1616,7 +1616,7 @@ impl App {
                             ui.painter().rect_stroke(
                                 r,
                                 5.0,
-                                Stroke::new(1.5, t.text),
+                                Stroke::new(1.5_f32, t.text),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -1766,7 +1766,7 @@ impl App {
                                     for m in people {
                                         egui::Frame::new()
                                             .fill(t.card)
-                                            .stroke(Stroke::new(1.0, t.border))
+                                            .stroke(Stroke::new(1.0_f32, t.border))
                                             .corner_radius(10)
                                             .inner_margin(egui::Margin::same(12))
                                             .show(ui, |ui| {
@@ -1864,7 +1864,7 @@ impl App {
             });
         let r = ui.available_rect_before_wrap();
         ui.painter()
-            .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
         // the theme's panel grey (a fixed light grey hid the dark theme's text)
         let bg = t.sidebar;
         ui.painter().rect_filled(
@@ -1913,7 +1913,7 @@ impl App {
                     _ => {
                         let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (ts_day(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows(ws).is_empty() || self.sheet_force;
                         if !has_any {
-                            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
+                            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 ui.vertical_centered(|ui| {
                                     let (r, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
@@ -1929,7 +1929,7 @@ impl App {
                                         let (r, resp) = ui.allocate_exact_size(vec2(cw, 84.0), Sense::click());
                                         name_it(&resp, label);
                                         ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });
-                                        ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                                        ui.painter().rect_stroke(r, 10.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
                                         let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
                                         ui.painter().rect_filled(ib, 6.0, t.hover);
                                         line_icon(ui.painter(), icon, ib.center(), t.text2);
@@ -1996,7 +1996,7 @@ impl App {
         }
         egui::Frame::new()
             .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(10)
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
@@ -2030,7 +2030,7 @@ impl App {
                     t.text2,
                 );
                 ui.painter()
-                    .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+                    .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
                 let mut totals = [0i64; 7];
                 let mut drop_row = None;
                 for id in &ids {
@@ -2160,7 +2160,7 @@ impl App {
                 }
                 let (fr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
                 ui.painter()
-                    .hline(fr.x_range(), fr.top(), Stroke::new(1.0, t.border));
+                    .hline(fr.x_range(), fr.top(), Stroke::new(1.0_f32, t.border));
                 ui.painter().text(
                     fr.left_center() + vec2(8.0, 0.0),
                     Align2::LEFT_CENTER,
@@ -2381,7 +2381,7 @@ impl App {
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         egui::Frame::new()
             .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(10)
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
@@ -2509,7 +2509,7 @@ impl App {
         let t = self.t();
         egui::Frame::new()
             .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(10)
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {

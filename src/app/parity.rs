@@ -387,7 +387,6 @@ impl App {
             name: String::new(),
             space,
             folder,
-            private: false,
         });
     }
 
@@ -596,7 +595,7 @@ impl App {
                 hover_ring(ui, &resp, r.shrink(1.0), 10.0);
                 if *color == *c {
                     ui.painter()
-                        .circle_stroke(r.center(), 11.0, Stroke::new(1.5, t.text));
+                        .circle_stroke(r.center(), 11.0, Stroke::new(1.5_f32, t.text));
                 }
                 if resp.clicked() {
                     *color = *c;
@@ -2355,7 +2354,7 @@ impl App {
         let mut q: String = ctx.data(|d| d.get_temp(q_id)).unwrap_or_default();
         let mut close = false;
         egui::Area::new(egui::Id::new("fields_panel")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
-            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(40) }).show(ui, |ui| {
+            egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(40) }).show(ui, |ui| {
                 ui.set_width(rect.width() - 28.0);
                 ui.set_min_height(rect.height() - 28.0);
                 if dialog_header(ui, &t, tr("Fields")) {
@@ -3243,20 +3242,20 @@ impl App {
                         br.left_center() + vec2(3.0, 0.0),
                         br.center_bottom() + vec2(-1.0, -3.5),
                     ],
-                    Stroke::new(1.6, t.on_primary),
+                    Stroke::new(1.6_f32, t.on_primary),
                 );
                 ui.painter().line_segment(
                     [
                         br.center_bottom() + vec2(-1.0, -3.5),
                         br.right_top() + vec2(-3.0, 3.5),
                     ],
-                    Stroke::new(1.6, t.on_primary),
+                    Stroke::new(1.6_f32, t.on_primary),
                 );
             } else {
                 ui.painter().rect_stroke(
                     br,
                     3.0,
-                    Stroke::new(1.2, t.text3),
+                    Stroke::new(1.2_f32, t.text3),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -3465,12 +3464,17 @@ impl App {
 
 fn shell_checklist_icon(p: &egui::Painter, c: Pos2, color: Color32) {
     let r = Rect::from_center_size(c, vec2(12.0, 12.0));
-    p.rect_stroke(r, 2.0, Stroke::new(1.2, color), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        r,
+        2.0,
+        Stroke::new(1.2_f32, color),
+        egui::StrokeKind::Inside,
+    );
     p.line_segment(
         [
             r.left_center() + vec2(3.0, 0.0),
             r.right_center() - vec2(3.0, 0.0),
         ],
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
     );
 }

@@ -36,6 +36,11 @@ raw-window-handle = "0.6"
 [patch.crates-io]
 nokhwa-bindings-macos = { path = "third_party/nokhwa-bindings-macos" }
 
+# objc 0.2's msg_send! expands to `cfg(feature = "cargo-clippy")`, which
+# buried real warnings (dead code) under hundreds of these
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [profile.release]
 opt-level = 2
 

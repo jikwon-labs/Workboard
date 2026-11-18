@@ -10,7 +10,7 @@ use super::icons::{icon_button, icon_button_ex, line_icon};
 use super::*;
 use egui::Response;
 
-pub enum Modal {
+pub(super) enum Modal {
     Invite {
         emails: String,
         role: String,
@@ -117,7 +117,6 @@ pub enum Modal {
         name: String,
         space: u64,
         folder: Option<u64>,
-        private: bool,
     },
     NewSpace {
         name: String,
@@ -1388,7 +1387,6 @@ impl App {
                 name,
                 space,
                 folder,
-                ..
             } => close = self.new_list_body(ui, t, name, space, folder),
             Modal::NewSpace { name, color } => close = self.new_space_body(ui, t, name, color),
             Modal::NewChannel {
@@ -1547,7 +1545,7 @@ impl App {
                             ui.painter().rect_stroke(
                                 r,
                                 6.0,
-                                Stroke::new(2.0, t.text),
+                                Stroke::new(2.0_f32, t.text),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -1802,8 +1800,11 @@ impl App {
                         ui.painter().circle_filled(r.center(), 9.0, rgb(*c));
                         hover_ring(ui, &resp, r.shrink(1.0), 10.0);
                         if cur == Some(*c) {
-                            ui.painter()
-                                .circle_stroke(r.center(), 11.0, Stroke::new(1.5, t.text));
+                            ui.painter().circle_stroke(
+                                r.center(),
+                                11.0,
+                                Stroke::new(1.5_f32, t.text),
+                            );
                         }
                         if resp.clicked() {
                             if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
@@ -1939,14 +1940,14 @@ impl App {
                             ui.painter().circle_stroke(
                                 r.center_top() + vec2(0.0, 16.0),
                                 13.0,
-                                Stroke::new(1.0, t.text3),
+                                Stroke::new(1.0_f32, t.text3),
                             );
                         }
                         if sel {
                             ui.painter().circle_stroke(
                                 r.center_top() + vec2(0.0, 16.0),
                                 16.0,
-                                Stroke::new(2.0, t.text),
+                                Stroke::new(2.0_f32, t.text),
                             );
                         }
                         // the saved name is lower case ("black"); shown as a name ("Black")

@@ -224,7 +224,7 @@ pub(super) fn icon_button_ex(
             r,
             6.0,
             Stroke::new(
-                1.0,
+                1.0_f32,
                 if hovered {
                     crate::widgets::hover_line(ui)
                 } else {
@@ -251,7 +251,7 @@ pub(super) fn icon_button_ex(
 /// Thin outline icons in the style of the original (1.5 px strokes), drawn
 /// in a 16 pt square around `c`. Returns false for a kind it does not know.
 pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) -> bool {
-    let s = Stroke::new(1.5, color);
+    let s = Stroke::new(1.5_f32, color);
     let line = |a: egui::Vec2, b: egui::Vec2| p.line_segment([c + a, c + b], s);
     match kind {
         "home" => {
@@ -541,7 +541,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(5.0, 3.0), vec2(5.0, 4.0)),
                 1.0,
-                Stroke::new(1.2, color),
+                Stroke::new(1.2_f32, color),
                 egui::StrokeKind::Middle,
             );
         }
@@ -593,7 +593,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             for i in 0..8 {
                 let a = std::f32::consts::TAU * i as f32 / 8.0;
                 let d = vec2(a.cos(), a.sin());
-                p.line_segment([c + d * 4.8, c + d * 7.3], Stroke::new(2.2, color));
+                p.line_segment([c + d * 4.8, c + d * 7.3], Stroke::new(2.2_f32, color));
             }
         }
         "apps" => {
@@ -688,7 +688,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             for (x, y) in [(-3.0, -2.5), (1.0, -4.0), (3.8, -0.5)] {
                 p.circle_filled(c + vec2(x, y), 1.2, color);
             }
-            p.circle_stroke(c + vec2(-1.5, 3.0), 1.6, Stroke::new(1.2, color));
+            p.circle_stroke(c + vec2(-1.5, 3.0), 1.6, Stroke::new(1.2_f32, color));
         }
         "sparkle" => {
             let star = |o: egui::Vec2, r: f32| {

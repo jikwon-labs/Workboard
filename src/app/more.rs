@@ -5,14 +5,6 @@ use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
 use super::menus::ROLES;
 use super::*;
 
-fn title(ui: &mut Ui, t: &Theme, text: &str, sub: &str) {
-    ui.label(RichText::new(text).size(20.0));
-    if !sub.is_empty() {
-        ui.label(RichText::new(sub).color(t.text2));
-    }
-    ui.add_space(10.0);
-}
-
 fn list_panel_frame(t: &Theme) -> egui::Frame {
     egui::Frame::new()
         .fill(t.sidebar)
@@ -302,7 +294,7 @@ impl App {
                 for (x, h) in [(0.0, "Name"), (ex, "Email"), (rx, "Role"), (sx, "Status")] {
                     ui.painter().text(pos2(hr.left() + w * x + 8.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
                 }
-                ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+                ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
                 let members = self.data.members.clone();
                 let me = self.data.me;
                 // on a team server only its owner and admins manage people, and
@@ -314,7 +306,7 @@ impl App {
                     // another admin is the owner's to change or remove (as the server)
                     let manages = manages && (owner || m.role != "Admin" || m.id == me);
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
-                    ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
+                    ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
                     let name = if m.id == me { trf!("{} (you)", m.name) } else { m.name.clone() };
                     let name_w = w * ex - 44.0 - 8.0;
@@ -431,7 +423,7 @@ impl App {
                 ui.painter().vline(
                     r.left(),
                     r.top() + 14.0..=r.bottom() - 14.0,
-                    Stroke::new(1.0, t.border),
+                    Stroke::new(1.0_f32, t.border),
                 );
             }
             if resp.clicked() {
@@ -441,7 +433,7 @@ impl App {
         ui.painter().hline(
             tabs_r.x_range(),
             tabs_r.bottom(),
-            Stroke::new(1.0, t.border),
+            Stroke::new(1.0_f32, t.border),
         );
         // collect items (what is on which tab: inbox_items)
         let mut items: Vec<super::nav::InboxItem> = self
@@ -604,7 +596,7 @@ impl App {
                                 ui.painter().rect_stroke(
                                     r.shrink(2.0),
                                     14.0,
-                                    Stroke::new(1.5, t.border),
+                                    Stroke::new(1.5_f32, t.border),
                                     egui::StrokeKind::Inside,
                                 );
                                 line_icon_scaled(
@@ -682,7 +674,7 @@ impl App {
                                 ui.painter().rect_filled(r, 8.0, t.hover);
                             }
                             ui.painter()
-                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5, t.border));
+                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                             if let Some(m) = self.data.member(it.author) {
                                 paint_avatar(
                                     ui.painter(),
@@ -818,7 +810,7 @@ impl App {
                         paint_avatar(ui.painter(), r.center(), 15.0, &m, t.bg);
                     }
                     egui::Frame::new()
-                        .stroke(Stroke::new(1.0, t.border))
+                        .stroke(Stroke::new(1.0_f32, t.border))
                         .corner_radius(12)
                         .inner_margin(egui::Margin::symmetric(16, 10))
                         .show(ui, |ui| {
@@ -977,7 +969,7 @@ impl App {
                 ui.add_space(20.0);
                 let r = ui.available_rect_before_wrap();
                 ui.painter()
-                    .hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+                    .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     ui.add_space(pad);
@@ -1144,7 +1136,7 @@ impl App {
                         ui.painter().rect_stroke(
                             r.shrink(2.0),
                             14.0,
-                            Stroke::new(1.5, t.border),
+                            Stroke::new(1.5_f32, t.border),
                             egui::StrokeKind::Inside,
                         );
                         line_icon_scaled(ui.painter(), "megaphone", r.center(), t.text2, 1.6);
@@ -1161,7 +1153,7 @@ impl App {
                         ui.add_space(pad);
                         egui::Frame::new()
                             .fill(t.card)
-                            .stroke(Stroke::new(1.0, t.border))
+                            .stroke(Stroke::new(1.0_f32, t.border))
                             .corner_radius(10)
                             .inner_margin(egui::Margin::same(14))
                             .show(ui, |ui| {
@@ -1442,7 +1434,7 @@ impl App {
                             let open = self.goal_open == Some(g.id);
                             let resp = egui::Frame::new()
                                 .fill(t.card)
-                                .stroke(Stroke::new(1.0, if open { t.text3 } else { t.border }))
+                                .stroke(Stroke::new(1.0_f32, if open { t.text3 } else { t.border }))
                                 .corner_radius(10)
                                 .inner_margin(egui::Margin::same(14))
                                 .show(ui, |ui| {
@@ -1595,8 +1587,11 @@ impl App {
                         ui.painter().circle_filled(r.center(), 7.0, rgb(*c));
                         hover_ring(ui, &resp, r.shrink(1.0), 8.0);
                         if g.color == *c {
-                            ui.painter()
-                                .circle_stroke(r.center(), 9.0, Stroke::new(1.5, t.text));
+                            ui.painter().circle_stroke(
+                                r.center(),
+                                9.0,
+                                Stroke::new(1.5_f32, t.text),
+                            );
                         }
                         if resp.clicked() {
                             g.color = *c;
@@ -1837,7 +1832,7 @@ impl App {
                 }
             } else {
                 let f = self.data.extra.forms[fi].clone();
-                egui::Frame::new().stroke(Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
+                egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(12).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
                     ui.set_width(ui.available_width().min(640.0));
                     ui.label(RichText::new(&f.name).size(22.0));
                     ui.label(RichText::new(&f.description).color(t.text2));
@@ -1929,33 +1924,6 @@ impl App {
         });
     }
 
-    fn side_like_row(&self, ui: &mut Ui, sel: bool, icon: &str, label: &str) -> egui::Response {
-        let t = self.t();
-        let w = ui.available_width();
-        let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-        name_it(&resp, label);
-        if sel {
-            ui.painter().rect_filled(r, 7.0, t.row_selected);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(r, 7.0, t.hover);
-        }
-        ui.painter().text(
-            r.left_center() + vec2(14.0, 0.0),
-            Align2::CENTER_CENTER,
-            icon,
-            FontId::proportional(13.0),
-            t.text2,
-        );
-        ui.painter().with_clip_rect(r).text(
-            r.left_center() + vec2(30.0, 0.0),
-            Align2::LEFT_CENTER,
-            tr(label),
-            FontId::proportional(14.0),
-            t.text,
-        );
-        resp
-    }
-
     // ---------------------------------------------------------------- whiteboards
 
     pub(super) fn whiteboard_canvas(&mut self, ui: &mut Ui) {
@@ -2022,7 +1990,7 @@ impl App {
                         hover_ring(ui, &resp, r.shrink(1.0), 9.0);
                         if self.wb_color == c {
                             ui.painter()
-                                .circle_stroke(r.center(), 10.0, Stroke::new(1.5, t.text));
+                                .circle_stroke(r.center(), 10.0, Stroke::new(1.5_f32, t.text));
                         }
                         if resp.clicked() {
                             self.wb_color = c;
@@ -2265,7 +2233,7 @@ impl App {
                         p.circle_stroke(
                             dot.center(),
                             5.0,
-                            Stroke::new(1.0, Color32::from_black_alpha(60)),
+                            Stroke::new(1.0_f32, Color32::from_black_alpha(60)),
                         );
                         popup(
                             ui,
@@ -2287,7 +2255,7 @@ impl App {
                                             ui.painter().circle_stroke(
                                                 cr.center(),
                                                 10.0,
-                                                Stroke::new(1.5, t.text),
+                                                Stroke::new(1.5_f32, t.text),
                                             );
                                         }
                                         if cresp.clicked() {
@@ -2987,7 +2955,7 @@ impl App {
                     ui.horizontal_wrapped(|ui| {
                         for (id, n, c) in &folders {
                             let label = if *c == 1 { trf!("\u{1F4C1} {}  (1 list)", n) } else { trf!("\u{1F4C1} {}  ({} lists)", n, c) };
-                            if ui.add(egui::Button::new(label).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0, s.t().border))).clicked() {
+                            if ui.add(egui::Button::new(label).min_size(vec2(200.0, 40.0)).stroke(Stroke::new(1.0_f32, s.t().border))).clicked() {
                                 s.actions.push(Action::Go(Location::Folder(*id)));
                             }
                         }
@@ -3083,7 +3051,7 @@ impl App {
                     p.circle_stroke(
                         pos2(c0.left() + 8.0, c0.center().y),
                         6.0,
-                        Stroke::new(1.0, tt.text3),
+                        Stroke::new(1.0_f32, tt.text3),
                     );
                 }
             }
@@ -3278,7 +3246,7 @@ impl App {
         let t = self.t();
         egui::Frame::new()
             .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
+            .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(12)
             .inner_margin(egui::Margin::same(16))
             .show(ui, |ui| {

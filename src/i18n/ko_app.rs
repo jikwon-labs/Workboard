@@ -86,7 +86,6 @@ pub const T: &[(&str, &str)] = &[
     ("Dates", "날짜"),
     ("Due", "마감"),
     ("Repeats when closed", "닫으면 반복됩니다"),
-    (" min", "분"),
     ("Remove tag", "태그 제거"),
     ("Add tag", "태그 추가"),
     ("Add description", "설명 추가"),

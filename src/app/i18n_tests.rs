@@ -7,16 +7,7 @@ use super::*;
 use crate::i18n::{set_lang, Lang};
 
 fn texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
-    fn walk(s: &egui::Shape, out: &mut Vec<String>) {
-        match s {
-            egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-            _ => {}
-        }
-    }
-    for c in shapes {
-        walk(&c.shape, out);
-    }
+    out.extend(drawn_texts(shapes));
 }
 
 /// All strings in the workspace data (lower case), for telling data from interface.

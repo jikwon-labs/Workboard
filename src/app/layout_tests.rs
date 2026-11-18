@@ -8,35 +8,26 @@ impl Ui1 {
     /// Painted texts inside `area` that their clip rect cuts on the left or
     /// right (cut mid-glyph instead of shortened with an ellipsis).
     fn cut_texts(&self, area: Rect) -> Vec<String> {
-        fn walk(shape: &egui::Shape, clip: Rect, area: Rect, out: &mut Vec<String>) {
-            match shape {
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, area, out)),
-                egui::Shape::Text(ts) => {
-                    let r = ts.visual_bounding_rect();
-                    let text = ts.galley.text().trim();
-                    // where it shows decides whether it is in the area
-                    if text.is_empty() || !area.contains(r.intersect(clip).center()) {
-                        return;
-                    }
-                    // scrolled out of view is fine; partly in view is cut
-                    if r.center().y < clip.top()
-                        || r.center().y > clip.bottom()
-                        || r.right() <= clip.left()
-                        || r.left() >= clip.right()
-                    {
-                        return;
-                    }
-                    if r.right() > clip.right() + 1.0 || r.left() < clip.left() - 1.0 {
-                        out.push(text.to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
         let mut out = vec![];
-        for s in &self.shapes {
-            walk(&s.shape, s.clip_rect, area, &mut out);
-        }
+        each_text(&self.shapes, |ts, clip| {
+            let r = ts.visual_bounding_rect();
+            let text = ts.galley.text().trim();
+            // where it shows decides whether it is in the area
+            if text.is_empty() || !area.contains(r.intersect(clip).center()) {
+                return;
+            }
+            // scrolled out of view is fine; partly in view is cut
+            if r.center().y < clip.top()
+                || r.center().y > clip.bottom()
+                || r.right() <= clip.left()
+                || r.left() >= clip.right()
+            {
+                return;
+            }
+            if r.right() > clip.right() + 1.0 || r.left() < clip.left() - 1.0 {
+                out.push(text.to_string());
+            }
+        });
         out
     }
 
@@ -58,23 +49,14 @@ impl Ui1 {
 
     /// Every painted text shape with its rect (inside its clip rect).
     fn texts_in(&self, area: Rect) -> Vec<(String, Rect)> {
-        fn walk(shape: &egui::Shape, clip: Rect, area: Rect, out: &mut Vec<(String, Rect)>) {
-            match shape {
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, area, out)),
-                egui::Shape::Text(ts) => {
-                    let r = ts.visual_bounding_rect().intersect(clip);
-                    let text = ts.galley.text().trim();
-                    if !text.is_empty() && r.is_positive() && area.contains(r.center()) {
-                        out.push((text.to_string(), r));
-                    }
-                }
-                _ => {}
-            }
-        }
         let mut out = vec![];
-        for s in &self.shapes {
-            walk(&s.shape, s.clip_rect, area, &mut out);
-        }
+        each_text(&self.shapes, |ts, clip| {
+            let r = ts.visual_bounding_rect().intersect(clip);
+            let text = ts.galley.text().trim();
+            if !text.is_empty() && r.is_positive() && area.contains(r.center()) {
+                out.push((text.to_string(), r));
+            }
+        });
         out
     }
 }

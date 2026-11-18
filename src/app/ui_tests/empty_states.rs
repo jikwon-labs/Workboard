@@ -36,18 +36,7 @@ fn with(data: Data, w: f32, h: f32) -> Ui1 {
 impl Ui1 {
     /// Every text painted in the last frame.
     fn texts(&self) -> Vec<String> {
-        fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
-            match shape {
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-                egui::Shape::Text(ts) => out.push(ts.galley.text().to_string()),
-                _ => {}
-            }
-        }
-        let mut out = vec![];
-        for s in &self.shapes {
-            walk(&s.shape, &mut out);
-        }
-        out
+        drawn_texts(&self.shapes)
     }
 
     /// Clicks the lowest control with this name (a dialog's button, not
@@ -61,10 +50,6 @@ impl Ui1 {
             .max_by(|a, b| a.center().y.total_cmp(&b.center().y))
             .unwrap_or_else(|| panic!("nothing named {:?}", name));
         self.click_at(r.center());
-    }
-
-    fn count_named(&self, name: &str) -> usize {
-        self.tree.iter().filter(|(n, _)| n == name).count()
     }
 }
 
@@ -432,23 +417,6 @@ fn timesheet_options_with_no_tasks_say_why() {
         h.app.toast.as_ref().map(|t| t.0.as_str()),
         Some("Make a task first: time is tracked on tasks")
     );
-}
-
-/// WCAG contrast ratio of two opaque colours.
-fn contrast(a: Color32, b: Color32) -> f32 {
-    fn lum(c: Color32) -> f32 {
-        let lin = |x: u8| {
-            let x = x as f32 / 255.0;
-            if x <= 0.03928 {
-                x / 12.92
-            } else {
-                ((x + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
-    }
-    let (x, y) = (lum(a), lum(b));
-    (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
 #[test]

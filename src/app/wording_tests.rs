@@ -7,19 +7,10 @@ use crate::i18n::{set_lang, Lang};
 
 /// Every text painted in the last frame.
 fn painted(h: &Ui1) -> Vec<(String, Rect)> {
-    fn walk(s: &egui::Shape, out: &mut Vec<(String, Rect)>) {
-        match s {
-            egui::Shape::Text(t) => {
-                out.push((t.galley.text().to_string(), t.visual_bounding_rect()))
-            }
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-            _ => {}
-        }
-    }
     let mut out = vec![];
-    for c in &h.shapes {
-        walk(&c.shape, &mut out);
-    }
+    each_text(&h.shapes, |t, _| {
+        out.push((t.galley.text().to_string(), t.visual_bounding_rect()))
+    });
     out
 }
 

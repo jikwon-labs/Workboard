@@ -21,21 +21,6 @@ fn space_id(h: &Ui1, name: &str) -> u64 {
         .id
 }
 
-fn list_id(h: &Ui1, name: &str) -> u64 {
-    h.app
-        .data
-        .spaces
-        .iter()
-        .flat_map(|s| {
-            s.lists
-                .iter()
-                .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
-        })
-        .find(|l| l.name == name)
-        .unwrap()
-        .id
-}
-
 fn tasks_in(h: &Ui1, list: u64) -> Vec<Task> {
     h.app
         .data
@@ -569,7 +554,7 @@ fn templates_keep_the_file_shape_older_apps_read() {
 fn long_template_lines_end_in_an_ellipsis_and_show_in_full_on_hover() {
     let mut h = Ui1::new();
     open_center(&mut h);
-    let row = rect_of(&h, "Pick template Project tracker");
+    let row = h.rect("Pick template Project tracker");
     let about = "Plan a project from kickoff to wrap-up, with a review step";
     let texts: Vec<(String, Rect)> = h
         .shapes

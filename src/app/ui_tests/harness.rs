@@ -1,0 +1,612 @@
+// The harness for the click-through tests: a window driven with real
+// input events (Ui1) and the helpers the tests share.
+
+use super::*;
+use egui::Pos2;
+
+pub(super) struct Ui1 {
+    pub(super) ctx: egui::Context,
+    pub(super) app: App,
+    pub(super) time: f64,
+    pub(super) tree: Vec<(String, egui::Rect)>,
+    pub(super) size: egui::Vec2,
+    pub(super) shapes: Vec<egui::epaint::ClippedShape>,
+    /// files dropped on the window in the next frame
+    pub(super) dropped: Vec<egui::DroppedFile>,
+    /// the mouse cursor the last frame asked for
+    pub(super) cursor: egui::CursorIcon,
+}
+
+impl Ui1 {
+    pub(super) fn new() -> Self {
+        Self::sized(1440.0, 900.0)
+    }
+
+    // the smallest window the app allows is 900x560
+    pub(super) fn sized(w: f32, h: f32) -> Self {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut h = Ui1 {
+            ctx,
+            app: App::build(None, Some(Data::seed())),
+            time: 0.0,
+            tree: vec![],
+            size: vec2(w, h),
+            shapes: vec![],
+            dropped: vec![],
+            cursor: egui::CursorIcon::Default,
+        };
+        // no notices on the wall clock: after 09:00 the seed's tasks due
+        // today put a toast over the bottom of the window, so a test would
+        // pass or fail by the time of day (notify_tests move the clock)
+        h.app.notify_rt.last_clock = i64::MAX;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        h
+    }
+
+    pub(super) fn frame(&mut self, events: Vec<egui::Event>) {
+        self.time += 0.05;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
+            time: Some(self.time),
+            events,
+            dropped_files: std::mem::take(&mut self.dropped),
+            ..Default::default()
+        };
+        let app = &mut self.app;
+        let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
+        self.shapes = out.shapes;
+        self.cursor = out.platform_output.cursor_icon;
+        if let Some(update) = out.platform_output.accesskit_update {
+            self.tree.clear();
+            for (_, node) in update.nodes {
+                let Some(b) = node.bounds() else { continue };
+                let rect = Rect::from_min_max(
+                    pos2(b.x0 as f32, b.y0 as f32),
+                    pos2(b.x1 as f32, b.y1 as f32),
+                );
+                for name in [node.label(), node.placeholder(), node.value()]
+                    .into_iter()
+                    .flatten()
+                {
+                    self.tree.push((name.to_string(), rect));
+                }
+            }
+        }
+    }
+
+    pub(super) fn settle(&mut self) {
+        for _ in 0..3 {
+            self.frame(vec![]);
+        }
+    }
+
+    pub(super) fn find(&self, name: &str) -> Option<Pos2> {
+        self.tree
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, r)| r.center())
+    }
+
+    pub(super) fn has(&self, name: &str) -> bool {
+        self.find(name).is_some()
+    }
+
+    // scroll with the mouse wheel over a control until it is on screen
+    pub(super) fn scroll_into_view(&mut self, name: &str) {
+        for _ in 0..40 {
+            let Some(p) = self.find(name) else { return };
+            let bottom = self.size.y - 20.0;
+            if p.y > 40.0 && p.y < bottom {
+                return;
+            }
+            let at = pos2(p.x, self.size.y / 2.0);
+            let dy = if p.y >= bottom { -120.0 } else { 120.0 };
+            self.frame(vec![egui::Event::PointerMoved(at)]);
+            self.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, dy),
+                modifiers: Default::default(),
+            }]);
+            self.settle();
+        }
+    }
+
+    pub(super) fn click(&mut self, name: &str) {
+        if !self.has(name) && self.app.modal.is_some() {
+            // maybe further down a dialog that scrolls
+            self.scroll_dialog_to(name);
+        }
+        self.scroll_into_view(name);
+        let pos = self.find(name).unwrap_or_else(|| {
+            let mut names: Vec<&String> = self.tree.iter().map(|(n, _)| n).collect();
+            names.sort();
+            names.dedup();
+            panic!(
+                "nothing named {:?} on screen; visible names: {:?}",
+                name, names
+            )
+        });
+        self.click_at(pos);
+    }
+
+    pub(super) fn click_at(&mut self, pos: Pos2) {
+        self.click_button(pos, egui::PointerButton::Primary);
+    }
+
+    // move to a point, press and release one mouse button there
+    pub(super) fn click_button(&mut self, pos: Pos2, button: egui::PointerButton) {
+        self.frame(vec![egui::Event::PointerMoved(pos)]);
+        self.frame(vec![egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: true,
+            modifiers: Default::default(),
+        }]);
+        self.frame(vec![egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers: Default::default(),
+        }]);
+        self.settle();
+    }
+
+    // click near the left end of a wide control (a task row's name)
+    pub(super) fn click_left(&mut self, name: &str, dx: f32) {
+        let r = self.rect(name);
+        self.click_at(pos2(r.left() + dx, r.center().y));
+    }
+
+    pub(super) fn right_click(&mut self, name: &str, dx: f32) {
+        self.scroll_into_view(name);
+        let r = self.rect(name);
+        let pos = pos2(r.left() + dx, r.center().y);
+        self.click_button(pos, egui::PointerButton::Secondary);
+    }
+
+    // press on one control, move the mouse in small steps to another, release
+    pub(super) fn drag(&mut self, from: &str, to: &str) {
+        let a = self
+            .find(from)
+            .unwrap_or_else(|| panic!("nothing named {:?}", from));
+        let b = self
+            .find(to)
+            .unwrap_or_else(|| panic!("nothing named {:?}", to));
+        self.drag_by(a, b);
+    }
+
+    // press at one point, move the mouse in 12 steps to another, release
+    pub(super) fn drag_by(&mut self, from: Pos2, to: Pos2) {
+        self.drag_with(from, to, egui::PointerButton::Primary);
+    }
+
+    // drag_by with any mouse button
+    pub(super) fn drag_with(&mut self, from: Pos2, to: Pos2, button: egui::PointerButton) {
+        self.frame(vec![egui::Event::PointerMoved(from)]);
+        self.frame(vec![egui::Event::PointerButton {
+            pos: from,
+            button,
+            pressed: true,
+            modifiers: Default::default(),
+        }]);
+        for i in 1..=12 {
+            self.frame(vec![egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 12.0),
+            )]);
+        }
+        self.frame(vec![egui::Event::PointerButton {
+            pos: to,
+            button,
+            pressed: false,
+            modifiers: Default::default(),
+        }]);
+        self.settle();
+    }
+
+    // click the left-most (or right-most) control with this name, for names
+    // shown twice (sidebar and page)
+    pub(super) fn click_side(&mut self, name: &str, rightmost: bool) {
+        let pick = |h: &Self| {
+            let mut hits: Vec<Rect> = h
+                .tree
+                .iter()
+                .filter(|(n, _)| n == name)
+                .map(|(_, r)| *r)
+                .collect();
+            hits.sort_by(|a, b| a.center().x.total_cmp(&b.center().x));
+            if rightmost { hits.last() } else { hits.first() }
+                .copied()
+                .unwrap_or_else(|| panic!("nothing named {:?}", name))
+        };
+        for _ in 0..30 {
+            let r = pick(self);
+            if r.center().y > 40.0 && r.center().y < 880.0 {
+                break;
+            }
+            let dy = if r.center().y >= 880.0 { -120.0 } else { 120.0 };
+            self.frame(vec![egui::Event::PointerMoved(pos2(r.center().x, 450.0))]);
+            self.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, dy),
+                modifiers: Default::default(),
+            }]);
+            self.settle();
+        }
+        let r = pick(self);
+        self.click_at(r.center());
+    }
+
+    pub(super) fn hover(&mut self, pos: Pos2) {
+        self.frame(vec![egui::Event::PointerMoved(pos)]);
+        self.settle();
+    }
+
+    /// Whether the soft hover fill (`widgets::hover_fill`) is painted under `pos`.
+    pub(super) fn hover_fill_at(&self, pos: Pos2) -> bool {
+        let fill = crate::widgets::hover_fill_for(self.ctx.style().visuals.dark_mode);
+        self.shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Rect(r) => r.fill == fill && r.rect.contains(pos),
+            _ => false,
+        })
+    }
+
+    pub(super) fn type_text(&mut self, text: &str) {
+        self.frame(vec![egui::Event::Text(text.to_string())]);
+        self.frame(vec![]);
+    }
+
+    pub(super) fn key(&mut self, key: egui::Key) {
+        self.key_with(key, Default::default());
+    }
+
+    // press and release a key with these modifiers held
+    pub(super) fn key_with(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+        self.frame(vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }]);
+        self.frame(vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers,
+        }]);
+        self.settle();
+    }
+
+    // where the open dialog is on screen
+    pub(super) fn modal_rect(&self) -> Rect {
+        self.try_modal_rect().expect("a dialog is drawn")
+    }
+
+    pub(super) fn try_modal_rect(&self) -> Option<Rect> {
+        let m = self.app.modal.as_ref()?;
+        self.ctx
+            .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
+    }
+
+    // turn the mouse wheel over the open dialog until a control in it shows
+    pub(super) fn scroll_dialog_to(&mut self, name: &str) {
+        for _ in 0..30 {
+            if self.has(name) {
+                break;
+            }
+            let Some(r) = self.try_modal_rect() else {
+                return;
+            };
+            let at = r.center();
+            self.frame(vec![egui::Event::PointerMoved(at)]);
+            self.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -120.0),
+                modifiers: Default::default(),
+            }]);
+            self.settle();
+        }
+    }
+
+    pub(super) fn rect(&self, name: &str) -> Rect {
+        self.tree
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, r)| *r)
+            .unwrap_or_else(|| panic!("nothing named {:?}", name))
+    }
+
+    // the one control with this name inside a screen region
+    pub(super) fn rect_in(&self, name: &str, area: Rect) -> Rect {
+        self.tree
+            .iter()
+            .rev()
+            .find(|(n, r)| n == name && area.contains(r.center()))
+            .map(|(_, r)| *r)
+            .unwrap_or_else(|| panic!("nothing named {:?} in {:?}", name, area))
+    }
+
+    // every painted text with this exact content: (position, color)
+    pub(super) fn painted_text(&self, text: &str) -> Vec<(Rect, Color32)> {
+        let mut out = vec![];
+        each_text(&self.shapes, |ts, _| {
+            if ts.galley.text() != text {
+                return;
+            }
+            let c = ts
+                .galley
+                .job
+                .sections
+                .first()
+                .map(|s| s.format.color)
+                .unwrap_or(ts.fallback_color);
+            let c = if c == Color32::PLACEHOLDER {
+                ts.fallback_color
+            } else {
+                c
+            };
+            out.push((
+                ts.visual_bounding_rect(),
+                ts.override_text_color.unwrap_or(c),
+            ));
+        });
+        out
+    }
+
+    pub(super) fn circle_fill_at(&self, p: Pos2) -> Option<Color32> {
+        self.shapes.iter().rev().find_map(|s| match &s.shape {
+            egui::Shape::Circle(c) if c.center.distance(p) < 3.0 && c.radius > 5.0 => Some(c.fill),
+            _ => None,
+        })
+    }
+
+    pub(super) fn cmd_enter(&mut self) {
+        self.key_with(egui::Key::Enter, egui::Modifiers::COMMAND);
+    }
+
+    // open "Write copy for landing page" with no comments; returns its id
+    pub(super) fn open_clean_task(&mut self) -> u64 {
+        self.click_left("Task Write copy for landing page", 120.0);
+        let id = self.app.open_task.unwrap();
+        self.app
+            .data
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap()
+            .activity
+            .retain(|a| !a.comment);
+        self.settle();
+        id
+    }
+
+    pub(super) fn comments(&self, id: u64) -> Vec<Activity> {
+        self.app
+            .task(id)
+            .unwrap()
+            .activity
+            .iter()
+            .filter(|a| a.comment)
+            .cloned()
+            .collect()
+    }
+
+    /// A fresh doc open in Edit with the cursor in its body.
+    pub(super) fn new_doc_focused(&mut self) -> u64 {
+        self.app.new_doc(None);
+        self.settle();
+        let id = self.app.doc_open.unwrap();
+        self.ctx
+            .memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+        self.settle();
+        id
+    }
+
+    pub(super) fn doc_body(&self, id: u64) -> String {
+        self.app
+            .data
+            .docs
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap()
+            .body
+            .clone()
+    }
+
+    pub(super) fn open_docs_list(&mut self) {
+        self.app.section = Section::Docs;
+        self.app.doc_open = None;
+        self.app.hub_filter = 0;
+        self.settle();
+    }
+
+    // one frame with modifier keys held (egui reads them from the raw input)
+    pub(super) fn frame_held(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        self.time += 0.05;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
+            time: Some(self.time),
+            events,
+            modifiers,
+            ..Default::default()
+        };
+        let app = &mut self.app;
+        let _ = self.ctx.run(input, |ctx| app.ui_frame(ctx));
+    }
+
+    pub(super) fn click_with(&mut self, name: &str, modifiers: egui::Modifiers, dx: Option<f32>) {
+        self.scroll_into_view(name);
+        let r = self.rect(name);
+        let pos = dx
+            .map(|d| pos2(r.left() + d, r.center().y))
+            .unwrap_or(r.center());
+        self.frame_held(vec![egui::Event::PointerMoved(pos)], modifiers);
+        self.frame_held(
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers,
+            }],
+            modifiers,
+        );
+        self.frame_held(
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers,
+            }],
+            modifiers,
+        );
+        self.settle();
+    }
+
+    pub(super) fn count_named(&self, name: &str) -> usize {
+        self.tree.iter().filter(|(n, _)| n == name).count()
+    }
+
+    pub(super) fn task_id(&self, name: &str) -> u64 {
+        self.app
+            .data
+            .tasks
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.id)
+            .unwrap_or_else(|| panic!("no task {:?}", name))
+    }
+}
+
+/// Red dots (the theme's danger color) painted inside the control named `name`.
+pub(super) fn red_dots_in(h: &Ui1, name: &str) -> usize {
+    let danger = h.app.t().danger;
+    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
+        return 0;
+    };
+    fn count(s: &egui::Shape, rect: egui::Rect, danger: Color32) -> usize {
+        match s {
+            egui::Shape::Circle(c) if c.fill == danger && rect.contains(c.center) => 1,
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, danger)).sum(),
+            _ => 0,
+        }
+    }
+    h.shapes
+        .iter()
+        .map(|c| count(&c.shape, *rect, danger))
+        .sum()
+}
+
+/// Filled circles of `color` painted inside the control named `name`.
+pub(super) fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
+    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
+        return 0;
+    };
+    fn count(s: &egui::Shape, rect: egui::Rect, color: Color32) -> usize {
+        match s {
+            egui::Shape::Circle(c) if c.fill == color && rect.contains(c.center) => 1,
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, color)).sum(),
+            _ => 0,
+        }
+    }
+    h.shapes.iter().map(|c| count(&c.shape, *rect, color)).sum()
+}
+
+/// Grey presence rings ("not online") painted inside the control named `name`.
+pub(super) fn rings_in(h: &Ui1, name: &str) -> usize {
+    let grey = h.app.t().text3;
+    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
+        return 0;
+    };
+    fn count(s: &egui::Shape, rect: egui::Rect, grey: Color32) -> usize {
+        match s {
+            egui::Shape::Circle(c)
+                if c.stroke.color == grey && c.radius < 4.0 && rect.contains(c.center) =>
+            {
+                1
+            }
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, grey)).sum(),
+            _ => 0,
+        }
+    }
+    h.shapes.iter().map(|c| count(&c.shape, *rect, grey)).sum()
+}
+
+// WCAG contrast ratio of two colors
+pub(super) fn contrast(a: Color32, b: Color32) -> f32 {
+    let lum = |c: Color32| {
+        let f = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+pub(super) fn task_named<'a>(h: &'a Ui1, name: &str) -> &'a Task {
+    h.app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.name == name)
+        .unwrap_or_else(|| panic!("no task {:?}", name))
+}
+
+pub(super) fn cmd_key(h: &mut Ui1, key: egui::Key) {
+    let cmd = egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        ..Default::default()
+    };
+    h.key_with(key, cmd);
+}
+
+pub(super) fn list_id(h: &Ui1, name: &str) -> u64 {
+    h.app
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| {
+            s.lists
+                .iter()
+                .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
+        })
+        .find(|l| l.name == name)
+        .map(|l| l.id)
+        .unwrap()
+}
+
+/// Calls `f` with every text painted in the last frame (also the ones inside
+/// shape lists), in paint order, with the clip rect it was painted in.
+pub(super) fn each_text(
+    shapes: &[egui::epaint::ClippedShape],
+    mut f: impl FnMut(&egui::epaint::TextShape, Rect),
+) {
+    fn walk(shape: &egui::Shape, clip: Rect, f: &mut dyn FnMut(&egui::epaint::TextShape, Rect)) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, f)),
+            egui::Shape::Text(ts) => f(ts, clip),
+            _ => {}
+        }
+    }
+    for s in shapes {
+        walk(&s.shape, s.clip_rect, &mut f);
+    }
+}
+
+/// Every text painted in the last frame.
+pub(super) fn drawn_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+    let mut out = vec![];
+    each_text(shapes, |ts, _| out.push(ts.galley.text().to_string()));
+    out
+}

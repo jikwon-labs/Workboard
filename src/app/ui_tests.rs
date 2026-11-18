@@ -7,301 +7,8 @@ use super::*;
 use egui::Pos2;
 
 mod empty_states;
-
-struct Ui1 {
-    ctx: egui::Context,
-    app: App,
-    time: f64,
-    tree: Vec<(String, egui::Rect)>,
-    size: egui::Vec2,
-    shapes: Vec<egui::epaint::ClippedShape>,
-    /// files dropped on the window in the next frame
-    dropped: Vec<egui::DroppedFile>,
-    /// the mouse cursor the last frame asked for
-    cursor: egui::CursorIcon,
-}
-
-impl Ui1 {
-    fn new() -> Self {
-        Self::sized(1440.0, 900.0)
-    }
-
-    // the smallest window the app allows is 900x560
-    fn sized(w: f32, h: f32) -> Self {
-        let ctx = egui::Context::default();
-        ctx.enable_accesskit();
-        let mut h = Ui1 {
-            ctx,
-            app: App::build(None, Some(Data::seed())),
-            time: 0.0,
-            tree: vec![],
-            size: vec2(w, h),
-            shapes: vec![],
-            dropped: vec![],
-            cursor: egui::CursorIcon::Default,
-        };
-        // no notices on the wall clock: after 09:00 the seed's tasks due
-        // today put a toast over the bottom of the window, so a test would
-        // pass or fail by the time of day (notify_tests move the clock)
-        h.app.notify_rt.last_clock = i64::MAX;
-        h.frame(vec![]);
-        h.frame(vec![]);
-        h
-    }
-
-    fn frame(&mut self, events: Vec<egui::Event>) {
-        self.time += 0.05;
-        let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
-            time: Some(self.time),
-            events,
-            dropped_files: std::mem::take(&mut self.dropped),
-            ..Default::default()
-        };
-        let app = &mut self.app;
-        let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
-        self.shapes = out.shapes;
-        self.cursor = out.platform_output.cursor_icon;
-        if let Some(update) = out.platform_output.accesskit_update {
-            self.tree.clear();
-            for (_, node) in update.nodes {
-                let Some(b) = node.bounds() else { continue };
-                let rect = Rect::from_min_max(
-                    pos2(b.x0 as f32, b.y0 as f32),
-                    pos2(b.x1 as f32, b.y1 as f32),
-                );
-                for name in [node.label(), node.placeholder(), node.value()]
-                    .into_iter()
-                    .flatten()
-                {
-                    self.tree.push((name.to_string(), rect));
-                }
-            }
-        }
-    }
-
-    fn settle(&mut self) {
-        for _ in 0..3 {
-            self.frame(vec![]);
-        }
-    }
-
-    fn find(&self, name: &str) -> Option<Pos2> {
-        self.tree
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, r)| r.center())
-    }
-
-    fn has(&self, name: &str) -> bool {
-        self.find(name).is_some()
-    }
-
-    // scroll with the mouse wheel over a control until it is on screen
-    fn scroll_into_view(&mut self, name: &str) {
-        for _ in 0..40 {
-            let Some(p) = self.find(name) else { return };
-            let bottom = self.size.y - 20.0;
-            if p.y > 40.0 && p.y < bottom {
-                return;
-            }
-            let at = pos2(p.x, self.size.y / 2.0);
-            let dy = if p.y >= bottom { -120.0 } else { 120.0 };
-            self.frame(vec![egui::Event::PointerMoved(at)]);
-            self.frame(vec![egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: vec2(0.0, dy),
-                modifiers: Default::default(),
-            }]);
-            self.settle();
-        }
-    }
-
-    fn click(&mut self, name: &str) {
-        if !self.has(name) && self.app.modal.is_some() {
-            // maybe further down a dialog that scrolls
-            self.scroll_dialog_to(name);
-        }
-        self.scroll_into_view(name);
-        let pos = self.find(name).unwrap_or_else(|| {
-            let mut names: Vec<&String> = self.tree.iter().map(|(n, _)| n).collect();
-            names.sort();
-            names.dedup();
-            panic!(
-                "nothing named {:?} on screen; visible names: {:?}",
-                name, names
-            )
-        });
-        self.frame(vec![egui::Event::PointerMoved(pos)]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: Default::default(),
-        }]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: Default::default(),
-        }]);
-        self.settle();
-    }
-
-    fn click_at(&mut self, pos: Pos2) {
-        self.frame(vec![egui::Event::PointerMoved(pos)]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: Default::default(),
-        }]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: Default::default(),
-        }]);
-        self.settle();
-    }
-
-    // click near the left end of a wide control (a task row's name)
-    fn click_left(&mut self, name: &str, dx: f32) {
-        let r = self
-            .tree
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, r)| *r)
-            .unwrap_or_else(|| panic!("nothing named {:?}", name));
-        self.click_at(pos2(r.left() + dx, r.center().y));
-    }
-
-    fn right_click(&mut self, name: &str, dx: f32) {
-        self.scroll_into_view(name);
-        let r = self
-            .tree
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, r)| *r)
-            .unwrap_or_else(|| panic!("nothing named {:?}", name));
-        let pos = pos2(r.left() + dx, r.center().y);
-        self.frame(vec![egui::Event::PointerMoved(pos)]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Secondary,
-            pressed: true,
-            modifiers: Default::default(),
-        }]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Secondary,
-            pressed: false,
-            modifiers: Default::default(),
-        }]);
-        self.settle();
-    }
-
-    // press on one control, move the mouse in small steps to another, release
-    fn drag(&mut self, from: &str, to: &str) {
-        let a = self
-            .find(from)
-            .unwrap_or_else(|| panic!("nothing named {:?}", from));
-        let b = self
-            .find(to)
-            .unwrap_or_else(|| panic!("nothing named {:?}", to));
-        self.frame(vec![egui::Event::PointerMoved(a)]);
-        self.frame(vec![egui::Event::PointerButton {
-            pos: a,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: Default::default(),
-        }]);
-        for i in 1..=12 {
-            let p = a + (b - a) * (i as f32 / 12.0);
-            self.frame(vec![egui::Event::PointerMoved(p)]);
-        }
-        self.frame(vec![egui::Event::PointerButton {
-            pos: b,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: Default::default(),
-        }]);
-        self.settle();
-    }
-
-    // click the left-most (or right-most) control with this name, for names
-    // shown twice (sidebar and page)
-    fn click_side(&mut self, name: &str, rightmost: bool) {
-        let pick = |h: &Self| {
-            let mut hits: Vec<Rect> = h
-                .tree
-                .iter()
-                .filter(|(n, _)| n == name)
-                .map(|(_, r)| *r)
-                .collect();
-            hits.sort_by(|a, b| a.center().x.total_cmp(&b.center().x));
-            if rightmost { hits.last() } else { hits.first() }
-                .copied()
-                .unwrap_or_else(|| panic!("nothing named {:?}", name))
-        };
-        for _ in 0..30 {
-            let r = pick(self);
-            if r.center().y > 40.0 && r.center().y < 880.0 {
-                break;
-            }
-            let dy = if r.center().y >= 880.0 { -120.0 } else { 120.0 };
-            self.frame(vec![egui::Event::PointerMoved(pos2(r.center().x, 450.0))]);
-            self.frame(vec![egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: vec2(0.0, dy),
-                modifiers: Default::default(),
-            }]);
-            self.settle();
-        }
-        let r = pick(self);
-        self.click_at(r.center());
-    }
-
-    fn hover(&mut self, pos: Pos2) {
-        self.frame(vec![egui::Event::PointerMoved(pos)]);
-        self.settle();
-    }
-
-    /// Whether the soft hover fill (`widgets::hover_fill`) is painted under `pos`.
-    fn hover_fill_at(&self, pos: Pos2) -> bool {
-        let fill = crate::widgets::hover_fill_for(self.ctx.style().visuals.dark_mode);
-        self.shapes.iter().any(|c| match &c.shape {
-            egui::Shape::Rect(r) => r.fill == fill && r.rect.contains(pos),
-            _ => false,
-        })
-    }
-
-    fn type_text(&mut self, text: &str) {
-        self.frame(vec![egui::Event::Text(text.to_string())]);
-        self.frame(vec![]);
-    }
-
-    fn key(&mut self, key: egui::Key) {
-        self.frame(vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Default::default(),
-        }]);
-        self.frame(vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: false,
-            repeat: false,
-            modifiers: Default::default(),
-        }]);
-        self.settle();
-    }
-}
+mod harness;
+use harness::*;
 
 #[test]
 fn click_sidebar_inbox_and_my_tasks() {
@@ -359,13 +66,7 @@ fn click_status_circle_and_pick_status() {
     let mut h = Ui1::new();
     h.click("Status of Set up analytics dashboard");
     h.click("IN PROGRESS");
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Set up analytics dashboard")
-        .unwrap();
+    let t = task_named(&h, "Set up analytics dashboard");
     assert_eq!(t.status, "in progress");
 }
 
@@ -758,13 +459,7 @@ fn drag_board_card_to_another_column() {
         "Card Write copy for landing page",
         "Card Fix navigation on mobile",
     );
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Write copy for landing page")
-        .unwrap();
+    let t = task_named(&h, "Write copy for landing page");
     assert_eq!(
         t.status, "in progress",
         "dropping a card in another column moves it"
@@ -930,60 +625,6 @@ fn check_for_updates_explains_why_it_cannot_run_outside_the_installed_app() {
     }
     h.key(egui::Key::Escape);
     assert!(h.app.modal.is_none());
-}
-
-/// Red dots (the theme's danger color) painted inside the control named `name`.
-fn red_dots_in(h: &Ui1, name: &str) -> usize {
-    let danger = h.app.t().danger;
-    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
-        return 0;
-    };
-    fn count(s: &egui::Shape, rect: egui::Rect, danger: Color32) -> usize {
-        match s {
-            egui::Shape::Circle(c) if c.fill == danger && rect.contains(c.center) => 1,
-            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, danger)).sum(),
-            _ => 0,
-        }
-    }
-    h.shapes
-        .iter()
-        .map(|c| count(&c.shape, *rect, danger))
-        .sum()
-}
-
-/// Filled circles of `color` painted inside the control named `name`.
-fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
-    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
-        return 0;
-    };
-    fn count(s: &egui::Shape, rect: egui::Rect, color: Color32) -> usize {
-        match s {
-            egui::Shape::Circle(c) if c.fill == color && rect.contains(c.center) => 1,
-            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, color)).sum(),
-            _ => 0,
-        }
-    }
-    h.shapes.iter().map(|c| count(&c.shape, *rect, color)).sum()
-}
-
-/// Grey presence rings ("not online") painted inside the control named `name`.
-fn rings_in(h: &Ui1, name: &str) -> usize {
-    let grey = h.app.t().text3;
-    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
-        return 0;
-    };
-    fn count(s: &egui::Shape, rect: egui::Rect, grey: Color32) -> usize {
-        match s {
-            egui::Shape::Circle(c)
-                if c.stroke.color == grey && c.radius < 4.0 && rect.contains(c.center) =>
-            {
-                1
-            }
-            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, grey)).sum(),
-            _ => 0,
-        }
-    }
-    h.shapes.iter().map(|c| count(&c.shape, *rect, grey)).sum()
 }
 
 #[test]
@@ -1533,39 +1174,6 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.app.sync_rt.net.is_none(), "starts over on the next frame");
     h.click("Stop sharing");
     assert!(h.app.data.extra.shared.is_none());
-}
-
-impl Ui1 {
-    // where the open dialog is on screen
-    fn modal_rect(&self) -> Rect {
-        self.try_modal_rect().expect("a dialog is drawn")
-    }
-
-    fn try_modal_rect(&self) -> Option<Rect> {
-        let m = self.app.modal.as_ref()?;
-        self.ctx
-            .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
-    }
-
-    // turn the mouse wheel over the open dialog until a control in it shows
-    fn scroll_dialog_to(&mut self, name: &str) {
-        for _ in 0..30 {
-            if self.has(name) {
-                break;
-            }
-            let Some(r) = self.try_modal_rect() else {
-                return;
-            };
-            let at = r.center();
-            self.frame(vec![egui::Event::PointerMoved(at)]);
-            self.frame(vec![egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: vec2(0.0, -120.0),
-                modifiers: Default::default(),
-            }]);
-            self.settle();
-        }
-    }
 }
 
 // a server workspace whose server can't be reached, waited on until the
@@ -2195,13 +1803,7 @@ fn right_click_task_move_to_another_list() {
     h.click("Move to...");
     assert!(matches!(h.app.modal, Some(Modal::MoveTasks { .. })));
     h.click("Team Space / Projects / Marketing");
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Set up analytics dashboard")
-        .unwrap();
+    let t = task_named(&h, "Set up analytics dashboard");
     assert_eq!(h.app.data.list_name(t.list_id), "Marketing");
 }
 
@@ -2337,13 +1939,7 @@ fn doc_slash_command_and_sub_page() {
 // ---------------------------------------------------------------- round 2 bugs
 
 fn pri(h: &Ui1, name: &str) -> u8 {
-    h.app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == name)
-        .unwrap()
-        .priority
+    task_named(h, name).priority
 }
 
 #[test]
@@ -2379,17 +1975,6 @@ fn bulk_priority_opening_the_menu_changes_nothing() {
     assert_eq!((pri(&h, a), pri(&h, b)), (0, 0), "Clear still clears");
 }
 
-impl Ui1 {
-    fn rect(&self, name: &str) -> Rect {
-        self.tree
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, r)| *r)
-            .unwrap_or_else(|| panic!("nothing named {:?}", name))
-    }
-}
-
 #[test]
 fn dots_menus_open_submenus_beside_the_parent() {
     let mut h = Ui1::new();
@@ -2421,13 +2006,7 @@ fn dots_menus_open_submenus_beside_the_parent() {
         sub
     );
     h.click("IN PROGRESS");
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Set up analytics dashboard")
-        .unwrap();
+    let t = task_named(&h, "Set up analytics dashboard");
     assert_eq!(t.status, "in progress", "picking from the submenu works");
 }
 
@@ -3052,13 +2631,7 @@ fn fields_panel_searches_and_adds_property_columns() {
         cols.extra.iter().map(|c| c.0).collect::<Vec<_>>(),
         vec!["Created by"]
     );
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Write copy for landing page")
-        .unwrap();
+    let t = task_named(&h, "Write copy for landing page");
     assert_eq!(
         h.app.prop_text(t, "Created by"),
         h.app.data.member(t.activity[0].author).unwrap().name
@@ -3068,14 +2641,7 @@ fn fields_panel_searches_and_adds_property_columns() {
 #[test]
 fn closing_a_task_records_date_done_and_closed() {
     let mut h = Ui1::new();
-    let mut t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Write copy for landing page")
-        .unwrap()
-        .clone();
+    let mut t = task_named(&h, "Write copy for landing page").clone();
     assert!(t.closed_at.is_none());
     t.status = "complete".into();
     h.app.actions.push(Action::Replace(t.clone()));
@@ -3602,18 +3168,6 @@ fn open_toolbar_search_does_not_steal_the_comment_box() {
     );
 }
 
-impl Ui1 {
-    // the one control with this name inside a screen region
-    fn rect_in(&self, name: &str, area: Rect) -> Rect {
-        self.tree
-            .iter()
-            .rev()
-            .find(|(n, r)| n == name && area.contains(r.center()))
-            .map(|(_, r)| *r)
-            .unwrap_or_else(|| panic!("nothing named {:?} in {:?}", name, area))
-    }
-}
-
 #[test]
 fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
     let mut h = Ui1::sized(900.0, 560.0);
@@ -3931,65 +3485,6 @@ fn unread_filter_still_lists_unread_chats_while_muted() {
     }
 }
 
-impl Ui1 {
-    // every painted text with this exact content: (position, color)
-    fn painted_text(&self, text: &str) -> Vec<(Rect, Color32)> {
-        fn walk(shape: &egui::Shape, text: &str, out: &mut Vec<(Rect, Color32)>) {
-            match shape {
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, text, out)),
-                egui::Shape::Text(ts) if ts.galley.text() == text => {
-                    let c = ts
-                        .galley
-                        .job
-                        .sections
-                        .first()
-                        .map(|s| s.format.color)
-                        .unwrap_or(ts.fallback_color);
-                    let c = if c == Color32::PLACEHOLDER {
-                        ts.fallback_color
-                    } else {
-                        c
-                    };
-                    out.push((
-                        ts.visual_bounding_rect(),
-                        ts.override_text_color.unwrap_or(c),
-                    ));
-                }
-                _ => {}
-            }
-        }
-        let mut out = vec![];
-        for s in &self.shapes {
-            walk(&s.shape, text, &mut out);
-        }
-        out
-    }
-
-    fn circle_fill_at(&self, p: Pos2) -> Option<Color32> {
-        self.shapes.iter().rev().find_map(|s| match &s.shape {
-            egui::Shape::Circle(c) if c.center.distance(p) < 3.0 && c.radius > 5.0 => Some(c.fill),
-            _ => None,
-        })
-    }
-}
-
-// WCAG contrast ratio of two colors
-fn contrast(a: Color32, b: Color32) -> f32 {
-    let lum = |c: Color32| {
-        let f = |v: u8| {
-            let v = v as f32 / 255.0;
-            if v <= 0.03928 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
-    };
-    let (x, y) = (lum(a), lum(b));
-    (x.max(y) + 0.05) / (x.min(y) + 0.05)
-}
-
 #[test]
 fn add_column_plus_and_reply_link_read_in_both_themes() {
     for dark in [false, true] {
@@ -4104,14 +3599,7 @@ fn task_names_use_the_room_up_to_the_columns() {
     );
     // a long name is cut with an ellipsis just before the first column
     let long = "Prepare the quarterly marketing report with charts for every channel and region";
-    let id = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Write copy for landing page")
-        .unwrap()
-        .id;
+    let id = h.task_id("Write copy for landing page");
     h.app
         .data
         .tasks
@@ -4572,54 +4060,6 @@ fn composer_mention_and_emoji_pickers() {
 
 // ---- task comments and activity (sf-comments)
 
-impl Ui1 {
-    fn cmd_enter(&mut self) {
-        let m = egui::Modifiers::COMMAND;
-        self.frame(vec![egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: m,
-        }]);
-        self.frame(vec![egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed: false,
-            repeat: false,
-            modifiers: m,
-        }]);
-        self.settle();
-    }
-
-    // open "Write copy for landing page" with no comments; returns its id
-    fn open_clean_task(&mut self) -> u64 {
-        self.click_left("Task Write copy for landing page", 120.0);
-        let id = self.app.open_task.unwrap();
-        self.app
-            .data
-            .tasks
-            .iter_mut()
-            .find(|t| t.id == id)
-            .unwrap()
-            .activity
-            .retain(|a| !a.comment);
-        self.settle();
-        id
-    }
-
-    fn comments(&self, id: u64) -> Vec<Activity> {
-        self.app
-            .task(id)
-            .unwrap()
-            .activity
-            .iter()
-            .filter(|a| a.comment)
-            .cloned()
-            .collect()
-    }
-}
-
 #[test]
 fn comment_send_with_cmd_enter_then_react_edit_reply_delete() {
     let mut h = Ui1::new();
@@ -4796,55 +4236,6 @@ fn mentions_stand_out_and_comments_only_hides_activity() {
 }
 
 // ---------------------------------------------------------------- docs slice (A1-A16)
-
-impl Ui1 {
-    fn key_mods(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
-        self.frame(vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers,
-        }]);
-        self.frame(vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: false,
-            repeat: false,
-            modifiers,
-        }]);
-        self.settle();
-    }
-
-    /// A fresh doc open in Edit with the cursor in its body.
-    fn new_doc_focused(&mut self) -> u64 {
-        self.app.new_doc(None);
-        self.settle();
-        let id = self.app.doc_open.unwrap();
-        self.ctx
-            .memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
-        self.settle();
-        id
-    }
-
-    fn doc_body(&self, id: u64) -> String {
-        self.app
-            .data
-            .docs
-            .iter()
-            .find(|d| d.id == id)
-            .unwrap()
-            .body
-            .clone()
-    }
-
-    fn open_docs_list(&mut self) {
-        self.app.section = Section::Docs;
-        self.app.doc_open = None;
-        self.app.hub_filter = 0;
-        self.settle();
-    }
-}
 
 #[test]
 fn docs_pages_panel_menu_duplicates_reorders_moves_and_deletes() {
@@ -5137,7 +4528,7 @@ fn docs_editor_keys_bold_enter_tab_and_slash_filter() {
     };
     let id = h.new_doc_focused();
     // Cmd+B wraps (here: inserts) bold markers
-    h.key_mods(egui::Key::B, cmd);
+    h.key_with(egui::Key::B, cmd);
     h.type_text("x");
     assert_eq!(h.doc_body(id), "**x**");
 
@@ -5265,78 +4656,6 @@ fn docs_editor_text_helpers() {
 }
 
 // ---------------------------------------------------------------- list view slice (sf-listview)
-
-impl Ui1 {
-    // one frame with modifier keys held (egui reads them from the raw input)
-    fn frame_held(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
-        self.time += 0.05;
-        let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
-            time: Some(self.time),
-            events,
-            modifiers,
-            ..Default::default()
-        };
-        let app = &mut self.app;
-        let _ = self.ctx.run(input, |ctx| app.ui_frame(ctx));
-    }
-
-    fn click_with(&mut self, name: &str, modifiers: egui::Modifiers, dx: Option<f32>) {
-        self.scroll_into_view(name);
-        let r = self.rect(name);
-        let pos = dx
-            .map(|d| pos2(r.left() + d, r.center().y))
-            .unwrap_or(r.center());
-        self.frame_held(vec![egui::Event::PointerMoved(pos)], modifiers);
-        self.frame_held(
-            vec![egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers,
-            }],
-            modifiers,
-        );
-        self.frame_held(
-            vec![egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers,
-            }],
-            modifiers,
-        );
-        self.settle();
-    }
-
-    fn key_with(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
-        self.frame(vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers,
-        }]);
-        self.frame(vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: false,
-            repeat: false,
-            modifiers,
-        }]);
-        self.settle();
-    }
-
-    fn task_id(&self, name: &str) -> u64 {
-        self.app
-            .data
-            .tasks
-            .iter()
-            .find(|t| t.name == name)
-            .map(|t| t.id)
-            .unwrap_or_else(|| panic!("no task {:?}", name))
-    }
-}
 
 #[test]
 fn drag_a_row_into_a_new_place() {
@@ -5703,7 +5022,7 @@ fn list_due_date_takes_a_time_removes_it_and_clearing_the_date_drops_it() {
     assert_eq!(t.due_at(), chrono::NaiveTime::from_hms_opt(9, 0, 0));
     // type another time and press Enter
     h.click("Time of day");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("2:30 pm");
     h.key(egui::Key::Enter);
     h.app.apply_actions();
@@ -5784,14 +5103,7 @@ fn task_window_picker_sets_parent_and_adds_existing_subtask() {
     h.click("Search tasks to pick");
     h.type_text("q1");
     h.click("Pick Plan Q1 campaign");
-    let q1 = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Plan Q1 campaign")
-        .unwrap()
-        .clone();
+    let q1 = task_named(&h, "Plan Q1 campaign").clone();
     let t = h.app.task(id).unwrap();
     assert_eq!(t.parent, Some(q1.id));
     assert_eq!(
@@ -5804,13 +5116,7 @@ fn task_window_picker_sets_parent_and_adds_existing_subtask() {
     h.click("Search tasks to pick");
     h.type_text("passport");
     h.click("Pick Renew passport");
-    let p = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Renew passport")
-        .unwrap();
+    let p = task_named(&h, "Renew passport");
     assert_eq!(p.parent, Some(id));
 }
 
@@ -5823,14 +5129,7 @@ fn relationships_waiting_on_blocking_and_linked() {
     h.click("Search tasks to pick");
     h.type_text("analytics");
     h.click("Pick Set up analytics dashboard");
-    let other = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Set up analytics dashboard")
-        .unwrap()
-        .id;
+    let other = h.task_id("Set up analytics dashboard");
     assert_eq!(h.app.task(id).unwrap().waiting_on, vec![other]);
     assert!(h.has("Waiting on Set up analytics dashboard"));
     // the other task shows it as Blocking
@@ -5901,46 +5200,6 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
 
 // ---------------------------------------------------------------- views and sidebar slice
 // (board, calendar, gantt, table and the sidebar's spaces, folders, lists, favorites)
-
-fn task_named<'a>(h: &'a Ui1, name: &str) -> &'a Task {
-    h.app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == name)
-        .unwrap_or_else(|| panic!("no task {:?}", name))
-}
-
-fn rect_of(h: &Ui1, name: &str) -> Rect {
-    h.tree
-        .iter()
-        .rev()
-        .find(|(n, _)| n == name)
-        .map(|(_, r)| *r)
-        .unwrap_or_else(|| panic!("nothing named {:?}", name))
-}
-
-fn drag_by(h: &mut Ui1, from: Pos2, to: Pos2) {
-    h.frame(vec![egui::Event::PointerMoved(from)]);
-    h.frame(vec![egui::Event::PointerButton {
-        pos: from,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: Default::default(),
-    }]);
-    for i in 1..=12 {
-        h.frame(vec![egui::Event::PointerMoved(
-            from + (to - from) * (i as f32 / 12.0),
-        )]);
-    }
-    h.frame(vec![egui::Event::PointerButton {
-        pos: to,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: Default::default(),
-    }]);
-    h.settle();
-}
 
 #[test]
 fn board_card_boxes_open_the_pickers_and_the_card_opens() {
@@ -6092,7 +5351,7 @@ fn calendar_shows_due_times_and_orders_a_day_by_them() {
         h.app.data.tasks.push(x);
     }
     h.click("View Calendar");
-    let y = |h: &Ui1, n: &str| rect_of(h, &format!("Calendar {} {}", n, td)).center().y;
+    let y = |h: &Ui1, n: &str| h.rect(&format!("Calendar {} {}", n, td)).center().y;
     assert!(
         y(&h, "All day") < y(&h, "Early call"),
         "a day without a time first"
@@ -6117,20 +5376,20 @@ fn gantt_bar_ends_resize_and_empty_rows_schedule() {
     let mut h = Ui1::new();
     h.click("View Gantt");
     let before = task_named(&h, "Write copy for landing page").clone();
-    let r = rect_of(&h, "End of Write copy for landing page");
+    let r = h.rect("End of Write copy for landing page");
     // a day is 30 px wide at the Day scale
-    drag_by(&mut h, r.center(), r.center() + vec2(90.0, 0.0));
+    h.drag_by(r.center(), r.center() + vec2(90.0, 0.0));
     let after = task_named(&h, "Write copy for landing page").clone();
     assert_eq!(after.due, before.due.map(|d| d + Duration::days(3)));
     assert_eq!(after.start, before.start, "only the end moved");
-    let r = rect_of(&h, "Start of Write copy for landing page");
-    drag_by(&mut h, r.center(), r.center() - vec2(60.0, 0.0));
+    let r = h.rect("Start of Write copy for landing page");
+    h.drag_by(r.center(), r.center() - vec2(60.0, 0.0));
     assert_eq!(
         task_named(&h, "Write copy for landing page").start,
         before.start.map(|d| d - Duration::days(2))
     );
     // a task without dates gets them from a click in its row
-    let r = rect_of(&h, "Schedule Collect feedback from beta users");
+    let r = h.rect("Schedule Collect feedback from beta users");
     // (the row runs under the names column too; click where it shows)
     h.click_at(pos2(1000.0, r.center().y));
     assert!(task_named(&h, "Collect feedback from beta users")
@@ -6150,10 +5409,6 @@ fn gantt_shows_subtasks_when_expanded() {
     );
 }
 
-fn count_named(h: &Ui1, name: &str) -> usize {
-    h.tree.iter().filter(|(n, _)| n == name).count()
-}
-
 #[test]
 fn timeline_lanes_switch_grouping() {
     let mut h = Ui1::new();
@@ -6168,17 +5423,17 @@ fn timeline_lanes_switch_grouping() {
     ] {
         assert!(h.has(lane), "{} is shown", lane);
     }
-    assert_eq!(count_named(&h, "Bar Design new homepage layout"), 2);
+    assert_eq!(h.count_named("Bar Design new homepage layout"), 2);
     // a task with only a due date gets a one-day bar in the Unassigned lane
-    let bar = rect_of(&h, "Bar Set up analytics dashboard");
+    let bar = h.rect("Bar Set up analytics dashboard");
     assert!(bar.width() < 30.0, "one day wide: {}", bar.width());
-    let lane = rect_of(&h, "Lane UNASSIGNED");
+    let lane = h.rect("Lane UNASSIGNED");
     assert!(bar.center().y > lane.top() && bar.center().y < lane.bottom());
     h.click("Lanes by Status");
     assert_eq!(h.app.timeline.by, GroupBy::Status);
     assert!(h.has("Lane IN PROGRESS") && h.has("Lane TO DO"));
     assert!(!h.has("Lane ALEX KIM"));
-    assert_eq!(count_named(&h, "Bar Design new homepage layout"), 1);
+    assert_eq!(h.count_named("Bar Design new homepage layout"), 1);
     h.click("Lanes by Priority");
     assert_eq!(h.app.timeline.by, GroupBy::Priority);
     assert!(h.has("Lane URGENT"));
@@ -6200,14 +5455,14 @@ fn timeline_bar_opens_and_drags_dates() {
     h.settle();
     let before = task_named(&h, "Write copy for landing page").clone();
     // a day is 30 px wide at the Day scale, as in the Gantt
-    let r = rect_of(&h, "Bar Write copy for landing page");
-    drag_by(&mut h, r.center(), r.center() + vec2(60.0, 0.0));
+    let r = h.rect("Bar Write copy for landing page");
+    h.drag_by(r.center(), r.center() + vec2(60.0, 0.0));
     let moved = task_named(&h, "Write copy for landing page").clone();
     assert_eq!(moved.start, before.start.map(|d| d + Duration::days(2)));
     assert_eq!(moved.due, before.due.map(|d| d + Duration::days(2)));
     assert!(h.app.open_task.is_none(), "a drag doesn't open the task");
-    let r = rect_of(&h, "End of Write copy for landing page");
-    drag_by(&mut h, r.center(), r.center() + vec2(90.0, 0.0));
+    let r = h.rect("End of Write copy for landing page");
+    h.drag_by(r.center(), r.center() + vec2(90.0, 0.0));
     let after = task_named(&h, "Write copy for landing page").clone();
     assert_eq!(after.due, moved.due.map(|d| d + Duration::days(3)));
     assert_eq!(after.start, moved.start, "only the end moved");
@@ -6228,8 +5483,8 @@ fn timeline_keeps_a_name_beside_a_bar_off_the_next_bar() {
         t.due = Some(today + Duration::days(n as i64));
     }
     h.click("View Timeline");
-    let first = rect_of(&h, "Bar Write copy for landing page");
-    let second = rect_of(&h, "Bar Set up analytics dashboard");
+    let first = h.rect("Bar Write copy for landing page");
+    let second = h.rect("Bar Set up analytics dashboard");
     assert!(first.width() < 60.0, "one day wide: {}", first.width());
     assert!(
         second.left() - first.right() < 60.0,
@@ -6241,7 +5496,7 @@ fn timeline_keeps_a_name_beside_a_bar_off_the_next_bar() {
         first,
         second
     );
-    let lane = rect_of(&h, "Lane UNASSIGNED");
+    let lane = h.rect("Lane UNASSIGNED");
     for r in [first, second] {
         assert!(r.center().y > lane.top() && r.center().y < lane.bottom());
     }
@@ -6276,7 +5531,7 @@ fn timeline_follows_the_filter_and_zoom() {
     h.click("Month");
     assert_eq!(h.app.timeline.zoom, 2);
     h.click("Today");
-    let r = rect_of(&h, "Bar Write copy for landing page");
+    let r = h.rect("Bar Write copy for landing page");
     assert!(r.left() > 0.0 && r.right() < 1440.0, "today is in view");
     assert!(r.width() < 30.0, "narrow at the Month scale");
 }
@@ -6287,7 +5542,7 @@ fn table_sorts_renames_and_chooses_columns() {
     let mut h = Ui1::sized(1900.0, 900.0);
     h.click("View Table");
     h.click("Sort by Name");
-    let y = |h: &Ui1, n: &str| rect_of(h, &format!("Rename {}", n)).center().y;
+    let y = |h: &Ui1, n: &str| h.rect(&format!("Rename {}", n)).center().y;
     assert!(
         y(&h, "Collect feedback from beta users") < y(&h, "Write copy for landing page"),
         "A to Z"
@@ -6391,54 +5646,19 @@ fn sidebar_lists_reorder_by_drag() {
 
 // ---------------------------------------------------------------- apps sweep (home, planner, reminders, apps, search)
 
-fn cmd_key(h: &mut Ui1, key: egui::Key) {
-    let cmd = egui::Modifiers {
-        command: true,
-        mac_cmd: true,
-        ..Default::default()
-    };
-    h.frame(vec![egui::Event::Key {
-        key,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: cmd,
-    }]);
-    h.frame(vec![egui::Event::Key {
-        key,
-        physical_key: None,
-        pressed: false,
-        repeat: false,
-        modifiers: cmd,
-    }]);
-    h.settle();
-}
-
 #[test]
 fn home_my_work_row_ticks_done() {
     let mut h = Ui1::new();
     h.app.actions.push(Action::Go(Location::Home));
     h.settle();
     h.click("Complete Renew passport");
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Renew passport")
-        .unwrap();
+    let t = task_named(&h, "Renew passport");
     assert!(h.app.data.is_closed(t));
     // the Done section starts folded
     h.app.home_collapsed.remove("Done");
     h.settle();
     h.click("Reopen Renew passport");
-    let t = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Renew passport")
-        .unwrap();
+    let t = task_named(&h, "Renew passport");
     assert!(!h.app.data.is_closed(t));
 }
 
@@ -6763,14 +5983,7 @@ fn dashboard_cards_move_rename_remove_and_add() {
 #[test]
 fn search_link_arrows_and_enter() {
     let mut h = Ui1::new();
-    let tid = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Newsletter draft")
-        .unwrap()
-        .id;
+    let tid = h.task_id("Newsletter draft");
     h.app.palette = Some(format!("workboard://task/{}", tid));
     h.settle();
     h.key(egui::Key::Enter);
@@ -7845,7 +7058,7 @@ fn whiteboard_undo_puts_a_moved_note_back() {
     h.app.wb_tool = 2;
     h.settle();
     // press near the note's bottom edge and drag it
-    let x = rect_of(&h, "Delete note 0");
+    let x = h.rect("Delete note 0");
     let a = pos2(x.center().x - 60.0, x.center().y + 100.0);
     h.frame(vec![egui::Event::PointerMoved(a)]);
     h.frame(vec![egui::Event::PointerButton {
@@ -8371,7 +7584,7 @@ fn status_editor_retargets_automations_only_when_a_rename_is_done() {
     };
     // type a name through the other space's "review": tasks follow live
     h.click("triage");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("review");
     assert_eq!(status(&h), "review");
     assert_eq!(
@@ -8379,7 +7592,7 @@ fn status_editor_retargets_automations_only_when_a_rename_is_done() {
         ["review", "triage"],
         "rules wait for the rename"
     );
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("reviewed");
     assert_eq!(status(&h), "reviewed");
     h.key(egui::Key::Enter);
@@ -8414,7 +7627,7 @@ fn closing_the_status_editor_puts_back_an_empty_or_taken_name() {
     h.settle();
     // "in progress" typed into "to do": taken, so its tasks wait
     h.click("in progress");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("to do");
     assert_eq!(h.app.task(tid).unwrap().status, "in progress");
     h.click("Close window");
@@ -8432,7 +7645,7 @@ fn closing_the_status_editor_puts_back_an_empty_or_taken_name() {
     h.app.edit_statuses = Some(sid);
     h.settle();
     h.click("in progress");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.key(egui::Key::Backspace);
     h.click("Close window");
     assert!(h.app.data.spaces[0]
@@ -8443,28 +7656,6 @@ fn closing_the_status_editor_puts_back_an_empty_or_taken_name() {
 }
 
 // ---- whiteboard pan and zoom (r3-work)
-
-fn drag_with(h: &mut Ui1, from: Pos2, to: Pos2, button: egui::PointerButton) {
-    h.frame(vec![egui::Event::PointerMoved(from)]);
-    h.frame(vec![egui::Event::PointerButton {
-        pos: from,
-        button,
-        pressed: true,
-        modifiers: Default::default(),
-    }]);
-    for i in 1..=12 {
-        h.frame(vec![egui::Event::PointerMoved(
-            from + (to - from) * (i as f32 / 12.0),
-        )]);
-    }
-    h.frame(vec![egui::Event::PointerButton {
-        pos: to,
-        button,
-        pressed: false,
-        modifiers: Default::default(),
-    }]);
-    h.settle();
-}
 
 #[test]
 fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
@@ -8499,7 +7690,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
         });
     h.settle();
     assert!(!h.has("Delete note 0"), "the far note is off screen");
-    let canvas = rect_of(&h, "Whiteboard canvas");
+    let canvas = h.rect("Whiteboard canvas");
     let view = |h: &Ui1| h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
     // two-finger scroll moves the view until the note shows
     h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
@@ -8543,19 +7734,14 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     h.app.wb_tool = 0;
     let from = canvas.center();
     let to = from + vec2(80.0, 40.0);
-    drag_by(&mut h, from, to);
+    h.drag_by(from, to);
     let s = board(&h).strokes.last().cloned().expect("a stroke");
     let want = v.to_board(canvas.min, from);
     assert!((s.points[0][0] - want[0]).abs() < 2.0 && (s.points[0][1] - want[1]).abs() < 2.0);
     // the middle button pans and doesn't draw
     let n = board(&h).strokes.len();
     let pan = view(&h).pan;
-    drag_with(
-        &mut h,
-        from,
-        from + vec2(60.0, 30.0),
-        egui::PointerButton::Middle,
-    );
+    h.drag_with(from, from + vec2(60.0, 30.0), egui::PointerButton::Middle);
     assert_eq!(board(&h).strokes.len(), n);
     assert!((view(&h).pan - pan - vec2(60.0, 30.0)).length() < 2.0);
     // Space + drag pans too
@@ -8567,12 +7753,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
         repeat: false,
         modifiers: Default::default(),
     }]);
-    drag_with(
-        &mut h,
-        from,
-        from - vec2(50.0, 20.0),
-        egui::PointerButton::Primary,
-    );
+    h.drag_with(from, from - vec2(50.0, 20.0), egui::PointerButton::Primary);
     h.frame(vec![egui::Event::Key {
         key: egui::Key::Space,
         physical_key: None,
@@ -8669,7 +7850,7 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     h.click(&format!("Points of {}", name));
     h.type_text("abc");
     assert_eq!(custom(&h, 9004), None);
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("5");
     assert_eq!(custom(&h, 9004).as_deref(), Some("5"));
     // with the Custom Fields ClickApp off the columns go away
@@ -9335,14 +8516,7 @@ fn a_space_shared_to_view_or_comment_reads_only() {
         server: Some("127.0.0.1:1".into()),
     });
     h.app.sync_rt.role = Some(wb_net::Role::Member);
-    let task = h
-        .app
-        .data
-        .tasks
-        .iter()
-        .find(|t| t.name == "Write copy for landing page")
-        .unwrap()
-        .clone();
+    let task = task_named(&h, "Write copy for landing page").clone();
     let space = h.app.data.space_of_list(task.list_id).unwrap().clone();
     let share = |h: &mut Ui1, level: &str| {
         let s = h
@@ -9756,21 +8930,6 @@ fn archived_workspace() -> Ui1 {
     h
 }
 
-fn list_id(h: &Ui1, name: &str) -> u64 {
-    h.app
-        .data
-        .spaces
-        .iter()
-        .flat_map(|s| {
-            s.lists
-                .iter()
-                .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
-        })
-        .find(|l| l.name == name)
-        .map(|l| l.id)
-        .unwrap()
-}
-
 #[test]
 fn archived_favorite_leaves_the_sidebar_and_its_page_says_archived() {
     let h0 = Ui1::new();
@@ -9963,18 +9122,7 @@ fn time_on_archived_tasks_counts_on_the_dashboard_and_is_marked_in_timesheets() 
     }]);
     h.settle();
     fn texts(h: &Ui1) -> Vec<String> {
-        fn walk(s: &egui::Shape, out: &mut Vec<String>) {
-            match s {
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
-                _ => {}
-            }
-        }
-        let mut out = vec![];
-        for s in &h.shapes {
-            walk(&s.shape, &mut out);
-        }
-        out
+        drawn_texts(&h.shapes)
     }
     // (the seed has some time of its own today too)
     assert!(
@@ -10287,7 +9435,7 @@ fn a_teammate_change_arriving_while_i_draw_keeps_every_stroke() {
     let before = h.app.data.clone();
     // I start a stroke and keep the button down
     h.app.wb_tool = 0;
-    let canvas = rect_of(&h, "Whiteboard canvas");
+    let canvas = h.rect("Whiteboard canvas");
     let from = canvas.center();
     h.frame(vec![egui::Event::PointerMoved(from)]);
     h.frame(vec![egui::Event::PointerButton {
@@ -10372,10 +9520,10 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
     let mut h = Ui1::new();
     let wid = shared_board(&mut h);
     let known: Vec<u64> = board_of(&h, wid).strokes.iter().map(|s| s.id).collect();
-    let canvas = rect_of(&h, "Whiteboard canvas");
+    let canvas = h.rect("Whiteboard canvas");
     // I draw a stroke
     h.app.wb_tool = 0;
-    drag_by(&mut h, canvas.center(), canvas.center() + vec2(60.0, 20.0));
+    h.drag_by(canvas.center(), canvas.center() + vec2(60.0, 20.0));
     let mine = board_of(&h, wid)
         .strokes
         .iter()
@@ -10443,7 +9591,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
     h.settle();
     let view = h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
     let grab = view.to_screen(canvas.min, [at0[0] + 80.0, at0[1] + 4.0]);
-    drag_by(&mut h, grab, grab + vec2(40.0, 30.0));
+    h.drag_by(grab, grab + vec2(40.0, 30.0));
     let moved = board_of(&h, wid)
         .notes
         .iter()
@@ -10488,8 +9636,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
 
     // a stroke of mine a teammate already erased: Undo does nothing to the board
     h.app.wb_tool = 0;
-    drag_by(
-        &mut h,
+    h.drag_by(
         canvas.center() + vec2(0.0, 60.0),
         canvas.center() + vec2(60.0, 80.0),
     );
@@ -10563,7 +9710,7 @@ fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
     };
     assert_eq!(text(&h, 7002), "LowA");
     // scroll the board up so the top note leaves the screen
-    let canvas = rect_of(&h, "Whiteboard canvas");
+    let canvas = h.rect("Whiteboard canvas");
     h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
     for _ in 0..4 {
         h.frame(vec![egui::Event::MouseWheel {
@@ -10637,10 +9784,10 @@ fn switching_the_status_editor_to_another_space_or_quitting_finishes_the_edits()
     h.app.apply(Action::EditStatuses(sid));
     h.settle();
     h.click("to do");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("backlog");
     h.click("in progress");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.key(egui::Key::Backspace);
     h.settle();
     assert!(!status_ok(&h, 0, a), "mid-edit the name is empty");
@@ -10659,7 +9806,7 @@ fn switching_the_status_editor_to_another_space_or_quitting_finishes_the_edits()
     assert!(h.app.toast.is_some());
     // quitting with a name taken in the other space's editor
     h.click("in progress");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("complete");
     h.settle();
     assert!(
@@ -10729,7 +9876,7 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
     );
     h.settle();
     h.click("Columns");
-    let created = rect_of(&h, "Created by");
+    let created = h.rect("Created by");
     let marks: Vec<Rect> = h
         .tree
         .iter()
@@ -11054,10 +10201,10 @@ fn status_edit_half_done(h: &mut Ui1) -> (u64, u64, u64) {
     h.app.apply(Action::EditStatuses(sid));
     h.settle();
     h.click("to do");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("backlog");
     h.click("in progress");
-    h.key_mods(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.key(egui::Key::Backspace);
     h.settle();
     assert!(h.app.status_edit.is_some());

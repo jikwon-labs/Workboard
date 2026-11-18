@@ -2390,7 +2390,7 @@ impl App {
                     if !shown_fields.is_empty() {
                         ui.label(RichText::new(tr("Custom fields")).small().color(t.text3));
                         for (fid, name) in shown_fields {
-                            let key = super::shell::field_col_key(*fid);
+                            let key = super::listview::field_col_key(*fid);
                             ui.horizontal(|ui| {
                                 super::icons::icon_label(ui, "fields", RichText::new(name).color(t.text), t.text2);
                                 let on_now = !self.hidden_cols.contains(&key);

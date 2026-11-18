@@ -5,6 +5,11 @@
 use super::*;
 use parity::{FilterGroup, FilterRow, Join};
 
+mod columns;
+mod row;
+
+pub(super) use columns::*;
+
 /// The view settings remembered for one location (List, Folder, Space...).
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ViewPrefs {
@@ -720,4 +725,385 @@ pub(super) fn tag_menu(ui: &mut Ui, t: &Theme, all: &[String], tags: &mut Vec<St
     }
     ui.data_mut(|d| d.insert_temp(id, text));
     changed
+}
+
+// ---------------------------------------------------------------- list view
+
+impl App {
+    pub(super) fn list_view(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        self.list_keys(ui.ctx());
+        self.row.order = self.row.spots.drain(..).map(|s| s.id).collect();
+        self.row.groups.clear();
+        // the tasks by id: each row looks its task up when it's drawn, so
+        // the list isn't copied on every frame
+        let (groups, shown) = {
+            let refs = self.filtered();
+            let shown: HashSet<u64> = refs.iter().map(|t| t.id).collect();
+            (self.groups(&refs, false), shown)
+        };
+        // one column header row for the whole list
+        let w = ui.available_width();
+        let (hr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
+        self.list_width = w;
+        let cols = self.list_cols(hr);
+        let p = ui.painter();
+        p.text(
+            hr.left_center() + vec2(36.0, 0.0),
+            Align2::LEFT_CENTER,
+            tr("Name"),
+            FontId::proportional(13.0),
+            t.text2,
+        );
+        let show_pr = self.data.extra.apps.priorities;
+        for (label, r) in [
+            ("Assignee", cols.assignee),
+            ("Due date", cols.due),
+            ("Priority", cols.priority),
+            ("Status", cols.status),
+            ("Comments", cols.comments),
+            ("Date created", cols.created),
+        ] {
+            if (label == "Priority" && !show_pr) || !self.col_on(label) || r.width() <= 0.0 {
+                continue;
+            }
+            p.text(
+                r.left_center(),
+                Align2::LEFT_CENTER,
+                tr(label),
+                FontId::proportional(13.0),
+                t.text2,
+            );
+        }
+        for (label, r) in &cols.extra {
+            p.with_clip_rect(*r).text(
+                r.left_center(),
+                Align2::LEFT_CENTER,
+                tr(label),
+                FontId::proportional(13.0),
+                t.text2,
+            );
+        }
+        for (fid, r) in &cols.fields {
+            let name = self
+                .data
+                .extra
+                .fields
+                .iter()
+                .find(|f| f.id == *fid)
+                .map(|f| f.name.clone())
+                .unwrap_or_default();
+            p.with_clip_rect(*r).text(
+                r.left_center(),
+                Align2::LEFT_CENTER,
+                name,
+                FontId::proportional(13.0),
+                t.text2,
+            );
+        }
+        let plus = Rect::from_center_size(pos2(hr.right() - 20.0, hr.center().y), vec2(16.0, 16.0));
+        p.circle_filled(plus.center(), 8.0, t.text);
+        // the background color reads on the circle in both themes
+        p.text(
+            plus.center(),
+            Align2::CENTER_CENTER,
+            "+",
+            FontId::proportional(13.0),
+            t.bg,
+        );
+        p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
+        let add_col = ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click());
+        hover_bg(ui, &add_col, add_col.rect, 5.0);
+        if add_col
+            .on_hover_text(tr("Add a column (Custom Field)"))
+            .clicked()
+            && self.may_manage()
+        {
+            self.modal = Some(Modal::CustomFields {
+                name: String::new(),
+                kind: "text".into(),
+                opts: String::new(),
+            });
+        }
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(8.0);
+                if groups.iter().all(|g| g.tasks.is_empty()) {
+                    // completed tasks are hidden by default: say so instead of "no tasks"
+                    let hidden = if self.show_closed {
+                        0
+                    } else {
+                        self.show_closed = true;
+                        let n = self.filtered().len();
+                        self.show_closed = false;
+                        n.saturating_sub(self.filtered().len())
+                    };
+                    // archived ones are hidden too: say how many, and where they are
+                    let (arch_tasks, arch_in_lists) = if hidden > 0 {
+                        (0, 0)
+                    } else {
+                        self.archived_here()
+                    };
+                    ui.add_space(30.0);
+                    ui.vertical_centered(|ui| {
+                        if hidden > 0 {
+                            ui.label(
+                                RichText::new(if hidden == 1 {
+                                    tr("All tasks here are done").to_string()
+                                } else {
+                                    trf!("All {} tasks here are done", hidden)
+                                })
+                                .size(16.0)
+                                .color(t.text2),
+                            );
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space((ui.available_width() - 230.0).max(0.0) / 2.0);
+                                let label = if hidden == 1 {
+                                    tr("Show 1 closed task").to_string()
+                                } else {
+                                    trf!("Show {} closed tasks", hidden)
+                                };
+                                if ui
+                                    .add(
+                                        egui::Button::new(label)
+                                            .stroke(Stroke::new(1.0_f32, t.border))
+                                            .corner_radius(6),
+                                    )
+                                    .clicked()
+                                {
+                                    self.show_closed = true;
+                                }
+                                if primary_button(ui, &t, tr("Add Task")).clicked() {
+                                    self.open_quick_add(None);
+                                }
+                            });
+                        } else if arch_tasks + arch_in_lists > 0 {
+                            let n = arch_tasks + arch_in_lists;
+                            ui.label(
+                                RichText::new(if n == 1 {
+                                    tr("The 1 task here is archived").to_string()
+                                } else {
+                                    trf!("All {} tasks here are archived", n)
+                                })
+                                .size(16.0)
+                                .color(t.text2),
+                            );
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
+                                let ghost_btn = |ui: &mut Ui, label: &str| {
+                                    ui.add(
+                                        egui::Button::new(label)
+                                            .stroke(Stroke::new(1.0_f32, t.border))
+                                            .corner_radius(6),
+                                    )
+                                };
+                                // archived tasks in Lists that are not: the Archived filter
+                                if arch_tasks > 0 {
+                                    let b = ghost_btn(ui, tr("Show archived tasks"));
+                                    name_it(&b, "Show archived tasks");
+                                    if b.clicked() {
+                                        self.filter.archived = true;
+                                    }
+                                }
+                                // tasks in archived Lists come back with their List
+                                if arch_in_lists > 0 {
+                                    let b = ghost_btn(ui, tr("See archived Lists"));
+                                    name_it(&b, "See archived Lists");
+                                    if b.clicked() {
+                                        self.open_settings("Spaces");
+                                    }
+                                }
+                                if !self.on_personal_list()
+                                    && primary_button(ui, &t, tr("Add Task")).clicked()
+                                {
+                                    self.open_quick_add(None);
+                                }
+                            });
+                        } else if self.on_personal_list() {
+                            // the inline "+ Add task" row below is the empty state
+                        } else {
+                            ui.label(
+                                RichText::new(tr("No tasks here yet"))
+                                    .size(16.0)
+                                    .color(t.text2),
+                            );
+                            ui.add_space(6.0);
+                            if primary_button(ui, &t, tr("Add Task")).clicked() {
+                                self.open_quick_add(None);
+                            }
+                        }
+                    });
+                }
+                for g in &groups {
+                    self.list_group(ui, g, &shown);
+                    ui.add_space(12.0);
+                }
+                self.finish_row_drag(ui);
+                ui.add_space(40.0);
+            });
+    }
+
+    pub(super) fn group_pill(&self, ui: &mut Ui, g: &Group) {
+        match &g.status {
+            Some(st) => {
+                status_pill(ui, st, Sense::hover());
+            }
+            None => {
+                let fake = Status {
+                    name: g.label.clone(),
+                    color: [g.color.r(), g.color.g(), g.color.b()],
+                    kind: StatusKind::Custom,
+                };
+                status_pill(ui, &fake, Sense::hover());
+            }
+        }
+    }
+
+    fn list_group(&mut self, ui: &mut Ui, g: &Group, shown: &HashSet<u64>) {
+        let t = self.t();
+        self.row.groups.push(g.clone());
+        let collapsed = self.collapsed.contains(&g.key);
+        let w = ui.available_width();
+        let (hr, hresp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+        hresp.context_menu(|ui| self.group_menu(ui, g));
+        let arrow = Rect::from_center_size(hr.left_center() + vec2(14.0, 0.0), vec2(18.0, 18.0));
+        let ar = ui.interact(arrow, ui.id().with(("garrow", &g.key)), Sense::click());
+        paint_triangle(
+            ui.painter(),
+            arrow.center(),
+            !collapsed,
+            if ar.hovered() { t.text } else { t.text2 },
+        );
+        if ar.clicked() {
+            if collapsed {
+                self.collapsed.remove(&g.key);
+            } else {
+                self.collapsed.insert(g.key.clone());
+            }
+        }
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_max(pos2(hr.left() + 28.0, hr.top()), hr.max))
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        self.group_pill(&mut child, g);
+        child.label(RichText::new(g.tasks.len().to_string()).color(t.text2));
+        // "..." group menu: always laid out so its menu stays open while
+        // the pointer moves into it, drawn only on hover
+        let (dr, dresp) = child.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+        name_it(&dresp, &format!("Group options {}", g.label));
+        let show_dots = hresp.hovered() || child.ui_contains_pointer();
+        if show_dots {
+            if dresp.hovered() {
+                child.painter().rect_filled(dr, 5.0, t.hover);
+            }
+            child.painter().text(
+                dr.center(),
+                Align2::CENTER_CENTER,
+                "\u{22EF}",
+                FontId::proportional(14.0),
+                t.text2,
+            );
+        }
+        click_menu(&dresp, |ui| self.group_menu(ui, g));
+        if show_dots {
+            if child
+                .add(ghost(egui::Button::new(
+                    RichText::new(tr("+ Add task")).color(t.text3).size(12.5),
+                )))
+                .clicked()
+            {
+                self.adding = Some((g.key.clone(), String::new()));
+                self.collapsed.remove(&g.key);
+            }
+        }
+        if collapsed {
+            return;
+        }
+        for &id in g.tasks.iter().filter(|id| shown.contains(id)) {
+            self.task_row_by_id(ui, id, 0);
+            if self.subtasks_open || self.expanded_tasks.contains(&id) {
+                // a subtask that is a row of its own here (my subtasks on My
+                // Tasks) isn't shown a second time under its parent
+                let subs: Vec<u64> = self
+                    .subtasks(id)
+                    .into_iter()
+                    .filter(|s| !shown.contains(&s.id))
+                    .map(|s| s.id)
+                    .collect();
+                for s in subs {
+                    self.task_row_by_id(ui, s, 1);
+                }
+            }
+            if self.sub_adding.as_ref().is_some_and(|(p, _)| *p == id) {
+                if let Some(task) = self.task(id).cloned() {
+                    self.sub_add_row(ui, &task);
+                }
+            }
+        }
+        let w = ui.available_width();
+        let adding_here = self
+            .adding
+            .as_ref()
+            .map(|(k, _)| k == &g.key)
+            .unwrap_or(false);
+        if adding_here {
+            let mut text = self.adding.as_ref().unwrap().1.clone();
+            let mut submit = false;
+            let mut cancel = false;
+            ui.horizontal(|ui| {
+                ui.add_space(36.0);
+                let r = ui.add(
+                    field(&mut text)
+                        .hint_text(tr("Task Name"))
+                        .desired_width((w - 240.0).max(200.0)),
+                );
+                focus_once(ui, &r);
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    submit = true;
+                    r.request_focus();
+                } else if r.lost_focus() && text.trim().is_empty() {
+                    // clicking away from an empty row closes it
+                    cancel = true;
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+                if ui.button(tr("Cancel")).clicked() {
+                    cancel = true;
+                }
+                if primary_button(ui, &t, tr("Save")).clicked() {
+                    submit = true;
+                }
+            });
+            if submit && !text.trim().is_empty() {
+                // no List to put it in: the name stays for after one is made
+                let added = self.add_from_group(g, text.clone(), false);
+                self.adding = Some((g.key.clone(), if added { String::new() } else { text }));
+            } else if cancel || (submit && text.trim().is_empty()) {
+                self.adding = None;
+            } else {
+                self.adding = Some((g.key.clone(), text));
+            }
+        } else {
+            let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
+            name_it(&resp, &format!("Add Task in {}", g.label));
+            if resp.hovered() {
+                ui.painter().rect_filled(r, 4.0, t.hover);
+            }
+            ui.painter().text(
+                r.left_center() + vec2(40.0, 0.0),
+                Align2::LEFT_CENTER,
+                tr("+ Add task"),
+                FontId::proportional(13.5),
+                t.text3,
+            );
+            if resp.clicked() {
+                self.adding = Some((g.key.clone(), String::new()));
+            }
+        }
+    }
 }

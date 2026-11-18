@@ -41,6 +41,7 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
+use wb_sync::json::{array_at, text_field, u64_field};
 
 use crate::Locked;
 
@@ -395,41 +396,27 @@ pub fn message_ids(copy: &Value) -> HashSet<u64> {
 
 /// The ids of the channels and DMs in a copy (a whole one or a change).
 pub fn channel_ids(copy: &Value) -> HashSet<u64> {
-    arr(copy.get("channels"))
+    array_at(copy, "channels")
         .iter()
-        .filter_map(|c| num(c, "id"))
+        .filter_map(|c| u64_field(c, "id"))
         .collect()
 }
 
 /// `message_ids`, of the conversations in `only` alone (all when None).
 pub fn message_ids_in(copy: &Value, only: Option<&HashSet<u64>>) -> HashSet<u64> {
     let mut s = HashSet::new();
-    for ch in arr(copy.get("channels")) {
-        if only.is_some_and(|o| !num(ch, "id").is_some_and(|i| o.contains(&i))) {
+    for ch in array_at(copy, "channels") {
+        if only.is_some_and(|o| !u64_field(ch, "id").is_some_and(|i| o.contains(&i))) {
             continue;
         }
-        for m in arr(ch.get("messages")) {
+        for m in array_at(ch, "messages") {
             s.extend(m.get("id").and_then(|i| i.as_u64()));
-            for r in arr(m.get("replies")) {
+            for r in array_at(m, "replies") {
                 s.extend(r.get("id").and_then(|i| i.as_u64()));
             }
         }
     }
     s
-}
-
-fn arr(v: Option<&Value>) -> &[Value] {
-    v.and_then(|v| v.as_array())
-        .map(|a| a.as_slice())
-        .unwrap_or(&[])
-}
-
-fn num(v: &Value, k: &str) -> Option<u64> {
-    v.get(k).and_then(|i| i.as_u64())
-}
-
-fn text(v: &Value, k: &str) -> String {
-    v.get(k).and_then(|t| t.as_str()).unwrap_or("").to_string()
 }
 
 /// One notification for one member.
@@ -456,10 +443,10 @@ pub fn payload(title: &str, body: &str, channel: u64, parent: Option<u64>) -> Va
 }
 
 fn body_of(m: &Value) -> String {
-    let t = text(m, "text");
+    let t = text_field(m, "text");
     let t = t.trim();
     if t.is_empty() {
-        return if arr(m.get("attachments")).is_empty() {
+        return if array_at(m, "attachments").is_empty() {
             "New message".into()
         } else {
             "Sent an attachment".into()
@@ -501,9 +488,14 @@ pub fn notes_in(
     skip: &[u64],
     now_secs: i64,
 ) -> Vec<Note> {
-    let people: Vec<(u64, String)> = arr(canon.get("members"))
+    let people: Vec<(u64, String)> = array_at(canon, "members")
         .iter()
-        .filter_map(|m| Some((num(m, "id")?, text(m, "name").trim().to_string())))
+        .filter_map(|m| {
+            Some((
+                u64_field(m, "id")?,
+                text_field(m, "name").trim().to_string(),
+            ))
+        })
         .collect();
     let name = |id: u64| {
         people
@@ -516,11 +508,11 @@ pub fn notes_in(
     // the app's rule (wb_sync::mentions): the ids a message keeps, else its text
     let named: Vec<(u64, &str)> = people.iter().map(|(i, n)| (*i, n.as_str())).collect();
     let mentioned = |m: &Value| -> Vec<u64> {
-        let saved: Vec<u64> = arr(m.get("mentions"))
+        let saved: Vec<u64> = array_at(m, "mentions")
             .iter()
             .filter_map(|x| x.as_u64())
             .collect();
-        wb_sync::mentions::mentions_of(&saved, &text(m, "text"), &named)
+        wb_sync::mentions::mentions_of(&saved, &text_field(m, "text"), &named)
     };
     // restored from someone's Trash (or a delete undone): not new, so no
     // push again. An id the merge revived, or a message written well before
@@ -531,19 +523,21 @@ pub fn notes_in(
             .and_then(|r| r.as_i64())
     };
     let mut out = vec![];
-    for ch in arr(canon.get("channels")) {
-        let Some(cid) = num(ch, "id") else { continue };
+    for ch in array_at(canon, "channels") {
+        let Some(cid) = u64_field(ch, "id") else {
+            continue;
+        };
         if only.is_some_and(|o| !o.contains(&cid)) {
             continue;
         }
         let back_at = revived(cid).map(secs);
         let restored = |m: &Value| {
             let ts = secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
-            num(m, "id").is_some_and(|id| revived(id).is_some())
+            u64_field(m, "id").is_some_and(|id| revived(id).is_some())
                 || back_at.is_some_and(|at| ts < at - RESTORED_SLACK_SECS)
         };
         let direct = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct");
-        let ch_members: Vec<u64> = arr(ch.get("members"))
+        let ch_members: Vec<u64> = array_at(ch, "members")
             .iter()
             .filter_map(|m| m.as_u64())
             .collect();
@@ -551,11 +545,11 @@ pub fn notes_in(
             if direct {
                 name(author)
             } else {
-                format!("{} in #{}", name(author), text(ch, "name"))
+                format!("{} in #{}", name(author), text_field(ch, "name"))
             }
         };
         let mut add = |author: u64, m: &Value, parent: Option<u64>, mut to: Vec<u64>| {
-            let Some(id) = num(m, "id") else { return };
+            let Some(id) = u64_field(m, "id") else { return };
             // brought in by an import (Slack history, say): old history, not
             // news, however recent its time (Message::imported in the app)
             if m.get("imported").is_some_and(|i| !i.is_null()) {
@@ -579,9 +573,11 @@ pub fn notes_in(
                 });
             }
         };
-        for m in arr(ch.get("messages")) {
-            let Some(mid) = num(m, "id") else { continue };
-            let author = num(m, "author").unwrap_or(0);
+        for m in array_at(ch, "messages") {
+            let Some(mid) = u64_field(m, "id") else {
+                continue;
+            };
+            let author = u64_field(m, "author").unwrap_or(0);
             if !before.contains(&mid) && !restored(m) {
                 let to = if direct {
                     ch_members.clone()
@@ -590,20 +586,22 @@ pub fn notes_in(
                 };
                 add(author, m, None, to);
             }
-            let replies = arr(m.get("replies"));
+            let replies = array_at(m, "replies");
             for r in replies {
-                let Some(rid) = num(r, "id") else { continue };
+                let Some(rid) = u64_field(r, "id") else {
+                    continue;
+                };
                 if before.contains(&rid) || restored(r) {
                     continue;
                 }
-                let ra = num(r, "author").unwrap_or(0);
+                let ra = u64_field(r, "author").unwrap_or(0);
                 let to = if direct {
                     ch_members.clone()
                 } else {
                     // the thread's people: who started it and who wrote in it
                     let mut to = mentioned(r);
                     to.push(author);
-                    to.extend(replies.iter().filter_map(|x| num(x, "author")));
+                    to.extend(replies.iter().filter_map(|x| u64_field(x, "author")));
                     to
                 };
                 add(ra, r, Some(mid), to);

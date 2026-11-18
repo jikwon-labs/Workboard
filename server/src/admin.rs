@@ -325,7 +325,7 @@ impl Hub {
                 }
             }
         }
-        canon["extra"]["sync"] = serde_json::to_value(meta).unwrap();
+        wb_sync::json::set_meta(&mut canon, &meta);
         let mut saved = g.saved.clone();
         let code = saved.make_invite(id, Role::Member);
         // Persist the same revision broadcast_canon will publish, before any

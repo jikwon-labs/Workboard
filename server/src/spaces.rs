@@ -34,6 +34,9 @@
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use wb_sync::json::{
+    array_at, array_at_mut, get_path, meta_of, put_path, set_meta, u64_field, written_id,
+};
 use wb_sync::{Level, SyncMeta};
 
 /// What to do to the team's copy after merging a fixed-up copy.
@@ -67,7 +70,9 @@ impl PutBack {
 
 /// Shared settings only the owner and admins change: the workspace's name
 /// and colour (Settings > General) and its features (Settings > Apps).
-pub const ADMIN_VALUES: &[&str] = &["workspace", "extra.workspace_color", "extra.apps"];
+/// That is every shared setting (`wb_sync::SHARED_VALUES`), so one added
+/// there is the owner's and admins' to change until said otherwise here.
+pub const ADMIN_VALUES: &[&str] = wb_sync::SHARED_VALUES;
 
 /// Team-wide collections only the owner and admins add to, change or
 /// delete from: custom fields, automations, templates and teams. Everyone
@@ -78,47 +83,6 @@ pub const ADMIN_ITEMS: &[&str] = &[
     "extra.templates",
     "extra.teams",
 ];
-
-fn value_at<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.').try_fold(v, |v, part| v.get(part))
-}
-
-fn set_value_at(v: &mut Value, path: &str, new: Option<Value>) {
-    let mut parts: Vec<&str> = path.split('.').collect();
-    let Some(last) = parts.pop() else { return };
-    let mut cur = v;
-    for part in parts {
-        if !cur.get(part).is_some_and(|x| x.is_object()) {
-            if new.is_none() || !cur.is_object() {
-                return;
-            }
-            cur[part] = Value::Object(Map::new());
-        }
-        cur = &mut cur[part];
-    }
-    let Some(obj) = cur.as_object_mut() else {
-        return;
-    };
-    match new {
-        Some(n) => {
-            obj.insert(last.into(), n);
-        }
-        None => {
-            obj.remove(last);
-        }
-    }
-}
-
-fn id_of(v: &Value) -> Option<u64> {
-    v.get("id")?.as_u64()
-}
-
-fn meta_of(v: &Value) -> SyncMeta {
-    v.get("extra")
-        .and_then(|e| e.get("sync"))
-        .and_then(|s| serde_json::from_value(s.clone()).ok())
-        .unwrap_or_default()
-}
 
 /// Bring every change time in a copy someone sent down to `limit` at most.
 /// Times decide which version wins, so a stamp far in the future (or
@@ -147,45 +111,13 @@ pub fn clamp_future(data: &mut Value, limit: i64) {
     }
 }
 
-fn set_meta(v: &mut Value, meta: &SyncMeta) {
-    if v.is_object() && !v.get("extra").is_some_and(|e| e.is_object()) {
-        v["extra"] = Value::Object(Map::new());
-    }
-    if let Some(extra) = v.get_mut("extra").and_then(|e| e.as_object_mut()) {
-        extra.insert(
-            "sync".into(),
-            serde_json::to_value(meta).unwrap_or_default(),
-        );
-    }
-}
-
-fn array<'a>(v: &'a Value, path: &str) -> &'a [Value] {
-    path.split('.')
-        .try_fold(v, |v, part| v.get(part))
-        .and_then(|a| a.as_array())
-        .map(|a| a.as_slice())
-        .unwrap_or(&[])
-}
-
-fn array_mut<'a>(v: &'a mut Value, path: &str) -> Option<&'a mut Vec<Value>> {
-    let mut cur = Some(v);
-    for part in path.split('.') {
-        cur = cur.and_then(|v| v.get_mut(part));
-    }
-    cur.and_then(|a| a.as_array_mut())
-}
-
-fn u64_at(v: &Value, key: &str) -> Option<u64> {
-    v.get(key).and_then(|x| x.as_u64())
-}
-
 /// Arrays of items with ids inside an item (a task's comments, a doc's views).
 /// The fields of a space that hold items (see Space in the app's model).
 const SPACE_ITEMS: [&str; 3] = ["folders", "lists", "statuses"];
 
 fn is_items(v: &Value) -> bool {
     v.as_array()
-        .is_some_and(|a| !a.is_empty() && a.iter().all(|x| id_of(x).is_some()))
+        .is_some_and(|a| !a.is_empty() && a.iter().all(|x| written_id(x).is_some()))
 }
 
 /// Own fields without `ignore`: the ones a change worth telling about is in.
@@ -309,7 +241,7 @@ impl Cx {
         own: Option<&dyn Fn(&Value) -> bool>,
         ignore: &[&str],
     ) -> Value {
-        let id = id_of(team).unwrap_or(0);
+        let id = written_id(team).unwrap_or(0);
         let telling = telling_fields(team, ignore) != telling_fields(theirs, ignore);
         self.keep(id, telling);
         let mut out = team.clone();
@@ -319,8 +251,10 @@ impl Cx {
                 continue;
             }
             for child in v.as_array().into_iter().flatten() {
-                let cid = id_of(child).unwrap_or(0);
-                let team_child = array(team, k).iter().find(|c| id_of(c) == Some(cid));
+                let cid = written_id(child).unwrap_or(0);
+                let team_child = array_at(team, k)
+                    .iter()
+                    .find(|c| written_id(c) == Some(cid));
                 if mine(child) && team_child.is_none_or(mine) {
                     // theirs to change: their version goes in
                     let Some(arr) = out.get_mut(k.as_str()) else {
@@ -330,7 +264,7 @@ impl Cx {
                     let Some(arr) = arr.as_array_mut() else {
                         continue;
                     };
-                    match arr.iter_mut().find(|c| id_of(c) == Some(cid)) {
+                    match arr.iter_mut().find(|c| written_id(c) == Some(cid)) {
                         Some(c) => *c = child.clone(),
                         None => arr.push(child.clone()),
                     }
@@ -344,8 +278,12 @@ impl Cx {
         // inner items they deleted: only their own may go
         for (k, v) in team.as_object().into_iter().flatten() {
             for child in v.as_array().into_iter().flatten() {
-                let Some(cid) = id_of(child) else { continue };
-                let kept = array(theirs, k).iter().any(|c| id_of(c) == Some(cid));
+                let Some(cid) = written_id(child) else {
+                    continue;
+                };
+                let kept = array_at(theirs, k)
+                    .iter()
+                    .any(|c| written_id(c) == Some(cid));
                 if !kept && !mine(child) {
                     for inner in wb_sync::ids_within(child) {
                         self.undelete(inner);
@@ -369,17 +307,17 @@ impl Cx {
         own: Option<&dyn Fn(&Value) -> bool>,
         ignore: &[&str],
     ) {
-        let all = array(canon, path);
+        let all = array_at(canon, path);
         let team: HashMap<u64, &Value> = all
             .iter()
             .filter(|x| in_team(x))
-            .filter_map(|x| id_of(x).map(|i| (i, x)))
+            .filter_map(|x| written_id(x).map(|i| (i, x)))
             .collect();
         let mut seen = HashSet::new();
-        if let Some(arr) = array_mut(data, path) {
+        if let Some(arr) = array_at_mut(data, path) {
             let mut out = Vec::with_capacity(arr.len());
             for item in std::mem::take(arr) {
-                let Some(id) = id_of(&item) else {
+                let Some(id) = written_id(&item) else {
                     out.push(item);
                     continue;
                 };
@@ -387,7 +325,7 @@ impl Cx {
                 if let Some(t) = team.get(&id) {
                     out.push(self.keep_item(t, &item, own, ignore));
                 } else if in_theirs(&item) {
-                    match all.iter().find(|x| id_of(x) == Some(id)) {
+                    match all.iter().find(|x| written_id(x) == Some(id)) {
                         // moved in from where the team has it: it stays there
                         Some(t) => {
                             for inner in wb_sync::ids_within(&item) {
@@ -413,7 +351,7 @@ impl Cx {
                                 v.as_array()
                                     .into_iter()
                                     .flatten()
-                                    .any(|c| id_of(c) == Some(inner) && f(c))
+                                    .any(|c| written_id(c) == Some(inner) && f(c))
                             })
                     });
                     if !own_inner {
@@ -432,18 +370,18 @@ impl Cx {
     /// custom fields, automations, templates and teams. Their own entry
     /// they may change (name, colour, status), but not its role.
     fn guard_people(&mut self, canon: &Value, data: &mut Value, member: u64) {
-        let team = array(canon, "members");
-        let own = |x: &Value| id_of(x) == Some(member);
+        let team = array_at(canon, "members");
+        let own = |x: &Value| written_id(x) == Some(member);
         let mut seen = HashSet::new();
-        if let Some(arr) = array_mut(data, "members") {
+        if let Some(arr) = array_at_mut(data, "members") {
             let mut out = Vec::with_capacity(arr.len());
             for item in std::mem::take(arr) {
-                let Some(id) = id_of(&item) else {
+                let Some(id) = written_id(&item) else {
                     out.push(item);
                     continue;
                 };
                 seen.insert(id);
-                match team.iter().find(|t| id_of(t) == Some(id)) {
+                match team.iter().find(|t| written_id(t) == Some(id)) {
                     Some(t) if own(&item) => {
                         let mut mine = item;
                         // (a copy that leaves the field out changes nothing)
@@ -478,7 +416,7 @@ impl Cx {
         }
         // the team's people missing from their copy: removing them is undone
         for t in team {
-            if let Some(id) = id_of(t) {
+            if let Some(id) = written_id(t) {
                 if !seen.contains(&id) {
                     self.undelete(id);
                 }
@@ -503,8 +441,8 @@ impl Cx {
             if newer.is_empty() {
                 continue;
             }
-            let team_map = value_at(canon, path).cloned();
-            let changed = value_at(data, path).cloned() != team_map;
+            let team_map = get_path(canon, path).cloned();
+            let changed = get_path(data, path).cloned() != team_map;
             for (k, s) in newer {
                 self.dmeta.values.remove(&k);
                 if changed {
@@ -512,20 +450,20 @@ impl Cx {
                 }
             }
             self.out.refused |= changed;
-            set_value_at(data, path, team_map);
+            put_path(data, path, team_map);
         }
         self.guard_authors(canon, data, member);
         for path in ADMIN_VALUES {
             let theirs = self.dmeta.values.get(*path).copied().unwrap_or(0);
             let team_stamp = self.cmeta.values.get(*path).copied().unwrap_or(0);
-            let team_value = value_at(canon, path).cloned();
-            if theirs > team_stamp && value_at(data, path).cloned() != team_value {
+            let team_value = get_path(canon, path).cloned();
+            if theirs > team_stamp && get_path(data, path).cloned() != team_value {
                 self.out.values.insert(path.to_string(), theirs);
                 self.out.refused = true;
             }
             if theirs > team_stamp {
                 self.dmeta.values.remove(*path);
-                set_value_at(data, path, team_value);
+                put_path(data, path, team_value);
             }
         }
     }
@@ -536,13 +474,13 @@ impl Cx {
     /// entries (name, email, role) stay as the owner has them, and the owner
     /// can't be taken out of the list.
     fn guard_entries(&mut self, canon: &Value, data: &mut Value, owners: &[u64]) {
-        let team = array(canon, "members");
+        let team = array_at(canon, "members");
         for &id in owners {
-            let Some(t) = team.iter().find(|t| id_of(t) == Some(id)) else {
+            let Some(t) = team.iter().find(|t| written_id(t) == Some(id)) else {
                 continue;
             };
-            match array_mut(data, "members")
-                .and_then(|a| a.iter_mut().find(|x| id_of(x) == Some(id)))
+            match array_at_mut(data, "members")
+                .and_then(|a| a.iter_mut().find(|x| written_id(x) == Some(id)))
             {
                 Some(x) => {
                     let theirs = std::mem::replace(x, Value::Null);
@@ -575,7 +513,7 @@ pub const COMMENT_KEYS: &[&str] = &[
 ];
 
 fn author_of(v: &Value) -> Option<u64> {
-    u64_at(v, "author")
+    u64_field(v, "author")
 }
 
 fn is_comment(v: &Value) -> bool {
@@ -607,17 +545,17 @@ impl Cx {
         let before: HashSet<u64> = wb_sync::hidden_from(canon, NOBODY, true)
             .into_iter()
             .collect();
-        let mut theirs: HashSet<u64> = array(canon, "docs")
+        let mut theirs: HashSet<u64> = array_at(canon, "docs")
             .iter()
-            .chain(array(canon, "extra.dashboards"))
-            .filter(|d| u64_at(d, "owner") == Some(member))
-            .filter_map(id_of)
+            .chain(array_at(canon, "extra.dashboards"))
+            .filter(|d| u64_field(d, "owner") == Some(member))
+            .filter_map(written_id)
             .collect();
         loop {
-            let more: Vec<u64> = array(canon, "docs")
+            let more: Vec<u64> = array_at(canon, "docs")
                 .iter()
-                .filter(|d| u64_at(d, "parent").is_some_and(|p| theirs.contains(&p)))
-                .filter_map(id_of)
+                .filter(|d| u64_field(d, "parent").is_some_and(|p| theirs.contains(&p)))
+                .filter_map(written_id)
                 .filter(|i| !theirs.contains(i))
                 .collect();
             if more.is_empty() {
@@ -646,7 +584,7 @@ impl Cx {
 fn drop_items(v: &mut Value, ids: &HashSet<u64>) {
     match v {
         Value::Array(a) => {
-            a.retain(|x| id_of(x).is_none_or(|i| !ids.contains(&i)));
+            a.retain(|x| written_id(x).is_none_or(|i| !ids.contains(&i)));
             a.iter_mut().for_each(|x| drop_items(x, ids));
         }
         Value::Object(o) => o.values_mut().for_each(|x| drop_items(x, ids)),
@@ -670,18 +608,18 @@ fn written_mark(e: &Value, chat: bool) -> u64 {
 /// coming back from the Trash can be told from one made up under its id.
 pub fn written_marks(canon: &Value) -> HashMap<u64, u64> {
     let mut messages = HashMap::new();
-    for ch in array(canon, "channels") {
-        collect_messages(array(ch, "messages"), &mut messages);
+    for ch in array_at(canon, "channels") {
+        collect_messages(array_at(ch, "messages"), &mut messages);
     }
     let mut out: HashMap<u64, u64> = messages
         .into_iter()
         .map(|(id, m)| (id, written_mark(m, true)))
         .collect();
-    for a in array(canon, "tasks")
+    for a in array_at(canon, "tasks")
         .iter()
-        .flat_map(|t| array(t, "activity"))
+        .flat_map(|t| array_at(t, "activity"))
     {
-        if let (Some(id), true) = (id_of(a), is_comment(a)) {
+        if let (Some(id), true) = (written_id(a), is_comment(a)) {
             out.insert(id, written_mark(a, false));
         }
     }
@@ -691,10 +629,10 @@ pub fn written_marks(canon: &Value) -> HashMap<u64, u64> {
 /// Chat messages, with their thread replies, by id.
 fn collect_messages<'a>(msgs: &'a [Value], out: &mut HashMap<u64, &'a Value>) {
     for m in msgs {
-        if let Some(id) = id_of(m) {
+        if let Some(id) = written_id(m) {
             out.insert(id, m);
         }
-        collect_messages(array(m, "replies"), out);
+        collect_messages(array_at(m, "replies"), out);
     }
 }
 
@@ -707,21 +645,21 @@ impl Cx {
     /// in by an import comes only from an owner or admin (Import from Slack).
     fn guard_authors(&mut self, canon: &Value, data: &mut Value, member: u64) {
         let mut messages = HashMap::new();
-        for ch in array(canon, "channels") {
-            collect_messages(array(ch, "messages"), &mut messages);
+        for ch in array_at(canon, "channels") {
+            collect_messages(array_at(ch, "messages"), &mut messages);
         }
-        let comments: HashMap<u64, &Value> = array(canon, "tasks")
+        let comments: HashMap<u64, &Value> = array_at(canon, "tasks")
             .iter()
-            .flat_map(|t| array(t, "activity"))
+            .flat_map(|t| array_at(t, "activity"))
             .filter(|a| is_comment(a))
-            .filter_map(|a| id_of(a).map(|i| (i, a)))
+            .filter_map(|a| written_id(a).map(|i| (i, a)))
             .collect();
-        for ch in array_mut(data, "channels").into_iter().flatten() {
+        for ch in array_at_mut(data, "channels").into_iter().flatten() {
             if let Some(m) = ch.get_mut("messages") {
                 self.fix_written(m, &messages, member, true);
             }
         }
-        for t in array_mut(data, "tasks").into_iter().flatten() {
+        for t in array_at_mut(data, "tasks").into_iter().flatten() {
             if let Some(a) = t.get_mut("activity") {
                 self.fix_written(a, &comments, member, false);
             }
@@ -729,30 +667,30 @@ impl Cx {
         // deletes of what someone else wrote are undone, unless what it is
         // in goes (a channel or task they may delete, their own message
         // with its thread)
-        for ch in array(canon, "channels") {
-            if id_of(ch).is_some_and(|c| !self.dmeta.tombs.contains_key(&c)) {
-                self.keep_messages(array(ch, "messages"), member);
+        for ch in array_at(canon, "channels") {
+            if written_id(ch).is_some_and(|c| !self.dmeta.tombs.contains_key(&c)) {
+                self.keep_messages(array_at(ch, "messages"), member);
             }
         }
-        for t in array(canon, "tasks") {
-            if id_of(t).is_none_or(|i| self.dmeta.tombs.contains_key(&i)) {
+        for t in array_at(canon, "tasks") {
+            if written_id(t).is_none_or(|i| self.dmeta.tombs.contains_key(&i)) {
                 continue;
             }
-            let acts: Vec<&Value> = array(t, "activity")
+            let acts: Vec<&Value> = array_at(t, "activity")
                 .iter()
                 .filter(|a| is_comment(a))
                 .collect();
             // replies after the comments they answer
             for replies in [false, true] {
                 for a in &acts {
-                    let parent = u64_at(a, "parent");
+                    let parent = u64_field(a, "parent");
                     if parent.is_some() != replies || author_of(a) == Some(member) {
                         continue;
                     }
                     if parent.is_some_and(|p| self.dmeta.tombs.contains_key(&p)) {
                         continue;
                     }
-                    if let Some(id) = id_of(a) {
+                    if let Some(id) = written_id(a) {
                         self.undelete(id);
                     }
                 }
@@ -762,12 +700,12 @@ impl Cx {
 
     fn keep_messages(&mut self, msgs: &[Value], member: u64) {
         for m in msgs {
-            let Some(id) = id_of(m) else { continue };
+            let Some(id) = written_id(m) else { continue };
             if author_of(m) != Some(member) {
                 self.undelete(id);
             }
             if !self.dmeta.tombs.contains_key(&id) {
-                self.keep_messages(array(m, "replies"), member);
+                self.keep_messages(array_at(m, "replies"), member);
             }
         }
     }
@@ -788,7 +726,7 @@ impl Cx {
         let keys = if chat { MESSAGE_KEYS } else { COMMENT_KEYS };
         let mut out = Vec::with_capacity(arr.len());
         for mut e in std::mem::take(arr) {
-            let Some(id) = id_of(&e) else {
+            let Some(id) = written_id(&e) else {
                 // every message has an id: one without can only be made up
                 // (task activity got ids from fill_activity_ids)
                 if !chat {
@@ -861,14 +799,14 @@ fn docs_in(docs: &[Value], sid: u64, seed: &HashSet<u64>) -> HashSet<u64> {
     let mut out: HashSet<u64> = seed.clone();
     out.extend(
         docs.iter()
-            .filter(|d| u64_at(d, "space") == Some(sid))
-            .filter_map(id_of),
+            .filter(|d| u64_field(d, "space") == Some(sid))
+            .filter_map(written_id),
     );
     loop {
         let more: Vec<u64> = docs
             .iter()
-            .filter(|d| u64_at(d, "parent").is_some_and(|p| out.contains(&p)))
-            .filter_map(id_of)
+            .filter(|d| u64_field(d, "parent").is_some_and(|p| out.contains(&p)))
+            .filter_map(written_id)
             .filter(|i| !out.contains(i))
             .collect();
         if more.is_empty() {
@@ -889,7 +827,7 @@ pub fn guard(
     now: i64,
     graves: &BTreeMap<u64, (u64, i64)>,
 ) -> PutBack {
-    let all_theirs = array(canon, "spaces")
+    let all_theirs = array_at(canon, "spaces")
         .iter()
         .all(|s| wb_sync::space_level(s, member, manages) == Some(Level::Full));
     if all_theirs && manages && owners.is_empty() {
@@ -908,24 +846,25 @@ pub fn guard(
         now,
         graves: graves.iter().map(|(id, (m, _))| (*id, *m)).collect(),
     };
-    for s in array(canon, "spaces") {
-        let Some(sid) = id_of(s) else { continue };
+    for s in array_at(canon, "spaces") {
+        let Some(sid) = written_id(s) else { continue };
         let level = wb_sync::space_level(s, member, manages);
         if level == Some(Level::Full) {
             continue;
         }
         let inner = wb_sync::ids_within(s);
         let lists: HashSet<u64> = inner.iter().copied().filter(|i| *i != sid).collect();
-        let team_docs = docs_in(array(canon, "docs"), sid, &HashSet::new());
-        let their_docs = docs_in(array(data, "docs"), sid, &team_docs);
-        let in_lists = |x: &Value| u64_at(x, "list_id").is_some_and(|l| lists.contains(&l));
-        let in_space = |x: &Value| u64_at(x, "space") == Some(sid);
-        let canon_has = |x: &Value, set: &HashSet<u64>| id_of(x).is_some_and(|i| set.contains(&i));
+        let team_docs = docs_in(array_at(canon, "docs"), sid, &HashSet::new());
+        let their_docs = docs_in(array_at(data, "docs"), sid, &team_docs);
+        let in_lists = |x: &Value| u64_field(x, "list_id").is_some_and(|l| lists.contains(&l));
+        let in_space = |x: &Value| u64_field(x, "space") == Some(sid);
+        let canon_has =
+            |x: &Value, set: &HashSet<u64>| written_id(x).is_some_and(|i| set.contains(&i));
         if level.is_some_and(|l| l >= Level::Edit) {
             // Edit: everything inside, but not the space's own settings or
             // sharing, and not deleting it
-            match array_mut(data, "spaces")
-                .and_then(|a| a.iter_mut().find(|x| id_of(x) == Some(sid)))
+            match array_at_mut(data, "spaces")
+                .and_then(|a| a.iter_mut().find(|x| written_id(x) == Some(sid)))
             {
                 Some(ds) => {
                     let telling = wb_sync::own_fields(ds) != wb_sync::own_fields(s);
@@ -959,7 +898,7 @@ pub fn guard(
                         ("extra.dashboards", &in_space),
                         ("extra.forms", &in_lists),
                     ] {
-                        for x in array(canon, path).iter().filter(|x| inside(x)) {
+                        for x in array_at(canon, path).iter().filter(|x| inside(x)) {
                             for id in wb_sync::ids_within(x) {
                                 cx.undelete(id);
                             }
@@ -971,8 +910,8 @@ pub fn guard(
             continue;
         }
         // View, Comment or closed: the space and everything in it stay the team's
-        if let Some(ds) =
-            array_mut(data, "spaces").and_then(|a| a.iter_mut().find(|x| id_of(x) == Some(sid)))
+        if let Some(ds) = array_at_mut(data, "spaces")
+            .and_then(|a| a.iter_mut().find(|x| written_id(x) == Some(sid)))
         {
             let theirs = std::mem::replace(ds, s.clone());
             let extra: Vec<u64> = wb_sync::ids_within(&theirs)
@@ -989,9 +928,9 @@ pub fn guard(
         let own_comment = move |a: &Value| {
             comments
                 && a.get("comment").and_then(|c| c.as_bool()) == Some(true)
-                && u64_at(a, "author") == Some(member)
+                && u64_field(a, "author") == Some(member)
         };
-        let own_view = move |v: &Value| reads && u64_at(v, "member") == Some(member);
+        let own_view = move |v: &Value| reads && u64_field(v, "member") == Some(member);
         // a task's `updated` moves with a comment: put back without a word
         cx.guard_items(
             canon,

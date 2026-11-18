@@ -90,11 +90,7 @@ pub fn mark_restored(data: &mut Value, now: i64) {
         return;
     }
     let ids: Vec<u64> = wb_sync::fingerprints(data).into_keys().collect();
-    let mut meta: wb_sync::SyncMeta = data
-        .get("extra")
-        .and_then(|e| e.get("sync"))
-        .and_then(|s| serde_json::from_value(s.clone()).ok())
-        .unwrap_or_default();
+    let mut meta = wb_sync::json::meta_of(data);
     for id in ids {
         meta.stamps.insert(id, now);
         meta.revived.insert(id, now);
@@ -103,10 +99,7 @@ pub fn mark_restored(data: &mut Value, now: i64) {
     meta.fields.clear();
     meta.hashes.clear();
     meta.field_hashes.clear();
-    if data.get("extra").is_none() {
-        data["extra"] = json!({});
-    }
-    data["extra"]["sync"] = serde_json::to_value(&meta).unwrap_or_default();
+    wb_sync::json::set_meta(data, &meta);
 }
 
 /// Write a member's role into the team's copy so everyone's app shows it.
@@ -136,10 +129,7 @@ pub(crate) fn label_role(canon: &mut Value, member: u64, role: Role) -> bool {
     if let Some(mut meta) = meta {
         // only the role field changed, so a rename made meanwhile still counts
         wb_sync::touch_fields(&mut meta, member, &["role"], now_ms());
-        if canon.get("extra").is_none_or(|e| e.is_null()) {
-            canon["extra"] = json!({});
-        }
-        canon["extra"]["sync"] = serde_json::to_value(&meta).unwrap_or_default();
+        wb_sync::json::set_meta(canon, &meta);
         return true;
     }
     let stamps = &mut canon["extra"]["sync"]["stamps"];
@@ -355,12 +345,7 @@ pub(crate) fn swap_hidden(canon: &Value, data: &mut Value, member: u64, role: Ro
     }
     let items: Vec<Value> = wb_sync::SHARED
         .iter()
-        .filter_map(|path| {
-            path.split('.')
-                .try_fold(canon, |v, part| v.get(part))
-                .and_then(|a| a.as_array())
-        })
-        .flatten()
+        .flat_map(|path| wb_sync::json::array_at(canon, path))
         .filter(|x| {
             x.get("id")
                 .and_then(|i| i.as_u64())
@@ -374,11 +359,7 @@ pub(crate) fn swap_hidden(canon: &Value, data: &mut Value, member: u64, role: Ro
     for item in &items {
         let id = item.get("id").and_then(|i| i.as_u64());
         for path in wb_sync::SHARED {
-            let mut arr = Some(&mut *data);
-            for part in path.split('.') {
-                arr = arr.and_then(|v| v.get_mut(part));
-            }
-            if let Some(x) = arr.and_then(|a| a.as_array_mut()).and_then(|a| {
+            if let Some(x) = wb_sync::json::array_at_mut(data, path).and_then(|a| {
                 a.iter_mut()
                     .find(|c| c.get("id").and_then(|i| i.as_u64()) == id)
             }) {

@@ -142,17 +142,46 @@ impl Hub {
 pub(crate) const EVERYONE: u64 = 0;
 pub(crate) static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 
-pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) {
-    hub.connections.fetch_add(1, Ordering::Relaxed);
-    let _count = Counted(hub.clone());
-    let mut stop = hub.stop.clone();
+/// What an app hears when the work done for its request failed on the way
+/// (the blocking task panicked).
+const PROBLEM: &str = "The server had a problem. Try again.";
+
+/// Run `f` away from the connections (password hashing takes a moment);
+/// PROBLEM when it failed on the way.
+async fn off_thread<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .unwrap_or_else(|_| Err(PROBLEM.into()))
+}
+
+/// A connection whose hello signed in.
+struct SignedIn {
+    device: String,
+    member: u64,
+    role: Role,
+    tag: u16,
+    token: Option<String>,
+    app: Option<String>,
+    sync: Option<u32>,
+    deltas: bool,
+}
+
+/// The hello a connection starts with, and signing in with it. None when
+/// the connection is done (it was told why, if it should hear).
+async fn hello(
+    socket: &mut WebSocket,
+    hub: &Arc<Hub>,
+    stop: &mut watch::Receiver<bool>,
+) -> Option<SignedIn> {
     // the first message must be hello
     let hello = tokio::select! {
         m = tokio::time::timeout(Duration::from_secs(10), socket.next()) => m,
-        _ = stop.changed() => return,
+        _ = stop.changed() => return None,
     };
     let Ok(Some(Ok(Message::Text(t)))) = hello else {
-        return;
+        return None;
     };
     let Some(Msg::Hello {
         device,
@@ -169,8 +198,8 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         deltas,
     }) = Msg::parse(t.as_str())
     else {
-        let _ = send(&mut socket, &Msg::error("Say hello first.", None).to_json()).await;
-        return;
+        let _ = send(socket, &Msg::error("Say hello first.", None).to_json()).await;
+        return None;
     };
     let hello = Hello {
         device: device.clone(),
@@ -185,16 +214,159 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     };
     let h = hub.clone();
     // password hashing takes a moment
-    let signed = tokio::task::spawn_blocking(move || h.sign_in(&hello))
-        .await
-        .unwrap_or_else(|_| Err("The server had a problem. Try again.".into()));
+    let signed = off_thread(move || h.sign_in(&hello)).await;
     let (member, role, tag, token) = match signed {
         Ok(x) => x,
         Err(why) => {
-            let _ = send(&mut socket, &Msg::error(&why, Some(CODE_AUTH)).to_json()).await;
+            let _ = send(socket, &Msg::error(&why, Some(CODE_AUTH)).to_json()).await;
             let _ = socket.send(Message::Close(None)).await;
-            return;
+            return None;
         }
+    };
+    Some(SignedIn {
+        device,
+        member,
+        role,
+        tag,
+        token,
+        app,
+        sync,
+        deltas,
+    })
+}
+
+/// A signed-in connection: who it is, and what it remembers between the
+/// app's messages.
+struct Conn {
+    hub: Arc<Hub>,
+    member: u64,
+    device: String,
+    /// this connection's number (see EVERYONE)
+    conn: u64,
+    /// the address the app reached us at, for links in invite mails
+    host: Option<String>,
+    /// the app is too old to know every field (see OLDEST_SYNC)
+    too_old: bool,
+    told_too_old: bool,
+    told_put_back: Option<std::time::Instant>,
+    /// what the last copy sent left out (see Canon::delta_for)
+    was_hidden: Vec<u64>,
+}
+
+impl Conn {
+    /// What to answer a message from the app with, if anything.
+    async fn answer(&mut self, msg: Option<Msg>) -> Option<String> {
+        let (hub, member, conn) = (&self.hub, self.member, self.conn);
+        match msg {
+            Some(Msg::Push { .. }) if self.too_old => {
+                // said once per connection; the app stays connected
+                (!std::mem::replace(&mut self.told_too_old, true))
+                    .then(|| Msg::error(wb_net::UPDATE_NEEDED, Some(CODE_DENIED)).to_json())
+            }
+            Some(Msg::Push { data }) => {
+                let (hub2, device2) = (hub.clone(), self.device.clone());
+                // merging can take a moment on a big workspace
+                let refused =
+                    tokio::task::spawn_blocking(move || hub2.push(member, &device2, data))
+                        .await
+                        .unwrap_or(false);
+                // said once in a while, as an app may send again before the update reaches it
+                let quiet = self
+                    .told_put_back
+                    .is_some_and(|t| t.elapsed() < Duration::from_secs(PUT_BACK_QUIET_SECS));
+                (refused && !quiet).then(|| {
+                    self.told_put_back = Some(std::time::Instant::now());
+                    Msg::put_back(PUT_BACK).to_json()
+                })
+            }
+            Some(Msg::Ping) => Some(Msg::Pong.to_json()),
+            // it missed a revision: the whole copy again
+            Some(Msg::Resync) => hub.latest(member).map(|(t, h)| {
+                self.was_hidden = h;
+                t
+            }),
+            Some(Msg::PushToken {
+                token,
+                platform,
+                env,
+            }) => {
+                hub.set_push_token(&self.device, &token, &platform, &env);
+                None
+            }
+            Some(Msg::CallJoin { channel }) => {
+                Some(match hub.call(member, &self.device, channel) {
+                    Ok(m) => m.to_json(),
+                    Err(why) => Msg::call_denied(&why, channel).to_json(),
+                })
+            }
+            Some(Msg::SetPassword {
+                email,
+                password,
+                old_password,
+            }) => {
+                let h = hub.clone();
+                let d = self.device.clone();
+                let r = off_thread(move || {
+                    h.set_password(member, &d, &email, &password, old_password.as_deref())
+                })
+                .await;
+                Some(match r {
+                    Ok(m) => m.to_json(),
+                    Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+                })
+            }
+            Some(
+                m @ (Msg::CreateInvite { .. }
+                | Msg::SetRole { .. }
+                | Msg::Revoke { .. }
+                | Msg::AccessList
+                | Msg::BackupList
+                | Msg::Restore { .. }),
+            ) => match hub.request(member, conn, m) {
+                Reply::To(Msg::Invite {
+                    member: who, code, ..
+                }) => {
+                    // email it when the server can (sending takes a moment)
+                    let (h, c, at) = (hub.clone(), code.clone(), self.host.clone());
+                    let (emailed, mail_error) = tokio::task::spawn_blocking(move || {
+                        h.email_invite(member, who, &c, at.as_deref())
+                    })
+                    .await
+                    .unwrap_or((None, None));
+                    Some(
+                        Msg::Invite {
+                            member: who,
+                            code,
+                            emailed,
+                            mail_error,
+                        }
+                        .to_json(),
+                    )
+                }
+                Reply::To(r) => Some(r.to_json()),
+                Reply::Denied(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
+            },
+            _ => None,
+        }
+    }
+}
+
+pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Option<String>) {
+    hub.connections.fetch_add(1, Ordering::Relaxed);
+    let _count = Counted(hub.clone());
+    let mut stop = hub.stop.clone();
+    let Some(SignedIn {
+        device,
+        member,
+        role,
+        tag,
+        token,
+        app,
+        sync,
+        deltas,
+    }) = hello(&mut socket, &hub, &mut stop).await
+    else {
+        return;
     };
     let mut closed = hub.closed.subscribe();
     if *closed.borrow_and_update() {
@@ -212,7 +384,6 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
             app.as_deref().unwrap_or("no version")
         );
     }
-    let mut told_too_old = false;
     // signed in: from now on a message may hold a whole workspace. The app
     // sends nothing between hello and welcome, so nothing read ahead is lost.
     let mut socket = WebSocketStream::from_raw_socket(
@@ -237,7 +408,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     let mut presence = hub.presence.subscribe();
     // this connection's requests don't bring it the access broadcast too
     let conn = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
-    let (welcome, mut was_hidden) = hub.welcome(tag, member, role, token);
+    let (welcome, was_hidden) = hub.welcome(tag, member, role, token);
     if !send(&mut socket, &welcome).await {
         return;
     }
@@ -248,8 +419,18 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
         return;
     }
+    let mut me = Conn {
+        hub: hub.clone(),
+        member,
+        device: device.clone(),
+        conn,
+        host,
+        too_old,
+        told_too_old: false,
+        told_put_back: None,
+        was_hidden,
+    };
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
-    let mut told_put_back: Option<std::time::Instant> = None;
     loop {
         tokio::select! {
             // in this order when several are ready: a new role (Access)
@@ -302,58 +483,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                 let Message::Text(t) = m else {
                     if matches!(m, Message::Close(_)) { break } else { continue }
                 };
-                let out = match Msg::parse(t.as_str()) {
-                    Some(Msg::Push { .. }) if too_old => {
-                        // said once per connection; the app stays connected
-                        (!std::mem::replace(&mut told_too_old, true)).then(|| Msg::error(wb_net::UPDATE_NEEDED, Some(CODE_DENIED)).to_json())
-                    }
-                    Some(Msg::Push { data }) => {
-                        let (hub2, device2) = (hub.clone(), device.clone());
-                        // merging can take a moment on a big workspace
-                        let refused = tokio::task::spawn_blocking(move || hub2.push(member, &device2, data)).await.unwrap_or(false);
-                        // said once in a while, as an app may send again before the update reaches it
-                        let quiet = told_put_back.is_some_and(|t| t.elapsed() < Duration::from_secs(PUT_BACK_QUIET_SECS));
-                        (refused && !quiet).then(|| {
-                            told_put_back = Some(std::time::Instant::now());
-                            Msg::put_back(PUT_BACK).to_json()
-                        })
-                    }
-                    Some(Msg::Ping) => Some(Msg::Pong.to_json()),
-                    // it missed a revision: the whole copy again
-                    Some(Msg::Resync) => hub.latest(member).map(|(t, h)| {
-                        was_hidden = h;
-                        t
-                    }),
-                    Some(Msg::PushToken { token, platform, env }) => {
-                        hub.set_push_token(&device, &token, &platform, &env);
-                        None
-                    }
-                    Some(Msg::CallJoin { channel }) => Some(match hub.call(member, &device, channel) {
-                        Ok(m) => m.to_json(),
-                        Err(why) => Msg::call_denied(&why, channel).to_json(),
-                    }),
-                    Some(Msg::SetPassword { email, password, old_password }) => {
-                        let h = hub.clone();
-                        let d = device.clone();
-                        let r = tokio::task::spawn_blocking(move || h.set_password(member, &d, &email, &password, old_password.as_deref())).await.unwrap_or_else(|_| Err("The server had a problem. Try again.".into()));
-                        Some(match r {
-                            Ok(m) => m.to_json(),
-                            Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
-                        })
-                    }
-                    Some(m @ (Msg::CreateInvite { .. } | Msg::SetRole { .. } | Msg::Revoke { .. } | Msg::AccessList | Msg::BackupList | Msg::Restore { .. })) => match hub.request(member, conn, m) {
-                        Reply::To(Msg::Invite { member: who, code, .. }) => {
-                            // email it when the server can (sending takes a moment)
-                            let (h, c, at) = (hub.clone(), code.clone(), host.clone());
-                            let (emailed, mail_error) = tokio::task::spawn_blocking(move || h.email_invite(member, who, &c, at.as_deref())).await.unwrap_or((None, None));
-                            Some(Msg::Invite { member: who, code, emailed, mail_error }.to_json())
-                        }
-                        Reply::To(r) => Some(r.to_json()),
-                        Reply::Denied(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
-                    },
-                    _ => None,
-                };
-                if let Some(o) = out {
+                if let Some(o) = me.answer(Msg::parse(t.as_str())).await {
                     if !send(&mut socket, &o).await {
                         break;
                     }
@@ -361,7 +491,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
             }
             u = updates.recv() => {
                 let (text, hidden) = match u {
-                    Ok(c) => match deltas.then(|| c.delta_for(member, &was_hidden)).flatten() {
+                    Ok(c) => match deltas.then(|| c.delta_for(member, &me.was_hidden)).flatten() {
                         Some(d) => d,
                         None => c.update_for(member),
                     },
@@ -369,7 +499,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                     Err(broadcast::error::RecvError::Lagged(_)) => match hub.latest(member) { Some(t) => t, None => continue },
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                was_hidden = hidden;
+                me.was_hidden = hidden;
                 if !send(&mut socket, &text).await {
                     break;
                 }

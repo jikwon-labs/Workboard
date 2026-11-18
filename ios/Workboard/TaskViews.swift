@@ -286,7 +286,6 @@ struct TaskDetailView: View {
     var body: some View {
         let v = client.view
         if let t = v.tasks.first(where: { $0.id == taskId }) {
-            let status = v.status(of: t)
             let can = client.canEdit
             ScrollViewReader { proxy in
                 Form {
@@ -308,68 +307,7 @@ struct TaskDetailView: View {
                             LabeledContent("List", value: l.name)
                         }
                     }
-                    Section {
-                        Menu {
-                            ForEach(v.statuses(forList: t.listId), id: \.name) { st in
-                                Button {
-                                    client.edit { d, me in Edits.setStatus(&d, task: t.id, to: st.name, me: me, ts: nowTs()) }
-                                } label: {
-                                    CheckedLabel(st.name.uppercased(), checked: st.name == t.status)
-                                }
-                            }
-                        } label: {
-                            LabeledContent("Status") {
-                                HStack(spacing: 6) {
-                                    StatusDot(status: status, size: 10)
-                                    Text(status.name.uppercased()).font(.subheadline.weight(.semibold)).foregroundStyle(Color(rgb: status.color))
-                                }
-                            }
-                        }
-                        .disabled(!can)
-                        .accessibilityIdentifier("statusMenu")
-                        Button {
-                            client.edit { d, me in Edits.setDone(&d, task: t.id, done: !status.isClosed, me: me, ts: nowTs()) }
-                        } label: {
-                            Label(status.isClosed ? "Reopen" : "Mark complete", systemImage: status.isClosed ? "arrow.uturn.backward.circle" : "checkmark.circle")
-                        }
-                        .disabled(!can)
-                        .accessibilityIdentifier("completeButton")
-                        Menu {
-                            ForEach(v.activeMembers) { m in
-                                Button {
-                                    client.edit { d, me in Edits.toggleAssignee(&d, task: t.id, member: m.id, me: me, ts: nowTs()) }
-                                } label: {
-                                    CheckedLabel(m.name, checked: t.assignees.contains(m.id))
-                                }
-                            }
-                        } label: {
-                            LabeledContent("Assignees") {
-                                Text(t.assignees.isEmpty ? String(localized: "None") : t.assignees.compactMap { v.member($0)?.name }.joined(separator: ", "))
-                                    .lineLimit(1)
-                            }
-                        }
-                        .disabled(!can)
-                        .accessibilityIdentifier("assigneeMenu")
-                        DueRow(task: t, enabled: can)
-                        if v.apps.priorities {
-                        Menu {
-                            ForEach(0..<5) { p in
-                                Button {
-                                    client.edit { d, me in Edits.setPriority(&d, task: t.id, to: p, me: me, ts: nowTs()) }
-                                } label: {
-                                    CheckedLabel(L(Edits.priorityLabels[p]), checked: t.priority == p)
-                                }
-                            }
-                        } label: {
-                            LabeledContent("Priority") {
-                                Label(L(Edits.priorityLabels[min(max(t.priority, 0), 4)]), systemImage: t.priority == 0 ? "flag" : "flag.fill")
-                                    .foregroundStyle(priorityColor(t.priority))
-                            }
-                        }
-                        .disabled(!can)
-                        .accessibilityIdentifier("priorityMenu")
-                        }
-                    }
+                    TaskPropertiesSection(task: t, can: can)
                     TaskDetailsSection(task: t, can: can)
                     Section("Description") {
                         TextField("Add a description", text: $desc, axis: .vertical)
@@ -399,49 +337,7 @@ struct TaskDetailView: View {
                     TaskAttachmentsSection(task: t, can: can)
                     if !t.checklist.isEmpty || can {
                         Section {
-                            ForEach(Array(t.checklist.enumerated()), id: \.offset) { i, item in
-                                Button {
-                                    client.edit { d, _ in Edits.setCheckItem(&d, task: t.id, index: i, done: !item.done, ts: nowTs()) }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(item.done ? Color.green : Color.secondary)
-                                        Text(item.text)
-                                            .strikethrough(item.done)
-                                            .foregroundStyle(item.done ? .secondary : .primary)
-                                        Spacer(minLength: 0)
-                                        if let who = item.assignee, let m = v.member(who) {
-                                            Avatar(member: m, size: 20)
-                                        }
-                                    }
-                                }
-                                .disabled(!can)
-                                .accessibilityLabel(item.text)
-                                .accessibilityValue(item.done ? "Done" : "Not done")
-                                .accessibilityIdentifier("checkItem-\(i)")
-                                .contextMenu {
-                                    if can {
-                                        Button { renameText = item.text; renaming = i } label: { Label("Rename", systemImage: "pencil") }
-                                        Menu {
-                                            Button("Nobody") { client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: nil, ts: nowTs()) } }
-                                            ForEach(v.activeMembers) { m in
-                                                Button {
-                                                    client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: m.id, ts: nowTs()) }
-                                                } label: {
-                                                    CheckedLabel(m.name, checked: item.assignee == m.id)
-                                                }
-                                            }
-                                        } label: { Label("Assign", systemImage: "person") }
-                                        Button {
-                                            let id = client.newId()
-                                            client.edit { d, me in Edits.checkItemToSubtask(&d, task: t.id, index: i, me: me, id: id, ts: nowTs()) }
-                                        } label: { Label("Convert to subtask", systemImage: "arrow.turn.down.right") }
-                                    }
-                                }
-                                .deleteSwipe(can) {
-                                    client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
-                                }
-                            }
+                            ChecklistRows(task: t, can: can) { i, text in renameText = text; renaming = i }
                             if can {
                                 TextField(t.checklist.isEmpty ? "Create checklist" : "Add item", text: $newCheck)
                                     .focused($focus, equals: .check)
@@ -463,25 +359,7 @@ struct TaskDetailView: View {
                     if v.apps.timeTracking {
                         TimeSection(task: t, can: can)
                     }
-                    Section {
-                        ForEach(Array(t.activity.suffix(30).reversed().enumerated()), id: \.offset) { i, a in
-                            HStack(alignment: .top, spacing: 10) {
-                                Avatar(member: v.member(a.author), size: 22)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    if a.comment {
-                                        Text(v.member(a.author)?.name ?? String(localized: "Someone")).font(.caption.weight(.semibold))
-                                    }
-                                    Text(verbatim: a.comment ? a.text : History.line(who: v.member(a.author)?.name ?? String(localized: "Someone"), text: a.text))
-                                        .font(.subheadline)
-                                        .foregroundStyle(a.comment ? .primary : .secondary)
-                                    Text(Fmt.relative(a.ts)).font(.caption2).foregroundStyle(.tertiary)
-                                }
-                            }
-                            .id(i == 0 ? "latestActivity" : "activity-\(i)")
-                        }
-                    } header: {
-                        Text("Activity")
-                    }
+                    TaskActivitySection(task: t)
                 }
                 .onChange(of: commented) {
                     withAnimation { proxy.scrollTo("latestActivity", anchor: .top) }
@@ -583,15 +461,6 @@ struct TaskDetailView: View {
         }
     }
 
-    func priorityColor(_ p: Int) -> Color {
-        switch p {
-        case 1: return .red
-        case 2: return .orange
-        case 3: return .blue
-        default: return .secondary
-        }
-    }
-
     /// Like the Mac app's "Add subtask": in the parent's list, under it.
     func addSubtask(_ t: TaskView) {
         let n = newSubtask.trimmed
@@ -624,6 +493,178 @@ struct TaskDetailView: View {
         if !ok {
             name = t.name
             desc = t.description
+        }
+    }
+}
+
+/// A task's status, Mark complete, assignees, due date and priority.
+struct TaskPropertiesSection: View {
+    @Environment(SyncClient.self) private var client
+    let task: TaskView
+    let can: Bool
+
+    var body: some View {
+        let v = client.view
+        let t = task
+        let status = v.status(of: t)
+        Section {
+            Menu {
+                ForEach(v.statuses(forList: t.listId), id: \.name) { st in
+                    Button {
+                        client.edit { d, me in Edits.setStatus(&d, task: t.id, to: st.name, me: me, ts: nowTs()) }
+                    } label: {
+                        CheckedLabel(st.name.uppercased(), checked: st.name == t.status)
+                    }
+                }
+            } label: {
+                LabeledContent("Status") {
+                    HStack(spacing: 6) {
+                        StatusDot(status: status, size: 10)
+                        Text(status.name.uppercased()).font(.subheadline.weight(.semibold)).foregroundStyle(Color(rgb: status.color))
+                    }
+                }
+            }
+            .disabled(!can)
+            .accessibilityIdentifier("statusMenu")
+            Button {
+                client.edit { d, me in Edits.setDone(&d, task: t.id, done: !status.isClosed, me: me, ts: nowTs()) }
+            } label: {
+                Label(status.isClosed ? "Reopen" : "Mark complete", systemImage: status.isClosed ? "arrow.uturn.backward.circle" : "checkmark.circle")
+            }
+            .disabled(!can)
+            .accessibilityIdentifier("completeButton")
+            Menu {
+                ForEach(v.activeMembers) { m in
+                    Button {
+                        client.edit { d, me in Edits.toggleAssignee(&d, task: t.id, member: m.id, me: me, ts: nowTs()) }
+                    } label: {
+                        CheckedLabel(m.name, checked: t.assignees.contains(m.id))
+                    }
+                }
+            } label: {
+                LabeledContent("Assignees") {
+                    Text(t.assignees.isEmpty ? String(localized: "None") : t.assignees.compactMap { v.member($0)?.name }.joined(separator: ", "))
+                        .lineLimit(1)
+                }
+            }
+            .disabled(!can)
+            .accessibilityIdentifier("assigneeMenu")
+            DueRow(task: t, enabled: can)
+            if v.apps.priorities {
+            Menu {
+                ForEach(0..<5) { p in
+                    Button {
+                        client.edit { d, me in Edits.setPriority(&d, task: t.id, to: p, me: me, ts: nowTs()) }
+                    } label: {
+                        CheckedLabel(L(Edits.priorityLabels[p]), checked: t.priority == p)
+                    }
+                }
+            } label: {
+                LabeledContent("Priority") {
+                    Label(L(Edits.priorityLabels[min(max(t.priority, 0), 4)]), systemImage: t.priority == 0 ? "flag" : "flag.fill")
+                        .foregroundStyle(priorityColor(t.priority))
+                }
+            }
+            .disabled(!can)
+            .accessibilityIdentifier("priorityMenu")
+            }
+        }
+    }
+
+    func priorityColor(_ p: Int) -> Color {
+        switch p {
+        case 1: return .red
+        case 2: return .orange
+        case 3: return .blue
+        default: return .secondary
+        }
+    }
+}
+
+/// A task's checklist items: tap to tick, long-press to rename, assign or
+/// turn into a subtask, swipe to delete.
+struct ChecklistRows: View {
+    @Environment(SyncClient.self) private var client
+    let task: TaskView
+    let can: Bool
+    /// Rename item `i` (its text now).
+    let rename: (Int, String) -> Void
+
+    var body: some View {
+        let v = client.view
+        let t = task
+        ForEach(Array(t.checklist.enumerated()), id: \.offset) { i, item in
+            Button {
+                client.edit { d, _ in Edits.setCheckItem(&d, task: t.id, index: i, done: !item.done, ts: nowTs()) }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(item.done ? Color.green : Color.secondary)
+                    Text(item.text)
+                        .strikethrough(item.done)
+                        .foregroundStyle(item.done ? .secondary : .primary)
+                    Spacer(minLength: 0)
+                    if let who = item.assignee, let m = v.member(who) {
+                        Avatar(member: m, size: 20)
+                    }
+                }
+            }
+            .disabled(!can)
+            .accessibilityLabel(item.text)
+            .accessibilityValue(item.done ? "Done" : "Not done")
+            .accessibilityIdentifier("checkItem-\(i)")
+            .contextMenu {
+                if can {
+                    Button { rename(i, item.text) } label: { Label("Rename", systemImage: "pencil") }
+                    Menu {
+                        Button("Nobody") { client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: nil, ts: nowTs()) } }
+                        ForEach(v.activeMembers) { m in
+                            Button {
+                                client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: m.id, ts: nowTs()) }
+                            } label: {
+                                CheckedLabel(m.name, checked: item.assignee == m.id)
+                            }
+                        }
+                    } label: { Label("Assign", systemImage: "person") }
+                    Button {
+                        let id = client.newId()
+                        client.edit { d, me in Edits.checkItemToSubtask(&d, task: t.id, index: i, me: me, id: id, ts: nowTs()) }
+                    } label: { Label("Convert to subtask", systemImage: "arrow.turn.down.right") }
+                }
+            }
+            .deleteSwipe(can) {
+                client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
+            }
+        }
+    }
+}
+
+/// The newest 30 lines of a task's activity, newest first.
+struct TaskActivitySection: View {
+    @Environment(SyncClient.self) private var client
+    let task: TaskView
+
+    var body: some View {
+        let v = client.view
+        let t = task
+        Section {
+            ForEach(Array(t.activity.suffix(30).reversed().enumerated()), id: \.offset) { i, a in
+                HStack(alignment: .top, spacing: 10) {
+                    Avatar(member: v.member(a.author), size: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if a.comment {
+                            Text(v.member(a.author)?.name ?? String(localized: "Someone")).font(.caption.weight(.semibold))
+                        }
+                        Text(verbatim: a.comment ? a.text : History.line(who: v.member(a.author)?.name ?? String(localized: "Someone"), text: a.text))
+                            .font(.subheadline)
+                            .foregroundStyle(a.comment ? .primary : .secondary)
+                        Text(Fmt.relative(a.ts)).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .id(i == 0 ? "latestActivity" : "activity-\(i)")
+            }
+        } header: {
+            Text("Activity")
         }
     }
 }

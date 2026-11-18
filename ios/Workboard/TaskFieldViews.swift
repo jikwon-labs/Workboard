@@ -26,10 +26,10 @@ struct TaskDetailsSection: View {
         Section("Details") {
             Menu {
                 Button { client.edit { d, _ in Edits.setMilestone(&d, task: task.id, false, ts: nowTs()) } } label: {
-                    if !task.milestone { Label("Task", systemImage: "checkmark") } else { Text("Task") }
+                    CheckedLabel("Task", checked: !task.milestone)
                 }
                 Button { client.edit { d, _ in Edits.setMilestone(&d, task: task.id, true, ts: nowTs()) } } label: {
-                    if task.milestone { Label("Milestone", systemImage: "checkmark") } else { Text("Milestone") }
+                    CheckedLabel("Milestone", checked: task.milestone)
                 }
             } label: {
                 LabeledContent("Task type") {
@@ -72,7 +72,7 @@ struct TaskDetailsSection: View {
                     Button {
                         client.edit { d, me in Edits.setRecur(&d, task: task.id, to: r.value, me: me, ts: nowTs()) }
                     } label: {
-                        if task.recur == r.value { Label(L(r.label), systemImage: "checkmark") } else { Text(L(r.label)) }
+                        CheckedLabel(L(r.label), checked: task.recur == r.value)
                     }
                 }
             } label: {
@@ -100,11 +100,11 @@ struct TaskDetailsSection: View {
             }
 
             Menu {
-                ForEach(v.members.filter { !$0.invited }) { m in
+                ForEach(v.activeMembers) { m in
                     Button {
                         client.edit { d, _ in Edits.toggleWatcher(&d, task: task.id, member: m.id, ts: nowTs()) }
                     } label: {
-                        if task.watchers.contains(m.id) { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                        CheckedLabel(m.name, checked: task.watchers.contains(m.id))
                     }
                 }
             } label: {
@@ -237,7 +237,7 @@ struct AddTagSheet: View {
             .navigationTitle("Add tag")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") { add(text) }.disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -370,12 +370,8 @@ struct TimeSection: View {
                     Spacer()
                     Text(Self.hm(e.secs)).monospacedDigit().foregroundStyle(.secondary)
                 }
-                .swipeActions {
-                    if can && (owner == me || (owner == 0 && v.solo)) {
-                        Button("Delete", role: .destructive) {
-                            client.edit { d, _ in Edits.removeTimeEntry(&d, task: task.id, member: e.member, start: e.start) }
-                        }
-                    }
+                .deleteSwipe(can && (owner == me || (owner == 0 && v.solo))) {
+                    client.edit { d, _ in Edits.removeTimeEntry(&d, task: task.id, member: e.member, start: e.start) }
                 }
             }
             Button { addingTime = true } label: { Label("Add time", systemImage: "plus") }
@@ -450,7 +446,7 @@ struct AddTimeSheet: View {
             .navigationTitle("Add time")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add", action: add).disabled(minutes == nil).accessibilityIdentifier("addTimeConfirm")
                 }
@@ -487,12 +483,8 @@ struct RelationshipsSection: View {
                             TaskRow(task: t)
                         }
                     }
-                    .swipeActions {
-                        if can {
-                            Button("Remove", role: .destructive) {
-                                client.edit { d, _ in Edits.removeRelation(&d, task: task.id, rel, other: t.id, ts: nowTs()) }
-                            }
-                        }
+                    .deleteSwipe(can, "Remove") {
+                        client.edit { d, _ in Edits.removeRelation(&d, task: task.id, rel, other: t.id, ts: nowTs()) }
                     }
                     .accessibilityIdentifier("relation-\(rel.rawValue)-\(t.id)")
                 }
@@ -550,7 +542,7 @@ struct TaskPickerSheet: View {
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { CancelButton { dismiss() } }
         }
     }
 }
@@ -586,7 +578,7 @@ struct ListPickerSheet: View {
             }
             .navigationTitle("Move to")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { CancelButton { dismiss() } }
         }
     }
 }

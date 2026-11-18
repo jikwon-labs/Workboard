@@ -457,6 +457,9 @@ public struct WorkspaceView: Sendable {
 
     public func member(_ id: UInt64) -> MemberView? { members.first { $0.id == id } }
 
+    /// The people who have joined (not those still invited).
+    public var activeMembers: [MemberView] { members.filter { !$0.invited } }
+
     public func space(ofList list: UInt64) -> SpaceView? { spaces.first { $0.allListIds.contains(list) } }
 
     public func statuses(forList list: UInt64) -> [StatusView] { space(ofList: list)?.statuses ?? StatusView.defaults }

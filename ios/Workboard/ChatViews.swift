@@ -97,7 +97,7 @@ struct NewDMSheet: View {
             .navigationTitle("New Message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
             }
         }
     }
@@ -142,7 +142,7 @@ struct NewChannelSheet: View {
             .navigationTitle("Create Channel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create", action: create)
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -532,7 +532,7 @@ struct MessageRow: View {
                 .navigationTitle("Edit message")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editing = false } }
+                    CancelButton { editing = false }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Save") {
                             client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
@@ -815,7 +815,7 @@ struct NewPostSheet: View {
             .navigationTitle("New post")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Post") {
                         let id = client.newId()

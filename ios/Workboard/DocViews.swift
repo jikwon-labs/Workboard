@@ -138,9 +138,7 @@ struct DocDetailView: View {
             .navigationBarBackButtonHidden(editing)
             .toolbar {
                 if editing {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { editing = false }
-                    }
+                    CancelButton { editing = false }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { save(d) }
                             .disabled(!client.canEdit)

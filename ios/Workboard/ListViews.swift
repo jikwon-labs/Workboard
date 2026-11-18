@@ -57,10 +57,7 @@ struct BoardColumn: View {
                 Text(status.name.uppercased()).font(.caption.weight(.bold))
                 Text("\(tasks.count)").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button { adding = true } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("Add task to \(status.name)")
-                    .accessibilityIdentifier("boardAdd-\(status.name)")
+                AddButton("Add task to \(status.name)", id: "boardAdd-\(status.name)") { adding = true }
             }
             .padding(.horizontal, 4)
             ScrollView {

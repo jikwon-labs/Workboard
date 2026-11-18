@@ -25,14 +25,14 @@ struct RootView: View {
         .fullScreenCover(isPresented: $calls.showCall) { CallView() }
         .onChange(of: nav.openedLink) { if let l = nav.openedLink { nav.openedLink = nil; open(l) } }
         .onAppear { if let l = nav.openedLink { nav.openedLink = nil; open(l) } }
-        .alert("Switch servers?", isPresented: Binding(get: { nav.confirmSwitch != nil }, set: { if !$0 { nav.confirmSwitch = nil } }), presenting: nav.confirmSwitch) { link in
+        .alert("Switch servers?", isPresented: Binding(isPresent: $nav.confirmSwitch), presenting: nav.confirmSwitch) { link in
             Button("Switch") { use(link, fresh: true) }
                 .accessibilityIdentifier("confirmSwitchButton")
             Button("Cancel", role: .cancel) {}
         } message: { link in
             Text("This invite is for \(link.server ?? "another server"). You're signed in to \(client.settings.server). Switching signs this iPhone out there and replaces its copy of the workspace.")
         }
-        .alert("Already signed in", isPresented: Binding(get: { nav.confirmSignOut != nil }, set: { if !$0 { nav.confirmSignOut = nil } }), presenting: nav.confirmSignOut) { link in
+        .alert("Already signed in", isPresented: Binding(isPresent: $nav.confirmSignOut), presenting: nav.confirmSignOut) { link in
             Button("Sign out and use it", role: .destructive) {
                 client.signOut()
                 nav.invite = link

@@ -48,7 +48,7 @@ struct PeopleView: View {
             client.clearAdminMessages()
             if rules.seesPeople { client.requestAccessList() }
         }
-        .confirmationDialog("Remove access?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
+        .confirmationDialog("Remove access?", isPresented: Binding(isPresent: $confirmRemove),
                             titleVisibility: .visible, presenting: confirmRemove) { p in
             Button("Remove access", role: .destructive) { client.revoke(member: p.member) }
                 .accessibilityIdentifier("confirmRemoveAccess")
@@ -202,7 +202,7 @@ struct BackupsView: View {
             client.clearAdminMessages()
             if client.accessRules.seesBackups { client.requestBackups() }
         }
-        .confirmationDialog("Restore this backup?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }),
+        .confirmationDialog("Restore this backup?", isPresented: Binding(isPresent: $confirm),
                             titleVisibility: .visible, presenting: confirm) { b in
             Button("Yes, restore", role: .destructive) { client.restore(backup: b.name) }
                 .accessibilityIdentifier("confirmRestore")

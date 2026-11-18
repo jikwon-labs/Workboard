@@ -40,10 +40,7 @@ struct SpacesView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { prompt = .newSpace } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New space")
-                    .accessibilityIdentifier("newSpaceButton")
+                AddButton("New space", id: "newSpaceButton") { prompt = .newSpace }
             }
         }
         .namePrompt($prompt)
@@ -242,13 +239,10 @@ struct ListTasksView: View {
                     Button("Add", action: add)
                         .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                 } else {
-                    Button {
+                    AddButton("New task", id: "addTaskButton") {
                         adding = true
                         newFocused = true
-                    } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New task")
-                    .accessibilityIdentifier("addTaskButton")
+                    }
                 }
             }
         }
@@ -320,7 +314,7 @@ struct TaskDetailView: View {
                                 Button {
                                     client.edit { d, me in Edits.setStatus(&d, task: t.id, to: st.name, me: me, ts: nowTs()) }
                                 } label: {
-                                    if st.name == t.status { Label(st.name.uppercased(), systemImage: "checkmark") } else { Text(st.name.uppercased()) }
+                                    CheckedLabel(st.name.uppercased(), checked: st.name == t.status)
                                 }
                             }
                         } label: {
@@ -341,11 +335,11 @@ struct TaskDetailView: View {
                         .disabled(!can)
                         .accessibilityIdentifier("completeButton")
                         Menu {
-                            ForEach(v.members.filter { !$0.invited }) { m in
+                            ForEach(v.activeMembers) { m in
                                 Button {
                                     client.edit { d, me in Edits.toggleAssignee(&d, task: t.id, member: m.id, me: me, ts: nowTs()) }
                                 } label: {
-                                    if t.assignees.contains(m.id) { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                                    CheckedLabel(m.name, checked: t.assignees.contains(m.id))
                                 }
                             }
                         } label: {
@@ -363,7 +357,7 @@ struct TaskDetailView: View {
                                 Button {
                                     client.edit { d, me in Edits.setPriority(&d, task: t.id, to: p, me: me, ts: nowTs()) }
                                 } label: {
-                                    if t.priority == p { Label(L(Edits.priorityLabels[p]), systemImage: "checkmark") } else { Text(L(Edits.priorityLabels[p])) }
+                                    CheckedLabel(L(Edits.priorityLabels[p]), checked: t.priority == p)
                                 }
                             }
                         } label: {
@@ -430,11 +424,11 @@ struct TaskDetailView: View {
                                         Button { renameText = item.text; renaming = i } label: { Label("Rename", systemImage: "pencil") }
                                         Menu {
                                             Button("Nobody") { client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: nil, ts: nowTs()) } }
-                                            ForEach(v.members.filter { !$0.invited }) { m in
+                                            ForEach(v.activeMembers) { m in
                                                 Button {
                                                     client.edit { d, _ in Edits.setCheckAssignee(&d, task: t.id, index: i, to: m.id, ts: nowTs()) }
                                                 } label: {
-                                                    if item.assignee == m.id { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                                                    CheckedLabel(m.name, checked: item.assignee == m.id)
                                                 }
                                             }
                                         } label: { Label("Assign", systemImage: "person") }
@@ -444,12 +438,8 @@ struct TaskDetailView: View {
                                         } label: { Label("Convert to subtask", systemImage: "arrow.turn.down.right") }
                                     }
                                 }
-                                .swipeActions {
-                                    if can {
-                                        Button("Delete", role: .destructive) {
-                                            client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
-                                        }
-                                    }
+                                .deleteSwipe(can) {
+                                    client.edit { d, _ in Edits.removeCheckItem(&d, task: t.id, index: i, ts: nowTs()) }
                                 }
                             }
                             if can {
@@ -560,7 +550,7 @@ struct TaskDetailView: View {
                     NewReminderView(task: t)
                 }
             }
-            .alert("Rename item", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            .alert("Rename item", isPresented: Binding(isPresent: $renaming)) {
                 TextField("Item", text: $renameText).accessibilityIdentifier("renameCheckField")
                 Button("Cancel", role: .cancel) { renaming = nil }
                 Button("Save") {

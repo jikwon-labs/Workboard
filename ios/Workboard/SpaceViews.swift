@@ -50,7 +50,7 @@ struct NamePromptModifier: ViewModifier {
     @State private var text = ""
 
     func body(content: Content) -> some View {
-        content.alert(prompt?.title ?? "", isPresented: Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } })) {
+        content.alert(prompt?.title ?? "", isPresented: Binding(isPresent: $prompt)) {
             TextField("Name", text: $text)
             Button("Cancel", role: .cancel) { prompt = nil }
             Button(prompt?.action ?? "Save") { apply() }
@@ -183,7 +183,7 @@ private struct StatusRow: View {
                     Button {
                         client.edit { d, _ in Edits.setStatusKind(&d, space: spaceId, index: index, to: k) }
                     } label: {
-                        if k == status.kind { Label(L(label), systemImage: "checkmark") } else { Text(L(label)) }
+                        CheckedLabel(L(label), checked: k == status.kind)
                     }
                 }
             } label: {
@@ -192,12 +192,8 @@ private struct StatusRow: View {
             .accessibilityIdentifier("statusKind-\(index)")
         }
         .disabled(!client.canEdit)
-        .swipeActions {
-            if canDelete && client.canEdit {
-                Button("Delete", role: .destructive) {
-                    client.edit { d, me in Edits.deleteStatus(&d, space: spaceId, index: index, me: me, ts: nowTs()) }
-                }
-            }
+        .deleteSwipe(canDelete && client.canEdit) {
+            client.edit { d, me in Edits.deleteStatus(&d, space: spaceId, index: index, me: me, ts: nowTs()) }
         }
         .onAppear { name = status.name }
         .onChange(of: status.name) { if !focused { name = status.name } }

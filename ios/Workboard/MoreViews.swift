@@ -89,13 +89,10 @@ struct GoalsView: View {
         .navigationTitle("Goals")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                AddButton("New goal", id: "newGoalButton") {
                     let id = client.newId()
                     if client.edit({ d, me in Edits.addGoal(&d, name: "New goal", me: me, id: id) }) { nav.more.append(.goal(id)) }
-                } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New goal")
-                    .accessibilityIdentifier("newGoalButton")
+                }
             }
         }
     }
@@ -136,11 +133,7 @@ struct GoalDetailView: View {
                     ForEach(Array(g.targets.enumerated()), id: \.offset) { i, t in
                         TargetRow(goal: g.id, index: i, target: t, pickTasks: { pickingTasks = i })
                             .disabled(!can)
-                            .swipeActions {
-                                if can {
-                                    Button("Delete", role: .destructive) { client.edit { d, _ in Edits.removeTarget(&d, goal: g.id, index: i) } }
-                                }
-                            }
+                            .deleteSwipe(can) { client.edit { d, _ in Edits.removeTarget(&d, goal: g.id, index: i) } }
                     }
                     Button { addingTarget = true } label: { Label("Add target", systemImage: "plus") }
                         .disabled(!can)
@@ -267,7 +260,7 @@ private struct NewTargetView: View {
             .navigationTitle("New target")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let k: GoalTargetView.Kind
@@ -316,7 +309,7 @@ private struct TasksTargetPicker: View {
             .navigationTitle(name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         client.edit { d, _ in Edits.setTarget(&d, goal: goal, index: index, to: GoalTargetView(name: name, kind: .tasks(ids: chosen))) }
@@ -349,13 +342,10 @@ struct MeetingsView: View {
         .navigationTitle("Meetings")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                AddButton("New meeting", id: "newMeetingButton") {
                     let id = client.newId()
                     if client.edit({ d, me in Edits.addMeeting(&d, title: "New meeting", date: dayString(), me: me, id: id) }) { nav.more.append(.meeting(id)) }
-                } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New meeting")
-                    .accessibilityIdentifier("newMeetingButton")
+                }
             }
         }
     }
@@ -398,16 +388,9 @@ struct MeetingDetailView: View {
                 }
                 .disabled(!can)
                 Section("Attendees") {
-                    ForEach(v.members.filter { !$0.invited }) { p in
-                        Button {
+                    ForEach(v.activeMembers) { p in
+                        MemberToggleRow(member: p, on: m.attendees.contains(p.id)) {
                             client.edit { d, _ in Edits.toggleAttendee(&d, meeting: m.id, member: p.id) }
-                        } label: {
-                            HStack {
-                                Avatar(member: p, size: 22)
-                                Text(p.name).foregroundStyle(.primary)
-                                Spacer()
-                                if m.attendees.contains(p.id) { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
-                            }
                         }
                         .disabled(!can)
                     }
@@ -537,9 +520,7 @@ struct RemindersView: View {
         .navigationTitle("Reminders")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { adding = true } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New reminder")
-                    .accessibilityIdentifier("newReminderButton")
+                AddButton("New reminder", id: "newReminderButton", needsEdit: false) { adding = true }
             }
         }
         .sheet(isPresented: $adding) { NewReminderView(task: nil) }
@@ -593,7 +574,7 @@ struct NewReminderView: View {
             .navigationTitle("New reminder")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let id = client.newId(), ts = Int64(when.timeIntervalSince1970), me = client.me ?? 0, t = text
@@ -742,10 +723,7 @@ struct TimesheetsView: View {
         .navigationTitle("Timesheets")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { adding = true } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("Add time")
-                    .accessibilityIdentifier("sheetAddTime")
+                AddButton("Add time", id: "sheetAddTime") { adding = true }
             }
         }
         .sheet(isPresented: $adding) { SheetAddTime() }
@@ -772,7 +750,7 @@ private struct SheetAddTime: View {
                 .searchable(text: $query)
                 .navigationTitle("Add time to")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+                .toolbar { CancelButton { dismiss() } }
             }
         }
     }
@@ -796,11 +774,7 @@ struct DashboardsView: View {
                 NavigationLink { DashboardDetailView(dashboardId: d.id) } label: {
                     Label(d.name, systemImage: "rectangle.3.group")
                 }
-                .swipeActions {
-                    if client.canEdit {
-                        Button("Delete", role: .destructive) { client.edit { data, _ in Edits.deleteDashboard(&data, dashboard: d.id) } }
-                    }
-                }
+                .deleteSwipe(client.canEdit) { client.edit { data, _ in Edits.deleteDashboard(&data, dashboard: d.id) } }
                 .accessibilityIdentifier("dashboard-\(d.id)")
             }
         }
@@ -926,14 +900,11 @@ struct FormsView: View {
         .navigationTitle("Forms")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                AddButton("New form", id: "newFormButton") {
                     let id = client.newId()
                     let list = client.view.visibleSpaces(me: client.me ?? 0).flatMap(\.allListIds).first ?? 0
                     client.edit { d, me in Edits.addForm(&d, list: list, me: me, id: id) }
-                } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New form")
-                    .accessibilityIdentifier("newFormButton")
+                }
             }
         }
     }
@@ -1015,7 +986,7 @@ struct FormDetailView: View {
         case "assignee":
             Picker("Person", selection: text) {
                 Text("Choose").tag("")
-                ForEach(client.view.members.filter { !$0.invited }) { Text($0.name).tag(String($0.id)) }
+                ForEach(client.view.activeMembers) { Text($0.name).tag(String($0.id)) }
             }
         case "dropdown":
             Picker("Choice", selection: text) {
@@ -1132,24 +1103,17 @@ struct WhiteboardsView: View {
                         Text("\(b.strokes.count) strokes · \(b.notes.count) notes").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .swipeActions {
-                    if client.canEdit {
-                        Button("Delete", role: .destructive) { client.edit { d, _ in Edits.deleteWhiteboard(&d, board: b.id) } }
-                    }
-                }
+                .deleteSwipe(client.canEdit) { client.edit { d, _ in Edits.deleteWhiteboard(&d, board: b.id) } }
                 .accessibilityIdentifier("board-\(b.id)")
             }
         }
         .navigationTitle("Whiteboards")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                AddButton("New whiteboard", id: "newBoardButton") {
                     let id = client.newId()
                     client.edit { d, me in Edits.addWhiteboard(&d, me: me, id: id) }
-                } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New whiteboard")
-                    .accessibilityIdentifier("newBoardButton")
+                }
             }
         }
     }
@@ -1199,7 +1163,7 @@ struct WhiteboardCanvas: View {
         }
         .navigationTitle(board?.name ?? "Whiteboard")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Note", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+        .alert("Note", isPresented: Binding(isPresent: $editing)) {
             TextField("Text", text: $noteText)
             Button("Delete", role: .destructive) {
                 if let n = editing { client.edit { d, _ in Edits.deleteNote(&d, board: boardId, note: n.id) } }
@@ -1331,11 +1295,7 @@ struct TemplatesView: View {
                                 }
                             }
                             .disabled(!client.canEdit)
-                            .swipeActions {
-                                if let id = tp.teamId, client.canEdit {
-                                    Button("Delete", role: .destructive) { client.edit { d, _ in Edits.deleteTemplate(&d, template: id) } }
-                                }
-                            }
+                            .deleteSwipe(tp.teamId != nil && client.canEdit) { if let id = tp.teamId { client.edit { d, _ in Edits.deleteTemplate(&d, template: id) } } }
                             .accessibilityIdentifier("template-\(tp.id)")
                         }
                     }
@@ -1386,7 +1346,7 @@ private struct UseTemplateSheet: View {
             .navigationTitle(template.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Use") { use() }
                         .disabled(template.kind == "" && dest == 0)
@@ -1472,16 +1432,9 @@ struct TeamsView: View {
                 if teams.isEmpty { Text("No teams yet").foregroundStyle(.secondary) }
                 ForEach(teams) { t in
                     DisclosureGroup {
-                        ForEach(v.members.filter { !$0.invited }) { m in
-                            Button {
+                        ForEach(v.activeMembers) { m in
+                            MemberToggleRow(member: m, on: t.members.contains(m.id)) {
                                 client.edit { d, _ in Edits.toggleTeamMember(&d, team: t.id, member: m.id) }
-                            } label: {
-                                HStack {
-                                    Avatar(member: m, size: 22)
-                                    Text(m.name).foregroundStyle(.primary)
-                                    Spacer()
-                                    if t.members.contains(m.id) { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
-                                }
                             }
                             .disabled(!client.canEdit)
                         }
@@ -1518,16 +1471,13 @@ struct TeamsView: View {
         .navigationTitle("Teams")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                AddButton("Create Team", id: "newTeamButton") {
                     let id = client.newId()
                     client.edit { d, me in Edits.addTeam(&d, me: me, id: id) }
-                } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("Create Team")
-                    .accessibilityIdentifier("newTeamButton")
+                }
             }
         }
-        .alert("Rename team", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+        .alert("Rename team", isPresented: Binding(isPresent: $renaming)) {
             TextField("Name", text: $name)
             Button("Cancel", role: .cancel) { renaming = nil }
             Button("Save") {

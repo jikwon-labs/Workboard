@@ -45,12 +45,8 @@ struct AutomationsView: View {
                     }
                 }
                 .disabled(!client.canEdit)
-                .swipeActions {
-                    if client.canEdit {
-                        Button("Delete", role: .destructive) {
-                            client.edit { d, _ in Edits.deleteAutomation(&d, automation: r.id) }
-                        }
-                    }
+                .deleteSwipe(client.canEdit) {
+                    client.edit { d, _ in Edits.deleteAutomation(&d, automation: r.id) }
                 }
                 .accessibilityIdentifier("automation-\(r.id)")
             }
@@ -58,10 +54,7 @@ struct AutomationsView: View {
         .navigationTitle("Automations")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { adding = true } label: { Image(systemName: "plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("Add automation")
-                    .accessibilityIdentifier("addAutomationButton")
+                AddButton("Add automation", id: "addAutomationButton") { adding = true }
             }
         }
         .sheet(isPresented: $adding) { NewAutomationView() }
@@ -118,7 +111,7 @@ struct NewAutomationView: View {
                     case "assign":
                         Picker("Person", selection: $value) {
                             Text("Choose").tag("")
-                            ForEach(v.members.filter { !$0.invited }) { Text($0.name).tag(String($0.id)) }
+                            ForEach(v.activeMembers) { Text($0.name).tag(String($0.id)) }
                         }
                     case "priority":
                         Picker("Priority", selection: $value) {
@@ -147,7 +140,7 @@ struct NewAutomationView: View {
             .navigationTitle("New automation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let id = client.newId()

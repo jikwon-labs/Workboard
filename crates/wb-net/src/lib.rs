@@ -752,6 +752,19 @@ pub struct SignIn {
     pub full_copies: bool,
 }
 
+impl SignIn {
+    /// After a welcome: sign in with the token next time, not with the
+    /// password or a code that is used up now.
+    pub fn forget_secrets(&mut self) {
+        self.invite = None;
+        self.claim = None;
+        self.email = None;
+        self.password = None;
+        self.new_password = None;
+        self.reset_code = None;
+    }
+}
+
 enum Cmd {
     Push(Value),
     Send(Msg),
@@ -970,10 +983,6 @@ fn session(
     queued: &mut Vec<Msg>,
     tries: &mut u64,
 ) -> End {
-    let send = |ws: &mut WebSocket<Conn>, m: &Msg| {
-        ws.send(Message::text(m.to_json()))
-            .map_err(|e| e.to_string())
-    };
     let hello = Msg::Hello {
         device: sign_in.device.clone(),
         tag: sign_in.tag,
@@ -991,11 +1000,7 @@ fn session(
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
     }
-    let mut welcomed = false;
-    // what the server has of our copy, when it takes deltas (else None)
-    let mut summary: Option<wb_sync::Summary> = None;
-    let mut deltas = false;
-    let mut rev: u64 = 0;
+    let mut st = Synced::default();
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
     // the app let go: what it pushed or sent just before still goes, then the
@@ -1005,7 +1010,7 @@ fn session(
         loop {
             match crx.try_recv() {
                 Ok(Cmd::Push(v)) => *pending = Some(v),
-                Ok(Cmd::Send(m)) if welcomed => queued.push(m),
+                Ok(Cmd::Send(m)) if st.welcomed => queued.push(m),
                 Ok(Cmd::Send(m)) => queue(queued, m),
                 Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => {
                     stopping = true;
@@ -1014,19 +1019,19 @@ fn session(
                 Err(TryRecvError::Empty) => break,
             }
         }
-        if stopping && !welcomed {
+        if stopping && !st.welcomed {
             return End::Stop;
         }
-        if welcomed {
+        if st.welcomed {
             // the copy first, so a conversation made a moment ago is on the
             // server before a call_join for it
             if let Some(v) = pending.take() {
-                let push = match summary.as_mut() {
+                let push = match st.summary.as_mut() {
                     // only what the server doesn't have yet (nothing: no push)
                     Some(s) => wb_sync::delta(s, &v).inspect(|d| s.absorb(d)),
                     None => {
-                        if deltas {
-                            summary = Some(wb_sync::Summary::of(&v));
+                        if st.deltas {
+                            st.summary = Some(wb_sync::Summary::of(&v));
                         }
                         Some(v)
                     }
@@ -1059,148 +1064,10 @@ fn session(
         if last_heard.elapsed() >= Duration::from_secs(SILENT_SECS) {
             return End::Lost("The server stopped answering.".into());
         }
-        let emit = |e: Event| -> Result<(), End> {
-            if line.emit(e) {
-                Ok(())
-            } else {
-                Err(End::Stop)
-            }
-        };
         let res: Result<(), End> = match ws.read() {
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
-                match Msg::parse(t.as_str()) {
-                    Some(Msg::Welcome {
-                        tag,
-                        snapshot,
-                        rev: r,
-                        member,
-                        role,
-                        token,
-                        email,
-                        hidden,
-                        deltas: server_deltas,
-                    }) => {
-                        deltas = server_deltas && !sign_in.full_copies;
-                        rev = r;
-                        summary = if deltas {
-                            snapshot.as_ref().map(wb_sync::Summary::of)
-                        } else {
-                            None
-                        };
-                        // sign in the same way next time: with the token, not the password
-                        sign_in.tag = Some(tag);
-                        if let Some(t) = &token {
-                            sign_in.token = Some(t.clone());
-                        }
-                        sign_in.invite = None;
-                        sign_in.claim = None;
-                        sign_in.email = None;
-                        sign_in.password = None;
-                        sign_in.new_password = None;
-                        sign_in.reset_code = None;
-                        welcomed = true;
-                        *tries = 0;
-                        emit(Event::Status(Status::Connected)).and_then(|_| {
-                            emit(Event::Welcome {
-                                tag,
-                                snapshot,
-                                rev: r,
-                                member,
-                                role,
-                                token,
-                                email,
-                                hidden,
-                            })
-                        })
-                    }
-                    Some(Msg::Update {
-                        data,
-                        rev: r,
-                        hidden,
-                    }) => {
-                        if deltas {
-                            summary = Some(wb_sync::Summary::of(&data));
-                        }
-                        rev = r;
-                        emit(Event::Update {
-                            data,
-                            rev: r,
-                            hidden,
-                        })
-                    }
-                    Some(Msg::Delta {
-                        data,
-                        rev: r,
-                        base,
-                        hidden,
-                    }) => {
-                        // a revision went missing: ask for the whole copy
-                        // (this part still merges fine meanwhile)
-                        let asked = if base > rev {
-                            send(ws, &Msg::Resync).map_err(End::Lost)
-                        } else {
-                            Ok(())
-                        };
-                        if let Some(s) = summary.as_mut() {
-                            s.absorb(&data);
-                        }
-                        rev = rev.max(r);
-                        asked.and_then(|_| {
-                            emit(Event::Update {
-                                data,
-                                rev: r,
-                                hidden,
-                            })
-                        })
-                    }
-                    Some(Msg::Invite {
-                        member,
-                        code,
-                        emailed,
-                        mail_error,
-                    }) => emit(Event::Invite {
-                        member,
-                        code,
-                        emailed,
-                        mail_error,
-                    }),
-                    Some(Msg::Account { email }) => emit(Event::Account(email)),
-                    Some(Msg::Access { people, role, .. }) => emit(Event::Access { people, role }),
-                    Some(Msg::CallToken {
-                        channel,
-                        url,
-                        token,
-                    }) => emit(Event::CallToken {
-                        channel,
-                        url,
-                        token,
-                    }),
-                    Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
-                    Some(Msg::Restored { name }) => emit(Event::Restored(name)),
-                    Some(Msg::Presence { online }) => emit(Event::Presence(online)),
-                    Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
-                    Some(Msg::Error {
-                        message,
-                        code,
-                        channel,
-                        put_back,
-                        gone,
-                    }) => match code.as_deref() {
-                        Some(CODE_AUTH) if gone => Err(End::Gone(message)),
-                        Some(CODE_AUTH) => Err(End::Refused(message)),
-                        Some(CODE_DENIED) if put_back => emit(Event::PutBack(message)),
-                        Some(CODE_DENIED) => match channel {
-                            Some(channel) => emit(Event::CallDenied {
-                                channel,
-                                why: message,
-                            }),
-                            None => emit(Event::Denied(message)),
-                        },
-                        _ => Err(End::Lost(message)),
-                    },
-                    _ => Ok(()),
-                }
+                on_server_msg(Msg::parse(t.as_str()), ws, line, sign_in, tries, &mut st)
             }
             Ok(Message::Close(_)) => Err(End::Lost("The server closed the connection.".into())),
             Ok(_) => {
@@ -1217,6 +1084,168 @@ fn session(
         if let Err(end) = res {
             return end;
         }
+    }
+}
+
+/// Send a message to the server.
+fn send(ws: &mut WebSocket<Conn>, m: &Msg) -> Result<(), String> {
+    ws.send(Message::text(m.to_json()))
+        .map_err(|e| e.to_string())
+}
+
+/// What a session knows of the server.
+#[derive(Default)]
+struct Synced {
+    welcomed: bool,
+    /// what the server has of our copy, when it takes deltas (else None)
+    summary: Option<wb_sync::Summary>,
+    deltas: bool,
+    rev: u64,
+}
+
+/// Act on a message from the server: tell the app, answer it, or end the
+/// session.
+fn on_server_msg(
+    m: Option<Msg>,
+    ws: &mut WebSocket<Conn>,
+    line: &Line,
+    sign_in: &mut SignIn,
+    tries: &mut u64,
+    st: &mut Synced,
+) -> Result<(), End> {
+    let emit = |e: Event| -> Result<(), End> {
+        if line.emit(e) {
+            Ok(())
+        } else {
+            Err(End::Stop)
+        }
+    };
+    match m {
+        Some(Msg::Welcome {
+            tag,
+            snapshot,
+            rev: r,
+            member,
+            role,
+            token,
+            email,
+            hidden,
+            deltas: server_deltas,
+        }) => {
+            st.deltas = server_deltas && !sign_in.full_copies;
+            st.rev = r;
+            st.summary = if st.deltas {
+                snapshot.as_ref().map(wb_sync::Summary::of)
+            } else {
+                None
+            };
+            // sign in the same way next time: with the token, not the password
+            sign_in.tag = Some(tag);
+            if let Some(t) = &token {
+                sign_in.token = Some(t.clone());
+            }
+            sign_in.forget_secrets();
+            st.welcomed = true;
+            *tries = 0;
+            emit(Event::Status(Status::Connected)).and_then(|_| {
+                emit(Event::Welcome {
+                    tag,
+                    snapshot,
+                    rev: r,
+                    member,
+                    role,
+                    token,
+                    email,
+                    hidden,
+                })
+            })
+        }
+        Some(Msg::Update {
+            data,
+            rev: r,
+            hidden,
+        }) => {
+            if st.deltas {
+                st.summary = Some(wb_sync::Summary::of(&data));
+            }
+            st.rev = r;
+            emit(Event::Update {
+                data,
+                rev: r,
+                hidden,
+            })
+        }
+        Some(Msg::Delta {
+            data,
+            rev: r,
+            base,
+            hidden,
+        }) => {
+            // a revision went missing: ask for the whole copy
+            // (this part still merges fine meanwhile)
+            let asked = if base > st.rev {
+                send(ws, &Msg::Resync).map_err(End::Lost)
+            } else {
+                Ok(())
+            };
+            if let Some(s) = st.summary.as_mut() {
+                s.absorb(&data);
+            }
+            st.rev = st.rev.max(r);
+            asked.and_then(|_| {
+                emit(Event::Update {
+                    data,
+                    rev: r,
+                    hidden,
+                })
+            })
+        }
+        Some(Msg::Invite {
+            member,
+            code,
+            emailed,
+            mail_error,
+        }) => emit(Event::Invite {
+            member,
+            code,
+            emailed,
+            mail_error,
+        }),
+        Some(Msg::Account { email }) => emit(Event::Account(email)),
+        Some(Msg::Access { people, role, .. }) => emit(Event::Access { people, role }),
+        Some(Msg::CallToken {
+            channel,
+            url,
+            token,
+        }) => emit(Event::CallToken {
+            channel,
+            url,
+            token,
+        }),
+        Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
+        Some(Msg::Restored { name }) => emit(Event::Restored(name)),
+        Some(Msg::Presence { online }) => emit(Event::Presence(online)),
+        Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
+        Some(Msg::Error {
+            message,
+            code,
+            channel,
+            put_back,
+            gone,
+        }) => match code.as_deref() {
+            Some(CODE_AUTH) if gone => Err(End::Gone(message)),
+            Some(CODE_AUTH) => Err(End::Refused(message)),
+            Some(CODE_DENIED) if put_back => emit(Event::PutBack(message)),
+            Some(CODE_DENIED) => match channel {
+                Some(channel) => emit(Event::CallDenied {
+                    channel,
+                    why: message,
+                }),
+                None => emit(Event::Denied(message)),
+            },
+            _ => Err(End::Lost(message)),
+        },
+        _ => Ok(()),
     }
 }
 

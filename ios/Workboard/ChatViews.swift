@@ -381,139 +381,19 @@ struct MessageRow: View {
 
     var body: some View {
         let author = client.view.member(message.author)
-        let mine = message.author == client.me
         HStack(alignment: .top, spacing: 12) {
             if compact {
                 Color.clear.frame(width: 36, height: 1)
             } else {
                 Avatar(member: author, size: 36)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                if !compact {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(author?.name ?? String(localized: "Someone")).font(.subheadline.weight(.semibold))
-                        Text(Fmt.time(message.ts)).font(.caption).foregroundStyle(.secondary)
-                        if message.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
-                        if message.saved { Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Saved") }
-                    }
-                }
-                if compact && (message.pinned || message.saved) {
-                    // a message under the one before it has no name line for these
-                    HStack(spacing: 4) {
-                        if message.pinned { Image(systemName: "pin.fill").accessibilityLabel("Pinned") }
-                        if message.saved { Image(systemName: "bookmark.fill").accessibilityLabel("Saved") }
-                    }
-                    .font(.caption2).foregroundStyle(.secondary)
-                }
-                if let title = message.postTitle, !title.isEmpty {
-                    Text(title).font(.headline)
-                }
-                if !message.text.isEmpty || message.edited != nil {
-                    (Text(message.text) + (message.edited != nil ? Text(message.text.isEmpty ? "(edited)" : " (edited)").font(.caption).foregroundColor(.secondary) : Text("")))
-                        .textSelection(.enabled)
-                        .accessibilityIdentifier("messageText-\(message.id)")
-                }
-                if !message.attachments.isEmpty {
-                    AttachmentsView(attachments: message.attachments)
-                        .padding(.top, 4)
-                }
-                if let tid = message.task, let t = client.view.tasks.first(where: { $0.id == tid }) {
-                    NavigationLink(value: Nav.Route.task(tid)) {
-                        Label(t.name, systemImage: "checklist").font(.caption).lineLimit(1)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("messageTask-\(message.id)")
-                }
-                if let call = message.call {
-                    if let ch = CallAPI.huddleChannel(call) {
-                        Button {
-                            Task { _ = await calls.start(channel: ch, client: client, announce: false) }
-                        } label: { Label("Join huddle", systemImage: "headphones") }
-                            .font(.subheadline.weight(.medium))
-                            .padding(.top, 2)
-                            .disabled(!client.state.isConnected)
-                            .accessibilityIdentifier("joinHuddle-\(message.id)")
-                    } else if let url = URL(string: call) {
-                        Link(destination: url) { Label("Join call", systemImage: "phone.fill") }
-                            .font(.subheadline.weight(.medium))
-                            .padding(.top, 2)
-                    }
-                }
-                if !message.reactions.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(message.reactions, id: \.emoji) { r in
-                            let mine = r.users.contains(client.me ?? 0)
-                            Button { react(r.emoji) } label: {
-                                Text("\(r.emoji) \(r.users.count)")
-                                    .font(.caption.weight(.medium))
-                                    .monospacedDigit()
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Capsule().fill(mine ? Color.wbAccent.opacity(0.18) : Color(.secondarySystemFill)))
-                                    .overlay(Capsule().strokeBorder(mine ? Color.wbAccent : .clear, lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!client.canEdit)
-                            .accessibilityLabel("\(r.emoji) \(r.users.count)\(mine ? ", yours" : "")")
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
+            content
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.top, compact ? 2 : 10)
         .contentShape(Rectangle())
-        .contextMenu {
-            if client.canEdit {
-                Section("React") {
-                    ForEach(Self.quick, id: \.self) { e in
-                        Button("React \(e)") { react(e) }
-                    }
-                }
-                Section {
-                    // huddle and call cards aren't edited, as on the Mac
-                    if message.isEditable(by: client.me) {
-                        Button { draft = message.text; editing = true } label: { Label("Edit message", systemImage: "pencil") }
-                    }
-                    if !isReply {
-                        Button { client.edit { d, _ in Edits.togglePin(&d, channel: channelId, message: message.id) } } label: {
-                            Label(message.pinned ? "Unpin" : "Pin to channel", systemImage: message.pinned ? "pin.slash" : "pin")
-                        }
-                    }
-                }
-            }
-            if !message.text.isEmpty {
-                Button { UIPasteboard.general.string = message.text } label: { Label("Copy text", systemImage: "doc.on.doc") }
-            }
-            Button {
-                client.editLocal { d in Edits.toggleSaved(&d, channel: channelId, message: message.id) }
-            } label: { Label(message.saved ? "Remove from saved" : "Save for later", systemImage: message.saved ? "bookmark.slash" : "bookmark") }
-            if client.canEdit && !isReply && message.task == nil && !message.text.isEmpty {
-                Button {
-                    let id = client.newId()
-                    let list = client.view.visibleSpaces(me: client.me ?? 0).flatMap(\.allListIds).first ?? 0
-                    client.edit { d, me in Edits.messageToTask(&d, channel: channelId, message: message.id, list: list, me: me, id: id, ts: nowTs()) }
-                } label: { Label("Create task", systemImage: "checklist") }
-            }
-            if !isReply {
-                Menu {
-                    Button("In 1 hour") { remind(at: nowTs() + 3600) }
-                    Button("In 3 hours") { remind(at: nowTs() + 3 * 3600) }
-                    Button("Tomorrow at 9 AM") {
-                        let cal = Calendar.current
-                        let t = cal.date(bySettingHour: 9, minute: 0, second: 0, of: cal.date(byAdding: .day, value: 1, to: Date())!)!
-                        remind(at: Int64(t.timeIntervalSince1970))
-                    }
-                } label: { Label("Remind me", systemImage: "alarm") }
-            }
-            if client.canEdit && mine {
-                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete message", systemImage: "trash") }
-            }
-        }
+        .contextMenu { menu }
         .confirmationDialog("Delete this message?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 client.edit { d, me in Edits.deleteMessage(&d, channel: channelId, message: message.id, me: me) }
@@ -523,34 +403,176 @@ struct MessageRow: View {
             Text(isReply || message.replies.isEmpty ? "It's removed for everyone." : "It's removed for everyone, with its replies.")
         }
         .sheet(isPresented: $editing) {
-            NavigationStack {
-                Form {
-                    TextField("Message", text: $draft, axis: .vertical)
-                        .lineLimit(1...10)
-                        .accessibilityIdentifier("editMessageField")
-                }
-                .navigationTitle("Edit message")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    CancelButton { editing = false }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
-                            editing = false
-                        }
-                        .disabled(draft.isBlank)
-                        .accessibilityIdentifier("saveEditButton")
-                    }
-                }
-            }
-            .presentationDetents([.medium])
+            EditMessageSheet(message: message, channelId: channelId, draft: $draft, editing: $editing)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.id)")
     }
 
+    /// The name line, the text, pictures, a linked task, a call card and reactions.
+    @ViewBuilder private var content: some View {
+        let author = client.view.member(message.author)
+        VStack(alignment: .leading, spacing: 2) {
+            if !compact {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(author?.name ?? String(localized: "Someone")).font(.subheadline.weight(.semibold))
+                    Text(Fmt.time(message.ts)).font(.caption).foregroundStyle(.secondary)
+                    if message.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
+                    if message.saved { Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Saved") }
+                }
+            }
+            if compact && (message.pinned || message.saved) {
+                // a message under the one before it has no name line for these
+                HStack(spacing: 4) {
+                    if message.pinned { Image(systemName: "pin.fill").accessibilityLabel("Pinned") }
+                    if message.saved { Image(systemName: "bookmark.fill").accessibilityLabel("Saved") }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let title = message.postTitle, !title.isEmpty {
+                Text(title).font(.headline)
+            }
+            if !message.text.isEmpty || message.edited != nil {
+                (Text(message.text) + (message.edited != nil ? Text(message.text.isEmpty ? "(edited)" : " (edited)").font(.caption).foregroundColor(.secondary) : Text("")))
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("messageText-\(message.id)")
+            }
+            if !message.attachments.isEmpty {
+                AttachmentsView(attachments: message.attachments)
+                    .padding(.top, 4)
+            }
+            if let tid = message.task, let t = client.view.tasks.first(where: { $0.id == tid }) {
+                NavigationLink(value: Nav.Route.task(tid)) {
+                    Label(t.name, systemImage: "checklist").font(.caption).lineLimit(1)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("messageTask-\(message.id)")
+            }
+            if let call = message.call {
+                if let ch = CallAPI.huddleChannel(call) {
+                    Button {
+                        Task { _ = await calls.start(channel: ch, client: client, announce: false) }
+                    } label: { Label("Join huddle", systemImage: "headphones") }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 2)
+                        .disabled(!client.state.isConnected)
+                        .accessibilityIdentifier("joinHuddle-\(message.id)")
+                } else if let url = URL(string: call) {
+                    Link(destination: url) { Label("Join call", systemImage: "phone.fill") }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 2)
+                }
+            }
+            if !message.reactions.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(message.reactions, id: \.emoji) { r in
+                        let mine = r.users.contains(client.me ?? 0)
+                        Button { react(r.emoji) } label: {
+                            Text("\(r.emoji) \(r.users.count)")
+                                .font(.caption.weight(.medium))
+                                .monospacedDigit()
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(mine ? Color.wbAccent.opacity(0.18) : Color(.secondarySystemFill)))
+                                .overlay(Capsule().strokeBorder(mine ? Color.wbAccent : .clear, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!client.canEdit)
+                        .accessibilityLabel("\(r.emoji) \(r.users.count)\(mine ? ", yours" : "")")
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    /// What a long press offers.
+    @ViewBuilder private var menu: some View {
+        let mine = message.author == client.me
+        if client.canEdit {
+            Section("React") {
+                ForEach(Self.quick, id: \.self) { e in
+                    Button("React \(e)") { react(e) }
+                }
+            }
+            Section {
+                // huddle and call cards aren't edited, as on the Mac
+                if message.isEditable(by: client.me) {
+                    Button { draft = message.text; editing = true } label: { Label("Edit message", systemImage: "pencil") }
+                }
+                if !isReply {
+                    Button { client.edit { d, _ in Edits.togglePin(&d, channel: channelId, message: message.id) } } label: {
+                        Label(message.pinned ? "Unpin" : "Pin to channel", systemImage: message.pinned ? "pin.slash" : "pin")
+                    }
+                }
+            }
+        }
+        if !message.text.isEmpty {
+            Button { UIPasteboard.general.string = message.text } label: { Label("Copy text", systemImage: "doc.on.doc") }
+        }
+        Button {
+            client.editLocal { d in Edits.toggleSaved(&d, channel: channelId, message: message.id) }
+        } label: { Label(message.saved ? "Remove from saved" : "Save for later", systemImage: message.saved ? "bookmark.slash" : "bookmark") }
+        if client.canEdit && !isReply && message.task == nil && !message.text.isEmpty {
+            Button {
+                let id = client.newId()
+                let list = client.view.visibleSpaces(me: client.me ?? 0).flatMap(\.allListIds).first ?? 0
+                client.edit { d, me in Edits.messageToTask(&d, channel: channelId, message: message.id, list: list, me: me, id: id, ts: nowTs()) }
+            } label: { Label("Create task", systemImage: "checklist") }
+        }
+        if !isReply {
+            Menu {
+                Button("In 1 hour") { remind(at: nowTs() + 3600) }
+                Button("In 3 hours") { remind(at: nowTs() + 3 * 3600) }
+                Button("Tomorrow at 9 AM") {
+                    let cal = Calendar.current
+                    let t = cal.date(bySettingHour: 9, minute: 0, second: 0, of: cal.date(byAdding: .day, value: 1, to: Date())!)!
+                    remind(at: Int64(t.timeIntervalSince1970))
+                }
+            } label: { Label("Remind me", systemImage: "alarm") }
+        }
+        if client.canEdit && mine {
+            Button(role: .destructive) { confirmDelete = true } label: { Label("Delete message", systemImage: "trash") }
+        }
+    }
+
     func react(_ emoji: String) {
         client.edit { d, me in Edits.toggleReaction(&d, channel: channelId, message: message.id, emoji: emoji, me: me) }
+    }
+}
+
+/// Changing the text of one of my messages.
+struct EditMessageSheet: View {
+    @Environment(SyncClient.self) private var client
+    let message: MessageView
+    let channelId: UInt64
+    @Binding var draft: String
+    @Binding var editing: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Message", text: $draft, axis: .vertical)
+                    .lineLimit(1...10)
+                    .accessibilityIdentifier("editMessageField")
+            }
+            .navigationTitle("Edit message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                CancelButton { editing = false }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
+                        editing = false
+                    }
+                    .disabled(draft.isBlank)
+                    .accessibilityIdentifier("saveEditButton")
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

@@ -620,6 +620,9 @@ struct NotepadView: View {
     @Environment(SyncClient.self) private var client
     @State private var text = ""
     @FocusState private var focused: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    /// The save a second after the last keystroke.
+    @State private var pending: Task<Void, Never>?
 
     var body: some View {
         TextEditor(text: $text)
@@ -629,8 +632,31 @@ struct NotepadView: View {
             .navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("notepad")
             .onAppear { text = client.data?.at("extra.notepad")?.string ?? "" }
-            .onChange(of: text) { _, t in client.editLocal { d in Edits.setNotepad(&d, to: t) } }
+            // saved a moment after typing stops, not on every key (each save
+            // copies the whole workspace); leaving the field, the screen or
+            // the app saves right away
+            .onChange(of: text) { _, _ in saveSoon() }
+            .onChange(of: focused) { _, f in if !f { save() } }
+            // the app's own flush may run before this one
+            .onChange(of: scenePhase) { _, p in if p != .active { save(); client.flushSnapshot() } }
+            .onDisappear { save() }
             .toolbar { if focused { ToolbarItem(placement: .topBarTrailing) { Button("Done") { focused = false } } } }
+    }
+
+    func saveSoon() {
+        pending?.cancel()
+        pending = Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            save()
+        }
+    }
+
+    func save() {
+        pending?.cancel()
+        pending = nil
+        let t = text
+        client.editLocal { d in Edits.setNotepad(&d, to: t) }
     }
 }
 

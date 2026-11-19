@@ -39,6 +39,10 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
     panic!("attachments never got ready: {:?}", a.chat.files);
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_picture_goes_through_the_server_to_the_other_computer() {
     let server = TestServer::start();
@@ -148,6 +152,10 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
     let server = TestServer::start();
@@ -358,6 +366,10 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     assert_eq!(a.chat.files[0].error.as_deref(), Some("Notes is a folder."));
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn in_a_shared_folder_pictures_go_into_its_files_folder() {
     let folder = temp_home("shared-files");
@@ -497,6 +509,10 @@ fn a_missing_file_is_fetched_again_later() {
     });
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
     let mut a = app();
@@ -539,6 +555,10 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn sharing_a_folder_brings_earlier_pictures_along() {
     let mut a = app();
@@ -564,6 +584,10 @@ fn sharing_a_folder_brings_earlier_pictures_along() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_failed_upload_for_a_sent_message_is_tried_again_and_not_cancelled() {
     let mut a = app();
@@ -590,6 +614,10 @@ fn a_failed_upload_for_a_sent_message_is_tried_again_and_not_cancelled() {
     });
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_picture_added_before_sharing_goes_up_when_the_message_is_sent() {
     let mut a = app();
@@ -638,6 +666,10 @@ fn file_errors_are_shown_in_the_interface_language() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
     let mut a = app();
@@ -695,6 +727,10 @@ fn dead_server() -> crate::app::files::Remote {
     }
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn waiting_uploads_are_kept_on_disk_and_carry_on_after_a_restart() {
     let mut a = app();
@@ -731,6 +767,10 @@ fn waiting_uploads_are_kept_on_disk_and_carry_on_after_a_restart() {
     assert_eq!(g.state(&sha), None, "not sent to the wrong server");
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn sharing_brings_task_attachments_along_too() {
     let mut a = app();
@@ -764,6 +804,10 @@ fn sharing_brings_task_attachments_along_too() {
     let _ = tid;
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_task_attachment_waiting_for_a_sign_in_goes_up_once_there_is_one() {
     let mut a = app();
@@ -1059,6 +1103,10 @@ fn every_workspace_on_this_computer_counts_for_the_cache() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
     let mut a = app();

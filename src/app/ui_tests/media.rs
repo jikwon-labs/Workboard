@@ -15,6 +15,10 @@ fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
     p
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     let mut h = Ui1::new();
@@ -84,6 +88,10 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn drop_a_picture_send_it_and_open_it_large() {
     let mut h = Ui1::new();
@@ -217,6 +225,10 @@ fn drop_a_picture_send_it_and_open_it_large() {
     let _ = std::fs::remove_file(&saved);
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     let mut h = Ui1::new();
@@ -247,6 +259,10 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     assert!(h.app.task(id).unwrap().attachments.is_empty());
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_pdf_dropped_on_a_task_attaches_and_a_click_saves_it() {
     let mut h = Ui1::new();

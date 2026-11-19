@@ -158,6 +158,10 @@ fn people_not_added_from_slack_come_in_under_my_name() {
     assert!(m.text.starts_with("Mia Park: Plan for"), "{}", m.text);
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_slack_export_zip_opens_and_anything_else_says_why() {
     let dir = slack_export();

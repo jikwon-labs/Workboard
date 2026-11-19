@@ -277,10 +277,10 @@ impl App {
                 "Meetings" => self.section == Section::Meetings,
                 _ => false,
             };
-            let badge = match label {
-                "Inbox" if inbox_n > 0 => Some(inbox_n.to_string()),
-                "Replies" if replies_n > 0 => Some(replies_n.to_string()),
-                _ => None,
+            let unread = match label {
+                "Inbox" => inbox_n,
+                "Replies" => replies_n,
+                _ => 0,
             };
             let kind = match label {
                 "Inbox" => "inbox",
@@ -310,9 +310,10 @@ impl App {
                 },
                 label,
                 None,
-                badge,
+                None,
                 true,
             );
+            self.unread_pill(ui, r.rect, unread);
             match label {
                 "More" => {
                     popup(ui, &r, ui.id().with("side_more"), 220.0, |ui| {
@@ -685,13 +686,10 @@ impl App {
                     },
                     &name,
                     sub.as_deref(),
-                    if unread > 0 {
-                        Some(unread.to_string())
-                    } else {
-                        None
-                    },
+                    None,
                     false,
                 );
+                self.unread_pill(ui, r.rect, unread);
                 let sr = Rect::from_center_size(
                     r.rect.right_center() - vec2(14.0, 0.0),
                     vec2(20.0, 20.0),
@@ -852,13 +850,10 @@ impl App {
                     },
                     &name,
                     sub.as_deref(),
-                    if unread > 0 {
-                        Some(unread.to_string())
-                    } else {
-                        None
-                    },
+                    None,
                     false,
                 );
+                self.unread_pill(ui, r.rect, unread);
                 let sr = Rect::from_center_size(
                     r.rect.right_center() - vec2(14.0, 0.0),
                     vec2(20.0, 20.0),
@@ -959,6 +954,31 @@ impl App {
         });
         self.dirty = true;
         lid
+    }
+
+    /// The red count at the right end of a sidebar row, when something in
+    /// it hasn't been seen.
+    fn unread_pill(&self, ui: &Ui, row: Rect, n: usize) {
+        if n > 0 {
+            paint_unread_badge(
+                ui.painter(),
+                self.t().danger,
+                row.right_center() - vec2(8.0, 0.0),
+                Align2::RIGHT_CENTER,
+                n,
+            );
+        }
+    }
+
+    /// Unread messages in the channels and direct messages the sidebar
+    /// lists, for the Chat badge on the rail.
+    pub(in crate::app) fn chat_unread_total(&self) -> usize {
+        self.data
+            .channels
+            .iter()
+            .filter(|c| self.listed(c))
+            .map(|c| self.unread_count(c))
+            .sum()
     }
 
     fn unread_count(&self, c: &Channel) -> usize {

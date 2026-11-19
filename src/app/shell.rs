@@ -22,6 +22,28 @@ pub(super) enum SideDrag {
     List(u64),
 }
 
+/// A red pill with a white count for what hasn't been looked at yet (Inbox,
+/// replies, unread messages), placed by `align` at `at`. Over 99 reads "99+".
+pub(super) fn paint_unread_badge(
+    p: &egui::Painter,
+    danger: Color32,
+    at: Pos2,
+    align: Align2,
+    n: usize,
+) -> Rect {
+    let label = if n > 99 {
+        "99+".to_string()
+    } else {
+        n.to_string()
+    };
+    let g = p.layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
+    let h = 16.0;
+    let r = align.anchor_size(at, vec2((g.size().x + 10.0).max(h), h));
+    p.rect_filled(r, h / 2.0, danger);
+    p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
+    r
+}
+
 // moved to widgets.rs; kept here for code that names it `shell::fit_text`
 pub(super) use crate::widgets::fit_text;
 
@@ -437,6 +459,22 @@ impl App {
 
     // ---------------------------------------------------------------- rail
 
+    /// The red counts on the rail's Home and Chat: the Inbox badge, and the
+    /// unread messages the sidebar shows. While Chat isn't pinned to the rail
+    /// it lives under Home, so Home carries both. Nothing while notifications
+    /// are paused, as in the sidebar.
+    pub(super) fn rail_unread(&self, chat_pinned: bool) -> (usize, usize) {
+        if self.data.extra.muted_until > now_ts() {
+            return (0, 0);
+        }
+        let (inbox, chat) = (self.inbox_badge(), self.chat_unread_total());
+        if chat_pinned {
+            (inbox, chat)
+        } else {
+            (inbox + chat, 0)
+        }
+    }
+
     pub(super) fn rail(&mut self, ctx: &egui::Context) {
         let t = self.t();
         egui::SidePanel::left("rail")
@@ -518,6 +556,9 @@ impl App {
                 };
                 let pinned_sections: Vec<Section> =
                     items.iter().filter_map(|l| section_of(l)).collect();
+                // red counts on Home (the Inbox) and Chat (unread messages);
+                // Chat counts on Home while it isn't in the bar of its own
+                let (home_n, chat_n) = self.rail_unread(pinned_sections.contains(&Section::Chat));
                 for label in &items {
                     let sec = section_of(label);
                     let active = match sec {
@@ -550,6 +591,20 @@ impl App {
                         FontId::proportional(11.0),
                         white,
                     );
+                    let unread = match sec {
+                        Some(Section::Home) => home_n,
+                        Some(Section::Chat) => chat_n,
+                        _ => 0,
+                    };
+                    if unread > 0 {
+                        paint_unread_badge(
+                            &p,
+                            t.danger,
+                            ibox.center() + vec2(4.0, -16.0),
+                            Align2::LEFT_TOP,
+                            unread,
+                        );
+                    }
                     if resp.on_hover_text(tr(label)).clicked() {
                         self.open_app(label);
                         if label == "Home" {

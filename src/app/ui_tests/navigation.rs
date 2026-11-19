@@ -152,6 +152,100 @@ fn a_waiting_update_puts_a_red_dot_on_the_profile_and_check_for_updates() {
 /// A team server with a Windows build 99.0.0 put up the way
 /// scripts/publish-windows.sh does it: the zip (holding a workboard.exe
 /// that says `program`) and appcast-windows.xml naming it.
+/// Two new direct messages from someone else, after everything there is read.
+fn two_unread_dms(h: &mut Ui1) -> String {
+    let me = h.app.data.me;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members.len() == 2 && h.app.listed(c))
+        .expect("a direct message in the sample workspace");
+    let (dm, other) = (c.id, *c.members.iter().find(|m| **m != me).unwrap());
+    let name = h.app.data.member(other).unwrap().shown().to_string();
+    h.app.mark_read(dm);
+    for text in ["one", "two"] {
+        let id = h.app.data.new_id();
+        let m: Message = serde_json::from_value(serde_json::json!(
+            {"id": id, "author": other, "text": text, "ts": now_ts() + 5}
+        ))
+        .unwrap();
+        let ch = h.app.data.channels.iter_mut().find(|c| c.id == dm).unwrap();
+        ch.messages.push(m);
+    }
+    name
+}
+
+#[test]
+fn unseen_notifications_show_a_red_count_on_the_rail_and_sidebar() {
+    let mut h = Ui1::new();
+    // Chat isn't in the bar by default, so its messages count on Home
+    assert!(!h.app.data.extra.rail_items.iter().any(|r| r == "Chat"));
+    let name = two_unread_dms(&mut h);
+    h.settle();
+    let home = h.app.inbox_badge() + h.app.chat_unread_total();
+    assert_eq!(red_badge_in(&h, "Rail Home"), Some(home.to_string()));
+    assert_eq!(red_badge_in(&h, &name), Some("2".into()), "beside the DM");
+    let inbox = h.app.inbox_badge();
+    assert_eq!(
+        red_badge_in(&h, "Inbox"),
+        (inbox > 0).then(|| inbox.to_string())
+    );
+
+    // pinned to the bar, Chat carries the messages and Home the Inbox
+    h.app.data.extra.rail_items.push("Chat".into());
+    h.settle();
+    let chat = h.app.chat_unread_total();
+    assert_eq!(red_badge_in(&h, "Rail Chat"), Some(chat.to_string()));
+    assert_eq!(
+        red_badge_in(&h, "Rail Home"),
+        (inbox > 0).then(|| inbox.to_string())
+    );
+
+    // reading the conversation takes its count away
+    h.click(&name);
+    h.settle();
+    assert_eq!(red_badge_in(&h, &name), None, "read now");
+    assert_eq!(h.app.chat_unread_total(), chat - 2);
+
+    // paused notifications: no red counts anywhere
+    two_unread_dms(&mut h);
+    h.app.data.extra.muted_until = now_ts() + 3600;
+    h.settle();
+    for n in ["Rail Home", "Rail Chat", "Inbox", name.as_str()] {
+        assert_eq!(red_badge_in(&h, n), None, "{} while muted", n);
+    }
+}
+
+#[test]
+fn a_big_unread_count_reads_99_plus() {
+    let mut h = Ui1::new();
+    h.app.data.extra.rail_items.push("Chat".into());
+    let me = h.app.data.me;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && h.app.listed(c))
+        .unwrap()
+        .id;
+    let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().id;
+    for i in 0..120 {
+        let id = h.app.data.new_id();
+        let m: Message = serde_json::from_value(serde_json::json!(
+            {"id": id, "author": other, "text": format!("m{}", i), "ts": now_ts() + 5}
+        ))
+        .unwrap();
+        let ch = h.app.data.channels.iter_mut().find(|x| x.id == c).unwrap();
+        ch.messages.push(m);
+    }
+    h.settle();
+    assert!(h.app.chat_unread_total() > 99);
+    assert_eq!(red_badge_in(&h, "Rail Chat"), Some("99+".into()));
+}
+
 fn server_with_windows_build(program: &[u8]) -> workboard_server::testing::TestServer {
     use crate::updater::own;
     let server = workboard_server::testing::TestServer::start();

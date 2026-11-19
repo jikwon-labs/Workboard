@@ -504,6 +504,40 @@ pub(super) fn red_dots_in(h: &Ui1, name: &str) -> usize {
         .sum()
 }
 
+/// The number on the red unread pill painted inside the control named
+/// `name`, if there is one; the number is painted white on the theme's danger.
+pub(super) fn red_badge_in(h: &Ui1, name: &str) -> Option<String> {
+    let danger = h.app.t().danger;
+    let (_, area) = h.tree.iter().rev().find(|(n, _)| n == name)?;
+    fn pills(s: &egui::Shape, area: Rect, danger: Color32, out: &mut Vec<Rect>) {
+        match s {
+            egui::Shape::Rect(r) if r.fill == danger && area.contains(r.rect.center()) => {
+                out.push(r.rect)
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| pills(s, area, danger, out)),
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for c in &h.shapes {
+        pills(&c.shape, *area, danger, &mut found);
+    }
+    let pill = *found.first()?;
+    let mut text = None;
+    each_text(&h.shapes, |ts, _| {
+        let c = ts
+            .galley
+            .job
+            .sections
+            .first()
+            .map_or(ts.fallback_color, |s| s.format.color);
+        if pill.contains(ts.visual_bounding_rect().center()) && c == Color32::WHITE {
+            text = Some(ts.galley.text().to_string());
+        }
+    });
+    text
+}
+
 /// Filled circles of `color` painted inside the control named `name`.
 pub(super) fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
     let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {

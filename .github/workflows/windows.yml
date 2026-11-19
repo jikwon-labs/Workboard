@@ -1,6 +1,7 @@
-# Builds the Windows app on GitHub's Windows machines. The Mac can't build
-# it: the C libraries (ring, libwebrtc) need Microsoft's headers and linker.
-# The built workboard.exe is kept with the run as "Workboard-windows".
+# Builds and tests the Windows app on GitHub's Windows machines. The Mac
+# can't build it: the C libraries (ring, libwebrtc) need Microsoft's headers
+# and linker. The built workboard.exe is kept with the run as
+# "Workboard-windows", with a screenshot of it running as "screenshot".
 name: Windows
 
 on:
@@ -21,3 +22,28 @@ jobs:
         with:
           name: Workboard-windows
           path: target/release/workboard.exe
+      # the machine has no graphics card: Mesa draws OpenGL in software
+      - uses: ssciwr/setup-mesa-dist-win@v2
+      - name: Start the app and take a screenshot
+        shell: pwsh
+        env:
+          WORKBOARD_HOME: ${{ runner.temp }}\wbhome
+        run: |
+          $p = Start-Process target\release\workboard.exe -ArgumentList '--screenshot','shot.png','--lang','ko' -PassThru
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "The app didn't finish in 3 minutes" }
+          if (-not (Test-Path shot.png)) { throw "No screenshot; the app ended with code $($p.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot
+          path: shot.png
+          if-no-files-found: ignore
+
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the tests
+        run: cargo test --workspace

@@ -3236,7 +3236,7 @@ fn two_people_editing_one_task_at_once_both_keep_their_change() {
 fn an_app_too_old_to_know_every_field_gets_changes_but_cannot_send_them() {
     let home = temp_home("old-app");
     let server = Server::start_at(&home, 0);
-    let (mut a, mut b) = two_apps(server.port);
+    let (mut a, b) = two_apps(server.port);
     // B's computer runs an app from before the hello said its version
     let token = b.token.clone();
     let device = b.device.clone();

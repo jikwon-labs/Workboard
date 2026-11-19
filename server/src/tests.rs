@@ -1098,6 +1098,8 @@ fn saved_files_are_for_this_user_only() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+// Unix file modes; Windows keeps a user's files private through the folder
+#[cfg(unix)]
 #[test]
 fn an_email_invite_saves_both_files_for_this_user_only() {
     use std::os::unix::fs::PermissionsExt;

@@ -473,6 +473,18 @@ public struct ChannelView: Identifiable, Hashable, Sendable {
     public func unread(me: UInt64) -> Int {
         messages.filter { $0.author != me && !$0.imported && $0.ts > lastRead }.count
     }
+
+    /// The first message from others I haven't read: the red "New" line
+    /// goes above it.
+    public func firstUnread(me: UInt64) -> UInt64? {
+        messages.first { $0.author != me && !$0.imported && $0.ts > lastRead }?.id
+    }
+
+    /// Messages from others after `ts`: those that came in below where the
+    /// list is scrolled to, for the "N new messages" note.
+    public func newer(than ts: Int64, me: UInt64) -> Int {
+        messages.filter { $0.author != me && !$0.imported && $0.ts > ts }.count
+    }
 }
 
 /// Everything the screens read, made from one snapshot.

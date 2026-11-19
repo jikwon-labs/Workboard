@@ -2347,3 +2347,129 @@ fn integrations_show_webhook_addresses_and_commands() {
         .iter()
         .any(|(n, d)| n == "deploy" && d == "Ship it"));
 }
+
+/// Messages from someone else in channel `cid`, `secs` from now and on.
+fn messages_from_others(h: &mut Ui1, cid: u64, texts: &[String], secs: i64) {
+    let me = h.app.data.me;
+    let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().id;
+    for (i, text) in texts.iter().enumerate() {
+        let id = h.app.data.new_id();
+        let m: Message = serde_json::from_value(serde_json::json!(
+            {"id": id, "author": other, "text": text, "ts": now_ts() + secs + i as i64}
+        ))
+        .unwrap();
+        let ch = h
+            .app
+            .data
+            .channels
+            .iter_mut()
+            .find(|c| c.id == cid)
+            .unwrap();
+        ch.messages.push(m);
+    }
+}
+
+fn general_id(h: &Ui1) -> u64 {
+    h.app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && c.name == "general")
+        .unwrap()
+        .id
+}
+
+/// A long, read #general open and down at its newest message.
+fn long_general_open() -> (Ui1, u64) {
+    let mut h = Ui1::new();
+    let cid = general_id(&h);
+    let old: Vec<String> = (0..30).map(|i| format!("older note {}", i)).collect();
+    messages_from_others(&mut h, cid, &old, -3000);
+    h.app.mark_read(cid);
+    h.click("general");
+    h.settle();
+    assert!(h.app.chat.at_bottom);
+    (h, cid)
+}
+
+#[test]
+fn opening_a_channel_draws_a_red_line_above_the_first_unread_message() {
+    let mut h = Ui1::new();
+    let cid = general_id(&h);
+    let texts = vec!["first new one".to_string(), "second new one".to_string()];
+    messages_from_others(&mut h, cid, &texts, 10);
+    h.click("general");
+    h.settle();
+    assert!(h.has("Read up to here"));
+    let line = h.rect("Read up to here");
+    let first = h.find("first new one").unwrap();
+    assert!(
+        line.bottom() <= first.y,
+        "the line is above the first unread"
+    );
+    let (_, color) = h
+        .painted_text("New")
+        .into_iter()
+        .find(|(r, _)| r.intersects(line))
+        .expect("labelled New");
+    assert_eq!(color, h.app.t().danger, "drawn in red");
+    // they're read now: leaving and coming back draws no line
+    h.click("website-redesign");
+    h.click("general");
+    h.settle();
+    assert!(!h.has("Read up to here"));
+}
+
+#[test]
+fn messages_that_come_in_while_scrolled_up_show_a_grey_note_that_goes_down() {
+    let (mut h, cid) = long_general_open();
+    assert!(!h.has("Read up to here"), "everything was read");
+    h.scroll_into_view("older note 2");
+    assert!(!h.app.chat.at_bottom);
+    assert!(!h.has("New messages"));
+
+    let texts = vec!["fresh one".to_string(), "fresh two".to_string()];
+    messages_from_others(&mut h, cid, &texts, 10);
+    h.settle();
+    assert!(!h.app.chat.at_bottom, "the list stays where I'm reading");
+    assert!(h.has("New messages"));
+    let (_, color) = h.painted_text("2 new messages")[0];
+    assert_eq!(color, h.app.t().text2, "a quiet grey note, not a colour");
+    assert!(
+        h.has("Read up to here"),
+        "the red line marks where they start"
+    );
+
+    h.click("New messages");
+    for _ in 0..30 {
+        h.settle();
+    }
+    assert!(h.app.chat.at_bottom, "down at the newest message");
+    assert!(!h.has("New messages"));
+    assert!(h.has("Read up to here"), "the line stays until I leave");
+}
+
+#[test]
+fn messages_that_come_in_at_the_bottom_need_no_note_or_line() {
+    let (mut h, cid) = long_general_open();
+    messages_from_others(&mut h, cid, &["just now".to_string()], 10);
+    h.settle();
+    assert!(h.app.chat.at_bottom);
+    assert!(!h.has("New messages"));
+    assert!(!h.has("Read up to here"));
+}
+
+#[test]
+fn messages_that_come_in_while_the_window_is_behind_get_the_red_line() {
+    let (mut h, cid) = long_general_open();
+    h.focused = false;
+    h.frame(vec![egui::Event::WindowFocused(false)]);
+    messages_from_others(&mut h, cid, &["while away".to_string()], 10);
+    h.settle();
+    h.focused = true;
+    h.frame(vec![egui::Event::WindowFocused(true)]);
+    h.settle();
+    let line = h.rect("Read up to here");
+    assert!(line.bottom() <= h.find("while away").unwrap().y);
+    assert!(!h.has("New messages"), "the list is down at them already");
+}

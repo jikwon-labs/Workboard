@@ -41,6 +41,26 @@ final class Round5ClientTests: FakeServerTestCase {
         XCTAssertEqual(ch.messages[0].replies.map(\.imported), [true, false])
     }
 
+    /// Where the red "New" line goes and how many came in below the list,
+    /// like the Mac (src/app/chat.rs read_line, new_below).
+    func testFirstUnreadAndNewerMessages() {
+        let now: Int64 = 1_800_000_000
+        func msg(_ id: UInt64, author: UInt64, ts: Int64) -> JSON {
+            ["id": .id(id), "author": .id(author), "text": .string("m\(id)"), "ts": .int(ts)]
+        }
+        let ch = WorkspaceView(["channels": [["id": 1, "last_read": .int(now - 50), "messages": [
+            msg(10, author: 2, ts: now - 100),
+            msg(11, author: 1, ts: now - 40),
+            msg(12, author: 2, ts: now - 30),
+            msg(13, author: 3, ts: now - 20),
+        ]]]]).channels[0]
+        XCTAssertEqual(ch.firstUnread(me: 1), 12, "my own message isn't unread")
+        XCTAssertEqual(ch.newer(than: now - 35, me: 1), 2)
+        XCTAssertEqual(ch.newer(than: now, me: 1), 0)
+        let read = WorkspaceView(["channels": [["id": 1, "last_read": .int(now), "messages": [msg(10, author: 2, ts: now - 100)]]]]).channels[0]
+        XCTAssertNil(read.firstUnread(me: 1))
+    }
+
     /// An imported message arriving from the server doesn't notify, and the
     /// field stays as it came through this iPhone's own changes.
     func testImportedMessageFromTheServerStaysQuietAndKeepsItsField() async throws {

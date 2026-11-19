@@ -321,6 +321,16 @@
         }
       }
     },
+    "%lld new messages": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 메시지 %lld개"
+          }
+        }
+      }
+    },
     "%lld new notifications": {
       "localizations": {
         "ko": {
@@ -481,6 +491,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "변경 1개 대기 중"
+          }
+        }
+      }
+    },
+    "1 new message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 메시지 1개"
           }
         }
       }
@@ -3624,6 +3644,16 @@
         }
       }
     },
+    "New": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 메시지"
+          }
+        }
+      }
+    },
     "New Message": {
       "localizations": {
         "ko": {
@@ -4861,6 +4891,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "내 메시지에 달린 반응"
+          }
+        }
+      }
+    },
+    "Read up to here": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "여기까지 읽음"
           }
         }
       }

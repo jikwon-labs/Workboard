@@ -501,19 +501,18 @@ impl App {
     }
 
     pub(super) fn unread_here(&self, c: &Channel) -> usize {
-        let seen = self.data.extra.chat_seen.get(&c.id);
-        c.messages
-            .iter()
-            .filter(|m| {
-                m.author != self.data.me
-                    // imported history isn't new to anyone
-                    && m.imported.is_none()
-                    && match seen {
-                        Some(s) => !s.has(m.id) && (m.ts >= s.floor || m.ts > c.last_read),
-                        None => m.ts > c.last_read,
-                    }
-            })
-            .count()
+        c.messages.iter().filter(|m| self.is_unread(c, m)).count()
+    }
+
+    /// A message from someone else in channel `c` I haven't seen.
+    pub(super) fn is_unread(&self, c: &Channel, m: &Message) -> bool {
+        m.author != self.data.me
+            // imported history isn't new to anyone
+            && m.imported.is_none()
+            && match self.data.extra.chat_seen.get(&c.id) {
+                Some(s) => !s.has(m.id) && (m.ts >= s.floor || m.ts > c.last_read),
+                None => m.ts > c.last_read,
+            }
     }
 
     /// Something in an open conversation still to be marked read.
@@ -998,6 +997,34 @@ impl App {
             .collect();
         at.sort_by_key(|&(c, m)| self.data.channels[c].messages[m].ts);
         let no_messages = at.is_empty();
+        // ---- where I'd read up to (see ChatUi::read_line)
+        let first_unread = at.iter().find_map(|&(c, m)| {
+            let ch = &self.data.channels[c];
+            let msg = &ch.messages[m];
+            self.is_unread(ch, msg).then_some(msg.id)
+        });
+        let newest = at
+            .last()
+            .map(|&(c, m)| self.data.channels[c].messages[m].ts)
+            .unwrap_or(0);
+        let pass = ui.ctx().cumulative_pass_nr();
+        let reopened = pass > self.chat.drawn_pass + 1;
+        self.chat.drawn_pass = pass;
+        match self.chat.read_line {
+            Some((c, line)) if c == cid && !reopened => {
+                // messages that come in while I'm scrolled up or away from
+                // the window: the line goes above the first of them
+                if line.is_none() && (!self.chat.at_bottom || self.notify_rt.away) {
+                    self.chat.read_line = Some((cid, first_unread));
+                }
+            }
+            _ => {
+                self.chat.read_line = Some((cid, first_unread));
+                self.chat.bottom_seen = Some((cid, newest));
+                self.chat.at_bottom = true;
+            }
+        }
+        let line_at = self.chat.read_line.and_then(|(_, l)| l);
         // the channel's own settings, without its messages
         let messages = std::mem::take(&mut self.data.channels[ci].messages);
         let channel = self.data.channels[ci].clone();
@@ -1273,7 +1300,7 @@ impl App {
             };
             let earlier = matching.len().saturating_sub(limit);
             let shown: Vec<Message> = matching[earlier..].iter().map(|m| (*m).clone()).collect();
-            egui::ScrollArea::vertical().id_salt(("chat_scroll", cid)).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+            let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid)).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 10)).show(ui, |ui| {
                     if earlier > 0 {
                         ui.vertical_centered(|ui| {
@@ -1354,6 +1381,10 @@ impl App {
                             ui.painter().galley(pill.center() - g.size() / 2.0, g, t.text2);
                             prev = None;
                         }
+                        if line_at == Some(m.id) {
+                            read_line(ui, &t);
+                            prev = None;
+                        }
                         let compact = prev.map_or(false, |(a, ts)| a == m.author && m.ts - ts < 300) && m.post_title.is_none() && m.call.is_none();
                         self.message_row_c(ui, cid, m, true, compact, &mut acts);
                         prev = Some((m.author, m.ts));
@@ -1364,6 +1395,24 @@ impl App {
                     }
                 });
             });
+            // scrolled up while messages came in: a quiet note over the
+            // composer that takes the list down to them
+            let at_bottom = list.state.offset.y + list.inner_rect.height() >= list.content_size.y - 24.0;
+            self.chat.at_bottom = at_bottom;
+            if at_bottom || self.chat.bottom_seen.is_none_or(|(c, _)| c != cid) {
+                self.chat.bottom_seen = Some((cid, newest));
+            } else {
+                let since = self.chat.bottom_seen.map_or(newest, |(_, ts)| ts);
+                let me = self.data.me;
+                let below = at
+                    .iter()
+                    .map(|&(c, m)| &self.data.channels[c].messages[m])
+                    .filter(|m| m.author != me && m.imported.is_none() && m.ts > since)
+                    .count();
+                if below > 0 && new_below(ui, &t, list.inner_rect, below) {
+                    self.chat.to_bottom = true;
+                }
+            }
             egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 2 }).show(ui, |ui| {
                 let target = match channel.kind {
                     ChannelKind::Channel => channel.name.clone(),
@@ -3122,6 +3171,17 @@ impl App {
                         .find(|c| c.id == ch)
                         .map(|c| self.conversation(c).iter().map(|d| d.id).collect())
                         .unwrap_or_default();
+                    // the red line moves up to it
+                    let from = ids
+                        .iter()
+                        .filter_map(|id| self.data.channels.iter().find(|c| c.id == *id))
+                        .flat_map(|c| c.messages.iter())
+                        .filter(|m| m.ts >= ts)
+                        .min_by_key(|m| m.ts)
+                        .map(|m| m.id);
+                    if let Some(open) = self.chat.open {
+                        self.chat.read_line = Some((open, from));
+                    }
                     for id in ids {
                         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == id) {
                             c.last_read = ts - 1;
@@ -3361,6 +3421,75 @@ impl App {
 /// Calls and huddles post a message whose text is kept in English, so every
 /// device and the iPhone app read the same thing; it is put in the reader's
 /// language where it is shown. Anything else is what the person wrote.
+/// The red "New" line above the first message I hadn't read.
+fn read_line(ui: &mut Ui, t: &Theme) {
+    ui.add_space(2.0);
+    let w = ui.available_width();
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 18.0), Sense::hover());
+    name_it(&resp, "Read up to here");
+    let g = ui
+        .painter()
+        .layout_no_wrap(tr("New").into(), FontId::proportional(11.0), t.danger);
+    let tx = r.right() - g.size().x - 2.0;
+    ui.painter().hline(
+        r.left()..=tx - 8.0,
+        r.center().y,
+        Stroke::new(1.0_f32, t.danger),
+    );
+    ui.painter()
+        .galley(pos2(tx, r.center().y - g.size().y / 2.0), g, t.danger);
+}
+
+/// "N new messages" in grey at the foot of the message list `list`, for
+/// messages that came in below where it's scrolled to. True when clicked.
+fn new_below(ui: &mut Ui, t: &Theme, list: Rect, n: usize) -> bool {
+    let label = if n == 1 {
+        tr("1 new message").to_string()
+    } else {
+        trf!("{} new messages", n)
+    };
+    let g = ui
+        .painter()
+        .layout_no_wrap(label, FontId::proportional(12.5), t.text2);
+    let size = vec2(g.size().x + 42.0, 28.0);
+    let r = Rect::from_center_size(
+        pos2(list.center().x, list.bottom() - 10.0 - size.y / 2.0),
+        size,
+    );
+    let resp = ui
+        .interact(r, ui.id().with("new_below"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    name_it(&resp, "New messages");
+    let p = ui.painter();
+    p.rect_filled(
+        r.translate(vec2(0.0, 1.0)).expand(1.0),
+        15.0,
+        Color32::from_black_alpha(14),
+    );
+    p.rect_filled(r, 14.0, t.card);
+    if resp.hovered() {
+        p.rect_filled(r, 14.0, t.hover);
+    }
+    p.rect_stroke(
+        r,
+        14.0,
+        Stroke::new(1.0_f32, t.border),
+        egui::StrokeKind::Inside,
+    );
+    p.galley(
+        pos2(r.left() + 14.0, r.center().y - g.size().y / 2.0),
+        g,
+        t.text2,
+    );
+    // a small arrow down
+    let c = pos2(r.right() - 17.0, r.center().y);
+    let s = Stroke::new(1.4_f32, t.text2);
+    p.line_segment([c + vec2(0.0, -4.5), c + vec2(0.0, 4.0)], s);
+    p.line_segment([c + vec2(-3.5, 0.5), c + vec2(0.0, 4.0)], s);
+    p.line_segment([c + vec2(3.5, 0.5), c + vec2(0.0, 4.0)], s);
+    resp.clicked()
+}
+
 pub(super) fn shown_text(m: &Message) -> String {
     match m.text.as_str() {
         t @ ("Started a call" | "Started a huddle") if m.call.is_some() => tr(t).to_string(),

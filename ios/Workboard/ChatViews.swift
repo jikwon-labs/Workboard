@@ -250,24 +250,34 @@ struct ConversationView: View {
     @Environment(CallManager.self) private var calls
     @Environment(\.openURL) private var openURL
     let channelId: UInt64
+    @Environment(\.scenePhase) private var scenePhase
     @State private var settings = false
     @State private var posting = false
+    /// The red "New" line sits above this message: the first unread one on
+    /// opening, or the first that came in while scrolled up or away.
+    @State private var readLine: UInt64?
+    /// The message at the bottom edge of the list (nil: not scrolled yet,
+    /// so still at the bottom where it opens).
+    @State private var position: UInt64?
+    /// The newest message the last time the list was at the bottom.
+    @State private var bottomSeen: Int64 = 0
 
     var body: some View {
         let me = client.me ?? 0
         let v = client.view
         if let c = v.channels.first(where: { $0.id == channelId }) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if !c.topic.isEmpty {
-                            Text(c.topic).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
-                        }
-                        ForEach(Array(c.messages.enumerated()), id: \.element.id) { i, m in
-                            let prev = i > 0 ? c.messages[i - 1] : nil
-                            let grouped = prev != nil && prev!.author == m.author && m.ts - prev!.ts < 300 && prev!.replies.isEmpty
+            let atBottom = position == nil || position == c.messages.last?.id
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !c.topic.isEmpty {
+                        Text(c.topic).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
+                    }
+                    ForEach(Array(c.messages.enumerated()), id: \.element.id) { i, m in
+                        let prev = i > 0 ? c.messages[i - 1] : nil
+                        let grouped = prev != nil && prev!.author == m.author && m.ts - prev!.ts < 300 && prev!.replies.isEmpty && m.id != readLine
+                        VStack(alignment: .leading, spacing: 0) {
+                            if m.id == readLine { ReadLine() }
                             MessageRow(message: m, channelId: c.id, compact: grouped)
-                                .id(m.id)
                             if !m.replies.isEmpty {
                                 NavigationLink(value: Nav.Route.thread(channel: c.id, message: m.id)) {
                                     RepliesChip(message: m)
@@ -278,14 +288,45 @@ struct ConversationView: View {
                                 .accessibilityIdentifier("replies-\(m.id)")
                             }
                         }
+                        .id(m.id)
                     }
-                    .padding(.vertical, 8)
                 }
-                .defaultScrollAnchor(.bottom)
-                .onAppear { markRead(c) }
-                .onChange(of: c.messages.last?.id) {
-                    markRead(c)
-                    if let id = c.messages.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } }
+                .scrollTargetLayout()
+                .padding(.vertical, 8)
+            }
+            .defaultScrollAnchor(.bottom)
+            .scrollPosition(id: $position, anchor: .bottom)
+            .overlay(alignment: .bottom) {
+                let below = atBottom ? 0 : c.newer(than: bottomSeen, me: me)
+                if below > 0 {
+                    NewBelowNote(count: below) {
+                        withAnimation { position = c.messages.last?.id }
+                    }
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
+                }
+            }
+            .onAppear {
+                readLine = c.firstUnread(me: me)
+                bottomSeen = c.messages.last?.ts ?? 0
+                markRead(c)
+            }
+            .onChange(of: atBottom) { if atBottom { bottomSeen = c.messages.last?.ts ?? 0 } }
+            .onChange(of: c.messages.last?.id) { old, new in
+                // at the bottom when the one before it was (set at once
+                // below, so a quick run of messages keeps following)
+                let was = position == nil || position == old
+                    // mine: just sent, down to it from anywhere
+                    || c.messages.last?.author == me
+                // came in while I'm scrolled up or away: the line goes
+                // above the first of them, and the list stays put
+                if readLine == nil && (!was || scenePhase != .active) {
+                    readLine = c.firstUnread(me: me)
+                }
+                markRead(c)
+                if was, let new {
+                    bottomSeen = c.messages.last?.ts ?? 0
+                    withAnimation { position = new }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -359,6 +400,45 @@ struct ConversationView: View {
     func markRead(_ c: ChannelView) {
         guard let last = c.messages.last?.ts, last > c.lastRead else { return }
         client.editLocal { d in Edits.markRead(&d, channel: c.id, ts: max(last, nowTs())) }
+    }
+}
+
+/// The red "New" line above the first message I hadn't read.
+struct ReadLine: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.red).frame(height: 1)
+            Text("New").font(.caption2.weight(.medium)).foregroundStyle(.red)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Read up to here")
+        .accessibilityIdentifier("readLine")
+    }
+}
+
+/// "N new messages" in grey over the foot of the list, for messages that
+/// came in below where it's scrolled to; a tap goes down to them.
+struct NewBelowNote: View {
+    let count: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(count == 1 ? "1 new message" : "\(count) new messages")
+                Image(systemName: "arrow.down")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.2)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("newMessagesButton")
     }
 }
 

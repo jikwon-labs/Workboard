@@ -190,4 +190,34 @@ final class ChatCommandsUITests: WorkboardUITestCase {
         XCTAssertTrue(a.staticTexts["ping\(tag) are you there"].waitForExistence(timeout: 5))
         XCTAssertTrue(a.staticTexts["1 reply"].firstMatch.waitForExistence(timeout: 5), "the workflow replied")
     }
+
+    /// A message that comes in while the list is scrolled up leaves it
+    /// where it is: a grey note over the message box says so and goes down
+    /// to it, and a red line marks where the new ones start.
+    func testNewMessagesWhileScrolledUpShowAQuietNoteAndARedLine() {
+        let tag = Int.random(in: 1000...9999)
+        let a = launchFresh(["-wbOpen", "channel:302"], server: adminServer)
+        waitEnabled(a.textFields["composer"])
+        for i in 0..<14 {
+            say("Earlier note \(i) \(tag): a longer line so the list scrolls well past one screen on a phone.", channel: 302)
+        }
+        XCTAssertTrue(a.staticTexts["Earlier note 13 \(tag): a longer line so the list scrolls well past one screen on a phone."].waitForExistence(timeout: 5), "down at the newest while at the bottom")
+        let note = a.buttons["newMessagesButton"]
+        let line = a.descendants(matching: .any)["readLine"].firstMatch
+        XCTAssertFalse(note.exists, "nothing came in below")
+        XCTAssertFalse(line.exists, "read as they came in")
+
+        let list = a.scrollViews.firstMatch
+        list.swipeDown()
+        list.swipeDown()
+        say("Fresh one \(tag)", channel: 302)
+        XCTAssertTrue(note.waitForExistence(timeout: 5), "a note for the message below")
+        waitLabel(note, contains: "1 new message")
+        XCTAssertFalse(a.staticTexts["Fresh one \(tag)"].isHittable, "the list stayed where I was reading")
+        note.tap()
+        XCTAssertTrue(a.staticTexts["Fresh one \(tag)"].waitForExistence(timeout: 5))
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: note)
+        wait(for: [gone], timeout: 5)
+        XCTAssertTrue(line.exists, "a red line above the new one")
+    }
 }

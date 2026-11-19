@@ -648,6 +648,20 @@ struct ChatUi {
     /// scrolled up.
     to_bottom: bool,
     thread_to_bottom: bool,
+    /// Where I'd read up to in the open conversation: the red "New" line
+    /// sits above this message (conversation, message) until I leave it.
+    /// Set on opening it with unread messages, and when messages come in
+    /// while I'm scrolled up or away from the window.
+    read_line: Option<(u64, Option<u64>)>,
+    /// The newest message in the open conversation the last time its list
+    /// was down at the bottom (conversation, time): anything from others
+    /// after it, while scrolled up, shows "New messages" over the composer.
+    bottom_seen: Option<(u64, i64)>,
+    /// The open conversation's list was at the bottom on the last frame.
+    at_bottom: bool,
+    /// The pass Chat was last drawn in: a gap means it was left (for
+    /// another page) and opened again, which starts `read_line` afresh.
+    drawn_pass: u64,
 }
 
 /// The Posts page: the post being written and the filters.

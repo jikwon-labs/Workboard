@@ -1087,6 +1087,16 @@
         }
       }
     },
+    "Bold": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "굵게"
+          }
+        }
+      }
+    },
     "Bronze": {
       "extractionState": "manual",
       "localizations": {
@@ -1094,6 +1104,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "갈색"
+          }
+        }
+      }
+    },
+    "Bulleted list": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "글머리 기호 목록"
           }
         }
       }
@@ -1338,6 +1358,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "닫힘"
+          }
+        }
+      }
+    },
+    "Code block": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "코드 블록"
           }
         }
       }
@@ -1868,6 +1898,16 @@
         }
       }
     },
+    "Divider": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구분선"
+          }
+        }
+      }
+    },
     "Doc title": {
       "localizations": {
         "ko": {
@@ -2329,6 +2369,46 @@
         }
       }
     },
+    "Heading 1": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "제목 1"
+          }
+        }
+      }
+    },
+    "Heading 2": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "제목 2"
+          }
+        }
+      }
+    },
+    "Heading 3": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "제목 3"
+          }
+        }
+      }
+    },
+    "Hide keyboard": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키보드 숨기기"
+          }
+        }
+      }
+    },
     "Hide password": {
       "localizations": {
         "ko": {
@@ -2451,6 +2531,16 @@
         }
       }
     },
+    "Inline code": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "인라인 코드"
+          }
+        }
+      }
+    },
     "Invite code": {
       "localizations": {
         "ko": {
@@ -2528,6 +2618,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "모든 사람에게서 삭제됩니다. 설정의 휴지통에서 되살릴 수 있습니다."
+          }
+        }
+      }
+    },
+    "Italic": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기울임꼴"
           }
         }
       }
@@ -2649,6 +2749,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "[ ] 로 시작하는 줄은 할 일이 됩니다."
+          }
+        }
+      }
+    },
+    "Link": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "링크"
           }
         }
       }
@@ -3782,6 +3892,16 @@
         }
       }
     },
+    "Numbered list": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "번호 매기기 목록"
+          }
+        }
+      }
+    },
     "On": {
       "localizations": {
         "ko": {
@@ -4201,6 +4321,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "질문"
+          }
+        }
+      }
+    },
+    "Quote": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "인용"
           }
         }
       }
@@ -4989,6 +5119,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "타이머 중지"
+          }
+        }
+      }
+    },
+    "Strikethrough": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "취소선"
           }
         }
       }

@@ -62,7 +62,7 @@ struct DocsView: View {
     }
 }
 
-/// Reads a doc; Edit turns the body into plain text editing.
+/// Reads a doc; Edit opens the formatting editor.
 struct DocDetailView: View {
     @Environment(SyncClient.self) private var client
     @Environment(Nav.self) private var nav
@@ -72,7 +72,7 @@ struct DocDetailView: View {
     @State private var editing = false
     @State private var title = ""
     @State private var draft = ""
-    @FocusState private var bodyFocused: Bool
+    @State private var bodyFocused = false
 
     var body: some View {
         if let d = client.view.docs.first(where: { $0.id == docId }) {
@@ -84,11 +84,8 @@ struct DocDetailView: View {
                             .padding(.horizontal, 20)
                             .padding(.top, 12)
                             .accessibilityIdentifier("docTitleField")
-                        TextEditor(text: $draft)
-                            .focused($bodyFocused)
-                            .scrollContentBackground(.hidden)
-                            .padding(.horizontal, 15)
-                            .accessibilityIdentifier("docEditor")
+                        // formatting shows while typing; a bar above the keyboard adds it
+                        DocEditor(text: $draft, focus: $bodyFocused)
                     }
                 } else {
                     ScrollView {

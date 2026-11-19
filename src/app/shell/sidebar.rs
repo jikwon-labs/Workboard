@@ -47,11 +47,8 @@ impl App {
                 self.sidebar_top(ui, t);
                 ui.add_space(4.0);
                 let filter = self.side.filter.unwrap_or("");
-                // The list still scrolls with the wheel or trackpad; the bar
-                // itself is hidden so it does not crowd the narrow sidebar.
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
                         let tc = t.text2;
                         let muted = self.data.extra.muted_until > now_ts();

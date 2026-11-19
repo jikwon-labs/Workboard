@@ -868,6 +868,47 @@ fn small_window_doc_template_cards_fit_and_shorten() {
     assert!(cut.is_empty(), "cut: {:?}", cut);
 }
 
+// scroll bars (narrow, tall, painted bars) inside a strip of the window
+fn scroll_bars_in(h: &Ui1, strip: Rect) -> usize {
+    h.shapes
+        .iter()
+        .filter(|s| match &s.shape {
+            egui::Shape::Rect(r) => {
+                r.fill.a() > 0
+                    && r.rect.width() > 0.5
+                    && r.rect.width() <= 12.0
+                    && r.rect.height() >= 40.0
+                    && strip.contains_rect(r.rect)
+            }
+            _ => false,
+        })
+        .count()
+}
+
+fn wheel_down(h: &mut Ui1, at: Pos2, strip: Rect, what: &str) {
+    for _ in 0..6 {
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -200.0),
+            modifiers: Default::default(),
+        }]);
+        assert_eq!(
+            scroll_bars_in(h, strip),
+            0,
+            "{}: no scroll bar while scrolling",
+            what
+        );
+    }
+    h.settle();
+    assert_eq!(
+        scroll_bars_in(h, strip),
+        0,
+        "{}: no scroll bar after scrolling",
+        what
+    );
+}
+
 #[test]
 fn small_window_sidebar_scrolls_without_a_scroll_bar() {
     let mut h = Ui1::sized(900.0, 560.0);
@@ -889,40 +930,49 @@ fn small_window_sidebar_scrolls_without_a_scroll_bar() {
         "the sidebar overflows a small window: {:?}",
         start
     );
-    // a scroll bar is a narrow, tall bar along the sidebar's right edge
-    let bars = |h: &Ui1| {
-        h.shapes
-            .iter()
-            .filter(|s| match &s.shape {
-                egui::Shape::Rect(r) => {
-                    r.rect.width() <= 12.0
-                        && r.rect.height() >= 40.0
-                        && r.rect.left() > side.right() - 30.0
-                        && r.rect.right() <= side.right()
-                }
-                _ => false,
-            })
-            .count()
-    };
-    assert_eq!(bars(&h), 0, "no scroll bar at rest");
-    let at = pos2(side.center().x, 300.0);
-    for _ in 0..6 {
-        h.frame(vec![egui::Event::PointerMoved(at)]);
-        h.frame(vec![egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -200.0),
-            modifiers: Default::default(),
-        }]);
-        assert_eq!(bars(&h), 0, "no scroll bar while scrolling");
-    }
-    h.settle();
+    // a scroll bar would sit along the sidebar's right edge
+    let strip = side.with_min_x(side.right() - 30.0);
+    assert_eq!(scroll_bars_in(&h, strip), 0, "no scroll bar at rest");
+    wheel_down(&mut h, pos2(side.center().x, 300.0), strip, "sidebar");
     let end = last_row(&h).expect("New message is still listed");
     assert!(
         end.bottom() <= h.size.y,
         "the wheel brings the bottom row into view: {:?}",
         end
     );
-    assert_eq!(bars(&h), 0, "no scroll bar after scrolling");
+}
+
+#[test]
+fn small_window_settings_scroll_without_a_scroll_bar() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    // the longest section: taller than a small window
+    h.app.open_settings("Notifications");
+    h.settle();
+    let bottom = |h: &Ui1| {
+        h.tree
+            .iter()
+            .filter(|(_, r)| r.left() > 300.0)
+            .map(|(_, r)| r.bottom())
+            .fold(0.0_f32, f32::max)
+    };
+    let before = bottom(&h);
+    assert!(before > h.size.y, "the section overflows: {}", before);
+    // a scroll bar would sit near the window's right edge, inside the
+    // section's margin
+    let strip = Rect::from_min_max(pos2(h.size.x - 80.0, 40.0), h.size.to_pos2());
+    assert_eq!(
+        scroll_bars_in(&h, strip),
+        0,
+        "settings: no scroll bar at rest"
+    );
+    wheel_down(&mut h, pos2(600.0, 300.0), strip, "settings");
+    let after = bottom(&h);
+    assert!(
+        after < before - 100.0,
+        "the wheel scrolls the section: {} -> {}",
+        before,
+        after
+    );
 }
 
 #[test]

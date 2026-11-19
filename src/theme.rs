@@ -215,6 +215,24 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
         s.spacing.interact_size.y = crate::widgets::CONTROL_H;
         // drop-down lists show as many rows as before the rows grew to 28
         s.spacing.combo_height = 300.0;
+        // no scroll bars anywhere (lists, dialogs, drop-downs): content
+        // still scrolls with the wheel or trackpad. A floating bar takes no
+        // room, and with no width it cannot be seen or grabbed.
+        s.spacing.scroll = egui::style::ScrollStyle {
+            floating: true,
+            bar_width: 0.0,
+            floating_width: 0.0,
+            floating_allocated_width: 0.0,
+            bar_inner_margin: 0.0,
+            bar_outer_margin: 0.0,
+            dormant_background_opacity: 0.0,
+            active_background_opacity: 0.0,
+            interact_background_opacity: 0.0,
+            dormant_handle_opacity: 0.0,
+            active_handle_opacity: 0.0,
+            interact_handle_opacity: 0.0,
+            ..egui::style::ScrollStyle::floating()
+        };
         s.text_styles
             .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
         s.text_styles

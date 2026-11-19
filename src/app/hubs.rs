@@ -144,9 +144,9 @@ impl App {
         let t = self.t();
         let mut clicked = None;
         let mut plus = false;
-        // One id for every hub, so a width dragged in Docs carries over to
-        // Dashboards, Whiteboards and the rest.
-        egui::SidePanel::left("hub_sidebar")
+        // The same id as the Home and Chat sidebar (`sidebar` in
+        // shell/sidebar.rs), so one dragged width applies everywhere.
+        egui::SidePanel::left("sidebar")
             .resizable(true)
             .default_width(255.0)
             .width_range(200.0..=400.0)

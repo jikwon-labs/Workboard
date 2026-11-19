@@ -36,6 +36,7 @@ impl App {
                 });
             return;
         }
+        // App hubs (hubs.rs) reuse this id, so they keep the same width.
         egui::SidePanel::left("sidebar")
             .resizable(true)
             .default_width(255.0)

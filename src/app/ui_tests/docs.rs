@@ -801,7 +801,7 @@ fn docs_hub_leaves_out_docs_in_archived_or_other_peoples_spaces() {
 }
 
 #[test]
-fn hub_sidebar_can_be_dragged_wider_and_keeps_its_width_across_hubs() {
+fn sidebar_width_is_shared_by_chat_docs_and_dashboards() {
     let mut h = Ui1::new();
     h.click("Rail More");
     h.click("Docs");
@@ -825,6 +825,20 @@ fn hub_sidebar_can_be_dragged_wider_and_keeps_its_width_across_hubs() {
         "Dashboards uses the same width: {:?} vs {:?}",
         dash,
         after
+    );
+    // narrowing the Chat sidebar narrows the hubs' sidebar too
+    h.app.section = Section::Chat;
+    h.settle();
+    let edge = pos2(after.right() + 8.0, after.center().y + 200.0);
+    h.drag_by(edge, edge - vec2(150.0, 0.0));
+    h.click("Rail More");
+    h.click("Docs");
+    let docs = h.rect("Create in Docs");
+    assert!(
+        (after.right() - docs.right() - 150.0).abs() < 4.0,
+        "Docs follows the width set in Chat: {:?} -> {:?}",
+        after,
+        docs
     );
 }
 

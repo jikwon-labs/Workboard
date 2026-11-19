@@ -94,7 +94,8 @@ extension FakeServer {
                 let q = { (n: String) in comps?.queryItems?.first { $0.name == n }?.value }
                 let ch = q("channel").flatMap { UInt64($0) } ?? 0
                 let who = q("member").flatMap { UInt64($0) } ?? 2
-                broadcast(.typing(channel: ch, member: who))
+                let thread = q("thread").flatMap { UInt64($0) }
+                broadcast(.typing(channel: ch, member: who, thread: thread))
                 log("admin: \(who) typing in \(ch)")
                 respond(p, 200, ["ok": true])
             case "/admin/reset-code":

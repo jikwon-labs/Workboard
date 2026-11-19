@@ -1613,7 +1613,11 @@ fn who_else_is_typing_shows_under_the_message_box_for_a_moment() {
         .collect();
     let (a, an) = others[0].clone();
     let (b, bn) = others[1].clone();
-    let typing = |channel, member| wb_net::Event::Typing { channel, member };
+    let typing = |channel, member| wb_net::Event::Typing {
+        channel,
+        member,
+        thread: None,
+    };
     let line_for = |n: &str| format!("{} is typing...", n);
 
     // nobody yet: the row under the box is empty
@@ -1707,6 +1711,7 @@ fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name() {
     h.app.take_net_events(vec![wb_net::Event::Typing {
         channel: dm,
         member: 2,
+        thread: None,
     }]);
     h.settle();
     let dots = h.rect(&line);
@@ -1747,14 +1752,80 @@ fn typing_in_the_message_box_tells_the_server_every_few_seconds() {
     h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
     h.type_text("i");
     let first = h.app.sync_rt.typed.expect("told the server");
-    assert_eq!(first.0, cid);
+    assert_eq!((first.0, first.1), (cid, None));
     // more keys right after: not again
     h.type_text(" there");
-    assert_eq!(h.app.sync_rt.typed.unwrap().1, first.1);
+    assert_eq!(h.app.sync_rt.typed.unwrap().2, first.2);
     // a few seconds on, the next key tells it again
-    h.app.sync_rt.typed = Some((cid, first.1 - crate::app::typing::TYPING_EVERY));
+    h.app.sync_rt.typed = Some((cid, None, first.2 - crate::app::typing::TYPING_EVERY));
     h.type_text("!");
-    assert!(h.app.sync_rt.typed.unwrap().1 > first.1);
+    assert!(h.app.sync_rt.typed.unwrap().2 > first.2);
+    h.app.sync_rt.net = None;
+}
+
+#[test]
+fn typing_in_a_thread_shows_only_under_that_threads_reply_box() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("1 reply");
+    let tid = h.app.chat.thread_open.unwrap();
+    let name = h.app.data.member(2).unwrap().shown().to_string();
+    let line = format!("{} is typing...", name);
+
+    // the server says Alex is answering in this thread
+    h.app.take_net_events(vec![wb_net::Event::Typing {
+        channel: cid,
+        member: 2,
+        thread: Some(tid),
+    }]);
+    h.settle();
+    let at = h.rect(&line);
+    let reply_box = h.rect("Reply composer");
+    let channel_box = h.rect("Message composer");
+    assert_eq!(
+        h.tree.iter().filter(|(n, _)| n == &line).count(),
+        1,
+        "shown once"
+    );
+    assert!(
+        at.top() > reply_box.top() && at.left() >= reply_box.left() - 20.0,
+        "under the thread's reply box {:?}, at {:?}",
+        reply_box,
+        at
+    );
+    assert!(
+        at.left() > channel_box.right() - 1.0,
+        "not under the channel's box"
+    );
+
+    // back in the channel: typing there shows under the channel's box only
+    h.app.take_net_events(vec![wb_net::Event::Typing {
+        channel: cid,
+        member: 2,
+        thread: None,
+    }]);
+    h.settle();
+    let at = h.rect(&line);
+    assert!(
+        at.left() < channel_box.right() && at.top() > channel_box.top(),
+        "under the channel's box {:?}, at {:?}",
+        channel_box,
+        at
+    );
+    assert_eq!(h.tree.iter().filter(|(n, _)| n == &line).count(), 1);
+
+    // typing in the reply box tells the server which thread
+    h.app.sync_rt.net = Some(wb_net::Client::start(
+        "127.0.0.1:1",
+        wb_net::SignIn::default(),
+        std::sync::Arc::new(|| {}),
+    ));
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.click("Reply composer");
+    h.type_text("on it");
+    let told = h.app.sync_rt.typed.expect("told the server");
+    assert_eq!((told.0, told.1), (cid, Some(tid)));
     h.app.sync_rt.net = None;
 }
 

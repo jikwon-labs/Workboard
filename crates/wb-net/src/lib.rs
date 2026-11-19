@@ -649,10 +649,14 @@ pub enum Msg {
     /// `member`) at most every few seconds while its person types; the
     /// server passes it on, with `member`, to the others who can see that
     /// conversation. Nothing is kept. Older servers and apps ignore it.
+    /// `thread` is the message whose thread is being answered: that typing
+    /// shows in the thread, not under the conversation's own box.
     Typing {
         channel: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         member: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<u64>,
     },
     Error {
         message: String,
@@ -980,10 +984,12 @@ pub enum Event {
     Restored(String),
     /// The members connected to the server right now.
     Presence(Vec<u64>),
-    /// `member` is typing in `channel` (see `Msg::Typing`).
+    /// `member` is typing in `channel`, in the thread of message `thread`
+    /// when there is one (see `Msg::Typing`).
     Typing {
         channel: u64,
         member: u64,
+        thread: Option<u64>,
     },
     /// My scheduled messages (the answer to schedule, unschedule and
     /// scheduled_list).
@@ -1552,7 +1558,12 @@ fn on_server_msg(
         Some(Msg::Typing {
             channel,
             member: Some(member),
-        }) => emit(Event::Typing { channel, member }),
+            thread,
+        }) => emit(Event::Typing {
+            channel,
+            member,
+            thread,
+        }),
         Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
         Some(Msg::Error {
             message,

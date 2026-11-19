@@ -220,8 +220,9 @@ pub struct SyncRt {
     pub(super) online: Option<Vec<u64>>,
     /// Who the server says is typing where (see typing.rs).
     pub(super) typing: Vec<super::typing::Typist>,
-    /// The conversation I last told the server I'm typing in, and when.
-    pub(super) typed: Option<(u64, std::time::Instant)>,
+    /// The conversation (and thread) I last told the server I'm typing in,
+    /// and when.
+    pub(super) typed: Option<(u64, Option<u64>, std::time::Instant)>,
     /// A code that signs my phone in, while Work together shows it.
     pub(super) phone: Option<PhoneLink>,
     /// When the server was asked for a new one that hasn't come yet.

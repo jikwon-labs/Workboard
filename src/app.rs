@@ -640,6 +640,9 @@ struct ChatUi {
     thread_open: Option<u64>,
     /// The reply being written in the open thread (`thread_open`).
     thread_text: String,
+    /// The reply box was just typed in (this frame), with words in it: the
+    /// others in the thread are told.
+    thread_typed: bool,
     thread_files: Vec<files::Pending>,
     /// The same for the open thread's reply box (kept with its draft).
     thread_picked: Vec<u64>,

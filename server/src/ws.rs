@@ -142,6 +142,8 @@ impl Hub {
 pub(crate) struct Typing {
     pub(crate) member: u64,
     pub(crate) channel: u64,
+    /// the message whose thread they're answering, if any
+    pub(crate) thread: Option<u64>,
     /// who may hear it: the members of a DM or private channel; None for a
     /// channel everyone sees
     pub(crate) to: Option<Arc<Vec<u64>>>,
@@ -159,9 +161,10 @@ impl Typing {
 const TYPING_GAP: Duration = Duration::from_millis(1500);
 
 impl Hub {
-    /// `member` is typing in `channel`: tell the others who can see it.
-    /// Nothing when the conversation isn't there or is closed to them.
-    pub(crate) fn typing_in(&self, member: u64, channel: u64) {
+    /// `member` is typing in `channel` (in the thread of message `thread`):
+    /// tell the others who can see it. Nothing when the conversation isn't
+    /// there or is closed to them.
+    pub(crate) fn typing_in(&self, member: u64, channel: u64, thread: Option<u64>) {
         let t = {
             let g = self.state();
             let Some(ch) = g
@@ -191,6 +194,7 @@ impl Hub {
             Typing {
                 member,
                 channel,
+                thread,
                 to: (restricted && !members.is_empty()).then(|| Arc::new(members)),
             }
         };
@@ -300,7 +304,7 @@ struct Conn {
     was_hidden: Vec<u64>,
     /// the conversation this connection's typing was last passed on for,
     /// and when (see TYPING_GAP)
-    typed: Option<(u64, std::time::Instant)>,
+    typed: Option<(u64, Option<u64>, std::time::Instant)>,
 }
 
 impl Conn {
@@ -378,13 +382,15 @@ impl Conn {
                 }
                 .to_json(),
             ),
-            Some(Msg::Typing { channel, .. }) => {
-                let soon = self
-                    .typed
-                    .is_some_and(|(c, t)| c == channel && t.elapsed() < TYPING_GAP);
+            Some(Msg::Typing {
+                channel, thread, ..
+            }) => {
+                let soon = self.typed.is_some_and(|(c, th, t)| {
+                    c == channel && th == thread && t.elapsed() < TYPING_GAP
+                });
                 if !soon {
-                    self.typed = Some((channel, std::time::Instant::now()));
-                    hub.typing_in(member, channel);
+                    self.typed = Some((channel, thread, std::time::Instant::now()));
+                    hub.typing_in(member, channel, thread);
                 }
                 None
             }
@@ -607,7 +613,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
                 if t.for_member(member) {
-                    let m = Msg::Typing { channel: t.channel, member: Some(t.member) };
+                    let m = Msg::Typing { channel: t.channel, member: Some(t.member), thread: t.thread };
                     if !send(&mut socket, &m.to_json()).await {
                         break;
                     }

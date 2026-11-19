@@ -377,7 +377,11 @@ impl App {
                 NetEvent::Integrations { hooks, commands } => {
                     self.sync_rt.integrations = Some((hooks, commands))
                 }
-                NetEvent::Typing { channel, member } => self.heard_typing(channel, member),
+                NetEvent::Typing {
+                    channel,
+                    member,
+                    thread,
+                } => self.heard_typing(channel, member, thread),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();
                     self.toast(trf!(

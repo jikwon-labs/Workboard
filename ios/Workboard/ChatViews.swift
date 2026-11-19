@@ -480,6 +480,8 @@ struct ThreadView: View {
                     .padding(.vertical, 4)
                     .background(.bar)
                     .accessibilityIdentifier("alsoToChannel")
+                    // who else is answering in this thread (not shown in the channel)
+                    TypingLine(channelId: c.id, thread: m.id)
                     Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
                         var text = text
                         switch runSlash(client, notifier: notifier, text: text, channel: c.id, parent: m.id, hasFiles: !files.isEmpty) {
@@ -500,6 +502,7 @@ struct ThreadView: View {
                         }
                         return sent
                     }
+                    .onTyping { client.typingNow(channel: c.id, thread: m.id) }
                     .draft("\(c.id)|\(m.id)")
                 }
             }
@@ -1095,11 +1098,13 @@ struct Composer: View {
 struct TypingLine: View {
     @Environment(SyncClient.self) private var client
     let channelId: UInt64
+    /// The message whose thread this line is under; nil for the conversation.
+    var thread: UInt64? = nil
 
     var body: some View {
         // looked at again every second, so it goes away when they stop
         TimelineView(.periodic(from: .now, by: 1)) { tl in
-            let who = client.typing(in: channelId, at: tl.date)
+            let who = client.typing(in: channelId, thread: thread, at: tl.date)
             if !who.isEmpty {
                 let name = { (m: UInt64) in client.view.members.first { $0.id == m }?.name ?? String(localized: "Someone") }
                 Group {

@@ -1135,7 +1135,12 @@ impl App {
                                 parent: Some(tid),
                                 files,
                             });
+                        } else if self.chat.thread_typed {
+                            // the others in the thread see that I'm typing
+                            self.typing_now(cid, Some(tid));
                         }
+                        // who else is answering in this thread
+                        self.typing_row(ui, &channel, Some(tid));
                         // the reply also goes in the conversation, marked as one
                         let place = self
                             .data
@@ -1451,7 +1456,7 @@ impl App {
                         None => acts.push(ChatAction::Send { ch: cid, text, parent: None, files }),
                     }
                 }
-                self.typing_row(ui, &channel);
+                self.typing_row(ui, &channel, None);
             });
         });
         if dragging {
@@ -1592,7 +1597,7 @@ impl App {
                 // the others in the conversation see that I'm typing
                 if r.changed() && !self.chat.text.trim().is_empty() {
                     if let Some(cid) = self.chat.open {
-                        self.typing_now(cid);
+                        self.typing_now(cid, None);
                     }
                 }
                 // "/" at the start lists the commands (integrations.rs)
@@ -1822,6 +1827,7 @@ impl App {
     ) -> Option<(String, Vec<Attachment>)> {
         let t = self.t();
         let mut out = None;
+        let mut typed = false;
         egui::Frame::new()
             .stroke(Stroke::new(1.0_f32, t.border))
             .corner_radius(10)
@@ -1900,6 +1906,7 @@ impl App {
                     *text = format!("/{} ", pick);
                     move_cursor_to_end(ui.ctx(), id, text);
                 }
+                typed = r.changed() && !text.trim().is_empty();
                 // typing "@" at the start of a word offers the people to
                 // mention, as in the channel's box
                 let mention_popup = egui::Id::new(("reply_mention_popup", thread));
@@ -2019,6 +2026,9 @@ impl App {
                     self.pick_media(thread);
                 }
             });
+        if thread {
+            self.chat.thread_typed = typed;
+        }
         out
     }
 

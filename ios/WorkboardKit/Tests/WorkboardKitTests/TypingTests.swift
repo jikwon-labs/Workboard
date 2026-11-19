@@ -21,6 +21,39 @@ final class TypingTests: FakeServerTestCase {
         XCTAssertEqual(ServerMessage(text: #"{"type":"typing","channel":301,"member":2}"#), .typing(channel: 301, member: 2))
         XCTAssertEqual(ServerMessage(text: ServerMessage.typing(channel: 5, member: 6).text), .typing(channel: 5, member: 6))
         XCTAssertEqual(ServerMessage(text: #"{"type":"typing","channel":301}"#), .unknown("typing without member"))
+        // in a thread: the message whose thread it is goes along
+        XCTAssertEqual(ClientMessage.typing(channel: 301, thread: 311).json, ["type": "typing", "channel": 301, "thread": 311])
+        XCTAssertEqual(ClientMessage(text: #"{"type":"typing","channel":301,"thread":311}"#), .typing(channel: 301, thread: 311))
+        XCTAssertEqual(ServerMessage(text: #"{"type":"typing","channel":301,"member":2,"thread":311}"#), .typing(channel: 301, member: 2, thread: 311))
+    }
+
+    func testTypingInAThreadShowsOnlyInThatThread() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let url = "ws://127.0.0.1:\(try await server.start(port: 0))"
+        defer { server.stop() }
+        let a = await signedIn(server, url, member: 1)
+        let b = await signedIn(server, url, member: 2)
+
+        // A answers in the thread of message 311 in #general
+        a.typingNow(channel: 301, thread: 311)
+        await until("B sees A typing in the thread") { b.typing(in: 301, thread: 311) == [1] }
+        XCTAssertEqual(b.typing(in: 301), [], "not under #general's own box")
+
+        // right after, typing in #general itself is another place: it goes out
+        a.typingNow(channel: 301)
+        await until("B sees A typing in #general") { b.typing(in: 301) == [1] }
+        XCTAssertEqual(b.typing(in: 301, thread: 311), [], "one place at a time")
+
+        // back in the thread; A's reply arrives: done typing there
+        a.typingNow(channel: 301, thread: 311)
+        await until("B sees A in the thread again") { b.typing(in: 301, thread: 311) == [1] }
+        XCTAssertTrue(a.edit { d, me in
+            Edits.sendReply(&d, channel: 301, to: 311, text: "on it", me: me, id: a.newId(), ts: nowTs())
+        })
+        await until("A's reply at B") {
+            b.view.channels.first { $0.id == 301 }!.messages.first { $0.id == 311 }!.replies.last?.text == "on it"
+        }
+        XCTAssertEqual(b.typing(in: 301, thread: 311), [])
     }
 
     func testTypingShowsToTheOthersInTheConversationUntilTheirMessageComes() async throws {

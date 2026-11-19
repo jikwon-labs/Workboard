@@ -425,8 +425,8 @@ public final class FakeServer: @unchecked Sendable {
             request(m, from: p)
         case let .callJoin(ch):
             callJoin(ch, from: p)
-        case let .typing(ch):
-            typing(ch, from: p)
+        case let .typing(ch, thread):
+            typing(ch, thread: thread, from: p)
         case .ping:
             send(.pong, to: p)
         case .pong:
@@ -698,14 +698,14 @@ public final class FakeServer: @unchecked Sendable {
     /// Pass someone's typing on to the others who can see the conversation,
     /// as the real server does (Hub::typing_in): a DM or private channel
     /// with a member list only to its members.
-    func typing(_ ch: UInt64, from p: Peer) {
+    func typing(_ ch: UInt64, thread: UInt64? = nil, from p: Peer) {
         guard let member = p.member,
               let c = WorkspaceView(snapshot ?? [:]).channels.first(where: { $0.id == ch }) else { return }
         let restricted = (c.kind == .direct || c.isPrivate) && !c.members.isEmpty
         if restricted && !c.members.contains(member) { return }
         for q in peers.values where q.welcomed && q !== p {
             guard let m = q.member, m != member, !restricted || c.members.contains(m) else { continue }
-            send(.typing(channel: ch, member: member), to: q)
+            send(.typing(channel: ch, member: member, thread: thread), to: q)
         }
     }
 

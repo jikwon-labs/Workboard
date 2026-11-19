@@ -391,7 +391,7 @@ fn two_computers_work_through_a_server() {
     );
 
     // B starts writing the next one: A sees "Sam ... is typing..." in #general
-    b.typing_now(ch);
+    b.typing_now(ch, None);
     let general = |a: &App| a.data.channels.iter().find(|c| c.id == ch).unwrap().clone();
     net_until(&mut a, "B typing at A", |a| {
         a.typing_in(&general(a)) == vec![bora]
@@ -401,6 +401,15 @@ fn two_computers_work_through_a_server() {
         a.typing_line(&general(&a)),
         Some(format!("{} is typing...", name))
     );
+
+    // then in the thread of that message: only the thread shows it
+    let tid = general(&a).messages.last().unwrap().id;
+    b.sync_rt.typed = None;
+    b.typing_now(ch, Some(tid));
+    net_until(&mut a, "B typing in the thread at A", |a| {
+        a.typing_where(&general(a), Some(tid)) == vec![bora]
+    });
+    assert!(a.typing_in(&general(&a)).is_empty(), "not in the channel");
 
     // a task from A reaches B
     let list = a.data.first_list().unwrap();

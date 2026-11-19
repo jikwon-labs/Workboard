@@ -19,7 +19,8 @@
 // /admin/online, /admin/workspaces?list=ID:NAME,... (what POST
 // /auth/workspaces lists; ID "" is the first), /admin/find?text=T, /admin/late-answer?secs=N (the next
 // access or backup request is answered N seconds late) and
-// /admin/typing?channel=C&member=M (M is typing there) over HTTP, for UI
+// /admin/typing?channel=C&member=M[&thread=T] (M is typing there, or in the
+// thread of message T) over HTTP, for UI
 // tests running in the simulator.
 
 import Foundation

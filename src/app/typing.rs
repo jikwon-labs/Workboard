@@ -2,6 +2,7 @@
 // the server every few seconds while its person writes in the message box,
 // and shows, under the box, who else the server says is writing there (in a
 // direct message, moving dots by the other person's name at the top instead).
+// Typing in a thread's reply box shows only under that thread's box.
 // Nothing is saved; it lasts a few seconds after the last word from the
 // server, or until that person's message arrives.
 
@@ -20,47 +21,55 @@ pub(super) const TYPING_SHOWS: Duration = Duration::from_secs(5);
 pub struct Typist {
     pub(super) channel: u64,
     pub(super) member: u64,
+    /// the message whose thread they're answering; None in the conversation
+    pub(super) thread: Option<u64>,
     pub(super) heard: Instant,
-    /// their newest message in that conversation when it was heard: a newer
-    /// one means they sent what they were typing
+    /// their newest message in that conversation (or reply in that thread)
+    /// when it was heard: a newer one means they sent what they were typing
     pub(super) last_msg: Option<u64>,
 }
 
 impl App {
-    /// The id of `member`'s newest message in conversation `channel`.
-    fn newest_by(&self, channel: u64, member: u64) -> Option<u64> {
-        self.data
+    /// The id of `member`'s newest message in conversation `channel`, or
+    /// newest reply in the thread of message `thread` there.
+    fn newest_by(&self, channel: u64, member: u64, thread: Option<u64>) -> Option<u64> {
+        let msgs = &self
+            .data
             .channels
             .iter()
             .find(|c| c.id == channel)?
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.author == member)
-            .map(|m| m.id)
+            .messages;
+        let msgs = match thread {
+            Some(tid) => &msgs.iter().find(|m| m.id == tid)?.replies,
+            None => msgs,
+        };
+        msgs.iter().rev().find(|m| m.author == member).map(|m| m.id)
     }
 
-    /// The server says `member` is typing in `channel`.
-    pub(super) fn heard_typing(&mut self, channel: u64, member: u64) {
+    /// The server says `member` is typing in `channel` (in the thread of
+    /// message `thread`).
+    pub(super) fn heard_typing(&mut self, channel: u64, member: u64, thread: Option<u64>) {
         if member == self.data.me {
             return;
         }
-        let last_msg = self.newest_by(channel, member);
+        let last_msg = self.newest_by(channel, member, thread);
         let rt = &mut self.sync_rt;
+        // one place at a time: typing in a thread ends typing in the channel
         rt.typing
             .retain(|t| !(t.channel == channel && t.member == member));
         rt.typing.push(Typist {
             channel,
             member,
+            thread,
             heard: Instant::now(),
             last_msg,
         });
     }
 
-    /// My person typed in the message box of conversation `channel`: tell
-    /// the server, at most every TYPING_EVERY (only while connected; it
-    /// isn't kept for later).
-    pub(super) fn typing_now(&mut self, channel: u64) {
+    /// My person typed in the message box of conversation `channel` (or
+    /// the reply box of message `thread`'s thread): tell the server, at most
+    /// every TYPING_EVERY (only while connected; it isn't kept for later).
+    pub(super) fn typing_now(&mut self, channel: u64, thread: Option<u64>) {
         if self.sync_rt.net_status != Some(wb_net::Status::Connected) {
             return;
         }
@@ -70,27 +79,36 @@ impl App {
         let soon = self
             .sync_rt
             .typed
-            .is_some_and(|(c, at)| c == channel && at.elapsed() < TYPING_EVERY);
+            .is_some_and(|(c, th, at)| c == channel && th == thread && at.elapsed() < TYPING_EVERY);
         if soon {
             return;
         }
         net.send(wb_net::Msg::Typing {
             channel,
             member: None,
+            thread,
         });
-        self.sync_rt.typed = Some((channel, Instant::now()));
+        self.sync_rt.typed = Some((channel, thread, Instant::now()));
     }
 
     /// Who is typing in the conversation shown as `c` (with its duplicate
     /// direct messages), oldest first: heard lately, still in it, and not
     /// having sent a message since.
     pub(super) fn typing_in(&self, c: &Channel) -> Vec<u64> {
+        self.typing_where(c, None)
+    }
+
+    /// The same for the thread of message `thread` in `c`, or for the
+    /// conversation itself with None (typing in a thread isn't counted
+    /// there).
+    pub(super) fn typing_where(&self, c: &Channel, thread: Option<u64>) -> Vec<u64> {
         let copies: Vec<u64> = self.conversation(c).iter().map(|d| d.id).collect();
         let mut out = vec![];
         for t in &self.sync_rt.typing {
             if !copies.contains(&t.channel)
+                || t.thread != thread
                 || t.heard.elapsed() >= TYPING_SHOWS
-                || self.newest_by(t.channel, t.member) != t.last_msg
+                || self.newest_by(t.channel, t.member, t.thread) != t.last_msg
                 || out.contains(&t.member)
             {
                 continue;
@@ -104,13 +122,19 @@ impl App {
     /// both names, for more "Several people are typing...". None when
     /// nobody is.
     pub(super) fn typing_line(&self, c: &Channel) -> Option<String> {
+        self.typing_line_in(c, None)
+    }
+
+    /// The same for the reply box of message `thread`'s thread (None: the
+    /// conversation's own box).
+    pub(super) fn typing_line_in(&self, c: &Channel, thread: Option<u64>) -> Option<String> {
         let name = |m: u64| {
             self.data
                 .member(m)
                 .map(|p| p.shown().to_string())
                 .unwrap_or_else(|| tr("Someone").to_string())
         };
-        match self.typing_in(c).as_slice() {
+        match self.typing_where(c, thread).as_slice() {
             [] => None,
             [a] => Some(trf!("{} is typing...", name(*a))),
             [a, b] => Some(trf!("{} and {} are typing...", name(*a), name(*b))),
@@ -141,12 +165,13 @@ impl App {
 
     /// Draw the typing line (a row kept the same height whether or not
     /// someone is typing, so the message box doesn't jump), and redraw once
-    /// it should go away.
-    pub(super) fn typing_row(&mut self, ui: &mut Ui, c: &Channel) {
+    /// it should go away. Under a thread's reply box (`thread`) it shows in
+    /// a direct message too: the dots at the top are for the conversation.
+    pub(super) fn typing_row(&mut self, ui: &mut Ui, c: &Channel, thread: Option<u64>) {
         let t = self.t();
         let line = self
-            .typing_line(c)
-            .filter(|_| c.kind != ChannelKind::Direct);
+            .typing_line_in(c, thread)
+            .filter(|_| thread.is_some() || c.kind != ChannelKind::Direct);
         let w = ui.available_width();
         let (r, resp) = ui.allocate_exact_size(vec2(w, 16.0), Sense::hover());
         if let Some(line) = line {

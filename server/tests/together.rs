@@ -48,6 +48,8 @@ struct App {
     online: Option<Vec<u64>>,
     /// (conversation, member) for each "typing" heard
     typing: Vec<(u64, u64)>,
+    /// typing heard in a thread: (channel, member, thread message)
+    thread_typing: Vec<(u64, u64, u64)>,
     /// my scheduled messages, from the last `scheduled` answer
     scheduled: Option<Vec<wb_net::ScheduledMsg>>,
     /// the webhooks and commands, from the last `integrations` answer
@@ -142,6 +144,7 @@ impl App {
             restored: vec![],
             online: None,
             typing: vec![],
+            thread_typing: vec![],
             scheduled: None,
             integrations: None,
             email: None,
@@ -295,7 +298,16 @@ impl App {
                 Event::Backups(b) => self.backups = Some(b),
                 Event::Restored(n) => self.restored.push(n),
                 Event::Presence(o) => self.online = Some(o),
-                Event::Typing { channel, member } => self.typing.push((channel, member)),
+                Event::Typing {
+                    channel,
+                    member,
+                    thread: None,
+                } => self.typing.push((channel, member)),
+                Event::Typing {
+                    channel,
+                    member,
+                    thread: Some(t),
+                } => self.thread_typing.push((channel, member, t)),
                 Event::Scheduled(items) => self.scheduled = Some(items),
                 Event::Integrations { hooks, commands } => {
                     self.integrations = Some((hooks, commands))
@@ -627,6 +639,7 @@ fn typing_reaches_only_the_others_who_see_the_conversation() {
     let typing = |channel| Msg::Typing {
         channel,
         member: None,
+        thread: None,
     };
     a.client.send(typing(20));
     a.client.send(typing(10));
@@ -668,6 +681,15 @@ fn typing_reaches_only_the_others_who_see_the_conversation() {
         [(10, 1), (10, 2)],
         "B can't type into A and C's DM"
     );
+    // typing in a thread of #general goes on with the thread, right after
+    // typing in the channel itself (another place, so not held back)
+    a.client.send(Msg::Typing {
+        channel: 10,
+        member: None,
+        thread: Some(77),
+    });
+    b.until("B hears A in the thread", |b| !b.thread_typing.is_empty());
+    assert_eq!(b.thread_typing, [(10, 1, 77)]);
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

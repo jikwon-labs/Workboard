@@ -498,6 +498,8 @@ pub struct Extra {
     pub accent: String,
     /// Follow the computer's light / dark setting.
     pub auto_theme: bool,
+    /// The row of recently opened tasks at the bottom of the window is hidden.
+    pub hide_tray: bool,
     pub muted_until: i64,
     pub labs: Vec<String>,
     pub workspace_color: [u8; 3],
@@ -613,6 +615,7 @@ impl Default for Extra {
             hidden_views: vec![],
             accent: "black".into(),
             auto_theme: false,
+            hide_tray: false,
             muted_until: 0,
             labs: vec![],
             workspace_color: [48, 164, 108],

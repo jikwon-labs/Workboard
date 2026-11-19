@@ -145,6 +145,22 @@ impl App {
                     if let Some(id) = remove {
                         self.recent.retain(|r| *r != id);
                     }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if super::icons::icon_button(
+                            ui,
+                            &t,
+                            "eye_off",
+                            "",
+                            "Hide recent tasks",
+                            false,
+                        )
+                        .on_hover_text(tr("Hide this row. Turn it back on in Themes."))
+                        .clicked()
+                        {
+                            self.data.extra.hide_tray = true;
+                            self.dirty = true;
+                        }
+                    });
                 });
             });
     }

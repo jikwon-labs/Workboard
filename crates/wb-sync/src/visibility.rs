@@ -28,6 +28,7 @@ pub(crate) const PERSONAL_EXTRA: &[&str] = &[
     "hidden_cards",
     "accent",
     "auto_theme",
+    "hide_tray",
     "labs",
     "shared",
     "sheet_rows",

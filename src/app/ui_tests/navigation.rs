@@ -34,6 +34,32 @@ fn click_workspace_menu_people_and_profile_themes() {
 }
 
 #[test]
+fn click_hide_recent_tasks_row_and_turn_it_back_on_in_themes() {
+    let mut h = Ui1::new();
+    h.click("Search");
+    h.type_text("passport");
+    h.key(egui::Key::Enter);
+    assert!(h.app.open_task.is_some());
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert!(
+        h.has("Hide recent tasks"),
+        "the opened task shows in the bottom row"
+    );
+    h.click("Hide recent tasks");
+    assert!(h.app.data.extra.hide_tray);
+    h.settle();
+    assert!(!h.has("Hide recent tasks"), "the bottom row is gone");
+    h.click("Profile menu");
+    h.click("Themes");
+    h.click("Show recently opened tasks at the bottom");
+    assert!(!h.app.data.extra.hide_tray);
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert!(h.has("Hide recent tasks"), "the bottom row is back");
+}
+
+#[test]
 fn click_search_and_open_result() {
     let mut h = Ui1::new();
     h.click("Search");

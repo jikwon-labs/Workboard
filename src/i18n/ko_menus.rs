@@ -140,6 +140,7 @@ pub const T: &[(&str, &str)] = &[
     ("Dark", "다크"),
     ("Auto", "자동"),
     ("Follow your computer's appearance", "컴퓨터의 화면 모드를 따릅니다"),
+    ("Show recently opened tasks at the bottom", "아래쪽에 최근 연 작업 보이기"),
     ("Theme color", "테마 색상"),
     ("Black", "검정"),
     ("Purple", "보라"),

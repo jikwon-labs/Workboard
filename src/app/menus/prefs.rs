@@ -64,6 +64,18 @@ impl App {
             }
         });
         ui.add_space(6.0);
+        let mut show = !self.data.extra.hide_tray;
+        if check(
+            ui,
+            &mut show,
+            tr("Show recently opened tasks at the bottom"),
+        )
+        .changed()
+        {
+            self.data.extra.hide_tray = !show;
+            self.dirty = true;
+        }
+        ui.add_space(6.0);
         ui.label(tr("Theme color"));
         ui.horizontal_wrapped(|ui| {
             for (name, c) in theme::ACCENTS {

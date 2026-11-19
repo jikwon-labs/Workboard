@@ -2730,7 +2730,7 @@ impl App {
                 );
                 inner.set_clip_rect(card.shrink(1.0));
                 let ui = &mut inner;
-                if !self.recent.is_empty() {
+                if !self.recent.is_empty() && !self.data.extra.hide_tray {
                     self.tray(ui);
                 }
                 let page = egui::Frame::new().fill(t.bg);

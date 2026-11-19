@@ -490,7 +490,8 @@ impl Ui1 {
         };
         self.app.fix_input(&self.ctx, &mut input);
         let app = &mut self.app;
-        let _ = self.ctx.run(input, |ctx| app.ui_frame(ctx));
+        // keep what was drawn, for checks of what shows while a key is held
+        self.shapes = self.ctx.run(input, |ctx| app.ui_frame(ctx)).shapes;
     }
 
     pub(super) fn click_with(&mut self, name: &str, modifiers: egui::Modifiers, dx: Option<f32>) {

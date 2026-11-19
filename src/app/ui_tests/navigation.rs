@@ -1156,3 +1156,72 @@ fn list_crumb_opens_the_list_menu() {
     h.settle();
     assert!(!h.has("List menu"));
 }
+
+// the small number drawn at the corner of a rail icon, if any
+fn rail_hint(h: &Ui1, name: &str) -> Option<String> {
+    let (_, area) = h.tree.iter().rev().find(|(n, _)| n == name)?;
+    let mut found = None;
+    each_text(&h.shapes, |ts, _| {
+        let c = ts
+            .galley
+            .job
+            .sections
+            .first()
+            .map_or(ts.fallback_color, |s| s.format.color);
+        if c == Color32::from_gray(20) && area.contains(ts.visual_bounding_rect().center()) {
+            found = Some(ts.galley.text().to_string());
+        }
+    });
+    found
+}
+
+#[test]
+fn holding_cmd_numbers_the_rail_and_cmd_number_opens_that_item() {
+    let mut h = Ui1::new();
+    // the bar by default: Home, Planner, AI, Teams
+    assert_eq!(h.app.data.extra.rail_items, ["Planner", "AI", "Teams"]);
+    assert_eq!(
+        rail_hint(&h, "Rail Planner"),
+        None,
+        "no numbers without Cmd"
+    );
+
+    h.frame_held(vec![], egui::Modifiers::COMMAND);
+    assert_eq!(rail_hint(&h, "Rail Home"), Some("1".into()));
+    assert_eq!(rail_hint(&h, "Rail Planner"), Some("2".into()));
+    assert_eq!(rail_hint(&h, "Rail Teams"), Some("4".into()));
+    assert_eq!(rail_hint(&h, "Rail More"), None, "More opens a menu");
+    h.settle();
+    assert_eq!(
+        rail_hint(&h, "Rail Planner"),
+        None,
+        "gone when Cmd is let go"
+    );
+
+    h.key_with(egui::Key::Num2, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.section, Section::Planner);
+    h.key_with(egui::Key::Num4, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.section, Section::Teams);
+    h.key_with(egui::Key::Num1, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.section, Section::Home);
+    // a number past the last item does nothing
+    h.key_with(egui::Key::Num9, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.section, Section::Home);
+
+    // an app opened from More sits in the bar and takes the next number
+    h.app.open_app("Docs");
+    h.key_with(egui::Key::Num1, egui::Modifiers::COMMAND);
+    h.frame_held(vec![], egui::Modifiers::COMMAND);
+    assert_eq!(rail_hint(&h, "Rail Docs"), Some("5".into()));
+    h.settle();
+    h.key_with(egui::Key::Num5, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.section, Section::Docs);
+
+    // with a task open, Cmd+2 is its priority, not the Planner
+    h.key_with(egui::Key::Num1, egui::Modifiers::COMMAND);
+    let id = h.app.data.tasks[0].id;
+    h.app.open_task = Some(id);
+    h.settle();
+    h.key_with(egui::Key::Num2, egui::Modifiers::COMMAND);
+    assert_eq!(h.app.section, Section::Home);
+}

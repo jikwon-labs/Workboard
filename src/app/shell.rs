@@ -44,6 +44,33 @@ pub(super) fn paint_unread_badge(
     r
 }
 
+/// The keys that open the rail's items, top to bottom.
+const RAIL_KEYS: [egui::Key; 9] = [
+    egui::Key::Num1,
+    egui::Key::Num2,
+    egui::Key::Num3,
+    egui::Key::Num4,
+    egui::Key::Num5,
+    egui::Key::Num6,
+    egui::Key::Num7,
+    egui::Key::Num8,
+    egui::Key::Num9,
+];
+
+/// The small number at the bottom right of a rail icon while Cmd is held:
+/// Cmd plus that number opens the item.
+fn paint_key_hint(p: &egui::Painter, ibox: Rect, n: usize) {
+    let r = Rect::from_center_size(ibox.center() + vec2(8.0, 7.0), vec2(13.0, 13.0));
+    p.rect_filled(r, 4.0, Color32::WHITE);
+    p.text(
+        r.center(),
+        Align2::CENTER_CENTER,
+        n.to_string(),
+        FontId::proportional(10.0),
+        Color32::from_gray(20),
+    );
+}
+
 // moved to widgets.rs; kept here for code that names it `shell::fit_text`
 pub(super) use crate::widgets::fit_text;
 
@@ -475,6 +502,16 @@ impl App {
         }
     }
 
+    /// Whether Cmd+1..9 go to the rail's items now. Not while a dialog, the
+    /// command palette or quick add is up, nor while a task is open: there
+    /// Cmd+1..4 set its priority.
+    pub(super) fn rail_keys_on(&self) -> bool {
+        self.modal.is_none()
+            && self.palette.is_none()
+            && self.quick_add.is_none()
+            && self.open_task.is_none()
+    }
+
     pub(super) fn rail(&mut self, ctx: &egui::Context) {
         let t = self.t();
         egui::SidePanel::left("rail")
@@ -559,6 +596,22 @@ impl App {
                 // red counts on Home (the Inbox) and Chat (unread messages);
                 // Chat counts on Home while it isn't in the bar of its own
                 let (home_n, chat_n) = self.rail_unread(pinned_sections.contains(&Section::Chat));
+                // Cmd+1..9 open the bar's items from the top; holding Cmd
+                // shows each item's number at the corner of its icon
+                let keys_on = self.rail_keys_on();
+                let hints = keys_on && ctx.input(|i| i.modifiers.command);
+                let mut slot = 0usize;
+                let mut next_key = |p: &egui::Painter, ibox: Rect| -> bool {
+                    if !keys_on || slot >= RAIL_KEYS.len() {
+                        return false;
+                    }
+                    let key = RAIL_KEYS[slot];
+                    slot += 1;
+                    if hints {
+                        paint_key_hint(p, ibox, slot);
+                    }
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
+                };
                 for label in &items {
                     let sec = section_of(label);
                     let active = match sec {
@@ -584,6 +637,7 @@ impl App {
                         p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                     }
                     line_icon(&p, icon_of(label), ibox.center(), white);
+                    let pressed = next_key(&p, ibox);
                     p.text(
                         pos2(cx, ibox.bottom() + 10.0),
                         Align2::CENTER_CENTER,
@@ -605,7 +659,7 @@ impl App {
                             unread,
                         );
                     }
-                    if resp.on_hover_text(tr(label)).clicked() {
+                    if resp.on_hover_text(tr(label)).clicked() || pressed {
                         self.open_app(label);
                         if label == "Home" {
                             self.section = Section::Home;
@@ -629,6 +683,7 @@ impl App {
                         let hit =
                             Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));
                         let resp = ui.interact(hit, ui.id().with("rail_temp"), Sense::click());
+                        name_it(&resp, &format!("Rail {}", label));
                         let active = self.section == ts;
                         if active {
                             p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
@@ -636,6 +691,7 @@ impl App {
                             p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                         }
                         line_icon(&p, icon_of(label), ibox.center(), white);
+                        let pressed = next_key(&p, ibox);
                         let shown = tr(label);
                         let short = if shown.chars().count() > 8 {
                             format!("{}..", shown.chars().take(7).collect::<String>())
@@ -649,7 +705,7 @@ impl App {
                             FontId::proportional(11.0),
                             white,
                         );
-                        if resp.on_hover_text(tr(label)).clicked() {
+                        if resp.on_hover_text(tr(label)).clicked() || pressed {
                             self.section = ts;
                         }
                         y += 62.0;

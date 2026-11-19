@@ -11,9 +11,11 @@
 
 - [ ] **팀원 모두 0.1.17 로 업데이트됐는지 확인한 뒤 파일 보내기 시작**: 일반 파일 첨부("File")는 0.1.14 이하 Mac 앱이 읽지 못해, 누가 파일을 보내면 그 앱은 업데이트할 때까지 팀 변경을 받지 못한다. iPhone 은 구 버전에서 깨진 사진 칸으로만 보인다(동기화는 계속됨).
 
-- [ ] **Windows PC 에서 0.1.17 받아 확인**: 앱 안 업데이트가 들어간 첫 Windows 판이라 팀원이 GitHub Release 에서 `Workboard-0.1.17-windows-x64.zip` 을 직접 받아야 하고, 그다음 버전부터 앱이 스스로 바꾼다. 다음 버전이 나오면 확인: 프로필 빨간 점 → Check for updates → "설치하고 다시 시작" → 새 버전으로 다시 열리는지, 같은 폴더의 `workboard.old.exe` 가 새 버전이 열린 뒤 지워지는지, 다시 열린 창이 하나뿐인지.
+- [ ] **Windows PC 에서 0.1.17 받아 확인**: 앱 안 업데이트가 들어간 첫 Windows 판이라 팀원이 GitHub Release 에서 `Workboard-0.1.17-windows-x64.zip` 을 직접 받아야 하고, 그다음 버전부터 앱이 스스로 바꾼다. 0.1.18 이 나왔으니 0.1.17 을 열어 확인: 프로필 빨간 점 → Check for updates → "설치하고 다시 시작" → 새 버전으로 다시 열리는지, 같은 폴더의 `workboard.old.exe` 가 새 버전이 열린 뒤 지워지는지, 다시 열린 창이 하나뿐인지.
 
 ## 끝난 일
+
+- [x] **0.1.18 배포 (Mac, Windows, iPhone)** (2026-11-19, `4099763`, 빌드 584): Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 44539487407 의 zip 을 `appcast-windows.xml` 로, iPhone 은 TestFlight 에 올렸다. GitHub Release v0.1.18 에 Mac·Windows zip 을 붙였다. 휴대폰 QR 로그인이 들어 있다.
 
 - [x] **일반 파일 첨부가 든 새 버전 배포 (Mac 과 iPhone)** (2026-11-19, 0.1.17 `390be54`): Mac 은 공증해 업데이트 서버에, iPhone 은 TestFlight 에 올렸다. 팀원 업데이트 확인은 위 할 일로 남겼다.
 

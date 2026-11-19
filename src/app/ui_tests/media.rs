@@ -374,3 +374,88 @@ fn a_video_the_app_cannot_play_offers_another_app() {
     h.key(egui::Key::Escape);
     assert!(h.app.viewer.is_none());
 }
+
+/// The V of a Cmd+V as egui passes it on: its press is kept back, so only
+/// the release shows, with Cmd on it while Cmd is still held.
+fn v_released(cmd: bool) -> egui::Event {
+    egui::Event::Key {
+        key: egui::Key::V,
+        physical_key: Some(egui::Key::V),
+        pressed: false,
+        repeat: false,
+        modifiers: if cmd {
+            egui::Modifiers::COMMAND
+        } else {
+            egui::Modifiers::NONE
+        },
+    }
+}
+
+fn wait_for_tiles(h: &mut Ui1, n: usize) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !(h.app.chat.files.len() >= n && h.app.pending_ready(false).0)
+        && std::time::Instant::now() < until
+    {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.settle();
+}
+
+#[test]
+fn a_screenshot_pastes_into_the_message_box_without_clicking_it_first() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let shot = std::fs::read(test_picture("shot.png", 40, 30)).unwrap();
+    crate::media::CLIPBOARD.with(|c| c.borrow_mut().png = Some(shot));
+    // back from taking the screenshot in another app: a click on the
+    // messages, so nothing has the keyboard
+    let messages = h.find("Message composer").unwrap() - vec2(0.0, 300.0);
+    h.click_at(messages);
+    assert_eq!(h.ctx.memory(|m| m.focused()), None);
+    h.frame(vec![v_released(true)]);
+    wait_for_tiles(&mut h, 1);
+    assert!(h.has("Attachment Pasted image.png"), "a tile in the box");
+    assert_eq!(
+        h.ctx.memory(|m| m.focused()),
+        Some(egui::Id::new(super::super::files::CHAT_BOX)),
+        "the cursor waits in the box, so Enter sends it"
+    );
+    h.key(egui::Key::Enter);
+    let cid = h.app.chat.open.unwrap();
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert_eq!(ch.messages.last().unwrap().attachments.len(), 1, "sent");
+
+    // Cmd let go before V: the release has no Cmd on it but is still a paste
+    h.click_at(messages);
+    h.frame_held(vec![], egui::Modifiers::COMMAND);
+    h.frame(vec![v_released(false)]);
+    wait_for_tiles(&mut h, 1);
+    assert_eq!(h.app.chat.files.len(), 1, "pasted again");
+
+    // typing a v is not a paste, even right after a Cmd shortcut
+    h.click("Message composer");
+    h.frame_held(vec![], egui::Modifiers::COMMAND);
+    h.frame(vec![
+        egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: Some(egui::Key::V),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        },
+        egui::Event::Text("v".into()),
+    ]);
+    h.frame(vec![v_released(false)]);
+    h.settle();
+    assert_eq!(h.app.chat.files.len(), 1, "no second picture");
+
+    // pasting while another text field has the keyboard leaves the message box alone
+    h.click("Search");
+    h.settle();
+    let typing = h.ctx.memory(|m| m.focused());
+    assert!(typing.is_some_and(|id| egui::TextEdit::load_state(&h.ctx, id).is_some()));
+    h.frame(vec![v_released(true)]);
+    h.settle();
+    assert_eq!(h.app.chat.files.len(), 1, "nothing added from the search box");
+}

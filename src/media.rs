@@ -99,7 +99,7 @@ pub fn clock(secs: f32) -> String {
 }
 
 /// What was on the clipboard when the person pasted.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Pasted {
     /// files copied in Finder
     pub files: Vec<PathBuf>,
@@ -126,7 +126,24 @@ pub fn pick_picture() -> Option<PathBuf> {
     PICKED_PICTURE.with(|p| p.borrow_mut().take())
 }
 #[cfg(target_os = "macos")]
-pub use mac::{pasteboard, pick_files, probe, thumbnail, video_still_jpeg, Player};
+pub use mac::{pick_files, probe, thumbnail, video_still_jpeg, Player};
+#[cfg(all(target_os = "macos", not(test)))]
+pub use mac::pasteboard;
+#[cfg(all(not(target_os = "macos"), not(test)))]
+pub use other::pasteboard;
+
+#[cfg(test)]
+thread_local! {
+    /// What `pasteboard` finds in tests, so they never read (or depend on)
+    /// the real clipboard.
+    pub static CLIPBOARD: std::cell::RefCell<Pasted> = std::cell::RefCell::new(Pasted::default());
+}
+
+/// In tests: what a test put on `CLIPBOARD`.
+#[cfg(test)]
+pub fn pasteboard() -> Pasted {
+    CLIPBOARD.with(|c| c.borrow().clone())
+}
 
 /// Longer side of the still sent along with a video.
 pub const STILL: u32 = 480;
@@ -259,6 +276,7 @@ mod other {
 
     /// Files or a picture on the clipboard (files copied in File Explorer,
     /// a screenshot, a picture copied from a page).
+    #[cfg_attr(test, allow(dead_code))]
     pub fn pasteboard() -> Pasted {
         let mut out = Pasted::default();
         let Ok(mut cb) = arboard::Clipboard::new() else {
@@ -314,7 +332,7 @@ mod other {
     }
 }
 #[cfg(not(target_os = "macos"))]
-pub use other::{pasteboard, pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
+pub use other::{pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -789,6 +807,7 @@ mod mac {
     }
 
     /// Files or a picture on the clipboard.
+    #[cfg_attr(test, allow(dead_code))]
     pub fn pasteboard() -> Pasted {
         autoreleasepool(|| unsafe {
             let mut out = Pasted::default();

@@ -1663,10 +1663,26 @@ impl App {
     /// picture on the clipboard. egui only passes on text, so a picture alone
     /// shows up as nothing but the release of V.
     pub(super) fn catch_paste(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let v_up = self.paste_key_up(raw);
+        let chat_box = egui::Id::new(CHAT_BOX);
         let focused = ctx.memory(|m| m.focused());
-        if focused != Some(egui::Id::new(CHAT_BOX)) && focused != Some(egui::Id::new(THREAD_BOX)) {
-            self.paste_text_seen = false;
-            return;
+        if focused != Some(chat_box) && focused != Some(egui::Id::new(THREAD_BOX)) {
+            // Nothing to type in has the keyboard (say a click on the
+            // messages after taking a screenshot in another app): the paste
+            // goes to the open channel's message box, as in Slack.
+            let typing_elsewhere =
+                focused.is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
+            let pasting = v_up
+                || raw
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::Paste(_)));
+            if !pasting || typing_elsewhere || !self.chat_box_shown(ctx) {
+                self.paste_text_seen = false;
+                return;
+            }
+            // the box takes this frame's pasted text itself
+            ctx.memory_mut(|m| m.request_focus(chat_box));
         }
         if raw
             .events
@@ -1681,7 +1697,6 @@ impl App {
                 self.pasted = Some(p);
             }
         }
-        let v_up = raw.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. } if modifiers.command));
         if v_up {
             if !self.paste_text_seen {
                 let p = media::pasteboard();
@@ -1691,6 +1706,52 @@ impl App {
             }
             self.paste_text_seen = false;
         }
+    }
+
+    /// Whether this frame ends a Cmd+V (Ctrl+V on Windows). egui keeps the
+    /// V going down to itself, so only its release shows, and when Cmd was
+    /// let go first that release has no Cmd on it: a V released without
+    /// having gone down as typing, while Cmd was held, counts too.
+    fn paste_key_up(&mut self, raw: &egui::RawInput) -> bool {
+        let mut up = false;
+        for e in &raw.events {
+            let egui::Event::Key {
+                key,
+                pressed,
+                modifiers,
+                ..
+            } = e
+            else {
+                continue;
+            };
+            if modifiers.command {
+                self.paste_cmd = true;
+            }
+            if *key == egui::Key::V {
+                if *pressed {
+                    self.v_typed = true;
+                } else {
+                    up |= modifiers.command || (self.paste_cmd && !self.v_typed);
+                    self.v_typed = false;
+                    self.paste_cmd = false;
+                }
+            } else if *pressed && !modifiers.command {
+                self.paste_cmd = false;
+            }
+        }
+        if raw.modifiers.command {
+            self.paste_cmd = true;
+        }
+        up
+    }
+
+    /// The open channel's message box was on screen last frame, with
+    /// nothing (an open task) over it.
+    fn chat_box_shown(&self, ctx: &egui::Context) -> bool {
+        self.section == Section::Chat
+            && self.chat.open.is_some()
+            && self.open_task.is_none()
+            && ctx.read_response(egui::Id::new(CHAT_BOX)).is_some()
     }
 
     /// Attachments waiting in a message box, as small tiles with a remove

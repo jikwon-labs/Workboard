@@ -540,6 +540,11 @@ pub struct App {
     pasted: Option<crate::media::Pasted>,
     /// egui pasted text for the Cmd+V being held.
     paste_text_seen: bool,
+    /// Cmd was held since the last key typed: a V let go after Cmd is still
+    /// the end of a Cmd+V.
+    paste_cmd: bool,
+    /// V went down as typing (egui swallows the V of a Cmd+V).
+    v_typed: bool,
     new_channel: Option<String>,
     /// Tasks ticked for bulk editing.
     selected: HashSet<u64>,
@@ -947,6 +952,8 @@ impl App {
             file_saves: vec![],
             pasted: None,
             paste_text_seen: false,
+            paste_cmd: false,
+            v_typed: false,
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,

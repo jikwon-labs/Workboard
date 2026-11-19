@@ -47,13 +47,15 @@ impl Ui1 {
 
     pub(super) fn frame(&mut self, events: Vec<egui::Event>) {
         self.time += 0.05;
-        let input = egui::RawInput {
+        let mut input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
             time: Some(self.time),
             events,
             dropped_files: std::mem::take(&mut self.dropped),
             ..Default::default()
         };
+        // as eframe's raw_input_hook does
+        self.app.catch_paste(&self.ctx, &mut input);
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
         self.shapes = out.shapes;
@@ -428,13 +430,14 @@ impl Ui1 {
     // one frame with modifier keys held (egui reads them from the raw input)
     pub(super) fn frame_held(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
         self.time += 0.05;
-        let input = egui::RawInput {
+        let mut input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), self.size)),
             time: Some(self.time),
             events,
             modifiers,
             ..Default::default()
         };
+        self.app.catch_paste(&self.ctx, &mut input);
         let app = &mut self.app;
         let _ = self.ctx.run(input, |ctx| app.ui_frame(ctx));
     }

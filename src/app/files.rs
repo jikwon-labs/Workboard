@@ -1665,6 +1665,10 @@ impl App {
         if self.ime.fix(raw) {
             ctx.request_repaint();
         }
+        if !self.ime.woken && raw.focused {
+            self.ime.woken = crate::os::wake_input_method();
+            self.ime.drop_wake = self.ime.woken;
+        }
         self.catch_paste(ctx, raw);
     }
 

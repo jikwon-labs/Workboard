@@ -1501,13 +1501,15 @@ fn a_sign_typed_right_after_a_korean_syllable_is_kept() {
     h.click("Message composer");
     h.type_text("안녕하세");
     h.frame(preedit("요"));
-    // macOS finishes "요" and then commits "!" too, in one key press
-    use egui::{Event::Ime, ImeEvent::*};
-    h.frame(vec![
-        Ime(Disabled),
-        Ime(Commit("요".into())),
-        Ime(Commit("!".into())),
-    ]);
+    // the Mac finishes "요" and passes on only the release of Shift+1
+    h.frame(finished("요"));
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Exclamationmark,
+        physical_key: Some(egui::Key::Num1),
+        pressed: false,
+        repeat: false,
+        modifiers: egui::Modifiers::SHIFT,
+    }]);
     h.settle();
     assert_eq!(h.app.chat.text, "안녕하세요!");
 }

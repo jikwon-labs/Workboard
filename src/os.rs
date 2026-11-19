@@ -97,6 +97,62 @@ pub fn reveal_path(p: &Path) {
     }
 }
 
+/// Wake the Mac's input method before the first key. The first key the
+/// window's input context ever gets goes past the Korean IME: a "ㅇ" on its
+/// own that never joins the next letters ("ㅇㅏㄴ녕"). So the context is
+/// handed one letter key here, and the syllable it starts is taken back at
+/// once. That leaves IME events for the next frame, which the caller drops
+/// (`ImeFix::drop_wake`). False when there is no window with the keyboard
+/// yet.
+#[cfg(all(target_os = "macos", not(test)))]
+pub fn wake_input_method() -> bool {
+    use objc::runtime::{Object, BOOL};
+    use objc::{class, msg_send, sel, sel_impl};
+    // a key event the way the keyboard makes it: one built in AppKit alone
+    // (keyEventWithType) does not reach the input method
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreateKeyboardEvent(
+            source: *const std::ffi::c_void,
+            key: u16,
+            down: bool,
+        ) -> *mut std::ffi::c_void;
+        fn CFRelease(cf: *const std::ffi::c_void);
+    }
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let window: *mut Object = msg_send![app, keyWindow];
+        if window.is_null() {
+            return false;
+        }
+        let view: *mut Object = msg_send![window, contentView];
+        if view.is_null() {
+            return false;
+        }
+        let context: *mut Object = msg_send![view, inputContext];
+        if context.is_null() {
+            return false;
+        }
+        // kVK_ANSI_D
+        let cg = CGEventCreateKeyboardEvent(std::ptr::null(), 0x02, true);
+        if cg.is_null() {
+            return false;
+        }
+        let event: *mut Object = msg_send![class!(NSEvent), eventWithCGEvent: cg];
+        if !event.is_null() {
+            let _: BOOL = msg_send![context, handleEvent: event];
+            let _: () = msg_send![view, unmarkText];
+        }
+        CFRelease(cg);
+    }
+    true
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+pub fn wake_input_method() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -258,6 +258,38 @@ final class EditTests: XCTestCase {
         XCTAssertFalse(Edits.sendMessage(&d, channel: 301, text: "", me: 1, id: 9401, ts: 9), "nothing to send")
     }
 
+    func testMessageWithAFile() {
+        var d = SampleWorkspace.make()
+        let a = FileAPI.fileAttachment(sha: String(repeating: "b", count: 64), name: "Plan.pdf", bytes: 5120)
+        XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "", attachments: [a], me: 1, id: 9402, ts: 9))
+        let m = WorkspaceView(d).channels.first { $0.id == 301 }!.messages.last!
+        XCTAssertEqual(m.attachments.first?.isFile, true)
+        XCTAssertEqual(m.attachments.first?.isVideo, false)
+        XCTAssertEqual(m.attachments.first?.bytes, 5120)
+        XCTAssertEqual(d["channels"]![0]!["messages"]!.array!.last!["attachments"]![0]!["kind"], "File")
+    }
+
+    func testAttachmentKinds() {
+        func kind(_ k: String?) -> AttachmentView {
+            var o: JSON = ["file": .string(String(repeating: "c", count: 64)), "name": "x"]
+            if let k { o["kind"] = .string(k) }
+            return AttachmentView(o)
+        }
+        XCTAssertFalse(kind(nil).isFile, "older messages without a kind are pictures")
+        XCTAssertFalse(kind("Image").isFile)
+        XCTAssertTrue(kind("Video").isVideo)
+        XCTAssertTrue(kind("File").isFile)
+        XCTAssertTrue(kind("Audio").isFile, "a kind a newer app adds opens as a file")
+    }
+
+    func testSafeFileName() {
+        XCTAssertEqual(FileAPI.safeName("Plan.pdf"), "Plan.pdf")
+        XCTAssertEqual(FileAPI.safeName("../../etc/passwd"), "passwd")
+        XCTAssertEqual(FileAPI.safeName(".hidden"), "hidden")
+        XCTAssertEqual(FileAPI.safeName(""), "file")
+        XCTAssertEqual(FileAPI.safeName("a:b.md"), "a-b.md")
+    }
+
     func testDeleteTaskTakesSubtasksAndDeleteDocTakesSubPages() {
         var d = SampleWorkspace.make()
         Edits.addTask(&d, list: 111, name: "child", assignees: [], me: 1, id: 9500, ts: 1)

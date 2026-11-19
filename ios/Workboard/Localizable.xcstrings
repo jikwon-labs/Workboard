@@ -108,6 +108,16 @@
         }
       }
     },
+    "%@ is a folder.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@은(는) 폴더입니다."
+          }
+        }
+      }
+    },
     "%@ is calling you": {
       "localizations": {
         "ko": {
@@ -589,6 +599,16 @@
         }
       }
     },
+    "Add files": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일 추가"
+          }
+        }
+      }
+    },
     "Add item": {
       "localizations": {
         "ko": {
@@ -929,6 +949,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "첨부"
+          }
+        }
+      }
+    },
+    "Attach file": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일 첨부"
           }
         }
       }
@@ -2111,6 +2141,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "금"
+          }
+        }
+      }
+    },
+    "File": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일"
           }
         }
       }
@@ -3800,6 +3840,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "홈에서 확인하세요."
+          }
+        }
+      }
+    },
+    "Opens the file": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일을 엽니다"
           }
         }
       }

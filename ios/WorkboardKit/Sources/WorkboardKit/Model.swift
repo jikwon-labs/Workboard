@@ -325,12 +325,17 @@ public struct ReactionView: Hashable, Sendable {
     public let users: [UInt64]
 }
 
-/// A picture or video in a message (Attachment in src/model.rs). The file
-/// lives on the team server, named by the sha256 of its contents.
+/// A picture, video or other file in a message (Attachment in
+/// src/model.rs). The file lives on the team server, named by the sha256 of
+/// its contents.
 public struct AttachmentView: Hashable, Sendable {
     public let file: String
     public let name: String
     public let isVideo: Bool
+    /// Any other file (a PDF, a Markdown note...): shown by its name and
+    /// size, opened on a tap. A kind this app doesn't know is one too, as
+    /// on the Mac; no kind at all is a picture (older messages).
+    public let isFile: Bool
     public let bytes: UInt64
     public let w: Int
     public let h: Int
@@ -343,7 +348,9 @@ public struct AttachmentView: Hashable, Sendable {
     init(_ j: JSON) {
         file = j["file"]?.string ?? ""
         name = j["name"]?.string ?? ""
-        isVideo = j["kind"]?.string == "Video"
+        let kind = j["kind"]?.string
+        isVideo = kind == "Video"
+        isFile = kind != nil && kind != "Video" && kind != "Image"
         bytes = j["bytes"]?.uint ?? 0
         w = Int(j["w"]?.int ?? 0)
         h = Int(j["h"]?.int ?? 0)

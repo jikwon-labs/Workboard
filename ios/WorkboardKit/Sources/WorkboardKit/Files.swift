@@ -167,6 +167,25 @@ public enum FileAPI {
         return o
     }
 
+    /// An Attachment object for a file that isn't a picture or video
+    /// (MediaKind::File on the Mac): sent as it is, with no size to show.
+    public static func fileAttachment(sha: String, name: String, bytes: Int) -> JSON {
+        [
+            "file": .string(sha), "name": .string(name), "kind": .string("File"),
+            "bytes": .int(Int64(bytes)), "w": .int(0), "h": .int(0), "secs": .double(0),
+        ]
+    }
+
+    /// A name a file from someone else's message may be saved under here:
+    /// its last part only, never empty, never hidden.
+    public static func safeName(_ name: String) -> String {
+        let last = (name as NSString).lastPathComponent
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = String(last.drop(while: { $0 == "." }))
+        return trimmed.isEmpty ? "file" : trimmed
+    }
+
     /// Keep a copy of a file sent from here in the cache, under the name a
     /// download would give it, so it never comes down again and can go up
     /// again after a restore from Trash.

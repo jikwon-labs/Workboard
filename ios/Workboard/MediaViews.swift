@@ -1,17 +1,20 @@
-// Pictures and videos in chat messages. Files come from the team server
+// Pictures, videos and other files in chat messages. Files come from the team server
 // (GET /files/<sha256> with this device's token, see WorkboardKit Files.swift)
 // and are kept in the caches folder. Pictures show in the message and open
 // large on a tap; a video shows as a tile with its still (`thumb`, a small
 // JPEG, when the sender made one) and downloads the video only when it's
 // played, in the system player. Sending: photos picked in the message box go
 // up first (PUT /files) and the message names them, the same shape the Mac
-// app writes; a video goes with a still made here.
+// app writes; a video goes with a still made here. Any other file (a PDF, a
+// Markdown note) goes up as it is and shows as its name and size; a tap
+// downloads it and opens it in Quick Look, which can share or save it.
 
 import AVFoundation
 import AVKit
 import CoreTransferable
 import ImageIO
 import PhotosUI
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 import WorkboardKit
@@ -24,7 +27,13 @@ struct AttachmentsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(attachments, id: \.file) { a in
-                if a.isVideo { VideoTile(attachment: a) } else { PictureView(attachment: a) }
+                if a.isFile {
+                    FileTile(attachment: a)
+                } else if a.isVideo {
+                    VideoTile(attachment: a)
+                } else {
+                    PictureView(attachment: a)
+                }
             }
         }
     }
@@ -100,6 +109,85 @@ final class FileLoad {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// A file that isn't a picture or video: its kind, name and size. A tap
+/// downloads it and opens it in Quick Look (which shows it without running
+/// anything, and can share or save it).
+struct FileTile: View {
+    @Environment(SyncClient.self) private var client
+    let attachment: AttachmentView
+    @State private var file = FileLoad()
+    @State private var loading = false
+    @State private var shown: URL?
+
+    /// "PDF", "MD"; "FILE" without an extension (as on the Mac).
+    static func label(_ name: String) -> String {
+        let e = (name as NSString).pathExtension.uppercased()
+        return e.isEmpty || e.count > 5 || !e.allSatisfy({ $0.isLetter || $0.isNumber }) ? "FILE" : e
+    }
+
+    var body: some View {
+        Button {
+            Task { await open() }
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.accentColor.opacity(0.15))
+                    Text(verbatim: Self.label(attachment.name))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 36, height: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: attachment.name)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(.primary)
+                    if let e = file.error {
+                        Text(verbatim: e).font(.caption).foregroundStyle(.red).lineLimit(2)
+                    } else {
+                        Text(verbatim: ByteCountFormatter.string(fromByteCount: Int64(attachment.bytes), countStyle: .file))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                if loading { ProgressView() }
+            }
+            .padding(8)
+            .frame(maxWidth: 260, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemBackground)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(verbatim: attachment.name))
+        .accessibilityHint("Opens the file")
+        .accessibilityIdentifier("fileAttachment")
+        .quickLookPreview($shown)
+    }
+
+    func open() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        file.error = nil
+        await file.load(attachment, client: client)
+        guard let url = file.url else { return }
+        // under its own name, so Quick Look and Save show that, not the hash
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("open-\(attachment.file)", isDirectory: true)
+        let dest = dir.appendingPathComponent(FileAPI.safeName(attachment.name))
+        if !FileManager.default.fileExists(atPath: dest.path) {
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: url, to: dest)
+            } catch {
+                file.error = error.localizedDescription
+                return
+            }
+        }
+        shown = dest
     }
 }
 
@@ -276,7 +364,8 @@ struct VideoTile: View {
 
 // MARK: sending
 
-/// One picture or video picked in the message box, on its way to the server.
+/// One picture, video or file picked in the message box, on its way to the
+/// server.
 @MainActor
 @Observable
 final class PendingFile: Identifiable {
@@ -285,6 +374,9 @@ final class PendingFile: Identifiable {
     var attachment: JSON?
     var preview: UIImage?
     var error: String?
+    /// A file from Files (not a picture or video), and its name.
+    var isFile = false
+    var name = ""
 }
 
 struct PendingChip: View {
@@ -297,6 +389,14 @@ struct PendingChip: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(.secondarySystemFill))
                 if let p = file.preview {
                     Image(uiImage: p).resizable().scaledToFill()
+                } else if file.isFile && file.error == nil {
+                    VStack(spacing: 2) {
+                        Image(systemName: "doc.fill")
+                        Text(verbatim: FileTile.label(file.name)).font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                    .opacity(file.attachment == nil ? 0.35 : 1)
+                    .overlay { if file.attachment == nil { ProgressView() } }
                 } else if file.attachment != nil {
                     Image(systemName: "video.fill").foregroundStyle(.secondary)
                 } else if file.error != nil {
@@ -404,6 +504,42 @@ enum MediaUpload {
         guard let jpeg = drawn.jpegData(compressionQuality: 0.85) else { throw Unreadable() }
         let preview = drawn.preparingThumbnail(of: CGSize(width: 120, height: 120 * size.height / max(size.width, 1)))
         return Prepared(data: jpeg, bytes: jpeg.count, name: "Photo-\(stamp()).jpg", contentType: "image/jpeg", isVideo: false, w: Int(size.width), h: Int(size.height), secs: 0, preview: preview)
+    }
+}
+
+/// Puts a file picked in Files on the server as it is (no picture size, no
+/// still); the pending file then holds its Attachment.
+@MainActor
+func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) async {
+    f.isFile = true
+    f.name = url.lastPathComponent
+    let scoped = url.startAccessingSecurityScopedResource()
+    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+    do {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
+        if values.isDirectory == true {
+            f.error = String(localized: "\(f.name) is a folder.")
+            return
+        }
+        let bytes = values.fileSize ?? 0
+        if bytes > FileAPI.maxBytes {
+            f.error = FileError.tooLarge.explanation
+            return
+        }
+        // a copy of our own: the picked file is only readable while access lasts
+        let ext = url.pathExtension.lowercased()
+        var tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        if !ext.isEmpty { tmp.appendPathExtension(ext) }
+        try FileManager.default.copyItem(at: url, to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        // streamed from the file, never read whole
+        let sha = try await FileAPI.upload(server: server, auth: auth, file: tmp, contentType: "application/octet-stream")
+        FileAPI.keep(file: tmp, sha: sha, ext: ext)
+        f.attachment = FileAPI.fileAttachment(sha: sha, name: f.name, bytes: bytes)
+    } catch let e as FileError {
+        f.error = e.explanation
+    } catch {
+        f.error = error.localizedDescription
     }
 }
 

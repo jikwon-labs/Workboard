@@ -669,14 +669,15 @@ struct CustomFieldRow: View {
 }
 
 
-/// The task's pictures and videos, and Attach (they go to the team server
-/// first, then join the task, as on the Mac).
+/// The task's pictures, videos and files, and Attach (they go to the team
+/// server first, then join the task, as on the Mac).
 struct TaskAttachmentsSection: View {
     @Environment(SyncClient.self) private var client
     let task: TaskView
     let can: Bool
     @State private var picked: [PhotosPickerItem] = []
     @State private var pending: [PendingFile] = []
+    @State private var importing = false
 
     var body: some View {
         Section {
@@ -702,6 +703,10 @@ struct TaskAttachmentsSection: View {
                     Label("Attach", systemImage: "paperclip")
                 }
                 .accessibilityIdentifier("attachButton")
+                Button { importing = true } label: {
+                    Label("Attach file", systemImage: "doc")
+                }
+                .accessibilityIdentifier("attachFileButton")
             }
         } header: {
             Text("Attachments")
@@ -715,12 +720,29 @@ struct TaskAttachmentsSection: View {
                 pending.append(f)
                 Task {
                     await uploadMedia(item, server: server, auth: auth, into: f)
-                    if let a = f.attachment {
-                        client.edit { d, me in Edits.addTaskAttachment(&d, task: tid, attachment: a, me: me, ts: nowTs()) }
-                        pending.removeAll { $0.id == f.id }
-                    }
+                    attach(f, task: tid)
                 }
             }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            let (server, auth, tid) = (client.settings.server, client.fileAuth, task.id)
+            for url in urls {
+                let f = PendingFile()
+                pending.append(f)
+                Task {
+                    await uploadFile(url, server: server, auth: auth, into: f)
+                    attach(f, task: tid)
+                }
+            }
+        }
+    }
+
+    /// A file that got to the server joins the task.
+    func attach(_ f: PendingFile, task tid: UInt64) {
+        if let a = f.attachment {
+            client.edit { d, me in Edits.addTaskAttachment(&d, task: tid, attachment: a, me: me, ts: nowTs()) }
+            pending.removeAll { $0.id == f.id }
         }
     }
 }

@@ -214,7 +214,11 @@ struct ChannelRow: View {
         let who = m.author == client.me ? "You" : (client.view.member(m.author)?.name.split(separator: " ").first.map(String.init) ?? "")
         var text = m.text
         if text.isEmpty, let a = m.attachments.first {
-            text = a.isVideo ? String(localized: "Video") : (m.attachments.count == 1 ? String(localized: "Photo") : String(localized: "\(m.attachments.count) photos"))
+            if m.attachments.contains(where: \.isFile) {
+                text = String(localized: "File")
+            } else {
+                text = a.isVideo ? String(localized: "Video") : (m.attachments.count == 1 ? String(localized: "Photo") : String(localized: "\(m.attachments.count) photos"))
+            }
         }
         return who.isEmpty ? text : "\(who): \(text)"
     }
@@ -598,8 +602,9 @@ struct RepliesChip: View {
 }
 
 /// The message box. Works offline too: messages wait and go up on reconnect.
-/// With `attachments`, a photo button adds pictures and videos: they go up
-/// to the server first (PUT /files) and the message names them.
+/// With `attachments`, a photo button adds pictures and videos and a clip
+/// button files from Files: they go up to the server first (PUT /files) and
+/// the message names them.
 /// Typing "@" at the start of a word offers the people to mention; the ones
 /// picked go along with the text, so a name several people share mentions
 /// the person picked (the message's `mentions`).
@@ -611,6 +616,7 @@ struct Composer: View {
     @State private var text = ""
     @State private var picked: [PhotosPickerItem] = []
     @State private var pending: [PendingFile] = []
+    @State private var importing = false
     /// People chosen from the @ list for this message.
     @State private var mentioned: [UInt64] = []
     /// The text right after a pick from the list: no list again for that
@@ -692,6 +698,12 @@ struct Composer: View {
                     .disabled(!can || !client.state.isConnected)
                     .accessibilityLabel("Add photos or videos")
                     .accessibilityIdentifier("attachButton")
+                    Button { importing = true } label: {
+                        Image(systemName: "paperclip").font(.system(size: 22)).padding(.bottom, 5)
+                    }
+                    .disabled(!can || !client.state.isConnected || pending.count >= maxFiles)
+                    .accessibilityLabel("Add files")
+                    .accessibilityIdentifier("attachFileButton")
                 }
                 TextField(can ? placeholder : "Sign in to send messages", text: $text, axis: .vertical)
                     .lineLimit(1...5)
@@ -727,13 +739,29 @@ struct Composer: View {
             picked = []
             for item in items { upload(item) }
         }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls.prefix(max(0, maxFiles - pending.count)) { upload(file: url) }
+        }
     }
+
+    /// Attachments in one message, as on the Mac (MAX_PER_MESSAGE).
+    let maxFiles = 10
 
     func upload(_ item: PhotosPickerItem) {
         let f = PendingFile()
         pending.append(f)
         let (server, auth) = (client.settings.server, client.fileAuth)
         Task { await uploadMedia(item, server: server, auth: auth, into: f) }
+    }
+
+    func upload(file url: URL) {
+        let f = PendingFile()
+        f.isFile = true
+        f.name = url.lastPathComponent
+        pending.append(f)
+        let (server, auth) = (client.settings.server, client.fileAuth)
+        Task { await uploadFile(url, server: server, auth: auth, into: f) }
     }
 }
 

@@ -153,6 +153,19 @@ pub fn paint_avatar(p: &egui::Painter, center: Pos2, r: f32, m: &Member, ring: C
     );
 }
 
+/// The width `paint_avatars` will use for these people, to make room first.
+pub fn avatars_width(r: f32, ids: &[u64], data: &Data) -> f32 {
+    let n = ids
+        .iter()
+        .take(3)
+        .filter(|id| data.member(**id).is_some())
+        .count();
+    if n == 0 {
+        return 0.0;
+    }
+    r + n as f32 * r * 1.4 + if ids.len() > 3 { 18.0 } else { 0.0 }
+}
+
 /// Overlapping avatars; returns the width used.
 pub fn paint_avatars(
     p: &egui::Painter,

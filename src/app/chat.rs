@@ -545,6 +545,23 @@ impl App {
         }
     }
 
+    /// Mark the replies in thread `parent` of channel `cid` read, as
+    /// "Mark read" in Replies does (`replies_read`).
+    pub(super) fn mark_thread_read(&mut self, cid: u64, parent: &Message) {
+        let me = self.data.me;
+        let mut added = false;
+        for r in parent.replies.iter().filter(|r| r.author != me) {
+            let k = format!("chat:{}:{}", cid, r.id);
+            if !self.data.extra.replies_read.contains(&k) {
+                self.data.extra.replies_read.push(k);
+                added = true;
+            }
+        }
+        if added && self.persist {
+            self.dirty = true;
+        }
+    }
+
     /// A direct message's copies with the same people (see `dm_duplicate`),
     /// the one shown first; just `c` for anything else.
     pub(super) fn conversation<'a>(&'a self, c: &'a Channel) -> Vec<&'a Channel> {
@@ -1042,12 +1059,18 @@ impl App {
         // ---- thread panel
         let mut thread_rect: Option<Rect> = None;
         if let Some(tid) = self.chat.thread_open {
-            let parent = at
-                .iter()
-                .filter_map(|&(c, m)| self.data.channels.get(c)?.messages.get(m))
-                .find(|m| m.id == tid)
-                .cloned();
-            if let Some(parent) = parent {
+            let found = at.iter().find_map(|&(c, m)| {
+                let ch = self.data.channels.get(c)?;
+                let m = ch.messages.get(m)?;
+                (m.id == tid).then(|| (ch.id, m.clone()))
+            });
+            if let Some((pc, parent)) = found {
+                // the replies on screen are read: they leave Replies' Unread
+                // and the Inbox badge (not while the window is behind
+                // another app, as for the channel)
+                if !self.notify_rt.away {
+                    self.mark_thread_read(pc, &parent);
+                }
                 let panel = egui::SidePanel::right("thread")
                     .exact_width(360.0)
                     .resizable(false)
@@ -1926,11 +1949,33 @@ impl App {
                         }
                     });
                     format_buttons(ui, &t, id, text, "reply ");
-                    ui.label(
-                        RichText::new(tr("Enter to send, Shift+Enter for a new line"))
-                            .small()
-                            .color(t.text3),
-                    );
+                    // the hint takes what Send leaves and is cut short with "…"
+                    // in a narrow box, instead of running under the button
+                    let send_w = ui
+                        .painter()
+                        .layout_no_wrap(
+                            tr("Send").to_string(),
+                            egui::TextStyle::Button.resolve(ui.style()),
+                            t.text,
+                        )
+                        .size()
+                        .x
+                        + 2.0 * ui.spacing().button_padding.x
+                        + ui.spacing().item_spacing.x;
+                    let room = ui.available_width() - send_w;
+                    if room > 24.0 {
+                        ui.scope(|ui| {
+                            ui.set_max_width(room);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(tr("Enter to send, Shift+Enter for a new line"))
+                                        .small()
+                                        .color(t.text3),
+                                )
+                                .truncate(),
+                            );
+                        });
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let ready = files_ok && (!text.trim().is_empty() || !files.is_empty());
                         if (primary_button(ui, &t, tr("Send")).clicked() || enter) && ready {
@@ -2272,16 +2317,27 @@ impl App {
                 }
                 if top_level && !m.replies.is_empty() {
                     let last = m.replies.last().map(|r| fmt_ago(r.ts)).unwrap_or_default();
+                    // the people who replied, each once, in the order they joined
+                    let mut people: Vec<u64> = vec![];
+                    for r in &m.replies {
+                        if !people.contains(&r.author) {
+                            people.push(r.author);
+                        }
+                    }
                     ui.horizontal(|ui| {
+                        // laid out like the other items so they share one centre line
+                        let (ar, _) = ui.allocate_exact_size(
+                            vec2(avatars_width(8.0, &people, &self.data), 18.0),
+                            Sense::hover(),
+                        );
                         paint_avatars(
                             ui.painter(),
-                            ui.cursor().left_center() + vec2(0.0, 9.0),
+                            ar.left_center(),
                             8.0,
-                            &m.replies.iter().map(|r| r.author).collect::<Vec<_>>(),
+                            &people,
                             &self.data,
                             t.bg,
                         );
-                        ui.add_space(30.0);
                         let label = if m.replies.len() == 1 {
                             "1 reply".to_string()
                         } else {

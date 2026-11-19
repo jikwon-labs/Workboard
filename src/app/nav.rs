@@ -430,9 +430,15 @@ impl App {
     }
 
     /// The Inbox badge: the Primary rows (not cleared, not saved for later)
-    /// plus reminders that are due, when reminders are turned on.
+    /// not yet read (a thread opened, or "Mark read" in Replies), plus
+    /// reminders that are due, when reminders are turned on.
     pub(super) fn inbox_badge(&self) -> usize {
-        let rows = self.inbox_items().iter().filter(|i| i.tab == 0).count();
+        let read = &self.data.extra.replies_read;
+        let rows = self
+            .inbox_items()
+            .iter()
+            .filter(|i| i.tab == 0 && !read.contains(&i.key))
+            .count();
         rows + if self.data.extra.notify.reminders {
             self.due_reminders()
         } else {

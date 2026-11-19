@@ -2524,3 +2524,110 @@ fn messages_that_come_in_while_the_window_is_behind_get_the_red_line() {
     assert!(line.bottom() <= h.find("while away").unwrap().y);
     assert!(!h.has("New messages"), "the list is down at them already");
 }
+
+// #general with a thread of mine that others replied to, by `authors`
+fn general_with_thread(authors: &[u64]) -> (Ui1, u64) {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let cid = c.id;
+    let mut m = c.messages[0].clone();
+    m.id = 9001;
+    m.author = me;
+    m.text = "Who has the keys?".into();
+    m.ts = now_ts() - 60;
+    m.replies = authors
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let mut r = m.clone();
+            r.id = 9100 + i as u64;
+            r.author = *a;
+            r.text = format!("answer {}", i);
+            r.ts = now_ts() - 50 + i as i64;
+            r.replies = vec![];
+            r
+        })
+        .collect();
+    c.messages.push(m);
+    h.app.data.extra.replies_seen = now_ts() - 100;
+    h.click("general");
+    (h, cid)
+}
+
+#[test]
+fn opening_a_thread_marks_its_replies_read() {
+    let (mut h, cid) = general_with_thread(&[2, 3]);
+    assert_eq!(h.app.unread_replies(), 2);
+    let badge = h.app.inbox_badge();
+    h.click("2 replies");
+    assert_eq!(h.app.chat.thread_open, Some(9001));
+    let read = &h.app.data.extra.replies_read;
+    assert!(read.contains(&format!("chat:{}:9100", cid)));
+    assert!(read.contains(&format!("chat:{}:9101", cid)));
+    assert_eq!(h.app.unread_replies(), 0, "gone from Replies' Unread");
+    assert_eq!(h.app.inbox_badge(), badge - 2, "and from the Home badge");
+}
+
+#[test]
+fn thread_summary_avatars_sit_on_the_text_line_and_count_people_once() {
+    // Alex twice, then Sam, Jordan and me: four people, so three faces and "+1"
+    let (h, _) = general_with_thread(&[2, 2, 3, 4, 1]);
+    let label = h.painted_text(&tr("{} replies").replace("{}", "5"))[0].0;
+    let more = h.painted_text("+1");
+    assert_eq!(more.len(), 1, "each person once: +1, not +2");
+    let more = more[0].0;
+    assert!(
+        more.right() <= label.left(),
+        "+1 {:?} runs into the label {:?}",
+        more,
+        label
+    );
+    // Alex's face is the first, just left of the label
+    let face = h
+        .painted_text("AK")
+        .into_iter()
+        .map(|(r, _)| r)
+        .find(|r| r.right() <= label.left() && label.left() - r.right() < 80.0)
+        .expect("Alex's face beside the label");
+    assert!(
+        (face.center().y - label.center().y).abs() <= 2.0,
+        "faces {:?} off the label's line {:?}",
+        face,
+        label
+    );
+}
+
+#[test]
+fn reply_box_hint_stops_before_send() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let send = h.rect_in(
+        tr("Send"),
+        h.rect("Reply composer").expand2(vec2(40.0, 80.0)),
+    );
+    let start: String = tr("Enter to send, Shift+Enter for a new line")
+        .chars()
+        .take(5)
+        .collect();
+    let mut hint = None;
+    each_text(&h.shapes, |ts, _| {
+        if ts.galley.text().starts_with(&start) && ts.pos.y > send.top() - 20.0 {
+            hint = Some(Rect::from_min_size(ts.pos, ts.galley.size()));
+        }
+    });
+    let hint = hint.expect("the hint shows");
+    assert!(
+        hint.right() <= send.left(),
+        "hint {:?} runs under Send {:?}",
+        hint,
+        send
+    );
+}

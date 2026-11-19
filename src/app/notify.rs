@@ -94,7 +94,11 @@ fn preview(m: &Message) -> String {
     let shown = super::chat::shown_text(m);
     let text = shown.trim();
     let text = if text.is_empty() && !m.attachments.is_empty() {
-        tr("Sent a picture or video").to_string()
+        if m.attachments.iter().any(|a| a.kind == MediaKind::File) {
+            tr("Sent a file").to_string()
+        } else {
+            tr("Sent a picture or video").to_string()
+        }
     } else {
         text.to_string()
     };

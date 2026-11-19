@@ -115,10 +115,7 @@ pub const T: &[(&str, &str)] = &[
     // attachments
     ("Attachments", "첨부 파일"),
     ("Attach", "첨부"),
-    (
-        "Attach pictures or videos (or drop them here)",
-        "사진이나 동영상 첨부 (여기에 끌어다 놓아도 됩니다)",
-    ),
+    ("Attach files (or drop them here)", "파일 첨부 (여기에 끌어다 놓아도 됩니다)"),
     ("{} is still downloading", "{}을(를) 아직 내려받는 중입니다"),
     ("Adding {}...", "{} 추가하는 중..."),
     ("Uploading {} {}%", "{} 올리는 중 {}%"),

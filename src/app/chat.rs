@@ -933,7 +933,7 @@ impl App {
             p.text(
                 r.center(),
                 Align2::CENTER_CENTER,
-                tr("Drop pictures or videos to send"),
+                tr("Drop files to send"),
                 FontId::proportional(18.0),
                 t.text,
             );
@@ -1090,7 +1090,7 @@ impl App {
                         name_it(&b, tip);
                         b
                     };
-                    if tool(ui, "+", "Add pictures or videos").clicked() {
+                    if tool(ui, "+", "Add files").clicked() {
                         self.pick_media(false);
                     }
                     let at = tool(ui, "@", "Mention someone");
@@ -1286,12 +1286,12 @@ impl App {
                 ui.horizontal(|ui| {
                     let b = ui
                         .add(ghost(egui::Button::new(RichText::new("+").color(t.text2))))
-                        .on_hover_text(tr("Add pictures or videos"));
+                        .on_hover_text(tr("Add files"));
                     b.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
                             true,
-                            "Add pictures or videos to the reply",
+                            "Add files to the reply",
                         )
                     });
                     pick = b.clicked();
@@ -1932,7 +1932,11 @@ impl App {
                         .filter(|x| !x.is_empty())
                         .unwrap_or_else(|| m.text.clone());
                     let body = if body.is_empty() && !m.attachments.is_empty() {
-                        tr("Picture or video").to_string()
+                        if m.attachments.iter().any(|a| a.kind == MediaKind::File) {
+                            tr("File").to_string()
+                        } else {
+                            tr("Picture or video").to_string()
+                        }
                     } else {
                         truncate(body.lines().next().unwrap_or(""), 80)
                     };
@@ -2301,13 +2305,18 @@ impl App {
                                 .find(|m| m.id == msg)
                         })
                         .and_then(|m| m.attachments.get(index))
-                        .map(|a| a.file.clone());
-                    if let Some(f) = file.filter(|f| {
-                        matches!(self.files.state(f), Some(super::files::Transfer::Failed(_)))
-                    }) {
-                        self.files.retry(&f);
+                        .cloned();
+                    // a plain file isn't opened large: it's saved to Downloads
+                    if let Some(a) = file.as_ref().filter(|a| a.kind == MediaKind::File) {
+                        self.save_file(a);
+                    } else {
+                        if let Some(f) = file.map(|a| a.file).filter(|f| {
+                            matches!(self.files.state(f), Some(super::files::Transfer::Failed(_)))
+                        }) {
+                            self.files.retry(&f);
+                        }
+                        self.viewer = Some(super::files::Viewer::new(ch, msg, index));
                     }
-                    self.viewer = Some(super::files::Viewer::new(ch, msg, index));
                 }
                 ChatAction::Send {
                     ch,

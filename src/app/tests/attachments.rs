@@ -149,6 +149,109 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
 }
 
 #[test]
+fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| {
+        a.data.extra.shared.is_some()
+    });
+    net_until(&mut a, "A sees the people list", |a| {
+        a.sync_rt.people.iter().any(|p| p.member == 3)
+    });
+    a.access_request(wb_net::Msg::CreateInvite {
+        member: 3,
+        role: wb_net::Role::Member,
+    });
+    net_until(&mut a, "invite code", |a| {
+        a.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == 3 && p.invite.is_some())
+    });
+    let code = a
+        .sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == 3)
+        .unwrap()
+        .invite
+        .clone()
+        .unwrap();
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
+    b.connect_server(&addr, &code).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+
+    let ch = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    let dir = temp_home("pdf");
+    std::fs::create_dir_all(&dir).unwrap();
+    let pdf = dir.join("Quarterly plan.pdf");
+    let body: Vec<u8> = b"%PDF-1.4\n"
+        .iter()
+        .copied()
+        .chain((0..5000u32).map(|i| (i % 251) as u8))
+        .collect();
+    std::fs::write(&pdf, &body).unwrap();
+    a.add_media(false, Some(pdf), None);
+    let files = until_ready(&mut a, false);
+    let att = files[0].clone();
+    assert_eq!((att.kind, att.bytes), (MediaKind::File, body.len() as u64));
+    assert_eq!(
+        std::fs::read(
+            server
+                .home
+                .join(workboard_server::FILES_DIR)
+                .join(&att.file)
+        )
+        .unwrap(),
+        body,
+        "on the server under its hash"
+    );
+    a.apply_chat(vec![ChatAction::Send {
+        ch,
+        text: String::new(),
+        parent: None,
+        files,
+    }]);
+    a.sync_note_change();
+    a.write_shared();
+
+    // B can read the team's data with the new kind in it
+    net_until(&mut b, "A's file message at B", |b| {
+        b.data.channels.iter().any(|c| {
+            c.messages
+                .iter()
+                .any(|m| m.attachments.iter().any(|x| x.kind == MediaKind::File))
+        })
+    });
+    // showing it fetches nothing: only a click does
+    let remote = b.media_remote();
+    b.files.want(&att, crate::app::files::THUMB);
+    b.files.tick(None, &remote);
+    assert_eq!(b.files.state(&att.file), None);
+    let saved = std::env::temp_dir()
+        .join("workboard-test-downloads")
+        .join("Quarterly plan.pdf");
+    let _ = std::fs::remove_file(&saved);
+    b.save_file(&att);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !saved.is_file() && std::time::Instant::now() < end {
+        b.files_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read(&saved).unwrap(), body, "saved to Downloads");
+    assert!(b.file_saves.is_empty(), "nothing left waiting");
+    let _ = std::fs::remove_file(&saved);
+}
+
+#[test]
 fn attachments_wait_with_their_channel_and_only_media_goes() {
     let mut a = app();
     let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).take(2).collect();
@@ -224,22 +327,35 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
         .flat_map(|c| c["messages"].as_array().unwrap().iter())
         .find(|m| m["attachments"].is_null());
     assert!(plain.is_some());
-    // things that aren't pictures or videos are refused
+    // any other file goes as it is, without a picture size
     let doc = temp_home("doc").join("plan.pdf");
     std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
     std::fs::write(&doc, b"%PDF").unwrap();
     a.chat.files.clear();
     a.add_media(false, Some(doc), None);
+    let files = until_ready(&mut a, false);
+    assert_eq!(
+        (
+            files[0].name.as_str(),
+            files[0].kind,
+            files[0].bytes,
+            files[0].w,
+            files[0].h
+        ),
+        ("plan.pdf", MediaKind::File, 4, 0, 0)
+    );
+    assert_eq!(files[0].thumb, None);
+    // a folder is refused, saying why
+    let folder = temp_home("doc").join("Notes");
+    std::fs::create_dir_all(&folder).unwrap();
+    a.chat.files.clear();
+    a.add_media(false, Some(folder), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while a.chat.files[0].error.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert!(a.chat.files[0]
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("isn't a picture or a video"));
+    assert_eq!(a.chat.files[0].error.as_deref(), Some("Notes is a folder."));
 }
 
 #[test]
@@ -505,11 +621,11 @@ fn a_picture_added_before_sharing_goes_up_when_the_message_is_sent() {
 #[test]
 fn file_errors_are_shown_in_the_interface_language() {
     crate::i18n::set_lang(crate::i18n::Lang::Ko);
-    let shown = App::error_text("cat.gif isn't a picture or a video.");
+    let shown = App::error_text("Notes is a folder.");
     let net = App::error_text("Couldn't reach the server: Connection refused (os error 61)");
     let plain = App::error_text("The server doesn't have this file.");
     crate::i18n::set_lang(crate::i18n::Lang::En);
-    assert_eq!(shown, "cat.gif은(는) 사진이나 동영상이 아닙니다.");
+    assert_eq!(shown, "Notes은(는) 폴더입니다.");
     // the system's English words are left out
     assert_eq!(
         net,

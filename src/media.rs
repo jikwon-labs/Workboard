@@ -9,12 +9,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// Picture or video (stored in each attachment).
+/// Picture, video or any other file (stored in each attachment).
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MediaKind {
     #[default]
     Image,
     Video,
+    /// Any other file (a PDF, a Markdown note...): sent as it is, shown by
+    /// its name and size, saved to Downloads when clicked. A kind a newer
+    /// app adds is read as this too, so it can't make the team's data
+    /// unreadable here.
+    #[serde(other)]
+    File,
 }
 
 /// Premultiplied RGBA pixels.
@@ -38,16 +44,20 @@ pub const IMAGE_EXTS: [&str; 10] = [
 ];
 pub const VIDEO_EXTS: [&str; 4] = ["mov", "mp4", "m4v", "3gp"];
 
-/// What a file is, from its name. None for anything that isn't a picture or
-/// a video AVFoundation can play.
-pub fn kind_of(path: &Path) -> Option<MediaKind> {
-    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+/// What a file is, from its name: a picture or a video AVFoundation can
+/// play, else a plain file.
+pub fn kind_of(path: &Path) -> MediaKind {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
     if IMAGE_EXTS.contains(&ext.as_str()) {
-        Some(MediaKind::Image)
+        MediaKind::Image
     } else if VIDEO_EXTS.contains(&ext.as_str()) {
-        Some(MediaKind::Video)
+        MediaKind::Video
     } else {
-        None
+        MediaKind::File
     }
 }
 
@@ -397,6 +407,7 @@ mod mac {
     pub fn probe(path: &Path, kind: MediaKind) -> Result<(u32, u32, f32), String> {
         autoreleasepool(|| unsafe {
             match kind {
+                MediaKind::File => Ok((0, 0, 0.0)),
                 MediaKind::Image => {
                     let src = image_source(path).ok_or("That picture can't be opened.")?;
                     let props = CGImageSourceCopyPropertiesAtIndex(src, 0, null());
@@ -459,6 +470,7 @@ mod mac {
     pub fn thumbnail(path: &Path, kind: MediaKind, max: u32) -> Option<Rgba> {
         autoreleasepool(|| unsafe {
             match kind {
+                MediaKind::File => None,
                 MediaKind::Image => {
                     let src = image_source(path)?;
                     let opts = dict(&[
@@ -578,27 +590,15 @@ mod mac {
         })
     }
 
-    /// The system file picker for pictures and videos (several at once).
-    /// Blocks until the person chooses or cancels. Main thread only.
+    /// The system file picker for files to send (several at once, any
+    /// kind). Blocks until the person chooses or cancels. Main thread only.
     pub fn pick_files() -> Vec<PathBuf> {
         autoreleasepool(|| unsafe {
             let panel: *mut Object = msg_send![class!(NSOpenPanel), openPanel];
             let _: () = msg_send![panel, setAllowsMultipleSelection: YES];
             let _: () = msg_send![panel, setCanChooseDirectories: NO];
             let _: () = msg_send![panel, setCanChooseFiles: YES];
-            let _: () = msg_send![panel, setMessage: ns(crate::i18n::tr("Choose pictures or videos to send"))];
-            // only the kinds kind_of takes, so nothing chosen is refused afterwards
-            let types: Vec<*mut Object> = IMAGE_EXTS
-                .iter()
-                .chain(VIDEO_EXTS.iter())
-                .map(|e| -> *mut Object {
-                    msg_send![class!(UTType), typeWithFilenameExtension: ns(e)]
-                })
-                .filter(|t| !t.is_null())
-                .collect();
-            if !types.is_empty() {
-                let _: () = msg_send![panel, setAllowedContentTypes: array(&types)];
-            }
+            let _: () = msg_send![panel, setMessage: ns(crate::i18n::tr("Choose files to send"))];
             let r: isize = msg_send![panel, runModal];
             if r != 1 {
                 return vec![];
@@ -845,7 +845,7 @@ mod tests {
     fn pictures_are_measured_and_shrunk() {
         let dir = temp("pic");
         let png = picture(&dir);
-        assert_eq!(kind_of(&png), Some(MediaKind::Image));
+        assert_eq!(kind_of(&png), MediaKind::Image);
         assert_eq!(probe(&png, MediaKind::Image).unwrap(), (400, 300, 0.0));
         let t = thumbnail(&png, MediaKind::Image, 100).unwrap();
         assert_eq!((t.w, t.h), (100, 75));
@@ -911,7 +911,7 @@ mod tests {
             .status
             .success();
         assert!(ok, "ffmpeg made the clip");
-        assert_eq!(kind_of(&mp4), Some(MediaKind::Video));
+        assert_eq!(kind_of(&mp4), MediaKind::Video);
         let (w, h, secs) = probe(&mp4, MediaKind::Video).unwrap();
         assert_eq!((w, h), (320, 240));
         assert!((secs - 2.0).abs() < 0.1, "{}", secs);
@@ -940,16 +940,29 @@ mod tests {
 
     #[test]
     fn kinds_types_and_clock() {
-        assert_eq!(
-            kind_of(Path::new("a/IMG_0001.HEIC")),
-            Some(MediaKind::Image)
-        );
-        assert_eq!(kind_of(Path::new("screen.mov")), Some(MediaKind::Video));
-        assert_eq!(kind_of(Path::new("notes.pdf")), None);
-        assert_eq!(kind_of(Path::new("noext")), None);
+        assert_eq!(kind_of(Path::new("a/IMG_0001.HEIC")), MediaKind::Image);
+        assert_eq!(kind_of(Path::new("screen.mov")), MediaKind::Video);
+        assert_eq!(kind_of(Path::new("notes.pdf")), MediaKind::File);
+        assert_eq!(kind_of(Path::new("plan.MD")), MediaKind::File);
+        assert_eq!(kind_of(Path::new("noext")), MediaKind::File);
         assert_eq!(content_type(Path::new("x.JPG")), "image/jpeg");
         assert_eq!(content_type(Path::new("x.mov")), "video/quicktime");
         assert_eq!(clock(65.4), "1:05");
         assert_eq!(clock(3723.0), "1:02:03");
+    }
+
+    #[test]
+    fn a_kind_from_a_newer_app_reads_as_a_file() {
+        let k: MediaKind = serde_json::from_str("\"File\"").unwrap();
+        assert_eq!(k, MediaKind::File);
+        assert_eq!(serde_json::to_string(&k).unwrap(), "\"File\"");
+        let k: MediaKind = serde_json::from_str("\"Audio\"").unwrap();
+        assert_eq!(
+            k,
+            MediaKind::File,
+            "unknown kinds don't fail the whole read"
+        );
+        let k: MediaKind = serde_json::from_str("\"Video\"").unwrap();
+        assert_eq!(k, MediaKind::Video);
     }
 }

@@ -41,6 +41,8 @@ use std::time::{Duration, Instant, SystemTime};
 pub(super) const THUMB: u32 = 720;
 /// Longer side of a picture opened large.
 pub(super) const FULL: u32 = 2560;
+/// The size `Files::fetch` asks for: the file only, nothing decoded.
+const FETCH_ONLY: u32 = 0;
 /// The server takes files up to this size (MAX_FILE in server/src/files.rs:
 /// under the 100 MB Cloudflare passes on its free plan).
 pub(super) const MAX_FILE: u64 = 90 << 20;
@@ -489,11 +491,12 @@ impl Files {
         }
     }
 
-    /// The lane a picture's or a video's transfer goes on.
+    /// The lane a transfer goes on: pictures on their own, so a big video
+    /// or file never holds one up.
     fn lane(&self, kind: MediaKind) -> &Sender<Job> {
         match kind {
             MediaKind::Image => &self.small,
-            MediaKind::Video => &self.net,
+            MediaKind::Video | MediaKind::File => &self.net,
         }
     }
 
@@ -674,15 +677,28 @@ impl Files {
     }
 
     /// While drawing: this attachment is on screen and should be shown at `max`.
+    /// A plain file is never decoded (see `fetch`).
     pub fn want(&self, a: &Attachment, max: u32) {
         // the name comes from another member's synced message: only a sha256
         // may become a cache path or a request to the server
-        if !wb_server_name_ok(&a.file) {
+        if !wb_server_name_ok(&a.file) || a.kind == MediaKind::File {
             return;
         }
         self.wants
             .borrow_mut()
             .push((a.file.clone(), ext_of(&a.name), a.kind, max));
+    }
+
+    /// Bring a file into the cache without showing it (a plain file someone
+    /// asked to save); asked each frame until it's here, tried again like
+    /// pictures when it can't be fetched.
+    pub fn fetch(&self, a: &Attachment) {
+        if !wb_server_name_ok(&a.file) {
+            return;
+        }
+        self.wants
+            .borrow_mut()
+            .push((a.file.clone(), ext_of(&a.name), a.kind, FETCH_ONLY));
     }
 
     /// The cached file under a name with the attachment's extension, for
@@ -756,6 +772,10 @@ impl Files {
         for (sha, ext, kind, max) in self.wants.take() {
             let k = key(&sha, max);
             if self.textures.contains_key(&k) || self.asked.contains(&k) {
+                continue;
+            }
+            if max == FETCH_ONLY && self.local(&sha).is_some() {
+                self.fetches.remove(&sha);
                 continue;
             }
             if self.local(&sha).is_some() {
@@ -1042,6 +1062,50 @@ fn touch(p: &Path) {
 }
 
 /// "mov" for "Clip.MOV"; empty without one.
+/// The short label a plain file's tile shows for its kind: "PDF", "MD";
+/// "FILE" without an extension.
+pub(super) fn ext_label(name: &str) -> String {
+    let e = ext_of(name).to_ascii_uppercase();
+    if e.is_empty() || e.len() > 5 {
+        "FILE".into()
+    } else {
+        e
+    }
+}
+
+/// A file's size for people: "512 B", "14 KB", "2.3 MB".
+pub(super) fn size_text(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{} KB", bytes.div_ceil(1024))
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// A plain file's tile in a message box or on a task: its kind label
+/// with the name under it.
+pub(super) fn paint_file_tile(painter: &egui::Painter, rect: Rect, name: &str, t: &Theme) {
+    painter.rect_filled(rect, 8.0, t.hover);
+    let small = rect.height() < 80.0;
+    painter.text(
+        rect.center() - vec2(0.0, if small { 8.0 } else { 10.0 }),
+        Align2::CENTER_CENTER,
+        ext_label(name),
+        FontId::proportional(if small { 13.0 } else { 16.0 }),
+        t.text2,
+    );
+    let room = ((rect.width() - 8.0) / if small { 5.5 } else { 6.5 }).max(4.0) as usize;
+    painter.text(
+        rect.center() + vec2(0.0, if small { 12.0 } else { 14.0 }),
+        Align2::CENTER_CENTER,
+        crate::widgets::truncate_chars(name, room),
+        FontId::proportional(if small { 9.5 } else { 11.0 }),
+        t.text3,
+    );
+}
+
 fn ext_of(name: &str) -> String {
     Path::new(name)
         .extension()
@@ -1132,15 +1196,19 @@ fn prepare(
         (None, None) => return Err("Nothing to send.".into()),
     };
     let out = (|| {
-        let kind =
-            media::kind_of(&src).ok_or_else(|| format!("{} isn't a picture or a video.", name))?;
-        let bytes = std::fs::metadata(&src)
-            .map_err(|_| format!("{} can't be read.", name))?
-            .len();
-        if bytes > MAX_FILE {
+        let kind = media::kind_of(&src);
+        let meta = std::fs::metadata(&src).map_err(|_| format!("{} can't be read.", name))?;
+        if meta.is_dir() {
+            return Err(format!("{} is a folder.", name));
+        }
+        if meta.len() > MAX_FILE {
             return Err(format!("{} is larger than 90 MB.", name));
         }
-        let (w, h, secs) = media::probe(&src, kind)?;
+        // a plain file goes as it is: nothing to measure
+        let (w, h, secs) = match kind {
+            MediaKind::File => (0, 0, 0.0),
+            _ => media::probe(&src, kind)?,
+        };
         let (sha, bytes) =
             wb_net::sha256_file(&src).map_err(|_| format!("{} can't be read.", name))?;
         store(dir, &src, &sha)?;
@@ -1150,7 +1218,7 @@ fn prepare(
         }
         let thumb = match kind {
             MediaKind::Video => make_still(dir, &src, folder),
-            MediaKind::Image => None,
+            MediaKind::Image | MediaKind::File => None,
         };
         Ok(Attachment {
             file: sha,
@@ -1323,6 +1391,8 @@ impl App {
     /// Once a frame: background work, prepared attachments, a paste.
     pub(super) fn files_tick(&mut self, ctx: Option<&egui::Context>) {
         let remote = self.media_remote();
+        // before the tick, which takes the files asked for
+        self.save_fetched_files();
         self.files.tick(ctx, &remote);
         for (local, result) in self.files.take_prepared() {
             let boxes = [&mut self.chat.files, &mut self.chat.thread_files]
@@ -1503,7 +1573,7 @@ impl App {
             return tr("Can't reach the team server right now. It's tried again by itself.").into();
         }
         const WITH_VALUES: [&str; 5] = [
-            "{} isn't a picture or a video.",
+            "{} is a folder.",
             "{} can't be read.",
             "{} is larger than 90 MB.",
             "Couldn't put {} in the shared folder: {}",
@@ -1538,7 +1608,7 @@ impl App {
         };
         if count >= MAX_PER_MESSAGE {
             self.toast(trf!(
-                "You can send up to {} pictures or videos in one message.",
+                "You can send up to {} files in one message.",
                 MAX_PER_MESSAGE
             ));
             return false;
@@ -1653,10 +1723,12 @@ impl App {
                     no_pointer(&resp);
                 }
                 let painter = ui.painter_at(rect.expand(6.0));
-                match p.att.as_ref().and_then(|a| {
+                let plain = media::kind_of(Path::new(&p.name)) == MediaKind::File;
+                match p.att.as_ref().filter(|_| !plain).and_then(|a| {
                     self.files.want(a, THUMB);
                     self.files.texture(&a.file, THUMB)
                 }) {
+                    _ if plain => paint_file_tile(&painter, rect, &p.name, &t),
                     Some(tex) => {
                         let uv = cover_uv(tex.size_vec2(), size);
                         painter.add(
@@ -1818,6 +1890,12 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             for (i, a) in m.attachments.iter().enumerate() {
+                if a.kind == MediaKind::File {
+                    if self.file_card(ui, a, avail) {
+                        clicked = Some(i);
+                    }
+                    continue;
+                }
                 let aspect = if a.w > 0 && a.h > 0 {
                     a.w as f32 / a.h as f32
                 } else {
@@ -1913,6 +1991,117 @@ impl App {
         clicked
     }
 
+    /// A plain file in a message: its kind, name and size, or how its
+    /// download is going. True when clicked (to save it).
+    fn file_card(&self, ui: &mut Ui, a: &Attachment, avail: f32) -> bool {
+        let t = self.t();
+        let size = vec2(260.0_f32.min(avail).max(160.0), 52.0);
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        let label = format!("File {}", a.name);
+        resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())
+        });
+        if !ui.is_rect_visible(rect) {
+            return resp.clicked();
+        }
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 8.0, if resp.hovered() { t.hover } else { t.card });
+        painter.rect_stroke(
+            rect,
+            8.0,
+            Stroke::new(1.0_f32, t.border),
+            egui::StrokeKind::Inside,
+        );
+        let icon = Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(36.0, 36.0));
+        painter.rect_filled(icon, 6.0, t.accent_bg);
+        painter.text(
+            icon.center(),
+            Align2::CENTER_CENTER,
+            ext_label(&a.name),
+            FontId::proportional(if ext_label(&a.name).len() > 3 {
+                9.5
+            } else {
+                11.0
+            }),
+            t.accent_text,
+        );
+        let left = icon.right() + 10.0;
+        let room = ((rect.right() - left - 8.0) / 6.5).max(4.0) as usize;
+        painter.text(
+            pos2(left, rect.top() + 17.0),
+            Align2::LEFT_CENTER,
+            crate::widgets::truncate_chars(&a.name, room),
+            FontId::proportional(13.0),
+            t.text,
+        );
+        let saving = self.file_saves.iter().any(|s| s.file == a.file);
+        let (status, bad) = match self.files.state(&a.file) {
+            Some(Transfer::Down(f)) => (trf!("Loading {}%", (f * 100.0) as u32), false),
+            Some(Transfer::Failed(e)) => (
+                format!("{} {}", App::error_text(&e), tr("Click to try again")),
+                true,
+            ),
+            _ if saving => (tr("Loading...").to_string(), false),
+            _ => (size_text(a.bytes), false),
+        };
+        painter.text(
+            pos2(left, rect.top() + 36.0),
+            Align2::LEFT_CENTER,
+            crate::widgets::truncate_chars(&status, room + 4),
+            FontId::proportional(11.5),
+            if bad { t.danger } else { t.text3 },
+        );
+        resp.on_hover_text(tr("Click to save to Downloads"))
+            .clicked()
+    }
+
+    /// Save a plain file to Downloads: now when it's here, else once it's
+    /// fetched (see `save_fetched_files`).
+    pub(super) fn save_file(&mut self, a: &Attachment) {
+        if matches!(self.files.state(&a.file), Some(Transfer::Failed(_))) {
+            self.files.retry(&a.file);
+        }
+        match self.files.local(&a.file) {
+            Some(path) => self.save_to_downloads(&path, &a.name),
+            None => {
+                if !self.file_saves.iter().any(|s| s.file == a.file) {
+                    self.file_saves.push(a.clone());
+                }
+                self.files.fetch(a);
+            }
+        }
+    }
+
+    /// Once a frame: files asked to be saved that have come in are saved;
+    /// the rest are asked for again.
+    pub(super) fn save_fetched_files(&mut self) {
+        if self.file_saves.is_empty() {
+            return;
+        }
+        let saves = std::mem::take(&mut self.file_saves);
+        for a in saves {
+            match self.files.local(&a.file) {
+                Some(path) => self.save_to_downloads(&path, &a.name),
+                None => {
+                    self.files.fetch(&a);
+                    self.file_saves.push(a);
+                }
+            }
+        }
+    }
+
+    fn save_to_downloads(&mut self, path: &Path, name: &str) {
+        match save_copy(path, name) {
+            Ok(dest) => self.toast(trf!(
+                "Saved {} in Downloads",
+                dest.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            )),
+            Err(e) => self.toast = Some((trf!("Couldn't save: {}", e), now_ts())),
+        }
+    }
+
     /// The message a viewer shows.
     fn viewer_message(&self, v: &Viewer) -> Option<Message> {
         let c = self.data.channels.iter().find(|c| c.id == v.ch)?;
@@ -1928,13 +2117,19 @@ impl App {
         let Some(mut v) = self.viewer.take() else {
             return;
         };
-        let Some(m) = self.viewer_message(&v) else {
+        let Some(mut m) = self.viewer_message(&v) else {
             return;
         };
-        if m.attachments.is_empty() {
+        // only the pictures and videos: plain files are saved, not shown;
+        // from here on the index counts those
+        let media: Vec<usize> = (0..m.attachments.len())
+            .filter(|&i| m.attachments[i].kind != MediaKind::File)
+            .collect();
+        if media.is_empty() {
             return;
         }
-        v.index = v.index.min(m.attachments.len() - 1);
+        v.index = media.iter().position(|&i| i == v.index).unwrap_or(0);
+        m.attachments = media.iter().map(|&i| m.attachments[i].clone()).collect();
         let a = m.attachments[v.index].clone();
         let t = self.t();
         let screen = ctx.screen_rect();
@@ -2031,6 +2226,7 @@ impl App {
                         .texture(&a.file, FULL)
                         .or_else(|| self.files.texture(&a.file, THUMB))
                         .cloned(),
+                    MediaKind::File => None,
                     MediaKind::Video => v.frame.clone().or_else(|| {
                         still
                             .as_ref()
@@ -2332,6 +2528,7 @@ impl App {
             let n = m.attachments.len() as i32;
             v.index = ((v.index as i32 + step).rem_euclid(n)) as usize;
         }
+        v.index = media[v.index];
         let _ = t;
         if !close {
             self.viewer = Some(v);
@@ -2415,7 +2612,13 @@ fn play_badge(p: &egui::Painter, c: egui::Pos2, r: f32) {
 
 /// Copy a file to ~/Downloads under its name, without overwriting.
 fn save_copy(from: &Path, name: &str) -> Result<PathBuf, String> {
-    let dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Downloads");
+    // tests keep out of the real Downloads folder
+    let dir = if cfg!(test) {
+        std::env::temp_dir().join("workboard-test-downloads")
+    } else {
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Downloads")
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let p = Path::new(name);
     let stem = p
         .file_stem()

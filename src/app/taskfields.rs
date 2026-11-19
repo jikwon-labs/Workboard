@@ -1107,7 +1107,7 @@ impl App {
                     t.text2,
                     t.text2,
                 );
-                if b.on_hover_text(tr("Attach pictures or videos (or drop them here)"))
+                if b.on_hover_text(tr("Attach files (or drop them here)"))
                     .clicked()
                 {
                     attach = true;
@@ -1135,6 +1135,9 @@ impl App {
                     let shown = files::shown(a);
                     self.files.want(&shown, files::THUMB);
                     match self.files.texture(&shown.file, files::THUMB) {
+                        _ if a.kind == MediaKind::File => {
+                            files::paint_file_tile(ui.painter(), pic, &a.name, t);
+                        }
                         Some(tex) => {
                             let uv = files::cover_uv(tex.size_vec2(), size);
                             ui.painter().add(
@@ -1197,7 +1200,11 @@ impl App {
         if let Some(i) = remove {
             task.attachments.remove(i);
         }
-        if let Some(a) = open {
+        if let Some(a) = open.as_ref().filter(|a| a.kind == MediaKind::File) {
+            // a plain file is saved to Downloads, never opened from here (it
+            // may be a program)
+            self.save_file(a);
+        } else if let Some(a) = open {
             // the picture or video opens in the Mac's own viewer
             if let Some(p) = self.files.playable(&a) {
                 if !cfg!(test) {

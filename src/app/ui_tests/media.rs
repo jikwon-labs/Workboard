@@ -158,32 +158,63 @@ fn drop_a_picture_send_it_and_open_it_large() {
     assert!(h.has("Large beach.png") && h.has("Show in Finder") && h.has("Save to Downloads"));
     h.key(egui::Key::Escape);
     assert!(h.app.viewer.is_none());
-    // a file that isn't a picture or video is refused in the box
-    let txt = pic.with_file_name("notes.txt");
-    std::fs::write(&txt, "hi").unwrap();
+    // a file that isn't a picture or video goes too, shown by its name
+    let md = pic.with_file_name("ui-notes.md");
+    std::fs::write(&md, "# Plan\n- ship it\n").unwrap();
     h.dropped = vec![egui::DroppedFile {
-        path: Some(txt),
+        path: Some(md),
         ..Default::default()
     }];
     h.frame(vec![]);
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while h.app.chat.files.first().is_some_and(|p| p.error.is_none())
+    while !(h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty())
         && std::time::Instant::now() < until
     {
         h.frame(vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert!(h.app.chat.files[0]
-        .error
-        .as_deref()
-        .unwrap_or("")
-        .contains("isn't a picture or a video"));
-    assert!(
-        !h.app.pending_ready(false).0,
-        "can't send with a refused file"
+    assert_eq!(h.app.chat.files[0].error, None);
+    h.settle();
+    assert!(h.has("Attachment ui-notes.md"), "a tile in the message box");
+    h.click("Message composer");
+    h.type_text("the plan");
+    h.key(egui::Key::Enter);
+    let m = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(m.text, "the plan");
+    assert_eq!(
+        (m.attachments[0].kind, m.attachments[0].bytes),
+        (MediaKind::File, 17)
     );
-    h.click("Remove notes.txt");
-    assert!(h.app.chat.files.is_empty());
+    h.settle();
+    // clicking it saves it to Downloads instead of opening it large
+    let saved = std::env::temp_dir()
+        .join("workboard-test-downloads")
+        .join("ui-notes.md");
+    let _ = std::fs::remove_file(&saved);
+    h.click("File ui-notes.md");
+    h.app.apply_actions();
+    h.settle();
+    assert!(h.app.viewer.is_none(), "not opened large");
+    assert_eq!(
+        std::fs::read_to_string(&saved).unwrap(),
+        "# Plan\n- ship it\n"
+    );
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("ui-notes.md")));
+    let _ = std::fs::remove_file(&saved);
 }
 
 #[test]
@@ -214,6 +245,37 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     h.click("Remove attachment mockup.png");
     h.app.apply_actions();
     assert!(h.app.task(id).unwrap().attachments.is_empty());
+}
+
+#[test]
+fn a_pdf_dropped_on_a_task_attaches_and_a_click_saves_it() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    let dir = temp_home("ui-task-pdf");
+    std::fs::create_dir_all(&dir).unwrap();
+    let pdf = dir.join("ui-brief.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4 brief").unwrap();
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(pdf),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.app.task(id).unwrap().attachments.is_empty() && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let a = h.app.task(id).unwrap().attachments[0].clone();
+    assert_eq!((a.name.as_str(), a.kind), ("ui-brief.pdf", MediaKind::File));
+    h.settle();
+    let saved = std::env::temp_dir()
+        .join("workboard-test-downloads")
+        .join("ui-brief.pdf");
+    let _ = std::fs::remove_file(&saved);
+    h.click("Attachment ui-brief.pdf");
+    h.settle();
+    assert_eq!(std::fs::read(&saved).unwrap(), b"%PDF-1.4 brief");
+    let _ = std::fs::remove_file(&saved);
 }
 
 #[test]

@@ -28,7 +28,7 @@ pub const T: &[(&str, &str)] = &[
     ("That video can't be opened.", "이 동영상을 열 수 없습니다."),
     ("That video can't be played on this Mac.", "이 Mac에서는 이 동영상을 재생할 수 없습니다."),
     ("Pictures and videos need macOS.", "사진과 동영상은 macOS에서만 쓸 수 있습니다."),
-    ("{} isn't a picture or a video.", "{}은(는) 사진이나 동영상이 아닙니다."),
+    ("{} is a folder.", "{}은(는) 폴더입니다."),
     ("{} can't be read.", "{}을(를) 읽을 수 없습니다."),
     ("{} is larger than 90 MB.", "{}은(는) 90MB보다 큽니다."),
     ("Couldn't put {} in the shared folder: {}", "{}을(를) 공유 폴더에 넣지 못했습니다: {}"),
@@ -58,7 +58,7 @@ pub const T: &[(&str, &str)] = &[
     ("Stopped.", "중단했습니다."),
     ("The file arrived damaged. Try again.", "파일이 손상된 채로 도착했습니다. 다시 시도하세요."),
     // media
-    ("Choose pictures or videos to send", "보낼 사진이나 동영상을 고르세요"),
+    ("Choose files to send", "보낼 파일을 고르세요"),
     // huddle
     ("Huddles need the team's server. Connect in Work together.", "허들은 팀 서버가 있어야 합니다. 함께 작업하기에서 연결하세요."),
     ("Huddles go through the team's server, and it can't be reached right now. Try again once it's connected.", "허들은 팀 서버를 거치는데, 지금은 서버에 연결할 수 없습니다. 연결되면 다시 시도하세요."),
@@ -200,7 +200,7 @@ pub const T: &[(&str, &str)] = &[
     ("Show in sidebar", "사이드바에 표시"),
     ("No spaces yet. A Space holds your Lists and their tasks: make one with + New Space.", "아직 스페이스가 없습니다. 스페이스에 목록과 작업이 들어갑니다. + 새 스페이스로 만드세요."),
     ("Nothing is archived. Archived Spaces and Lists show here so you can restore them.", "보관된 항목이 없습니다. 보관한 스페이스와 목록은 여기에 표시되며 다시 복원할 수 있습니다."),
-    ("You can send up to {} pictures or videos in one message.", "메시지 하나에 사진이나 동영상을 {}개까지 보낼 수 있습니다."),
+    ("You can send up to {} files in one message.", "메시지 하나에 파일을 {}개까지 보낼 수 있습니다."),
     ("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard.", "팀의 변경 사항을 읽지 못했습니다. 누군가 더 새 버전의 앱을 쓰고 있을 수 있으니 Workboard를 업데이트하세요."),
     ("A saved workspace couldn't be read, so a copy was kept as {}.", "저장된 워크스페이스를 읽지 못해 사본을 {}(으)로 보관했습니다."),
     ("You're no longer in #{}, so it was taken off your list.", "더 이상 #{}의 멤버가 아니어서 목록에서 뺐습니다."),

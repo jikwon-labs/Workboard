@@ -533,6 +533,8 @@ pub struct App {
     files: files::Files,
     /// A picture or video opened large.
     viewer: Option<files::Viewer>,
+    /// plain files someone clicked to save, waiting to be fetched
+    file_saves: Vec<Attachment>,
     /// Files or a picture pasted into a message box (see raw_input_hook).
     pasted: Option<crate::media::Pasted>,
     /// egui pasted text for the Cmd+V being held.
@@ -938,6 +940,7 @@ impl App {
                 std::env::temp_dir().join(format!("wb-files-{:x}", wb_sync::random_u64()))
             }),
             viewer: None,
+            file_saves: vec![],
             pasted: None,
             paste_text_seen: false,
             new_channel: None,

@@ -1555,3 +1555,26 @@ fn mentioned_ids_take_the_longest_name_and_honour_picks() {
         vec![1, 2]
     );
 }
+
+#[test]
+fn every_offered_emoji_has_a_glyph_in_the_built_in_fonts() {
+    // the system fonts the app adds have no emoji, so egui's built-in emoji
+    // fonts draw them all; one missing there shows as an empty box
+    let ctx = egui::Context::default();
+    setup_fonts(&ctx);
+    let _ = ctx.run(Default::default(), |_| {});
+    let font = egui::FontId::proportional(18.0);
+    let lists = [
+        &super::super::chat::EMOJIS[..],
+        &super::super::chat::QUICK_REACTIONS[..],
+        &super::super::comments::REACTIONS[..],
+    ];
+    for e in lists.into_iter().flatten() {
+        assert!(
+            ctx.fonts(|f| f.has_glyphs(&font, e)),
+            "{:?} (U+{:X}) has no glyph",
+            e,
+            e.chars().next().unwrap() as u32
+        );
+    }
+}

@@ -1220,20 +1220,7 @@ impl App {
             let em = icons::icon_button(ui, &t, "smile", "", "Emoji", false);
             popup(ui, &em, win_id.with("emoji_popup"), 180.0, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    for e in [
-                        "\u{1F44D}",
-                        "\u{1F389}",
-                        "\u{2705}",
-                        "\u{1F440}",
-                        "\u{1F525}",
-                        "\u{1F64F}",
-                        "\u{1F604}",
-                        "\u{2764}",
-                        "\u{1F680}",
-                        "\u{1F914}",
-                        "\u{1F4AF}",
-                        "\u{1F44F}",
-                    ] {
+                    for e in super::comments::REACTIONS {
                         if ui
                             .add(ghost(egui::Button::new(RichText::new(e).size(18.0))))
                             .clicked()

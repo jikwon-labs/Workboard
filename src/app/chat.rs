@@ -6,7 +6,7 @@
 use super::icons::{icon_button, icon_button_ex, line_icon};
 use super::*;
 
-const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F389}"];
+pub(super) const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F389}"];
 
 /// How many of a conversation's newest messages are drawn, and how many
 /// more each "Show earlier messages" adds. Every drawn row is laid out on
@@ -14,6 +14,7 @@ const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F
 pub(super) const CHAT_PAGE: usize = 200;
 
 /// The emoji grid behind "Add reaction" and the message box's emoji button.
+/// Each must be in egui's built-in emoji fonts, or it draws as an empty box.
 pub(super) const EMOJIS: [&str; 40] = [
     "\u{1F44D}",
     "\u{1F44E}",
@@ -26,7 +27,7 @@ pub(super) const EMOJIS: [&str; 40] = [
     "\u{1F604}",
     "\u{1F602}",
     "\u{1F60D}",
-    "\u{1F914}",
+    "\u{1F615}",
     "\u{1F62E}",
     "\u{1F622}",
     "\u{1F621}",
@@ -35,7 +36,7 @@ pub(super) const EMOJIS: [&str; 40] = [
     "\u{1F64C}",
     "\u{1F4AA}",
     "\u{1F44B}",
-    "\u{1F91D}",
+    "\u{1F44A}",
     "\u{1F449}",
     "\u{270C}",
     "\u{1F44C}",

@@ -6,7 +6,7 @@ use super::nav::Link;
 use super::*;
 
 /// Reactions offered on a comment.
-const REACTIONS: [&str; 12] = [
+pub(super) const REACTIONS: [&str; 12] = [
     "\u{1F44D}",
     "\u{1F389}",
     "\u{2705}",
@@ -16,7 +16,7 @@ const REACTIONS: [&str; 12] = [
     "\u{1F604}",
     "\u{2764}",
     "\u{1F680}",
-    "\u{1F914}",
+    "\u{1F615}",
     "\u{1F4AF}",
     "\u{1F44F}",
 ];

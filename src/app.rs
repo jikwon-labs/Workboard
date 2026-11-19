@@ -26,6 +26,7 @@ mod files;
 mod hubs;
 mod huddle;
 mod icons;
+mod ime;
 mod listview;
 mod login;
 mod menus;
@@ -545,6 +546,8 @@ pub struct App {
     paste_cmd: bool,
     /// V went down as typing (egui swallows the V of a Cmd+V).
     v_typed: bool,
+    /// Input method fixes for the raw input (see ime.rs).
+    ime: ime::ImeFix,
     new_channel: Option<String>,
     /// Tasks ticked for bulk editing.
     selected: HashSet<u64>,
@@ -954,6 +957,7 @@ impl App {
             paste_text_seen: false,
             paste_cmd: false,
             v_typed: false,
+            ime: Default::default(),
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
@@ -5502,7 +5506,7 @@ impl eframe::App for App {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.catch_paste(ctx, raw_input);
+        self.fix_input(ctx, raw_input);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

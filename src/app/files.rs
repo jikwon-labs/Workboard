@@ -1659,10 +1659,19 @@ impl App {
         }
     }
 
+    /// Before egui sees the input (eframe's raw_input_hook): the input
+    /// method fixes, then a paste of files or a picture.
+    pub(super) fn fix_input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.ime.fix(raw) {
+            ctx.request_repaint();
+        }
+        self.catch_paste(ctx, raw);
+    }
+
     /// Before egui sees the input: a Cmd+V in a message box with files or a
     /// picture on the clipboard. egui only passes on text, so a picture alone
     /// shows up as nothing but the release of V.
-    pub(super) fn catch_paste(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+    fn catch_paste(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         let v_up = self.paste_key_up(raw);
         let chat_box = egui::Id::new(CHAT_BOX);
         let focused = ctx.memory(|m| m.focused());

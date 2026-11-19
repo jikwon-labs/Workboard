@@ -55,7 +55,7 @@ impl Ui1 {
             ..Default::default()
         };
         // as eframe's raw_input_hook does
-        self.app.catch_paste(&self.ctx, &mut input);
+        self.app.fix_input(&self.ctx, &mut input);
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
         self.shapes = out.shapes;
@@ -437,7 +437,7 @@ impl Ui1 {
             modifiers,
             ..Default::default()
         };
-        self.app.catch_paste(&self.ctx, &mut input);
+        self.app.fix_input(&self.ctx, &mut input);
         let app = &mut self.app;
         let _ = self.ctx.run(input, |ctx| app.ui_frame(ctx));
     }

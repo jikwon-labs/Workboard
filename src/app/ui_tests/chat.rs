@@ -1316,3 +1316,74 @@ fn hover_toolbar_floats_above_a_one_line_message() {
     assert_eq!(h.count_named("More actions"), 1);
     assert_eq!(h.rect("More actions"), more, "the same toolbar stays put");
 }
+
+/// What winit sends while a Korean syllable is put together and finished.
+fn preedit(s: &str) -> Vec<egui::Event> {
+    vec![
+        egui::Event::Ime(egui::ImeEvent::Enabled),
+        egui::Event::Ime(egui::ImeEvent::Preedit(s.into())),
+    ]
+}
+
+fn finished(s: &str) -> Vec<egui::Event> {
+    use egui::{Event::Ime, ImeEvent::*};
+    vec![
+        Ime(Preedit(s.into())),
+        Ime(Disabled),
+        Ime(Commit(s.into())),
+        Ime(Disabled),
+        Ime(Disabled),
+    ]
+}
+
+fn backspace(pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key: egui::Key::Backspace,
+        physical_key: Some(egui::Key::Backspace),
+        pressed,
+        repeat: false,
+        modifiers,
+    }
+}
+
+#[test]
+fn korean_typing_keeps_backspace_cmd_backspace_and_fast_keys() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    let none = egui::Modifiers::NONE;
+    // a Backspace in the same frame as the end of a syllable deletes it
+    h.frame(preedit("안"));
+    let mut ev = finished("안");
+    ev.extend([backspace(true, none), backspace(false, none)]);
+    h.frame(ev);
+    h.settle();
+    assert_eq!(h.app.chat.text, "");
+
+    // Cmd+Backspace while a syllable is unfinished: macOS finishes it and
+    // passes on only the release of the key; the line still goes
+    h.type_text("hi ");
+    h.frame(preedit("녕"));
+    h.frame(finished("녕"));
+    // (as the Mac sends Cmd)
+    let cmd = egui::Modifiers {
+        mac_cmd: true,
+        command: true,
+        ..Default::default()
+    };
+    h.frame(vec![backspace(false, cmd)]);
+    h.settle();
+    assert_eq!(h.app.chat.text, "");
+
+    // fast typing: a space and the next syllable in the same frame as the
+    // end of the last one stay in order
+    h.frame(preedit("가"));
+    let mut ev = finished("가");
+    ev.push(egui::Event::Text(" ".into()));
+    ev.extend(preedit("ㄴ"));
+    h.frame(ev);
+    h.frame(vec![egui::Event::Ime(egui::ImeEvent::Preedit("나".into()))]);
+    h.frame(finished("나"));
+    h.settle();
+    assert_eq!(h.app.chat.text, "가 나");
+}

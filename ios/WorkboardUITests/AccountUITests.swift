@@ -1,7 +1,8 @@
 // Signing in on a server that wants it, the way the real server does it:
 // invite code with a new password, email and password on another device,
 // a wrong password, "Forgot password?" with a reset code, setting a password
-// from settings, and invite links (workboard://join?...).
+// from settings, invite links (workboard://join?...), and the code a computer
+// shows to sign a phone in (typed, or its workboard://link?... QR code).
 // Needs: swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev
 // (from ios/WorkboardKit). The server keeps accounts between tests, so each
 // test starts by joining with a fresh invite code, which replaces the account.
@@ -115,6 +116,41 @@ final class AccountUITests: WorkboardUITestCase {
         type(a.secureTextFields["confirmPasswordField"], "alex-password-1")
         a.buttons["joinButton"].tap()
         XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
+    }
+
+    func testCodeFromTheComputerSignsInWithoutAPassword() {
+        let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
+        let toCode = a.buttons["codeModeButton"]
+        XCTAssertTrue(toCode.waitForExistence(timeout: 10))
+        toCode.tap()
+        let field = a.textFields["linkCodeField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(a.buttons["scanButton"].exists, "the QR code can be scanned from here too")
+        type(field, "zzzzzz")
+        XCTAssertEqual(field.value as? String, "ZZZZZZ", "typed in capitals")
+        a.buttons["linkSignInButton"].tap()
+        waitLabel(a.staticTexts["signInError"], contains: "That code doesn't work")
+
+        let code = admin("link-code?member=3")["code"] as! String
+        type(field, code.lowercased())
+        a.buttons["linkSignInButton"].tap()
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in as the computer's person")
+        a.buttons["settingsButton"].tap()
+        waitLabel(a.staticTexts["signedInAs"], contains: "Signed in as Sam Lee")
+    }
+
+    func testScannedComputerLinkSignsInAtOnce() {
+        let a = launchApp(["-wbReset", "YES"])
+        let scan = a.buttons["setupScanButton"]
+        XCTAssertTrue(scan.waitForExistence(timeout: 10), "first launch offers to scan the computer's QR code")
+        scan.tap()
+        // the simulator has no camera: it says to type the code instead
+        waitLabel(a.staticTexts["scanMessage"], contains: "six-character code")
+        a.buttons["scanCancelButton"].tap()
+        // what the Camera app opens after reading the QR code
+        let code = admin("link-code?member=2")["code"] as! String
+        a.open(URL(string: "workboard://link?server=ws%3A%2F%2F127.0.0.1%3A18788&code=\(code)")!)
+        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "the link set the server and signed in with no form")
     }
 
     func testPastedInviteEmailFillsTheForm() {

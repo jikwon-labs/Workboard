@@ -163,6 +163,38 @@ final class ClientTests: FakeServerTestCase {
         XCTAssertEqual(c.state, .signIn, "no retrying after an auth refusal")
     }
 
+    func testCodeFromTheComputerSignsInOnceWithoutAPassword() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let url = try await start(server)
+        defer { server.stop() }
+        let tokens = MemoryTokenStore()
+        let c = device(url, tokens: tokens)
+        await until("asked to sign in") { c.state == .signIn }
+        XCTAssertNotNil(c.signIn(.link(code: " - ")), "checked here first")
+
+        c.signIn(.link(code: "ZZZZZZ"))
+        await until("wrong code refused") { c.signInReason == .failed && !c.signingIn }
+        XCTAssertEqual(c.signInMessage, "That code doesn't work. It may be used already or expired (codes last 5 minutes). Show a new one on your computer: Work together > Sign in on your phone.")
+
+        // typed in lower case with a space, as people do
+        let code = server.linkCode(member: 3)
+        let typed = (code.prefix(3) + " " + code.dropFirst(3)).lowercased()
+        c.signIn(.link(code: typed))
+        await until("signed in") { c.state.isConnected }
+        XCTAssertEqual(c.me, 3, "signed in as the person whose computer showed the code")
+        XCTAssertTrue(c.settings.meFromServer)
+        XCTAssertNotNil(tokens.token(for: url), "a token for next time")
+        c.disconnect()
+        c.connect()
+        await until("back with the token") { c.state.isConnected }
+
+        // it works once
+        let other = device(url)
+        await until("other asked") { other.state == .signIn }
+        other.signIn(.link(code: code))
+        await until("second use refused") { other.signInReason == .failed }
+    }
+
     func testInviteWithoutRecordedEmailNeedsOne() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
         let url = try await start(server)

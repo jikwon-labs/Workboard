@@ -61,6 +61,11 @@ extension FakeServer {
                 invites[Self.normalize(code)] = member
                 log("admin: invite for member \(member): \(code)")
                 respond(p, 200, ["code": .string(code)])
+            case "/admin/link-code":
+                let code = makeLinkCode()
+                links[code] = member
+                log("admin: link code for member \(member): \(code)")
+                respond(p, 200, ["code": .string(code)])
             case "/admin/say":
                 // a message from someone else, as if their app had pushed it
                 let q = { (n: String) in comps?.queryItems?.first { $0.name == n }?.value }

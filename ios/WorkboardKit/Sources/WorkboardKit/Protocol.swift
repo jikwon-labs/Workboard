@@ -4,7 +4,7 @@
 //
 //   app -> server  hello        {device, tag?, token?, invite?, claim?,
 //                                email?, password?, new_password?, reset_code?,
-//                                app?, sync?}   (app version and sync format;
+//                                link_code?, app?, sync?}   (app version and sync format;
 //                                the server takes no pushes from apps with
 //                                sync below wb_net::OLDEST_SYNC or none)
 //   server -> app  welcome      {tag, snapshot|null, rev, member, role, token?, email?}
@@ -23,6 +23,9 @@
 //                                (sent on sign-out and before leaving for another server)
 //   app -> server  create_invite {member, role}   owner or admin
 //   server -> app  invite       {member, code, emailed?, mail_error?}
+//   app -> server  create_link_code   (the Mac only: a 6-character code that
+//                                signs a phone in as the same person)
+//   server -> app  link_code    {code, seconds}   (iOS never asks; ignored)
 //   app -> server  set_role     {member, role}    owner or admin
 //   app -> server  revoke       {member}          owner or admin
 //   app -> server  access_list
@@ -40,7 +43,8 @@
 // Optional hello fields are left out when absent: the server treats a field
 // that is there as meant. It uses the first that applies: reset_code (with
 // email and new_password), invite (with new_password: make the account),
-// email + password, token, claim. iOS never claims: claiming an empty
+// link_code (the code the person's computer shows as a QR code or six
+// letters and digits), email + password, token, claim. iOS never claims: claiming an empty
 // server means bringing a workspace, which only the Mac app has; the sign-in
 // screen asks /health and says to set the server up from the Mac instead.
 //
@@ -61,6 +65,9 @@ public struct Hello: Equatable, Sendable {
     public var password: String?
     public var newPassword: String?
     public var resetCode: String?
+    /// The code the person's computer showed (Work together > Sign in on
+    /// your phone), from its QR code or typed.
+    public var linkCode: String?
     /// This app's version, and the sync format it writes (Sync.metaV).
     public var app: String?
     public var sync: UInt64?
@@ -130,6 +137,7 @@ public enum ClientMessage: Equatable, Sendable {
             put("password", h.password)
             put("new_password", h.newPassword)
             put("reset_code", h.resetCode)
+            put("link_code", h.linkCode)
             put("app", h.app)
             if let v = h.sync { o["sync"] = .id(v) }
             if h.deltas { o["deltas"] = true }
@@ -189,6 +197,7 @@ public enum ClientMessage: Equatable, Sendable {
                           newPassword: j["new_password"]?.string, resetCode: j["reset_code"]?.string,
                           app: j["app"]?.string, sync: j["sync"]?.uint)
             h.deltas = j["deltas"]?.bool ?? false
+            h.linkCode = j["link_code"]?.string
             self = .hello(h)
         case "push":
             guard let s = j["data"], s.object != nil else { return nil }

@@ -1502,6 +1502,16 @@
         }
       }
     },
+    "Code from your computer": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컴퓨터에 뜬 코드"
+          }
+        }
+      }
+    },
     "Colour of %@": {
       "localizations": {
         "ko": {
@@ -2952,6 +2962,16 @@
         }
       }
     },
+    "Join": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "참여"
+          }
+        }
+      }
+    },
     "Join %@ on Workboard with this link, or type the code %@. It works once, for 7 days.": {
       "localizations": {
         "ko": {
@@ -4332,6 +4352,16 @@
         }
       }
     },
+    "On your computer, open Work together > Sign in on your phone. The code works once, for 5 minutes.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컴퓨터의 함께 작업하기 > 휴대폰에서 로그인을 여세요. 코드는 5분 동안 한 번만 쓸 수 있습니다."
+          }
+        }
+      }
+    },
     "Only @mentions": {
       "extractionState": "manual",
       "localizations": {
@@ -4400,6 +4430,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "홈에서 확인하세요."
+          }
+        }
+      }
+    },
+    "Open Settings": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "설정 열기"
           }
         }
       }
@@ -4626,6 +4666,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "고정됨"
+          }
+        }
+      }
+    },
+    "Point the camera at the QR code on your computer: Work together > Sign in on your phone.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컴퓨터에 뜬 QR 코드에 카메라를 맞추세요(컴퓨터의 함께 작업하기 > 휴대폰에서 로그인)."
           }
         }
       }
@@ -5117,6 +5167,16 @@
         }
       }
     },
+    "Reset password": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비밀번호 재설정"
+          }
+        }
+      }
+    },
     "Restore": {
       "localizations": {
         "ko": {
@@ -5259,6 +5319,26 @@
         }
       }
     },
+    "Scan QR code": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR 코드 스캔"
+          }
+        }
+      }
+    },
+    "Scan QR code from your computer": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컴퓨터의 QR 코드 스캔"
+          }
+        }
+      }
+    },
     "Schedule": {
       "localizations": {
         "ko": {
@@ -5309,12 +5389,32 @@
         }
       }
     },
+    "Send another code": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "코드 다시 보내기"
+          }
+        }
+      }
+    },
     "Send at": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "보낼 시간"
+          }
+        }
+      }
+    },
+    "Send code": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "코드 보내기"
           }
         }
       }
@@ -5439,6 +5539,16 @@
         }
       }
     },
+    "Set password and sign in": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비밀번호를 정하고 로그인"
+          }
+        }
+      }
+    },
     "Set priority": {
       "extractionState": "manual",
       "localizations": {
@@ -5531,6 +5641,36 @@
         }
       }
     },
+    "Sign in": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로그인"
+          }
+        }
+      }
+    },
+    "Sign in with a code from your computer": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컴퓨터에 뜬 코드로 로그인"
+          }
+        }
+      }
+    },
+    "Sign in with your email and password, with the code your computer shows, or with the invite code you were given.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이메일과 비밀번호, 컴퓨터에 뜬 코드, 또는 받은 초대 코드로 로그인하세요."
+          }
+        }
+      }
+    },
     "Sign out": {
       "localizations": {
         "ko": {
@@ -5557,6 +5697,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@(으)로 로그인됨"
+          }
+        }
+      }
+    },
+    "Signed in on your computer? Open Work together > Sign in on your phone there, and scan its QR code to sign in here without a password.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컴퓨터에 로그인되어 있나요? 컴퓨터의 함께 작업하기 > 휴대폰에서 로그인을 열고 QR 코드를 찍으면 비밀번호 없이 여기서 로그인됩니다."
+          }
+        }
+      }
+    },
+    "Signed out": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로그아웃됨"
           }
         }
       }
@@ -6033,6 +6193,26 @@
         }
       }
     },
+    "That code doesn't work. It may be used already or expired (codes last 5 minutes). Show a new one on your computer: Work together > Sign in on your phone.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "그 코드는 쓸 수 없습니다. 이미 쓰였거나 만료됐을 수 있습니다(코드는 5분 동안 유효합니다). 컴퓨터의 함께 작업하기 > 휴대폰에서 로그인에서 새 코드를 띄우세요."
+          }
+        }
+      }
+    },
+    "That isn't a Workboard sign-in code. On your computer, open Work together > Sign in on your phone.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workboard 로그인 코드가 아닙니다. 컴퓨터의 함께 작업하기 > 휴대폰에서 로그인을 여세요."
+          }
+        }
+      }
+    },
     "The email you were invited with. Leave it empty if the invite came to your email. You can also paste the whole invite link or email here.": {
       "localizations": {
         "ko": {
@@ -6193,6 +6373,26 @@
         }
       }
     },
+    "This iPhone has no camera to scan with. Type the six-character code instead: press Show code next to the QR code on your computer.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 iPhone 에는 스캔할 카메라가 없습니다. 대신 컴퓨터의 QR 코드 옆 코드 보기를 눌러 나온 6자리 코드를 입력하세요."
+          }
+        }
+      }
+    },
+    "This iPhone is already signed in to this server. Sign out and sign in with the code from the computer?": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 iPhone 은 이미 이 서버에 로그인되어 있습니다. 로그아웃하고 컴퓨터에 뜬 코드로 로그인할까요?"
+          }
+        }
+      }
+    },
     "This iPhone is already signed in to this server. Use the invite to sign in as someone else?": {
       "localizations": {
         "ko": {
@@ -6259,6 +6459,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 서버는 로그인이 필요합니다."
+          }
+        }
+      }
+    },
+    "This sign-in code is for %@. You're signed in to %@, which stays on this iPhone: switch back to it in Settings > Workspaces.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 로그인 코드는 %1$@용입니다. 지금 로그인된 %2$@ 은(는) 이 iPhone 에 남아 있어서 설정 > 워크스페이스에서 다시 돌아갈 수 있습니다."
           }
         }
       }
@@ -6436,6 +6646,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "내일 오전 9:00"
+          }
+        }
+      }
+    },
+    "Too many wrong codes. Wait a minute and try again.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "틀린 코드가 너무 많습니다. 1분 뒤에 다시 해 보세요."
           }
         }
       }
@@ -6969,6 +7189,16 @@
         }
       }
     },
+    "Workboard isn't allowed to use the camera. Allow it in Settings, or type the six-character code instead: press Show code next to the QR code on your computer.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workboard 에 카메라 권한이 없습니다. 설정에서 허용하거나, 컴퓨터의 QR 코드 옆 코드 보기를 눌러 나온 6자리 코드를 입력하세요."
+          }
+        }
+      }
+    },
     "Workflows": {
       "localizations": {
         "ko": {
@@ -6996,6 +7226,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "워크스페이스"
+          }
+        }
+      }
+    },
+    "Workspace deleted": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "워크스페이스 삭제됨"
           }
         }
       }

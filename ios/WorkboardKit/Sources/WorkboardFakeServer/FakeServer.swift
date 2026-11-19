@@ -19,10 +19,12 @@
 // -> call_token {channel, url, token}, or error {code: "denied", channel}.
 //
 // Optional sign-in (`requireSignIn`), like the real server: hello must carry
-// a reset code, an invite code, an email and password, or a device token,
-// else the answer is error {code: "auth"} and the connection closes.
-// Accounts (email + password) are kept in memory. invite(member:) makes a
-// one-time code, revoke(member:) signs that member's devices out.
+// a reset code, an invite code, a link code, an email and password, or a
+// device token, else the answer is error {code: "auth"} and the connection
+// closes. Accounts (email + password) are kept in memory. invite(member:)
+// makes a one-time code, linkCode(member:) the six-character code a Mac
+// shows to sign a phone in (Work together > Sign in on your phone),
+// revoke(member:) signs that member's devices out.
 // Without `requireSignIn` every hello is welcomed without a member, and the
 // app lets the person pick who they are.
 //
@@ -66,6 +68,8 @@ public final class FakeServer: @unchecked Sendable {
     var tags: [String: UInt64] = [:]
     /// normalized code (letters and digits only, upper case) -> member
     var invites: [String: UInt64] = [:]
+    /// six-character link code -> member (one-time, no expiry here)
+    var links: [String: UInt64] = [:]
     /// token -> (member, device)
     var tokens: [String: (member: UInt64, device: String)] = [:]
     /// DELETE /w/<id> came from an owner: the workspace is gone
@@ -135,7 +139,7 @@ public final class FakeServer: @unchecked Sendable {
     public var resyncs: Int { queue.sync { resyncCount } }
     /// What /auth/forgot answers for "mail" (false: this server can't send email).
     public var canMail = true
-    /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
+    /// Test-only HTTP admin endpoints (POST /admin/invite?member=N, /admin/link-code?member=N,
     /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T[&imported=KEY],
     /// /admin/reset-code?email=E, /admin/drop-account?member=N,
     /// /admin/offline?secs=N, /admin/online, /admin/workspaces?list=ID:NAME,...,
@@ -271,6 +275,19 @@ public final class FakeServer: @unchecked Sendable {
         let code = makeCode()
         queue.sync { invites[Self.normalize(code)] = member }
         return code
+    }
+
+    /// The code a Mac signed in as `member` shows to sign a phone in.
+    public func linkCode(member: UInt64) -> String {
+        let code = makeLinkCode()
+        queue.sync { links[code] = member }
+        return code
+    }
+
+    /// Six letters and digits without look-alikes, like the real server.
+    func makeLinkCode() -> String {
+        let alphabet = Array("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
+        return String((0..<6).map { _ in alphabet.randomElement()! })
     }
 
     /// XXXX-XXXX-XXXX without look-alike letters, like the real server.
@@ -418,7 +435,7 @@ public final class FakeServer: @unchecked Sendable {
     }
 
     /// Check a hello the way the real server does (first that applies:
-    /// reset code, invite, email + password, token).
+    /// reset code, invite, link code, email + password, token).
     func hello(_ h: Hello, from p: Peer) {
         p.device = h.device
         var newToken: String?
@@ -451,6 +468,12 @@ public final class FakeServer: @unchecked Sendable {
                     accounts[m] = Account(email: e, password: pw)
                 }
                 invites[Self.normalize(code)] = nil
+                member = m
+                newToken = addDevice(h.device, member: m)
+            } else if let code = h.linkCode, !code.isEmpty {
+                guard let m = links.removeValue(forKey: Self.normalize(code)) else {
+                    return refuse(p, "That code doesn't work. It may be used already or expired (codes last 5 minutes). Show a new one on your computer: Work together > Sign in on your phone.")
+                }
                 member = m
                 newToken = addDevice(h.device, member: m)
             } else if let e = email, let pw = h.password {

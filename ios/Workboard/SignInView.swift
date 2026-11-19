@@ -1,13 +1,14 @@
 // Signing in to a server that refused this device (error code "auth"):
-// with an email and password, with an invite code (choosing a password),
-// or with a reset code from "Forgot password?". Each attempt is a fresh
+// with an email and password, with the code the person's computer shows
+// (typed, or its QR code scanned), with an invite code (choosing a
+// password), or with a reset code from "Forgot password?". Each attempt is a fresh
 // connection; the server's message is shown as it is.
 
 import SwiftUI
 import WorkboardKit
 
 struct SignInView: View {
-    enum Mode: Hashable { case password, invite, forgot }
+    enum Mode: Hashable { case password, code, invite, forgot }
 
     @Environment(SyncClient.self) private var client
     @Environment(Nav.self) private var nav
@@ -15,6 +16,9 @@ struct SignInView: View {
     // sign in
     @State private var email = ""
     @State private var password = ""
+    // code from the computer
+    @State private var linkCode = ""
+    @State private var scanning = false
     // invite
     @State private var code = ""
     @State private var inviteEmail = ""
@@ -43,7 +47,7 @@ struct SignInView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         WMark().frame(width: 56, height: 56)
-                        Text(title).font(.largeTitle.bold())
+                        Text(L(title)).font(.largeTitle.bold())
                         if let note { Text(note).foregroundStyle(.secondary).accessibilityIdentifier("signInNote") }
                     }
                     .listRowBackground(Color.clear)
@@ -51,6 +55,7 @@ struct SignInView: View {
                 }
                 switch mode {
                 case .password: passwordForm
+                case .code: codeForm
                 case .invite: inviteForm
                 case .forgot: forgotForm
                 }
@@ -61,6 +66,10 @@ struct SignInView: View {
                 takeInvite()
             }
             .onChange(of: nav.invite) { takeInvite() }
+            .sheet(isPresented: $scanning) {
+                // RootView acts on it like a link opened from the Camera app
+                QRScanView { link in nav.openedLink = link }
+            }
             .task(id: "\(client.settings.server)|\(client.signInMessage ?? "")") { await checkEmpty() }
         }
     }
@@ -69,6 +78,7 @@ struct SignInView: View {
         switch mode {
         case .forgot: return "Reset password"
         case .invite: return "Join"
+        case .code: return "Sign in"
         case .password:
             switch client.signInReason {
             case .signedOut: return "Signed out"
@@ -84,7 +94,7 @@ struct SignInView: View {
         switch client.signInReason {
         case .signedOut: return client.signInMessage ?? "This iPhone isn't signed in on the server any more."
         case .gone: return (client.signInMessage ?? WorkspaceAPI.goneMessage) + " Sign in to another workspace, or type another server's address."
-        case .needed, nil: return mode == .password ? "Sign in with your email and password, or use the invite code you were given." : nil
+        case .needed, nil: return mode == .password ? String(localized: "Sign in with your email and password, with the code your computer shows, or with the invite code you were given.") : nil
         case .failed: return nil
         }
     }
@@ -99,7 +109,8 @@ struct SignInView: View {
 
     @ViewBuilder var errorFooter: some View {
         if let e = shownError {
-            Label(e, systemImage: "exclamationmark.triangle")
+            // the server's own words, in Korean when the table has them
+            Label(L(e), systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.red)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("signInError")
@@ -127,10 +138,43 @@ struct SignInView: View {
             errorFooter
         }
         Section {
+            Button("Sign in with a code from your computer") { switchTo(.code) }
+                .accessibilityIdentifier("codeModeButton")
             Button("I have an invite code") { switchTo(.invite) }
                 .accessibilityIdentifier("inviteModeButton")
             Button("Forgot password?") { resetEmail = email; switchTo(.forgot) }
                 .accessibilityIdentifier("forgotButton")
+        }
+    }
+
+    @ViewBuilder var codeForm: some View {
+        Section {
+            TextField("ABC123", text: $linkCode)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
+                .font(.title2.monospaced())
+                .accessibilityIdentifier("linkCodeField")
+                .onChange(of: linkCode) { _, new in
+                    let t = LinkCode.typed(new)
+                    if t != new { linkCode = t }
+                }
+                .onSubmit(signInWithCode)
+            Button(action: signInWithCode) { busyLabel("Sign in") }
+                .disabled(client.signingIn || linkCode.count < LinkCode.length)
+                .accessibilityIdentifier("linkSignInButton")
+        } header: {
+            Text("Code from your computer")
+        } footer: {
+            if shownError != nil { errorFooter } else { Text("On your computer, open Work together > Sign in on your phone. The code works once, for 5 minutes.") }
+        }
+        Section {
+            Button { scanning = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
+                .accessibilityIdentifier("scanButton")
+        }
+        Section {
+            Button("I already have a password") { switchTo(.password) }
+                .accessibilityIdentifier("signInModeButton")
         }
     }
 
@@ -249,7 +293,7 @@ struct SignInView: View {
         if busy ?? client.signingIn {
             ProgressView().accessibilityLabel("Signing in")
         } else {
-            Text(text)
+            Text(L(text))
         }
     }
 
@@ -283,6 +327,10 @@ struct SignInView: View {
 
     func signIn() {
         send(.password(email: email, password: password))
+    }
+
+    func signInWithCode() {
+        send(.link(code: linkCode))
     }
 
     func join() {
@@ -324,9 +372,17 @@ struct SignInView: View {
     }
 
     /// An invite link opened from outside the app: fill in the invite form.
+    /// A sign-in link from the computer was sent already (RootView.use):
+    /// show its code, and the server's answer under it.
     func takeInvite() {
         guard let link = nav.invite else { return }
         nav.invite = nil
+        if link.fromComputer {
+            linkCode = link.code
+            switchTo(.code)
+            attemptMode = .code
+            return
+        }
         code = link.code
         if let e = link.email { inviteEmail = e }
         switchTo(.invite)

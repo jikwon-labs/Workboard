@@ -25,26 +25,39 @@ struct RootView: View {
         .fullScreenCover(isPresented: $calls.showCall) { CallView() }
         .onChange(of: nav.openedLink) { if let l = nav.openedLink { nav.openedLink = nil; open(l) } }
         .onAppear { if let l = nav.openedLink { nav.openedLink = nil; open(l) } }
+        // a sign-in code that worked needs no sign-in screen
+        .onChange(of: client.state.isConnected) { if client.state.isConnected, nav.invite?.fromComputer == true { nav.invite = nil } }
         .alert("Switch servers?", isPresented: Binding(isPresent: $nav.confirmSwitch), presenting: nav.confirmSwitch) { link in
             Button("Switch") { use(link, fresh: true) }
                 .accessibilityIdentifier("confirmSwitchButton")
             Button("Cancel", role: .cancel) {}
         } message: { link in
-            Text("This invite is for \(link.server ?? "another server"). You're signed in to \(client.settings.server), which stays on this iPhone: switch back to it in Settings > Workspaces.")
+            if link.fromComputer {
+                Text("This sign-in code is for \(link.server ?? "another server"). You're signed in to \(client.settings.server), which stays on this iPhone: switch back to it in Settings > Workspaces.")
+            } else {
+                Text("This invite is for \(link.server ?? "another server"). You're signed in to \(client.settings.server), which stays on this iPhone: switch back to it in Settings > Workspaces.")
+            }
         }
         .alert("Already signed in", isPresented: Binding(isPresent: $nav.confirmSignOut), presenting: nav.confirmSignOut) { link in
             Button("Sign out and use it", role: .destructive) {
                 client.signOut()
                 nav.invite = link
+                if link.fromComputer { client.signIn(.link(code: link.code)) }
             }
             Button("Keep me signed in", role: .cancel) {}
-        } message: { _ in
-            Text("This iPhone is already signed in to this server. Use the invite to sign in as someone else?")
+        } message: { link in
+            if link.fromComputer {
+                Text("This iPhone is already signed in to this server. Sign out and sign in with the code from the computer?")
+            } else {
+                Text("This iPhone is already signed in to this server. Use the invite to sign in as someone else?")
+            }
         }
     }
 
     /// An invite link (workboard://join?...): set the server and fill in the
     /// invite form, asking first when that means leaving a signed-in server.
+    /// A sign-in link from the person's computer (workboard://link?...,
+    /// scanned here or with the Camera app) signs in with its code at once.
     func open(_ link: InviteLink) {
         nav.showSettings = false
         let signedIn = client.settings.meFromServer && !client.needsSignIn
@@ -60,9 +73,10 @@ struct RootView: View {
         nav.invite = link
         if let s = link.server, !ServerAddress.same(s, client.settings.server) {
             client.setServer(s, freshCopy: fresh)
-        } else if client.state == .idle {
+        } else if client.state == .idle, !link.fromComputer {
             client.connect()
         }
+        if link.fromComputer { client.signIn(.link(code: link.code)) }
     }
 }
 
@@ -191,10 +205,13 @@ struct ConnectionBanner: View {
     }
 }
 
-/// First launch: where is the server?
+/// First launch: where is the server? Or scan the QR code the computer
+/// shows, which has the address and a sign-in code.
 struct SetupView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
     @State private var address = ""
+    @State private var scanning = false
 
     var body: some View {
         NavigationStack {
@@ -224,8 +241,19 @@ struct SetupView: View {
                 } footer: {
                     status
                 }
+                Section {
+                    Button { scanning = true } label: {
+                        Label("Scan QR code from your computer", systemImage: "qrcode.viewfinder")
+                    }
+                    .accessibilityIdentifier("setupScanButton")
+                } footer: {
+                    Text("Signed in on your computer? Open Work together > Sign in on your phone there, and scan its QR code to sign in here without a password.")
+                }
             }
             .onAppear { address = client.settings.server }
+            .sheet(isPresented: $scanning) {
+                QRScanView { link in nav.openedLink = link }
+            }
         }
     }
 

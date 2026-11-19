@@ -17,7 +17,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Workboard uses the microphone for huddles with your team.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Workboard uses the camera when you turn on video in a huddle.</string>
+	<string>Workboard uses the camera when you turn on video in a huddle, and to scan the QR code your computer shows to sign you in.</string>
 	<!-- keep a huddle's audio going when the app goes to the background -->
 	<key>UIBackgroundModes</key>
 	<array>

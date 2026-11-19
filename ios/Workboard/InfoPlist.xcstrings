@@ -32,13 +32,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Workboard uses the camera when you turn on video in a huddle."
+            "value" : "Workboard uses the camera when you turn on video in a huddle, and to scan the QR code your computer shows to sign you in."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "허들에서 영상을 켜면 Workboard 가 카메라를 씁니다."
+            "value" : "허들에서 영상을 켜거나, 컴퓨터에 뜬 로그인 QR 코드를 찍을 때 Workboard 가 카메라를 씁니다."
           }
         }
       }

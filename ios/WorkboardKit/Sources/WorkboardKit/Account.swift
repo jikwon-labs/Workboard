@@ -11,6 +11,12 @@
 // with reset_code, email and new_password.
 //
 // Invite link: workboard://join?server=HOST[:PORT]&code=XXXX-XXXX-XXXX&email=...
+//
+// Sign-in link from the person's own computer (Work together > Sign in on
+// your phone shows it as a QR code, with the code as six letters and digits
+// under it): workboard://link?server=<the Mac's server address>&code=K7Q2MX.
+// The code goes into a hello as link_code and signs this iPhone in as that
+// person, once, within 5 minutes; no password is needed.
 
 import Foundation
 
@@ -27,6 +33,8 @@ public enum SignInRequest: Equatable, Sendable {
     case invite(code: String, email: String?, newPassword: String?)
     /// The code mailed by /auth/forgot.
     case reset(email: String, code: String, newPassword: String)
+    /// The code the person's computer shows (QR code or six characters).
+    case link(code: String)
 
     /// What is wrong before asking the server, or nil.
     public var problem: String? {
@@ -41,6 +49,8 @@ public enum SignInRequest: Equatable, Sendable {
             if email.isEmpty { return "Type your email." }
             if code.isEmpty { return "Type the code from the email." }
             if let why = passwordProblem(newPassword) { return why }
+        case let .link(code):
+            if code.isEmpty { return "Type the code shown on your computer." }
         }
         return nil
     }
@@ -59,6 +69,8 @@ public enum SignInRequest: Equatable, Sendable {
             h.email = email
             h.resetCode = code
             h.newPassword = newPassword
+        case let .link(code):
+            h.linkCode = code
         }
     }
 
@@ -69,6 +81,7 @@ public enum SignInRequest: Equatable, Sendable {
         case let .password(e, p): return .password(email: t(e), password: p)
         case let .invite(c, e, p): return .invite(code: t(c), email: e.map(t), newPassword: p)
         case let .reset(e, c, p): return .reset(email: t(e), code: t(c), newPassword: p)
+        case let .link(c): return .link(code: LinkCode.normalize(c))
         }
     }
 }
@@ -78,24 +91,46 @@ public func passwordProblem(_ p: String) -> String? {
     p.count < minPasswordLength ? "Use at least \(minPasswordLength) characters for the password." : nil
 }
 
-/// What an invite link says.
+/// The code a computer shows to sign a phone in (wb-server new_link_code):
+/// six capital letters and digits without look-alikes.
+public enum LinkCode {
+    public static let length = 6
+
+    /// What was typed or scanned, as the server compares it: capitals and
+    /// digits only (the server does the same).
+    public static func normalize(_ s: String) -> String {
+        String(s.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+    }
+
+    /// For the code field while typing: normalized, at most six characters.
+    public static func typed(_ s: String) -> String {
+        String(normalize(s).prefix(length))
+    }
+}
+
+/// What an invite link says, or a sign-in link from the person's own
+/// computer (`fromComputer`).
 public struct InviteLink: Equatable, Sendable {
     /// As typed in the server field: ws://host[:port] (or wss://, from an https link).
     public var server: String?
     public var code: String
     public var email: String?
+    /// workboard://link: the code signs this iPhone in as the person whose
+    /// computer showed it, right away, without choosing a password.
+    public var fromComputer = false
 
-    public init(server: String?, code: String, email: String?) {
+    public init(server: String?, code: String, email: String?, fromComputer: Bool = false) {
         self.server = server
         self.code = code
         self.email = email
+        self.fromComputer = fromComputer
     }
 
     /// Finds an invite link in `text`: the link itself, or a whole email that
     /// contains one. Also takes the server's web page link
     /// (http://host:port/join?code=...&email=...). Nil when there is none.
     public static func find(in text: String) -> InviteLink? {
-        for prefix in ["workboard://join", "https://", "http://"] {
+        for prefix in ["workboard://link", "workboard://join", "https://", "http://"] {
             var rest = text[...]
             while let r = rest.range(of: prefix, options: .caseInsensitive) {
                 let tail = rest[r.lowerBound...]
@@ -117,6 +152,12 @@ public struct InviteLink: Equatable, Sendable {
         guard let code = q("code") else { return nil }
         var server: String?
         switch scheme {
+        case "workboard" where c.host?.lowercased() == "link" || c.path.lowercased().hasSuffix("link"):
+            // a sign-in link from the person's computer: the server address
+            // as that computer has it (https://..., ws://host:port, /w/<id>)
+            let code = LinkCode.normalize(code)
+            guard !code.isEmpty else { return nil }
+            return InviteLink(server: q("server"), code: code, email: nil, fromComputer: true)
         case "workboard":
             // workboard://join?... (host "join"), or workboard:join?...
             guard c.host?.lowercased() == "join" || c.path.lowercased().hasSuffix("join") else { return nil }
@@ -137,8 +178,14 @@ public struct InviteLink: Equatable, Sendable {
     public var url: URL? {
         var c = URLComponents()
         c.scheme = "workboard"
-        c.host = "join"
+        c.host = fromComputer ? "link" : "join"
         var items: [URLQueryItem] = []
+        if fromComputer {
+            if let s = server { items.append(URLQueryItem(name: "server", value: s)) }
+            items.append(URLQueryItem(name: "code", value: code))
+            c.queryItems = items
+            return c.url
+        }
         if let s = server {
             let bare = s.replacingOccurrences(of: "ws://", with: "")
             items.append(URLQueryItem(name: "server", value: bare))

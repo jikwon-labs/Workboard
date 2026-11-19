@@ -10,6 +10,7 @@ mod model;
 mod notifier;
 mod os;
 mod single;
+mod startup;
 use wb_sync as sync;
 mod media;
 mod theme;
@@ -18,6 +19,19 @@ mod updater;
 mod widgets;
 
 use std::path::PathBuf;
+
+/// macOS: none, or eframe puts its own "e" icon in the Dock over the
+/// bundle's AppIcon. Windows: the logo, for the title bar and the taskbar
+/// button (the exe's own icon, from build.rs, is for File Explorer).
+fn window_icon() -> egui::IconData {
+    #[cfg(windows)]
+    if let Ok(icon) =
+        eframe::icon_data::from_png_bytes(include_bytes!("../Resources/AppIcon-256.png"))
+    {
+        return icon;
+    }
+    egui::IconData::default()
+}
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -34,8 +48,7 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Workboard")
-        // no runtime icon: otherwise eframe puts its own "e" icon in the Dock over the bundle's AppIcon
-        .with_icon(egui::IconData::default())
+        .with_icon(window_icon())
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([900.0, 560.0])
         // like the original: no separate title bar, window buttons sit in the header
@@ -55,6 +68,16 @@ fn main() -> eframe::Result<()> {
         viewport,
         ..Default::default()
     };
+    // Windows, --wgpu: Direct3D through wgpu instead of OpenGL, which virtual
+    // machines and PCs without a graphics driver often lack (see Cargo.toml).
+    // Not the default yet: it doesn't open on GitHub's GPU-less machines.
+    #[cfg(windows)]
+    if args.iter().any(|a| a == "--wgpu") {
+        options.renderer = eframe::Renderer::Wgpu;
+    }
+    // Windows has no console to print an error on: say it in a message box
+    #[cfg(windows)]
+    startup::watch_panics(shot);
     #[cfg(target_os = "macos")]
     if shot {
         options.event_loop_builder = Some(Box::new(|b| {
@@ -71,9 +94,13 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
     links::listen();
-    eframe::run_native(
+    let run = eframe::run_native(
         "Workboard",
         options,
         Box::new(move |cc| Ok(Box::new(app::App::new(cc, screenshot)))),
-    )
+    );
+    if let Err(e) = &run {
+        startup::failed(&e.to_string(), shot);
+    }
+    run
 }

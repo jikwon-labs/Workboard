@@ -38,21 +38,43 @@ jobs:
           name: Workboard-windows-zip
           path: ${{ env.ZIP }}
           if-no-files-found: error
-      # the machine has no graphics card: Mesa draws OpenGL in software
+      # the machine has no graphics card, like many virtual machines. Try
+      # --wgpu (Direct3D, Windows' software renderer) first without failing
+      # the run: it doesn't open here yet, and its output says why
+      - name: Try the app with --wgpu
+        continue-on-error: true
+        shell: pwsh
+        env:
+          WORKBOARD_HOME: ${{ runner.temp }}\wbhome-wgpu
+        run: |
+          $env:RUST_BACKTRACE = '1'
+          $p = Start-Process target\release\workboard.exe -ArgumentList '--wgpu','--screenshot','shot-wgpu.png' -PassThru -RedirectStandardError err-wgpu.txt -RedirectStandardOutput out-wgpu.txt
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "The app didn't finish in 3 minutes" }
+          Get-Content err-wgpu.txt, out-wgpu.txt -ErrorAction SilentlyContinue
+          Get-Content "$env:WORKBOARD_HOME\startup-error.log" -ErrorAction SilentlyContinue
+          if (-not (Test-Path shot-wgpu.png)) { throw "No --wgpu screenshot; the app ended with code $($p.ExitCode)" }
+      # then OpenGL, the default: Mesa draws it in software
       - uses: ssciwr/setup-mesa-dist-win@v2
       - name: Start the app and take a screenshot
         shell: pwsh
         env:
           WORKBOARD_HOME: ${{ runner.temp }}\wbhome
         run: |
-          $p = Start-Process target\release\workboard.exe -ArgumentList '--screenshot','shot.png','--lang','ko' -PassThru
+          $env:RUST_BACKTRACE = '1'
+          $p = Start-Process target\release\workboard.exe -ArgumentList '--screenshot','shot.png','--lang','ko' -PassThru -RedirectStandardError err.txt -RedirectStandardOutput out.txt
           if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "The app didn't finish in 3 minutes" }
-          if (-not (Test-Path shot.png)) { throw "No screenshot; the app ended with code $($p.ExitCode)" }
+          if (-not (Test-Path shot.png)) {
+            # why the window didn't open: what the app printed, and src/startup.rs's log
+            Get-Content err.txt, out.txt -ErrorAction SilentlyContinue
+            Get-ChildItem $env:WORKBOARD_HOME -ErrorAction SilentlyContinue
+            Get-Content "$env:WORKBOARD_HOME\startup-error.log" -ErrorAction SilentlyContinue
+            throw "No screenshot; the app ended with code $($p.ExitCode)"
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: screenshot
-          path: shot.png
+          path: shot*.png
           if-no-files-found: ignore
 
   test:

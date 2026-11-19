@@ -1,4 +1,4 @@
-// Korean text for src/app.rs and src/widgets.rs (see src/i18n.rs).
+// Korean text for src/app.rs, src/widgets.rs and src/startup.rs (see src/i18n.rs).
 
 pub const T: &[(&str, &str)] = &[
     // view, group and sort names (ViewKind / GroupBy / SortBy labels)
@@ -164,4 +164,8 @@ pub const T: &[(&str, &str)] = &[
     ("The only List is archived.", "하나뿐인 목록이 보관되어 있습니다."),
     ("All {} Lists are archived.", "목록 {}개가 모두 보관되어 있습니다."),
     ("No tasks yet", "아직 작업 없음"),
+    // src/startup.rs: the message box when the app can't start
+    ("Workboard couldn't open its window.", "Workboard 창을 열지 못했습니다."),
+    ("Workboard stopped because of an error.", "오류 때문에 Workboard가 멈췄습니다."),
+    ("The details were saved to:", "자세한 내용을 저장한 곳:"),
 ];

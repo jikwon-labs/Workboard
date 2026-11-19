@@ -53,8 +53,17 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 raw-window-handle = "0.6"
+# workboard.exe --wgpu draws the window with wgpu (Direct3D) instead of
+# OpenGL, for virtual machines and PCs without a graphics driver, which often
+# have no usable OpenGL (src/main.rs). wgpu can fall back to Windows' own
+# software renderer (WARP) when there is no graphics card.
+eframe = { version = "0.31", features = ["wgpu"] }
 # the file picker (src/media.rs); its default features are for Linux only
 rfd = { version = "0.15", default-features = false }
+
+# the icon inside workboard.exe (build.rs)
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 # pictures and the clipboard outside macOS (src/media.rs; macOS uses ImageIO
 # and NSPasteboard instead)

@@ -1511,3 +1511,88 @@ fn a_sign_typed_right_after_a_korean_syllable_is_kept() {
     h.settle();
     assert_eq!(h.app.chat.text, "안녕하세요!");
 }
+
+/// Sending from higher up a long conversation goes down to the message just
+/// sent, in the channel and in a thread.
+#[test]
+fn sending_from_higher_up_goes_down_to_the_new_message() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap();
+    for i in 0..60 {
+        ch.messages.push(crate::app::slack::new_message(
+            910_000 + i as u64,
+            2,
+            format!("Filler message {}", i),
+            1_600_000_000 + i as i64 * 60,
+        ));
+    }
+    ch.messages.sort_by_key(|m| m.ts);
+    let parent = ch.messages.last().unwrap().id;
+    let m = ch.messages.last_mut().unwrap();
+    for i in 0..40 {
+        m.replies.push(crate::app::slack::new_message(
+            920_000 + i as u64,
+            2,
+            format!("Filler reply {}", i),
+            1_700_000_000 + i as i64 * 60,
+        ));
+    }
+    h.settle();
+    // up the list with the wheel, then send
+    let up = |h: &mut Ui1, at: Pos2| {
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..4 {
+            h.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 20_000.0),
+                modifiers: Default::default(),
+            }]);
+        }
+        for _ in 0..30 {
+            h.frame(vec![]);
+        }
+    };
+    let on_screen =
+        |h: &Ui1, name: &str, above: f32| h.find(name).map_or(false, |p| p.y > 40.0 && p.y < above);
+    up(&mut h, pos2(500.0, 400.0));
+    let composer = h.rect("Message composer").top();
+    assert!(!on_screen(&h, "Filler message 59", composer), "scrolled up");
+    h.click("Message composer");
+    h.type_text("sent from up the list");
+    h.key(egui::Key::Enter);
+    for _ in 0..30 {
+        h.frame(vec![]);
+    }
+    assert!(
+        on_screen(&h, "sent from up the list", composer),
+        "the list went down to the message just sent"
+    );
+
+    // the same in a thread
+    h.app.chat.thread_open = Some(parent);
+    h.settle();
+    let reply_box = h.rect("Reply composer");
+    up(&mut h, pos2(reply_box.center().x, 300.0));
+    assert!(
+        !on_screen(&h, "Filler reply 39", reply_box.top()),
+        "thread scrolled up"
+    );
+    h.click("Reply composer");
+    h.type_text("reply from up the thread");
+    h.key(egui::Key::Enter);
+    for _ in 0..30 {
+        h.frame(vec![]);
+    }
+    assert!(
+        on_screen(&h, "reply from up the thread", reply_box.top()),
+        "the thread went down to the reply just sent"
+    );
+}

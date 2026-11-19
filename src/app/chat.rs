@@ -638,6 +638,9 @@ impl App {
                                 for r in &parent.replies {
                                     self.message_row(ui, cid, r, false, &mut acts);
                                 }
+                                if std::mem::take(&mut self.chat.thread_to_bottom) {
+                                    ui.scroll_to_cursor(Some(Align::BOTTOM));
+                                }
                             });
                         if let Some((text, files)) = self.composer(ui, tr("Reply..."), true) {
                             acts.push(ChatAction::Send {
@@ -901,6 +904,10 @@ impl App {
                         let compact = prev.map_or(false, |(a, ts)| a == m.author && m.ts - ts < 300) && m.post_title.is_none() && m.call.is_none();
                         self.message_row_c(ui, cid, m, true, compact, &mut acts);
                         prev = Some((m.author, m.ts));
+                    }
+                    // just sent: down to it, even from higher up the list
+                    if std::mem::take(&mut self.chat.to_bottom) {
+                        ui.scroll_to_cursor(Some(Align::BOTTOM));
                     }
                 });
             });
@@ -2097,6 +2104,7 @@ impl App {
                     text,
                     files,
                 } => {
+                    self.chat.to_bottom = true;
                     self.send_files(&files);
                     let id = self.data.new_id();
                     // the channel's box: the people picked from its @ list
@@ -2345,6 +2353,11 @@ impl App {
                 } => {
                     if self.chat.keep_unread == Some(ch) {
                         self.chat.keep_unread = None;
+                    }
+                    if parent.is_none() {
+                        self.chat.to_bottom = true;
+                    } else {
+                        self.chat.thread_to_bottom = true;
                     }
                     self.send_files(&files);
                     let id = self.data.new_id();

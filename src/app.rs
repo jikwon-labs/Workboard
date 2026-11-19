@@ -632,6 +632,11 @@ struct ChatUi {
     thread_files: Vec<files::Pending>,
     /// The same for the open thread's reply box (kept with its draft).
     thread_picked: Vec<u64>,
+    /// A message was just sent in the channel / the thread: its list goes
+    /// down to the newest message on the next frame, even when it had been
+    /// scrolled up.
+    to_bottom: bool,
+    thread_to_bottom: bool,
 }
 
 /// The Posts page: the post being written and the filters.

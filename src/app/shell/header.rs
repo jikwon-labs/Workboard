@@ -177,8 +177,23 @@ impl App {
                 }
                 cap
             };
+            // the List's own crumb (icon, name and arrow) opens the same menu
+            // as Manage on the right
+            let list_menu = match self.loc {
+                Location::List(id) => Some(id),
+                _ => None,
+            };
             for (i, (name, kind, color)) in crumbs.iter().enumerate() {
-                let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                let last = i + 1 == n;
+                let menu_here = last && list_menu.is_some();
+                let sense = if menu_here {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                };
+                // a slot under the crumb for its hover background
+                let hover_bg = ui.painter().add(egui::Shape::Noop);
+                let (r, icon_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), sense);
                 match kind {
                     0 => {
                         ui.painter().rect_filled(
@@ -218,26 +233,47 @@ impl App {
                     2 => paint_checklist_icon(ui.painter(), r.center(), t.text),
                     _ => {}
                 }
-                let last = i + 1 == n;
                 let text =
                     RichText::new(name)
                         .size(15.0)
                         .color(if last { t.text } else { t.text2 });
-                if widths[i] > cap {
+                let label = egui::Label::new(text).sense(sense);
+                let name_resp = if widths[i] > cap {
                     ui.scope(|ui| {
                         ui.set_max_width(cap.max(20.0));
-                        ui.add(egui::Label::new(text).truncate());
-                    });
+                        ui.add(label.truncate())
+                    })
+                    .inner
                 } else {
-                    ui.label(text);
-                }
+                    ui.add(label)
+                };
                 if last && personal {
                     let (r, lr) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                     line_icon(ui.painter(), "lock", r.center(), t.text3);
                     lr.on_hover_text(tr("Private: only you can see this List"));
                 }
                 if last {
-                    let (cr, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
+                    let (cr, chev) = ui.allocate_exact_size(vec2(10.0, 16.0), sense);
+                    if let Some(lid) = list_menu {
+                        // one target for the icon, the name and the arrow
+                        let resp = (icon_resp | name_resp | chev)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(tr("Manage"));
+                        name_it(&resp, "List menu");
+                        if resp.hovered() {
+                            ui.painter().set(
+                                hover_bg,
+                                egui::Shape::rect_filled(
+                                    resp.rect.expand2(vec2(4.0, 2.0)),
+                                    6.0,
+                                    t.hover,
+                                ),
+                            );
+                        }
+                        popup(ui, &resp, ui.id().with("crumb_list_pop"), 200.0, |ui| {
+                            self.list_manage_menu(ui, &t, lid);
+                        });
+                    }
                     let cv = cr.center();
                     ui.painter().line_segment(
                         [cv + vec2(-3.5, -1.5), cv + vec2(0.0, 2.0)],
@@ -332,31 +368,7 @@ impl App {
                     );
                     if let Location::List(lid) = self.loc {
                         popup(ui, &r, ui.id().with("manage_pop"), 200.0, |ui| {
-                            if ui.button(tr("Rename list")).clicked() {
-                                self.actions.push(Action::StartRename(Target::List(lid)));
-                                close_popup(ui);
-                            }
-                            if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
-                                if ui.button(tr("Edit statuses")).clicked() {
-                                    self.actions.push(Action::EditStatuses(sid));
-                                    close_popup(ui);
-                                }
-                            }
-                            if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
-                                self.modal = Some(Modal::custom_fields());
-                                close_popup(ui);
-                            }
-                            if ui.button(tr("Export to CSV")).clicked() {
-                                self.toast(self.export_csv());
-                                close_popup(ui);
-                            }
-                            if ui
-                                .button(RichText::new(tr("Delete list")).color(t.danger))
-                                .clicked()
-                            {
-                                self.actions.push(Action::AskDelete(Target::List(lid)));
-                                close_popup(ui);
-                            }
+                            self.list_manage_menu(ui, &t, lid);
                         });
                     }
                 }
@@ -393,6 +405,35 @@ impl App {
                 ui.data_mut(|d| d.insert_temp(right_id, used));
             });
         });
+    }
+
+    /// What a List can do: shown by Manage and by the List's crumb.
+    fn list_manage_menu(&mut self, ui: &mut Ui, t: &Theme, lid: u64) {
+        if ui.button(tr("Rename list")).clicked() {
+            self.actions.push(Action::StartRename(Target::List(lid)));
+            close_popup(ui);
+        }
+        if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
+            if ui.button(tr("Edit statuses")).clicked() {
+                self.actions.push(Action::EditStatuses(sid));
+                close_popup(ui);
+            }
+        }
+        if self.may_manage() && ui.button(tr("Custom fields")).clicked() {
+            self.modal = Some(Modal::custom_fields());
+            close_popup(ui);
+        }
+        if ui.button(tr("Export to CSV")).clicked() {
+            self.toast(self.export_csv());
+            close_popup(ui);
+        }
+        if ui
+            .button(RichText::new(tr("Delete list")).color(t.danger))
+            .clicked()
+        {
+            self.actions.push(Action::AskDelete(Target::List(lid)));
+            close_popup(ui);
+        }
     }
 
     /// The header's second row: Add Channel, a tab per view and "+ View".

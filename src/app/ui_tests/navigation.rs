@@ -1052,3 +1052,27 @@ fn inbox_with_reminders_waiting_is_not_all_caught_up() {
     assert!(!h.has("You're all caught up"), "a reminder is waiting");
     assert!(h.has("No new comments, mentions or assignments."));
 }
+
+#[test]
+fn list_crumb_opens_the_list_menu() {
+    let mut h = Ui1::new();
+    let list = task_named(&h, "Write copy for landing page").list_id;
+    h.app.apply(Action::Go(Location::List(list)));
+    h.settle();
+    // the arrow (and the icon and name beside it) open the Manage menu
+    h.click("List menu");
+    assert!(h.has("Rename list"));
+    assert!(h.has("Delete list"));
+    h.click("Rename list");
+    assert!(matches!(h.app.rename, Some((Target::List(id), _)) if id == list));
+    // a second click on the crumb closes the menu again
+    h.click("List menu");
+    assert!(h.has("Export to CSV"));
+    h.click("List menu");
+    assert!(!h.has("Export to CSV"));
+    // not on a Space: there is no List to manage
+    let space = h.app.data.space_of_list(list).unwrap().id;
+    h.app.apply(Action::Go(Location::Space(space)));
+    h.settle();
+    assert!(!h.has("List menu"));
+}

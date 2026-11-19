@@ -239,7 +239,7 @@ fn menu_item(ui: &mut Ui, t: &Theme, icon: &str, label: &str, right: &str) -> Re
         ui.painter().text(
             r.right_center() - vec2(10.0, 0.0),
             Align2::RIGHT_CENTER,
-            right,
+            crate::os::keys(right),
             FontId::proportional(12.0),
             t.text3,
         );

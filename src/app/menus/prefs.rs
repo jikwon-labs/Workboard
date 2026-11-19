@@ -135,7 +135,7 @@ impl App {
                 ] {
                     // the system font: in the monospace font the Shift
                     // arrow came from a fallback and was drawn tiny
-                    ui.label(RichText::new(tr(k)).strong());
+                    ui.label(RichText::new(crate::os::keys(tr(k))).strong());
                     ui.label(tr(d));
                     ui.end_row();
                 }

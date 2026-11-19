@@ -262,7 +262,7 @@ impl App {
                 ui.painter().text(
                     pos2(sr.left() + 38.0 + sgw, sr.center().y),
                     Align2::LEFT_CENTER,
-                    "\u{2318}J",
+                    crate::os::keys("\u{2318}J"),
                     FontId::proportional(11.5),
                     Color32::from_rgb(170, 170, 170),
                 );

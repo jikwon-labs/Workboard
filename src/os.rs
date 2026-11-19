@@ -43,6 +43,26 @@ pub fn quiet_command(program: &str) -> std::process::Command {
     c
 }
 
+/// A shortcut as this system writes it: the Mac's symbols on macOS
+/// ("\u{2318}J"), words elsewhere ("Ctrl+J"). egui's command key is Ctrl
+/// there, so the same keys work.
+pub fn keys(s: &str) -> String {
+    keys_for(s, cfg!(target_os = "macos"))
+}
+
+fn keys_for(s: &str, mac: bool) -> String {
+    if mac {
+        return s.to_string();
+    }
+    s.replace("\u{2318}+", "Ctrl+")
+        .replace('\u{2318}', "Ctrl+")
+        .replace('\u{2325}', "Alt+")
+        .replace('\u{21E7}', "Shift+")
+        // "Ctrl+/Shift+ click" reads better as "Ctrl/Shift click"
+        .replace("+/", "/")
+        .replace("+ ", " ")
+}
+
 /// Open a file or web address with whatever the system uses for it.
 pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
     let p = p.as_ref();
@@ -80,6 +100,25 @@ pub fn reveal_path(p: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcuts_use_words_outside_the_mac() {
+        assert_eq!(keys_for("\u{2318}J", true), "\u{2318}J");
+        assert_eq!(keys_for("\u{2318}J", false), "Ctrl+J");
+        assert_eq!(keys_for("\u{2325}T", false), "Alt+T");
+        assert_eq!(
+            keys_for("\u{2318}N  /  \u{2325}T  /  T", false),
+            "Ctrl+N  /  Alt+T  /  T"
+        );
+        assert_eq!(
+            keys_for("\u{2318}/\u{21E7} click", false),
+            "Ctrl/Shift click"
+        );
+        assert_eq!(
+            keys_for("pinch or \u{2318}+scroll to zoom", false),
+            "pinch or Ctrl+scroll to zoom"
+        );
+    }
 
     #[test]
     fn the_data_folder_is_under_the_home_folder_or_appdata() {

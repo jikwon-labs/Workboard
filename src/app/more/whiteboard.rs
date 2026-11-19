@@ -174,9 +174,9 @@ impl App {
                     if zr.clicked() {
                         btn_zoom = Some(1.25);
                     }
-                    let rr = ui.button(tr("Reset view")).on_hover_text(tr(
+                    let rr = ui.button(tr("Reset view")).on_hover_text(crate::os::keys(tr(
                         "Back to 100% at the board's top left corner. Drag with Space or the middle button, or scroll, to move around; pinch or \u{2318}+scroll to zoom.",
-                    ));
+                    )));
                     name_it(&rr, "Reset view");
                     if rr.clicked() {
                         reset_view = true;

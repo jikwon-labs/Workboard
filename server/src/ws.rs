@@ -416,6 +416,7 @@ impl Conn {
                     Err(why) => Msg::call_denied(&why, channel).to_json(),
                 })
             }
+            Some(Msg::CreateLinkCode) => Some(hub.new_link(member, &self.device).to_json()),
             Some(Msg::SetPassword {
                 email,
                 password,

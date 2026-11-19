@@ -71,9 +71,10 @@
 
 | 방향 | 메시지 | 내용 |
 |---|---|---|
-| 앱 → 서버 | `hello` | `device`, `tag`, 그리고 다음 중 하나: `token`(평소) / `invite`(초대 코드, `new_password`·`email` 을 같이 보내면 계정도 만든다) / `email`+`password`(계정 로그인) / `reset_code`+`email`+`new_password`(비밀번호 재설정) / `claim`(빈 서버 첫 등록, `email`+`new_password` 로 owner 계정). 그리고 앱 버전 `app`, 동기화 형식 `sync`(`wb_sync::META_V`), 변경분을 받으면 `deltas: true` |
+| 앱 → 서버 | `hello` | `device`, `tag`, 그리고 다음 중 하나: `token`(평소) / `invite`(초대 코드, `new_password`·`email` 을 같이 보내면 계정도 만든다) / `email`+`password`(계정 로그인) / `reset_code`+`email`+`new_password`(비밀번호 재설정) / `link_code`(같은 사람의 다른 기기가 띄운 6글자 코드로 그 사람으로 로그인) / `claim`(빈 서버 첫 등록, `email`+`new_password` 로 owner 계정). 그리고 앱 버전 `app`, 동기화 형식 `sync`(`wb_sync::META_V`), 변경분을 받으면 `deltas: true` |
 | 서버 → 앱 | `welcome` | 배정된 `tag`, 정본 `snapshot`, `rev`, `member`, `role`, 새로 발급한 `token`, 계정이 있으면 `email`, 이 사람이 못 보는 항목의 id `hidden`(있을 때만), 변경분을 주고받는 서버면 `deltas: true` |
 | 앱 → 서버 | `set_password` | `email`, `password`, 계정이 이미 있으면 `old_password`. 서버가 `account{email}` 로 답한다 |
+| 앱 → 서버 | `create_link_code` | 로그인한 누구나. 서버가 `link_code{code, seconds}` 로 답한다. 코드는 헷갈리는 글자를 뺀 대문자·숫자 6글자(31^6), 5분 동안 한 번만 쓰이고 메모리에만 있다. 같은 기기가 새로 만들면 전 것은 끝난다. 그 기기가 로그아웃되면(비밀번호 변경, 접근 제거) 코드도 안 먹는다. 틀린 코드는 워크스페이스마다 1분에 20번까지만 받는다. 데스크탑은 함께 작업하기 > 휴대폰에서 로그인에 `workboard://link?server=<주소>&code=<코드>` QR 과 코드를 보여 준다 |
 | 앱 → 서버 | `push` | 앱의 공유 사본. 전체이거나, 서버가 `deltas` 를 말했으면 서버가 아직 모르는 부분만(`wb_sync::delta`) |
 | 서버 → 앱 | `delta` | `deltas` 를 말한 앱에게 `update` 대신: 직전 `rev`(`base`)에서 바뀐 부분과 새 `rev`, 전체 `hidden` 목록 |
 | 앱 → 서버 | `resync` | `rev` 를 하나 놓쳤을 때(`base` 가 내 `rev` 보다 크다): 서버가 전체 `update` 로 답한다 |

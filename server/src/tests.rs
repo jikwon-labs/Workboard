@@ -461,6 +461,8 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
             resets: Default::default(),
             mailed: Default::default(),
             fails: Default::default(),
+            links: Default::default(),
+            link_fails: (0, 0),
             summary: None,
         }),
         updates: broadcast::channel(64).0,
@@ -499,6 +501,8 @@ fn wrong_tries_are_forgotten_and_never_pile_up() {
         resets: Default::default(),
         mailed: Default::default(),
         fails: Default::default(),
+        links: Default::default(),
+        link_fails: (0, 0),
         summary: None,
     };
     let now = now_ms();
@@ -1447,4 +1451,108 @@ fn a_command_tells_a_busy_server_from_one_that_is_off() {
     drop(running);
     assert!(!admin::server_running(&root));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_code_from_a_signed_in_computer_signs_a_phone_in_once() {
+    let home = std::env::temp_dir().join(format!("wb-link-{:x}", wb_sync::random_u64()));
+    let mut saved = Saved::default();
+    saved
+        .accounts
+        .insert(2, Account::new("bo@team.io", "bo-secret-22"));
+    let hub = test_hub(
+        &home,
+        Some(json!({"members": [{"id": 2}, {"id": 3}]})),
+        saved,
+    );
+    {
+        let mut g = hub.inner.lock().unwrap();
+        for (d, m) in [("mac", 2), ("cy-mac", 3)] {
+            g.saved.add_device(d, m, None);
+        }
+    }
+    let code = |hub: &Hub, member: u64, device: &str| match hub.new_link(member, device) {
+        Msg::LinkCode { code, seconds } => {
+            assert_eq!(seconds, LINK_SECS as u64);
+            code
+        }
+        m => panic!("not a link code: {:?}", m),
+    };
+    let phone = |device: &str, code: &str| Hello {
+        link_code: Some(code.into()),
+        ..hello(device)
+    };
+    // six capital letters and digits, without look-alikes
+    let c = code(&hub, 2, "mac");
+    assert_eq!(c.len(), 6);
+    assert!(c
+        .chars()
+        .all(|ch| "ABCDEFGHJKMNPQRSTUVWXYZ23456789".contains(ch)));
+    // typed in lower case with a space: the phone is in as Bo, with a token
+    let typed = format!("{} {}", &c[..3], &c[3..]).to_lowercase();
+    let (member, _, _, token) = hub.sign_in(&phone("phone", &typed)).unwrap();
+    assert_eq!(member, 2);
+    assert!(token.is_some());
+    assert!(hub.device_is("phone", 2));
+    // it works once
+    assert!(hub
+        .sign_in(&phone("phone-2", &c))
+        .unwrap_err()
+        .contains("doesn't work"));
+    // a new code from the same computer ends the one before
+    let old = code(&hub, 2, "mac");
+    let new = code(&hub, 2, "mac");
+    assert!(hub.sign_in(&phone("p3", &old)).is_err());
+    // another person's code stays
+    let cy = code(&hub, 3, "cy-mac");
+    assert_eq!(hub.sign_in(&phone("p4", &new)).map(|r| r.0), Ok(2));
+    assert_eq!(hub.sign_in(&phone("p5", &cy)).map(|r| r.0), Ok(3));
+    // a code from a computer that was signed out since (password changed
+    // elsewhere, access removed) no longer works
+    let late = code(&hub, 2, "mac");
+    assert!(hub
+        .set_password(
+            2,
+            "phone",
+            "bo@team.io",
+            "bo-secret-23",
+            Some("bo-secret-22")
+        )
+        .is_ok());
+    assert!(hub.sign_in(&phone("p6", &late)).is_err());
+    assert!(!hub.device_is("p6", 2));
+    // an expired code doesn't work
+    let cy2 = code(&hub, 3, "cy-mac");
+    hub.inner.lock().unwrap().links.get_mut(&cy2).unwrap().made -= LINK_SECS * 1000;
+    assert!(hub.sign_in(&phone("p7", &cy2)).is_err());
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn guessing_link_codes_stops_after_a_few_tries_a_minute() {
+    let home = std::env::temp_dir().join(format!("wb-linkguess-{:x}", wb_sync::random_u64()));
+    let hub = test_hub(
+        &home,
+        Some(json!({"members": [{"id": 2}]})),
+        Saved::default(),
+    );
+    hub.inner.lock().unwrap().saved.add_device("mac", 2, None);
+    let real = match hub.new_link(2, "mac") {
+        Msg::LinkCode { code, .. } => code,
+        m => panic!("not a link code: {:?}", m),
+    };
+    let try_code = |c: &str| {
+        hub.sign_in(&Hello {
+            link_code: Some(c.into()),
+            ..hello("guesser")
+        })
+    };
+    for _ in 0..LINK_TRIES_A_MINUTE {
+        assert!(try_code("ZZZZZZ").unwrap_err().contains("doesn't work"));
+    }
+    // even the right code waits until the minute is over
+    assert!(try_code(&real).unwrap_err().contains("Too many"));
+    hub.inner.lock().unwrap().link_fails.1 -= 60_000;
+    assert_eq!(try_code(&real).map(|r| r.0), Ok(2));
+    let _ = std::fs::remove_dir_all(&home);
 }

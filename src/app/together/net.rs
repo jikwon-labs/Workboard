@@ -340,6 +340,7 @@ impl App {
                         self.toast(trf!("Couldn't email {}'s invite code ({}). Copy it from Work together > People.", name, why));
                     }
                 }
+                NetEvent::LinkCode { code, seconds } => self.got_phone_link(code, seconds),
                 NetEvent::Account(email) => {
                     self.toast(crate::i18n::particles(&trf!(
                         "Password saved. Sign in with {} on your other computers and phones.",

@@ -1167,3 +1167,122 @@ fn invite_note_wraps_inside_the_dialog() {
     assert!(note.width() <= 620.0, "note {} wide", note.width());
     assert!(note.right() <= close.right() + 1.0, "inside the dialog");
 }
+
+/// Signed in on a server, Work together shows a QR code as soon as it
+/// opens, in space kept for it from the first frame (nothing moves when the
+/// code arrives). Show code puts the six letters and digits under it. A
+/// phone signing in with that code comes in as the same person, once. A
+/// new code ends the one before.
+#[test]
+fn work_together_shows_a_code_that_signs_a_phone_in_as_me() {
+    use crate::app::tests::net_until;
+    let server = workboard_server::testing::TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut h = Ui1::sized(1000.0, 1400.0);
+    h.app
+        .connect_with(
+            &addr,
+            together::How::Claim {
+                email: "owner@team.io".into(),
+                password: "owner-pass-1".into(),
+            },
+        )
+        .unwrap();
+    net_until(&mut h.app, "on the server", |a| {
+        a.data.extra.shared.is_some() && a.sync_rt.net_status == Some(wb_net::Status::Connected)
+    });
+    // the people list comes a moment after connecting (it would move the
+    // centred dialog by itself)
+    let everyone = h.app.data.members.len();
+    net_until(&mut h.app, "the people list", |a| {
+        a.sync_rt.people.len() >= everyone
+    });
+    h.settle();
+    h.click("Workspace menu");
+    h.click("Work together (shared)");
+    h.scroll_dialog_to("Sign-in QR code");
+    // asked by itself; the box and the buttons are there before the answer
+    assert!(h.app.sync_rt.phone.is_none() && h.app.sync_rt.phone_asked.is_some());
+    let before = (
+        h.rect("Sign-in QR code"),
+        h.rect("Show code"),
+        h.rect("New QR code"),
+    );
+    assert!(!h.painted_text("Getting a code from the server…").is_empty());
+    let wait_code = |h: &mut Ui1, not: Option<&str>| -> String {
+        net_until(&mut h.app, "a code for the phone", |a| {
+            a.sync_rt
+                .phone
+                .as_ref()
+                .is_some_and(|p| Some(p.code.as_str()) != not)
+        });
+        h.settle();
+        h.app.sync_rt.phone.as_ref().unwrap().code.clone()
+    };
+    let code = wait_code(&mut h, None);
+    let after = (
+        h.rect("Sign-in QR code"),
+        h.rect("Show code"),
+        h.rect("New QR code"),
+    );
+    assert_eq!(before, after, "nothing moved when the QR code came");
+    // the code itself waits for Show code
+    let typed = together::shown_code(&code);
+    assert!(h.painted_text(&typed).is_empty());
+    let below = h.rect("Show backups");
+    h.click("Show code");
+    assert!(!h.painted_text(&typed).is_empty(), "under the QR code");
+    assert!(
+        h.rect("Sign-in QR code") == after.0,
+        "the QR code stays put"
+    );
+    assert_eq!(h.rect("Show backups"), below, "and so does what's under it");
+    assert!(!h.painted_text(&format!("Server: {}", addr)).is_empty());
+    h.click("Hide code");
+    assert!(h.painted_text(&typed).is_empty());
+
+    // the phone
+    let phone = |code: &str| {
+        let c = wb_net::Client::start(
+            &addr,
+            wb_net::SignIn {
+                device: format!("iphone-{}", code),
+                link_code: Some(code.to_lowercase()),
+                sync: Some(wb_sync::META_V),
+                ..Default::default()
+            },
+            std::sync::Arc::new(|| {}),
+        );
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            for e in c.events() {
+                match e {
+                    wb_net::Event::Welcome { member, token, .. } => {
+                        return Ok((member, token.is_some()))
+                    }
+                    wb_net::Event::Status(wb_net::Status::Refused(why)) => return Err(why),
+                    _ => {}
+                }
+            }
+            assert!(std::time::Instant::now() < end, "the phone heard nothing");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    let me = h.app.data.me;
+    assert_eq!(phone(&code), Ok((me, true)), "in as me, with a token");
+    assert!(phone(&code).unwrap_err().contains("doesn't work"), "once");
+
+    // a new code: the one before stops working
+    h.click("New QR code");
+    let second = wait_code(&mut h, Some(&code));
+    h.click("New QR code");
+    let third = wait_code(&mut h, Some(&second));
+    assert!(phone(&second).is_err());
+    assert_eq!(phone(&third).map(|r| r.0), Ok(me));
+
+    // a code that ran out is replaced by itself
+    h.app.sync_rt.phone.as_mut().unwrap().until = std::time::Instant::now();
+    h.settle();
+    let fourth = wait_code(&mut h, Some(&third));
+    assert_eq!(phone(&fourth).map(|r| r.0), Ok(me));
+}

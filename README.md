@@ -29,6 +29,10 @@ Workspace menu > Work together offers two ways:
     server has email set up it mails them a one-time code and a link;
     otherwise the code is copied from Work together > People. Joining with
     the code also sets their password.
+  - **QR code**: on a computer that is signed in, Work together > Sign in on
+    your phone shows a QR code. The iPhone app scans it and is signed in as
+    the same person, without a password. Six letters and digits under it can
+    be typed instead; the code works once, for 5 minutes.
   - **Email and password**: signs in on another computer or phone without a
     new code. "Forgot password?" mails a reset code. When the account is in
     several workspaces on that server, you choose which to open.

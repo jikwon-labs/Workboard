@@ -91,6 +91,13 @@ pub const KEEP_DAILY: usize = 30;
 pub const INVITE_DAYS: i64 = 7;
 /// Password-reset codes stop working after this long.
 pub const RESET_MINUTES: i64 = 30;
+/// A code that signs a phone in (`create_link_code`) works this long...
+pub const LINK_SECS: i64 = 5 * 60;
+/// ...and at most this many wrong ones are taken a minute in a workspace.
+/// With 31^6 possible codes that leaves no real chance of guessing one.
+pub const LINK_TRIES_A_MINUTE: u32 = 20;
+/// At most this many link codes wait at once in a workspace.
+const MAX_LINKS: usize = 1_000;
 /// Wrong passwords or reset codes in a row before an email is locked...
 pub const MAX_TRIES: u32 = 5;
 /// ...for this long.
@@ -144,6 +151,12 @@ struct Inner {
     fails: std::collections::HashMap<String, (u32, i64)>,
     /// email (normalized) -> when a reset code was last mailed to it
     mailed: std::collections::HashMap<String, i64>,
+    /// codes that sign a phone in as the person whose computer showed them
+    /// (`create_link_code`); kept in memory only
+    links: std::collections::HashMap<String, LinkRec>,
+    /// wrong link codes typed in this workspace: (how many, when the first
+    /// of the current minute came)
+    link_fails: (u32, i64),
     /// what the team's copy held at the last broadcast, to send apps only
     /// what changed since (`wb_sync::delta`)
     summary: Option<wb_sync::Summary>,
@@ -234,6 +247,15 @@ impl Drop for HashSlot<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
     }
+}
+
+/// A link code waiting to be typed or scanned on a phone.
+#[derive(Clone, Debug)]
+struct LinkRec {
+    member: u64,
+    /// the computer that showed it: it must still be signed in as `member`
+    device: String,
+    made: i64,
 }
 
 /// The key wrong reset codes for `email` are counted under in `fails`.
@@ -432,6 +454,8 @@ impl Hub {
                 resets: Default::default(),
                 mailed: Default::default(),
                 fails: Default::default(),
+                links: Default::default(),
+                link_fails: (0, 0),
                 summary: None,
             }),
             updates: broadcast::channel(64).0,

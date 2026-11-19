@@ -400,6 +400,11 @@ pub enum Msg {
         /// The code a password-reset email gave.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reset_code: Option<String>,
+        /// A short code another device of the same person showed (as a QR
+        /// code or six letters and digits, see `create_link_code`): signs
+        /// this device in as that person.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        link_code: Option<String>,
         /// The app's version ("0.1.7"), for the server's log and messages.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         app: Option<String>,
@@ -568,6 +573,16 @@ pub enum Msg {
         /// Why it couldn't be emailed (mail is set up but sending failed).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mail_error: Option<String>,
+    },
+    /// A short one-time code that signs another device (a phone) in as
+    /// this person, shown as a QR code and as six letters and digits.
+    /// Servers from before it ignore the message.
+    CreateLinkCode,
+    /// The answer to `create_link_code`: the code and how many seconds it
+    /// works for.
+    LinkCode {
+        code: String,
+        seconds: u64,
     },
     /// Set up this person's account, or change its password
     /// (`old_password` is needed once an account exists).
@@ -933,6 +948,11 @@ pub enum Event {
         emailed: Option<String>,
         mail_error: Option<String>,
     },
+    /// A code that signs a phone in as this person (`Msg::LinkCode`).
+    LinkCode {
+        code: String,
+        seconds: u64,
+    },
     /// The account is set up or its password changed.
     Account(String),
     Access {
@@ -987,6 +1007,8 @@ pub struct SignIn {
     pub password: Option<String>,
     pub new_password: Option<String>,
     pub reset_code: Option<String>,
+    /// A code another device of the same person showed (`Msg::Hello::link_code`).
+    pub link_code: Option<String>,
     /// The app's version and sync format, sent in hello.
     pub app: Option<String>,
     pub sync: Option<u32>,
@@ -1009,6 +1031,7 @@ impl From<&SignIn> for Msg {
             password: s.password.clone(),
             new_password: s.new_password.clone(),
             reset_code: s.reset_code.clone(),
+            link_code: s.link_code.clone(),
             app: s.app.clone(),
             sync: s.sync,
             deltas: !s.full_copies,
@@ -1034,6 +1057,7 @@ impl TryFrom<Msg> for SignIn {
                 password,
                 new_password,
                 reset_code,
+                link_code,
                 app,
                 sync,
                 deltas,
@@ -1048,6 +1072,7 @@ impl TryFrom<Msg> for SignIn {
                 password,
                 new_password,
                 reset_code,
+                link_code,
                 app,
                 sync,
                 full_copies: !deltas,
@@ -1068,6 +1093,7 @@ impl SignIn {
         self.password = None;
         self.new_password = None;
         self.reset_code = None;
+        self.link_code = None;
     }
 }
 
@@ -1504,6 +1530,7 @@ fn on_server_msg(
             emailed,
             mail_error,
         }),
+        Some(Msg::LinkCode { code, seconds }) => emit(Event::LinkCode { code, seconds }),
         Some(Msg::Account { email }) => emit(Event::Account(email)),
         Some(Msg::Access { people, role, .. }) => emit(Event::Access { people, role }),
         Some(Msg::CallToken {
@@ -1691,6 +1718,7 @@ mod tests {
             password: Some("pw".into()),
             new_password: Some("new pw".into()),
             reset_code: Some("R".into()),
+            link_code: Some("K7Q2MX".into()),
             app: Some("0.1.7".into()),
             sync: Some(4),
             full_copies: false,
@@ -1706,6 +1734,7 @@ mod tests {
             password: Some("pw".into()),
             new_password: Some("new pw".into()),
             reset_code: Some("R".into()),
+            link_code: Some("K7Q2MX".into()),
             app: Some("0.1.7".into()),
             sync: Some(4),
             deltas: true,
@@ -1714,7 +1743,7 @@ mod tests {
         assert_eq!(Msg::from(&full).to_json(), by_hand.to_json());
         assert_eq!(
             Msg::from(&full).to_json(),
-            r#"{"type":"hello","device":"d1","tag":3,"token":"t","invite":"ABCD-EFGH-JKLM","claim":7,"email":"a@b.co","password":"pw","new_password":"new pw","reset_code":"R","app":"0.1.7","sync":4,"deltas":true}"#
+            r#"{"type":"hello","device":"d1","tag":3,"token":"t","invite":"ABCD-EFGH-JKLM","claim":7,"email":"a@b.co","password":"pw","new_password":"new pw","reset_code":"R","link_code":"K7Q2MX","app":"0.1.7","sync":4,"deltas":true}"#
         );
         let back = SignIn::try_from(Msg::parse(&by_hand.to_json()).unwrap()).unwrap();
         assert_eq!(back, full);
@@ -1747,6 +1776,7 @@ mod tests {
             password: None,
             new_password: None,
             reset_code: None,
+            link_code: None,
             app: None,
             sync: None,
             deltas: false,

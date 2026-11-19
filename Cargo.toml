@@ -19,6 +19,8 @@ chrono = { version = "0.4", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Slack export .zip files (src/app/slack.rs)
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# the QR code that signs a phone in (src/app/together/phone.rs); drawn by egui
+qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 # tests run the real server; it is not part of the app build

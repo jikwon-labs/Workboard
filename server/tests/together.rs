@@ -280,6 +280,9 @@ impl App {
                     self.invites.push((member, code));
                     self.mailed.push((member, emailed, mail_error));
                 }
+                Event::LinkCode { code, .. } => {
+                    self.heard.push(format!("link code {}", code));
+                }
                 Event::Account(e) => self.email = Some(e),
                 Event::Access { people, role } => {
                     self.heard.push(format!("role {:?}", role));

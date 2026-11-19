@@ -338,6 +338,8 @@ impl App {
             if connected {
                 ui.add_space(10.0);
                 self.account_section(ui, t);
+                ui.add_space(10.0);
+                self.phone_section(ui, t, &server);
             }
             if connected && self.sync_rt.role.is_some_and(|r| r.manages()) {
                 ui.add_space(10.0);

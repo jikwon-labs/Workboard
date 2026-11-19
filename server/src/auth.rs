@@ -24,6 +24,9 @@ impl Hub {
         if let Some(code) = given(&h.invite) {
             return self.sign_in_with_invite(h, code);
         }
+        if let Some(code) = given(&h.link_code) {
+            return self.sign_in_with_link(h, code);
+        }
         if let (Some(email), Some(pw)) = (given(&h.email), h.password.as_deref()) {
             let (g, member) = self.check_password(email, pw)?;
             return Ok(self.signed_in(g, &h.device, member, h.tag));
@@ -141,6 +144,76 @@ impl Hub {
             g.saved.set_role(member, inv.role);
         }
         Ok(self.signed_in(g, device, member, h.tag))
+    }
+
+    /// A new code that signs another device (a phone) in as `member`, shown
+    /// on `device`. An older code this device showed stops working.
+    pub(crate) fn new_link(&self, member: u64, device: &str) -> Msg {
+        let mut g = self.state();
+        let now = now_ms();
+        g.links
+            .retain(|_, l| now - l.made < LINK_SECS * 1000 && l.device != device);
+        if g.links.len() >= MAX_LINKS {
+            // the oldest go first
+            let mut by_age: Vec<(i64, String)> =
+                g.links.iter().map(|(c, l)| (l.made, c.clone())).collect();
+            by_age.sort();
+            for (_, c) in by_age.into_iter().take(g.links.len() + 1 - MAX_LINKS) {
+                g.links.remove(&c);
+            }
+        }
+        let code = loop {
+            let c = new_link_code();
+            if !g.links.contains_key(&c) {
+                break c;
+            }
+        };
+        g.links.insert(
+            code.clone(),
+            LinkRec {
+                member,
+                device: device.to_string(),
+                made: now,
+            },
+        );
+        Msg::LinkCode {
+            code,
+            seconds: LINK_SECS as u64,
+        }
+    }
+
+    /// Signing in with a code another device of the same person showed.
+    fn sign_in_with_link(&self, h: &Hello, code: &str) -> Result<Signed, String> {
+        const NO_GOOD: &str = "That code doesn't work. It may be used already or expired (codes last 5 minutes). Show a new one on your computer: Work together > Sign in on your phone.";
+        let mut g = self.state();
+        let now = now_ms();
+        let (n, since) = g.link_fails;
+        if n >= LINK_TRIES_A_MINUTE && now - since < 60_000 {
+            return Err("Too many wrong codes. Wait a minute and try again.".into());
+        }
+        g.links.retain(|_, l| now - l.made < LINK_SECS * 1000);
+        let key = normalize_code(code);
+        let found = g.links.get(&key).cloned();
+        let Some(link) = found else {
+            g.link_fails = if now - since >= 60_000 {
+                (1, now)
+            } else {
+                (n + 1, since)
+            };
+            return Err(NO_GOOD.into());
+        };
+        g.links.remove(&key);
+        // the computer that showed it was signed out (access removed, the
+        // password changed) since: the code goes with it
+        if !g
+            .saved
+            .devices
+            .get(&link.device)
+            .is_some_and(|d| d.member == link.member)
+        {
+            return Err(NO_GOOD.into());
+        }
+        Ok(self.signed_in(g, &h.device, link.member, h.tag))
     }
 
     /// Signing in again with the token an earlier welcome gave this device.

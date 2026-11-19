@@ -168,6 +168,16 @@ pub(crate) fn new_code() -> String {
     format!("{}-{}-{}", &s[0..4], &s[4..8], &s[8..12])
 }
 
+/// Six letters and digits without look-alikes, for signing in a phone
+/// (31^6, about 890 million codes).
+pub(crate) fn new_link_code() -> String {
+    const ABC: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    random_bytes::<6>()
+        .iter()
+        .map(|x| ABC[*x as usize % ABC.len()] as char)
+        .collect()
+}
+
 /// What people type: any case, with or without dashes and spaces.
 pub(crate) fn normalize_code(c: &str) -> String {
     c.chars()

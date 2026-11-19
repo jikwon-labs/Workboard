@@ -10,7 +10,8 @@
 //
 // In together/: the server token (tokens.rs), the connection's wording
 // (status.rs), the shared folder (shared_folder.rs), the server connection
-// (net.rs), the sign-in forms (forms.rs) and the dialogs (dialogs.rs).
+// (net.rs), the sign-in forms (forms.rs), the dialogs (dialogs.rs) and
+// signing in a phone with a QR code (phone.rs).
 
 use super::*;
 use crate::sync::{self, SharedCfg};
@@ -19,11 +20,13 @@ use std::time::SystemTime;
 mod dialogs;
 mod forms;
 mod net;
+mod phone;
 mod shared_folder;
 mod status;
 mod tokens;
 
 pub(super) use net::*;
+pub(super) use phone::*;
 pub(super) use shared_folder::*;
 pub(super) use status::*;
 pub(super) use tokens::*;
@@ -219,6 +222,12 @@ pub struct SyncRt {
     pub(super) typing: Vec<super::typing::Typist>,
     /// The conversation I last told the server I'm typing in, and when.
     pub(super) typed: Option<(u64, std::time::Instant)>,
+    /// A code that signs my phone in, while Work together shows it.
+    pub(super) phone: Option<PhoneLink>,
+    /// When the server was asked for a new one that hasn't come yet.
+    pub(super) phone_asked: Option<std::time::Instant>,
+    /// "Show code" was pressed: the code shows under the QR code.
+    pub(super) phone_code_shown: bool,
 }
 
 /// Asking a server which workspaces an email and password sign in to.

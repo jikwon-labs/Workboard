@@ -259,7 +259,13 @@ fn work_together_in_a_shared_folder_says_how_teammates_join_and_keeps_the_path_o
     h.settle();
     // the long path is cut from the front at folder names, on one line
     let short = crate::app::together::short_path(&full, 48);
-    assert!(short.starts_with('\u{2026}') && short.ends_with("/team-workspace-folder/_shared"));
+    let sep = std::path::MAIN_SEPARATOR;
+    assert!(
+        short.starts_with('\u{2026}')
+            && short.ends_with(&format!("{sep}team-workspace-folder{sep}_shared")),
+        "{}",
+        short
+    );
     assert!(h.has(&short), "{}", short);
     let at = h.painted_text(&short);
     assert_eq!(at.len(), 1, "one line: {:?}", at);

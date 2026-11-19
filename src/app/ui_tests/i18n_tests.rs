@@ -30,10 +30,15 @@ fn english_left(shown: &str, data: &[String]) -> bool {
     if s.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c)) {
         return false;
     }
-    // needs a word of two or more Latin letters
+    // needs a word of two or more Latin letters; key names in shortcuts
+    // ("Ctrl+J" outside the Mac) are the same in Korean
+    let keyless = s
+        .replace("Ctrl", "")
+        .replace("Alt", "")
+        .replace("Shift", "");
     let mut run = 0;
     let mut word = false;
-    for c in s.chars() {
+    for c in keyless.chars() {
         if c.is_ascii_alphabetic() {
             run += 1;
             word |= run >= 2;

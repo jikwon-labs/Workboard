@@ -1091,6 +1091,14 @@ fn a_long_folder_path_is_cut_from_the_front_at_folder_names() {
         short_path("/a/a-very-long-folder-name-that-will-not-fit", 10),
         "\u{2026}/a-very-long-folder-name-that-will-not-fit"
     );
+    // a Windows path keeps its backslashes
+    assert_eq!(
+        short_path(
+            r"C:\Users\someone\OneDrive\Documents\team-shared\_shared",
+            32
+        ),
+        "\u{2026}\\Documents\\team-shared\\_shared"
+    );
 }
 
 /// Through a real server: Sam can only view a space Ann shares with him.

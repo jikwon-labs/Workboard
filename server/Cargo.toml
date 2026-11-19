@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 wb-sync = { path = "../crates/wb-sync" }
 wb-net = { path = "../crates/wb-net" }
+getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs", "io-util"] }

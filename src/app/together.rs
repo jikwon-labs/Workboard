@@ -272,19 +272,25 @@ pub(super) fn short_path(p: &str, max: usize) -> String {
     if p.chars().count() <= max {
         return p.to_string();
     }
+    // Windows paths are written with backslashes
+    let sep = if p.contains('\\') && !p.contains('/') {
+        '\\'
+    } else {
+        '/'
+    };
     let mut out = String::new();
-    for part in p.rsplit('/').filter(|s| !s.is_empty()) {
+    for part in p.rsplit(sep).filter(|s| !s.is_empty()) {
         let next = if out.is_empty() {
             part.to_string()
         } else {
-            format!("{}/{}", part, out)
+            format!("{}{}{}", part, sep, out)
         };
         if !out.is_empty() && next.chars().count() + 2 > max {
             break;
         }
         out = next;
     }
-    format!("\u{2026}/{}", out)
+    format!("\u{2026}{}{}", sep, out)
 }
 
 /// This app's version, written into the shared folder and sent in hello.

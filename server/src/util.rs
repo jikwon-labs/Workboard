@@ -45,12 +45,11 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 /// Bytes from the system's secure random source.
+/// (getrandom: /dev/urandom's source on macOS and Linux, the system's
+/// generator on Windows, which has no /dev/urandom)
 pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
-    use std::io::Read;
     let mut b = [0u8; N];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut b))
-        .expect("read /dev/urandom");
+    getrandom::fill(&mut b).expect("the system's random source");
     b
 }
 

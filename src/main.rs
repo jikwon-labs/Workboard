@@ -1,3 +1,7 @@
+// the Windows app is a window, not a console program: no black console
+// window beside it (debug builds keep it for printed messages)
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod filters;
 mod i18n;

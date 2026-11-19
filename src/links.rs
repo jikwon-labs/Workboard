@@ -99,5 +99,32 @@ pub fn listen() {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows starts the app with the link as its argument, once the scheme is
+/// registered for this person (HKEY_CURRENT_USER, so no administrator is
+/// needed). Register it on every start so it follows the app when moved.
+#[cfg(all(windows, not(test)))]
+pub fn listen() {
+    if let Ok(exe) = std::env::current_exe() {
+        let key = r"HKCU\Software\Classes\workboard";
+        let open = format!("\"{}\" \"%1\"", exe.display());
+        let cmd = format!(r"{}\shell\open\command", key);
+        for args in [
+            vec![key, "/ve", "/d", "URL:Workboard", "/f"],
+            vec![key, "/v", "URL Protocol", "/d", "", "/f"],
+            vec![cmd.as_str(), "/ve", "/d", open.as_str(), "/f"],
+        ] {
+            let _ = crate::os::quiet_command("reg")
+                .arg("add")
+                .args(args)
+                .status();
+        }
+    }
+    for a in std::env::args().skip(1) {
+        if a.to_ascii_lowercase().starts_with("workboard://") {
+            arrived(a);
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", all(windows, not(test)))))]
 pub fn listen() {}

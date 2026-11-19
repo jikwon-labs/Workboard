@@ -28,6 +28,21 @@ pub fn app_data_dir() -> PathBuf {
     home_dir().join(".workboard")
 }
 
+/// A command that runs without flashing a console window on Windows (the
+/// app has none, so Windows would open one for each console program).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn quiet_command(program: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut c = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// Open a file or web address with whatever the system uses for it.
 pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
     let p = p.as_ref();
@@ -36,7 +51,7 @@ pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
     #[cfg(windows)]
     {
         // `start` treats its first quoted argument as a window title
-        let _ = std::process::Command::new("cmd")
+        let _ = quiet_command("cmd")
             .args(["/C", "start", ""])
             .arg(p)
             .spawn();

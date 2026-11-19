@@ -465,6 +465,15 @@ pub enum Msg {
     Presence {
         online: Vec<u64>,
     },
+    /// Someone is typing in a conversation. The app sends it (without
+    /// `member`) at most every few seconds while its person types; the
+    /// server passes it on, with `member`, to the others who can see that
+    /// conversation. Nothing is kept. Older servers and apps ignore it.
+    Typing {
+        channel: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        member: Option<u64>,
+    },
     Error {
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -774,6 +783,11 @@ pub enum Event {
     Restored(String),
     /// The members connected to the server right now.
     Presence(Vec<u64>),
+    /// `member` is typing in `channel` (see `Msg::Typing`).
+    Typing {
+        channel: u64,
+        member: u64,
+    },
 }
 
 /// How this computer signs in.
@@ -1319,6 +1333,10 @@ fn on_server_msg(
         Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
         Some(Msg::Restored { name }) => emit(Event::Restored(name)),
         Some(Msg::Presence { online }) => emit(Event::Presence(online)),
+        Some(Msg::Typing {
+            channel,
+            member: Some(member),
+        }) => emit(Event::Typing { channel, member }),
         Some(Msg::Ping) => send(ws, &Msg::Pong).map_err(End::Lost),
         Some(Msg::Error {
             message,

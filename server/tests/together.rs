@@ -46,6 +46,8 @@ struct App {
     restored: Vec<String>,
     /// the members online, from the last presence message
     online: Option<Vec<u64>>,
+    /// (conversation, member) for each "typing" heard
+    typing: Vec<(u64, u64)>,
     /// account email from the welcome, then from `account` answers
     email: Option<String>,
     /// (member, emailed to, mail error) for each invite answer
@@ -135,6 +137,7 @@ impl App {
             backups: None,
             restored: vec![],
             online: None,
+            typing: vec![],
             email: None,
             mailed: vec![],
             updates: vec![],
@@ -283,6 +286,7 @@ impl App {
                 Event::Backups(b) => self.backups = Some(b),
                 Event::Restored(n) => self.restored.push(n),
                 Event::Presence(o) => self.online = Some(o),
+                Event::Typing { channel, member } => self.typing.push((channel, member)),
             }
         }
     }
@@ -521,6 +525,75 @@ fn everyone_sees_who_is_connected() {
     });
     drop(b);
     a.until("A hears B went away", |a| a.online.as_deref() == Some(&[1]));
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn typing_reaches_only_the_others_who_see_the_conversation() {
+    let home = temp_home("typing");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let code = a.invite(3, Role::Member);
+    let mut c = App::join(server.port, &code);
+    c.wait("C gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    // a direct message between A and B
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({
+            "id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2],
+            "messages": [], "last_read": 0
+        }))
+    });
+    b.wait("the DM at B", |d| {
+        d["channels"].as_array().unwrap().len() == 2
+    });
+    // typing in the DM, then in #general
+    let typing = |channel| Msg::Typing {
+        channel,
+        member: None,
+    };
+    a.client.send(typing(20));
+    a.client.send(typing(10));
+    b.until("B hears A typing in both", |b| {
+        b.typing == [(20, 1), (10, 1)]
+    });
+    c.until("C hears A typing in #general", |c| !c.typing.is_empty());
+    assert_eq!(c.typing, [(10, 1)], "C isn't in the DM");
+    // sent again right away it isn't passed on twice; nobody hears their own
+    a.client.send(typing(10));
+    b.client.send(typing(10));
+    a.until("A hears B", |a| !a.typing.is_empty());
+    assert_eq!(a.typing, [(10, 2)], "A doesn't hear its own typing");
+    c.until("C hears B", |c| c.typing.len() == 2);
+    assert_eq!(c.typing, [(10, 1), (10, 2)]);
+    // a conversation that isn't there or that B isn't in goes nowhere
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({
+            "id": 30, "name": "", "kind": "Direct", "topic": "", "members": [1, 3],
+            "messages": [], "last_read": 0
+        }))
+    });
+    c.wait("the A-C DM at C", |d| {
+        d["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == 30)
+    });
+    b.client.send(typing(30));
+    b.client.send(typing(99));
+    b.client.send(typing(20));
+    a.until("A hears B in their DM", |a| a.typing.len() == 2);
+    assert_eq!(a.typing, [(10, 2), (20, 2)]);
+    std::thread::sleep(Duration::from_millis(300));
+    c.pump();
+    assert_eq!(
+        c.typing,
+        [(10, 1), (10, 2)],
+        "B can't type into A and C's DM"
+    );
     server.stop();
     let _ = std::fs::remove_dir_all(&home);
 }

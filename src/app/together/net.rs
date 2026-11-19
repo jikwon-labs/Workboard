@@ -367,6 +367,7 @@ impl App {
                 } => self.huddle_token(channel, url, token),
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
                 NetEvent::Presence(online) => self.sync_rt.online = Some(online),
+                NetEvent::Typing { channel, member } => self.heard_typing(channel, member),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();
                     self.toast(trf!(

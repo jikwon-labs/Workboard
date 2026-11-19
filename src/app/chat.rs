@@ -912,7 +912,7 @@ impl App {
                     }
                 });
             });
-            egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 10 }).show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 2 }).show(ui, |ui| {
                 let target = match channel.kind {
                     ChannelKind::Channel => channel.name.clone(),
                     ChannelKind::Direct => self.channel_label(&channel),
@@ -923,6 +923,7 @@ impl App {
                         None => acts.push(ChatAction::Send { ch: cid, text, parent: None, files }),
                     }
                 }
+                self.typing_row(ui, &channel);
             });
         });
         if dragging {
@@ -1057,6 +1058,12 @@ impl App {
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer")
                 });
+                // the others in the conversation see that I'm typing
+                if r.changed() && !self.chat.text.trim().is_empty() {
+                    if let Some(cid) = self.chat.open {
+                        self.typing_now(cid);
+                    }
+                }
                 // typing "@" at the start of a word offers the people to mention
                 let mention_popup = egui::Id::new("chat_mention_popup");
                 if r.changed() && self.chat.text.ends_with('@') {

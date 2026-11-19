@@ -50,6 +50,7 @@ mod tests;
 mod timebar;
 mod timeline;
 mod together;
+mod typing;
 #[cfg(test)]
 mod ui_tests;
 mod watch;

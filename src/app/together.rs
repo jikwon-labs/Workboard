@@ -211,6 +211,10 @@ pub struct SyncRt {
     /// The members connected to the server, as it last said (None until it
     /// says, or after the connection drops; older servers never say).
     pub(super) online: Option<Vec<u64>>,
+    /// Who the server says is typing where (see typing.rs).
+    pub(super) typing: Vec<super::typing::Typist>,
+    /// The conversation I last told the server I'm typing in, and when.
+    pub(super) typed: Option<(u64, std::time::Instant)>,
 }
 
 /// Asking a server which workspaces an email and password sign in to.

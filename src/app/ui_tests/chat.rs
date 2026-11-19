@@ -1596,3 +1596,120 @@ fn sending_from_higher_up_goes_down_to_the_new_message() {
         "the thread went down to the reply just sent"
     );
 }
+
+#[test]
+fn who_else_is_typing_shows_under_the_message_box_for_a_moment() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let me = h.app.data.me;
+    let others: Vec<(u64, String)> = h
+        .app
+        .data
+        .members
+        .iter()
+        .filter(|m| m.id != me)
+        .map(|m| (m.id, m.shown().to_string()))
+        .take(3)
+        .collect();
+    let (a, an) = others[0].clone();
+    let (b, bn) = others[1].clone();
+    let typing = |channel, member| wb_net::Event::Typing { channel, member };
+    let line_for = |n: &str| format!("{} is typing...", n);
+
+    // nobody yet: the row under the box is empty
+    let box_at = h.rect("Message composer");
+    assert!(!h.tree.iter().any(|(n, _)| n.ends_with("typing...")));
+
+    // the server says one teammate is typing here
+    h.app.take_net_events(vec![typing(cid, a)]);
+    h.settle();
+    assert!(h.has(&line_for(&an)), "their name and 'is typing...'");
+    assert_eq!(
+        h.rect("Message composer"),
+        box_at,
+        "the message box doesn't move"
+    );
+
+    // a second one: both names; a third: "Several people"
+    h.app.take_net_events(vec![typing(cid, b)]);
+    h.settle();
+    assert!(h.has(&format!("{} and {} are typing...", an, bn)));
+    h.app.take_net_events(vec![typing(cid, others[2].0)]);
+    h.settle();
+    assert!(h.has("Several people are typing..."));
+
+    // my own typing (from my other computer) never shows; nor in another channel
+    h.app.take_net_events(vec![typing(cid, me)]);
+    h.settle();
+    assert!(h.has("Several people are typing..."));
+    assert!(!h.app.sync_rt.typing.iter().any(|t| t.member == me));
+
+    // the first one's message arrives: they're done
+    let now = chrono::Utc::now().timestamp();
+    let copy = teammate_change(&h.app.data, |d| {
+        let c = d.channels.iter_mut().find(|c| c.id == cid).unwrap();
+        c.messages.push(crate::app::slack::new_message(
+            990_001,
+            a,
+            "done typing".into(),
+            now,
+        ));
+    });
+    h.app.take_net_events(vec![wb_net::Event::Update {
+        data: copy,
+        rev: 1,
+        hidden: vec![],
+    }]);
+    h.settle();
+    let cn = &others[2].1;
+    assert!(
+        h.has(&format!("{} and {} are typing...", bn, cn)),
+        "the other two still are"
+    );
+
+    // nothing heard for a few seconds: gone
+    for t in h.app.sync_rt.typing.iter_mut() {
+        t.heard -= crate::app::typing::TYPING_SHOWS;
+    }
+    h.settle();
+    assert!(!h.has(&line_for(&bn)));
+    assert!(h.app.sync_rt.typing.is_empty(), "forgotten");
+
+    // in Korean
+    h.app.take_net_events(vec![typing(cid, a)]);
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    h.settle();
+    let ko = format!("{}님이 입력 중...", an);
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(h.has(&ko));
+}
+
+#[test]
+fn typing_in_the_message_box_tells_the_server_every_few_seconds() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    // not on a server: nothing to tell
+    h.click("Message composer");
+    h.type_text("h");
+    assert_eq!(h.app.sync_rt.typed, None);
+    // connected (to a server that isn't there, so nothing really goes out)
+    h.app.sync_rt.net = Some(wb_net::Client::start(
+        "127.0.0.1:1",
+        wb_net::SignIn::default(),
+        std::sync::Arc::new(|| {}),
+    ));
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.type_text("i");
+    let first = h.app.sync_rt.typed.expect("told the server");
+    assert_eq!(first.0, cid);
+    // more keys right after: not again
+    h.type_text(" there");
+    assert_eq!(h.app.sync_rt.typed.unwrap().1, first.1);
+    // a few seconds on, the next key tells it again
+    h.app.sync_rt.typed = Some((cid, first.1 - crate::app::typing::TYPING_EVERY));
+    h.type_text("!");
+    assert!(h.app.sync_rt.typed.unwrap().1 > first.1);
+    h.app.sync_rt.net = None;
+}

@@ -391,6 +391,9 @@ struct Hub {
     /// the members with an open connection, sorted: each connection tells
     /// its app when it changes (the green dot by someone's name)
     presence: watch::Sender<Vec<u64>>,
+    /// someone typing in a conversation: each connection passes it on to
+    /// its app when that member can see the conversation (ws.rs)
+    typing: broadcast::Sender<Typing>,
     /// true once the workspace is deleted (registry.rs): its connections
     /// end, telling their apps, and nothing more is written to its folder
     closed: watch::Sender<bool>,
@@ -437,6 +440,7 @@ impl Hub {
             online: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
+            typing: broadcast::channel(64).0,
             closed: watch::channel(false).0,
         })
     }

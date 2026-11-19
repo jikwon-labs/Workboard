@@ -137,6 +137,68 @@ impl Hub {
     }
 }
 
+/// Someone typing in a conversation, on its way to the other connections.
+#[derive(Clone, Debug)]
+pub(crate) struct Typing {
+    pub(crate) member: u64,
+    pub(crate) channel: u64,
+    /// who may hear it: the members of a DM or private channel; None for a
+    /// channel everyone sees
+    pub(crate) to: Option<Arc<Vec<u64>>>,
+}
+
+impl Typing {
+    /// Whether `member`'s app hears it (never the typist's own).
+    pub(crate) fn for_member(&self, member: u64) -> bool {
+        member != self.member && self.to.as_ref().is_none_or(|to| to.contains(&member))
+    }
+}
+
+/// How often a connection's typing in one conversation is passed on at
+/// most; the app sends it every few seconds while its person types.
+const TYPING_GAP: Duration = Duration::from_millis(1500);
+
+impl Hub {
+    /// `member` is typing in `channel`: tell the others who can see it.
+    /// Nothing when the conversation isn't there or is closed to them.
+    pub(crate) fn typing_in(&self, member: u64, channel: u64) {
+        let t = {
+            let g = self.state();
+            let Some(ch) = g
+                .canon
+                .as_ref()
+                .and_then(|c| c.get("channels"))
+                .and_then(|c| c.as_array())
+                .and_then(|a| {
+                    a.iter()
+                        .find(|c| c.get("id").and_then(|i| i.as_u64()) == Some(channel))
+                })
+            else {
+                return;
+            };
+            if wb_sync::closed_to(ch, member) {
+                return;
+            }
+            // the same rule as closed_to: a DM or private channel with a
+            // member list is only for them
+            let restricted = ch.get("kind").and_then(|k| k.as_str()) == Some("Direct")
+                || ch.get("private").and_then(|p| p.as_bool()) == Some(true);
+            let members: Vec<u64> = ch
+                .get("members")
+                .and_then(|m| m.as_array())
+                .map(|a| a.iter().filter_map(|m| m.as_u64()).collect())
+                .unwrap_or_default();
+            Typing {
+                member,
+                channel,
+                to: (restricted && !members.is_empty()).then(|| Arc::new(members)),
+            }
+        };
+        // nobody listening is fine
+        let _ = self.typing.send(t);
+    }
+}
+
 /// An access broadcast no connection's request caused: every connection
 /// re-sends its list. Connections are numbered from 1.
 pub(crate) const EVERYONE: u64 = 0;
@@ -236,6 +298,9 @@ struct Conn {
     told_put_back: Option<std::time::Instant>,
     /// what the last copy sent left out (see Canon::delta_for)
     was_hidden: Vec<u64>,
+    /// the conversation this connection's typing was last passed on for,
+    /// and when (see TYPING_GAP)
+    typed: Option<(u64, std::time::Instant)>,
 }
 
 impl Conn {
@@ -265,6 +330,16 @@ impl Conn {
                 })
             }
             Some(Msg::Ping) => Some(Msg::Pong.to_json()),
+            Some(Msg::Typing { channel, .. }) => {
+                let soon = self
+                    .typed
+                    .is_some_and(|(c, t)| c == channel && t.elapsed() < TYPING_GAP);
+                if !soon {
+                    self.typed = Some((channel, std::time::Instant::now()));
+                    hub.typing_in(member, channel);
+                }
+                None
+            }
             // it missed a revision: the whole copy again
             Some(Msg::Resync) => hub.latest(member).map(|(t, h)| {
                 self.was_hidden = h;
@@ -397,6 +472,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     }
     let mut access = hub.access.subscribe();
     let mut presence = hub.presence.subscribe();
+    let mut typing = hub.typing.subscribe();
     // this connection's requests don't bring it the access broadcast too
     let conn = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
     let (welcome, was_hidden) = hub.welcome(tag, member, role, token);
@@ -420,6 +496,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         told_too_old: false,
         told_put_back: None,
         was_hidden,
+        typed: None,
     };
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
     loop {
@@ -463,6 +540,20 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                 let online = presence.borrow_and_update().clone();
                 if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
                     break;
+                }
+            }
+            t = typing.recv() => {
+                // fell behind: typing that old doesn't matter any more
+                let t = match t {
+                    Ok(t) => t,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if t.for_member(member) {
+                    let m = Msg::Typing { channel: t.channel, member: Some(t.member) };
+                    if !send(&mut socket, &m.to_json()).await {
+                        break;
+                    }
                 }
             }
             m = tokio::time::timeout(silent, socket.next()) => {

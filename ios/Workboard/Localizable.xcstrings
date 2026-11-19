@@ -250,12 +250,22 @@
         }
       }
     },
-    "%lld changes haven't reached %@ yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.": {
+    "%lld changes made there haven't reached its server yet and will be lost. Nothing else changes on the server.": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "변경 %1$lld개가 아직 %2$@에 올라가지 않았습니다. 다른 서버는 워크스페이스가 따로 있어서, 이 iPhone 은 그 서버의 것으로 새로 시작하고 이 변경들은 사라집니다."
+            "value": "거기서 한 변경 %lld개가 아직 서버에 올라가지 않아 사라집니다. 그 밖에 서버에서 바뀌는 것은 없습니다."
+          }
+        }
+      }
+    },
+    "%lld changes waiting": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "변경 %lld개 대기 중"
           }
         }
       }
@@ -425,12 +435,22 @@
         }
       }
     },
-    "1 change hasn't reached %@ yet. A different server has its own workspace, so this iPhone starts over from that one and that change is lost.": {
+    "1 change made there hasn't reached its server yet and will be lost. Nothing else changes on the server.": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "변경 1개가 아직 %@에 올라가지 않았습니다. 다른 서버는 워크스페이스가 따로 있어서, 이 iPhone 은 그 서버의 것으로 새로 시작하고 이 변경은 사라집니다."
+            "value": "거기서 한 변경 1개가 아직 서버에 올라가지 않아 사라집니다. 그 밖에 서버에서 바뀌는 것은 없습니다."
+          }
+        }
+      }
+    },
+    "1 change waiting": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "변경 1개 대기 중"
           }
         }
       }
@@ -2522,6 +2542,16 @@
         }
       }
     },
+    "Its copy and sign-in are removed from this iPhone. Nothing changes on the server.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 iPhone 에 있던 사본과 로그인이 지워집니다. 서버에는 아무것도 바뀌지 않습니다."
+          }
+        }
+      }
+    },
     "Join %@ on Workboard with this link, or type the code %@. It works once, for 7 days.": {
       "localizations": {
         "ko": {
@@ -4286,6 +4316,16 @@
         }
       }
     },
+    "Remove %@ from this iPhone?": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 iPhone 에서 %@ 을(를) 뺄까요?"
+          }
+        }
+      }
+    },
     "Remove access": {
       "localizations": {
         "ko": {
@@ -5383,12 +5423,12 @@
         }
       }
     },
-    "This invite is for %@. You're signed in to %@. Switching signs this iPhone out there and replaces its copy of the workspace.": {
+    "This invite is for %@. You're signed in to %@, which stays on this iPhone: switch back to it in Settings > Workspaces.": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 초대는 %1$@용입니다. 지금은 %2$@에 로그인되어 있습니다. 바꾸면 이 iPhone 은 거기서 로그아웃되고 워크스페이스 사본이 바뀝니다."
+            "value": "이 초대는 %1$@용입니다. 지금 로그인된 %2$@ 은(는) 이 iPhone 에 남아 있어서 설정 > 워크스페이스에서 다시 돌아갈 수 있습니다."
           }
         }
       }
@@ -5545,6 +5585,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "제목"
+          }
+        }
+      }
+    },
+    "To add one, connect to another server's address below. Each workspace stays on this iPhone with its sign-in and the changes it hasn't sent yet.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "추가하려면 아래에 다른 서버 주소를 넣고 연결하세요. 워크스페이스마다 로그인 상태와 아직 보내지 않은 변경이 이 iPhone 에 그대로 남습니다."
           }
         }
       }
@@ -6077,6 +6127,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "워크스페이스 개요"
+          }
+        }
+      }
+    },
+    "Workspaces": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "워크스페이스"
           }
         }
       }

@@ -6,11 +6,12 @@ struct SettingsView: View {
     @Environment(Notifier.self) private var notifier
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
-    @State private var confirmSwitch = false
+    @State private var forgetting: SavedWorkspace?
 
     var body: some View {
         NavigationStack {
             Form {
+                workspacesSection
                 Section("Server") {
                     TextField("https://wb.example.com", text: $address)
                         .keyboardType(.URL)
@@ -172,12 +173,12 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
             .onAppear { address = client.settings.server }
-            .alert("Switch servers?", isPresented: $confirmSwitch) {
-                Button("Switch", role: .destructive) { apply(confirmed: true) }
-                    .accessibilityIdentifier("confirmServerSwitch")
-                Button("Cancel", role: .cancel) { address = client.settings.server }
-            } message: {
-                Text(client.waitingCount == 1 ? "1 change hasn't reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and that change is lost." : "\(client.waitingCount) changes haven't reached \(client.settings.server) yet. A different server has its own workspace, so this iPhone starts over from that one and those changes are lost.")
+            .confirmationDialog(forgetting.map { String(localized: "Remove \($0.title) from this iPhone?") } ?? "", isPresented: Binding(isPresent: $forgetting), titleVisibility: .visible, presenting: forgetting) { w in
+                Button("Remove", role: .destructive) { client.forget(w) }
+                    .accessibilityIdentifier("confirmForgetWorkspace")
+                Button("Cancel", role: .cancel) {}
+            } message: { w in
+                Text(w.waiting == 0 ? "Its copy and sign-in are removed from this iPhone. Nothing changes on the server." : w.waiting == 1 ? "1 change made there hasn't reached its server yet and will be lost. Nothing else changes on the server." : "\(w.waiting) changes made there haven't reached its server yet and will be lost. Nothing else changes on the server.")
             }
         }
     }
@@ -192,17 +193,75 @@ struct SettingsView: View {
         }
     }
 
-    /// A different server has its own workspace: the copy here starts over
-    /// from it (never merged into it). Ask first when edits would be lost.
-    func apply() { apply(confirmed: false) }
-
-    func apply(confirmed: Bool) {
-        if !confirmed, client.isDifferentServer(address), client.waitingCount > 0 {
-            confirmSwitch = true
-            return
+    /// The open workspace and the ones kept on this iPhone, like the Mac
+    /// app's Switch Workspace menu: tap one to open it, swipe to remove it.
+    var workspacesSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                WorkspaceRow(title: client.view.name.isEmpty ? client.settings.server : client.view.name,
+                             detail: client.settings.server)
+                Spacer()
+                Image(systemName: "checkmark").foregroundStyle(.tint)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isSelected)
+            .accessibilityIdentifier("currentWorkspace")
+            ForEach(client.savedWorkspaces) { w in
+                Button {
+                    client.switchTo(w)
+                    dismiss()
+                } label: {
+                    WorkspaceRow(title: w.title, detail: w.detail)
+                }
+                .foregroundStyle(.primary)
+                .accessibilityIdentifier("savedWorkspace-\(w.server)")
+                .swipeActions {
+                    Button("Remove", role: .destructive) { forgetting = w }
+                        .accessibilityIdentifier("forgetWorkspace")
+                }
+            }
+        } header: {
+            Text("Workspaces")
+        } footer: {
+            Text("To add one, connect to another server's address below. Each workspace stays on this iPhone with its sign-in and the changes it hasn't sent yet.")
         }
+    }
+
+    /// A different server has its own workspace: the one open now is kept on
+    /// this iPhone (see Workspaces) and the new one starts from its own copy.
+    func apply() {
         client.setServer(address)
         if client.state == .idle { client.connect() }
+    }
+}
+
+/// One workspace in Settings > Workspaces.
+struct WorkspaceRow: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "building.2")
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).lineLimit(1)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
+}
+
+extension SavedWorkspace {
+    var title: String { name.isEmpty ? server : name }
+
+    /// Where it is, who is signed in there and what still waits to go up.
+    var detail: String {
+        var parts = [server]
+        if let who { parts.append(who) }
+        if waiting == 1 { parts.append(String(localized: "1 change waiting")) } else if waiting > 1 { parts.append(String(localized: "\(waiting) changes waiting")) }
+        return parts.joined(separator: " · ")
     }
 }
 

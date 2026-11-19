@@ -38,6 +38,7 @@ struct WorkboardApp: App {
             let old = storage.loadSettings().server
             if !old.isEmpty { tokens.setToken(nil, for: old) }
             if let s = args.string(forKey: "wbServer") { tokens.setToken(nil, for: s) }
+            for w in storage.loadSaved() { tokens.setToken(nil, for: w.server) }
             try? FileManager.default.removeItem(at: storage.folder)
         }
         let c = SyncClient(storage: storage, tokens: tokens)

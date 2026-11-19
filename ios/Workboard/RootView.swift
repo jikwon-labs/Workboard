@@ -30,7 +30,7 @@ struct RootView: View {
                 .accessibilityIdentifier("confirmSwitchButton")
             Button("Cancel", role: .cancel) {}
         } message: { link in
-            Text("This invite is for \(link.server ?? "another server"). You're signed in to \(client.settings.server). Switching signs this iPhone out there and replaces its copy of the workspace.")
+            Text("This invite is for \(link.server ?? "another server"). You're signed in to \(client.settings.server), which stays on this iPhone: switch back to it in Settings > Workspaces.")
         }
         .alert("Already signed in", isPresented: Binding(isPresent: $nav.confirmSignOut), presenting: nav.confirmSignOut) { link in
             Button("Sign out and use it", role: .destructive) {

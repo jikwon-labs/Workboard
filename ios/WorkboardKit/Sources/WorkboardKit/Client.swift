@@ -188,15 +188,15 @@ public struct IncomingMessage: Equatable, Sendable {
 public final class SyncClient {
     public private(set) var state: ConnectionState = .idle
     /// This device's copy of the workspace, nil until the first snapshot.
-    public private(set) var data: JSON? {
+    public internal(set) var data: JSON? {
         didSet { dataRevision &+= 1 }
     }
     /// Bumped on every change to `data` (what the Inbox cache checks).
     @ObservationIgnored public private(set) var dataRevision = 0
     @ObservationIgnored private var inboxCache: (rev: Int, me: UInt64, items: [InboxItem])?
     /// Read-only view of `data` for the screens.
-    public private(set) var view: WorkspaceView = .empty
-    public private(set) var rev: Int64 = 0
+    public internal(set) var view: WorkspaceView = .empty
+    public internal(set) var rev: Int64 = 0
     public internal(set) var settings: DeviceSettings
     public private(set) var lastError: String?
     /// The sign-in screen is up: set when the server refuses with "auth",
@@ -216,6 +216,9 @@ public final class SyncClient {
     public private(set) var pushesSent = 0
     /// This iPhone's Trash (personal, never shared; see Trash.swift).
     public internal(set) var trash: [TrashItem] = []
+    /// Workspaces kept on this iPhone besides the open one, the one left
+    /// most recently first (see Workspaces.swift).
+    public internal(set) var savedWorkspaces: [SavedWorkspace] = []
 
     // owners and admins (see Admin.swift)
     /// Everyone's access, from the server's last `access` (nil: not asked yet).
@@ -315,38 +318,47 @@ public final class SyncClient {
         cfg.waitsForConnectivity = false
         cfg.timeoutIntervalForRequest = 15
         self.session = URLSession(configuration: cfg)
-        if var snap = storage.loadSnapshot() {
-            // a copy saved by an older build: give activity lines their ids
-            // and take today's fingerprints as the baseline (every edit made
-            // here was stamped when it was made), so nothing reads as edited
-            let filledActivity = Sync.fillActivityIds(&snap)
-            let filled = Sync.fillBoardIds(&snap) || filledActivity
-            let old = SyncMeta(of: snap)
-            var meta = old
-            if old.v == 1 {
-                // fingerprints from before fields at their default were left
-                // out of the file: the new shape alone isn't an edit
-                Sync.carryHashes(&meta, legacy: Sync.legacyShape(snap), current: snap)
-            }
-            if filled || old.v < 1 || (old.fieldHashes.isEmpty && !old.hashes.isEmpty) {
-                meta.hashes = Sync.fingerprints(snap)
-                meta.fieldHashes = Sync.partHashes(snap)
-                meta.valueHashes = Sync.valueHashes(snap)
-                meta.v = max(meta.v, 1)
-            }
-            // Slack matches (any shared map entry) an older build kept but
-            // never fingerprinted: as they are now, not set by the next edit
-            Sync.fillValueHashes(&meta, snap)
-            // where everything sits now, so the next move is noticed
-            if meta.parents.isEmpty { meta.parents = Sync.parentsOf(snap) }
-            if meta != old { snap.set("extra.sync", meta.json) }
+        if let snap = storage.loadSnapshot() {
+            let snap = Self.prepared(snap)
             self.data = snap
             self.view = WorkspaceView(snap)
         }
         self.trash = storage.loadTrash()
+        self.savedWorkspaces = storage.loadSaved()
         // a Trash from an older build belongs to whoever is signed in now
         if !trash.isEmpty, settings.trashOwner == nil { settings.trashOwner = settings.me }
         storage.save(settings)
+    }
+
+    /// A saved copy made ready to open: one saved by an older build gets
+    /// what later builds keep in it.
+    static func prepared(_ saved: JSON) -> JSON {
+        var snap = saved
+        // a copy saved by an older build: give activity lines their ids
+        // and take today's fingerprints as the baseline (every edit made
+        // here was stamped when it was made), so nothing reads as edited
+        let filledActivity = Sync.fillActivityIds(&snap)
+        let filled = Sync.fillBoardIds(&snap) || filledActivity
+        let old = SyncMeta(of: snap)
+        var meta = old
+        if old.v == 1 {
+            // fingerprints from before fields at their default were left
+            // out of the file: the new shape alone isn't an edit
+            Sync.carryHashes(&meta, legacy: Sync.legacyShape(snap), current: snap)
+        }
+        if filled || old.v < 1 || (old.fieldHashes.isEmpty && !old.hashes.isEmpty) {
+            meta.hashes = Sync.fingerprints(snap)
+            meta.fieldHashes = Sync.partHashes(snap)
+            meta.valueHashes = Sync.valueHashes(snap)
+            meta.v = max(meta.v, 1)
+        }
+        // Slack matches (any shared map entry) an older build kept but
+        // never fingerprinted: as they are now, not set by the next edit
+        Sync.fillValueHashes(&meta, snap)
+        // where everything sits now, so the next move is noticed
+        if meta.parents.isEmpty { meta.parents = Sync.parentsOf(snap) }
+        if meta != old { snap.set("extra.sync", meta.json) }
+        return snap
     }
 
     // MARK: settings
@@ -358,45 +370,56 @@ public final class SyncClient {
         return !settings.server.isEmpty && !a.isEmpty && !ServerAddress.same(a, settings.server)
     }
 
-    /// Use another server address. `freshCopy` drops this device's copy of
-    /// the workspace (and edits still waiting), so one workspace is never
-    /// merged into another; by default that happens whenever the address
-    /// points at a different server than before (the same server typed
-    /// another way keeps the copy). Ask the person first when there are
-    /// edits waiting (`waitingCount`).
+    /// Use another server address. `freshCopy` leaves this device's copy of
+    /// the workspace (and edits still waiting) behind, so one workspace is
+    /// never merged into another; by default that happens whenever the
+    /// address points at a different server than before (the same server
+    /// typed another way keeps the copy). The copy left behind is kept on
+    /// this iPhone to come back to (`savedWorkspaces`), and a workspace kept
+    /// that way for the new address opens as it was left.
     public func setServer(_ address: String, freshCopy: Bool? = nil) {
         let a = address.trimmed
         guard a != settings.server else { return }
-        let freshCopy = freshCopy ?? isDifferentServer(a)
+        let different = isDifferentServer(a)
+        let freshCopy = freshCopy ?? different
         // the server left behind stops sending this device notifications
-        if isDifferentServer(a) { stopPushes(from: settings.server, token: tokens.token(for: settings.server)) }
+        if different { stopPushes(from: settings.server, token: tokens.token(for: settings.server)) }
+        if different, freshCopy { keepForLater() }
         settings.server = a
-        if settings.meFromServer {
-            settings.me = nil
-            settings.meFromServer = false
-            // that server wanted a sign-in; stay on the sign-in screen until
-            // this one says otherwise
-            needsSignIn = true
-            signInReason = .needed
-        }
-        if freshCopy {
-            data = nil
-            view = .empty
-            rev = 0
-            // people are numbered per workspace: pick again on the new one
-            settings.me = nil
-            settings.meFromServer = false
-            settings.waitingStamps = [:]
-            settings.waitingTombs = [:]
-            settings.reuploads = []
-            dropSnapshot()
-            // Trash holds the other workspace's items
-            setTrash([])
+        let restored = different && freshCopy && reopenKept(a)
+        if restored {
+            // signed in there before: open the copy and let the server say
+            // whether that still stands
+            needsSignIn = false
+            signInReason = nil
         } else {
-            flushSnapshot()
+            if settings.meFromServer {
+                settings.me = nil
+                settings.meFromServer = false
+                // that server wanted a sign-in; stay on the sign-in screen until
+                // this one says otherwise
+                needsSignIn = true
+                signInReason = .needed
+            }
+            if freshCopy {
+                data = nil
+                view = .empty
+                rev = 0
+                // people are numbered per workspace: pick again on the new one
+                settings.me = nil
+                settings.meFromServer = false
+                settings.waitingStamps = [:]
+                settings.waitingTombs = [:]
+                settings.reuploads = []
+                dropSnapshot()
+                // Trash holds the other workspace's items
+                setTrash([])
+            } else {
+                flushSnapshot()
+            }
+            settings.accountEmail = nil
+            settings.role = nil
         }
-        settings.accountEmail = nil
-        settings.role = nil
         clearAdmin()
         pendingSignIn = nil
         signInMessage = nil

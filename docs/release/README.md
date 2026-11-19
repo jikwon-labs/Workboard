@@ -43,6 +43,22 @@ Sparkle 은 `scripts/fetch-sparkle.sh` 가 `vendor/Sparkle` 에 받는다(버전
 
    서버는 다시 띄울 필요 없다. GitHub Releases 에도 올리려면 같은 zip 을 올린다.
 
+## Windows 판
+
+Windows 판은 이 맥에서 빌드하지 못한다. GitHub Actions "Windows" 실행(`.github/workflows/windows.yml`)이 main 과 `windows-*` 브랜치에 push 할 때마다 빌드해 `Workboard-<버전>-windows-x64.zip`(안에 `workboard.exe`)을 artifact `Workboard-windows-zip` 으로 남긴다. 버전은 `Cargo.toml` 에서 읽는다.
+
+- 앱 업데이트는 Sparkle 대신 앱이 직접 한다(`src/updater.rs` 의 `own`). 서버의 `updates/appcast-windows.xml` 을 몇 시간마다 읽어 새 버전이 있으면 프로필의 빨간 점을 켜고, Check for updates 에서 "설치하고 다시 시작"을 누르면 zip 을 받아 크기·sha256 을 확인한 뒤 실행 중인 `workboard.exe` 를 `workboard.old.exe` 로 비켜 두고 새 것을 넣고 다시 연다. 버전 비교는 `Cargo.toml` 의 버전 번호로 하므로, 버전을 올려야 새 버전으로 보인다.
+- Mac 의 `appcast.xml`, `build/updates/` 와는 따로 둔다. Sparkle 은 Windows 항목을 읽지 않는다.
+- 올리는 순서(Mac 판 배포 뒤, 같은 버전 커밋에서):
+  1. 버전 올린 커밋이 main 에 push 되고 그 커밋의 Windows 실행이 성공할 때까지 기다린다(약 20분, `gh run list --workflow windows.yml`).
+  2. 올린다.
+
+         UPDATES_DEST='seojigwon@macmini:Library/Application Support/WorkboardServer/updates' scripts/publish-windows.sh
+
+     artifact 를 받아 `build/updates-windows/` 에 zip 과 `appcast-windows.xml` 을 두고, zip 먼저 그다음 xml 을 서버로 복사한다. 실행 번호를 인자로 주면 그 실행에서 받는다.
+  3. 확인: `curl https://wb.wlrnjs.xyz/updates/appcast-windows.xml`
+- 코드 서명이 없어 처음 받아 실행할 때 SmartScreen 경고("Windows의 PC 보호")가 뜬다. "추가 정보 > 실행"으로 연다. 앱 안 업데이트로 바뀐 exe 에는 뜨지 않는다.
+
 ## 지켜야 할 것
 
 - **Sparkle 키를 백업한다.** 이 키를 잃으면 이미 설치된 앱들이 앞으로의 업데이트를 전부 거절한다. 내보내기:

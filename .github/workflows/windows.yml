@@ -2,6 +2,9 @@
 # can't build it: the C libraries (ring, libwebrtc) need Microsoft's headers
 # and linker. The built workboard.exe is kept with the run as
 # "Workboard-windows", with a screenshot of it running as "screenshot".
+# The same exe packed for the team server, Workboard-<version>-windows-x64.zip
+# (version from Cargo.toml), is kept as "Workboard-windows-zip";
+# scripts/publish-windows.sh takes it from there to the server's updates/.
 name: Windows
 
 on:
@@ -22,6 +25,19 @@ jobs:
         with:
           name: Workboard-windows
           path: target/release/workboard.exe
+      - name: Pack the app for the team server
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "([0-9.]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if (-not $v) { throw "No version in Cargo.toml" }
+          $zip = "Workboard-$v-windows-x64.zip"
+          Compress-Archive -Path target\release\workboard.exe -DestinationPath $zip
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Workboard-windows-zip
+          path: ${{ env.ZIP }}
+          if-no-files-found: error
       # the machine has no graphics card: Mesa draws OpenGL in software
       - uses: ssciwr/setup-mesa-dist-win@v2
       - name: Start the app and take a screenshot

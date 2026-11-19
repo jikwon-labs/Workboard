@@ -1090,8 +1090,10 @@ impl App {
                             });
                         });
                         ui.separator();
-                        // one row of tiles when pictures wait in the box
-                        let composer_h = 96.0
+                        // the box, the typing line under it and "Also send to",
+                        // all inside the window; one row of tiles when pictures
+                        // wait in the box
+                        let composer_h = 140.0
                             + if self.chat.thread_files.is_empty() {
                                 0.0
                             } else {

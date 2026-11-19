@@ -1798,6 +1798,13 @@ fn typing_in_a_thread_shows_only_under_that_threads_reply_box() {
         at.left() > channel_box.right() - 1.0,
         "not under the channel's box"
     );
+    // the line doesn't push "Also send to" out of the window
+    let also = h.rect("Also send to the channel");
+    assert!(
+        also.top() > at.bottom() && also.bottom() <= h.size.y - 4.0,
+        "{:?} below the window",
+        also
+    );
 
     // back in the channel: typing there shows under the channel's box only
     h.app.take_net_events(vec![wb_net::Event::Typing {

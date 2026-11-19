@@ -8,7 +8,7 @@ use super::*;
 // in data.json). When trying the app with a separate WORKBOARD_HOME folder it
 // lives in that folder instead, and tests keep it in memory.
 
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "macos"))]
 const KEYCHAIN_SERVICE: &str = "Workboard server";
 
 fn token_account(addr: &str, device: &str) -> String {

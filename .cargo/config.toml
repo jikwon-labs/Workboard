@@ -5,3 +5,9 @@ rustflags = ["-C", "link-args=-ObjC"]
 
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-args=-ObjC"]
+
+# LiveKit's prebuilt WebRTC library is built against the static C runtime
+# (/MT); everything else must use it too or linking fails with "mismatch
+# detected for 'RuntimeLibrary'".
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -621,6 +621,29 @@ fn composer_mention_and_emoji_pickers() {
 }
 
 #[test]
+fn composer_emoji_picker_opens_above_the_composer_not_over_it() {
+    // a short window, like a small window beside a terminal
+    let mut h = Ui1::sized(1000.0, 560.0);
+    h.click("general");
+    let button = h.rect("Emoji");
+    h.click("Emoji");
+    h.settle();
+    // the first and last emoji of the grid both sit above the button
+    for e in ["\u{1F44D}", "\u{1F355}"] {
+        let r = h.rect(e);
+        assert!(
+            r.bottom() <= button.top() && r.top() >= 0.0,
+            "emoji {:?} at {:?} covers the composer button {:?}",
+            e,
+            r,
+            button
+        );
+    }
+    h.click("\u{1F355}");
+    assert_eq!(h.app.chat.text, "\u{1F355}");
+}
+
+#[test]
 fn replies_show_chat_replies_and_mark_one_read() {
     let mut h = Ui1::new();
     let me = h.app.data.me;

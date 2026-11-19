@@ -3,7 +3,8 @@
 
 use super::*;
 
-/// Opens a popup below `resp` when it is clicked; shows `add` while open.
+/// Opens a popup below `resp` (above it when it only fits there) when it is
+/// clicked; shows `add` while open.
 pub fn popup<R>(
     ui: &Ui,
     resp: &Response,
@@ -19,9 +20,20 @@ pub fn popup<R>(
     // that were too tall last frame get the scroll area, so ordinary menus
     // are laid out exactly as before.
     let screen = ui.ctx().screen_rect();
-    let room = (screen.bottom() - resp.rect.bottom() - 32.0).max(screen.height() * 0.6);
     let tall_id = id.with("__tall");
     let tall: f32 = ui.data(|d| d.get_temp(tall_id)).unwrap_or(0.0);
+    // a popup that does not fit below its button opens above it when there
+    // is more room there; otherwise egui pushes it up over the button (an
+    // emoji grid opened from the composer at the bottom covered the composer)
+    let margin = egui::Frame::popup(ui.style()).total_margin().sum().y;
+    let below = screen.bottom() - resp.rect.bottom() - 8.0;
+    let above_room = resp.rect.top() - screen.top() - 8.0;
+    let above = tall + margin > below && above_room > below;
+    let room = if above {
+        above_room - margin
+    } else {
+        (screen.bottom() - resp.rect.bottom() - 32.0).max(screen.height() * 0.6)
+    };
     // egui only pushes a popup back inside the window, so near the right
     // edge it touched the edge: move it left to leave a margin (the width
     // is last frame's, or the minimum before it has been shown)
@@ -33,10 +45,16 @@ pub fn popup<R>(
         at.rect = at.rect.translate(vec2(-over, 0.0));
     }
     let resp = &at;
-    egui::popup_below_widget(
+    let side = if above {
+        egui::AboveOrBelow::Above
+    } else {
+        egui::AboveOrBelow::Below
+    };
+    egui::popup_above_or_below_widget(
         ui,
         id,
         resp,
+        side,
         egui::PopupCloseBehavior::CloseOnClickOutside,
         |ui| {
             ui.set_min_width(width);

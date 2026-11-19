@@ -664,6 +664,24 @@ fn http_get_with(port: u16, path: &str, headers: &str) -> (String, Vec<u8>) {
 }
 
 #[test]
+fn the_privacy_policy_page_is_served_to_anyone() {
+    let home = temp_home("privacy");
+    let server = Server::start_at(&home, 0);
+    // no sign-in, and from the internet too (App Store Connect links here)
+    for headers in [
+        "Host: x\r\n",
+        "Host: wb.example\r\nCF-Connecting-IP: 1.2.3.4\r\n",
+    ] {
+        let (head, body) = http_get_with(server.port, "/privacy", headers);
+        assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+        assert!(head.to_ascii_lowercase().contains("text/html"), "{}", head);
+        let body = String::from_utf8(body).unwrap();
+        assert!(body.contains("개인정보 처리방침"));
+        assert!(body.contains("Privacy Policy"));
+    }
+}
+
+#[test]
 fn app_updates_are_served_from_the_updates_folder() {
     let home = temp_home("updates");
     let server = Server::start_at(&home, 0);

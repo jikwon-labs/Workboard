@@ -710,6 +710,7 @@ pub async fn serve_on(
         .route("/files/{file}", get(files::get_file).put(files::put_file))
         .route("/auth/forgot", axum::routing::post(forgot_route))
         .route("/join", get(join_route))
+        .route("/privacy", get(privacy_route))
         .with_state(hub.clone())
         .merge(registry::routes(registry.clone()));
     tokio::spawn(async move {

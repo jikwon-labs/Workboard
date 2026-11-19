@@ -182,7 +182,8 @@ fn server_with_windows_build(program: &[u8]) -> workboard_server::testing::TestS
 }
 
 /// Frames until `name` is on screen, for at most 20 seconds (the updater
-/// works on a background thread).
+/// works on a background thread), then a few more so the dialog has grown
+/// to its new size before anything in it is clicked.
 fn settle_until(h: &mut Ui1, name: &str) {
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while !h.has(name) {
@@ -195,6 +196,8 @@ fn settle_until(h: &mut Ui1, name: &str) {
         std::thread::sleep(std::time::Duration::from_millis(50));
         h.settle();
     }
+    h.settle();
+    h.settle();
 }
 
 #[test]

@@ -96,9 +96,6 @@ pub(super) enum Modal {
         title: String,
         body: String,
     },
-    /// Check for updates on Windows, where the app updates itself
-    /// (`updater::status_ui`; Sparkle has its own window on macOS).
-    Update,
     /// A Slack export read and waiting for Import (slack.rs).
     SlackImport(Box<super::slack::SlackPlan>),
     Bookmark {
@@ -181,6 +178,10 @@ pub(super) enum Modal {
     DeleteWorkspace {
         typed: String,
     },
+    /// Check for updates on Windows, where the app updates itself
+    /// (`updater::status_ui`; Sparkle has its own window on macOS). Last, so
+    /// the other dialogs keep their window ids.
+    Update,
 }
 
 pub const ROLES: [(&str, &str); 4] = [

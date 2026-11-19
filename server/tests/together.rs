@@ -1034,7 +1034,9 @@ fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
                 .unwrap();
             assert!(
                 !output.status.success(),
-                "invite-email must fail when {file} cannot be staged (reinvite={reinvite})"
+                "invite-email must fail when {file} cannot be staged (reinvite={reinvite}); it printed {:?} {:?}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
             );
             assert!(
                 !String::from_utf8_lossy(&output.stdout).contains("Invite code"),

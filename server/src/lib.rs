@@ -78,6 +78,9 @@ pub const BACKUP_DIR: &str = "backups";
 pub const UPDATES_DIR: &str = "updates";
 pub const REQUEST_FILE: &str = "admin-request.json";
 pub const RESULT_FILE: &str = "admin-result.json";
+/// Kept locked while the server runs, so a command can tell a busy server
+/// from one that is off.
+pub const RUNNING_FILE: &str = "running.lock";
 /// LiveKit address and keys for voice huddles (written by deploy/use-livekit-cloud.sh).
 pub const LIVEKIT_FILE: &str = "livekit.json";
 /// How long a call token lets someone into a huddle.
@@ -678,6 +681,8 @@ pub async fn serve_on(
 ) -> std::io::Result<()> {
     let (stop_tx, stop_rx) = watch::channel(false);
     let stopping = stop_rx.clone();
+    // held until this returns
+    let _running = admin::hold_running(&home);
     let registry = Arc::new(registry::Registry::open(home, options, stop_rx)?);
     let hub = registry.first();
     // requests left while the server was off

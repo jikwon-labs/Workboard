@@ -384,19 +384,67 @@ impl Hub {
 
     /// Pick up an admin request left in the server folder.
     pub(crate) fn admin_file(&self) {
-        let req_path = self.home.join(REQUEST_FILE);
-        let Ok(Some(req)) = read_json(&req_path) else {
+        let Some(req) = take_request(&self.home.join(REQUEST_FILE)) else {
             return;
         };
-        let _ = std::fs::remove_file(&req_path);
         let res = self.admin(&req);
         self.flush();
         let _ = write_atomic(&self.home.join(RESULT_FILE), &res.to_string());
     }
 }
 
+/// Take the request left at `path`, if any. It is moved aside first, so a
+/// command that withdraws it (by removing `path`) knows the server never saw it.
+pub(crate) fn take_request(path: &Path) -> Option<Value> {
+    let mut name = path.file_name()?.to_os_string();
+    name.push(".taken");
+    let taken = path.with_file_name(name);
+    std::fs::rename(path, &taken).ok()?;
+    let req = read_json(&taken).ok().flatten();
+    let _ = std::fs::remove_file(&taken);
+    req
+}
+
+/// Lock `RUNNING_FILE` in the server folder `root` for as long as the
+/// returned file is kept. None if it can't (another server holds it, or the
+/// folder isn't writable); the server runs anyway.
+pub(crate) fn hold_running(root: &Path) -> Option<std::fs::File> {
+    std::fs::create_dir_all(root).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join(RUNNING_FILE))
+        .ok()?;
+    file.try_lock().ok()?;
+    Some(file)
+}
+
+/// Whether a server is running on `home`: one of the server's own folders,
+/// the first workspace's or another's under `workspaces/`.
+pub(crate) fn server_running(home: &Path) -> bool {
+    let root = match home.parent() {
+        Some(up) if up.file_name() == Some(registry::WORKSPACES_DIR.as_ref()) => {
+            up.parent().unwrap_or(home)
+        }
+        _ => home,
+    };
+    let Ok(file) = std::fs::File::open(root.join(RUNNING_FILE)) else {
+        return false;
+    };
+    matches!(
+        file.try_lock_shared(),
+        Err(std::fs::TryLockError::WouldBlock)
+    )
+}
+
+/// How much longer a command waits for a server that is running but hasn't
+/// answered yet (busy with backups, or a slow disk).
+const BUSY_WAIT: Duration = Duration::from_secs(60);
+
 /// Leave a request for the running server (or the next start) and wait for
-/// its answer. None when the server didn't answer in time.
+/// its answer. None when no server is running (it is done at the next
+/// start); an error when one is running but doesn't answer in time.
 pub fn admin_request(home: &Path, req: &Value, wait: Duration) -> std::io::Result<Option<Value>> {
     request_files(home, (REQUEST_FILE, RESULT_FILE), req, wait)
 }
@@ -421,20 +469,56 @@ pub fn workspaces_request(
 
 pub(crate) fn request_files(
     home: &Path,
+    files: (&str, &str),
+    req: &Value,
+    wait: Duration,
+) -> std::io::Result<Option<Value>> {
+    request_files_within(home, files, req, wait, BUSY_WAIT)
+}
+
+/// `request_files`, waiting `busy` more when the server is running but slow.
+/// Then the request is withdrawn if the server hasn't taken it yet, and either
+/// way it is an error: the server is running, so "do it when it starts"
+/// doesn't apply.
+pub(crate) fn request_files_within(
+    home: &Path,
     (request, result): (&str, &str),
     req: &Value,
     wait: Duration,
+    busy: Duration,
 ) -> std::io::Result<Option<Value>> {
     std::fs::create_dir_all(home)?;
     let _ = std::fs::remove_file(home.join(result));
     write_atomic(&home.join(request), &req.to_string())?;
-    let until = std::time::Instant::now() + wait;
-    while std::time::Instant::now() < until {
+    let mut until = std::time::Instant::now() + wait;
+    let mut waited_more = false;
+    loop {
         if let Ok(Some(v)) = read_json(&home.join(result)) {
             let _ = std::fs::remove_file(home.join(result));
             return Ok(Some(v));
         }
+        if std::time::Instant::now() >= until {
+            if !server_running(home) {
+                // left for the next start
+                return Ok(None);
+            }
+            if !waited_more {
+                waited_more = true;
+                until = std::time::Instant::now() + busy;
+                continue;
+            }
+            let secs = (wait + busy).as_secs();
+            return Err(std::io::Error::other(
+                if std::fs::remove_file(home.join(request)).is_ok() {
+                    format!("The server is running but didn't take the request in {secs} seconds, so nothing was done. Try again.")
+                } else {
+                    format!(
+                        "The server is running but didn't answer in {secs} seconds. It is still on it; the answer will be in {}.",
+                        home.join(result).display()
+                    )
+                },
+            ));
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Ok(None)
 }

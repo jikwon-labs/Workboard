@@ -407,11 +407,9 @@ impl Registry {
     /// Pick up a request left for the list of workspaces
     /// (`WORKSPACES_REQUEST_FILE`, from `workboard-server undelete`).
     pub(crate) fn admin_file(&self) {
-        let req_path = self.root.join(WORKSPACES_REQUEST_FILE);
-        let Ok(Some(req)) = read_json(&req_path) else {
+        let Some(req) = admin::take_request(&self.root.join(WORKSPACES_REQUEST_FILE)) else {
             return;
         };
-        let _ = std::fs::remove_file(&req_path);
         let res = match req.get("undelete").and_then(|v| v.as_str()) {
             Some(id) => match self.undelete(id) {
                 Ok(name) => {

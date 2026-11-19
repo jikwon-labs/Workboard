@@ -1390,3 +1390,61 @@ fn the_team_copy_is_written_once_changes_settle() {
     );
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_command_tells_a_busy_server_from_one_that_is_off() {
+    let root = std::env::temp_dir().join(format!("wb-running-{:x}", wb_sync::random_u64()));
+    let other = root.join(registry::WORKSPACES_DIR).join("w2");
+    std::fs::create_dir_all(&other).unwrap();
+    let ask = |home: &Path| {
+        admin::request_files_within(
+            home,
+            (REQUEST_FILE, RESULT_FILE),
+            &json!({"people": true}),
+            Duration::from_millis(200),
+            Duration::from_millis(200),
+        )
+    };
+    // off: the request waits for the next start
+    assert!(!admin::server_running(&root));
+    assert!(ask(&root).unwrap().is_none());
+    assert!(root.join(REQUEST_FILE).exists());
+    std::fs::remove_file(root.join(REQUEST_FILE)).unwrap();
+
+    // running but not taking it: an error, and the request is withdrawn
+    let running = admin::hold_running(&root).expect("lock");
+    assert!(admin::server_running(&root));
+    assert!(
+        admin::server_running(&other),
+        "a workspace under the same server"
+    );
+    let err = ask(&root).unwrap_err().to_string();
+    assert!(err.contains("nothing was done"), "{err}");
+    assert!(!root.join(REQUEST_FILE).exists());
+    let err = ask(&other).unwrap_err().to_string();
+    assert!(err.contains("nothing was done"), "{err}");
+    assert!(!other.join(REQUEST_FILE).exists());
+
+    // once taken, a withdrawal can't happen: it says where the answer goes
+    let taker = {
+        let root = root.clone();
+        std::thread::spawn(move || {
+            let until = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < until {
+                if admin::take_request(&root.join(REQUEST_FILE)).is_some() {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            false
+        })
+    };
+    let err = ask(&root).unwrap_err().to_string();
+    assert!(taker.join().unwrap());
+    assert!(err.contains("still on it"), "{err}");
+    assert!(err.contains(RESULT_FILE), "{err}");
+
+    drop(running);
+    assert!(!admin::server_running(&root));
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -115,17 +115,6 @@ fn two_computers_work_in_one_shared_folder() {
         "the new member shows up for A"
     );
 
-    // B starts writing the next one: A sees "Sam ... is typing..." in #general
-    b.typing_now(ch);
-    let general = |a: &App| a.data.channels.iter().find(|c| c.id == ch).unwrap().clone();
-    net_until(&mut a, "B typing at A", |a| {
-        a.typing_in(&general(a)) == vec![bora]
-    });
-    let name = a.data.member(bora).unwrap().shown().to_string();
-    assert_eq!(
-        a.typing_line(&general(&a)),
-        Some(format!("{} is typing...", name))
-    );
     let msgs = &a
         .data
         .channels
@@ -399,6 +388,18 @@ fn two_computers_work_through_a_server() {
     assert!(
         a.data.member(bora).is_some(),
         "the new member shows up for A"
+    );
+
+    // B starts writing the next one: A sees "Sam ... is typing..." in #general
+    b.typing_now(ch);
+    let general = |a: &App| a.data.channels.iter().find(|c| c.id == ch).unwrap().clone();
+    net_until(&mut a, "B typing at A", |a| {
+        a.typing_in(&general(a)) == vec![bora]
+    });
+    let name = a.data.member(bora).unwrap().shown().to_string();
+    assert_eq!(
+        a.typing_line(&general(&a)),
+        Some(format!("{} is typing...", name))
     );
 
     // a task from A reaches B

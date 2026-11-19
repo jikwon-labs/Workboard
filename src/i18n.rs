@@ -481,6 +481,34 @@ fn system_language() -> String {
             }
         }
     }
+    #[cfg(windows)]
+    {
+        // the display languages chosen in Windows Settings, as names like
+        // "ko-KR", one after another, each ending in a 0
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetUserPreferredUILanguages(
+                flags: u32,
+                count: *mut u32,
+                buffer: *mut u16,
+                len: *mut u32,
+            ) -> i32;
+        }
+        const MUI_LANGUAGE_NAME: u32 = 0x8;
+        let mut count = 0u32;
+        let mut buf = [0u16; 512];
+        let mut len = buf.len() as u32;
+        // SAFETY: buf holds len u16s; Windows writes at most that many
+        let ok = unsafe {
+            GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, buf.as_mut_ptr(), &mut len)
+        };
+        if ok != 0 {
+            let first: Vec<u16> = buf.iter().take_while(|c| **c != 0).copied().collect();
+            if !first.is_empty() {
+                return String::from_utf16_lossy(&first);
+            }
+        }
+    }
     for k in ["LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(v) = std::env::var(k) {
             if !v.is_empty() {

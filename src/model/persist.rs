@@ -403,17 +403,7 @@ impl Data {
                 return PathBuf::from(dir).join("data.json");
             }
         }
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".into());
-        let mut p = PathBuf::from(home);
-        if cfg!(target_os = "macos") {
-            p.push("Library/Application Support/Workboard");
-        } else {
-            p.push(".workboard");
-        }
-        p.push("data.json");
-        p
+        crate::os::app_data_dir().join("data.json")
     }
 
     pub fn load() -> Self {

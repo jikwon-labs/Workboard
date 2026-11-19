@@ -2342,10 +2342,7 @@ impl App {
                                     }
                                 }
                                 if b(ui, tr("Show in Finder")).clicked() {
-                                    let _ = std::process::Command::new("open")
-                                        .arg("-R")
-                                        .arg(path)
-                                        .spawn();
+                                    crate::os::reveal_path(path);
                                 }
                             }
                         });
@@ -2621,7 +2618,7 @@ fn save_copy(from: &Path, name: &str) -> Result<PathBuf, String> {
     let dir = if cfg!(test) {
         std::env::temp_dir().join("workboard-test-downloads")
     } else {
-        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Downloads")
+        crate::os::home_dir().join("Downloads")
     };
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let p = Path::new(name);

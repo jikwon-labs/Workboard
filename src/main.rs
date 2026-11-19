@@ -4,6 +4,7 @@ mod i18n;
 mod links;
 mod model;
 mod notifier;
+mod os;
 use wb_sync as sync;
 mod media;
 mod theme;

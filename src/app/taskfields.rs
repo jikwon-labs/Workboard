@@ -1205,10 +1205,10 @@ impl App {
             // may be a program)
             self.save_file(a);
         } else if let Some(a) = open {
-            // the picture or video opens in the Mac's own viewer
+            // the picture or video opens in the system's own viewer
             if let Some(p) = self.files.playable(&a) {
                 if !cfg!(test) {
-                    let _ = std::process::Command::new("open").arg(p).spawn();
+                    crate::os::open_path(p);
                 }
             } else {
                 self.toast(trf!("{} is still downloading", a.name));

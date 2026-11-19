@@ -73,7 +73,10 @@ pub fn write_mine(folder: &Path, device: &str, data: &Value, app: &str) -> std::
 
 /// Folders of sync services found on this computer, as places to share from.
 pub fn suggested_folders() -> Vec<(String, String)> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    // Windows has no $HOME
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let h = PathBuf::from(&home);
     let mut out = vec![];
     let icloud = h.join("Library/Mobile Documents/com~apple~CloudDocs");

@@ -346,12 +346,9 @@ impl App {
             Some(cfg) if cfg.server.is_none() && !cfg.folder.is_empty() => {
                 Path::new(&cfg.folder).join("Docs archive")
             }
-            _ => {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-                Path::new(&home)
-                    .join("Documents")
-                    .join("Workboard Docs archive")
-            }
+            _ => crate::os::home_dir()
+                .join("Documents")
+                .join("Workboard Docs archive"),
         }
     }
 

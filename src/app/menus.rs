@@ -1805,8 +1805,7 @@ impl App {
 
     pub(super) fn export_csv(&self) -> String {
         let out = self.csv_text();
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        let path = PathBuf::from(home)
+        let path = crate::os::home_dir()
             .join("Downloads")
             .join(format!("tasks-{}.csv", today()));
         match std::fs::write(&path, out) {

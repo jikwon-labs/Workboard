@@ -224,13 +224,19 @@ fn serve(bind: Option<String>, port: u16, home: PathBuf) {
             home,
             workboard_server::Options::default(),
             async {
-                let mut term =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .expect("signal");
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = term.recv() => {}
+                // launchd stops it with SIGTERM; Windows has only Ctrl+C
+                #[cfg(unix)]
+                {
+                    let mut term =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("signal");
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = term.recv() => {}
+                    }
                 }
+                #[cfg(not(unix))]
+                let _ = tokio::signal::ctrl_c().await;
                 println!("stopping");
             },
         )

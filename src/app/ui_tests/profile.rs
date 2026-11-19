@@ -206,3 +206,21 @@ fn members_from_older_files_read_without_the_new_fields() {
     assert_eq!(v["display_name"], "");
     assert_eq!(v["title"], "");
 }
+
+#[test]
+fn edit_profile_opens_at_its_width_without_growing() {
+    let mut h = Ui1::new();
+    open_edit_profile(&mut h);
+    let first = h.modal_rect();
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    let later = h.modal_rect();
+    assert_eq!(
+        first.width(),
+        later.width(),
+        "the dialog keeps its width: {:?} then {:?}",
+        first,
+        later
+    );
+}

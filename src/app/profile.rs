@@ -20,6 +20,8 @@ pub(super) const PHOTO_PX: u32 = 512;
 pub(super) const AVATAR_PX: u32 = 256;
 /// Side of the photo in the Edit profile dialog.
 const PREVIEW: f32 = 168.0;
+/// Width of the name and title fields beside it.
+const FIELDS_W: f32 = 340.0;
 
 /// The picture at `path` cut to its middle square and shrunk to PHOTO_PX
 /// (when larger), as PNG.
@@ -195,7 +197,9 @@ impl App {
             ui.label(RichText::new(s).strong().color(t.text));
         };
         ui.horizontal_top(|ui| {
-            let left = (ui.available_width() - PREVIEW - 20.0).max(220.0);
+            // fixed: a width taken from what's left would grow the dialog
+            // a little every frame (the spacing between the columns)
+            let left = FIELDS_W;
             ui.vertical(|ui| {
                 ui.set_width(left);
                 heading(ui, tr("Full name"));

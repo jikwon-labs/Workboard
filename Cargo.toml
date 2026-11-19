@@ -58,6 +58,10 @@ raw-window-handle = "0.6"
 # have no usable OpenGL (src/main.rs). wgpu can fall back to Windows' own
 # software renderer (WARP) when there is no graphics card.
 eframe = { version = "0.31", features = ["wgpu"] }
+# eframe takes wgpu without its default backends, which leaves Windows only
+# Vulkan and OpenGL: Direct3D 12 (with the WARP software fallback) is added
+# here. The version eframe uses.
+wgpu = { version = "24", default-features = false, features = ["dx12"] }
 # the file picker (src/media.rs); its default features are for Linux only
 rfd = { version = "0.15", default-features = false }
 

@@ -253,6 +253,12 @@ public final class SyncClient {
     /// Said when an access or backup request got no answer in time.
     public internal(set) var adminUnconfirmed: String?
 
+    // typing (see Typing.swift)
+    /// Who the server says is typing where.
+    public internal(set) var typists: [Typist] = []
+    /// The conversation this iPhone last told the server it's typing in, and when.
+    @ObservationIgnored var typedAt: (channel: UInt64, at: Date)?
+
     public var me: UInt64? { settings.me }
     /// Changes made here that the server has not shown back yet.
     public var waitingCount: Int { settings.waitingStamps.count + settings.waitingTombs.count }
@@ -660,6 +666,8 @@ public final class SyncClient {
             settings.accountEmail = email
             storage.save(settings)
             accountRequest = .done
+        case let .typing(channel, member):
+            heardTyping(channel: channel, member: member)
         case let .callToken(channel, url, token):
             finishCall(channel, .success(CallGrant(url: url, token: token, room: CallAPI.room(channel: channel, workspace: ServerAddress.workspaceID(settings.server)))))
         case .invite, .access, .backups, .restored:

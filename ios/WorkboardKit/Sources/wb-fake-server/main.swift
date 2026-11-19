@@ -16,8 +16,9 @@
 // (KEY marks it as brought in from Slack),
 // /admin/reset-code?email=E, /admin/drop-account?member=N,
 // /admin/offline?secs=N (drop the app connections and turn new ones away),
-// /admin/online, /admin/find?text=T and /admin/late-answer?secs=N (the next
-// access or backup request is answered N seconds late) over HTTP, for UI
+// /admin/online, /admin/find?text=T, /admin/late-answer?secs=N (the next
+// access or backup request is answered N seconds late) and
+// /admin/typing?channel=C&member=M (M is typing there) over HTTP, for UI
 // tests running in the simulator.
 
 import Foundation

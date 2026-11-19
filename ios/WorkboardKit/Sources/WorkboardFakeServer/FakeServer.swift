@@ -137,7 +137,7 @@ public final class FakeServer: @unchecked Sendable {
     /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T[&imported=KEY],
     /// /admin/reset-code?email=E, /admin/drop-account?member=N,
     /// /admin/offline?secs=N, /admin/online, /admin/find?text=T,
-    /// /admin/late-answer?secs=N), so UI
+    /// /admin/late-answer?secs=N, /admin/typing?channel=C&member=M), so UI
     /// tests in the simulator can drive sign-in, incoming messages and the
     /// server going away.
     public var adminHTTP = false
@@ -394,6 +394,8 @@ public final class FakeServer: @unchecked Sendable {
             request(m, from: p)
         case let .callJoin(ch):
             callJoin(ch, from: p)
+        case let .typing(ch):
+            typing(ch, from: p)
         case .ping:
             send(.pong, to: p)
         case .pong:
@@ -654,6 +656,20 @@ public final class FakeServer: @unchecked Sendable {
             s.set("extra.sync", theirs.json)
         }
         return refused
+    }
+
+    /// Pass someone's typing on to the others who can see the conversation,
+    /// as the real server does (Hub::typing_in): a DM or private channel
+    /// with a member list only to its members.
+    func typing(_ ch: UInt64, from p: Peer) {
+        guard let member = p.member,
+              let c = WorkspaceView(snapshot ?? [:]).channels.first(where: { $0.id == ch }) else { return }
+        let restricted = (c.kind == .direct || c.isPrivate) && !c.members.isEmpty
+        if restricted && !c.members.contains(member) { return }
+        for q in peers.values where q.welcomed && q !== p {
+            guard let m = q.member, m != member, !restricted || c.members.contains(m) else { continue }
+            send(.typing(channel: ch, member: member), to: q)
+        }
     }
 
     func broadcast(_ m: ServerMessage) {

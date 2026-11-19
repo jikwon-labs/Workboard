@@ -58,6 +58,16 @@
       }
     },
     "%@ / %@": {},
+    "%@ and %@ are typing...": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@님과 %@님이 입력 중..."
+          }
+        }
+      }
+    },
     "%@ assigned you a task": {
       "localizations": {
         "ko": {
@@ -144,6 +154,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 님이 기록 중"
+          }
+        }
+      }
+    },
+    "%@ is typing...": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@님이 입력 중..."
           }
         }
       }
@@ -4896,6 +4916,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "설정"
+          }
+        }
+      }
+    },
+    "Several people are typing...": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "여러 명이 입력 중..."
           }
         }
       }

@@ -92,6 +92,9 @@ public enum ClientMessage: Equatable, Sendable {
     /// which the server sends back as "ws" in each notification.
     case pushToken(token: String, platform: String, env: String, workspace: String? = nil)
     case callJoin(channel: UInt64)
+    /// This person is typing in a conversation (wb_net::Msg::Typing, sent
+    /// without `member`; see Typing.swift).
+    case typing(channel: UInt64)
     case resync
     case createInvite(member: UInt64, role: Role)
     case setRole(member: UInt64, role: Role)
@@ -131,6 +134,8 @@ public enum ClientMessage: Equatable, Sendable {
             return .object(o)
         case let .callJoin(channel):
             return ["type": "call_join", "channel": .id(channel)]
+        case let .typing(channel):
+            return ["type": "typing", "channel": .id(channel)]
         case .resync: return ["type": "resync"]
         case let .createInvite(member, role):
             return ["type": "create_invite", "member": .id(member), "role": .string(role.rawValue)]
@@ -171,6 +176,9 @@ public enum ClientMessage: Equatable, Sendable {
         case "call_join":
             guard let ch = j["channel"]?.uint else { return nil }
             self = .callJoin(channel: ch)
+        case "typing":
+            guard let ch = j["channel"]?.uint else { return nil }
+            self = .typing(channel: ch)
         case "resync": self = .resync
         case "create_invite":
             guard let m = j["member"]?.uint else { return nil }
@@ -238,6 +246,8 @@ public enum ServerMessage: Equatable, Sendable {
     case delta(data: JSON, rev: Int64, base: Int64, hidden: [UInt64] = [])
     case account(email: String)
     case callToken(channel: UInt64, url: String, token: String)
+    /// `member` is typing in `channel` (see Typing.swift).
+    case typing(channel: UInt64, member: UInt64)
     /// A new invite code (answer to create_invite); `emailed` is the address
     /// the server mailed it to, `mailError` why mailing failed.
     case invite(member: UInt64, code: String, emailed: String? = nil, mailError: String? = nil)
@@ -279,6 +289,8 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "account", "email": .string(email)]
         case let .callToken(channel, url, token):
             return ["type": "call_token", "channel": .id(channel), "url": .string(url), "token": .string(token)]
+        case let .typing(channel, member):
+            return ["type": "typing", "channel": .id(channel), "member": .id(member)]
         case let .invite(member, code, emailed, mailError):
             var o: [String: JSON] = ["type": "invite", "member": .id(member), "code": .string(code)]
             if let emailed { o["emailed"] = .string(emailed) }
@@ -335,6 +347,12 @@ public enum ServerMessage: Equatable, Sendable {
             self = .account(email: j["email"]?.string ?? "")
         case "call_token":
             self = .callToken(channel: j["channel"]?.uint ?? 0, url: j["url"]?.string ?? "", token: j["token"]?.string ?? "")
+        case "typing":
+            if let ch = j["channel"]?.uint, let m = j["member"]?.uint {
+                self = .typing(channel: ch, member: m)
+            } else {
+                self = .unknown("typing without member")
+            }
         case "invite":
             self = .invite(member: j["member"]?.uint ?? 0, code: j["code"]?.string ?? "", emailed: j["emailed"]?.string, mailError: j["mail_error"]?.string)
         case "access":

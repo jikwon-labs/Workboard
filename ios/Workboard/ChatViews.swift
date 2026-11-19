@@ -268,10 +268,14 @@ struct ConversationView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
-                    client.edit { d, me in
-                        Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, me: me, id: client.newId(), ts: nowTs())
+                VStack(spacing: 0) {
+                    TypingLine(channelId: c.id)
+                    Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
+                        client.edit { d, me in
+                            Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, me: me, id: client.newId(), ts: nowTs())
+                        }
                     }
+                    .onTyping { client.typingNow(channel: c.id) }
                 }
             }
             .navigationTitle(c.kind == .channel ? "#\(c.name)" : v.title(of: c, me: me))
@@ -613,6 +617,8 @@ struct Composer: View {
     let placeholder: String
     let allowsAttachments: Bool
     let send: (String, [JSON], [UInt64]) -> Bool
+    /// Called as the person types (the others see "... is typing").
+    var typed: (() -> Void)?
     @State private var text = ""
     @State private var picked: [PhotosPickerItem] = []
     @State private var pending: [PendingFile] = []
@@ -734,6 +740,9 @@ struct Composer: View {
         .padding(.vertical, 8)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+        .onChange(of: text) {
+            if !text.isBlank { typed?() }
+        }
         .onChange(of: picked) {
             let items = picked
             picked = []
@@ -747,6 +756,13 @@ struct Composer: View {
 
     /// Attachments in one message, as on the Mac (MAX_PER_MESSAGE).
     let maxFiles = 10
+
+    /// This composer, telling `f` as the person types.
+    func onTyping(_ f: @escaping () -> Void) -> Composer {
+        var c = self
+        c.typed = f
+        return c
+    }
 
     func upload(_ item: PhotosPickerItem) {
         let f = PendingFile()
@@ -762,6 +778,37 @@ struct Composer: View {
         pending.append(f)
         let (server, auth) = (client.settings.server, client.fileAuth)
         Task { await uploadFile(url, server: server, auth: auth, into: f) }
+    }
+}
+
+/// "Bo is typing..." above the message box while the server says others
+/// are writing in this conversation (see Typing.swift); nothing otherwise.
+struct TypingLine: View {
+    @Environment(SyncClient.self) private var client
+    let channelId: UInt64
+
+    var body: some View {
+        // looked at again every second, so it goes away when they stop
+        TimelineView(.periodic(from: .now, by: 1)) { tl in
+            let who = client.typing(in: channelId, at: tl.date)
+            if !who.isEmpty {
+                let name = { (m: UInt64) in client.view.members.first { $0.id == m }?.name ?? String(localized: "Someone") }
+                Group {
+                    switch who.count {
+                    case 1: Text("\(name(who[0])) is typing...")
+                    case 2: Text("\(name(who[0])) and \(name(who[1])) are typing...")
+                    default: Text("Several people are typing...")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 4)
+                .background(.bar)
+                .accessibilityIdentifier("typingLine")
+            }
+        }
     }
 }
 

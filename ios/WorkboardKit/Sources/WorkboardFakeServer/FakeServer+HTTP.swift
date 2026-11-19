@@ -82,6 +82,14 @@ extension FakeServer {
                 broadcast(.update(data: snap, rev: rev))
                 log("admin: message in \(ch) from \(author)")
                 respond(p, 200, ["ok": true])
+            case "/admin/typing":
+                // someone else typing in a conversation, as if their app said so
+                let q = { (n: String) in comps?.queryItems?.first { $0.name == n }?.value }
+                let ch = q("channel").flatMap { UInt64($0) } ?? 0
+                let who = q("member").flatMap { UInt64($0) } ?? 2
+                broadcast(.typing(channel: ch, member: who))
+                log("admin: \(who) typing in \(ch)")
+                respond(p, 200, ["ok": true])
             case "/admin/reset-code":
                 let email = comps?.queryItems?.first { $0.name == "email" }?.value?.lowercased() ?? ""
                 respond(p, 200, ["code": lastResetCode[email].map(JSON.string) ?? .null])

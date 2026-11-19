@@ -510,21 +510,59 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     }
 }
 
-/// Unpack a Slack export .zip into a new folder (macOS's `ditto`).
+/// Unpack a Slack export .zip into a new folder.
 pub(super) fn unzip(zip: &Path) -> Result<PathBuf, String> {
     let dest = std::env::temp_dir().join(format!("wb-slack-{:x}", wb_sync::random_u64()));
     std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-    let out = std::process::Command::new("/usr/bin/ditto")
-        .args(["-x", "-k"])
-        .arg(zip)
-        .arg(&dest)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
+    // names that would land outside `dest` ("../x", "C:\x") are refused
+    let out = std::fs::File::open(zip)
+        .map_err(|e| e.to_string())
+        .and_then(|f| zip::ZipArchive::new(f).map_err(|e| e.to_string()))
+        .and_then(|mut a| a.extract(&dest).map_err(|e| e.to_string()));
+    if out.is_err() {
         let _ = std::fs::remove_dir_all(&dest);
         return Err("That file couldn't be opened as a .zip.".into());
     }
     Ok(dest)
+}
+
+/// In tests: pack a folder into a .zip as Slack does (or with the folder
+/// itself at the top, as Finder's Compress does when `keep_parent`).
+#[cfg(test)]
+pub(crate) fn zip_folder(dir: &Path, zip: &Path, keep_parent: bool) {
+    use std::io::Write;
+    let mut w = zip::ZipWriter::new(std::fs::File::create(zip).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    let top = if keep_parent {
+        dir.parent().unwrap()
+    } else {
+        dir
+    };
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let mut entries: Vec<_> = std::fs::read_dir(&d)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        entries.sort();
+        for p in entries {
+            let name = p
+                .strip_prefix(top)
+                .unwrap()
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            if p.is_dir() {
+                w.add_directory(name, opts).unwrap();
+                todo.push(p);
+            } else {
+                w.start_file(name, opts).unwrap();
+                w.write_all(&std::fs::read(&p).unwrap()).unwrap();
+            }
+        }
+    }
+    w.finish().unwrap();
 }
 
 /// Open an export .zip and match it against the workspace.

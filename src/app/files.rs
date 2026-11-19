@@ -2349,6 +2349,18 @@ impl App {
                                 if b(ui, reveal).clicked() {
                                     crate::os::reveal_path(path);
                                 }
+                                // a video the app can't play (every video
+                                // outside macOS) opens in the system's player
+                                if a.kind == MediaKind::Video
+                                    && v.unplayable.as_deref() == Some(a.file.as_str())
+                                    && b(ui, tr("Open in another app")).clicked()
+                                {
+                                    if let Some(p) = self.files.playable(&a) {
+                                        if !cfg!(test) {
+                                            crate::os::open_path(p);
+                                        }
+                                    }
+                                }
                             }
                         });
                     },

@@ -12,6 +12,8 @@ pub const T: &[(&str, &str)] = &[
     ("{} reminders are overdue", "기한 지난 리마인더 {}개"),
     ("Overdue reminder", "기한 지난 리마인더"),
     // files: attachments and the large viewer
+    ("Open in another app", "다른 앱에서 열기"),
+    ("Pictures", "사진"),
     ("Loading {}%", "불러오는 중 {}%"),
     ("Can't show this file", "이 파일을 표시할 수 없습니다"),
     ("Loading...", "불러오는 중..."),

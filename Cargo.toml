@@ -17,6 +17,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Slack export .zip files (src/app/slack.rs)
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 # tests run the real server; it is not part of the app build
@@ -51,6 +53,14 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 raw-window-handle = "0.6"
+# the file picker (src/media.rs); its default features are for Linux only
+rfd = { version = "0.15", default-features = false }
+
+# pictures and the clipboard outside macOS (src/media.rs; macOS uses ImageIO
+# and NSPasteboard instead)
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
+arboard = "3"
 
 # one-line fix in nokhwa's macOS camera bindings (see third_party/nokhwa-bindings-macos/README.md)
 [patch.crates-io]

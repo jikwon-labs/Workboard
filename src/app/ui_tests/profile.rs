@@ -33,10 +33,6 @@ fn open_edit_profile(h: &mut Ui1) {
     h.settle();
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn edit_profile_saves_the_names_title_and_a_square_photo() {
     let mut h = Ui1::new();
@@ -110,10 +106,6 @@ fn edit_profile_saves_the_names_title_and_a_square_photo() {
     assert!(h.app.data.member(me).unwrap().photo.is_none());
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn a_photo_chosen_then_cancelled_changes_nothing() {
     let mut h = Ui1::new();

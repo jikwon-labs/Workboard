@@ -2,10 +2,6 @@
 
 use super::*;
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
     let mut h = Ui1::new();
@@ -36,13 +32,7 @@ fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
     )
     .unwrap();
     let zip = root.join("slack.zip");
-    assert!(std::process::Command::new("/usr/bin/ditto")
-        .args(["-c", "-k"])
-        .arg(&ex)
-        .arg(&zip)
-        .status()
-        .unwrap()
-        .success());
+    crate::app::slack::zip_folder(&ex, &zip, false);
     crate::app::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
     h.click("Import from Slack");
     assert!(matches!(h.app.modal, Some(Modal::SlackImport(_))));
@@ -60,10 +50,6 @@ fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
     assert!(h.app.modal.is_none());
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
     let mut h = Ui1::new();
@@ -88,13 +74,7 @@ fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
     )
     .unwrap();
     let zip = root.join("slack.zip");
-    assert!(std::process::Command::new("/usr/bin/ditto")
-        .args(["-c", "-k"])
-        .arg(&ex)
-        .arg(&zip)
-        .status()
-        .unwrap()
-        .success());
+    crate::app::slack::zip_folder(&ex, &zip, false);
     h.app.open_slack_export(&zip);
     h.settle();
     // the Slack Alex Kim is proposed as the member Alex Kim
@@ -122,10 +102,6 @@ fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn the_slack_matching_picker_tells_members_of_one_name_apart() {
     let mut h = Ui1::new();
@@ -158,13 +134,7 @@ fn the_slack_matching_picker_tells_members_of_one_name_apart() {
     )
     .unwrap();
     let zip = root.join("slack.zip");
-    assert!(std::process::Command::new("/usr/bin/ditto")
-        .args(["-c", "-k"])
-        .arg(&ex)
-        .arg(&zip)
-        .status()
-        .unwrap()
-        .success());
+    crate::app::slack::zip_folder(&ex, &zip, false);
     h.app.open_slack_export(&zip);
     h.settle();
     h.click("Messages from Sam Lee");
@@ -189,10 +159,6 @@ fn the_slack_matching_picker_tells_members_of_one_name_apart() {
 /// Choosing where a Slack person goes in the import dialog sticks: opened
 /// again, the dialog starts from that choice (my name, then another member),
 /// not from the match it proposed the first time.
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     let mut h = Ui1::new();
@@ -217,13 +183,7 @@ fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     )
     .unwrap();
     let zip = root.join("slack.zip");
-    assert!(std::process::Command::new("/usr/bin/ditto")
-        .args(["-c", "-k"])
-        .arg(&ex)
-        .arg(&zip)
-        .status()
-        .unwrap()
-        .success());
+    crate::app::slack::zip_folder(&ex, &zip, false);
     let chosen = |h: &Ui1| match &h.app.modal {
         Some(Modal::SlackImport(p)) => p.assign.get("U1").copied(),
         _ => panic!("the dialog is open"),

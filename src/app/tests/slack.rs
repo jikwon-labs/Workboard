@@ -158,22 +158,11 @@ fn people_not_added_from_slack_come_in_under_my_name() {
     assert!(m.text.starts_with("Mia Park: Plan for"), "{}", m.text);
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn a_slack_export_zip_opens_and_anything_else_says_why() {
     let dir = slack_export();
     let zip = temp_home("slackzip").with_extension("zip");
-    let ok = std::process::Command::new("/usr/bin/ditto")
-        .args(["-c", "-k", "--keepParent"])
-        .arg(dir.join("My Slack export"))
-        .arg(&zip)
-        .status()
-        .unwrap()
-        .success();
-    assert!(ok);
+    crate::app::slack::zip_folder(&dir.join("My Slack export"), &zip, true);
     let mut a = app();
     a.open_slack_export(&zip);
     match &a.modal {
@@ -181,6 +170,24 @@ fn a_slack_export_zip_opens_and_anything_else_says_why() {
         _ => panic!("the import dialog opens"),
     }
     a.modal = None;
+    // one made by Finder's Compress (macOS's own zip tool) opens the same way
+    #[cfg(target_os = "macos")]
+    {
+        let finder = temp_home("slackzip-ditto").with_extension("zip");
+        assert!(std::process::Command::new("/usr/bin/ditto")
+            .args(["-c", "-k", "--sequesterRsrc", "--keepParent"])
+            .arg(dir.join("My Slack export"))
+            .arg(&finder)
+            .status()
+            .unwrap()
+            .success());
+        a.open_slack_export(&finder);
+        match &a.modal {
+            Some(crate::app::menus::Modal::SlackImport(p)) => assert_eq!(p.channels.len(), 2),
+            _ => panic!("the import dialog opens for a Finder zip"),
+        }
+        a.modal = None;
+    }
     let junk = temp_home("junk").with_extension("zip");
     std::fs::write(&junk, b"not a zip").unwrap();
     a.open_slack_export(&junk);

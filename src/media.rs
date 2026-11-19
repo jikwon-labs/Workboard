@@ -4,7 +4,10 @@
 //   AVFoundation     video length and size, a still from the video, playback
 //   AppKit           the file picker and the clipboard
 // Pixels come back as premultiplied RGBA, ready for an egui texture.
-// Everything that isn't macOS gets stubs that find nothing.
+// Everything that isn't macOS reads pictures with the `image` crate (PNG,
+// JPEG, GIF, WebP, BMP, TIFF; not HEIC), the clipboard with `arboard` and,
+// on Windows, picks files with `rfd`. Videos there are sent as they are,
+// without a size, length or still, and nothing plays inside the app.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -131,28 +134,156 @@ pub const STILL: u32 = 480;
 #[cfg(not(target_os = "macos"))]
 mod other {
     use super::*;
-    pub fn probe(_: &Path, _: MediaKind) -> Result<(u32, u32, f32), String> {
-        Err("Pictures and videos need macOS.".into())
+    use image::ImageDecoder;
+
+    /// The picture as the camera meant it to be seen (EXIF turns applied).
+    fn open(path: &Path) -> Option<image::DynamicImage> {
+        let mut dec = image::ImageReader::open(path)
+            .ok()?
+            .with_guessed_format()
+            .ok()?
+            .into_decoder()
+            .ok()?;
+        let turn = dec.orientation().ok();
+        let mut img = image::DynamicImage::from_decoder(dec).ok()?;
+        if let Some(t) = turn {
+            img.apply_orientation(t);
+        }
+        Some(img)
     }
-    pub fn thumbnail(_: &Path, _: MediaKind, _: u32) -> Option<Rgba> {
-        None
+
+    /// Width, height (as shown, after rotation) and length in seconds. A
+    /// video's size and length aren't known here: 0 for each.
+    pub fn probe(path: &Path, kind: MediaKind) -> Result<(u32, u32, f32), String> {
+        match kind {
+            MediaKind::File => Ok((0, 0, 0.0)),
+            MediaKind::Video => {
+                std::fs::File::open(path).map_err(|_| "That video can't be opened.")?;
+                Ok((0, 0, 0.0))
+            }
+            MediaKind::Image => {
+                let err = || "That picture can't be opened.".to_string();
+                let mut dec = image::ImageReader::open(path)
+                    .map_err(|_| err())?
+                    .with_guessed_format()
+                    .map_err(|_| err())?
+                    .into_decoder()
+                    .map_err(|_| err())?;
+                let (w, h) = dec.dimensions();
+                if w == 0 || h == 0 {
+                    return Err(err());
+                }
+                use image::metadata::Orientation::*;
+                Ok(match dec.orientation() {
+                    Ok(Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH) => (h, w, 0.0),
+                    _ => (w, h, 0.0),
+                })
+            }
+        }
     }
+
+    /// A picture no larger than `max` on its longer side (never enlarged).
+    /// None for a video: no still can be taken from one here.
+    pub fn thumbnail(path: &Path, kind: MediaKind, max: u32) -> Option<Rgba> {
+        if kind != MediaKind::Image {
+            return None;
+        }
+        let mut img = open(path)?;
+        if img.width() > max || img.height() > max {
+            img = img.thumbnail(max, max);
+        }
+        Some(premultiplied(img.into_rgba8()))
+    }
+
+    fn premultiplied(img: image::RgbaImage) -> Rgba {
+        let (w, h) = img.dimensions();
+        let mut px = img.into_raw();
+        for p in px.chunks_exact_mut(4) {
+            let a = p[3] as u32;
+            if a < 255 {
+                for c in &mut p[..3] {
+                    *c = ((*c as u32 * a + 127) / 255) as u8;
+                }
+            }
+        }
+        Rgba { w, h, px }
+    }
+
     pub fn video_still_jpeg(_: &Path, _: u32) -> Option<Vec<u8>> {
         None
     }
+
+    /// The system file picker for files to send (several at once, any
+    /// kind). Blocks until the person chooses or cancels. Main thread only.
+    #[cfg(windows)]
+    pub fn pick_files() -> Vec<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title(crate::i18n::tr("Choose files to send"))
+            .pick_files()
+            .unwrap_or_default()
+    }
+    #[cfg(not(windows))]
     pub fn pick_files() -> Vec<PathBuf> {
         vec![]
     }
+
+    /// One picture, for a profile photo.
+    #[cfg(windows)]
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn pick_picture() -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title(crate::i18n::tr("Choose a profile photo"))
+            .add_filter(crate::i18n::tr("Pictures"), &IMAGE_EXTS)
+            .pick_file()
+    }
+    #[cfg(not(windows))]
     #[cfg_attr(test, allow(dead_code))]
     pub fn pick_picture() -> Option<PathBuf> {
         None
     }
+
+    /// The system file picker for one .zip file (a Slack export).
+    #[cfg(windows)]
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn pick_zip(message: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title(message)
+            .add_filter("zip", &["zip"])
+            .pick_file()
+    }
+    #[cfg(not(windows))]
+    #[cfg_attr(test, allow(dead_code))]
     pub fn pick_zip(_: &str) -> Option<PathBuf> {
         None
     }
+
+    /// Files or a picture on the clipboard (files copied in File Explorer,
+    /// a screenshot, a picture copied from a page).
     pub fn pasteboard() -> Pasted {
-        Pasted::default()
+        let mut out = Pasted::default();
+        let Ok(mut cb) = arboard::Clipboard::new() else {
+            return out;
+        };
+        out.files = cb.get().file_list().unwrap_or_default();
+        if !out.files.is_empty() {
+            return out;
+        }
+        if let Ok(img) = cb.get_image() {
+            out.png = png_of(img.width as u32, img.height as u32, img.bytes.into_owned());
+        }
+        out
     }
+
+    /// Straight RGBA pixels as a PNG file's bytes.
+    pub(super) fn png_of(w: u32, h: u32, rgba: Vec<u8>) -> Option<Vec<u8>> {
+        let img = image::RgbaImage::from_raw(w, h, rgba)?;
+        let mut out = std::io::Cursor::new(vec![]);
+        img.write_to(&mut out, image::ImageFormat::Png).ok()?;
+        Some(out.into_inner())
+    }
+
+    /// Nothing plays inside the app here: the viewer offers the system's
+    /// own player instead.
     pub struct Player;
     impl Player {
         pub fn new(_: &Path, _: u32, _: u32) -> Option<Player> {
@@ -856,6 +987,128 @@ mod mac {
                 let _: () = msg_send![self.item, release];
             }
         }
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod other_tests {
+    use super::*;
+
+    fn temp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("wb-media-{}-{:x}", tag, wb_sync::random_u64()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A 400×300 picture: red on the left half, blue on the right.
+    fn picture() -> image::RgbaImage {
+        let mut img = image::RgbaImage::new(400, 300);
+        for (x, _, p) in img.enumerate_pixels_mut() {
+            *p = if x < 200 {
+                image::Rgba([220, 20, 20, 255])
+            } else {
+                image::Rgba([20, 20, 220, 255])
+            };
+        }
+        img
+    }
+
+    #[test]
+    fn pictures_of_each_kind_are_measured_and_shrunk() {
+        let dir = temp("pic");
+        let rgb = image::DynamicImage::ImageRgba8(picture()).into_rgb8();
+        for name in ["pic.png", "pic.jpg", "pic.gif", "pic.bmp", "pic.tiff"] {
+            let p = dir.join(name);
+            if name.ends_with(".png") {
+                picture().save(&p).unwrap();
+            } else {
+                rgb.save(&p).unwrap();
+            }
+            assert_eq!(kind_of(&p), MediaKind::Image);
+            assert_eq!(
+                probe(&p, MediaKind::Image).unwrap(),
+                (400, 300, 0.0),
+                "{}",
+                name
+            );
+            let t = thumbnail(&p, MediaKind::Image, 100).unwrap();
+            assert_eq!((t.w, t.h), (100, 75), "{}", name);
+            assert_eq!(t.px.len(), 100 * 75 * 4);
+            // left is red, right is blue, the top row first
+            let at = |x: u32, y: u32| {
+                &t.px[((y * t.w + x) * 4) as usize..((y * t.w + x) * 4 + 4) as usize]
+            };
+            assert!(
+                at(10, 10)[0] > 180 && at(10, 10)[2] < 60,
+                "{} {:?}",
+                name,
+                at(10, 10)
+            );
+            assert!(
+                at(90, 60)[2] > 180 && at(90, 60)[0] < 60,
+                "{} {:?}",
+                name,
+                at(90, 60)
+            );
+            // never made larger than it is
+            let big = thumbnail(&p, MediaKind::Image, 1000).unwrap();
+            assert_eq!((big.w, big.h), (400, 300), "{}", name);
+        }
+        // the contents decide, not the name
+        let named_wrong = dir.join("really-a-png.jpg");
+        picture()
+            .save_with_format(&named_wrong, image::ImageFormat::Png)
+            .unwrap();
+        assert_eq!(
+            probe(&named_wrong, MediaKind::Image).unwrap(),
+            (400, 300, 0.0)
+        );
+        // not a picture at all
+        let bad = dir.join("bad.png");
+        std::fs::write(&bad, b"not a picture").unwrap();
+        assert!(probe(&bad, MediaKind::Image).is_err());
+        assert!(thumbnail(&bad, MediaKind::Image, 100).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn see_through_pixels_come_out_premultiplied() {
+        let dir = temp("alpha");
+        let p = dir.join("half.png");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([200, 100, 50, 128]))
+            .save(&p)
+            .unwrap();
+        let t = thumbnail(&p, MediaKind::Image, 64).unwrap();
+        assert_eq!(&t.px[..4], &[100, 50, 25, 128]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn videos_go_as_they_are_without_a_size_or_still() {
+        let dir = temp("vid");
+        let v = dir.join("clip.mp4");
+        std::fs::write(&v, b"any video bytes").unwrap();
+        assert_eq!(kind_of(&v), MediaKind::Video);
+        assert_eq!(probe(&v, MediaKind::Video).unwrap(), (0, 0, 0.0));
+        assert!(thumbnail(&v, MediaKind::Video, 100).is_none());
+        assert!(video_still_jpeg(&v, STILL).is_none());
+        assert!(Player::new(&v, 160, 120).is_none());
+        assert!(probe(&dir.join("gone.mp4"), MediaKind::Video).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_clipboard_picture_becomes_a_png() {
+        let px: Vec<u8> = (0..2 * 3)
+            .flat_map(|i| [i as u8 * 40, 10, 20, 255])
+            .collect();
+        let png = other::png_of(2, 3, px.clone()).unwrap();
+        let back = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+            .unwrap()
+            .into_rgba8();
+        assert_eq!(back.dimensions(), (2, 3));
+        assert_eq!(back.into_raw(), px);
+        assert!(other::png_of(5, 5, vec![0; 4]).is_none(), "too few pixels");
     }
 }
 

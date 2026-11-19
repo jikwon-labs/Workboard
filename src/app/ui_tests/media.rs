@@ -15,10 +15,6 @@ fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
     p
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     let mut h = Ui1::new();
@@ -88,10 +84,6 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     );
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn drop_a_picture_send_it_and_open_it_large() {
     let mut h = Ui1::new();
@@ -230,10 +222,6 @@ fn drop_a_picture_send_it_and_open_it_large() {
     let _ = std::fs::remove_file(&saved);
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     let mut h = Ui1::new();
@@ -295,10 +283,6 @@ fn a_pdf_dropped_on_a_task_attaches_and_a_click_saves_it() {
     let _ = std::fs::remove_file(&saved);
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
     let mut h = Ui1::new();
@@ -340,4 +324,53 @@ fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
         !h.app.files.is_waiting(&sha),
         "and no longer waits to go up"
     );
+}
+
+#[test]
+fn a_video_the_app_cannot_play_offers_another_app() {
+    // every video outside macOS, and one AVFoundation gives up on
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let src = temp_home("ui-video").with_extension("mp4");
+    std::fs::write(&src, b"not really a video").unwrap();
+    let (sha, bytes) = wb_net::sha256_file(&src).unwrap();
+    std::fs::create_dir_all(h.app.files.dir()).unwrap();
+    std::fs::copy(&src, h.app.files.dir().join(&sha)).unwrap();
+    let mut m =
+        crate::app::slack::new_message(h.app.data.new_id(), h.app.data.me, String::new(), now_ts());
+    m.attachments.push(Attachment {
+        file: sha,
+        name: "clip.mp4".into(),
+        kind: MediaKind::Video,
+        bytes,
+        w: 0,
+        h: 0,
+        secs: 0.0,
+        thumb: None,
+    });
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .push(m);
+    h.settle();
+    h.click("Video clip.mp4");
+    assert!(h.app.viewer.is_some());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !h.has("Open in another app") && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        h.has("Open in another app"),
+        "the system's player is offered"
+    );
+    h.click("Open in another app");
+    assert!(h.app.viewer.is_some(), "the viewer stays open");
+    h.key(egui::Key::Escape);
+    assert!(h.app.viewer.is_none());
 }

@@ -312,7 +312,7 @@ impl App {
                 let name = self
                     .data
                     .member(p.member)
-                    .map(|m| m.name.clone())
+                    .map(|m| m.shown().to_string())
                     .unwrap_or_else(|| p.member.to_string());
                 ui.horizontal(|ui| {
                     ui.add_sized(
@@ -346,7 +346,7 @@ impl App {
                 .members
                 .iter()
                 .filter(|m| !draft.people.iter().any(|p| p.member == m.id))
-                .map(|m| (m.id, m.name.clone()))
+                .map(|m| (m.id, m.shown().to_string()))
                 .collect();
             if !others.is_empty() {
                 ui.menu_button(tr("Add person"), |ui| {

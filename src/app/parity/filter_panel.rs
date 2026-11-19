@@ -22,7 +22,7 @@ impl App {
                 .activity
                 .first()
                 .and_then(|a| self.data.member(a.author))
-                .map(|m| m.name.clone())
+                .map(|m| m.shown().to_string())
                 .unwrap_or_default(),
             "Date closed" => t.closed_at.map(day).unwrap_or_default(),
             "Date done" => t.done_at.map(day).unwrap_or_default(),
@@ -204,7 +204,7 @@ impl App {
                     .data
                     .members
                     .iter()
-                    .map(|m| (m.id.to_string(), m.name.clone()))
+                    .map(|m| (m.id.to_string(), m.shown().to_string()))
                     .collect();
                 v.push(("none".into(), tr("Unassigned").into()));
                 v
@@ -242,7 +242,7 @@ impl App {
                 .data
                 .members
                 .iter()
-                .map(|m| (m.id.to_string(), m.name.clone()))
+                .map(|m| (m.id.to_string(), m.shown().to_string()))
                 .collect(),
             FilterField::HasSubtasks => vec![
                 ("yes".into(), tr("Has subtasks").into()),

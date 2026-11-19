@@ -121,8 +121,13 @@ public enum Notify {
     /// `manager`: I'm an owner or admin (people joining). `inbox`: the
     /// Inbox rows when the caller has them already (SyncClient.inboxItems).
     public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool, inbox: [InboxItem]? = nil) -> [Note] {
-        let members = Mentions.members(of: data)
-        let who = { (id: UInt64) in members.first { $0.id == id }?.name ?? "Someone" }
+        let all = data["members"]?.array ?? []
+        let who = { (id: UInt64) -> String in
+            let n = all.first { $0["id"]?.uint == id }.map(Mentions.shownName) ?? ""
+            return n.isEmpty ? "Someone" : n
+        }
+        // entries written before ids were kept name me by my full name
+        let fullName = { (id: UInt64) in all.first { $0["id"]?.uint == id }?["name"]?.string ?? "" }
         var out: [Note] = []
         var keys = Set<String>()
         func add(_ note: Note) { if keys.insert(note.key).inserted { out.append(note) } }
@@ -175,7 +180,7 @@ public enum Notify {
         }
 
         // the Inbox: mentions, thread replies, assignments, comments and changes on my tasks
-        let myName = who(me)
+        let myName = fullName(me)
         let tasks = Dictionary((data["tasks"]?.array ?? []).compactMap { t in t["id"]?.uint.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
         let channels = data["channels"]?.array ?? []
         for it in inbox ?? Inbox.items(data, me: me) where it.author != me {

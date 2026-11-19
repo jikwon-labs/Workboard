@@ -1595,9 +1595,9 @@ impl App {
                     for m in &members {
                         let mut on = tm.members.contains(&m.id);
                         let label = if m.invited {
-                            trf!("{} (invited)", m.name)
+                            trf!("{} (invited)", m.shown())
                         } else {
-                            m.name.clone()
+                            m.shown().to_string()
                         };
                         if check(ui, &mut on, label).changed() {
                             if on {
@@ -1653,7 +1653,7 @@ impl App {
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
                                 paint_avatar(ui.painter(), r.center(), 11.0, &m, t.bg);
-                                ui.label(RichText::new(&m.name).strong());
+                                ui.label(RichText::new(m.shown()).strong());
                                 ui.label(
                                     RichText::new(if open.len() == 1 {
                                         tr("1 open task").to_string()
@@ -1750,7 +1750,7 @@ impl App {
                                                     ui.vertical(|ui| {
                                                         ui.add(
                                                             egui::Label::new(
-                                                                RichText::new(&m.name).strong(),
+                                                                RichText::new(m.shown()).strong(),
                                                             )
                                                             .truncate(),
                                                         );
@@ -2485,7 +2485,7 @@ impl App {
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
                         paint_avatar(ui.painter(), r.center(), 11.0, &m, t.card);
-                        ui.label(&m.name);
+                        ui.label(m.shown());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(if total > 0 {
                                 fmt_duration(total)

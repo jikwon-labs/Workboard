@@ -62,10 +62,7 @@ impl App {
             "Work together" => self.together_modal(),
             "My settings" => {
                 let m = self.data.member(self.data.me).cloned().unwrap_or_default();
-                Modal::Profile {
-                    name: m.name,
-                    email: m.email,
-                }
+                Modal::profile(&m)
             }
             "Notifications" => Modal::Notifications,
             "Themes" => Modal::Themes,

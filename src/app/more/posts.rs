@@ -248,7 +248,7 @@ impl App {
                         .data
                         .members
                         .iter()
-                        .map(|m| (m.id, m.name.clone()))
+                        .map(|m| (m.id, m.shown().to_string()))
                         .collect();
                     let al = self
                         .post
@@ -385,7 +385,7 @@ impl App {
                                         let (r, _) = ui
                                             .allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
                                         paint_avatar(ui.painter(), r.center(), 12.0, a, t.card);
-                                        ui.label(RichText::new(&a.name).strong());
+                                        ui.label(RichText::new(a.shown()).strong());
                                     }
                                     ui.label(
                                         RichText::new(trf!(

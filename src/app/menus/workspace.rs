@@ -369,52 +369,6 @@ impl App {
         close
     }
 
-    /// The Profile dialog. Returns true when it should close.
-    pub(super) fn profile_body(
-        &mut self,
-        ui: &mut Ui,
-        t: &Theme,
-        name: &mut String,
-        email: &mut String,
-    ) -> bool {
-        let mut close = false;
-        ui.label(tr("Full name"));
-        ui.add(field(name).desired_width(f32::INFINITY));
-        ui.label(tr("Email"));
-        ui.add(field(email).desired_width(f32::INFINITY));
-        ui.label(tr("Avatar color"));
-        let me = self.data.me;
-        ui.horizontal_wrapped(|ui| {
-            let cur = self.data.member(me).map(|m| m.color);
-            for (i, c) in STATUS_PALETTE.iter().skip(1).enumerate() {
-                let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
-                name_it(&resp, &format!("Avatar color {}", i + 1));
-                ui.painter().circle_filled(r.center(), 9.0, rgb(*c));
-                hover_ring(ui, &resp, r.shrink(1.0), 10.0);
-                if cur == Some(*c) {
-                    ui.painter()
-                        .circle_stroke(r.center(), 11.0, Stroke::new(1.5_f32, t.text));
-                }
-                if resp.clicked() {
-                    if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
-                        m.color = *c;
-                        self.dirty = true;
-                    }
-                }
-            }
-        });
-        ui.add_space(8.0);
-        if primary_button(ui, t, tr("Save changes")).clicked() && !name.trim().is_empty() {
-            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
-                m.name = name.trim().to_string();
-                m.email = email.trim().to_string();
-            }
-            self.dirty = true;
-            close = true;
-        }
-        close
-    }
-
     /// The SetStatus dialog. Returns true when it should close.
     pub(super) fn set_status_body(&mut self, ui: &mut Ui, t: &Theme, text: &mut String) -> bool {
         let mut close = false;
@@ -489,7 +443,7 @@ impl App {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                 paint_avatar(ui.painter(), r.center(), 10.0, &m, t.card);
-                ui.label(&m.name);
+                ui.label(m.shown());
                 ui.label(
                     RichText::new(if m.invited {
                         tr("Invited")
@@ -534,7 +488,7 @@ impl App {
         let name = self
             .data
             .member(self.data.me)
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .unwrap_or_default();
         ui.label(crate::trf!("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", name));
         ui.add_space(6.0);
@@ -563,11 +517,11 @@ impl App {
         for m in self.data.members.clone() {
             let ring = t.card;
             let label = if m.id == self.data.me {
-                crate::trf!("{} (current)", m.name)
+                crate::trf!("{} (current)", m.shown())
             } else if m.invited {
-                crate::trf!("{} (invited)", m.name)
+                crate::trf!("{} (invited)", m.shown())
             } else {
-                m.name.clone()
+                m.shown().to_string()
             };
             if menu_row(ui, t, &label, m.id == self.data.me, |p, c| {
                 paint_avatar(p, c, 9.0, &m, ring)

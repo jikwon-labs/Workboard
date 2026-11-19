@@ -417,7 +417,7 @@ impl App {
                         let author = self
                             .data
                             .member(d.owner)
-                            .map(|m| m.name.clone())
+                            .map(|m| m.shown().to_string())
                             .unwrap_or_default();
                         ui.label(
                             RichText::new(trf!("{} \u{00B7} {} words", author, words))

@@ -97,8 +97,52 @@ pub fn paint_presence(
     }
 }
 
+/// Where the app keeps the profile photos ready to draw this frame: an
+/// `AvatarTextures` in egui's temp data, by photo file (sha256).
+pub const AVATAR_TEXTURES: &str = "avatar_textures";
+pub type AvatarTextures = std::sync::Arc<std::collections::HashMap<String, egui::TextureId>>;
+
+/// The texture of a profile photo, once the app has it decoded.
+pub fn avatar_texture(ctx: &egui::Context, file: &str) -> Option<egui::TextureId> {
+    ctx.data(|d| d.get_temp::<AvatarTextures>(egui::Id::new(AVATAR_TEXTURES)))
+        .and_then(|m| m.get(file).copied())
+}
+
+/// A square picture drawn as a circle of radius `r` at `c`.
+pub fn paint_round_image(p: &egui::Painter, c: Pos2, r: f32, tex: egui::TextureId) {
+    let mut mesh = egui::Mesh::with_texture(tex);
+    let n: u32 = 48;
+    let vertex = |pos: Pos2, uv: Pos2| egui::epaint::Vertex {
+        pos,
+        uv,
+        color: Color32::WHITE,
+    };
+    mesh.vertices.push(vertex(c, pos2(0.5, 0.5)));
+    for i in 0..=n {
+        let (s, co) = (i as f32 / n as f32 * std::f32::consts::TAU).sin_cos();
+        mesh.vertices.push(vertex(
+            c + vec2(co, s) * r,
+            pos2(0.5 + 0.5 * co, 0.5 + 0.5 * s),
+        ));
+    }
+    for i in 0..n {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+    p.add(egui::Shape::mesh(mesh));
+}
+
+/// A person's avatar: their profile photo when there is one (and it's
+/// here), else their initials on their colour.
 pub fn paint_avatar(p: &egui::Painter, center: Pos2, r: f32, m: &Member, ring: Color32) {
     p.circle_filled(center, r + 1.5, ring);
+    if let Some(tex) = m
+        .photo
+        .as_ref()
+        .and_then(|a| avatar_texture(p.ctx(), &a.file))
+    {
+        paint_round_image(p, center, r, tex);
+        return;
+    }
     p.circle_filled(center, r, rgb(m.color));
     p.text(
         center,

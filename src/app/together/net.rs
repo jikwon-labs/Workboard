@@ -323,7 +323,7 @@ impl App {
                     let name = self
                         .data
                         .member(member)
-                        .map(|m| m.name.clone())
+                        .map(|m| m.shown().to_string())
                         .unwrap_or_default();
                     if let Some(to) = emailed {
                         self.toast(crate::i18n::particles(&trf!(
@@ -472,7 +472,7 @@ impl App {
                         let name = self
                             .data
                             .member(member)
-                            .map(|m| m.name.clone())
+                            .map(|m| m.shown().to_string())
                             .unwrap_or_default();
                         self.toast(crate::i18n::particles(&trf!("Joined as {}.", name)));
                         self.signed_in_now();

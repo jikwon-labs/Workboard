@@ -203,7 +203,7 @@ impl App {
                 .iter()
                 .find(|m| **m != self.data.me)
                 .and_then(|m| self.data.member(*m))
-                .map(|m| m.name.clone())
+                .map(|m| m.shown().to_string())
                 .unwrap_or_else(|| tr("Just you").into()),
         }
     }
@@ -444,7 +444,7 @@ impl App {
             .data
             .members
             .iter()
-            .map(|m| m.name.as_str())
+            .flat_map(|m| m.names())
             .filter(|n| !n.is_empty())
             .collect();
         let (mut from, mut i) = (0, 0);
@@ -1108,12 +1108,12 @@ impl App {
                             ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
                         }
                         for m in &people {
-                            if menu_row(ui, &t, &m.name, false, |p, c| {
+                            if menu_row(ui, &t, m.shown(), false, |p, c| {
                                 paint_avatar(p, c, 8.0, m, t.card)
                             })
                             .clicked()
                             {
-                                insert = Some(format!("@{} ", m.name));
+                                insert = Some(format!("@{} ", m.shown()));
                                 picked = Some(m.id);
                                 close_popup(ui);
                             }
@@ -1304,12 +1304,12 @@ impl App {
                             ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
                         }
                         for m in &people {
-                            if menu_row(ui, &t, &m.name, false, |p, c| {
+                            if menu_row(ui, &t, m.shown(), false, |p, c| {
                                 paint_avatar(p, c, 8.0, m, t.card)
                             })
                             .clicked()
                             {
-                                insert = Some(format!("@{} ", m.name));
+                                insert = Some(format!("@{} ", m.shown()));
                                 picked = Some(m.id);
                                 close_popup(ui);
                             }
@@ -1616,7 +1616,7 @@ impl App {
                                 .users
                                 .iter()
                                 .filter_map(|u| self.data.member(*u))
-                                .map(|x| x.name.clone())
+                                .map(|x| x.shown().to_string())
                                 .collect();
                             if ui.add(b).on_hover_text(names.join(", ")).clicked() {
                                 acts.push(ChatAction::React {

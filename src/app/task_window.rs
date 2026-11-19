@@ -1196,8 +1196,8 @@ impl App {
                 .data
                 .members
                 .iter()
-                .filter(|m| !m.invited && m.name.to_lowercase().starts_with(&typed))
-                .map(|m| (m.id, m.name.clone()))
+                .filter(|m| !m.invited && m.any_name(|n| n.to_lowercase().starts_with(&typed)))
+                .map(|m| (m.id, m.shown().to_string()))
                 .collect();
             popup(ui, &at, win_id.with("mention_popup"), 200.0, |ui| {
                 if members.is_empty() {

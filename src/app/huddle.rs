@@ -803,7 +803,7 @@ impl App {
     fn huddle_name(&self, p: &Person) -> String {
         p.member()
             .and_then(|m| self.data.member(m))
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .unwrap_or_else(|| p.name.clone())
     }
 

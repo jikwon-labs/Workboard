@@ -268,9 +268,9 @@ pub fn assignee_menu(ui: &mut Ui, t: &Theme, data: &Data, current: &mut Vec<u64>
     for m in &data.members {
         let sel = current.contains(&m.id);
         let label = if m.id == data.me {
-            crate::trf!("{} (you)", m.name)
+            crate::trf!("{} (you)", m.shown())
         } else {
-            m.name.clone()
+            m.shown().to_string()
         };
         let ring = t.card;
         let r = menu_row(ui, t, &label, sel, |p, c| paint_avatar(p, c, 9.0, m, ring));

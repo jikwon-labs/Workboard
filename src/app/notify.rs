@@ -240,7 +240,7 @@ impl App {
         let my_name = self
             .data
             .member(me)
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .unwrap_or_default();
         for it in self.inbox_items().iter() {
             if it.author == me || it.imported {
@@ -348,7 +348,7 @@ impl App {
                 .iter()
                 .filter(|m| m.id != me && !m.invited)
             {
-                let title = trf!("{} joined {}", m.name, self.data.workspace);
+                let title = trf!("{} joined {}", m.shown(), self.data.workspace);
                 add(
                     &mut out,
                     &mut keys,

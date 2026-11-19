@@ -168,11 +168,13 @@ impl App {
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
-                    let name = if m.id == me { trf!("{} (you)", m.name) } else { m.name.clone() };
+                    let name = if m.id == me { trf!("{} (you)", m.shown()) } else { m.shown().to_string() };
                     let name_w = w * ex - 44.0 - 8.0;
-                    paint_fit(ui, pos2(r.left() + 44.0, r.center().y - (if m.status_text.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text, name_w);
-                    if !m.status_text.is_empty() {
-                        paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &m.status_text, FontId::proportional(12.0), t.text3, name_w);
+                    // under the name: their title and status
+                    let sub = [m.title.trim(), m.status_text.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" \u{00B7} ");
+                    paint_fit(ui, pos2(r.left() + 44.0, r.center().y - (if sub.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text, name_w);
+                    if !sub.is_empty() {
+                        paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &sub, FontId::proportional(12.0), t.text3, name_w);
                     }
                     paint_fit(ui, pos2(r.left() + w * ex + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2, col_w(ex, rx));
                     let role_w = w * (sx - rx) - 8.0;
@@ -208,7 +210,7 @@ impl App {
                         let (label, kind) = if m.invited { ("Cancel invite", "invite") } else { ("Remove", "person") };
                         let br = if m.invited { Rect::from_min_size(pos2(r.right() - 104.0, br.top()), vec2(96.0, 24.0)) } else { br };
                         if put_over(ui, br, ghost(egui::Button::new(RichText::new(tr(label)).color(t.danger)))).clicked() {
-                            remove = Some((kind, m.id, m.name.clone()));
+                            remove = Some((kind, m.id, m.shown().to_string()));
                         }
                     }
                 }
@@ -327,7 +329,7 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     for mem in &members {
                         let mut on = m.attendees.contains(&mem.id);
-                        if check(ui, &mut on, &mem.name).changed() {
+                        if check(ui, &mut on, mem.shown()).changed() {
                             if on {
                                 m.attendees.push(mem.id);
                             } else {

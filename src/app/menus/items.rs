@@ -74,9 +74,9 @@ impl App {
                     let allowed = manager || m.id == me;
                     // in the channel once they join, like #general
                     let label = if m.invited {
-                        crate::trf!("{} (invited)", m.name)
+                        crate::trf!("{} (invited)", m.shown())
                     } else {
-                        m.name.clone()
+                        m.shown().to_string()
                     };
                     let b = ui.add_enabled(allowed, Check::new(&mut on, label));
                     let b = if allowed { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can change who else is in it.")) };

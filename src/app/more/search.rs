@@ -356,14 +356,14 @@ impl App {
                 .members
                 .iter()
                 .filter(|m| {
-                    has(&m.name) || (!ql.is_empty() && m.email.to_lowercase().contains(&ql))
+                    m.any_name(&has) || (!ql.is_empty() && m.email.to_lowercase().contains(&ql))
                 })
                 .take(many(7));
             rows.extend(people.map(|m| {
                 (
                     "People",
                     "person",
-                    m.name.clone(),
+                    m.shown().to_string(),
                     if m.email.is_empty() {
                         super::menus::role_text(&m.role).to_string()
                     } else {

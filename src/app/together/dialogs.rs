@@ -72,7 +72,7 @@ impl App {
     pub(crate) fn who(&self, id: u64) -> String {
         self.data
             .member(id)
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| tr("Someone").into())
     }
@@ -110,7 +110,7 @@ impl App {
                     let Some(m) = self.data.member(p.member) else {
                         continue;
                     };
-                    let name = m.name.clone();
+                    let name = m.shown().to_string();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&name).color(t.text));
                         ui.label(RichText::new(tr(p.role.label())).small().color(t.text2));
@@ -255,7 +255,7 @@ impl App {
                 let name = self
                     .data
                     .member(self.data.me)
-                    .map(|m| m.name.clone())
+                    .map(|m| m.shown().to_string())
                     .unwrap_or_default();
                 ui.label(
                     RichText::new(crate::i18n::particles(&trf!(
@@ -525,9 +525,9 @@ impl App {
             .show(ui, |ui| {
                 for m in &members {
                     let label = if m.invited {
-                        trf!("{}   {}  (invited)", m.name, m.email)
+                        trf!("{}   {}  (invited)", m.shown(), m.email)
                     } else {
-                        format!("{}   {}", m.name, m.email)
+                        format!("{}   {}", m.shown(), m.email)
                     };
                     if ui.add(ghost(egui::Button::new(label))).clicked() {
                         self.become_member(Some(m.id), "", "");

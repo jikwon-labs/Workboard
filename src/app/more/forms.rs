@@ -100,7 +100,7 @@ impl App {
             if self.data.list_archived(picked) && self.data.space_of_list(picked).is_some() {
                 lists.push((picked, trf!("{} (archived)", self.data.list_name(picked))));
             }
-            let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.name.clone())).collect();
+            let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.shown().to_string())).collect();
             // answers typed into one form don't carry over to another
             let fid = self.data.extra.forms[fi].id;
             let for_id = egui::Id::new("form_fill_for");

@@ -449,7 +449,7 @@ impl Hub {
                     .and_then(|w| w.as_str())
                     .unwrap_or("")
                     .to_string(),
-                member_field(c, from, "name"),
+                shown_name(c, from),
             )
         };
         if !email_ok(&to) {

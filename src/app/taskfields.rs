@@ -392,8 +392,8 @@ impl App {
                 let r = menu_row_named(
                     ui,
                     t,
-                    &format!("Watcher {}", m.name),
-                    &m.name,
+                    &format!("Watcher {}", m.shown()),
+                    m.shown(),
                     sel,
                     |p, c| paint_avatar(p, c, 9.0, m, ring),
                 );
@@ -595,7 +595,7 @@ impl App {
                         for m in &members {
                             let sel = item.assignee == Some(m.id);
                             let ring = t.card;
-                            if menu_row(ui, t, &m.name, sel, |p, c| {
+                            if menu_row(ui, t, m.shown(), sel, |p, c| {
                                 paint_avatar(p, c, 9.0, m, ring)
                             })
                             .clicked()

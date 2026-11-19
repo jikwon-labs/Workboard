@@ -420,6 +420,28 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(Mentions.ids(in: "@", members: people), [])
     }
 
+    func testMembersAreShownByDisplayNameAndMentionedByEitherName() {
+        var d = SampleWorkspace.make()
+        var members = d["members"]!.array!
+        let i = members.firstIndex { $0["id"] == 2 }!
+        members[i]["display_name"] = "Lexi"
+        members[i]["title"] = "Engineer"
+        d["members"] = .array(members)
+        let alex = WorkspaceView(d).member(2)!
+        XCTAssertEqual(alex.name, "Lexi", "the display name is shown first")
+        XCTAssertEqual(alex.fullName, "Alex Kim")
+        XCTAssertEqual(alex.title, "Engineer")
+        XCTAssertEqual(alex.initials, "L")
+        XCTAssertEqual(WorkspaceView(d).member(3)!.name, WorkspaceView(d).member(3)!.fullName, "no display name: the full name")
+        let people = Mentions.members(of: d)
+        XCTAssertEqual(Mentions.ids(in: "@Lexi look", members: people), [2])
+        XCTAssertEqual(Mentions.ids(in: "@Alex Kim look", members: people), [2])
+        XCTAssertEqual(people.first { $0.id == 2 }?.name, "Alex Kim", "a lookup by id finds the full name")
+        members[i]["display_name"] = "  "
+        d["members"] = .array(members)
+        XCTAssertEqual(WorkspaceView(d).member(2)!.name, "Alex Kim", "a blank display name falls back")
+    }
+
     func testSendingAndEditingWorkOutMentions() {
         var d = SampleWorkspace.make()
         XCTAssertTrue(Edits.sendMessage(&d, channel: 301, text: "@Alex Kim can you look?", me: 1, id: 9001, ts: 60))

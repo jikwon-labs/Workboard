@@ -547,7 +547,7 @@ impl App {
                     let grouped = matches!(self.view, ViewKind::List | ViewKind::Board);
                     let group_label = format!("Group: {}", self.group_by.label());
                     let alabel = match self.assignee_filter.and_then(|a| self.data.member(a)) {
-                        Some(m) => m.name.clone(),
+                        Some(m) => m.shown().to_string(),
                         None => "Assignee".into(),
                     };
                     let nf = self.filter.count()
@@ -765,7 +765,7 @@ impl App {
                             }
                             for m in &data.members {
                                 if ui
-                                    .selectable_label(self.assignee_filter == Some(m.id), &m.name)
+                                    .selectable_label(self.assignee_filter == Some(m.id), m.shown())
                                     .clicked()
                                 {
                                     self.assignee_filter = Some(m.id);

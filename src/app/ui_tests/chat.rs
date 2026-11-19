@@ -1147,6 +1147,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
         status_text: String::new(),
         slack: vec![],
         slack_mine: vec![],
+        ..Default::default()
     });
     h.click("general");
     let before: Vec<egui::Rect> = h

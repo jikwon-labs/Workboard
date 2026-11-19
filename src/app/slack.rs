@@ -689,7 +689,7 @@ impl App {
                 let n = people
                     .get(&u.id)
                     .and_then(|m| self.data.member(*m))
-                    .map(|m| m.name.clone())
+                    .map(|m| m.shown().to_string())
                     .unwrap_or_else(|| u.shown());
                 (u.id.clone(), n)
             })
@@ -820,6 +820,7 @@ impl App {
                         status_text: String::new(),
                         slack: vec![],
                         slack_mine: vec![],
+                        ..Default::default()
                     });
                     people.insert(m.user.clone(), mid);
                     if existing.is_none() {
@@ -1078,7 +1079,7 @@ impl App {
                 let name = self
                     .data
                     .member(m)
-                    .map(|x| x.name.clone())
+                    .map(|x| x.shown().to_string())
                     .unwrap_or_default();
                 ui.label(
                     RichText::new(trf!(

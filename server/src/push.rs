@@ -488,25 +488,32 @@ pub fn notes_in(
     skip: &[u64],
     now_secs: i64,
 ) -> Vec<Note> {
-    let people: Vec<(u64, String)> = array_at(canon, "members")
+    // (id, full name, display name): pushes name people as the app shows
+    // them (the display name when there is one), and either name mentions
+    let people: Vec<(u64, String, String)> = array_at(canon, "members")
         .iter()
         .filter_map(|m| {
             Some((
                 u64_field(m, "id")?,
                 text_field(m, "name").trim().to_string(),
+                text_field(m, "display_name").trim().to_string(),
             ))
         })
         .collect();
     let name = |id: u64| {
         people
             .iter()
-            .find(|(i, _)| *i == id)
-            .map(|(_, n)| n.clone())
+            .find(|(i, _, _)| *i == id)
+            .map(|(_, n, d)| if d.is_empty() { n.clone() } else { d.clone() })
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "Someone".into())
     };
     // the app's rule (wb_sync::mentions): the ids a message keeps, else its text
-    let named: Vec<(u64, &str)> = people.iter().map(|(i, n)| (*i, n.as_str())).collect();
+    let named: Vec<(u64, &str)> = people
+        .iter()
+        .flat_map(|(i, n, d)| [(*i, n.as_str()), (*i, d.as_str())])
+        .filter(|(_, n)| !n.is_empty())
+        .collect();
     let mentioned = |m: &Value| -> Vec<u64> {
         let saved: Vec<u64> = array_at(m, "mentions")
             .iter()
@@ -903,6 +910,30 @@ mod tests {
         ]}]});
         let n = notes(&c, &HashSet::new(), &[], now());
         assert_eq!(who(&n), vec![(2, 5), (4, 7), (5, 8)]);
+    }
+
+    #[test]
+    fn pushes_name_people_by_display_name_and_either_name_mentions() {
+        let c = json!({"members": [
+            {"id": 1, "name": "Seo Jiwon", "display_name": "Jiwon"},
+            {"id": 2, "name": "Alex Kim", "display_name": ""},
+            {"id": 3, "name": "Bo"}
+        ],
+        "channels": [{"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [
+            msg(5, 1, "@Alex Kim look"),
+            msg(6, 2, "@Jiwon can you check"),
+            msg(7, 3, "@Seo Jiwon too")
+        ]}]});
+        let n = notes(&c, &HashSet::new(), &[], now());
+        assert_eq!(who(&n), vec![(2, 5), (1, 6), (1, 7)]);
+        let title = |id: u64| {
+            n.iter().find(|x| x.id == id).unwrap().payload["aps"]["alert"]["title"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert!(title(5).starts_with("Jiwon"), "{}", title(5));
+        assert!(title(6).starts_with("Alex Kim"), "{}", title(6));
     }
 
     #[test]

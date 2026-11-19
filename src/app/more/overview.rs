@@ -385,7 +385,7 @@ impl App {
             popup(ui, &orr, ui.id().with(("ov_owner_p", lid)), 200.0, |ui| {
                 for m in &members {
                     let ring = tt.card;
-                    if menu_row(ui, &tt, &m.name, item.owner == Some(m.id), |p, c| {
+                    if menu_row(ui, &tt, m.shown(), item.owner == Some(m.id), |p, c| {
                         paint_avatar(p, c, 8.0, m, ring)
                     })
                     .clicked()

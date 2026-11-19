@@ -813,11 +813,11 @@ impl App {
             for (id, other, real_unread) in dms {
                 let unread = if muted { 0 } else { real_unread };
                 let (name, sub) = match &other {
-                    Some(m) => (m.name.clone(), None),
+                    Some(m) => (m.shown().to_string(), None),
                     None => (
                         self.data
                             .member(me)
-                            .map(|m| m.name.clone())
+                            .map(|m| m.shown().to_string())
                             .unwrap_or_default(),
                         Some(tr("\u{2014} You").to_string()),
                     ),

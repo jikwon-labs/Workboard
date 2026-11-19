@@ -221,13 +221,13 @@ impl App {
                         .parse::<u64>()
                         .ok()
                         .and_then(|id| self.data.member(id))
-                        .map(|m| m.name.clone())
+                        .map(|m| m.shown().to_string())
                         .unwrap_or_else(|| tr("choose").into());
                     egui::ComboBox::from_id_salt("au_val")
                         .selected_text(cur)
                         .show_ui(ui, |ui| {
                             for m in &self.data.members {
-                                ui.selectable_value(value, m.id.to_string(), &m.name);
+                                ui.selectable_value(value, m.id.to_string(), m.shown());
                             }
                         });
                 }

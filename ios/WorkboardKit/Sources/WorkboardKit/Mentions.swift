@@ -41,9 +41,26 @@ public enum Mentions {
         return out
     }
 
-    /// Everyone in the workspace, as mentioned_ids gets them (data.members).
+    /// Everyone in the workspace, as mentioned_ids gets them (data.members):
+    /// each full name, then each display name, since either mentions them.
+    /// Looking a member up by id finds their full name first.
     public static func members(of data: JSON) -> [(id: UInt64, name: String)] {
-        (data["members"]?.array ?? []).map { (id: $0["id"]?.uint ?? 0, name: $0["name"]?.string ?? "") }
+        let all = data["members"]?.array ?? []
+        let full = all.map { (id: $0["id"]?.uint ?? 0, name: $0["name"]?.string ?? "") }
+        let display: [(id: UInt64, name: String)] = all.compactMap { m in
+            let d = (m["display_name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let n = (m["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !d.isEmpty, d != n else { return nil }
+            return (id: m["id"]?.uint ?? 0, name: d)
+        }
+        return full + display
+    }
+
+    /// The name others see a member by: their display name when they set
+    /// one, else their full name (the Mac app's `Member::shown`).
+    public static func shownName(_ m: JSON) -> String {
+        let d = (m["display_name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return d.isEmpty ? (m["name"]?.string ?? "") : d
     }
 
     /// mentions_in in src/model.rs (all members, nothing picked).

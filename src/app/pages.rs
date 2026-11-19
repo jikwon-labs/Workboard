@@ -448,7 +448,7 @@ impl App {
                                         let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
                                         paint_avatar(ui.painter(), r.center(), 15.0, m, t.card);
                                         ui.vertical(|ui| {
-                                            let name = if m.id == self.data.me { trf!("{} (you)", m.name) } else { m.name.clone() };
+                                            let name = if m.id == self.data.me { trf!("{} (you)", m.shown()) } else { m.shown().to_string() };
                                             ui.label(RichText::new(name).strong());
                                             ui.label(RichText::new(trf!("{} open  \u{2022}  {} in progress  \u{2022}  {} done", open.len(), active, done)).small().color(t.text2));
                                         });
@@ -966,7 +966,7 @@ impl App {
                     .iter()
                     .map(|m| {
                         (
-                            m.name.clone(),
+                            m.shown().to_string(),
                             tasks
                                 .iter()
                                 .filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x))
@@ -1028,7 +1028,7 @@ impl App {
                     .iter()
                     .map(|m| {
                         (
-                            m.name.clone(),
+                            m.shown().to_string(),
                             per.get(&m.id).copied().unwrap_or(0),
                             rgb(m.color),
                         )

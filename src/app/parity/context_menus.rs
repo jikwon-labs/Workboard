@@ -125,7 +125,10 @@ impl App {
             for m in &members {
                 let on = task.assignees.contains(&m.id);
                 let ring = t.card;
-                if menu_row(ui, &t, &m.name, on, |p, c| paint_avatar(p, c, 9.0, m, ring)).clicked()
+                if menu_row(ui, &t, m.shown(), on, |p, c| {
+                    paint_avatar(p, c, 9.0, m, ring)
+                })
+                .clicked()
                 {
                     let mut e = task.clone();
                     if on {

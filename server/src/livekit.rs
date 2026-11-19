@@ -87,11 +87,8 @@ impl Hub {
         if wb_sync::closed_to(ch, member) {
             return Err("You're not in that conversation.".into());
         }
-        // as written (member_field trims it)
-        let name = member_record(Some(canon), member)
-            .and_then(|m| m.get("name")?.as_str())
-            .unwrap_or("")
-            .to_string();
+        // as the apps show it: the display name, else the full name
+        let name = shown_name(Some(canon), member);
         let token = call_token(
             &cfg,
             &self.room(channel),

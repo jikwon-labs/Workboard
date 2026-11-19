@@ -36,9 +36,13 @@ pub(super) enum Modal {
         /// is one), else on this computer only
         on_server: bool,
     },
+    /// Edit profile (`profile.rs`).
     Profile {
         name: String,
+        display: String,
+        title: String,
         email: String,
+        photo: Option<Attachment>,
     },
     SetStatus {
         text: String,
@@ -598,7 +602,10 @@ impl App {
                 let (r, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
                 paint_avatar(ui.painter(), r.center(), 16.0, &m, t.card);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(&m.name).size(15.0));
+                    ui.label(RichText::new(m.shown()).size(15.0));
+                    if !m.title.trim().is_empty() {
+                        ui.label(RichText::new(m.title.trim()).small().color(t.text2));
+                    }
                     let muted = self.data.extra.muted_until > now_ts();
                     let st: String = if !m.status_text.is_empty() {
                         m.status_text.clone()
@@ -639,6 +646,10 @@ impl App {
                 .map(|m| m.status_text.clone())
                 .unwrap_or_default();
             self.modal = Some(Modal::SetStatus { text: cur });
+            close_popup(ui);
+        }
+        if menu_item(ui, &t, "person", tr("Edit profile"), "").clicked() {
+            self.open_profile();
             close_popup(ui);
         }
         // a flyout beside the row (egui's sub menu drew over this menu): to the
@@ -752,10 +763,7 @@ impl App {
                 self.modal = Some(match label {
                     "Settings" => {
                         let m = self.data.member(me).cloned().unwrap_or_default();
-                        Modal::Profile {
-                            name: m.name,
-                            email: m.email,
-                        }
+                        Modal::profile(&m)
                     }
                     "Notifications" => Modal::Notifications,
                     "Themes" => Modal::Themes,
@@ -1267,7 +1275,7 @@ impl App {
             Modal::Invite { .. } => tr("Invite people").to_string(),
             Modal::WorkspaceSettings { .. } => tr("Workspace settings").into(),
             Modal::NewWorkspace { .. } => tr("Create Workspace").into(),
-            Modal::Profile { .. } => tr("My settings").into(),
+            Modal::Profile { .. } => tr("Edit profile").into(),
             Modal::SetStatus { .. } => tr("Set status").into(),
             Modal::Themes => tr("Themes").into(),
             Modal::Shortcuts => tr("Keyboard shortcuts").into(),
@@ -1378,6 +1386,9 @@ impl App {
         }
         if open && !close && self.modal.is_none() {
             self.modal = Some(modal);
+        } else if matches!(modal, Modal::Profile { .. }) {
+            // a photo chosen in Edit profile and not saved is dropped
+            self.profile_photo = None;
         }
     }
 
@@ -1460,7 +1471,13 @@ impl App {
                 role,
                 on_server,
             } => close = self.new_workspace_body(ui, t, step, name, apps, emails, role, on_server),
-            Modal::Profile { name, email } => close = self.profile_body(ui, t, name, email),
+            Modal::Profile {
+                name,
+                display,
+                title,
+                email,
+                photo,
+            } => close = self.profile_body(ui, t, name, display, title, email, photo),
             Modal::SetStatus { text } => close = self.set_status_body(ui, t, text),
             Modal::Themes => close = self.themes_body(ui, t),
             Modal::Shortcuts => close = self.shortcuts_body(ui, t),
@@ -1596,6 +1613,7 @@ impl App {
                 status_text: String::new(),
                 slack: vec![],
                 slack_mine: vec![],
+                ..Default::default()
             });
             // on a server (or going up to one): ask for their invite code
             // (emailed by the server) once it has them
@@ -1646,7 +1664,7 @@ impl App {
                     .parse::<u64>()
                     .ok()
                     .and_then(|id| self.data.member(id))
-                    .map(|m| m.name.clone())
+                    .map(|m| m.shown().to_string())
                     .unwrap_or_default()
             ),
             "priority" => format!(
@@ -1679,7 +1697,7 @@ impl App {
                     .parse::<u64>()
                     .ok()
                     .and_then(|id| self.data.member(id))
-                    .map(|m| m.name.clone())
+                    .map(|m| m.shown().to_string())
                     .unwrap_or_default()
             ),
             "priority" => crate::trf!(
@@ -1740,7 +1758,7 @@ impl App {
                     self.data
                         .members
                         .iter()
-                        .find(|m| m.name.eq_ignore_ascii_case(a))
+                        .find(|m| m.any_name(|n| n.eq_ignore_ascii_case(a)))
                 })
                 .map(|m| vec![m.id])
                 .unwrap_or_default();
@@ -1769,7 +1787,7 @@ impl App {
                 .assignees
                 .first()
                 .and_then(|a| self.data.member(*a))
-                .map(|m| m.name.clone())
+                .map(|m| m.shown().to_string())
                 .unwrap_or_default();
             let row = [
                 t.name.clone(),
@@ -2138,15 +2156,15 @@ impl App {
                 if tab != 2 {
                     ui.label(RichText::new(tr("Direct Messages")).small().color(t.text3));
                     ui.horizontal_wrapped(|ui| {
-                        for m in members.iter().filter(|m| !m.invited && hit(&m.name)) {
+                        for m in members.iter().filter(|m| !m.invited && m.any_name(&hit)) {
                             let label = if m.id == me {
-                                crate::trf!("{} (You)", m.name)
+                                crate::trf!("{} (You)", m.shown())
                             } else {
-                                m.name.clone()
+                                m.shown().to_string()
                             };
                             let (r, resp) =
                                 ui.allocate_exact_size(vec2(72.0, 64.0), Sense::click());
-                            name_it(&resp, &format!("Message {}", m.name));
+                            name_it(&resp, &format!("Message {}", m.shown()));
                             if resp.hovered() {
                                 ui.painter().rect_filled(r, 8.0, t.hover);
                             }
@@ -2174,11 +2192,11 @@ impl App {
                 if tab == 1 {
                     ui.add_space(4.0);
                     ui.label(RichText::new(tr("People")).small().color(t.text3));
-                    for m in members.iter().filter(|m| hit(&m.name) || hit(&m.email)) {
+                    for m in members.iter().filter(|m| m.any_name(&hit) || hit(&m.email)) {
                         let label = if m.id == me {
-                            crate::trf!("{} \u{2014} You", m.name)
+                            crate::trf!("{} \u{2014} You", m.shown())
                         } else {
-                            m.name.clone()
+                            m.shown().to_string()
                         };
                         let ring = t.card;
                         if menu_row(ui, &t, &label, false, |p, c| {

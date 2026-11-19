@@ -128,7 +128,7 @@ impl App {
                                                         t.card,
                                                     );
                                                     ui.label(
-                                                        RichText::new(&m.name)
+                                                        RichText::new(m.shown())
                                                             .small()
                                                             .color(t.text2),
                                                     );
@@ -184,7 +184,7 @@ impl App {
             .data
             .members
             .iter()
-            .map(|m| (m.id, m.name.clone()))
+            .map(|m| (m.id, m.shown().to_string()))
             .collect();
         let exists: HashSet<u64> = self.data.tasks.iter().map(|x| x.id).collect();
         let mut delete = false;

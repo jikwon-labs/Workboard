@@ -87,7 +87,7 @@ impl App {
                                 for m in &members {
                                     let ring = t.card;
                                     let all = sel_tasks.iter().all(|x| x.assignees.contains(&m.id));
-                                    if menu_row(ui, &t, &m.name, all, |p, c| {
+                                    if menu_row(ui, &t, m.shown(), all, |p, c| {
                                         paint_avatar(p, c, 9.0, m, ring)
                                     })
                                     .clicked()

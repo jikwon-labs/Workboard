@@ -380,7 +380,7 @@ impl App {
         let author = self
             .data
             .member(d.owner)
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .unwrap_or_default();
         let when = local(d.updated)
             .map(|x| x.format("%Y-%m-%d %H:%M").to_string())

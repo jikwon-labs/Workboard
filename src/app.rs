@@ -36,6 +36,7 @@ mod notify;
 mod notify_tests;
 mod pages;
 mod parity;
+mod profile;
 mod settings;
 mod sharing;
 mod shell;
@@ -578,6 +579,8 @@ pub struct App {
     /// the cache folder too (`taskfields::TASK_FILES`), so ones still going
     /// up when the app quits join their task after the next start.
     task_files: Vec<(u64, files::Pending)>,
+    /// A picture chosen in Edit profile, while it gets ready and goes up.
+    profile_photo: Option<files::Pending>,
     /// What of `task_files` is written down (task, file), once read back
     /// for this workspace; None until then.
     task_files_saved: Option<Vec<(u64, String)>>,
@@ -975,6 +978,7 @@ impl App {
             undo_trash: None,
             confirm_bulk_delete: false,
             task_files: vec![],
+            profile_photo: None,
             task_files_saved: None,
             sweep: Default::default(),
             lang_choice,
@@ -1147,7 +1151,7 @@ impl App {
                     t.assignees
                         .iter()
                         .filter_map(|a| self.data.member(*a))
-                        .map(|m| m.name.to_lowercase())
+                        .map(|m| m.shown().to_lowercase())
                         .min()
                 };
                 v.sort_by_key(|t| (key(t).is_none(), key(t), t.order));
@@ -1264,7 +1268,7 @@ impl App {
                     }
                     out.push(Group {
                         key: format!("a:{}", m.id),
-                        label: m.name.to_uppercase(),
+                        label: m.shown().to_uppercase(),
                         color: rgb(m.color),
                         status: None,
                         priority: None,
@@ -1581,7 +1585,7 @@ impl App {
         let name = self
             .data
             .member(who)
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .unwrap_or_default();
         Activity {
             ts: now_ts(),
@@ -3602,7 +3606,7 @@ impl App {
                 x.assignees
                     .first()
                     .and_then(|a| data.member(*a))
-                    .map(|m| m.name.to_lowercase())
+                    .map(|m| m.shown().to_lowercase())
             };
             tasks.sort_by(|a, b| {
                 use std::cmp::Ordering;
@@ -4134,7 +4138,7 @@ impl App {
                         let me = self
                             .data
                             .member(self.data.me)
-                            .map(|m| m.name.clone())
+                            .map(|m| m.shown().to_string())
                             .unwrap_or_default();
                         ui.label(
                             RichText::new(trf!("{}, {}", tr(greet), me))
@@ -4631,10 +4635,17 @@ impl App {
                 let read_one = |k: &str| read_list.iter().any(|x| x == k);
                 let mut items: Vec<(i64, nav::InboxSrc, String, Activity)> = vec![];
                 let me = self.data.me;
-                let my_name = self
+                // "@" and either of my names (full or display)
+                let my_names: Vec<String> = self
                     .data
                     .member(me)
-                    .map(|m| format!("@{}", m.name))
+                    .map(|m| {
+                        m.names()
+                            .into_iter()
+                            .filter(|n| !n.is_empty())
+                            .map(|n| format!("@{}", n))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 for task in &self.data.tasks {
                     for a in &task.activity {
@@ -4665,8 +4676,7 @@ impl App {
                                     && !a.resolved
                                     && (a.assignee == Some(me)
                                         || (a.assignee.is_none()
-                                            && !my_name.is_empty()
-                                            && a.text.contains(&my_name)))
+                                            && my_names.iter().any(|n| a.text.contains(n))))
                             }
                             (CommentsPage::Assigned, _) => {
                                 a.comment
@@ -5091,7 +5101,9 @@ impl App {
                             let names: Vec<String> = qa
                                 .assignees
                                 .iter()
-                                .filter_map(|id| self.data.member(*id).map(|m| m.name.clone()))
+                                .filter_map(|id| {
+                                    self.data.member(*id).map(|m| m.shown().to_string())
+                                })
                                 .collect();
                             truncate(&names.join(", "), 20)
                         };

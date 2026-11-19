@@ -105,7 +105,23 @@ pub struct Pasted {
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
+pub use mac::pick_picture;
+#[cfg(all(target_os = "macos", not(test)))]
 pub use mac::pick_zip;
+#[cfg(all(not(target_os = "macos"), not(test)))]
+pub use other::pick_picture;
+
+#[cfg(test)]
+thread_local! {
+    /// What the next `pick_picture` returns in tests (no file panel there).
+    pub static PICKED_PICTURE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// In tests: the picture a test chose with `PICKED_PICTURE`.
+#[cfg(test)]
+pub fn pick_picture() -> Option<PathBuf> {
+    PICKED_PICTURE.with(|p| p.borrow_mut().take())
+}
 #[cfg(target_os = "macos")]
 pub use mac::{pasteboard, pick_files, probe, thumbnail, video_still_jpeg, Player};
 
@@ -126,6 +142,10 @@ mod other {
     }
     pub fn pick_files() -> Vec<PathBuf> {
         vec![]
+    }
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn pick_picture() -> Option<PathBuf> {
+        None
     }
     pub fn pick_zip(_: &str) -> Option<PathBuf> {
         None
@@ -611,6 +631,29 @@ mod mac {
                     from_ns(msg_send![u, path]).map(PathBuf::from)
                 })
                 .collect()
+        })
+    }
+
+    /// One picture, for a profile photo.
+    #[cfg(not(test))]
+    pub fn pick_picture() -> Option<PathBuf> {
+        autoreleasepool(|| unsafe {
+            let panel: *mut Object = msg_send![class!(NSOpenPanel), openPanel];
+            let _: () = msg_send![panel, setAllowsMultipleSelection: NO];
+            let _: () = msg_send![panel, setCanChooseDirectories: NO];
+            let _: () = msg_send![panel, setCanChooseFiles: YES];
+            let _: () = msg_send![panel, setMessage: ns(crate::i18n::tr("Choose a profile photo"))];
+            let r: isize = msg_send![panel, runModal];
+            if r != 1 {
+                return None;
+            }
+            let urls: *mut Object = msg_send![panel, URLs];
+            let n: usize = msg_send![urls, count];
+            if n == 0 {
+                return None;
+            }
+            let u: *mut Object = msg_send![urls, objectAtIndex: 0usize];
+            from_ns(msg_send![u, path]).map(PathBuf::from)
         })
     }
 

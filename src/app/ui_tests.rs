@@ -20,6 +20,7 @@ mod look;
 mod media;
 mod navigation;
 mod people;
+mod profile;
 mod sign_in;
 mod slack;
 mod tasks;

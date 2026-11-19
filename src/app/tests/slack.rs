@@ -73,6 +73,7 @@ fn a_slack_export_comes_in_as_channels_with_threads_and_times() {
         status_text: String::new(),
         slack: vec![],
         slack_mine: vec![],
+        ..Default::default()
     });
     let before = a.data.members.len();
     let (users, channels) = crate::app::slack::read_export(&slack_export()).unwrap();
@@ -393,6 +394,7 @@ fn slack_people_are_not_merged_by_name_and_same_second_messages_all_come_in() {
         status_text: String::new(),
         slack: vec![],
         slack_mine: vec![],
+        ..Default::default()
     });
     let export = [
         (

@@ -7,7 +7,13 @@ import Foundation
 
 public struct MemberView: Identifiable, Hashable, Sendable {
     public let id: UInt64
+    /// The name people see: the display name when there is one, else the
+    /// full name (the Mac app's `Member::shown`).
     public let name: String
+    public let fullName: String
+    public let displayName: String
+    /// What they do on the team ("Designer"); empty when not set.
+    public let title: String
     public let color: [Int]
     public let email: String
     public let role: String
@@ -15,7 +21,10 @@ public struct MemberView: Identifiable, Hashable, Sendable {
 
     init(_ j: JSON) {
         id = j["id"]?.uint ?? 0
-        name = j["name"]?.string ?? ""
+        fullName = j["name"]?.string ?? ""
+        displayName = (j["display_name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        title = (j["title"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        name = Mentions.shownName(j)
         color = (j["color"]?.array ?? []).compactMap { $0.int.map(Int.init) }
         email = j["email"]?.string ?? ""
         role = j["role"]?.string ?? ""

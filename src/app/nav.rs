@@ -344,7 +344,7 @@ impl App {
             } else {
                 self.data
                     .member(c.members.iter().copied().find(|m| *m != me).unwrap_or(me))
-                    .map(|m| m.name.clone())
+                    .map(|m| m.shown().to_string())
                     .unwrap_or_default()
             };
             for m in &c.messages {
@@ -451,7 +451,7 @@ impl App {
         let who = self
             .data
             .member(author)
-            .map(|m| m.name.clone())
+            .map(|m| m.shown().to_string())
             .unwrap_or_default();
         match src {
             InboxSrc::Chat {

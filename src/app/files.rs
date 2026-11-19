@@ -1393,8 +1393,13 @@ impl App {
         let remote = self.media_remote();
         // before the tick, which takes the files asked for
         self.save_fetched_files();
+        self.want_profile_photos();
         self.files.tick(ctx, &remote);
+        if let Some(c) = ctx {
+            self.publish_profile_photos(c);
+        }
         for (local, result) in self.files.take_prepared() {
+            self.profile_photo_prepared(local, &result, &remote);
             let boxes = [&mut self.chat.files, &mut self.chat.thread_files]
                 .into_iter()
                 .chain(self.drafts.chat_files.saved.values_mut())

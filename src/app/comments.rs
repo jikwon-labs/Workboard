@@ -174,7 +174,13 @@ impl App {
         let reply_id = win_id.with("comment_reply");
         let mut editing: Option<(u64, String)> = ui.data(|d| d.get_temp(edit_id)).unwrap_or(None);
         let mut replying: Option<(u64, String)> = ui.data(|d| d.get_temp(reply_id)).unwrap_or(None);
-        let mut names: Vec<String> = self.data.members.iter().map(|m| m.name.clone()).collect();
+        let mut names: Vec<String> = self
+            .data
+            .members
+            .iter()
+            .flat_map(|m| m.names())
+            .map(String::from)
+            .collect();
         names.sort_by_key(|n| std::cmp::Reverse(n.len()));
         let ids: HashSet<u64> = task
             .activity
@@ -394,7 +400,7 @@ impl App {
                             ui.menu_button(tr("Assign comment"), |ui| {
                                 for m in self.data.members.iter().filter(|m| !m.invited) {
                                     if ui
-                                        .selectable_label(a.assignee == Some(m.id), &m.name)
+                                        .selectable_label(a.assignee == Some(m.id), m.shown())
                                         .clicked()
                                     {
                                         acts.push(Act::Assign {
@@ -460,7 +466,7 @@ impl App {
                         let name = self
                             .data
                             .member(to)
-                            .map(|m| m.name.clone())
+                            .map(|m| m.shown().to_string())
                             .unwrap_or_else(|| tr("someone").into());
                         // the same check box as everywhere else
                         let mut on = a.resolved;
@@ -541,7 +547,7 @@ impl App {
                                 .users
                                 .iter()
                                 .filter_map(|u| self.data.member(*u))
-                                .map(|m| m.name.clone())
+                                .map(|m| m.shown().to_string())
                                 .collect();
                             if ui.add(b).on_hover_text(who.join(", ")).clicked() {
                                 acts.push(Act::React {

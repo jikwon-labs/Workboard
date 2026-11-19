@@ -187,8 +187,22 @@ pub struct SpaceGrant {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Member {
     pub id: u64,
+    /// The full name (Edit profile's "Full name").
     pub name: String,
     pub color: [u8; 3],
+    /// What the person likes to be called; shown before the full name
+    /// wherever others see them (`shown`). Empty when not set. Always
+    /// written, so clearing it reaches the others too.
+    #[serde(default)]
+    pub display_name: String,
+    /// What they do on the team ("Designer"), shown with their name.
+    #[serde(default)]
+    pub title: String,
+    /// Their profile photo: a square picture in the file cache and on the
+    /// server, like a chat picture. Kept as an attachment so the cache
+    /// cleanup, sharing and the server's file cleanup count it as in use.
+    #[serde(default)]
+    pub photo: Option<Attachment>,
     #[serde(default)]
     pub email: String,
     /// Owner, Admin, Member or Guest.
@@ -222,7 +236,10 @@ pub struct Member {
 /// is not Alex but "@지원님" is 지원. When several people share the name, the
 /// ones in `picked` (chosen from the mention list) are meant, else all.
 pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64> {
-    let people: Vec<(u64, &str)> = members.iter().map(|m| (m.id, m.name.as_str())).collect();
+    let people: Vec<(u64, &str)> = members
+        .iter()
+        .flat_map(|m| m.names().into_iter().map(move |n| (m.id, n)))
+        .collect();
     wb_sync::mentions::mentioned_ids(text, &people, picked)
 }
 
@@ -232,9 +249,36 @@ impl Member {
         self.role == "Owner" || self.role == "Admin"
     }
 
+    /// The name others see: the display name when there is one, else the
+    /// full name.
+    pub fn shown(&self) -> &str {
+        let d = self.display_name.trim();
+        if d.is_empty() {
+            &self.name
+        } else {
+            d
+        }
+    }
+
+    /// Every name the person goes by (the full name, then the display name
+    /// when it differs), for @mentions and search.
+    pub fn names(&self) -> Vec<&str> {
+        let mut v = vec![self.name.as_str()];
+        let d = self.display_name.trim();
+        if !d.is_empty() && d != self.name.trim() {
+            v.push(d);
+        }
+        v
+    }
+
+    /// Whether `pred` holds for any of the person's names.
+    pub fn any_name(&self, pred: impl Fn(&str) -> bool) -> bool {
+        self.names().into_iter().any(pred)
+    }
+
     pub fn initials(&self) -> String {
         let mut s: String = self
-            .name
+            .shown()
             .split_whitespace()
             .filter_map(|w| w.chars().next())
             .take(2)

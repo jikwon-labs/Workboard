@@ -6138,7 +6138,7 @@ dependencies = [
  "wb-net",
  "wb-sync",
  "wb-voice",
- "windows",
+ "windows 0.58.0",
  "winit",
  "workboard-server",
 ]

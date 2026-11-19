@@ -457,5 +457,9 @@ fn a_screenshot_pastes_into_the_message_box_without_clicking_it_first() {
     assert!(typing.is_some_and(|id| egui::TextEdit::load_state(&h.ctx, id).is_some()));
     h.frame(vec![v_released(true)]);
     h.settle();
-    assert_eq!(h.app.chat.files.len(), 1, "nothing added from the search box");
+    assert_eq!(
+        h.app.chat.files.len(),
+        1,
+        "nothing added from the search box"
+    );
 }

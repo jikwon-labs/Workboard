@@ -125,10 +125,10 @@ thread_local! {
 pub fn pick_picture() -> Option<PathBuf> {
     PICKED_PICTURE.with(|p| p.borrow_mut().take())
 }
-#[cfg(target_os = "macos")]
-pub use mac::{pick_files, probe, thumbnail, video_still_jpeg, Player};
 #[cfg(all(target_os = "macos", not(test)))]
 pub use mac::pasteboard;
+#[cfg(target_os = "macos")]
+pub use mac::{pick_files, probe, thumbnail, video_still_jpeg, Player};
 #[cfg(all(not(target_os = "macos"), not(test)))]
 pub use other::pasteboard;
 

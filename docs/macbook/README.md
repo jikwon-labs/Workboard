@@ -9,11 +9,15 @@
 - [ ] **내 앱 주소 바꾸기**: Mac 과 iPhone 에서 서버 주소를 `https://wb.wlrnjs.xyz` 로 (`docs/cloudflare-tunnel.md` "앱에서 주소 바꾸기"). 팀원에게도 알린다.
 - [ ] **데스크톱 알림 직접 확인 (설치된 앱에서)**: 알림 배너는 서명된 `Workboard.app` 으로 실행해야 앱 아이콘으로 뜨고, 눌렀을 때 해당 대화·작업이 열린다(`cargo run` 으로는 스크립트 편집기 이름으로 뜨고 눌러도 안 열린다). 새 버전 배포 뒤 확인: 첫 알림 때 권한 창이 뜨는지, 설정 > 알림의 "테스트 알림 보내기", 다른 계정에서 DM을 보내 창이 뒤에 있을 때 배너·소리·Dock 튀기기·Dock 숫자가 나오는지, 배너를 누르면 그 DM이 열리는지.
 
-- [ ] **일반 파일 첨부가 든 새 버전 배포 (Mac 과 iPhone)**: 채팅·작업에 PDF, md 등 아무 파일이나 보낼 수 있게 됐다(2026-11-19). 첨부 종류 "File" 은 0.1.14 이하 Mac 앱이 읽지 못해, 누가 파일을 보내면 그 앱은 업데이트할 때까지 팀 변경을 받지 못한다. 그래서 배포 뒤 팀원이 모두 업데이트한 것을 확인하고 나서 파일을 보내기 시작한다. iPhone 은 구 버전에서 깨진 사진 칸으로만 보인다(동기화는 계속됨).
+- [ ] **팀원 모두 0.1.17 로 업데이트됐는지 확인한 뒤 파일 보내기 시작**: 일반 파일 첨부("File")는 0.1.14 이하 Mac 앱이 읽지 못해, 누가 파일을 보내면 그 앱은 업데이트할 때까지 팀 변경을 받지 못한다. iPhone 은 구 버전에서 깨진 사진 칸으로만 보인다(동기화는 계속됨).
 
-- [ ] **Windows 판 처음 올리기**: 다음 배포 때 Mac 판을 올린 뒤 `scripts/publish-windows.sh` 로 Windows zip 과 `appcast-windows.xml` 을 Mac mini `updates/` 에 올린다(`docs/release/README.md` "Windows 판"). 앱 안 업데이트가 들어간 첫 Windows 판은 팀원이 직접 받아야 하고, 그다음 버전부터 앱이 스스로 바꾼다. Windows PC 에서 확인할 것: 옛 버전을 열어 서버에 연결 → 프로필 빨간 점 → Check for updates → "설치하고 다시 시작" → 새 버전으로 다시 열리는지, 같은 폴더의 `workboard.old.exe` 가 새 버전이 열린 뒤 지워지는지, 다시 열린 창이 하나뿐인지.
+- [ ] **Windows PC 에서 0.1.17 받아 확인**: 앱 안 업데이트가 들어간 첫 Windows 판이라 팀원이 GitHub Release 에서 `Workboard-0.1.17-windows-x64.zip` 을 직접 받아야 하고, 그다음 버전부터 앱이 스스로 바꾼다. 다음 버전이 나오면 확인: 프로필 빨간 점 → Check for updates → "설치하고 다시 시작" → 새 버전으로 다시 열리는지, 같은 폴더의 `workboard.old.exe` 가 새 버전이 열린 뒤 지워지는지, 다시 열린 창이 하나뿐인지.
 
 ## 끝난 일
+
+- [x] **일반 파일 첨부가 든 새 버전 배포 (Mac 과 iPhone)** (2026-11-19, 0.1.17 `390be54`): Mac 은 공증해 업데이트 서버에, iPhone 은 TestFlight 에 올렸다. 팀원 업데이트 확인은 위 할 일로 남겼다.
+
+- [x] **Windows 판 처음 올리기** (2026-11-19, 0.1.17): Actions 실행 44532785302 의 zip 을 `scripts/publish-windows.sh` 로 Mac mini `updates/` 에 올렸고 `appcast-windows.xml` 에 0.1.17 이 보인다. GitHub Release v0.1.17 에도 Mac·Windows zip 을 올렸다. Windows PC 확인은 위 할 일로 남겼다.
 
 - [x] **SSH 를 Cloudflare 로** (2026-11-17): Zero Trust Free 가입(팀 이름 `royal-sun-4d00`, 결제 수단 등록은 직접), Access 앱 `ssh`(ssh.wlrnjs.xyz, Cloudflare 가입 이메일만 Allow) 를 먼저 만든 뒤 터널 `workboard` 에 `ssh.wlrnjs.xyz` → `ssh://localhost:22` 경로 추가. 로그인 없이 `https://ssh.wlrnjs.xyz` 는 Access 로그인으로 302. `brew install cloudflared`, `~/.ssh/config` 에 `Host macmini` 블록(`HostKeyAlias macmini` 포함). Tailscale 이 꺼진 상태에서 `ssh macmini hostname` 이 Mac mini 이름을 답하고, 호스트 키가 예전 Tailscale 때 저장한 키와 같았다. 업데이트 폴더 rsync dry-run(47개 파일, 복사 0)도 됐다.
 

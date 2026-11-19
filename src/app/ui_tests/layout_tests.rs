@@ -371,15 +371,20 @@ fn gantt_marks_bars_out_of_sight_and_shortens_names() {
     late.due = Some(td - Duration::days(1));
     h.app.data.tasks.push(late);
     h.click("View Gantt");
-    let names = h.painted_text(tr("Name"))[0].0.left() - 8.0;
+    let name_label = h.painted_text(tr("Name"))[0].0;
+    let names = name_label.left() - 8.0;
     let timeline_left = names + 260.0;
+    // the "Name" label sits in the middle of the 44-point date header
+    let rows_top = name_label.center().y + 22.0;
     // the row says the bar is to the left and when it ended, inside the timeline
     let mark = h.painted_text(&format!("\u{2039} {}", fmt_date(ended)));
     assert_eq!(mark.len(), 1, "one marker for the bar out of sight");
     assert!(mark[0].0.left() >= timeline_left, "{:?}", mark[0].0);
     // the full long name is not drawn anywhere: the name column shortens it
     assert!(h.painted_text(LONG_TASK).is_empty());
-    let column = Rect::from_min_max(pos2(names, 0.0), pos2(timeline_left, h.size.y));
+    // the rows only: a day number in the header scrolled half out of the
+    // timeline (which day depends on today) is not a task name
+    let column = Rect::from_min_max(pos2(names, rows_top), pos2(timeline_left, h.size.y));
     let cut = h.cut_texts(column);
     assert!(cut.is_empty(), "cut names {:?}", cut);
     // an overdue bar is red

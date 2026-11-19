@@ -14,7 +14,8 @@
 //
 // Everything here must be called from the main thread (the egui frame).
 
-/// Banners ask for permission once, the first time one is needed.
+/// Banners ask for permission once, the first time one (or a Dock badge) is
+/// needed.
 pub fn post(title: &str, body: &str, target: &str, sound: bool) {
     #[cfg(target_os = "macos")]
     mac::post(title, body, target, sound);
@@ -267,6 +268,12 @@ mod mac {
         }
         BADGE.with(|b| *b.borrow_mut() = label.to_string());
         unsafe {
+            // macOS hides the Dock badge of an app that never asked for
+            // notification permission, and the ask used to wait for the
+            // first banner (which may never come while the app is in front)
+            if !label.is_empty() && center_ok() {
+                center();
+            }
             let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
             let tile: *mut Object = msg_send![app, dockTile];
             if tile.is_null() {

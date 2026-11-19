@@ -165,6 +165,35 @@ fn the_updates_route_serves_only_plain_update_files() {
 }
 
 #[test]
+fn downloads_pick_the_newest_version_by_number() {
+    let names = [
+        "appcast.xml",
+        "Workboard-0.1.9-arm64.zip",
+        "Workboard-0.1.10-arm64.zip",
+        "Workboard-0.1.2-arm64.zip",
+        "Workboard-0.2.0-windows-x64.zip",
+        "Workboard-0.1.11-windows-x64.zip",
+        "Workboard9-10.delta",
+        "Workboard-latest-arm64.zip",
+        "Workboard-0.9..1-arm64.zip",
+        "Workboard--arm64.zip",
+    ];
+    let (mac, _) = download_suffix("mac").unwrap();
+    let (win, _) = download_suffix("windows").unwrap();
+    assert_eq!(
+        latest_download(names, mac).as_deref(),
+        Some("Workboard-0.1.10-arm64.zip")
+    );
+    assert_eq!(
+        latest_download(names, win).as_deref(),
+        Some("Workboard-0.2.0-windows-x64.zip")
+    );
+    assert_eq!(latest_download(["appcast.xml"], win), None);
+    assert_eq!(latest_download(Vec::<String>::new(), mac), None);
+    assert_eq!(download_suffix("linux"), None);
+}
+
+#[test]
 fn backups_keep_48_hourly_and_30_daily_copies() {
     let home = std::env::temp_dir().join(format!("wb-backup-{:x}", wb_sync::random_u64()));
     let start = dt("2026-11-01 00:00");

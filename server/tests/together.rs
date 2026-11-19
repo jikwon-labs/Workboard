@@ -722,6 +722,66 @@ fn app_updates_are_served_from_the_updates_folder() {
 }
 
 #[test]
+fn download_links_always_give_the_newest_app() {
+    let home = temp_home("downloads");
+    let server = Server::start_at(&home, 0);
+    // nothing published yet: a page that says so, for either computer
+    for (path, os) in [("/download/mac", "Mac"), ("/download/windows", "Windows")] {
+        let (head, body) = http_get(server.port, path);
+        assert!(head.starts_with("HTTP/1.1 200"), "{} -> {}", path, head);
+        assert!(head.to_lowercase().contains("text/html"), "{}", head);
+        let body = String::from_utf8(body).unwrap();
+        assert!(
+            body.contains(&format!("No Workboard for {} yet", os)),
+            "{}",
+            body
+        );
+    }
+    let updates = home.join("updates");
+    std::fs::create_dir_all(&updates).unwrap();
+    for name in [
+        "appcast.xml",
+        "Workboard-0.1.9-arm64.zip",
+        "Workboard-0.1.10-arm64.zip",
+        "Workboard-0.1.2-arm64.zip",
+    ] {
+        std::fs::write(updates.join(name), name).unwrap();
+    }
+    // the newest by number, under its own name so it's saved with the version
+    let (head, _) = http_get(server.port, "/download/mac");
+    assert!(head.starts_with("HTTP/1.1 302"), "{}", head);
+    let lower = head.to_lowercase();
+    assert!(
+        lower.contains("location: /updates/workboard-0.1.10-arm64.zip"),
+        "{}",
+        head
+    );
+    assert!(lower.contains("cache-control: no-store"), "{}", head);
+    let (head, body) = http_get(server.port, "/updates/Workboard-0.1.10-arm64.zip");
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    assert_eq!(body, b"Workboard-0.1.10-arm64.zip");
+    // the Mac zip is not the Windows one
+    let (head, body) = http_get(server.port, "/download/windows");
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    assert!(String::from_utf8(body)
+        .unwrap()
+        .contains("No Workboard for Windows yet"));
+    std::fs::write(updates.join("Workboard-0.1.11-windows-x64.zip"), "w").unwrap();
+    let (head, _) = http_get(server.port, "/download/windows");
+    assert!(head.starts_with("HTTP/1.1 302"), "{}", head);
+    assert!(
+        head.to_lowercase()
+            .contains("location: /updates/workboard-0.1.11-windows-x64.zip"),
+        "{}",
+        head
+    );
+    let (head, _) = http_get(server.port, "/download/linux");
+    assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn email_invite_cli_creates_member_and_reaches_connected_apps() {
     let home = temp_home("email-invite-cli");
     let server = Server::start_at(&home, 0);
@@ -1977,6 +2037,16 @@ fn an_emailed_invite_sets_a_password_that_signs_in_on_any_device() {
         mail
     );
     assert!(
+        mail.contains(&format!("http://127.0.0.1:{}/download/mac", port)),
+        "{}",
+        mail
+    );
+    assert!(
+        mail.contains(&format!("http://127.0.0.1:{}/download/windows", port)),
+        "{}",
+        mail
+    );
+    assert!(
         mail.contains("Subject: You're invited to Team on Workboard"),
         "{}",
         mail
@@ -2317,6 +2387,9 @@ fn the_join_page_opens_the_app_with_the_invite() {
         body
     );
     assert!(body.contains("<dd>ABCD-EFGH-JKMN</dd>"));
+    // and where to get the app when it isn't installed
+    assert!(body.contains(r#"href="/download/mac""#), "{}", body);
+    assert!(body.contains(r#"href="/download/windows""#), "{}", body);
     let (_, body) = http_get(server.port, "/join?code=%3Cscript%3E");
     assert!(
         !String::from_utf8(body).unwrap().contains("<script>"),

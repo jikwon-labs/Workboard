@@ -1,5 +1,5 @@
 // The plain HTTP pages and endpoints: /auth/forgot, /join, /privacy,
-// /updates and /health.
+// /updates, /download and /health.
 
 use super::*;
 
@@ -194,7 +194,7 @@ dd { margin: 0; font-family: ui-monospace, Menlo, monospace; word-break: break-a
 <h1>Join your team on Workboard</h1>
 <p>Open the app with your invite filled in. You'll choose a password, and then sign in with your email on your other computers and phones.</p>
 <a class="button" href="{link}">Open in Workboard</a>
-<p style="margin-top:20px">Nothing happened? Install Workboard first, or open it, choose <b>Join my team</b> and type:</p>
+<p style="margin-top:20px">Nothing happened? Install Workboard first: <a href="/download/mac">Download for Mac</a> · <a href="/download/windows">Download for Windows</a>. Or open it, choose <b>Join my team</b> and type:</p>
 <dl><dt>Server</dt><dd>{server}</dd><dt>Invite code</dt><dd>{code}</dd></dl>
 </div></main></body></html>
 "#;
@@ -250,6 +250,102 @@ pub(crate) async fn update_route(
     )
         .into_response()
 }
+
+/// The file names `/download/<os>` picks from: "Workboard-<version><suffix>".
+/// The Mac name is the one Sparkle's appcast lists; the Windows zip holds
+/// workboard.exe.
+pub fn download_suffix(os: &str) -> Option<(&'static str, &'static str)> {
+    match os {
+        "mac" => Some(("-arm64.zip", "Mac")),
+        "windows" => Some(("-windows-x64.zip", "Windows")),
+        _ => None,
+    }
+}
+
+/// The newest "Workboard-<version><suffix>" among `names`, comparing the
+/// version number by number (0.1.9 before 0.1.10).
+pub fn latest_download<I, S>(names: I, suffix: &str) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    names
+        .into_iter()
+        .filter_map(|n| {
+            let n = n.as_ref();
+            let v = n.strip_prefix("Workboard-")?.strip_suffix(suffix)?;
+            let nums = v
+                .split('.')
+                .map(|p| {
+                    if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+                        return None;
+                    }
+                    p.parse::<u64>().ok()
+                })
+                .collect::<Option<Vec<u64>>>()?;
+            Some((nums, n.to_string()))
+        })
+        .max()
+        .map(|(_, n)| n)
+}
+
+/// GET /download/mac and /download/windows: always the newest app, for
+/// people who don't have Workboard yet (invite mails and /join link here).
+/// It sends the browser on to /updates/<file>, so the download keeps the
+/// name with the version in it; when there is none yet, a short page says so.
+pub(crate) async fn download_route(
+    axum::extract::Path(os): axum::extract::Path<String>,
+    State(hub): State<Arc<Hub>>,
+) -> Response {
+    let Some((suffix, label)) = download_suffix(&os) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let mut names = vec![];
+    if let Ok(mut dir) = tokio::fs::read_dir(hub.home.join(UPDATES_DIR)).await {
+        while let Ok(Some(e)) = dir.next_entry().await {
+            if e.file_type().await.is_ok_and(|t| t.is_file()) {
+                names.extend(e.file_name().to_str().map(|n| n.to_string()));
+            }
+        }
+    }
+    // never cached: the newest file changes with each release
+    match latest_download(&names, suffix) {
+        Some(name) => (
+            StatusCode::FOUND,
+            [
+                (header::LOCATION, format!("/updates/{}", name)),
+                (header::CACHE_CONTROL, "no-store".to_string()),
+            ],
+        )
+            .into_response(),
+        None => (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            NO_DOWNLOAD_PAGE.replace("{os}", label),
+        )
+            .into_response(),
+    }
+}
+
+pub(crate) const NO_DOWNLOAD_PAGE: &str = r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workboard for {os}</title>
+<style>
+:root { color-scheme: light dark; --bg: #f7f7f9; --card: #fff; --text: #1d1d22; --muted: #6b6b76; --line: #e3e3e8; }
+@media (prefers-color-scheme: dark) { :root { --bg: #18181b; --card: #222226; --text: #ececf0; --muted: #a0a0aa; --line: #34343a; } }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 440px; margin: 48px auto; padding: 0 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+h1 { font-size: 20px; margin: 0 0 8px; }
+p { margin: 0; color: var(--muted); }
+</style></head>
+<body><main><div class="card">
+<h1>No Workboard for {os} yet</h1>
+<p>This server doesn't have the {os} app yet. Ask the person who runs your team's server, or try again later.</p>
+</div></main></body></html>
+"#;
 
 pub(crate) async fn health(
     State(hub): State<Arc<Hub>>,

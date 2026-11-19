@@ -127,6 +127,18 @@ pub fn web_base(server: &str) -> String {
     }
 }
 
+/// The server's own web address for `server`, a workspace's address: the
+/// same without a "/w/<id>" at the end. Downloads live there, not per workspace.
+pub fn server_root(server: &str) -> String {
+    let base = web_base(server);
+    match base.rsplit_once("/w/") {
+        Some((root, id)) if !id.is_empty() && !id.contains('/') && root.contains("://") => {
+            root.to_string()
+        }
+        _ => base,
+    }
+}
+
 /// The address links in mails point at.
 pub fn link_address(cfg: &MailCfg, connected_to: Option<&str>) -> Option<String> {
     cfg.public_address
@@ -165,6 +177,11 @@ pub fn invite_mail(
             wb_net::pct_encode(to),
             s,
             code
+        ));
+        let root = server_root(s);
+        body.push_str(&format!(
+            "\nDon't have Workboard yet? Install it first, then open the link above:\n\n  Mac:      {}/download/mac\n  Windows:  {}/download/windows\n",
+            root, root
         ));
     } else {
         body.push_str(&format!("Open Workboard, choose \"Join my team\", type your team's server address and this invite code:\n\n  {}\n", code));
@@ -224,5 +241,54 @@ mod tests {
             m.body
         );
         assert!(!m.body.contains("Tailscale"), "{}", m.body);
+        // people without the app learn where to get it
+        assert!(
+            m.body
+                .contains("Mac:      https://wb.example.com/download/mac"),
+            "{}",
+            m.body
+        );
+        assert!(
+            m.body
+                .contains("Windows:  https://wb.example.com/download/windows"),
+            "{}",
+            m.body
+        );
+    }
+
+    #[test]
+    fn download_links_point_at_the_server_not_the_workspace() {
+        assert_eq!(
+            server_root("https://wb.example.com/w/ab12"),
+            "https://wb.example.com"
+        );
+        assert_eq!(server_root("macmini:8787/w/ab12"), "http://macmini:8787");
+        assert_eq!(
+            server_root("https://wb.example.com"),
+            "https://wb.example.com"
+        );
+        let m = invite_mail(
+            "bo@team.io",
+            "Team",
+            "Ann",
+            "CODE",
+            Some("https://wb.example.com/w/ab12"),
+            7,
+        );
+        assert!(
+            m.body
+                .contains("https://wb.example.com/w/ab12/join?code=CODE"),
+            "{}",
+            m.body
+        );
+        assert!(
+            m.body.contains("https://wb.example.com/download/mac"),
+            "{}",
+            m.body
+        );
+        assert!(!m.body.contains("/w/ab12/download"), "{}", m.body);
+        // no address, no links that can't work
+        let m = invite_mail("bo@team.io", "Team", "Ann", "CODE", None, 7);
+        assert!(!m.body.contains("/download/"), "{}", m.body);
     }
 }

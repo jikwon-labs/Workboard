@@ -18,7 +18,9 @@
 //   admin-request.json    a request from the `workboard-server` admin
 //   admin-result.json     commands, picked up within a second (see admin)
 //   updates/              app updates: appcast.xml and the Workboard-*.zip it
-//                         lists, served at /updates/<file> for Sparkle
+//                         lists, served at /updates/<file> for Sparkle; the
+//                         newest zip is also at /download/mac (-arm64.zip)
+//                         and /download/windows (-windows-x64.zip)
 //                         (scripts/publish-update.sh puts them here)
 //   files/                pictures and videos for chat messages, named by
 //                         the sha256 of their contents (see files.rs)
@@ -705,6 +707,7 @@ pub async fn serve_on(
         .route(wb_net::PATH, get(ws_route))
         .route("/health", get(health))
         .route("/updates/{file}", get(update_route))
+        .route("/download/{os}", get(download_route))
         // get() also answers HEAD. Uploads are read as a stream, which axum's
         // body limit doesn't cover; put_file enforces max_file itself.
         .route("/files/{file}", get(files::get_file).put(files::put_file))

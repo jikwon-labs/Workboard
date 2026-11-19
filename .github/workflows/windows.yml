@@ -38,23 +38,8 @@ jobs:
           name: Workboard-windows-zip
           path: ${{ env.ZIP }}
           if-no-files-found: error
-      # the machine has no graphics card, like many virtual machines. Try
-      # --wgpu (Direct3D, Windows' software renderer) first without failing
-      # the run: it doesn't open here yet, and its output says why
-      - name: Try the app with --wgpu
-        continue-on-error: true
-        shell: pwsh
-        env:
-          WORKBOARD_HOME: ${{ runner.temp }}\wbhome-wgpu
-        run: |
-          $env:RUST_BACKTRACE = '1'
-          $p = Start-Process target\release\workboard.exe -ArgumentList '--wgpu','--screenshot','shot-wgpu.png' -PassThru -RedirectStandardError err-wgpu.txt -RedirectStandardOutput out-wgpu.txt
-          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "The app didn't finish in 3 minutes" }
-          Get-Content err-wgpu.txt, out-wgpu.txt -ErrorAction SilentlyContinue
-          Get-Content "$env:WORKBOARD_HOME\startup-error.log" -ErrorAction SilentlyContinue
-          if (-not (Test-Path shot-wgpu.png)) { throw "No --wgpu screenshot; the app ended with code $($p.ExitCode)" }
-      # then OpenGL, the default: Mesa draws it in software
-      - uses: ssciwr/setup-mesa-dist-win@v2
+      # the machine has no graphics card, like many virtual machines: the app
+      # must open on Direct3D's software renderer (WARP)
       - name: Start the app and take a screenshot
         shell: pwsh
         env:
@@ -66,10 +51,21 @@ jobs:
           if (-not (Test-Path shot.png)) {
             # why the window didn't open: what the app printed, and src/startup.rs's log
             Get-Content err.txt, out.txt -ErrorAction SilentlyContinue
-            Get-ChildItem $env:WORKBOARD_HOME -ErrorAction SilentlyContinue
             Get-Content "$env:WORKBOARD_HOME\startup-error.log" -ErrorAction SilentlyContinue
             throw "No screenshot; the app ended with code $($p.ExitCode)"
           }
+      # --opengl, the old way, on Mesa's software OpenGL; it doesn't fail the run
+      - uses: ssciwr/setup-mesa-dist-win@v2
+      - name: Try the app with --opengl
+        continue-on-error: true
+        shell: pwsh
+        env:
+          WORKBOARD_HOME: ${{ runner.temp }}\wbhome-opengl
+        run: |
+          $p = Start-Process target\release\workboard.exe -ArgumentList '--opengl','--screenshot','shot-opengl.png' -PassThru -RedirectStandardError err-gl.txt
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "The app didn't finish in 3 minutes" }
+          Get-Content err-gl.txt -ErrorAction SilentlyContinue
+          if (-not (Test-Path shot-opengl.png)) { throw "No --opengl screenshot; the app ended with code $($p.ExitCode)" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

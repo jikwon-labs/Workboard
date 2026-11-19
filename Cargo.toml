@@ -53,10 +53,11 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 raw-window-handle = "0.6"
-# workboard.exe --wgpu draws the window with wgpu (Direct3D) instead of
-# OpenGL, for virtual machines and PCs without a graphics driver, which often
-# have no usable OpenGL (src/main.rs). wgpu can fall back to Windows' own
-# software renderer (WARP) when there is no graphics card.
+# Windows draws the window with wgpu (Direct3D 12) instead of OpenGL:
+# virtual machines and PCs without a graphics driver often have no usable
+# OpenGL, and the app then couldn't open its window. With no graphics card
+# Direct3D uses Windows' own software renderer (WARP). --opengl for the old
+# way (src/main.rs).
 eframe = { version = "0.31", features = ["wgpu"] }
 # eframe takes wgpu without its default backends, which leaves Windows only
 # Vulkan and OpenGL: Direct3D 12 (with the WARP software fallback) is added

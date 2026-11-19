@@ -68,12 +68,20 @@ fn main() -> eframe::Result<()> {
         viewport,
         ..Default::default()
     };
-    // Windows, --wgpu: Direct3D through wgpu instead of OpenGL, which virtual
-    // machines and PCs without a graphics driver often lack (see Cargo.toml).
-    // Not the default yet: it doesn't open on GitHub's GPU-less machines.
+    // Windows: Direct3D 12 through wgpu, not OpenGL, which virtual machines
+    // and PCs without a graphics driver often lack; with no graphics card it
+    // draws with Windows' own software renderer (WARP). --opengl: the old way.
     #[cfg(windows)]
-    if args.iter().any(|a| a == "--wgpu") {
+    if args.iter().any(|a| a == "--opengl") {
+        options.renderer = eframe::Renderer::Glow;
+    } else {
+        use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
         options.renderer = eframe::Renderer::Wgpu;
+        let mut setup = WgpuSetupCreateNew::default();
+        // only Direct3D: wgpu's OpenGL picked a software OpenGL over WARP on
+        // GitHub's machines and lost the device
+        setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+        options.wgpu_options.wgpu_setup = WgpuSetup::CreateNew(setup);
     }
     // Windows has no console to print an error on: say it in a message box
     #[cfg(windows)]

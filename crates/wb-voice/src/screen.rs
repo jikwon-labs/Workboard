@@ -15,6 +15,12 @@
 // Capturing needs the Screen Recording permission (System Settings > Privacy
 // & Security > Screen & System Audio Recording). `allowed` checks it without
 // asking, `ask` shows macOS's request (once), `open_settings` opens the page.
+//
+// On Windows the displays, the windows and the picture come from libwebrtc's
+// own capturer, which LiveKit already links in: Windows Graphics Capture,
+// falling back to DXGI desktop duplication and GDI. Windows has no
+// permission for this, so `allowed` and `ask` are always true and
+// `open_settings` does nothing.
 
 use crate::quality;
 use crate::video::{self, Feed, Limits};
@@ -83,8 +89,10 @@ pub fn ask() -> bool {
     imp::ask()
 }
 
-/// Open System Settings at the Screen Recording page.
+/// Open System Settings at the Screen Recording page (macOS; elsewhere there
+/// is no such setting, and it does nothing).
 pub fn open_settings() {
+    #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         .spawn();
@@ -262,14 +270,19 @@ fn pump(
     Ok(())
 }
 
-/// libwebrtc's capturer: CGDisplayStream for displays (where ScreenCaptureKit
-/// isn't there), CGWindowList for windows.
-fn run_webrtc(
+/// libwebrtc's capturer, started on `share`: on macOS CGDisplayStream for
+/// displays (where ScreenCaptureKit isn't there) and CGWindowList for
+/// windows; on Windows Windows Graphics Capture (or DXGI, or GDI). Frames
+/// arrive in the returned `Shared` each time `capture_frame` is called.
+fn open_webrtc(
     share: Share,
-    source: &NativeVideoSource,
-    limits: &Limits,
-    stop: &AtomicBool,
-) -> Result<(), ScreenTrouble> {
+) -> Result<
+    (
+        livekit::webrtc::desktop_capturer::DesktopCapturer,
+        Arc<Shared>,
+    ),
+    ScreenTrouble,
+> {
     use livekit::webrtc::desktop_capturer::{
         CaptureError, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
     };
@@ -284,10 +297,11 @@ fn run_webrtc(
     opts.set_sck_system_picker(false);
     let mut cap = DesktopCapturer::new(opts)
         .ok_or_else(|| ScreenTrouble::Failed("Couldn't start capturing the screen.".into()))?;
+    // (a Windows window id is a handle, which only uses its low 32 bits)
     let pick = cap
         .get_source_list()
         .into_iter()
-        .find(|s| s.id() == id as u64);
+        .find(|s| s.id() as u32 == id);
     if pick.is_none() && matches!(share, Share::Window(_)) {
         return Err(ScreenTrouble::Gone);
     }
@@ -307,28 +321,205 @@ fn run_webrtc(
             }));
         }
     });
+    Ok((cap, shared))
+}
+
+/// Share through libwebrtc's capturer until stopped.
+fn run_webrtc(
+    share: Share,
+    source: &NativeVideoSource,
+    limits: &Limits,
+    stop: &AtomicBool,
+) -> Result<(), ScreenTrouble> {
+    let (mut cap, shared) = open_webrtc(share)?;
     pump(source, limits, stop, &shared, || cap.capture_frame())
 }
 
+/// Windows and other systems: everything through libwebrtc's capturer.
 #[cfg(not(target_os = "macos"))]
 mod imp {
     use super::*;
+    use livekit::webrtc::desktop_capturer::{
+        DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
+    };
+
+    /// Windows asks no permission to capture the screen.
     pub fn allowed() -> bool {
         true
     }
     pub fn ask() -> bool {
         true
     }
-    pub fn sources() -> Result<Vec<Source>, ScreenTrouble> {
-        Err(ScreenTrouble::Failed("Screen sharing needs macOS.".into()))
+
+    /// What libwebrtc offers of one kind: (id, title).
+    fn list(ty: DesktopCaptureSourceType) -> Option<Vec<(u64, String)>> {
+        let cap = DesktopCapturer::new(DesktopCapturerOptions::new(ty))?;
+        Some(
+            cap.get_source_list()
+                .into_iter()
+                .map(|s| (s.id(), s.title()))
+                .collect(),
+        )
     }
+
+    pub fn sources() -> Result<Vec<Source>, ScreenTrouble> {
+        let _com = os::Com::init();
+        let screens = list(DesktopCaptureSourceType::Screen).ok_or_else(|| {
+            ScreenTrouble::Failed("Couldn't look for the screens to share.".into())
+        })?;
+        // on Windows a screen's id is its display device number, and it has no title
+        let primary = os::primary_screen();
+        let mut out: Vec<Source> = screens
+            .into_iter()
+            .enumerate()
+            .map(|(n, (id, title))| Source {
+                kind: SourceKind::Display,
+                id: id as u32,
+                name: if title.trim().is_empty() {
+                    format!("Display {}", n + 1)
+                } else {
+                    title
+                },
+                main: primary == Some(id as u32),
+            })
+            .collect();
+        if !out.iter().any(|s| s.main) {
+            if let Some(first) = out.first_mut() {
+                first.main = true;
+            }
+        }
+        // windows of other apps with a title (libwebrtc leaves out hidden
+        // windows, tool windows and this app's own)
+        let mut wins: Vec<Source> = list(DesktopCaptureSourceType::Window)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, title)| !title.trim().is_empty())
+            .map(|(id, name)| Source {
+                kind: SourceKind::Window,
+                id: id as u32,
+                name,
+                main: false,
+            })
+            .collect();
+        wins.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out.extend(wins);
+        out.sort_by_key(|s| (s.kind == SourceKind::Window, !s.main));
+        Ok(out)
+    }
+
     pub fn capture(
         share: Share,
         source: &NativeVideoSource,
         limits: &Limits,
         stop: &AtomicBool,
     ) -> Result<(), ScreenTrouble> {
+        let _com = os::Com::init();
         run_webrtc(share, source, limits, stop)
+    }
+}
+
+/// The little of Windows itself that sharing needs.
+#[cfg(windows)]
+pub(crate) mod os {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct DisplayDevice {
+        cb: u32,
+        name: [u16; 32],
+        string: [u16; 128],
+        flags: u32,
+        id: [u16; 128],
+        key: [u16; 128],
+    }
+
+    const ACTIVE: u32 = 0x1;
+    const PRIMARY: u32 = 0x4;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumDisplayDevicesW(
+            device: *const u16,
+            n: u32,
+            dd: *mut DisplayDevice,
+            flags: u32,
+        ) -> i32;
+    }
+
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoInitializeEx(reserved: *mut c_void, coinit: u32) -> i32;
+        fn CoUninitialize();
+    }
+
+    /// The display device number of the main display (libwebrtc's screen id).
+    pub fn primary_screen() -> Option<u32> {
+        for n in 0..64 {
+            let mut d: DisplayDevice = unsafe { std::mem::zeroed() };
+            d.cb = std::mem::size_of::<DisplayDevice>() as u32;
+            if unsafe { EnumDisplayDevicesW(std::ptr::null(), n, &mut d, 0) } == 0 {
+                break;
+            }
+            if d.flags & (ACTIVE | PRIMARY) == ACTIVE | PRIMARY {
+                return Some(n);
+            }
+        }
+        None
+    }
+
+    /// COM (and WinRT, which Windows Graphics Capture uses) on this thread
+    /// while it lives.
+    pub struct Com(bool);
+
+    impl Com {
+        /// `sta`: single-threaded, as Media Foundation in nokhwa asks for.
+        fn start(sta: bool) -> Com {
+            const MULTITHREADED: u32 = 0x0;
+            const APARTMENT_THREADED: u32 = 0x2;
+            const DISABLE_OLE1DDE: u32 = 0x4;
+            let mode = if sta {
+                APARTMENT_THREADED | DISABLE_OLE1DDE
+            } else {
+                MULTITHREADED
+            };
+            Com(unsafe { CoInitializeEx(std::ptr::null_mut(), mode) } >= 0)
+        }
+
+        pub fn init() -> Com {
+            Com::start(false)
+        }
+
+        pub fn init_sta() -> Com {
+            Com::start(true)
+        }
+    }
+
+    impl Drop for Com {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { CoUninitialize() }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub(crate) mod os {
+    pub fn primary_screen() -> Option<u32> {
+        None
+    }
+
+    pub struct Com;
+
+    impl Com {
+        pub fn init() -> Com {
+            Com
+        }
+
+        pub fn init_sta() -> Com {
+            Com
+        }
     }
 }
 
@@ -945,6 +1136,36 @@ mod tests {
             ended.lock().unwrap()
         );
         got.expect("a frame within 10 s").expect("stream open")
+    }
+
+    /// Windows: the displays are listed (main one first) and libwebrtc's
+    /// capturer gives a picture of the main one, the way sharing does.
+    #[test]
+    #[cfg(windows)]
+    fn windows_lists_and_captures_the_main_display() {
+        let list = sources().expect("sources");
+        eprintln!("{:?}", list);
+        let main = list.first().expect("a display");
+        assert!(main.main && main.kind == SourceKind::Display, "{:?}", list);
+        let _com = os::Com::init();
+        let (mut cap, shared) = open_webrtc(main.share()).expect("start capturing");
+        let until = Instant::now() + std::time::Duration::from_secs(10);
+        let p = loop {
+            cap.capture_frame();
+            if let Some(p) = shared.latest.lock().unwrap().take() {
+                break p;
+            }
+            if let Some(why) = shared.ended.lock().unwrap().take() {
+                panic!("capture ended: {:?}", why);
+            }
+            assert!(Instant::now() < until, "no picture in 10 s");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        eprintln!("main display: {}x{}", p.w, p.h);
+        assert!(p.w >= 320 && p.h >= 200, "{}x{}", p.w, p.h);
+        // and it can be sent
+        let pic = video::i420_to_picture(&p.to_buffer(quality::SCREEN_WIDTH));
+        assert!(pic.width <= quality::SCREEN_WIDTH);
     }
 
     /// Real capture of this computer's main display and of a window, for a

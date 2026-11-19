@@ -45,5 +45,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # a local LiveKit server, so the huddle tests (voice, video, screen)
+      # really run instead of printing "skipped"
+      - name: Install livekit-server
+        shell: pwsh
+        run: |
+          $v = '1.13.11'
+          $dir = Join-Path $env:RUNNER_TEMP 'livekit'
+          Invoke-WebRequest "https://github.com/livekit/livekit/releases/download/v$v/livekit_${v}_windows_amd64.zip" -OutFile (Join-Path $env:RUNNER_TEMP 'livekit.zip')
+          Expand-Archive (Join-Path $env:RUNNER_TEMP 'livekit.zip') -DestinationPath $dir
+          & (Join-Path $dir 'livekit-server.exe') --version
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
       - name: Run the tests
         run: cargo test --workspace

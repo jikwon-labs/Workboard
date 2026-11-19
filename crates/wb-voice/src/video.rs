@@ -356,6 +356,13 @@ fn camera_allowed() -> Result<(), String> {
     }
 }
 
+/// Where Windows turns the camera off for apps (macOS asks in camera_allowed).
+const PRIVACY_HINT: &str = if cfg!(windows) {
+    " (Check that camera access is on in Settings > Privacy & security > Camera.)"
+} else {
+    ""
+};
+
 fn run_camera(
     source: &NativeVideoSource,
     limits: &Limits,
@@ -364,6 +371,9 @@ fn run_camera(
 ) -> Result<(), String> {
     use nokhwa::pixel_format::RgbFormat;
     use nokhwa::utils::{ApiBackend, FrameFormat, RequestedFormat, RequestedFormatType};
+    // Windows: Media Foundation wants COM on this thread (nokhwa sets it up
+    // only on the first thread that uses the camera)
+    let _com = crate::screen::os::Com::init_sta();
     camera_allowed()?;
     let cams =
         nokhwa::query(ApiBackend::Auto).map_err(|e| format!("Couldn't look for cameras: {}", e))?;
@@ -372,7 +382,7 @@ fn run_camera(
     // (The camera lock nokhwa leaked is fixed in third_party/nokhwa-bindings-macos.)
     let want = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut cam = nokhwa::Camera::new(first.index().clone(), want)
-        .map_err(|e| format!("Couldn't open the camera: {}", e))?;
+        .map_err(|e| format!("Couldn't open the camera: {}{}", e, PRIVACY_HINT))?;
     // the smallest picture at least as wide as the top layer, at a usual
     // frame rate (else the widest there is): it's scaled to fit anyway
     if let Ok(formats) = cam.compatible_camera_formats() {
@@ -392,7 +402,7 @@ fn run_camera(
         }
     }
     cam.open_stream()
-        .map_err(|e| format!("Couldn't start the camera: {}", e))?;
+        .map_err(|e| format!("Couldn't start the camera: {}{}", e, PRIVACY_HINT))?;
     let fmt = cam.camera_format();
     let (w, h) = (fmt.resolution().width(), fmt.resolution().height());
     let started = Instant::now();
@@ -474,6 +484,16 @@ mod tests {
         let mut nv12 = vec![y; 64 * 32];
         nv12.extend(std::iter::repeat([u, v]).take(64 * 32 / 4).flatten());
         assert!(i420_to_picture(&nv12_to_i420(&nv12, 64, 32, 640)).average()[0] > 200);
+    }
+
+    /// The camera backend is built in (Media Foundation on Windows): looking
+    /// for cameras works, even on a computer that has none.
+    #[test]
+    #[cfg(windows)]
+    fn windows_looks_for_cameras_through_media_foundation() {
+        let _com = crate::screen::os::Com::init_sta();
+        let cams = nokhwa::query(nokhwa::utils::ApiBackend::Auto).expect("look for cameras");
+        eprintln!("{} cameras: {:?}", cams.len(), cams);
     }
 
     #[test]

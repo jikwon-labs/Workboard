@@ -31,7 +31,6 @@ pub const T: &[(&str, &str)] = &[
     ("That picture can't be opened.", "이 사진을 열 수 없습니다."),
     ("That video can't be opened.", "이 동영상을 열 수 없습니다."),
     ("That video can't be played on this Mac.", "이 Mac에서는 이 동영상을 재생할 수 없습니다."),
-    ("Pictures and videos need macOS.", "사진과 동영상은 macOS에서만 쓸 수 있습니다."),
     ("{} is a folder.", "{}은(는) 폴더입니다."),
     ("{} can't be read.", "{}을(를) 읽을 수 없습니다."),
     ("{} is larger than 90 MB.", "{}은(는) 90MB보다 큽니다."),

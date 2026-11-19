@@ -1,6 +1,12 @@
-// Push notifications: this install's APNs token sent to the server, and the
-// server left behind told to stop notifying this device (an empty
-// push_token), retried until it is heard.
+// Push notifications: this install's APNs token sent to the server, and a
+// server told to stop notifying this device (an empty push_token), retried
+// until it is heard.
+//
+// Every workspace kept on this iPhone keeps its registration, so news from
+// one that isn't open still comes as a push: the token goes with this
+// iPhone's name for the workspace (`pushKey`), which the server puts in each
+// notification as "ws" so a tap opens that workspace (`savedWorkspace(pushKey:)`).
+// Signing out and removing a kept workspace stop its pushes.
 
 import Foundation
 
@@ -15,9 +21,19 @@ extension SyncClient {
 
     func sendPushToken(on ws: URLSessionWebSocketTask) {
         guard let t = settings.pushToken else { return }
-        send(.pushToken(token: t, platform: "ios", env: settings.pushEnv), on: ws)
+        send(.pushToken(token: t, platform: "ios", env: settings.pushEnv, workspace: pushKey), on: ws)
         settings.pushSentTo = settings.server
         storage.save(settings)
+    }
+
+    /// This iPhone's name for the open workspace in notifications ("ws").
+    public var pushKey: String { ServerAddress.folderKey(settings.server) }
+
+    /// The kept workspace a notification with `key` ("ws") is from; nil
+    /// when it is the open one, an older server sent none, or it isn't kept.
+    public func savedWorkspace(pushKey key: String?) -> SavedWorkspace? {
+        guard let key, !key.isEmpty, key != pushKey else { return nil }
+        return savedWorkspaces.first { $0.folder == key }
     }
 
     /// Where a device token waits until its server is told to stop pushes.

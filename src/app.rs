@@ -52,6 +52,7 @@ mod timeline;
 mod together;
 #[cfg(test)]
 mod ui_tests;
+mod watch;
 use menus::Modal;
 pub use pages::Section;
 use parity::TaskFilter;
@@ -500,6 +501,8 @@ pub struct App {
     deleting_ws: Option<delete_ws::DeletingWs>,
     huddle: huddle::HuddleRt,
     notify_rt: notify::NotifyRt,
+    /// watchers on the other team workspaces (watch.rs)
+    watch_rt: watch::WatchRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
     ws_places: HashMap<String, &'static str>,
     create_text: String,
@@ -918,6 +921,7 @@ impl App {
             deleting_ws: None,
             huddle: Default::default(),
             notify_rt: Default::default(),
+            watch_rt: Default::default(),
             ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
@@ -5368,6 +5372,7 @@ impl App {
             self.making_ws_tick();
             self.deleting_ws_tick();
             self.sync_tick(ctx);
+            self.watch_tick(Some(ctx));
         }
         // after sync_tick, whose merges also leave a save due, so the wake-up
         // for it is asked for in this frame

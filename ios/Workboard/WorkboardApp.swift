@@ -83,8 +83,14 @@ struct WorkboardApp: App {
         n.scan(client: c, nav: nv) // the first look only remembers what is there
         appDelegate.onOpenTask = { id in nv.showSettings = false; nv.tab = .tasks; nv.tasks = [.task(id)] }
         appDelegate.currentChannel = { nv.currentChannel }
-        appDelegate.onOpen = { ch, parent in nv.open(channel: ch, parent: parent) }
-        if let (ch, parent) = appDelegate.pendingOpen { nav.open(channel: ch, parent: parent) }
+        appDelegate.otherWorkspace = { ws in c.savedWorkspace(pushKey: ws) != nil }
+        // a push from a workspace kept on this iPhone opens that workspace first
+        let open: (UInt64, UInt64?, String?) -> Void = { ch, parent, ws in
+            if let w = c.savedWorkspace(pushKey: ws) { c.switchTo(w) }
+            nv.open(channel: ch, parent: parent)
+        }
+        appDelegate.onOpen = open
+        if let (ch, parent, ws) = appDelegate.pendingOpen { open(ch, parent, ws) }
         appDelegate.onDeviceToken = { hex in
             #if DEBUG
             c.setPushToken(hex, env: "development")

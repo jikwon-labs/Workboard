@@ -13,6 +13,10 @@
 //   {"aps": {"alert": {"title": "...", "body": "..."}, "thread-id": "ch-301"},
 //    "channel": 301, "parent": 311}
 // ("parent" only for thread replies). Tapping it opens the conversation.
+// Every workspace kept on this iPhone stays registered, and the server adds
+// "ws" (this iPhone's name for the workspace, SyncClient.pushKey): a push from
+// a workspace that isn't open always shows, and tapping it switches to that
+// workspace first.
 
 import SwiftUI
 import UIKit
@@ -22,11 +26,14 @@ import WorkboardKit
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Set by the app once its state exists.
     @MainActor var onDeviceToken: (String) -> Void = { _ in }
-    @MainActor var onOpen: (UInt64, UInt64?) -> Void = { _, _ in }
+    /// (channel, thread, the notification's "ws")
+    @MainActor var onOpen: (UInt64, UInt64?, String?) -> Void = { _, _, _ in }
     @MainActor var onOpenTask: (UInt64) -> Void = { _ in }
     @MainActor var currentChannel: () -> UInt64? = { nil }
+    /// Whether a notification's "ws" is for a workspace that isn't open.
+    @MainActor var otherWorkspace: (String?) -> Bool = { _ in false }
     /// A tap that arrived before the app was ready.
-    @MainActor var pendingOpen: (UInt64, UInt64?)?
+    @MainActor var pendingOpen: (UInt64, UInt64?, String?)?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
@@ -46,9 +53,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let info = notification.request.content.userInfo
         let ch = Notifier.channel(in: info)
+        let ws = info["ws"] as? String
         // UIApplication is main-thread only; this delegate method is not
-        let (current, active) = await MainActor.run { (currentChannel(), UIApplication.shared.applicationState == .active) }
-        if let ch, ch == current, active { return [] }
+        let (current, active, other) = await MainActor.run {
+            (currentChannel(), UIApplication.shared.applicationState == .active, otherWorkspace(ws))
+        }
+        // the same channel number in another workspace is another conversation
+        if let ch, ch == current, active, !other { return [] }
         return [.banner, .list, .sound]
     }
 
@@ -60,9 +71,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
         guard let ch = Notifier.channel(in: info) else { return }
         let parent = Notifier.number(info["parent"])
+        let ws = info["ws"] as? String
         await MainActor.run {
-            pendingOpen = (ch, parent)
-            onOpen(ch, parent)
+            pendingOpen = (ch, parent, ws)
+            onOpen(ch, parent, ws)
         }
     }
 }

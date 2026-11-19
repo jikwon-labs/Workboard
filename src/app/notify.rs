@@ -541,6 +541,11 @@ impl App {
 
     /// Opens what a notice is about (a banner click, a toast click).
     pub(super) fn open_target(&mut self, target: &str) {
+        // from another workspace (watch.rs)
+        if let Some((file, inner)) = super::watch::split_target(target) {
+            let (file, inner) = (file.to_string(), inner.to_string());
+            return self.open_in_workspace(&file, &inner);
+        }
         let mut p = target.split(':');
         let what = p.next().unwrap_or("");
         let a = p.next().and_then(|x| x.parse::<u64>().ok());

@@ -465,6 +465,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         }),
         updates: broadcast::channel(64).0,
         kicks: broadcast::channel(16).0,
+        notes: broadcast::channel(64).0,
         access: broadcast::channel(16).0,
         stop: watch::channel(false).1,
         connections: AtomicUsize::new(0),

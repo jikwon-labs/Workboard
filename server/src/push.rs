@@ -70,6 +70,15 @@ pub struct PushToken {
     /// "development" or "production"
     pub env: String,
     pub updated: i64,
+    /// The phone's own name for this workspace (`push_token`'s
+    /// `workspace`), sent back as "ws" in each notification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+/// A workspace name from a phone worth keeping: short, letters and digits.
+pub fn workspace_key_ok(key: &str) -> bool {
+    (1..=64).contains(&key.len()) && key.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// A token worth keeping: hex, of a sensible length.

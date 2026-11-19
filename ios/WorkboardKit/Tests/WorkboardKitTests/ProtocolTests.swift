@@ -11,7 +11,8 @@ final class ProtocolTests: XCTestCase {
             .hello(Hello(device: "d5", email: "a@b.c", newPassword: "12345678", resetCode: "QQQQ-WWWW-EEEE")),
             .push(data: ["tasks": []]), .setPassword(email: "a@b.c", password: "12345678", oldPassword: nil),
             .setPassword(email: "a@b.c", password: "12345678", oldPassword: "old-pass"),
-            .pushToken(token: "ab12", platform: "ios", env: "development"), .callJoin(channel: 301), .ping, .pong,
+            .pushToken(token: "ab12", platform: "ios", env: "development"),
+            .pushToken(token: "ab12", platform: "ios", env: "production", workspace: "k1"), .callJoin(channel: 301), .ping, .pong,
         ]
         for m in msgs { XCTAssertEqual(ClientMessage(text: m.text), m) }
     }

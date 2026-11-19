@@ -3101,6 +3101,7 @@ fn phone(
         token: token.to_string(),
         platform: "ios".into(),
         env: "development".into(),
+        workspace: None,
     });
     let device = p.device.clone();
     wait_for("the token in server.json", || {
@@ -3236,6 +3237,145 @@ fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// Collect what a watcher hears until `cond` holds of all of it (10 s at most).
+fn heard_until(
+    w: &wb_net::Watcher,
+    got: &mut Vec<wb_net::Watch>,
+    what: &str,
+    cond: impl Fn(&[wb_net::Watch]) -> bool,
+) {
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        got.extend(w.events());
+        if cond(got) {
+            return;
+        }
+        assert!(
+            Instant::now() < until,
+            "timed out waiting for {}: {:?}",
+            what,
+            got
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn note_count(got: &[wb_net::Watch]) -> usize {
+    got.iter()
+        .filter(|e| matches!(e, wb_net::Watch::Note { .. }))
+        .count()
+}
+
+#[test]
+fn a_computer_watching_a_workspace_hears_only_its_persons_new_messages() {
+    let home = temp_home("watch");
+    let fake = Arc::new(FakePush::default());
+    let server = Server::start_with(
+        &home,
+        0,
+        workboard_server::Options {
+            push: Some(fake.clone()),
+            ..Default::default()
+        },
+    );
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    // Cy's phone, which names this workspace for taps ("ws")
+    let cy_phone = "c3".repeat(32);
+    let code = a.invite(3, Role::Member);
+    let mut p = App::join(port, &code);
+    p.wait("the phone gets the team's copy", |_| true);
+    p.client.send(Msg::PushToken {
+        token: cy_phone.clone(),
+        platform: "ios".into(),
+        env: "development".into(),
+        workspace: Some("teamKey42".into()),
+    });
+    let phone_device = p.device.clone();
+    wait_for("the token in server.json", || {
+        saved_tokens(&home).contains(&(phone_device.clone(), cy_phone.clone()))
+    });
+    drop(p);
+    // Cy's computer, signed in once, now has another workspace open: it only watches this one
+    let code = a.invite(3, Role::Member);
+    let mut c = App::join(port, &code);
+    c.wait("Cy's computer gets the team's copy", |_| true);
+    let (device, token) = (c.device.clone(), c.token.clone().unwrap());
+    let before = connections(port);
+    drop(c);
+    wait_for("Cy's computer's connection gone", || {
+        connections(port) < before
+    });
+    let addr = format!("127.0.0.1:{}", port);
+    let w = wb_net::Watcher::start(&addr, &device, &token, None, Arc::new(|| {}));
+    let mut got = vec![];
+    heard_until(&w, &mut got, "watching", |g| {
+        g.contains(&wb_net::Watch::Started)
+    });
+    // not online there: no green dot for Cy
+    a.until("the presence after Cy started watching", |a| {
+        a.online.is_some()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    a.pump();
+    assert!(
+        !a.online.clone().unwrap_or_default().contains(&3),
+        "a watcher isn't online"
+    );
+
+    // a DM from Ann to Cy: the watcher hears it as the phone's push says it
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 3], "messages": [{"id": 21, "author": 1, "text": "lunch?", "ts": now() / 1000}], "last_read": 0}));
+    });
+    heard_until(&w, &mut got, "the DM at Cy's watching computer", |g| {
+        note_count(g) == 1
+    });
+    assert!(got.contains(&wb_net::Watch::Note {
+        title: "Ann".into(),
+        body: "lunch?".into(),
+        channel: Some(20),
+        parent: None,
+    }));
+    // the phone still gets its push, with the phone's name for the workspace
+    wait_for("the DM pushed to Cy's phone", || {
+        fake.to(&cy_phone).len() == 1
+    });
+    assert_eq!(fake.to(&cy_phone)[0]["ws"], "teamKey42");
+    assert_eq!(fake.to(&cy_phone)[0]["channel"], 20);
+
+    // a message to everyone and a mention of Bo: nothing for Cy; a mention of Cy: heard
+    b.change(in_general("hi everyone", 30, 2));
+    a.change(in_general("@Bo look", 31, 1));
+    b.change(in_general("@Cy can you look", 32, 2));
+    heard_until(&w, &mut got, "the mention at Cy's watching computer", |g| {
+        note_count(g) == 2
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    got.extend(w.events());
+    let notes: Vec<&wb_net::Watch> = got
+        .iter()
+        .filter(|e| matches!(e, wb_net::Watch::Note { .. }))
+        .collect();
+    assert_eq!(notes.len(), 2, "only the DM and the mention: {:?}", notes);
+    assert_eq!(
+        notes[1],
+        &wb_net::Watch::Note {
+            title: "Bo in #general".into(),
+            body: "@Cy can you look".into(),
+            channel: Some(10),
+            parent: None,
+        }
+    );
+
+    // Cy's access removed: the watcher hears it and stops
+    a.client.send(Msg::Revoke { member: 3 });
+    heard_until(&w, &mut got, "the watcher refused", |g| {
+        g.iter().any(|e| matches!(e, wb_net::Watch::Refused(_)))
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 #[test]
 fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
     let home = temp_home("nopush");
@@ -3251,6 +3391,7 @@ fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
         token: "not a token".into(),
         platform: "ios".into(),
         env: "production".into(),
+        workspace: None,
     });
     a.change(|d| {
         d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2], "messages": [{"id": 21, "author": 1, "text": "lunch?", "ts": now() / 1000}], "last_read": 0}));

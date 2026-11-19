@@ -543,3 +543,152 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
     assert_ne!(b.data.workspace, "Side project");
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
+    let _home = super::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home = temp_home("home-watch");
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    let server = TestServer::with_mail_folder();
+    let addr = format!("127.0.0.1:{}", server.port);
+
+    // the owner sets up the server, and Sam joins the first workspace
+    let mut a = keeping_computer("Ours");
+    a.connect_with(
+        &addr,
+        How::Claim {
+            email: "owner@team.io".into(),
+            password: "owner-pass-1".into(),
+        },
+    )
+    .unwrap();
+    net_until(&mut a, "A on the server", |a| {
+        a.data.extra.shared.is_some() && connected(a)
+    });
+    let first = a.ws_file.clone();
+    let me = a.data.me;
+    assert_eq!(a.invite_people(&["sam@team.io".into()], "Member"), 1);
+    let sam = a
+        .data
+        .members
+        .iter()
+        .find(|m| m.email == "sam@team.io")
+        .unwrap()
+        .id;
+    a.sync_note_change();
+    a.write_shared();
+    net_until(&mut a, "Sam's code", |a| {
+        a.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == sam && p.invite.is_some())
+    });
+    let code = a
+        .sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == sam)
+        .and_then(|p| p.invite.clone())
+        .unwrap();
+    let mut s = computer("Sam's");
+    s.connect_with(
+        &addr,
+        How::Invite {
+            code,
+            email: String::new(),
+            password: "sam-pass-1".into(),
+        },
+    )
+    .unwrap();
+    net_until(&mut s, "Sam joins", |s| {
+        s.data.extra.shared.is_some() && connected(s)
+    });
+
+    // the owner opens a second workspace on the server: the first is watched
+    a.make_workspace_on_server("Side project", &[], &[], "Member", None);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while a.making_ws.is_some() && std::time::Instant::now() < end {
+        a.making_ws_tick();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    net_until(&mut a, "the second workspace is up", |a| {
+        a.data.workspace == "Side project" && connected(a)
+    });
+    let second = a.ws_file.clone();
+    let tick_until = |a: &mut App, what: &str, cond: &dyn Fn(&App) -> bool| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            a.net_tick(None);
+            a.watch_tick(None);
+            if cond(a) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < end,
+                "timed out waiting for: {}",
+                what
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    tick_until(&mut a, "watching the first workspace", &|a| {
+        a.watch_rt.listening(&first)
+    });
+    assert_eq!(a.watch_rt.files(), vec![first.clone()], "not the open one");
+
+    // Sam sends the owner a direct message in the first workspace
+    let dm = 9100;
+    s.data.channels.push(Channel {
+        id: dm,
+        kind: ChannelKind::Direct,
+        members: vec![me, sam],
+        messages: vec![Message {
+            id: 9101,
+            author: sam,
+            text: "got a minute?".into(),
+            ts: now_ts(),
+            reactions: vec![],
+            replies: vec![],
+            saved: false,
+            task: None,
+            post_title: None,
+            post_type: String::new(),
+            pinned: false,
+            call: None,
+            attachments: vec![],
+            edited: None,
+            imported: None,
+            mentions: vec![],
+        }],
+        ..Default::default()
+    });
+    s.sync_note_change();
+    s.write_shared();
+    tick_until(&mut a, "the notice from the first workspace", &|a| {
+        a.notify_rt
+            .sent
+            .iter()
+            .any(|n| n.target.starts_with(&format!("ws:{}:", first)))
+    });
+    let note = a.notify_rt.sent.last().unwrap().clone();
+    assert_eq!(note.title, "Ours \u{b7} Sam");
+    assert_eq!(note.body, "got a minute?");
+    assert_eq!(note.target, format!("ws:{}:chat:{}", first, dm));
+    assert_eq!(a.data.workspace, "Side project", "nothing opened by itself");
+
+    // a click opens the first workspace and, once its copy has it, the conversation
+    a.open_target(&note.target);
+    assert_eq!(a.ws_file, first);
+    tick_until(&mut a, "the conversation open", &|a| {
+        a.section == Section::Chat && a.chat.open == Some(dm)
+    });
+    // now the second one is watched instead
+    tick_until(&mut a, "watching the second workspace", &|a| {
+        a.watch_rt.listening(&second)
+    });
+    assert_eq!(a.watch_rt.files(), vec![second.clone()]);
+    let _ = std::fs::remove_dir_all(&home);
+}

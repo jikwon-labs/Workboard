@@ -174,8 +174,13 @@ impl Saved {
         token: &str,
         platform: &str,
         env: &str,
+        workspace: Option<&str>,
     ) -> bool {
         let token = token.trim().to_ascii_lowercase();
+        let workspace = workspace
+            .map(str::trim)
+            .filter(|w| push::workspace_key_ok(w))
+            .map(str::to_string);
         if token.is_empty() {
             return self.push.remove(device).is_some();
         }
@@ -189,7 +194,7 @@ impl Saved {
         if self
             .push
             .get(device)
-            .is_some_and(|t| t.token == token && t.env == env)
+            .is_some_and(|t| t.token == token && t.env == env && t.workspace == workspace)
         {
             return false;
         }
@@ -203,6 +208,7 @@ impl Saved {
                 platform: "ios".into(),
                 env: env.into(),
                 updated: now_ms(),
+                workspace,
             },
         );
         true

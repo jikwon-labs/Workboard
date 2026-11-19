@@ -9,8 +9,8 @@
 // address), so a kept workspace opens signed in, and edits not yet on its
 // server wait with it until it is open again.
 //
-// Only the open workspace gets push notifications: leaving one tells its
-// server to stop (Push.swift), and opening it again registers again.
+// Every kept workspace keeps getting push notifications (Push.swift):
+// leaving one doesn't tell its server to stop, removing it does.
 
 import Foundation
 
@@ -101,6 +101,8 @@ extension SyncClient {
     /// Remove a kept workspace from this iPhone: its copy, its edits still
     /// waiting and its sign-in. Nothing changes on its server.
     public func forget(_ saved: SavedWorkspace) {
+        // its server stops sending this iPhone notifications
+        if settings.pushToken != nil { queueUnregister(saved.server, token: tokens.token(for: saved.server)) }
         try? FileManager.default.removeItem(at: storage.kept(saved.folder).folder)
         tokens.setToken(nil, for: saved.server)
         savedWorkspaces.removeAll { $0.folder == saved.folder }
@@ -109,9 +111,10 @@ extension SyncClient {
 
     /// Put the open workspace aside before leaving it for another server
     /// (see setServer). Nothing to keep when its copy never came and it
-    /// wasn't signed in.
-    func keepForLater() {
-        guard !settings.server.isEmpty, data != nil || hasToken else { return }
+    /// wasn't signed in. False when nothing was kept.
+    @discardableResult
+    func keepForLater() -> Bool {
+        guard !settings.server.isEmpty, data != nil || hasToken else { return false }
         let key = ServerAddress.folderKey(settings.server)
         let place = storage.kept(key)
         flushSnapshot()
@@ -123,6 +126,7 @@ extension SyncClient {
         savedWorkspaces.removeAll { $0.folder == key }
         savedWorkspaces.insert(entry, at: 0)
         storage.save(saved: savedWorkspaces)
+        return true
     }
 
     /// Open the workspace kept for `address`, if there is one: its copy,

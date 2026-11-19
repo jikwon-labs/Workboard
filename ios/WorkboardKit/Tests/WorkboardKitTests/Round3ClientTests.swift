@@ -98,7 +98,41 @@ final class Round3ClientTests: FakeServerTestCase {
         XCTAssertNil(tokens.token(for: SyncClient.unregisterKey(url)))
     }
 
-    func testSwitchingServersStopsPushesFromTheOldOne() async throws {
+    func testAWorkspaceLeftKeepsItsPushesUntilItIsRemoved() async throws {
+        let a = FakeServer(snapshot: SampleWorkspace.make())
+        let b = FakeServer(snapshot: SampleWorkspace.make())
+        let pa = try await a.start(port: 0), pb = try await b.start(port: 0)
+        defer { a.stop(); b.stop() }
+        let (ua, ub) = ("ws://127.0.0.1:\(pa)", "ws://127.0.0.1:\(pb)")
+        let c = client(ua, me: 1)
+        c.setPushToken("ffee", env: "development")
+        await until("registered on a") { a.registeredPushTokens[c.settings.device] == "ffee" }
+        let keyA = c.pushKey
+        XCTAssertEqual(a.registeredPushWorkspaces[c.settings.device], keyA, "with this iPhone's name for it")
+        await until("a's copy") { c.data != nil }
+        c.setServer(ub)
+        c.setMe(1)
+        await until("registered on b") { b.registeredPushTokens[c.settings.device] == "ffee" }
+        XCTAssertEqual(b.registeredPushWorkspaces[c.settings.device], c.pushKey)
+        XCTAssertNotEqual(c.pushKey, keyA)
+        XCTAssertEqual(c.settings.pushSentTo, ub)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(a.registeredPushTokens[c.settings.device], "ffee", "a is kept here, so it still notifies")
+
+        // a tap on a's notification finds a; one from b (open) or with no "ws" finds nothing to switch to
+        let kept = try XCTUnwrap(c.savedWorkspace(pushKey: keyA))
+        XCTAssertEqual(kept.server, ua)
+        XCTAssertNil(c.savedWorkspace(pushKey: c.pushKey))
+        XCTAssertNil(c.savedWorkspace(pushKey: nil))
+        XCTAssertNil(c.savedWorkspace(pushKey: "someOtherKey"))
+
+        // removing a from this iPhone stops its pushes
+        c.forget(kept)
+        await until("removed from a") { a.registeredPushTokens[c.settings.device] == nil }
+        XCTAssertEqual(b.registeredPushTokens[c.settings.device], "ffee")
+    }
+
+    func testSwitchingToAWorkspaceNotKeptStopsPushesFromTheOldOne() async throws {
         let a = FakeServer(snapshot: SampleWorkspace.make())
         let b = FakeServer(snapshot: SampleWorkspace.make())
         let pa = try await a.start(port: 0), pb = try await b.start(port: 0)
@@ -106,16 +140,10 @@ final class Round3ClientTests: FakeServerTestCase {
         let c = client("ws://127.0.0.1:\(pa)", me: 1)
         c.setPushToken("ffee", env: "development")
         await until("registered on a") { a.registeredPushTokens[c.settings.device] == "ffee" }
-        c.setServer("ws://127.0.0.1:\(pb)")
-        c.setMe(1)
+        // the same workspace's copy goes along (not kept apart): a is left for good
+        c.setServer("ws://127.0.0.1:\(pb)", freshCopy: false)
         await until("removed from a") { a.registeredPushTokens[c.settings.device] == nil }
         await until("registered on b") { b.registeredPushTokens[c.settings.device] == "ffee" }
-        XCTAssertEqual(c.settings.pushSentTo, "ws://127.0.0.1:\(pb)")
-
-        // switching while disconnected goes over a connection of its own
-        c.disconnect()
-        c.setServer("ws://127.0.0.1:\(pa)")
-        await until("removed from b") { b.registeredPushTokens[c.settings.device] == nil }
     }
 
     func testAdminMessagesRoundTrip() {

@@ -166,6 +166,8 @@ struct SignedIn {
     app: Option<String>,
     sync: Option<u32>,
     deltas: bool,
+    /// only notifications (see `watching`)
+    watch: bool,
 }
 
 /// The hello a connection starts with, and signing in with it. None when
@@ -187,11 +189,12 @@ async fn hello(
         let _ = send(socket, &Msg::error("Say hello first.", None).to_json()).await;
         return None;
     };
-    let (device, app, sync, deltas) = (
+    let (device, app, sync, deltas, watch) = (
         hello.device.clone(),
         hello.app.clone(),
         hello.sync,
         !hello.full_copies,
+        hello.watch,
     );
     let h = hub.clone();
     // password hashing takes a moment
@@ -213,6 +216,7 @@ async fn hello(
         app,
         sync,
         deltas,
+        watch,
     })
 }
 
@@ -270,8 +274,9 @@ impl Conn {
                 token,
                 platform,
                 env,
+                workspace,
             }) => {
-                hub.set_push_token(&self.device, &token, &platform, &env);
+                hub.set_push_token(&self.device, &token, &platform, &env, workspace.as_deref());
                 None
             }
             Some(Msg::CallJoin { channel }) => {
@@ -345,6 +350,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         app,
         sync,
         deltas,
+        watch,
     }) = hello(&mut socket, &hub, &mut stop).await
     else {
         return;
@@ -353,6 +359,10 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     if *closed.borrow_and_update() {
         let _ = send(&mut socket, &Msg::gone().to_json()).await;
         return;
+    }
+    if watch {
+        let _ = (role, tag, token, app, sync, deltas);
+        return watching(socket, hub, device, member, stop, closed).await;
     }
     let _online = Online::new(&hub, &device, member);
     // an app too old to know every field would erase the ones it doesn't
@@ -483,6 +493,95 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                 me.was_hidden = hidden;
                 if !send(&mut socket, &text).await {
                     break;
+                }
+            }
+        }
+    }
+    let _ = socket.send(Message::Close(None)).await;
+}
+
+/// What a watch connection sends for one notification (push::payload's shape).
+pub(crate) fn note_msg(p: &Value) -> Msg {
+    let alert = &p["aps"]["alert"];
+    Msg::Note {
+        title: alert["title"].as_str().unwrap_or("Workboard").to_string(),
+        body: alert["body"].as_str().unwrap_or_default().to_string(),
+        channel: p["channel"].as_u64(),
+        parent: p["parent"].as_u64(),
+    }
+}
+
+/// A watch connection (hello with `watch`): a computer where this workspace
+/// isn't open hears of `member`'s new messages, the ones an iPhone gets a
+/// push for, and nothing else. It isn't counted online (no green dot, and
+/// the person's iPhone still gets its pushes) and takes no changes; it only
+/// answers ping.
+async fn watching(
+    mut socket: WebSocket,
+    hub: Arc<Hub>,
+    device: String,
+    member: u64,
+    mut stop: watch::Receiver<bool>,
+    mut closed: watch::Receiver<bool>,
+) {
+    let mut notes = hub.notes.subscribe();
+    let mut kicks = hub.kicks.subscribe();
+    let removed =
+        || Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json();
+    if !hub.device_is(&device, member) {
+        let _ = send(&mut socket, &removed()).await;
+        return;
+    }
+    if !send(&mut socket, &Msg::Watching.to_json()).await {
+        return;
+    }
+    let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
+    'conn: loop {
+        tokio::select! {
+            biased;
+            _ = stop.changed() => break,
+            _ = closed.changed() => {
+                let _ = send(&mut socket, &Msg::gone().to_json()).await;
+                break;
+            }
+            k = kicks.recv() => {
+                let out = match k {
+                    Ok(list) => list.contains(&device),
+                    Err(broadcast::error::RecvError::Lagged(_)) => !hub.device_is(&device, member),
+                    Err(broadcast::error::RecvError::Closed) => false,
+                };
+                if out {
+                    let _ = send(&mut socket, &removed()).await;
+                    break;
+                }
+            }
+            n = notes.recv() => {
+                let list = match n {
+                    Ok(l) => l,
+                    // fell behind: those are missed, the next ones still come
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                let mine: Vec<&push::Note> = list.iter().filter(|n| n.member == member).collect();
+                for p in push::batch(&mine) {
+                    if !send(&mut socket, &note_msg(&p).to_json()).await {
+                        break 'conn;
+                    }
+                }
+            }
+            m = tokio::time::timeout(silent, socket.next()) => {
+                let m = match m {
+                    Err(_) | Ok(None) | Ok(Some(Err(_))) => break,
+                    Ok(Some(Ok(m))) => m,
+                };
+                match m {
+                    Message::Close(_) => break,
+                    Message::Text(t) if matches!(Msg::parse(t.as_str()), Some(Msg::Ping)) => {
+                        if !send(&mut socket, &Msg::Pong.to_json()).await {
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

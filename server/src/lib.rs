@@ -368,6 +368,9 @@ struct Hub {
     updates: broadcast::Sender<Arc<Canon>>,
     /// device ids whose access was just removed
     kicks: broadcast::Sender<Arc<Vec<String>>>,
+    /// the notifications a merge called for, to the watch connections
+    /// (each picks out its member's; ws.rs)
+    notes: broadcast::Sender<Arc<Vec<push::Note>>>,
     /// roles or invites changed: each connection re-sends access info,
     /// except the connection whose request made the change (its answer
     /// already says it); `EVERYONE` when no connection's request did
@@ -423,6 +426,7 @@ impl Hub {
             }),
             updates: broadcast::channel(64).0,
             kicks: broadcast::channel(16).0,
+            notes: broadcast::channel(64).0,
             access: broadcast::channel(16).0,
             stop,
             connections: AtomicUsize::new(0),

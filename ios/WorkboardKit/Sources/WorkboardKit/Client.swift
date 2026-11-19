@@ -382,9 +382,10 @@ public final class SyncClient {
         guard a != settings.server else { return }
         let different = isDifferentServer(a)
         let freshCopy = freshCopy ?? different
-        // the server left behind stops sending this device notifications
-        if different { stopPushes(from: settings.server, token: tokens.token(for: settings.server)) }
-        if different, freshCopy { keepForLater() }
+        // a workspace kept on this iPhone keeps sending it notifications;
+        // one that isn't kept (or the same one typed another way) stops
+        let kept = different && freshCopy && keepForLater()
+        if different, !kept { stopPushes(from: settings.server, token: tokens.token(for: settings.server)) }
         settings.server = a
         let restored = different && freshCopy && reopenKept(a)
         if restored {

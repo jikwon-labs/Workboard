@@ -23,9 +23,10 @@ impl Hub {
         let mut g = self.state();
         let members_before = member_ids(g.canon.as_ref());
         // the messages already there, to tell which ones are new (only when
-        // someone could be notified)
+        // someone could be notified: an iPhone, or a computer watching)
+        let pushes = self.pusher.is_some() && !g.saved.push.is_empty();
         let before = match &g.canon {
-            Some(c) if self.pusher.is_some() && !g.saved.push.is_empty() => {
+            Some(c) if pushes || self.notes.receiver_count() > 0 => {
                 Some(push::message_ids_in(c, Some(&chans)))
             }
             _ => None,
@@ -81,6 +82,10 @@ impl Hub {
         if changed {
             if let (Some(before), Some(canon)) = (&before, &g.canon) {
                 let notes = push::notes_in(canon, before, Some(&chans), &[member], now_ms() / 1000);
+                if !notes.is_empty() {
+                    // watch connections (ws.rs) pick out their member's
+                    let _ = self.notes.send(Arc::new(notes.clone()));
+                }
                 self.notify(&g.saved, notes);
             }
             self.broadcast_canon(&mut g, false);
@@ -112,7 +117,11 @@ impl Hub {
                 continue;
             }
             let mine: Vec<&push::Note> = notes.iter().filter(|n| n.member == d.member).collect();
-            for p in push::batch(&mine) {
+            for mut p in push::batch(&mine) {
+                // the phone's name for this workspace: a tap opens it
+                if let Some(ws) = &tok.workspace {
+                    p["ws"] = json!(ws);
+                }
                 jobs.push((device.clone(), tok.clone(), p));
             }
         }
@@ -144,10 +153,19 @@ impl Hub {
         });
     }
 
-    /// An iPhone's push token (`push_token`).
-    pub(crate) fn set_push_token(&self, device: &str, token: &str, platform: &str, env: &str) {
+    /// An iPhone's push token (`push_token`), and its name for this workspace.
+    pub(crate) fn set_push_token(
+        &self,
+        device: &str,
+        token: &str,
+        platform: &str,
+        env: &str,
+        workspace: Option<&str>,
+    ) {
         let mut g = self.state();
-        if g.saved.set_push_token(device, token, platform, env) {
+        if g.saved
+            .set_push_token(device, token, platform, env, workspace)
+        {
             g.dirty = true;
         }
     }

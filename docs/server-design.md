@@ -265,6 +265,15 @@ iPhone 앱이 연결돼 있지 않을 때도 새 메시지·멘션·DM 을 알�
 - **iPhone.** `ServerAddress` 가 `/w/<id>` 를 ws·files·forgot·health 에 붙이고, `/w/<id>/join` 초대 페이지 링크도 읽는다. iPhone 은 아직 워크스페이스 하나만 들고 있다(전환 화면은 `docs/ios-design.md` 할 일).
 - **검증:** 서버 통합 `one_server_keeps_several_workspaces_apart`(토큰 없이 만들기 401, 만든 사람 이메일만 claim, 데이터·첨부 분리, 다른 워크스페이스 토큰으로 첨부 못 씀, 목록과 틀린 비밀번호, 초대 메일·join 페이지의 `/w/<id>`, 없는 id 404, 재시작 뒤 복원), wb-net 단위(주소), 앱-서버 통합 `a_second_workspace_goes_on_the_same_server_and_opens_anywhere`(만들기→owner·초대 메일, 다른 컴퓨터에서 고르기, 다시 고르면 기존 사본), UI 클릭 2개(위치 선택, 로컬 워크스페이스에는 선택 없음), 로그인 화면 테스트 갱신, iPhone 패키지 테스트(주소·초대 링크·방 이름).
 
+### 열려 있지 않은 워크스페이스의 알림 (2026-11-19)
+
+앱은 열린 워크스페이스 하나에만 연결해 동기화한다. 다른 워크스페이스의 새 소식(DM, 나를 멘션한 메시지, 내 스레드의 답글. iPhone 푸시와 같은 기준)도 맥과 iPhone 에 알림으로 온다. 작업 배정·마감 같은 나머지 알림은 열린 워크스페이스에서만 나온다.
+
+- **watch 연결 (맥).** `hello` 에 `watch: true` 를 넣으면 서버가 `watching` 으로 답하고, 그 뒤로는 그 사람 몫의 `note {title, body, channel, parent}` 만 보낸다. 사본은 오가지 않고, 접속 중(초록 점)으로 세지 않으며, 변경을 받지 않고 ping 에만 답한다. 서버는 병합 뒤 `push::notes_in` 으로 만든 알림을 `Hub::notes` 로 내보내고 각 watch 연결이 자기 멤버 것을 고른다(`ws.rs` 의 `watching`, `push::batch` 로 한 번에 3개까지). 예전 서버는 `welcome` 으로 답하므로 `wb_net::Watcher` 가 끊고 10분마다 다시 묻는다. 접속이 끊긴(auth) 기기·지워진 워크스페이스면 멈춘다.
+- **맥 앱 (`src/app/watch.rs`).** `workspaces.json` 의 다른 워크스페이스 중 팀 서버에 있고 토큰이 있는 것마다 `Watcher` 를 둔다. 열린 워크스페이스·토큰이 바뀌면, 그리고 30초마다 목록을 다시 본다. 알림은 `deliver` 로(앞에 있으면 토스트, 아니면 배너) 제목에 워크스페이스 이름을 붙여 보낸다. 대상은 `ws:<파일>:chat:<채널>[:<스레드>]` 이고, 누르면 그 워크스페이스로 바꾼 뒤 사본에 대화가 들어오면(30초까지 기다림) 연다.
+- **iPhone.** 워크스페이스를 바꿔도 남겨 둔(kept) 워크스페이스의 푸시 등록을 끊지 않는다. 지우거나(`forget`) 로그아웃할 때만 끊는다. `push_token` 에 iPhone 이 정한 워크스페이스 이름(`pushKey`, 주소의 해시)을 같이 보내고, 서버가 server.json 에 두었다가 알림마다 `"ws"` 로 붙인다. 앱은 `"ws"` 가 열린 워크스페이스가 아니면 앞에 있어도 배너를 띄우고, 누르면 그 워크스페이스로 바꾼 뒤 대화를 연다. 한계: 이 버전 전에 떠났던 워크스페이스는 등록이 이미 끊겼으니 한 번 열어야 다시 등록된다. APNs 토큰이 바뀌면 열린 워크스페이스에만 새 토큰이 간다(남은 곳은 APNs 가 Gone 이라 하면 서버가 지운다).
+- **검증:** 서버 통합 `a_computer_watching_a_workspace_hears_only_its_persons_new_messages`(DM·멘션만 들리고 남의 멘션·전체 메시지는 안 들림, watch 기기는 접속 중이 아님, 폰 푸시에 `ws`, 접속 끊기면 멈춤), wb-net 단위(메시지 모양), 앱-서버 통합 `a_message_in_a_workspace_not_open_is_announced_and_opens_it`(다른 워크스페이스 DM 알림 → 누르면 그 워크스페이스와 대화가 열림, 열린 쪽은 watch 하지 않음), iPhone 패키지 `testAWorkspaceLeftKeepsItsPushesUntilItIsRemoved`, `testSwitchingToAWorkspaceNotKeptStopsPushesFromTheOldOne`.
+
 ### 보안 점검 (2026-11-18)
 
 서버가 Cloudflare Tunnel 로 인터넷에 열린 뒤 전수 점검을 했다(인증, 동기화 권한, HTTP·파일, 그 밖의 메시지·DoS). 고친 것마다 공격을 그대로 재현하는 테스트를 두었다(고치기 전 코드에서 실패하는 것을 확인했다).

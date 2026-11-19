@@ -37,11 +37,13 @@ use tungstenite::{Message, WebSocket};
 
 mod conn;
 mod files;
+mod watch;
 pub use conn::{trust_certificate, Conn};
 pub use files::{
     create_workspace, delete_workspace, download, download_update, forgot_password,
     list_workspaces, name_ok, remote_size, sha256_file, update_text, upload, Auth, FileError,
 };
+pub use watch::{Watch, Watcher};
 
 pub const DEFAULT_PORT: u16 = 8787;
 pub const PATH: &str = "/ws";
@@ -296,6 +298,13 @@ pub enum Msg {
         /// The app takes `delta` messages.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         deltas: bool,
+        /// Only notifications, for a workspace that isn't open on this
+        /// computer (`Watcher`): the server answers `watching`, then sends
+        /// `note` for this person's new messages and nothing else. The
+        /// device doesn't count as online. Servers from before it answer
+        /// `welcome` as usual, and the watcher hangs up.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        watch: bool,
     },
     Welcome {
         /// The id tag this device must use; the server keeps them unique.
@@ -359,6 +368,25 @@ pub enum Msg {
         platform: String,
         #[serde(default)]
         env: String,
+        /// The phone's own name for this workspace, sent back in each
+        /// notification as "ws" so a tap opens the right one while another
+        /// workspace is open. Servers from before it leave "ws" out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+    },
+    /// The answer to a `watch` hello: signed in, notes follow.
+    Watching,
+    /// A new message for the person behind a `watch` connection: what the
+    /// iPhone's push says (server/src/push.rs), and where it is.
+    Note {
+        title: String,
+        #[serde(default)]
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<u64>,
+        /// The thread a reply is in.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<u64>,
     },
     /// Owner or admin: a one-time code that signs someone in as `member`.
     CreateInvite {
@@ -765,6 +793,8 @@ pub struct SignIn {
     pub sync: Option<u32>,
     /// Ask for whole copies every time, like apps from before deltas (tests).
     pub full_copies: bool,
+    /// Only notifications (see Msg::Hello::watch).
+    pub watch: bool,
 }
 
 /// The hello a computer signs in with.
@@ -783,6 +813,7 @@ impl From<&SignIn> for Msg {
             app: s.app.clone(),
             sync: s.sync,
             deltas: !s.full_copies,
+            watch: s.watch,
         }
     }
 }
@@ -807,6 +838,7 @@ impl TryFrom<Msg> for SignIn {
                 app,
                 sync,
                 deltas,
+                watch,
             } => Ok(SignIn {
                 device,
                 tag,
@@ -820,6 +852,7 @@ impl TryFrom<Msg> for SignIn {
                 app,
                 sync,
                 full_copies: !deltas,
+                watch,
             }),
             m => Err(m),
         }
@@ -1442,6 +1475,7 @@ mod tests {
             app: Some("0.1.7".into()),
             sync: Some(4),
             full_copies: false,
+            watch: false,
         };
         let by_hand = Msg::Hello {
             device: "d1".into(),
@@ -1456,6 +1490,7 @@ mod tests {
             app: Some("0.1.7".into()),
             sync: Some(4),
             deltas: true,
+            watch: false,
         };
         assert_eq!(Msg::from(&full).to_json(), by_hand.to_json());
         assert_eq!(
@@ -1496,6 +1531,7 @@ mod tests {
             app: None,
             sync: None,
             deltas: false,
+            watch: false,
         };
         assert_eq!(
             hello(Some(3)).to_json(),
@@ -1535,6 +1571,7 @@ mod tests {
             token: "ab12".into(),
             platform: "ios".into(),
             env: "development".into(),
+            workspace: None,
         };
         assert_eq!(
             Msg::parse(
@@ -1543,6 +1580,40 @@ mod tests {
             Some(t.clone())
         );
         assert_eq!(Msg::parse(&t.to_json()), Some(t));
+        // with the phone's name for the workspace (Protocol.swift sends it too)
+        assert_eq!(
+            Msg::parse(
+                r#"{"type":"push_token","token":"ab12","platform":"ios","env":"production","workspace":"k1"}"#
+            ),
+            Some(Msg::PushToken {
+                token: "ab12".into(),
+                platform: "ios".into(),
+                env: "production".into(),
+                workspace: Some("k1".into()),
+            })
+        );
+        // a watch connection: the hello says so, the server answers watching and notes
+        let w = SignIn {
+            device: "d3".into(),
+            token: Some("t".into()),
+            watch: true,
+            full_copies: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Msg::from(&w).to_json(),
+            r#"{"type":"hello","device":"d3","token":"t","watch":true}"#
+        );
+        assert_eq!(Msg::parse(r#"{"type":"watching"}"#), Some(Msg::Watching));
+        assert_eq!(
+            Msg::parse(r#"{"type":"note","title":"Ann","body":"hi","channel":20,"parent":11}"#),
+            Some(Msg::Note {
+                title: "Ann".into(),
+                body: "hi".into(),
+                channel: Some(20),
+                parent: Some(11),
+            })
+        );
     }
 
     #[test]

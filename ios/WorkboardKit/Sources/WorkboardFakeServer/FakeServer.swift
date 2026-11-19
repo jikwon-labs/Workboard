@@ -73,6 +73,8 @@ public final class FakeServer: @unchecked Sendable {
     /// Whether an owner deleted the workspace (tests).
     public var isDeleted: Bool { queue.sync { deleted } }
     var pushTokens: [String: String] = [:]
+    /// device -> the phone's name for this workspace that came with its token
+    var pushWorkspaces: [String: String] = [:]
     /// member -> account
     var accounts: [UInt64: Account] = [:]
     /// normalized reset code -> (email, made at)
@@ -220,6 +222,7 @@ public final class FakeServer: @unchecked Sendable {
     public var currentRev: Int64 { queue.sync { rev } }
     public var connectionCount: Int { queue.sync { peers.values.filter(\.welcomed).count } }
     public var registeredPushTokens: [String: String] { queue.sync { pushTokens } }
+    public var registeredPushWorkspaces: [String: String] { queue.sync { pushWorkspaces } }
 
     /// Replace the snapshot (as if another app pushed) and tell everyone.
     public func replace(_ s: JSON) {
@@ -380,9 +383,12 @@ public final class FakeServer: @unchecked Sendable {
             if let snap = snapshot { send(.update(data: snap, rev: rev), to: p) }
         case let .setPassword(email, password, old):
             setPassword(email: email, password: password, old: old, from: p)
-        case let .pushToken(token, platform, env):
+        case let .pushToken(token, platform, env, workspace):
             // an empty token stops notifications to this device (set_push_token)
-            if let d = p.device { pushTokens[d] = token.isEmpty ? nil : token }
+            if let d = p.device {
+                pushTokens[d] = token.isEmpty ? nil : token
+                pushWorkspaces[d] = token.isEmpty ? nil : workspace
+            }
             log("push token from \(p.device?.prefix(8) ?? "?") (\(platform), \(env))\(token.isEmpty ? ": removed" : "")")
         case .createInvite, .setRole, .revoke, .accessList, .backupList, .restore:
             request(m, from: p)

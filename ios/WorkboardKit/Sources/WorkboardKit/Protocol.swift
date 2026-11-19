@@ -88,7 +88,9 @@ public enum ClientMessage: Equatable, Sendable {
     case hello(Hello)
     case push(data: JSON)
     case setPassword(email: String, password: String, oldPassword: String?)
-    case pushToken(token: String, platform: String, env: String)
+    /// `workspace`: this iPhone's name for the workspace (`SyncClient.pushKey`),
+    /// which the server sends back as "ws" in each notification.
+    case pushToken(token: String, platform: String, env: String, workspace: String? = nil)
     case callJoin(channel: UInt64)
     case resync
     case createInvite(member: UInt64, role: Role)
@@ -123,8 +125,10 @@ public enum ClientMessage: Equatable, Sendable {
             var o: [String: JSON] = ["type": "set_password", "email": .string(email), "password": .string(password)]
             if let old, !old.isEmpty { o["old_password"] = .string(old) }
             return .object(o)
-        case let .pushToken(token, platform, env):
-            return ["type": "push_token", "token": .string(token), "platform": .string(platform), "env": .string(env)]
+        case let .pushToken(token, platform, env, workspace):
+            var o: [String: JSON] = ["type": "push_token", "token": .string(token), "platform": .string(platform), "env": .string(env)]
+            if let workspace, !workspace.isEmpty { o["workspace"] = .string(workspace) }
+            return .object(o)
         case let .callJoin(channel):
             return ["type": "call_join", "channel": .id(channel)]
         case .resync: return ["type": "resync"]
@@ -163,7 +167,7 @@ public enum ClientMessage: Equatable, Sendable {
             guard let e = j["email"]?.string, let p = j["password"]?.string else { return nil }
             self = .setPassword(email: e, password: p, oldPassword: j["old_password"]?.string)
         case "push_token":
-            self = .pushToken(token: j["token"]?.string ?? "", platform: j["platform"]?.string ?? "", env: j["env"]?.string ?? "")
+            self = .pushToken(token: j["token"]?.string ?? "", platform: j["platform"]?.string ?? "", env: j["env"]?.string ?? "", workspace: j["workspace"]?.string)
         case "call_join":
             guard let ch = j["channel"]?.uint else { return nil }
             self = .callJoin(channel: ch)

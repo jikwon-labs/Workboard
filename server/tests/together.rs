@@ -1392,9 +1392,10 @@ fn health_and_admin_commands_answer() {
     a2.until("signed in as owner again", |a| {
         a.role == Some(Role::Owner) && a.member == Some(1)
     });
-    // within a minute of having a workspace there is a backup
+    // within a minute of having a workspace there is a backup (the daily
+    // copy is written just after the hourly one, so wait for that)
     let until = Instant::now() + TICK_WAIT;
-    while workboard_server::backup_files(&home.join(workboard_server::BACKUP_DIR), "hourly")
+    while workboard_server::backup_files(&home.join(workboard_server::BACKUP_DIR), "daily")
         .is_empty()
         && Instant::now() < until
     {

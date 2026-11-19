@@ -1493,3 +1493,21 @@ fn delete_keys_in_the_message_box_work_as_on_the_mac() {
         "only the last row went: {left:?}"
     );
 }
+
+#[test]
+fn a_sign_typed_right_after_a_korean_syllable_is_kept() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    h.type_text("안녕하세");
+    h.frame(preedit("요"));
+    // macOS finishes "요" and then commits "!" too, in one key press
+    use egui::{Event::Ime, ImeEvent::*};
+    h.frame(vec![
+        Ime(Disabled),
+        Ime(Commit("요".into())),
+        Ime(Commit("!".into())),
+    ]);
+    h.settle();
+    assert_eq!(h.app.chat.text, "안녕하세요!");
+}

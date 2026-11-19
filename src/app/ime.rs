@@ -12,6 +12,10 @@
 // - Everything after a finished syllable waits for the next frame, when the
 //   box knows the syllable is done.
 // - A Cmd+Backspace whose press went missing gets its press back.
+// - Text the IME commits with no syllable being put together becomes plain
+//   text. Typing "!" (or another sign) right after "요" makes macOS commit
+//   "요" and then commit "!" as well; egui only takes a commit that ends a
+//   syllable, so the "!" was dropped and only the cursor moved.
 
 use egui::{Event, ImeEvent, Key, RawInput};
 
@@ -21,6 +25,8 @@ pub(super) struct ImeFix {
     later: Vec<Event>,
     /// Backspace went down as a key the app saw
     backspace_down: bool,
+    /// a syllable is being put together (its commit is the box's to take)
+    composing: bool,
 }
 
 impl ImeFix {
@@ -43,6 +49,18 @@ impl ImeFix {
                 end += 1;
             }
             self.later = raw.events.split_off(end);
+        }
+        for event in &mut raw.events {
+            match event {
+                Event::Ime(ImeEvent::Preedit(s)) => self.composing = !s.is_empty(),
+                Event::Ime(ImeEvent::Commit(s)) => {
+                    if !self.composing {
+                        *event = Event::Text(std::mem::take(s));
+                    }
+                    self.composing = false;
+                }
+                _ => {}
+            }
         }
         let mut i = 0;
         while i < raw.events.len() {
@@ -167,6 +185,34 @@ mod tests {
         let (last, more) = run(&mut fix, vec![]);
         assert!(!more);
         assert_eq!(last, vec![Event::Text(" ".into()), Event::Text("x".into())]);
+    }
+
+    #[test]
+    fn a_sign_committed_after_a_syllable_becomes_text() {
+        let mut fix = ImeFix::default();
+        run(&mut fix, vec![ime(ImeEvent::Preedit("요".into()))]);
+        // what winit sends for "!" typed while "요" is still being put together
+        let (now, more) = run(
+            &mut fix,
+            vec![
+                ime(ImeEvent::Disabled),
+                ime(ImeEvent::Commit("요".into())),
+                ime(ImeEvent::Commit("!".into())),
+            ],
+        );
+        assert!(more);
+        assert_eq!(
+            now,
+            vec![ime(ImeEvent::Disabled), ime(ImeEvent::Commit("요".into()))],
+            "the syllable stays the box's commit"
+        );
+        let (next, more) = run(&mut fix, vec![]);
+        assert!(!more);
+        assert_eq!(
+            next,
+            vec![Event::Text("!".into())],
+            "the sign is plain text"
+        );
     }
 
     #[test]

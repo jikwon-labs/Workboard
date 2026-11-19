@@ -94,6 +94,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     h.app.data.channels[0].messages.push(Message {
         edited: None,
         imported: None,
+        preview: None,
         mentions: vec![],
         attachments: vec![],
         id,

@@ -389,6 +389,8 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     public let task: UInt64?
     /// Saved for later by this person (kept on this device).
     public let saved: Bool
+    /// The page its first web address points to (Message::preview).
+    public let preview: LinkPreviewView?
 
     /// Message::imported: set once by the import and never cleared; the
     /// field itself stays in the JSON as it came.
@@ -398,6 +400,7 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         imported = Self.isImported(j)
         task = j["task"]?.uint
         saved = j["saved"]?.bool ?? false
+        preview = j["preview"].flatMap(LinkPreviewView.init)
         attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }
@@ -414,6 +417,21 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     /// Only my own messages, and not huddle or call cards (the Mac app
     /// offers no Edit for a message with `call`).
     public func isEditable(by me: UInt64?) -> Bool { me == author && call == nil }
+}
+
+public struct LinkPreviewView: Hashable, Sendable {
+    public let url: String
+    public let title: String
+    public let description: String
+    public let site: String
+
+    init?(_ j: JSON) {
+        guard let u = j["url"]?.string, !u.isEmpty else { return nil }
+        url = u
+        title = j["title"]?.string ?? ""
+        description = j["description"]?.string ?? ""
+        site = j["site"]?.string ?? ""
+    }
 }
 
 public enum ChannelKind: String, Sendable { case channel = "Channel", direct = "Direct" }

@@ -835,15 +835,12 @@ fn delete_channel_asks_first_and_close_conversation_only_hides() {
 #[test]
 fn mentions_of_names_with_spaces_are_marked_whole() {
     let h = Ui1::new();
-    let job = h
+    let text = "hi @Alex Kim and @Sam Lee, also @someone";
+    let marked: Vec<&str> = h
         .app
-        .mention_text("hi @Alex Kim and @Sam Lee, also @someone", 14.0);
-    let t = h.app.t();
-    let marked: Vec<&str> = job
-        .sections
-        .iter()
-        .filter(|s| s.format.background == t.selected_bg)
-        .map(|s| &job.text[s.byte_range.clone()])
+        .mention_ranges(text)
+        .into_iter()
+        .map(|(a, b)| &text[a..b])
         .collect();
     assert_eq!(marked, vec!["@Alex Kim", "@Sam Lee", "@someone"]);
 }
@@ -1845,4 +1842,99 @@ fn notification_keywords_are_typed_in_settings() {
         h.app.data.extra.notify.keyword_list(),
         vec!["deploy", "배포"]
     );
+}
+
+fn last_in(h: &Ui1, cid: u64) -> Message {
+    h.app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone()
+}
+
+/// Formatting marks are kept in the message but hidden when it is shown;
+/// the B button and Cmd+B put them around the selection.
+#[test]
+fn formatting_buttons_and_keys_wrap_the_selection_and_marks_are_hidden() {
+    let mut h = Ui1::new();
+    let cmd = egui::Modifiers {
+        mac_cmd: true,
+        command: true,
+        ..Default::default()
+    };
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Message composer");
+    h.type_text("ship it");
+    h.key_with(egui::Key::A, cmd);
+    h.click("Bold");
+    assert_eq!(h.app.chat.text, "**ship it**");
+    // the same text stays selected: Italic goes inside the bold
+    h.click("Italic");
+    assert_eq!(h.app.chat.text, "***ship it***");
+    h.click("Italic");
+    assert_eq!(h.app.chat.text, "**ship it**", "again takes it off");
+    // at the end with nothing selected: two marks, typing goes between them
+    h.key(egui::Key::End);
+    h.type_text(" now ");
+    h.key_with(egui::Key::C, cmd | egui::Modifiers::SHIFT);
+    h.type_text("cargo test");
+    assert_eq!(h.app.chat.text, "**ship it** now `cargo test`");
+    h.key(egui::Key::Enter);
+    assert_eq!(last_in(&h, cid).text, "**ship it** now `cargo test`");
+    assert!(
+        !h.painted_text("ship it now cargo test").is_empty(),
+        "shown without its marks"
+    );
+    assert!(h.painted_text("**ship it** now `cargo test`").is_empty());
+}
+
+/// A message with a web address gets the page's preview (fetched once by
+/// the sender's app); its writer can take it away.
+#[test]
+fn a_web_address_gets_a_preview_its_writer_can_remove() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Message composer");
+    h.type_text("plan at https://example.com/plan.");
+    h.key(egui::Key::Enter);
+    let m = last_in(&h, cid);
+    let p = m.preview.expect("a preview");
+    assert_eq!(p.url, "https://example.com/plan");
+    assert_eq!(p.title, "Example page");
+    assert!(h.has("Example page"), "the card shows the page's title");
+    h.click("Remove preview");
+    assert!(last_in(&h, cid).preview.is_none());
+    assert!(!h.has("Example page"));
+    // a message without an address gets none; someone else's has no remove button
+    h.click("Message composer");
+    h.type_text("no address here");
+    h.key(egui::Key::Enter);
+    assert!(last_in(&h, cid).preview.is_none());
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap();
+    let mut other = c.messages.last().unwrap().clone();
+    other.id = 987_654;
+    other.author = 2;
+    other.text = "see https://example.com/x".into();
+    other.preview = Some(LinkPreview {
+        url: "https://example.com/x".into(),
+        title: "Their page".into(),
+        ..Default::default()
+    });
+    c.messages.push(other);
+    h.settle();
+    assert!(h.has("Their page"));
+    assert!(!h.has("Remove preview"));
 }

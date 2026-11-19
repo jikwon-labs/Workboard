@@ -150,7 +150,13 @@ public enum Notify {
     public static let burst = 3
 
     static func preview(_ m: JSON) -> String {
-        let t = m["text"]?.string ?? ""
+        // without its formatting marks (as the Mac's banners)
+        let t = ChatFormat.blocks(m["text"]?.string ?? "").map { b -> String in
+            switch b {
+            case .text(let s), .quote(let s), .bullet(let s): return String(ChatFormat.inline(s).characters)
+            case .code(let s): return s
+            }
+        }.joined(separator: "\n")
         if !t.isEmpty { return String(t.prefix(140)) }
         return sentWhat(m["attachments"]?.array ?? [])
     }

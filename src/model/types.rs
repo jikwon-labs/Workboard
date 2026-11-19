@@ -402,6 +402,24 @@ pub struct Message {
     /// unread counts or badges. Set once and never cleared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported: Option<String>,
+    /// The page its first web address points to (title, description), got
+    /// once by the writer's app after sending, so others don't each visit
+    /// the page. Its writer can take it away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<LinkPreview>,
+}
+
+/// A web page as a message shows it under its text.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct LinkPreview {
+    pub url: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// the site's name ("GitHub"), else its address ("github.com")
+    #[serde(default)]
+    pub site: String,
 }
 
 pub use crate::media::MediaKind;

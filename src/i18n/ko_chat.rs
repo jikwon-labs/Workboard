@@ -121,4 +121,7 @@ pub const T: &[(&str, &str)] = &[
     ("Everyone in this conversation", "이 대화의 모든 사람"),
     ("Everyone here who is online", "이 대화에서 지금 접속한 사람"),
     ("Everyone in this team", "이 팀의 모든 사람"),
+    // link previews and formatting
+    ("Remove preview", "미리보기 지우기"),
+    ("Code", "코드"),
 ];

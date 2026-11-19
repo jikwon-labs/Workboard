@@ -77,6 +77,11 @@ fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
 
 pub(super) enum ChatAction {
     JoinHuddle(u64),
+    /// The writer takes a link preview off their message.
+    RemovePreview {
+        ch: u64,
+        msg: u64,
+    },
     React {
         ch: u64,
         msg: u64,
@@ -181,6 +186,199 @@ fn dm_people(c: &Channel) -> Vec<u64> {
 /// Which copy of a direct message shows: one with messages, then the older.
 fn dm_rank(c: &Channel) -> (bool, u64) {
     (c.messages.is_empty(), c.id)
+}
+
+/// Link previews on their way: fetched on a thread of their own for each
+/// message I send with a web address in it (linkpreview.rs), then put on
+/// the message by `previews_tick`.
+pub(super) struct Previews {
+    tx: std::sync::mpsc::Sender<(u64, u64, LinkPreview)>,
+    rx: std::sync::mpsc::Receiver<(u64, u64, LinkPreview)>,
+    ctx: std::sync::Arc<std::sync::Mutex<Option<egui::Context>>>,
+}
+
+impl Default for Previews {
+    fn default() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        Previews {
+            tx,
+            rx,
+            ctx: Default::default(),
+        }
+    }
+}
+
+impl App {
+    /// Fetch the preview of the first web address of message `msg` (in
+    /// channel `ch`), just sent.
+    pub(super) fn fetch_preview(&self, ch: u64, msg: u64, text: &str) {
+        let Some(url) = super::chatfmt::first_url(text) else {
+            return;
+        };
+        let tx = self.previews.tx.clone();
+        let ctx = self.previews.ctx.clone();
+        let job = move || {
+            if let Some(p) = crate::linkpreview::fetch(&url) {
+                let _ = tx.send((ch, msg, p));
+                if let Some(c) = ctx.lock().unwrap().as_ref() {
+                    c.request_repaint();
+                }
+            }
+        };
+        // (the tests' fetch visits nothing and answers at once)
+        if cfg!(test) {
+            job();
+        } else {
+            std::thread::spawn(job);
+        }
+    }
+
+    /// A link preview under a message: the site, the page's title (opens
+    /// it) and description. True when its writer (`mine`) takes it away.
+    pub(super) fn preview_card(&self, ui: &mut Ui, p: &LinkPreview, mine: bool) -> bool {
+        let t = self.t();
+        let mut remove = false;
+        ui.add_space(4.0);
+        let inner = egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 10,
+                right: 8,
+                top: 6,
+                bottom: 6,
+            })
+            .show(ui, |ui| {
+                ui.set_max_width(ui.available_width().min(460.0));
+                ui.horizontal(|ui| {
+                    if !p.site.is_empty() {
+                        ui.label(RichText::new(&p.site).small().color(t.text3));
+                    }
+                    if mine {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let x = ui
+                                .add(ghost(egui::Button::new(
+                                    RichText::new("\u{00D7}").color(t.text3),
+                                )))
+                                .on_hover_text(tr("Remove preview"));
+                            name_it(&x, "Remove preview");
+                            remove = x.clicked();
+                        });
+                    }
+                });
+                if !p.title.is_empty() {
+                    let title = ui.add(
+                        egui::Label::new(
+                            RichText::new(&p.title)
+                                .font(crate::app::bold_font(ui.ctx(), 14.0))
+                                .color(t.primary),
+                        )
+                        .sense(Sense::click())
+                        .wrap(),
+                    );
+                    name_it(&title, &p.title);
+                    if title.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if title.on_hover_text(&p.url).clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(p.url.clone()));
+                    }
+                }
+                if !p.description.is_empty() {
+                    ui.add(egui::Label::new(RichText::new(&p.description).color(t.text2)).wrap());
+                }
+            });
+        // the bar down its left side
+        let r = inner.response.rect;
+        ui.painter().rect_filled(
+            Rect::from_min_size(r.min, vec2(3.0, r.height())),
+            1.5,
+            t.border,
+        );
+        remove
+    }
+
+    /// Put fetched previews on their messages (unless taken away meanwhile:
+    /// a message edited to another address keeps none).
+    pub(super) fn previews_tick(&mut self, ctx: &egui::Context) {
+        *self.previews.ctx.lock().unwrap() = Some(ctx.clone());
+        while let Ok((ch, id, p)) = self.previews.rx.try_recv() {
+            if let Some(m) = self
+                .data
+                .channels
+                .iter_mut()
+                .find(|c| c.id == ch)
+                .and_then(|c| find_msg(&mut c.messages, id))
+            {
+                if super::chatfmt::first_url(&m.text).as_deref() == Some(p.url.as_str()) {
+                    m.preview = Some(p);
+                    self.dirty = true;
+                }
+            }
+        }
+    }
+}
+
+/// The formatting marks the message boxes offer: (mark, name, key, with Shift).
+const FORMATS: [(&str, &str, egui::Key, bool); 4] = [
+    ("**", "Bold", egui::Key::B, false),
+    ("*", "Italic", egui::Key::I, false),
+    ("~~", "Strikethrough", egui::Key::X, true),
+    ("`", "Code", egui::Key::C, true),
+];
+
+/// Puts `mark` around what is selected in the text box `id` (chatfmt::wrap),
+/// keeping the same text selected.
+fn format_selection(ctx: &egui::Context, id: egui::Id, text: &mut String, mark: &str) {
+    let n = text.chars().count();
+    let mut st = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    let (a, b) = st
+        .cursor
+        .char_range()
+        .map(|r| (r.primary.index.min(n), r.secondary.index.min(n)))
+        .unwrap_or((n, n));
+    let (a, b) = super::chatfmt::wrap(text, a, b, mark);
+    st.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+        egui::text::CCursor::new(a),
+        egui::text::CCursor::new(b),
+    )));
+    st.store(ctx, id);
+    ctx.memory_mut(|m| m.request_focus(id));
+}
+
+/// Cmd+B, Cmd+I, Cmd+Shift+X and Cmd+Shift+C in the focused text box `id`.
+fn format_keys(ui: &mut Ui, id: egui::Id, text: &mut String) {
+    if !ui.memory(|m| m.has_focus(id)) {
+        return;
+    }
+    for (mark, _, key, shift) in FORMATS {
+        let mods = if shift {
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT
+        } else {
+            egui::Modifiers::COMMAND
+        };
+        if ui.input_mut(|i| i.consume_key(mods, key)) {
+            format_selection(ui.ctx(), id, text, mark);
+        }
+    }
+}
+
+/// The B, I, S and </> buttons of a message box; `prefix` tells the
+/// boxes apart for the tests ("" or "reply ").
+fn format_buttons(ui: &mut Ui, t: &Theme, id: egui::Id, text: &mut String, prefix: &str) {
+    for (mark, name, _, _) in FORMATS {
+        let glyph = match name {
+            "Bold" => RichText::new("B").strong(),
+            "Italic" => RichText::new("I").italics(),
+            "Strikethrough" => RichText::new("S").strikethrough(),
+            _ => RichText::new("</>").monospace(),
+        };
+        let b = ui
+            .add(ghost(egui::Button::new(glyph.color(t.text2))))
+            .on_hover_text(tr(name));
+        name_it(&b, &format!("{}{}", prefix, name));
+        if b.clicked() {
+            format_selection(ui.ctx(), id, text, mark);
+        }
+    }
 }
 
 /// The groups at the end of an @ list: "@channel" (everyone here), "@here"
@@ -519,23 +717,9 @@ impl App {
         )
     }
 
-    /// Message text with mentions marked: "@" and a member's name (names
-    /// may have spaces; the same rule as `mentioned_ids`), else "@" and the
-    /// word after it.
-    pub(super) fn mention_text(&self, text: &str, size: f32) -> egui::text::LayoutJob {
-        let t = self.t();
-        let mut job = egui::text::LayoutJob::default();
-        let plain = egui::TextFormat {
-            font_id: FontId::proportional(size),
-            color: t.text,
-            ..Default::default()
-        };
-        let marked = egui::TextFormat {
-            font_id: FontId::proportional(size),
-            color: t.selected_text,
-            background: t.selected_bg,
-            ..Default::default()
-        };
+    /// Where `text` @mentions someone (byte ranges): "@" and a member's or
+    /// team's name, else "@" and the word after it (as `mention_text` marks).
+    pub(super) fn mention_ranges(&self, text: &str) -> Vec<(usize, usize)> {
         let names: Vec<&str> = self
             .data
             .members
@@ -544,7 +728,8 @@ impl App {
             .chain(self.data.extra.teams.iter().map(|t| t.name.trim()))
             .filter(|n| !n.is_empty())
             .collect();
-        let (mut from, mut i) = (0, 0);
+        let mut out = vec![];
+        let mut i = 0;
         while i < text.len() {
             let rest = &text[i..];
             if rest.starts_with('@') && (i == 0 || text[..i].ends_with(char::is_whitespace)) {
@@ -553,22 +738,125 @@ impl App {
                     Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0)
                 });
                 if let Some(len) = len {
-                    if from < i {
-                        job.append(&text[from..i], 0.0, plain.clone());
-                    }
-                    job.append(&text[i..i + 1 + len], 0.0, marked.clone());
+                    out.push((i, i + 1 + len));
                     i += 1 + len;
-                    from = i;
                     continue;
                 }
             }
             i += rest.chars().next().map_or(1, char::len_utf8);
         }
-        if from < text.len() || text.is_empty() {
-            job.append(&text[from..], 0.0, plain);
+        out
+    }
+
+    /// A message's text as it is shown (chatfmt): its formatting, mentions
+    /// marked and links clickable. A workboard:// link clicked comes back
+    /// to be opened here; a web address opens in the browser.
+    pub(super) fn message_text(&self, ui: &mut Ui, src: &str, size: f32) -> Option<String> {
+        let t = self.t();
+        let r = super::chatfmt::rich(src);
+        let mentions = self.mention_ranges(&r.text);
+        let mut links = r.links.clone();
+        for l in super::nav::find_links(&r.text) {
+            if !links.iter().any(|x| x.0 < l.1 && l.0 < x.1) {
+                links.push(l);
+            }
+        }
+        let mut cuts: Vec<usize> = vec![0, r.text.len()];
+        for (a, b, _) in &r.runs {
+            cuts.extend([*a, *b]);
+        }
+        for (a, b) in &mentions {
+            cuts.extend([*a, *b]);
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        let bold = crate::app::bold_font(ui.ctx(), size);
+        let code_bg = if t.dark {
+            Color32::from_white_alpha(18)
+        } else {
+            Color32::from_black_alpha(12)
+        };
+        let mut job = egui::text::LayoutJob::default();
+        for w in cuts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if a >= b {
+                continue;
+            }
+            let look = r
+                .runs
+                .iter()
+                .find(|(x, y, _)| *x <= a && b <= *y)
+                .map(|x| x.2)
+                .unwrap_or_default();
+            let mention = mentions.iter().any(|(x, y)| *x <= a && b <= *y);
+            let mut f = egui::TextFormat {
+                font_id: if look.code || look.block {
+                    FontId::monospace(size - 1.0)
+                } else if look.bold {
+                    bold.clone()
+                } else {
+                    FontId::proportional(size)
+                },
+                color: if look.quote { t.text2 } else { t.text },
+                italics: look.italic,
+                ..Default::default()
+            };
+            if look.strike {
+                f.strikethrough = Stroke::new(1.0_f32, f.color);
+            }
+            if look.code || look.block {
+                f.background = code_bg;
+            }
+            if mention && !look.code && !look.block {
+                f.color = t.selected_text;
+                f.background = t.selected_bg;
+            }
+            job.append(&r.text[a..b], 0.0, f);
+        }
+        if r.text.is_empty() {
+            job.append("", 0.0, egui::TextFormat::default());
         }
         job.wrap.max_width = f32::INFINITY;
-        job
+        if links.is_empty() {
+            ui.add(egui::Label::new(job).wrap());
+            return None;
+        }
+        // colour the links (char ranges of the shown text)
+        let full = job.text.clone();
+        let char_at = |byte: usize| full[..byte].chars().count();
+        for s in job.sections.iter_mut() {
+            let (a, b) = (char_at(s.byte_range.start), char_at(s.byte_range.end));
+            if links.iter().any(|(ls, le, _)| a < *le && b > *ls) {
+                s.format.color = t.primary;
+                s.format.underline = Stroke::new(1.0_f32, t.primary);
+            }
+        }
+        let (pos, galley, resp) = egui::Label::new(job)
+            .wrap()
+            .sense(Sense::click())
+            .layout_in_ui(ui);
+        ui.painter().galley(pos, galley.clone(), t.text);
+        let at = |p: egui::Pos2| galley.cursor_from_pos(p - pos).ccursor.index;
+        let over = resp
+            .hover_pos()
+            .map(at)
+            .and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e).cloned());
+        if let Some((_, _, url)) = &over {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            resp.clone().on_hover_text(url.as_str());
+        }
+        if resp.clicked() {
+            let url = resp
+                .interact_pointer_pos()
+                .map(at)
+                .and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e))
+                .map(|l| l.2.clone())?;
+            if url.starts_with("workboard://") {
+                return Some(url);
+            }
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        }
+        None
     }
 
     pub(super) fn chat(&mut self, ui: &mut Ui) {
@@ -1143,6 +1431,7 @@ impl App {
                     )
                 };
                 let enter = take_enter(ui, text_id);
+                format_keys(ui, text_id, &mut self.chat.text);
                 let r = ui.add(
                     egui::TextEdit::multiline(&mut self.chat.text)
                         .id(text_id)
@@ -1248,6 +1537,7 @@ impl App {
                             close_popup(ui);
                         }
                     });
+                    format_buttons(ui, &t, text_id, &mut self.chat.text, "");
                     if itool(ui, "task", "Create task").clicked() {
                         self.open_quick_add(None);
                     }
@@ -1371,6 +1661,7 @@ impl App {
                     &mut self.chat.text
                 };
                 let enter = take_enter(ui, id);
+                format_keys(ui, id, text);
                 let r = ui.add(
                     egui::TextEdit::multiline(text)
                         .id(id)
@@ -1436,6 +1727,7 @@ impl App {
                             close_popup(ui);
                         }
                     });
+                    format_buttons(ui, &t, id, text, "reply ");
                     ui.label(
                         RichText::new(tr("Enter to send, Shift+Enter for a new line"))
                             .small()
@@ -1572,12 +1864,16 @@ impl App {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
                     let text = shown_text(m);
-                    let job = self.mention_text(&text, 14.0);
-                    if let Some(link) = self.text_with_links(ui, job, &text) {
+                    if let Some(link) = self.message_text(ui, &text, 14.0) {
                         self.link_pending = Some(link);
                     }
                     if compact && m.edited.is_some() {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
+                    }
+                }
+                if let Some(p) = &m.preview {
+                    if self.preview_card(ui, p, m.author == me) {
+                        acts.push(ChatAction::RemovePreview { ch: cid, msg: m.id });
                     }
                 }
                 if let Some(index) = self.attachment_tiles(ui, m) {
@@ -2204,6 +2500,19 @@ impl App {
                         }
                     }
                 }
+                ChatAction::RemovePreview { ch, msg } => {
+                    if let Some(m) = self
+                        .data
+                        .channels
+                        .iter_mut()
+                        .find(|c| c.id == ch)
+                        .and_then(|c| find_msg(&mut c.messages, msg))
+                    {
+                        if m.author == me && m.preview.take().is_some() {
+                            self.dirty = true;
+                        }
+                    }
+                }
                 ChatAction::Pin { ch, msg } => {
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         if let Some(m) = c.messages.iter_mut().find(|m| m.id == msg) {
@@ -2227,6 +2536,7 @@ impl App {
                     let m = Message {
                         edited: None,
                         imported: None,
+                        preview: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2330,6 +2640,7 @@ impl App {
                         .map(|m| m.mentions.clone())
                         .unwrap_or_default();
                     let mentions = self.chat_mentions(&text, ch, &before);
+                    let mut refetch: Option<String> = None;
                     if let Some(m) = self
                         .data
                         .channels
@@ -2342,7 +2653,16 @@ impl App {
                             m.text = text;
                             m.edited = Some(now_ts());
                             self.dirty = true;
+                            // a preview of an address no longer in it goes; a new one comes
+                            let url = super::chatfmt::first_url(&m.text);
+                            if m.preview.as_ref().map(|p| &p.url) != url.as_ref() {
+                                m.preview = None;
+                                refetch = url.map(|_| m.text.clone());
+                            }
                         }
+                    }
+                    if let Some(text) = refetch {
+                        self.fetch_preview(ch, msg, &text);
                     }
                 }
                 ChatAction::CancelEdit => self.chat.edit = None,
@@ -2499,6 +2819,7 @@ impl App {
                     let m = Message {
                         edited: None,
                         imported: None,
+                        preview: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2514,6 +2835,7 @@ impl App {
                         pinned: false,
                         call: None,
                     };
+                    let sent = m.text.clone();
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         match parent {
                             Some(pid) => {
@@ -2526,6 +2848,7 @@ impl App {
                         c.last_read = c.last_read.max(now_ts());
                     }
                     self.dirty = true;
+                    self.fetch_preview(ch, id, &sent);
                 }
                 ChatAction::NewChannel(name) => {
                     let id = self.data.new_id();

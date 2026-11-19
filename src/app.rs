@@ -17,6 +17,7 @@ use std::path::PathBuf;
 mod account_tests;
 mod board;
 mod chat;
+mod chatfmt;
 mod comments;
 mod delete_ws;
 mod docs;
@@ -419,6 +420,8 @@ pub struct App {
     menu_was_open: bool,
     /// A text field had keyboard focus at the end of the previous pass.
     typing_was_on: bool,
+    /// Link previews being fetched for messages I sent (chat.rs).
+    previews: chat::Previews,
     data: Data,
     loc: Location,
     view: ViewKind,
@@ -972,6 +975,7 @@ impl App {
             selected: HashSet::new(),
             menu_was_open: false,
             typing_was_on: false,
+            previews: Default::default(),
             filter: TaskFilter::default(),
             hidden_cols: std::iter::once("Date created")
                 .chain(parity::PROPERTIES)
@@ -5360,6 +5364,7 @@ impl App {
             ctx.request_repaint();
         }
         self.open_pending_links();
+        self.previews_tick(ctx);
         self.reminder_tick(Some(ctx));
         self.apply_actions();
         self.track_history();

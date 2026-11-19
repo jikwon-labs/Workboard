@@ -5,6 +5,7 @@
 mod app;
 mod filters;
 mod i18n;
+mod linkpreview;
 mod links;
 mod model;
 mod notifier;

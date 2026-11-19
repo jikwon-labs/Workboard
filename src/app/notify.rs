@@ -92,7 +92,8 @@ fn add(out: &mut Vec<(i64, Note)>, keys: &mut HashSet<String>, ts: i64, note: No
 /// A message's text cut to banner length (a picture, video or file says
 /// which it is).
 fn preview(m: &Message) -> String {
-    let shown = super::chat::shown_text(m);
+    // without its formatting marks
+    let shown = super::chatfmt::plain(&super::chat::shown_text(m));
     let text = shown.trim();
     let text = if text.is_empty() && !m.attachments.is_empty() {
         sent_what(&m.attachments).to_string()

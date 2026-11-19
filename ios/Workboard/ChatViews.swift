@@ -279,9 +279,12 @@ struct ConversationView: View {
                 VStack(spacing: 0) {
                     TypingLine(channelId: c.id)
                     Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
-                        client.edit { d, me in
-                            Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: client.newId(), ts: nowTs())
+                        let id = client.newId()
+                        let sent = client.edit { d, me in
+                            Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
                         }
+                        if sent { fetchPreview(client, channel: c.id, message: id, text: text) }
+                        return sent
                     }
                     .onTyping { client.typingNow(channel: c.id) }
                 }
@@ -361,9 +364,12 @@ struct ThreadView: View {
             .defaultScrollAnchor(.bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
-                    client.edit { d, me in
-                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: client.newId(), ts: nowTs())
+                    let id = client.newId()
+                    let sent = client.edit { d, me in
+                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
                     }
+                    if sent { fetchPreview(client, channel: c.id, message: id, text: text) }
+                    return sent
                 }
             }
             .navigationTitle("Thread")
@@ -449,9 +455,14 @@ struct MessageRow: View {
                 Text(title).font(.headline)
             }
             if !message.text.isEmpty || message.edited != nil {
-                (Text(message.text) + (message.edited != nil ? Text(message.text.isEmpty ? "(edited)" : " (edited)").font(.caption).foregroundColor(.secondary) : Text("")))
+                ChatText(text: message.text, edited: message.edited != nil)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("messageText-\(message.id)")
+            }
+            if let p = message.preview {
+                LinkPreviewCard(preview: p, mine: message.author == client.me) {
+                    _ = client.edit { d, me in Edits.removePreview(&d, channel: channelId, message: message.id, me: me) }
+                }
             }
             if !message.attachments.isEmpty {
                 AttachmentsView(attachments: message.attachments)
@@ -580,7 +591,10 @@ struct EditMessageSheet: View {
                 CancelButton { editing = false }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        let had = message.preview?.url
                         client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
+                        // another address: its preview comes
+                        if ChatFormat.firstURL(draft) != had { fetchPreview(client, channel: channelId, message: message.id, text: draft) }
                         editing = false
                     }
                     .disabled(draft.isBlank)
@@ -637,6 +651,10 @@ struct Composer: View {
     /// "@" while the text still starts with it.
     @State private var completed: String?
     @FocusState private var focused: Bool
+    /// The B, I, S and code buttons are showing.
+    @State private var formatting = false
+    /// A mark a button asked to put around the selection.
+    @State private var wrapMark: String?
 
     init(placeholder: String, send: @escaping (String, [UInt64]) -> Bool) {
         self.placeholder = placeholder
@@ -735,6 +753,18 @@ struct Composer: View {
                     .padding(.horizontal, 4)
                 }
             }
+            if formatting {
+                HStack(spacing: 18) {
+                    ForEach([("**", "bold", "Bold"), ("*", "italic", "Italic"), ("~~", "strikethrough", "Strikethrough"), ("`", "chevron.left.forwardslash.chevron.right", "Code")], id: \.0) { mark, icon, name in
+                        Button { wrapMark = mark } label: { Image(systemName: icon) }
+                            .accessibilityLabel(L(name))
+                            .accessibilityIdentifier("format-\(name)")
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .font(.system(size: 17))
+            }
             HStack(alignment: .bottom, spacing: 8) {
                 if allowsAttachments {
                     PhotosPicker(selection: $picked, maxSelectionCount: 10, matching: .any(of: [.images, .videos])) {
@@ -750,7 +780,13 @@ struct Composer: View {
                     .accessibilityLabel("Add files")
                     .accessibilityIdentifier("attachFileButton")
                 }
-                TextField(can ? placeholder : "Sign in to send messages", text: $text, axis: .vertical)
+                Button { formatting.toggle() } label: {
+                    Image(systemName: "textformat").font(.system(size: 20)).padding(.bottom, 6)
+                }
+                .disabled(!can)
+                .accessibilityLabel("Formatting")
+                .accessibilityIdentifier("formatButton")
+                ComposerField(placeholder: can ? placeholder : "Sign in to send messages", text: $text, wrapMark: $wrapMark)
                     .lineLimit(1...5)
                     .focused($focused)
                     .padding(.horizontal, 14)
@@ -963,5 +999,162 @@ struct NewPostSheet: View {
                 }
             }
         }
+    }
+}
+
+
+/// A message's text with its formatting (ChatFormat, as on the Mac): inline
+/// marks hidden, ``` blocks in a code font, "> " quotes, "- " lists.
+struct ChatText: View {
+    let text: String
+    var edited = false
+
+    var body: some View {
+        let blocks = ChatFormat.blocks(text)
+        let tail = edited ? Text(text.isEmpty ? "(edited)" : " (edited)").font(.caption).foregroundColor(.secondary) : Text("")
+        if blocks.count <= 1, case .text(let t)? = blocks.first ?? .text("") {
+            Text(ChatFormat.inline(t)) + tail
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { i, b in
+                    let last = i == blocks.count - 1
+                    switch b {
+                    case .text(let t):
+                        Text(ChatFormat.inline(t)) + (last ? tail : Text(""))
+                    case .code(let c):
+                        (Text(c).font(.system(.callout, design: .monospaced)) + (last ? tail : Text("")))
+                            .padding(.horizontal, 8).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemFill)))
+                    case .quote(let q):
+                        HStack(alignment: .top, spacing: 8) {
+                            RoundedRectangle(cornerRadius: 1.5).fill(Color(.separator)).frame(width: 3)
+                            Text(ChatFormat.inline(q)).foregroundStyle(.secondary) + (last ? tail : Text(""))
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                    case .bullet(let t):
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("\u{2022}")
+                            Text(ChatFormat.inline(t)) + (last ? tail : Text(""))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The page a message's first web address points to: site, title (opens
+/// it) and description; its writer can take it away.
+struct LinkPreviewCard: View {
+    let preview: LinkPreviewView
+    let mine: Bool
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5).fill(Color(.separator)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                if !preview.site.isEmpty {
+                    Text(preview.site).font(.caption).foregroundStyle(.secondary)
+                }
+                if !preview.title.isEmpty, let url = URL(string: preview.url) {
+                    Link(preview.title, destination: url)
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier("previewTitle")
+                }
+                if !preview.description.isEmpty {
+                    Text(preview.description).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+            Spacer(minLength: 0)
+            if mine {
+                Button(action: remove) {
+                    Image(systemName: "xmark").font(.caption).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove preview")
+                .accessibilityIdentifier("removePreview")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 4)
+    }
+}
+
+
+/// Fetch the preview of the first web address of a message I just sent or
+/// changed, and put it on the message (as the Mac app does after sending).
+@MainActor
+func fetchPreview(_ client: SyncClient, channel: UInt64, message: UInt64, text: String) {
+    guard let url = ChatFormat.firstURL(text) else { return }
+    Task {
+        guard let p = await LinkPreviews.fetch(url) else { return }
+        _ = client.edit { d, me in Edits.setPreview(&d, channel: channel, message: message, preview: p, me: me) }
+    }
+}
+
+
+/// The message box's text field. A mark set in `wrapMark` (a formatting
+/// button) goes around the selection (ChatFormat.wrap); before iOS 18,
+/// which has no selection to read, two marks go at the end.
+struct ComposerField: View {
+    let placeholder: String
+    @Binding var text: String
+    @Binding var wrapMark: String?
+
+    var body: some View {
+        if #available(iOS 18.0, *) {
+            SelectingField(placeholder: placeholder, text: $text, wrapMark: $wrapMark)
+        } else {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .onChange(of: wrapMark) {
+                    guard let mark = wrapMark else { return }
+                    let n = text.count
+                    text = ChatFormat.wrap(text, n, n, mark: mark).0
+                    wrapMark = nil
+                }
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct SelectingField: View {
+    let placeholder: String
+    @Binding var text: String
+    @Binding var wrapMark: String?
+    @State private var selection: TextSelection?
+    /// The text was just changed by a formatting button (keep its selection).
+    @State private var wrapped = false
+
+    var body: some View {
+        TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+            .onChange(of: text) { old, new in
+                if wrapped {
+                    wrapped = false
+                } else if new.isEmpty {
+                    selection = nil
+                } else if new.count - old.count > 1 {
+                    // filled in from outside (a name from the @ list): go on after it
+                    selection = TextSelection(insertionPoint: new.endIndex)
+                }
+            }
+            .onChange(of: wrapMark) {
+                guard let mark = wrapMark else { return }
+                wrapMark = nil
+                wrapped = true
+                let n = text.count
+                var (a, b) = (n, n)
+                if case .selection(let r)? = selection?.indices,
+                   r.lowerBound >= text.startIndex, r.upperBound <= text.endIndex {
+                    a = text.distance(from: text.startIndex, to: r.lowerBound)
+                    b = text.distance(from: text.startIndex, to: r.upperBound)
+                }
+                let (t, a2, b2) = ChatFormat.wrap(text, a, b, mark: mark)
+                text = t
+                let lo = t.index(t.startIndex, offsetBy: a2), hi = t.index(t.startIndex, offsetBy: b2)
+                selection = TextSelection(range: lo..<hi)
+            }
     }
 }

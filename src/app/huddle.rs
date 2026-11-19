@@ -209,6 +209,7 @@ impl App {
             c.messages.push(Message {
                 edited: None,
                 imported: None,
+                preview: None,
                 mentions: vec![],
                 attachments: vec![],
                 id,

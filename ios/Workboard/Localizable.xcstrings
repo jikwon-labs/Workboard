@@ -1392,6 +1392,16 @@
         }
       }
     },
+    "Code": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "코드"
+          }
+        }
+      }
+    },
     "Code block": {
       "localizations": {
         "ko": {
@@ -2321,6 +2331,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "양식"
+          }
+        }
+      }
+    },
+    "Formatting": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서식"
           }
         }
       }
@@ -4572,6 +4592,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "저장 취소"
+          }
+        }
+      }
+    },
+    "Remove preview": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "미리보기 지우기"
           }
         }
       }

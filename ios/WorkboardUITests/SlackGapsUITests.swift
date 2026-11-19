@@ -65,3 +65,24 @@ final class SlackGapsUITests: WorkboardUITestCase {
         XCTAssertTrue(app.descendants(matching: .any)["Notifications off"].waitForExistence(timeout: 5), "#design is marked quiet")
     }
 }
+
+final class ChatFormatUITests: WorkboardUITestCase {
+    /// The formatting buttons put marks in the box; the message shows
+    /// without them.
+    func testBoldButtonAndTheMessageShowsWithoutMarks() {
+        let a = launchFresh(["-wbOpen", "channel:301"])
+        let box = a.textFields["composer"]
+        waitEnabled(box)
+        box.tap()
+        a.buttons["formatButton"].tap()
+        let bold = a.buttons["format-Bold"]
+        XCTAssertTrue(bold.waitForExistence(timeout: 5), "the formatting buttons show")
+        bold.tap()
+        let word = "loud\(Int.random(in: 1000...9999))"
+        box.typeText(word)
+        XCTAssertEqual(box.value as? String, "**\(word)**", "typing goes between the marks")
+        a.buttons["sendButton"].tap()
+        XCTAssertTrue(a.staticTexts[word].waitForExistence(timeout: 5), "shown without the marks")
+        XCTAssertFalse(a.staticTexts["**\(word)**"].exists)
+    }
+}

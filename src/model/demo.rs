@@ -565,6 +565,7 @@ impl Data {
             attachments: vec![],
             edited: None,
             imported: None,
+            preview: None,
         };
         let c1 = d.new_id();
         let mut m1 = msg(

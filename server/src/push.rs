@@ -502,8 +502,23 @@ pub fn payload(title: &str, body: &str, channel: u64, parent: Option<u64>) -> Va
     p
 }
 
+/// A message's text without the formatting marks that read badly in a
+/// banner (src/app/chatfmt.rs): ``` fences, **, ~~ and `.
+fn unmarked(t: &str) -> String {
+    t.lines()
+        .filter(|l| !l.trim_start().starts_with("```") || l.trim().len() > 6)
+        .map(|l| {
+            l.replace("```", "")
+                .replace("**", "")
+                .replace("~~", "")
+                .replace('`', "")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn body_of(m: &Value) -> String {
-    let t = text_field(m, "text");
+    let t = unmarked(&text_field(m, "text"));
     let t = t.trim();
     if t.is_empty() {
         return sent_what(array_at(m, "attachments"));
@@ -949,6 +964,15 @@ mod tests {
         assert_eq!(b[1]["aps"]["alert"]["body"], "m5");
         assert_eq!(b[2]["aps"]["alert"]["body"], "m6");
         assert_eq!(batch(&refs[..2]).len(), 2);
+    }
+
+    #[test]
+    fn formatting_marks_are_left_out_of_the_banner() {
+        let c = ws(
+            json!([{"id": 301, "name": "", "kind": "Direct", "members": [1, 2], "messages": [msg(5, 1, "**Ship** ~~not~~ `now`\n```\ncode\n```")]}]),
+        );
+        let n = notes(&c, &HashSet::new(), &[], now());
+        assert_eq!(n[0].payload["aps"]["alert"]["body"], "Ship not now\ncode");
     }
 
     #[test]

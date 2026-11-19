@@ -147,6 +147,7 @@ impl App {
                                             let m = Message {
                                                 edited: None,
                                                 imported: None,
+                                                preview: None,
                                                 mentions: self
                                                     .data
                                                     .mentions_in(self.post.body.trim()),

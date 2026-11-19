@@ -609,6 +609,7 @@ pub(super) fn new_message(id: u64, author: u64, text: String, ts: i64) -> Messag
         attachments: vec![],
         edited: None,
         imported: None,
+        preview: None,
     }
 }
 

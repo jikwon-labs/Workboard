@@ -677,55 +677,6 @@ impl App {
         shown == Some(true)
     }
 
-    /// A message text with its workboard:// links clickable; returns the
-    /// link clicked.
-    pub(super) fn text_with_links(
-        &self,
-        ui: &mut Ui,
-        job: egui::text::LayoutJob,
-        text: &str,
-    ) -> Option<String> {
-        let links = find_links(text);
-        if links.is_empty() {
-            ui.add(egui::Label::new(job).wrap());
-            return None;
-        }
-        let mut job = job;
-        // colour the links (the job's text is the message text, word for word)
-        let t = self.t();
-        let sections: Vec<_> = job.sections.drain(..).collect();
-        let full = job.text.clone();
-        let char_at = |byte: usize| full[..byte].chars().count();
-        for mut s in sections {
-            let (a, b) = (char_at(s.byte_range.start), char_at(s.byte_range.end));
-            if links.iter().any(|(ls, le, _)| a < *le && b > *ls) {
-                s.format.color = t.primary;
-                s.format.underline = Stroke::new(1.0_f32, t.primary);
-            }
-            job.sections.push(s);
-        }
-        let (pos, galley, resp) = egui::Label::new(job)
-            .wrap()
-            .sense(Sense::click())
-            .layout_in_ui(ui);
-        ui.painter().galley(pos, galley.clone(), t.text);
-        let at = |p: egui::Pos2| galley.cursor_from_pos(p - pos).ccursor.index;
-        let over = resp
-            .hover_pos()
-            .map(at)
-            .and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e).cloned());
-        if over.is_some() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        if resp.clicked() {
-            let c = resp.interact_pointer_pos().map(at);
-            return c
-                .and_then(|c| links.iter().find(|(s, e, _)| c >= *s && c < *e))
-                .map(|l| l.2.clone());
-        }
-        None
-    }
-
     /// Links waiting to be opened: clicked in a message, or sent by macOS.
     pub(super) fn open_pending_links(&mut self) {
         let urls: Vec<String> = self.link_pending.take().into_iter().collect();

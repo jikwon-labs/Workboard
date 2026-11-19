@@ -566,6 +566,7 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         attachments: vec![],
         edited: None,
         imported: None,
+        preview: None,
     }
 }
 
@@ -706,6 +707,7 @@ fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         attachments: vec![],
         edited: None,
         imported: None,
+        preview: None,
     }
 }
 

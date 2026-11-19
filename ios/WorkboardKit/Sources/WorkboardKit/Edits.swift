@@ -522,6 +522,10 @@ public enum Edits {
             Mentions.put(Mentions.chatIDs(in: text, data: snapshot, channel: channel, online: Set(picked), author: me, picked: picked), on: &m)
             m["text"] = .string(text)
             m["edited"] = .int(ts)
+            // a preview of an address no longer in it goes (the app fetches the new one)
+            if m["preview"]?["url"]?.string != nil && m["preview"]?["url"]?.string != ChatFormat.firstURL(text) {
+                m["preview"] = nil
+            }
             done = true
         }
         data.updateItem(at: "channels", id: channel) { c in

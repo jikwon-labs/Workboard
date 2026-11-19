@@ -250,6 +250,41 @@ fn an_invite_link_opens_the_join_form_filled_in() {
 }
 
 #[test]
+fn joining_a_server_that_does_not_answer_offers_to_update_the_app() {
+    let mut h = Ui1::new();
+    let addr = "https://wb.example.com/w/ab12";
+    h.app.login = Some(crate::app::login::LoginScreen::new(
+        crate::app::login::LoginPage::Invite,
+        addr,
+    ));
+    h.settle();
+    assert!(!h.has("Update Workboard"), "nothing to fix before joining");
+    // what an app older than the server sees with a workspace's invite link
+    h.app.sync_rt.joining = Some(together::Joining {
+        addr: addr.into(),
+        device: "dev1".into(),
+        how: together::How::Invite {
+            code: "ABCD-EFGH-JKMN".into(),
+            email: String::new(),
+            password: "a long password".into(),
+        },
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Reconnecting(
+        "The server didn't answer like Workboard".into(),
+    ));
+    h.settle();
+    assert!(h.has("Something answered at this address, but not a Workboard server. Check the address and port. Trying again every few seconds."));
+    assert!(h.has("An older Workboard may not work with this server."));
+    h.click("Update Workboard");
+    h.settle();
+    // tests don't run inside Workboard.app, so it says why it can't update
+    let note = h.app.sync_rt.form.update_note.clone();
+    assert!(note.contains(env!("CARGO_PKG_VERSION")), "{}", note);
+    assert!(h.has(&note), "shown under the button");
+    assert!(h.app.sync_rt.joining.is_some(), "still trying to join");
+}
+
+#[test]
 fn log_out_asks_first_then_deletes_the_team_copy_and_shows_the_sign_in_screen() {
     let mut h = Ui1::new();
     // working on this computer only: there is nothing to log out of

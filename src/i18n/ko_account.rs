@@ -189,6 +189,8 @@ pub const T: &[(&str, &str)] = &[
     ("This workspace is being set up by someone else.", "다른 사람이 이 워크스페이스를 설정하고 있습니다."),
     ("There's no such workspace on this server.", "이 서버에는 그런 워크스페이스가 없습니다."),
     ("Looking up your workspaces...", "내 워크스페이스를 찾는 중..."),
+    ("An older Workboard may not work with this server.", "Workboard 버전이 낮으면 이 서버에 접속하지 못할 수 있습니다."),
+    ("Update Workboard", "Workboard 업데이트"),
     ("Choose a workspace", "워크스페이스 고르기"),
     ("Your account is in these workspaces on this server. You can open the others later the same way.", "이 서버에서 내 계정이 들어 있는 워크스페이스입니다. 나머지는 나중에 같은 방법으로 열 수 있습니다."),
     ("The server's answer didn't make sense.", "서버의 응답을 이해할 수 없습니다."),

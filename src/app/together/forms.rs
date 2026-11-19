@@ -246,6 +246,37 @@ impl App {
                 .filter(|_| matches!(self.sync_rt.net_status, Some(NetStatus::Reconnecting(_))))
             {
                 ui.label(RichText::new(why).small().color(WARN));
+                // an app older than the server can't talk to it (an invite
+                // link with /w/<id> needs 0.1.13 or newer), so let it update
+                // from that same server right here
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(tr("An older Workboard may not work with this server."))
+                            .small()
+                            .color(t.text2),
+                    );
+                    if ui.button(tr("Update Workboard")).clicked() {
+                        if let Some(j) = &self.sync_rt.joining {
+                            crate::updater::set_server(&j.addr);
+                        }
+                        // Sparkle shows its own window; only explain when it can't run
+                        self.sync_rt.form.update_note = match crate::updater::check_now() {
+                            Ok(()) => String::new(),
+                            Err(why) => why.explain(),
+                        };
+                    }
+                });
+                if !self.sync_rt.form.update_note.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(self.sync_rt.form.update_note.clone())
+                                .small()
+                                .color(t.text2),
+                        )
+                        .wrap(),
+                    );
+                }
             }
             // refused: say why and let them fix what they typed
             if let Some(NetStatus::Refused(why) | NetStatus::Gone(why)) =

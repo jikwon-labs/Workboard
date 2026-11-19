@@ -141,6 +141,8 @@ pub struct Form {
     pub changing: bool,
     /// What went wrong, or what happens next.
     pub note: String,
+    /// Why "Update Workboard" couldn't run, under the button.
+    pub update_note: String,
 }
 
 /// Why a new password won't do, if it won't.

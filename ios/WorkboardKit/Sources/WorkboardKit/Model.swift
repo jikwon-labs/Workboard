@@ -391,6 +391,10 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     public let saved: Bool
     /// The page its first web address points to (Message::preview).
     public let preview: LinkPreviewView?
+    /// The message it forwards from another conversation.
+    public let forwarded: ForwardedView?
+    /// The channel's copy of a reply in this thread ("Also send to the channel").
+    public let threadOf: UInt64?
 
     /// Message::imported: set once by the import and never cleared; the
     /// field itself stays in the JSON as it came.
@@ -401,6 +405,8 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         task = j["task"]?.uint
         saved = j["saved"]?.bool ?? false
         preview = j["preview"].flatMap(LinkPreviewView.init)
+        forwarded = j["forwarded"].flatMap(ForwardedView.init)
+        threadOf = j["thread_of"]?.uint
         attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }

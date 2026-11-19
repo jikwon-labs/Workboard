@@ -284,6 +284,22 @@ pub struct PushPrefs {
     pub muted_until: i64,
 }
 
+/// A chat message the server keeps until `at` (seconds) and then posts as
+/// its writer's ("Schedule message").
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct ScheduledMsg {
+    /// the message's id once posted (made by the app)
+    pub id: u64,
+    pub channel: u64,
+    /// the thread it goes in
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<u64>,
+    pub text: String,
+    pub at: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<u64>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ChannelMode {
     pub channel: u64,
@@ -456,6 +472,21 @@ pub enum Msg {
         /// The thread a reply is in.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<u64>,
+    },
+    /// Keep a message to post later (replaces one with the same id).
+    /// Answered with `scheduled`. Servers from before it ignore it.
+    Schedule {
+        item: ScheduledMsg,
+    },
+    /// Don't post the scheduled message `id` after all.
+    Unschedule {
+        id: u64,
+    },
+    /// My scheduled messages, please.
+    ScheduledList,
+    /// The asker's scheduled messages, soonest first.
+    Scheduled {
+        items: Vec<ScheduledMsg>,
     },
     /// Owner or admin: a one-time code that signs someone in as `member`.
     CreateInvite {
@@ -857,6 +888,9 @@ pub enum Event {
         channel: u64,
         member: u64,
     },
+    /// My scheduled messages (the answer to schedule, unschedule and
+    /// scheduled_list).
+    Scheduled(Vec<ScheduledMsg>),
 }
 
 /// How this computer signs in.
@@ -1402,6 +1436,7 @@ fn on_server_msg(
         Some(Msg::Backups { backups }) => emit(Event::Backups(backups)),
         Some(Msg::Restored { name }) => emit(Event::Restored(name)),
         Some(Msg::Presence { online }) => emit(Event::Presence(online)),
+        Some(Msg::Scheduled { items }) => emit(Event::Scheduled(items)),
         Some(Msg::Typing {
             channel,
             member: Some(member),

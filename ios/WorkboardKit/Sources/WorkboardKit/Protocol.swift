@@ -102,6 +102,10 @@ public enum ClientMessage: Equatable, Sendable {
     case revoke(member: UInt64)
     case accessList
     case backupList
+    /// Keep a message to post later (wb_net::ScheduledMsg as JSON).
+    case schedule(item: JSON)
+    case unschedule(id: UInt64)
+    case scheduledList
     case restore(name: String)
     case ping
     case pong
@@ -147,6 +151,9 @@ public enum ClientMessage: Equatable, Sendable {
             return ["type": "revoke", "member": .id(member)]
         case .accessList: return ["type": "access_list"]
         case .backupList: return ["type": "backup_list"]
+        case let .schedule(item): return ["type": "schedule", "item": item]
+        case let .unschedule(id): return ["type": "unschedule", "id": .id(id)]
+        case .scheduledList: return ["type": "scheduled_list"]
         case let .restore(name):
             return ["type": "restore", "name": .string(name)]
         case .ping: return ["type": "ping"]
@@ -193,6 +200,9 @@ public enum ClientMessage: Equatable, Sendable {
             self = .revoke(member: m)
         case "access_list": self = .accessList
         case "backup_list": self = .backupList
+        case "schedule": self = .schedule(item: j["item"] ?? .null)
+        case "unschedule": self = .unschedule(id: j["id"]?.uint ?? 0)
+        case "scheduled_list": self = .scheduledList
         case "restore":
             guard let n = j["name"]?.string else { return nil }
             self = .restore(name: n)
@@ -262,6 +272,8 @@ public enum ServerMessage: Equatable, Sendable {
     case restored(name: String)
     /// Who is connected now (members), sent to everyone when it changes.
     case presence([UInt64])
+    /// My scheduled messages (wb_net::ScheduledMsg as JSON), soonest first.
+    case scheduled([JSON])
     case ping
     case pong
     /// `channel` is set when a call_join for it was turned down; `putBack`
@@ -310,6 +322,8 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "restored", "name": .string(name)]
         case let .presence(online):
             return ["type": "presence", "online": .array(online.map(JSON.id))]
+        case let .scheduled(items):
+            return ["type": "scheduled", "items": .array(items)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         case let .error(code, m, channel, putBack):
@@ -370,6 +384,8 @@ public enum ServerMessage: Equatable, Sendable {
             self = .restored(name: j["name"]?.string ?? "")
         case "presence":
             self = .presence((j["online"]?.array ?? []).compactMap(\.uint))
+        case "scheduled":
+            self = .scheduled(j["items"]?.array ?? [])
         case "ping": self = .ping
         case "pong": self = .pong
         case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint, putBack: j["put_back"]?.bool ?? false)

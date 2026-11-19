@@ -348,7 +348,8 @@ impl App {
                     .unwrap_or_default()
             };
             for m in &c.messages {
-                if m.author != me && mentions(&m.text, &m.mentions) {
+                // (the channel's copy of a thread reply: the reply is in the Inbox)
+                if m.author != me && m.thread_of.is_none() && mentions(&m.text, &m.mentions) {
                     let key = format!("chat:{}:{}", c.id, m.id);
                     let tab = if m.imported.is_some() {
                         imported_tab(&key)

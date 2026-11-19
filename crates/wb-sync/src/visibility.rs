@@ -11,6 +11,8 @@ use super::*;
 /// the app fills in its default when one is missing.
 pub(crate) const PERSONAL_EXTRA: &[&str] = &[
     "chat_seen",
+    "chat_drafts",
+    "scheduled",
     "closed_dm_seen",
     "closed_dms",
     "replies_seen",

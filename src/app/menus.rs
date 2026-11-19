@@ -78,6 +78,22 @@ pub(super) enum Modal {
     ChannelSettings(u64),
     /// My saved messages from every conversation I can see.
     SavedMessages,
+    /// Messages I started and haven't sent.
+    Drafts,
+    /// My messages waiting to be posted.
+    Scheduled,
+    /// Schedule the message in the box for a date and time.
+    ScheduleAt {
+        date: Option<NaiveDate>,
+        time: String,
+    },
+    /// Forward message `msg` of channel `ch` to another conversation.
+    Forward {
+        ch: u64,
+        msg: u64,
+        to: Option<u64>,
+        note: String,
+    },
     Share {
         emails: String,
     },
@@ -1298,6 +1314,10 @@ impl App {
             Modal::Import { .. } => tr("Import and export").into(),
             Modal::ChannelSettings(_) => tr("Channel settings").into(),
             Modal::SavedMessages => tr("Saved messages").into(),
+            Modal::Drafts => tr("Drafts").into(),
+            Modal::Scheduled => tr("Scheduled messages").into(),
+            Modal::ScheduleAt { .. } => tr("Schedule message").into(),
+            Modal::Forward { .. } => tr("Forward message").into(),
             Modal::Share { .. } => tr("Share").into(),
             Modal::CustomizeNav => tr("Customize navigation").into(),
             Modal::CustomizeSidebar => tr("Customize your sidebar").into(),
@@ -1516,6 +1536,12 @@ impl App {
             }
             Modal::SavedMessages => {
                 close = self.saved_messages(ui);
+            }
+            Modal::Drafts => close = self.drafts_body(ui),
+            Modal::Scheduled => close = self.scheduled_body(ui),
+            Modal::ScheduleAt { date, time } => close = self.schedule_at_body(ui, t, date, time),
+            Modal::Forward { ch, msg, to, note } => {
+                close = self.forward_body(ui, *ch, *msg, to, note);
             }
             Modal::Trash => close = self.trash_body(ui, t),
             Modal::SlackImport(plan) => {

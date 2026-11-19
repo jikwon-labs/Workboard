@@ -208,7 +208,8 @@ public enum Notify {
                 let author = m["author"]?.uint ?? 0
                 let key = "chat:\(cid):\(mid)"
                 let ts = m["ts"]?.int ?? 0
-                if author != me && !MessageView.isImported(m) {
+                // the channel's copy of a thread reply: the reply itself is told
+                if author != me && !MessageView.isImported(m) && m["thread_of"]?.uint == nil {
                     if m["call"]?.string != nil {
                         if n.huddles {
                             add(Note(key: key, kind: .huddle, title: dm ? "\(who(author)) is calling you" : "\(who(author)) started a huddle in \(place)",

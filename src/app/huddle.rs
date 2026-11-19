@@ -210,6 +210,8 @@ impl App {
                 edited: None,
                 imported: None,
                 preview: None,
+                forwarded: None,
+                thread_of: None,
                 mentions: vec![],
                 attachments: vec![],
                 id,

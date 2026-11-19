@@ -39,6 +39,7 @@ mod notify_tests;
 mod pages;
 mod parity;
 mod profile;
+mod schedule;
 mod settings;
 mod sharing;
 mod shell;
@@ -354,6 +355,8 @@ impl<T: Blank> DraftBox<T> {
 
 #[derive(Default)]
 struct Drafts {
+    /// The workspace file whose saved drafts were brought back.
+    loaded_for: Option<String>,
     chat: DraftBox,
     thread: DraftBox,
     chat_files: DraftBox<Vec<files::Pending>>,
@@ -613,6 +616,8 @@ pub struct App {
 #[derive(Default)]
 struct ChatUi {
     open: Option<u64>,
+    /// "Also send to the channel" is ticked under the thread's reply box.
+    also_channel: bool,
     /// The message being written in the open channel (`open`).
     text: String,
     /// The message being changed in place: (channel, message, new text).
@@ -5258,6 +5263,7 @@ impl App {
 
     fn ui_frame_inner(&mut self, ctx: &egui::Context) {
         self.menu_was_open = any_menu_was_open(ctx);
+        self.bring_back_drafts();
         self.drafts.chat.swap(self.chat.open, &mut self.chat.text);
         self.drafts
             .thread
@@ -5365,6 +5371,7 @@ impl App {
         }
         self.open_pending_links();
         self.previews_tick(ctx);
+        self.scheduled_tick();
         self.reminder_tick(Some(ctx));
         self.apply_actions();
         self.track_history();
@@ -5565,9 +5572,87 @@ impl App {
             .min(SAVE_AT_MOST.saturating_sub(first.elapsed()));
         if wait.is_zero() {
             self.save_due.set(None);
-            self.data.clone().save_later(Data::file_path(&self.ws_file));
+            self.data_to_save()
+                .save_later(Data::file_path(&self.ws_file));
         } else if let Some(ctx) = ctx {
             ctx.request_repaint_after(wait);
+        }
+    }
+
+    /// The workspace as it is saved: with the unsent messages (Drafts).
+    fn data_to_save(&self) -> Data {
+        let mut d = self.data.clone();
+        d.extra.chat_drafts = self.chat_drafts();
+        d
+    }
+
+    /// Every unsent message: the open boxes' and those put away (`Drafts`).
+    pub(super) fn chat_drafts(&self) -> Vec<ChatDraft> {
+        let thread_home = |tid: u64| {
+            self.data
+                .channels
+                .iter()
+                .find(|c| c.messages.iter().any(|m| m.id == tid))
+                .map(|c| c.id)
+        };
+        let mut out = vec![];
+        let open = self.chat.open.map(|c| (c, &self.chat.text));
+        for (ch, text) in self
+            .drafts
+            .chat
+            .saved
+            .iter()
+            .map(|(c, t)| (*c, t))
+            .chain(open)
+        {
+            if !text.trim().is_empty() {
+                out.push(ChatDraft {
+                    channel: ch,
+                    thread: None,
+                    text: text.clone(),
+                });
+            }
+        }
+        let open = self.chat.thread_open.map(|c| (c, &self.chat.thread_text));
+        for (tid, text) in self
+            .drafts
+            .thread
+            .saved
+            .iter()
+            .map(|(c, t)| (*c, t))
+            .chain(open)
+        {
+            if let Some(ch) = thread_home(tid).filter(|_| !text.trim().is_empty()) {
+                out.push(ChatDraft {
+                    channel: ch,
+                    thread: Some(tid),
+                    text: text.clone(),
+                });
+            }
+        }
+        out.sort_by_key(|d| (d.channel, d.thread));
+        out
+    }
+
+    /// Once per workspace opened: its saved drafts back into their boxes.
+    fn bring_back_drafts(&mut self) {
+        if self.drafts.loaded_for.as_deref() == Some(self.ws_file.as_str()) {
+            return;
+        }
+        self.drafts.loaded_for = Some(self.ws_file.clone());
+        for d in std::mem::take(&mut self.data.extra.chat_drafts) {
+            // a box already showing its place takes it now, the rest when
+            // their place opens (`DraftBox::swap`)
+            match d.thread {
+                None if self.drafts.chat.on == Some(d.channel) => self.chat.text = d.text,
+                None => {
+                    self.drafts.chat.saved.insert(d.channel, d.text);
+                }
+                Some(t) if self.drafts.thread.on == Some(t) => self.chat.thread_text = d.text,
+                Some(t) => {
+                    self.drafts.thread.saved.insert(t, d.text);
+                }
+            }
         }
     }
 
@@ -5579,9 +5664,9 @@ impl App {
         }
         self.save_due.set(None);
         if self.ws_file == "data.json" {
-            self.data.save();
+            self.data_to_save().save();
         } else {
-            self.data.save_file(&self.ws_file);
+            self.data_to_save().save_file(&self.ws_file);
         }
     }
 

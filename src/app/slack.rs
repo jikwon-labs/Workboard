@@ -610,6 +610,8 @@ pub(super) fn new_message(id: u64, author: u64, text: String, ts: i64) -> Messag
         edited: None,
         imported: None,
         preview: None,
+        forwarded: None,
+        thread_of: None,
     }
 }
 

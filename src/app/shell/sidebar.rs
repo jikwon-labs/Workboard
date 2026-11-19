@@ -639,13 +639,29 @@ impl App {
             let hs = self.side_header(
                 ui,
                 "Channels",
-                &[("bookmark", "Saved messages"), ("+", "Create a Channel")],
+                &[
+                    ("edit", "Drafts"),
+                    ("clock", "Scheduled messages"),
+                    ("bookmark", "Saved messages"),
+                    ("+", "Create a Channel"),
+                ],
             );
-            name_it(&hs[0], "Saved messages");
+            name_it(&hs[0], "Drafts");
             if hs[0].clicked() {
+                self.modal = Some(Modal::Drafts);
+            }
+            name_it(&hs[1], "Scheduled messages");
+            if hs[1].clicked() {
+                if let Some(net) = &self.sync_rt.net {
+                    net.send(wb_net::Msg::ScheduledList);
+                }
+                self.modal = Some(Modal::Scheduled);
+            }
+            name_it(&hs[2], "Saved messages");
+            if hs[2].clicked() {
                 self.modal = Some(Modal::SavedMessages);
             }
-            if hs[1].clicked() {
+            if hs[3].clicked() {
                 self.modal = Some(Modal::NewChannel {
                     name: String::new(),
                     private: false,

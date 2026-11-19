@@ -528,6 +528,15 @@ pub struct Extra {
     /// channel id), so a late message still counts as unread.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub chat_seen: std::collections::BTreeMap<u64, SeenIds>,
+    /// Messages I started and haven't sent, by conversation and thread
+    /// (only on this computer), kept when the workspace is saved so they
+    /// come back after a restart; listed in Drafts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chat_drafts: Vec<ChatDraft>,
+    /// Messages to post later, kept on this computer when there's no team
+    /// server (one keeps them itself; see app/schedule.rs).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scheduled: Vec<wb_net::ScheduledMsg>,
     /// Tasks people added to their own timesheet with "+ Add task":
     /// [member, task] pairs.
     #[serde(default)]
@@ -608,6 +617,8 @@ impl Default for Extra {
             closed_dms: vec![],
             closed_dm_seen: Default::default(),
             chat_seen: Default::default(),
+            chat_drafts: vec![],
+            scheduled: vec![],
             sheet_rows: vec![],
             sheet_week_rows: vec![],
             slack_under_me: vec![],
@@ -616,4 +627,14 @@ impl Default for Extra {
             slack_map: Default::default(),
         }
     }
+}
+
+/// An unsent message: in conversation `channel`, or in the thread of its
+/// message `thread`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct ChatDraft {
+    pub channel: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<u64>,
+    pub text: String,
 }

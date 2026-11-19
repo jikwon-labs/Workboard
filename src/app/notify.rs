@@ -143,7 +143,8 @@ impl App {
             let place = self.channel_label(c);
             for m in &c.messages {
                 let key = format!("chat:{}:{}", c.id, m.id);
-                if m.author != me && m.imported.is_none() {
+                // the channel's copy of a thread reply: the reply itself is told
+                if m.author != me && m.imported.is_none() && m.thread_of.is_none() {
                     let who = self.who(m.author);
                     let target = format!("chat:{}", c.id);
                     if m.call.is_some() {

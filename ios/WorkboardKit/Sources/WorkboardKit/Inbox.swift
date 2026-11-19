@@ -87,7 +87,8 @@ public enum Inbox {
                 guard let mid = m["id"]?.uint else { continue }
                 let author = m["author"]?.uint ?? 0
                 let imported = MessageView.isImported(m)
-                if author != me, mentions(m["text"]?.string ?? "", (m["mentions"]?.array ?? []).compactMap(\.uint)) {
+                // (the channel's copy of a thread reply: the reply is in the Inbox)
+                if author != me, m["thread_of"]?.uint == nil, mentions(m["text"]?.string ?? "", (m["mentions"]?.array ?? []).compactMap(\.uint)) {
                     let key = "chat:\(cid):\(mid)"
                     out.append(InboxItem(key: key, ts: m["ts"]?.int ?? 0, author: author, title: title, text: m["text"]?.string ?? "",
                                          source: .chat(channel: cid, message: mid, thread: nil), comment: true, mention: true, assigned: false, reply: false,

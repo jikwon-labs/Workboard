@@ -110,6 +110,7 @@ mod canon;
 mod livekit;
 mod notify;
 mod routes;
+mod schedule;
 mod state;
 mod store;
 mod util;
@@ -684,6 +685,7 @@ pub async fn serve_on(
                 let _ = tokio::task::spawn_blocking(move || {
                     for hub in registry.all() {
                         hub.save_tick();
+                        hub.post_due();
                         hub.admin_file();
                         if tick % 60 == 1 {
                             hub.backup_now();

@@ -567,6 +567,8 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         edited: None,
         imported: None,
         preview: None,
+        forwarded: None,
+        thread_of: None,
     }
 }
 
@@ -708,6 +710,8 @@ fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         edited: None,
         imported: None,
         preview: None,
+        forwarded: None,
+        thread_of: None,
     }
 }
 

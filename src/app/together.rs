@@ -193,6 +193,8 @@ pub struct SyncRt {
     pub(super) choices: Option<(Vec<(String, String)>, How)>,
     /// A workspace on this computer to open (the one chosen is here already).
     pub(super) open_local: Option<String>,
+    /// My scheduled messages the server keeps (None until it answered).
+    pub(super) scheduled: Option<Vec<wb_net::ScheduledMsg>>,
     /// The owner's view of the server's backups (None until asked for).
     pub(super) backups: Option<Vec<wb_net::Backup>>,
     /// The backup the owner clicked Restore on, waiting for "Yes, restore".
@@ -328,6 +330,8 @@ impl App {
                 edited: None,
                 imported: None,
                 preview: None,
+                forwarded: None,
+                thread_of: None,
                 mentions: vec![],
                 attachments: vec![],
                 id,

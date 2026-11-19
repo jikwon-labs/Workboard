@@ -309,6 +309,10 @@ impl App {
                         crate::updater::set_server(&addr);
                     }
                     changed |= self.net_welcome(tag, snapshot, member, &hidden);
+                    // what I scheduled (servers from before scheduling don't answer)
+                    if let Some(net) = &self.sync_rt.net {
+                        net.send(wb_net::Msg::ScheduledList);
+                    }
                 }
                 NetEvent::Update { .. } => unreachable!("taken in above"),
                 NetEvent::Invite {
@@ -367,6 +371,7 @@ impl App {
                 } => self.huddle_token(channel, url, token),
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
                 NetEvent::Presence(online) => self.sync_rt.online = Some(online),
+                NetEvent::Scheduled(items) => self.sync_rt.scheduled = Some(items),
                 NetEvent::Typing { channel, member } => self.heard_typing(channel, member),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();

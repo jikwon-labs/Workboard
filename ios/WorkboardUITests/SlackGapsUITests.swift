@@ -86,3 +86,59 @@ final class ChatFormatUITests: WorkboardUITestCase {
         XCTAssertFalse(a.staticTexts["**\(word)**"].exists)
     }
 }
+
+final class ChatSendingUITests: WorkboardUITestCase {
+    /// Long press > Forward message: the message arrives in the other
+    /// channel with the note, carrying the original.
+    func testForwardAMessageToAnotherChannel() {
+        let a = launchFresh(["-wbOpen", "channel:301"])
+        let box = a.textFields["composer"]
+        waitEnabled(box)
+        let tag = "\(Int.random(in: 100000...999999))"
+        box.tap()
+        box.typeText("Numbers are in \(tag)")
+        a.buttons["sendButton"].tap()
+        let sent = a.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Numbers are in \(tag)")).firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 5))
+        sent.press(forDuration: 1.0)
+        let fwd = a.buttons["Forward message"]
+        XCTAssertTrue(fwd.waitForExistence(timeout: 5))
+        fwd.tap()
+        a.buttons["forwardTo-302"].tap()
+        let note = a.textFields["forwardNote"]
+        note.tap()
+        note.typeText("FYI \(tag)")
+        a.buttons["forwardButton"].tap()
+        // over in #design
+        a.navigationBars.buttons.element(boundBy: 0).tap()
+        a.buttons["channel-302"].firstMatch.tap()
+        XCTAssertTrue(a.staticTexts["FYI \(tag)"].waitForExistence(timeout: 5))
+        XCTAssertTrue(a.staticTexts["Numbers are in \(tag)"].exists, "the original rides along")
+        XCTAssertTrue(a.descendants(matching: .any)["forwardedFrom"].firstMatch.exists)
+    }
+
+    /// An unsent message stays in its box and shows in Drafts; the clock
+    /// keeps a message for later and empties the box.
+    func testDraftsAndTheScheduleClock() {
+        let a = launchFresh(["-wbOpen", "channel:301"])
+        let box = a.textFields["composer"]
+        waitEnabled(box)
+        let tag = "\(Int.random(in: 100000...999999))"
+        box.tap()
+        box.typeText("Half a thought \(tag)")
+        a.navigationBars.buttons.element(boundBy: 0).tap()
+        a.buttons["draftsMenu"].tap()
+        a.buttons["Drafts"].tap()
+        let row = a.buttons["draft-301-0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "listed in Drafts")
+        row.tap()
+        let back = a.textFields["composer"]
+        waitEnabled(back)
+        XCTAssertEqual(back.value as? String, "Half a thought \(tag)", "the box has it again")
+        a.buttons["scheduleButton"].tap()
+        a.buttons["In 1 hour"].tap()
+        let emptied = expectation(for: NSPredicate(format: "value != %@", "Half a thought \(tag)"), evaluatedWith: back)
+        wait(for: [emptied], timeout: 5)
+        XCTAssertFalse(a.staticTexts["Half a thought \(tag)"].exists, "not posted now")
+    }
+}

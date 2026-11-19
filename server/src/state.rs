@@ -88,6 +88,9 @@ pub struct Saved {
     /// saying the same may come back under someone else's name.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub graves: BTreeMap<u64, (u64, i64)>,
+    /// Messages waiting to be posted (schedule.rs).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scheduled: Vec<crate::schedule::Waiting>,
 }
 
 impl Saved {

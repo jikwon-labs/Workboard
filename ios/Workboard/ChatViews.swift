@@ -7,6 +7,8 @@ struct ChatListView: View {
     @Environment(Notifier.self) private var notifier
     @State private var newChannel = false
     @State private var newDM = false
+    @State private var showDrafts = false
+    @State private var showScheduled = false
 
     var body: some View {
         let me = client.me ?? 0
@@ -62,10 +64,20 @@ struct ChatListView: View {
                     .accessibilityLabel("New message")
                     .accessibilityIdentifier("newDMButton")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { showDrafts = true } label: { Label("Drafts", systemImage: "square.and.pencil") }
+                    Button { showScheduled = true } label: { Label("Scheduled messages", systemImage: "clock") }
+                } label: { Image(systemName: "tray") }
+                .accessibilityLabel("Drafts and scheduled")
+                .accessibilityIdentifier("draftsMenu")
+            }
             ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
         }
         .sheet(isPresented: $newChannel) { NewChannelSheet() }
         .sheet(isPresented: $newDM) { NewDMSheet() }
+        .sheet(isPresented: $showDrafts) { DraftsSheet() }
+        .sheet(isPresented: $showScheduled) { ScheduledSheet() }
     }
 }
 
@@ -287,6 +299,8 @@ struct ConversationView: View {
                         return sent
                     }
                     .onTyping { client.typingNow(channel: c.id) }
+                    .draft("\(c.id)|0")
+                    .onSchedule { text, picked, at in client.schedule(channel: c.id, text: text, picked: picked, at: at) }
                 }
             }
             .navigationTitle(c.kind == .channel ? "#\(c.name)" : v.title(of: c, me: me))
@@ -342,6 +356,8 @@ struct ThreadView: View {
     @Environment(SyncClient.self) private var client
     let channelId: UInt64
     let messageId: UInt64
+    /// "Also send to #channel" is on for the next reply.
+    @State private var alsoToChannel = false
 
     var body: some View {
         let c = client.view.channels.first { $0.id == channelId }
@@ -363,13 +379,28 @@ struct ThreadView: View {
             }
             .defaultScrollAnchor(.bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
-                    let id = client.newId()
-                    let sent = client.edit { d, me in
-                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
+                VStack(spacing: 0) {
+                    Toggle(isOn: $alsoToChannel) {
+                        Text("Also send to \(c.kind == .channel ? "#" + c.name : client.view.title(of: c, me: client.me ?? 0))").font(.footnote)
                     }
-                    if sent { fetchPreview(client, channel: c.id, message: id, text: text) }
-                    return sent
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                    .background(.bar)
+                    .accessibilityIdentifier("alsoToChannel")
+                    Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
+                        let id = client.newId()
+                        let copy = alsoToChannel ? client.newId() : nil
+                        let sent = client.edit { d, me in
+                            Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
+                            if let copy { Edits.copyReplyToChannel(&d, channel: c.id, thread: m.id, reply: id, me: me, id: copy) }
+                        }
+                        if sent {
+                            alsoToChannel = false
+                            fetchPreview(client, channel: c.id, message: id, text: text)
+                        }
+                        return sent
+                    }
+                    .draft("\(c.id)|\(m.id)")
                 }
             }
             .navigationTitle("Thread")
@@ -391,6 +422,7 @@ struct MessageRow: View {
     @State private var editing = false
     @State private var draft = ""
     @State private var confirmDelete = false
+    @State private var forwarding = false
 
     func remind(at ts: Int64) {
         let id = client.newId(), me = client.me ?? 0, text = String(message.text.prefix(80))
@@ -416,6 +448,7 @@ struct MessageRow: View {
         .padding(.top, compact ? 2 : 10)
         .contentShape(Rectangle())
         .contextMenu { menu }
+        .sheet(isPresented: $forwarding) { ForwardSheet(channelId: channelId, message: message) }
         .confirmationDialog("Delete this message?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 client.edit { d, me in Edits.deleteMessage(&d, channel: channelId, message: message.id, me: me) }
@@ -454,10 +487,20 @@ struct MessageRow: View {
             if let title = message.postTitle, !title.isEmpty {
                 Text(title).font(.headline)
             }
+            if let tid = message.threadOf {
+                NavigationLink(value: Nav.Route.thread(channel: channelId, message: tid)) {
+                    Text("Replied in a thread · View thread").font(.caption).foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("viewThread-\(message.id)")
+            }
             if !message.text.isEmpty || message.edited != nil {
                 ChatText(text: message.text, edited: message.edited != nil)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("messageText-\(message.id)")
+            }
+            if let f = message.forwarded {
+                ForwardedCard(forwarded: f)
             }
             if let p = message.preview {
                 LinkPreviewCard(preview: p, mine: message.author == client.me) {
@@ -538,6 +581,9 @@ struct MessageRow: View {
         }
         if !message.text.isEmpty {
             Button { UIPasteboard.general.string = message.text } label: { Label("Copy text", systemImage: "doc.on.doc") }
+        }
+        if client.canEdit && message.call == nil {
+            Button { forwarding = true } label: { Label("Forward message", systemImage: "arrowshape.turn.up.right") }
         }
         Button {
             client.editLocal { d in Edits.toggleSaved(&d, channel: channelId, message: message.id) }
@@ -641,6 +687,12 @@ struct Composer: View {
     let send: (String, [JSON], [UInt64]) -> Bool
     /// Called as the person types (the others see "... is typing").
     var typed: (() -> Void)?
+    /// Where the unsent text is kept ("channel|thread", see ChatDrafts).
+    var draftKey: String?
+    /// Keep the message to post at a time (the clock); nil: no clock.
+    var schedule: ((String, [UInt64], Int64) -> Bool)?
+    @State private var customTime = false
+    @State private var customAt = Date().addingTimeInterval(3600)
     @State private var text = ""
     @State private var picked: [PhotosPickerItem] = []
     @State private var pending: [PendingFile] = []
@@ -794,6 +846,20 @@ struct Composer: View {
                     .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(.secondarySystemBackground)))
                     .disabled(!can)
                     .accessibilityIdentifier("composer")
+                if let schedule, !text.isBlank, pending.isEmpty {
+                    Menu {
+                        ForEach(ScheduleTimes.choices(), id: \.0) { label, at in
+                            Button(L(label)) {
+                                if schedule(text, mentioned, at) { text = ""; mentioned = []; completed = nil }
+                            }
+                        }
+                        Button("Custom time…") { customAt = Date().addingTimeInterval(3600); customTime = true }
+                    } label: {
+                        Image(systemName: "clock").font(.system(size: 20)).padding(.bottom, 6)
+                    }
+                    .accessibilityLabel("Schedule message")
+                    .accessibilityIdentifier("scheduleButton")
+                }
                 Button {
                     if send(text, ready, mentioned) {
                         text = ""
@@ -817,6 +883,33 @@ struct Composer: View {
         .overlay(alignment: .top) { Divider() }
         .onChange(of: text) {
             if !text.isBlank { typed?() }
+            if let draftKey { ChatDrafts.save(text, key: draftKey, server: client.settings.server) }
+        }
+        .onAppear {
+            if let draftKey, text.isEmpty { text = ChatDrafts.load(key: draftKey, server: client.settings.server) }
+        }
+        .sheet(isPresented: $customTime) {
+            NavigationStack {
+                Form {
+                    DatePicker("Send at", selection: $customAt, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                        .accessibilityIdentifier("scheduleDate")
+                }
+                .navigationTitle("Schedule message")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    CancelButton { customTime = false }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Schedule") {
+                            if let schedule, schedule(text, mentioned, Int64(customAt.timeIntervalSince1970)) {
+                                text = ""; mentioned = []; completed = nil
+                            }
+                            customTime = false
+                        }
+                        .accessibilityIdentifier("scheduleConfirm")
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
         .onChange(of: picked) {
             let items = picked
@@ -836,6 +929,20 @@ struct Composer: View {
     func onTyping(_ f: @escaping () -> Void) -> Composer {
         var c = self
         c.typed = f
+        return c
+    }
+
+    /// Keep the unsent text under `key` (ChatDrafts).
+    func draft(_ key: String) -> Composer {
+        var c = self
+        c.draftKey = key
+        return c
+    }
+
+    /// Offer the clock: keep the message to post at a time.
+    func onSchedule(_ f: @escaping (String, [UInt64], Int64) -> Bool) -> Composer {
+        var c = self
+        c.schedule = f
         return c
     }
 
@@ -1156,5 +1263,212 @@ private struct SelectingField: View {
                 let lo = t.index(t.startIndex, offsetBy: a2), hi = t.index(t.startIndex, offsetBy: b2)
                 selection = TextSelection(range: lo..<hi)
             }
+    }
+}
+
+
+/// Unsent messages, kept on this iPhone per server, conversation and thread
+/// ("channel|thread", thread 0 for the conversation itself), like the Mac's
+/// Drafts.
+enum ChatDrafts {
+    static func prefix(_ server: String) -> String { "chatDraft|\(server)|" }
+
+    static func save(_ text: String, key: String, server: String) {
+        let k = prefix(server) + key
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UserDefaults.standard.removeObject(forKey: k)
+        } else {
+            UserDefaults.standard.set(text, forKey: k)
+        }
+    }
+
+    static func load(key: String, server: String) -> String {
+        UserDefaults.standard.string(forKey: prefix(server) + key) ?? ""
+    }
+
+    /// Every draft on `server`: (channel, thread or nil, text).
+    static func all(server: String) -> [(UInt64, UInt64?, String)] {
+        let p = prefix(server)
+        return UserDefaults.standard.dictionaryRepresentation().compactMap { k, v in
+            guard k.hasPrefix(p), let text = v as? String else { return nil }
+            let parts = k.dropFirst(p.count).split(separator: "|")
+            guard parts.count == 2, let ch = UInt64(parts[0]), let t = UInt64(parts[1]) else { return nil }
+            return (ch, t == 0 ? nil : t, text)
+        }.sorted { ($0.0, $0.1 ?? 0) < ($1.0, $1.1 ?? 0) }
+    }
+}
+
+/// Drafts: every message started here and not sent; a tap opens it.
+struct DraftsSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let v = client.view, me = client.me ?? 0
+        let drafts = ChatDrafts.all(server: client.settings.server).filter { d in v.visibleChannels(me: me).contains { $0.id == d.0 } }
+        NavigationStack {
+            List {
+                if drafts.isEmpty {
+                    Text("Messages you start and don't send show up here.").foregroundStyle(.secondary)
+                }
+                ForEach(drafts, id: \.2) { ch, thread, text in
+                    Button {
+                        dismiss()
+                        nav.chat = [.channel(ch)] + (thread.map { [.thread(channel: ch, message: $0)] } ?? [])
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            let c = v.channels.first { $0.id == ch }
+                            let place = c.map { $0.kind == .channel ? "#" + $0.name : v.title(of: $0, me: me) } ?? ""
+                            Text(thread == nil ? place : String(localized: "Thread in \(place)")).font(.caption).foregroundStyle(.secondary)
+                            Text(text).lineLimit(2).foregroundStyle(.primary)
+                        }
+                    }
+                    .accessibilityIdentifier("draft-\(ch)-\(thread ?? 0)")
+                }
+            }
+            .navigationTitle("Drafts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+/// Scheduled messages: what the server keeps to post later, with Send now,
+/// Edit (back into its conversation's box) and Cancel.
+struct ScheduledSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let v = client.view, me = client.me ?? 0
+        let items = client.waitingToSend
+        NavigationStack {
+            List {
+                if items.isEmpty {
+                    Text("Messages you schedule show up here until they are sent.").foregroundStyle(.secondary)
+                }
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        let c = v.channels.first { $0.id == item.channel }
+                        let place = c.map { $0.kind == .channel ? "#" + $0.name : v.title(of: $0, me: me) } ?? ""
+                        Text("\(Fmt.time(item.at)) · \(place)").font(.caption).foregroundStyle(.secondary)
+                        Text(item.text).lineLimit(3)
+                        HStack(spacing: 16) {
+                            Button("Send now") {
+                                client.unschedule(item.id)
+                                _ = client.edit { d, me in Edits.postScheduled(&d, item, me: me, ts: nowTs()) }
+                            }
+                            .accessibilityIdentifier("sendNow-\(item.id)")
+                            Button("Edit") {
+                                client.unschedule(item.id)
+                                ChatDrafts.save(item.text, key: "\(item.channel)|\(item.parent ?? 0)", server: client.settings.server)
+                                dismiss()
+                                nav.chat = [.channel(item.channel)]
+                            }
+                            .accessibilityIdentifier("editScheduled-\(item.id)")
+                            Button("Cancel", role: .destructive) { client.unschedule(item.id) }
+                                .accessibilityIdentifier("cancelScheduled-\(item.id)")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.subheadline)
+                    }
+                }
+            }
+            .navigationTitle("Scheduled messages")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .onAppear { client.askScheduled() }
+        }
+    }
+}
+
+/// Forward a message: pick a conversation, add a note.
+struct ForwardSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    let channelId: UInt64
+    let message: MessageView
+    @State private var to: UInt64?
+    @State private var note = ""
+
+    var body: some View {
+        let v = client.view, me = client.me ?? 0
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(v.member(message.author)?.name ?? "").font(.subheadline.weight(.semibold))
+                        ChatText(text: message.text).lineLimit(4)
+                    }
+                }
+                Section("Forward to") {
+                    ForEach(v.visibleChannels(me: me)) { c in
+                        Button {
+                            to = c.id
+                        } label: {
+                            HStack {
+                                Text(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me)).foregroundStyle(.primary)
+                                Spacer()
+                                if to == c.id { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
+                            }
+                        }
+                        .accessibilityIdentifier("forwardTo-\(c.id)")
+                    }
+                }
+                Section {
+                    TextField("Add a message (optional)", text: $note, axis: .vertical).accessibilityIdentifier("forwardNote")
+                }
+            }
+            .navigationTitle("Forward message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                CancelButton { dismiss() }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Forward") {
+                        guard let to else { return }
+                        let id = client.newId()
+                        _ = client.edit { d, me in
+                            Edits.forward(&d, from: channelId, message: message.id, to: to, note: note, online: client.online, me: me, id: id, ts: nowTs())
+                        }
+                        dismiss()
+                    }
+                    .disabled(to == nil)
+                    .accessibilityIdentifier("forwardButton")
+                }
+            }
+        }
+    }
+}
+
+/// A forwarded message under a message's text: who wrote it, when, what it
+/// said, and where it came from (opens it, when I can see it).
+struct ForwardedCard: View {
+    @Environment(SyncClient.self) private var client
+    let forwarded: ForwardedView
+
+    var body: some View {
+        let v = client.view, me = client.me ?? 0
+        let from = v.visibleChannels(me: me).first { $0.id == forwarded.channel }
+        HStack(alignment: .top, spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5).fill(Color(.separator)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(v.member(forwarded.author)?.name ?? String(localized: "Someone")).font(.subheadline.weight(.semibold))
+                    Text(Fmt.time(forwarded.ts)).font(.caption).foregroundStyle(.secondary)
+                }
+                ChatText(text: forwarded.text)
+                if let c = from {
+                    NavigationLink(value: Nav.Route.channel(c.id)) {
+                        Text("Forwarded from \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("forwardedFrom")
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 4)
     }
 }

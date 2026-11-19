@@ -407,6 +407,25 @@ pub struct Message {
     /// the page. Its writer can take it away.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<LinkPreview>,
+    /// A message forwarded from another conversation, shown under the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarded: Option<Forwarded>,
+    /// The channel's copy of a reply in thread `thread_of` ("Also send to
+    /// the channel"): the reply itself notifies, not this copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_of: Option<u64>,
+}
+
+/// The message a forwarded one carries: what it said, who wrote it, when
+/// and where.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Forwarded {
+    pub channel: u64,
+    pub message: u64,
+    pub author: u64,
+    pub ts: i64,
+    #[serde(default)]
+    pub text: String,
 }
 
 /// A web page as a message shows it under its text.

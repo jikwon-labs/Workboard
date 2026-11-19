@@ -330,6 +330,22 @@ impl Conn {
                 })
             }
             Some(Msg::Ping) => Some(Msg::Pong.to_json()),
+            Some(Msg::Schedule { item }) => Some(match hub.schedule(member, item) {
+                Ok(items) => Msg::Scheduled { items }.to_json(),
+                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+            }),
+            Some(Msg::Unschedule { id }) => Some(
+                Msg::Scheduled {
+                    items: hub.unschedule(member, id),
+                }
+                .to_json(),
+            ),
+            Some(Msg::ScheduledList) => Some(
+                Msg::Scheduled {
+                    items: hub.scheduled_of(member),
+                }
+                .to_json(),
+            ),
             Some(Msg::Typing { channel, .. }) => {
                 let soon = self
                     .typed

@@ -148,6 +148,8 @@ impl App {
                                                 edited: None,
                                                 imported: None,
                                                 preview: None,
+                                                forwarded: None,
+                                                thread_of: None,
                                                 mentions: self
                                                     .data
                                                     .mentions_in(self.post.body.trim()),

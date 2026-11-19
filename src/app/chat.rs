@@ -77,6 +77,11 @@ fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
 
 pub(super) enum ChatAction {
     JoinHuddle(u64),
+    /// Open the Forward window for a message.
+    Forward {
+        ch: u64,
+        msg: u64,
+    },
     /// The writer takes a link preview off their message.
     RemovePreview {
         ch: u64,
@@ -1035,6 +1040,23 @@ impl App {
                                 files,
                             });
                         }
+                        // the reply also goes in the conversation, marked as one
+                        let place = self
+                            .data
+                            .channels
+                            .iter()
+                            .find(|c| c.id == cid)
+                            .map(|c| match c.kind {
+                                ChannelKind::Channel => format!("#{}", c.name),
+                                ChannelKind::Direct => self.channel_label(c),
+                            })
+                            .unwrap_or_default();
+                        let also = check(
+                            ui,
+                            &mut self.chat.also_channel,
+                            trf!("Also send to {}", place),
+                        );
+                        name_it(&also, "Also send to the channel");
                     });
                 thread_rect = Some(panel.response.rect);
             }
@@ -1481,6 +1503,8 @@ impl App {
                         self.chat.edit = last;
                     }
                 }
+                // a time picked from the clock (None: Custom time...)
+                let mut schedule: Option<Option<i64>> = None;
                 let mut insert: Option<String> = None;
                 ui.horizontal(|ui| {
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
@@ -1564,6 +1588,24 @@ impl App {
                             .min_size(vec2(34.0, 28.0)),
                         );
                         let sent = ui.add(b);
+                        // the clock: send it later (schedule.rs), plain messages only
+                        if self.composer_mode == 0 && !self.chat.text.trim().is_empty() {
+                            let clock = icon_button(ui, &t, "clock", "", "Schedule message", false)
+                                .on_hover_text(tr("Schedule message"));
+                            popup(ui, &clock, egui::Id::new("schedule_popup"), 220.0, |ui| {
+                                ui.label(RichText::new(tr("Send later")).small().color(t.text2));
+                                for (label, at) in super::schedule::schedule_choices(now_ts()) {
+                                    if menu_row_plain(ui, &t, tr(label), false).clicked() {
+                                        schedule = Some(Some(at));
+                                        close_popup(ui);
+                                    }
+                                }
+                                if menu_row_plain(ui, &t, tr("Custom time..."), false).clicked() {
+                                    schedule = Some(None);
+                                    close_popup(ui);
+                                }
+                            });
+                        }
                         if label.is_empty() {
                             name_it(&sent, "Send");
                             line_icon(
@@ -1594,6 +1636,25 @@ impl App {
                         }
                     });
                 });
+                match schedule {
+                    Some(Some(at)) => {
+                        if let Some(ch) = self.chat.open {
+                            let text = self.chat.text.clone();
+                            let picked = self.chat.picked.clone();
+                            if self.schedule_message(ch, None, &text, &picked, at) {
+                                self.chat.text.clear();
+                                self.chat.picked.clear();
+                            }
+                        }
+                    }
+                    Some(None) => {
+                        self.modal = Some(Modal::ScheduleAt {
+                            date: Some(today()),
+                            time: chrono::Local::now().format("%H:%M").to_string(),
+                        });
+                    }
+                    None => {}
+                }
                 if let Some(text) = insert {
                     // a picked @name replaces an "@" already typed
                     if text.starts_with('@') && self.chat.text.ends_with('@') {
@@ -1869,6 +1930,23 @@ impl App {
                     }
                     if compact && m.edited.is_some() {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
+                    }
+                }
+                if let Some(f) = &m.forwarded {
+                    self.forwarded_card(ui, f);
+                }
+                if let Some(tid) = m.thread_of {
+                    let b = ui.add(
+                        egui::Label::new(
+                            RichText::new(tr("Replied in a thread · View thread"))
+                                .small()
+                                .color(t.primary),
+                        )
+                        .sense(Sense::click()),
+                    );
+                    name_it(&b, "View thread");
+                    if b.clicked() {
+                        acts.push(ChatAction::Thread(tid));
                     }
                 }
                 if let Some(p) = &m.preview {
@@ -2229,6 +2307,10 @@ impl App {
                     acts.push(ChatAction::Copied);
                     close_popup(ui);
                 }
+                if m.call.is_none() && row(ui, "Forward message").clicked() {
+                    acts.push(ChatAction::Forward { ch: cid, msg: m.id });
+                    close_popup(ui);
+                }
                 if top_level && m.author != me && row(ui, "Mark unread").clicked() {
                     acts.push(ChatAction::MarkUnread { ch: cid, ts: m.ts });
                     close_popup(ui);
@@ -2337,6 +2419,237 @@ impl App {
     /// My saved messages from every conversation I can see, newest first;
     /// a click opens the conversation (and the thread, for a reply). True
     /// when one was opened.
+    /// The Forward window: pick a conversation, add a note, Forward. True
+    /// when it should close.
+    pub(super) fn forward_body(
+        &mut self,
+        ui: &mut Ui,
+        ch: u64,
+        msg: u64,
+        to: &mut Option<u64>,
+        note: &mut String,
+    ) -> bool {
+        let t = self.t();
+        let Some(orig) = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .and_then(|c| {
+                c.messages
+                    .iter()
+                    .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
+                    .find(|m| m.id == msg)
+            })
+            .cloned()
+        else {
+            return true;
+        };
+        // what it forwards
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(10, 6))
+            .fill(t.column_bg)
+            .corner_radius(6)
+            .show(ui, |ui| {
+                ui.label(RichText::new(self.who(orig.author)).strong());
+                ui.label(truncate(&super::chatfmt::plain(&orig.text), 200));
+            });
+        ui.add_space(8.0);
+        ui.label(RichText::new(tr("Forward to")).small().color(t.text2));
+        let places: Vec<(u64, String)> = self
+            .data
+            .channels
+            .iter()
+            .filter(|c| self.listed(c))
+            .map(|c| {
+                let name = match c.kind {
+                    ChannelKind::Channel => format!("# {}", c.name),
+                    ChannelKind::Direct => self.channel_label(c),
+                };
+                (c.id, name)
+            })
+            .collect();
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .id_salt("forward_places")
+            .show(ui, |ui| {
+                for (id, name) in &places {
+                    if radio(ui, *to == Some(*id), name.as_str()).clicked() {
+                        *to = Some(*id);
+                    }
+                }
+            });
+        ui.add_space(6.0);
+        let n = ui.add(
+            egui::TextEdit::multiline(note)
+                .hint_text(tr("Add a message (optional)"))
+                .desired_rows(2)
+                .desired_width(f32::INFINITY),
+        );
+        name_it(&n, "Forward note");
+        ui.add_space(8.0);
+        let mut close = false;
+        ui.horizontal(|ui| {
+            let go = ui.add_enabled(to.is_some(), egui::Button::new(tr("Forward")));
+            name_it(&go, "Forward");
+            if go.clicked() {
+                if let Some(dest) = *to {
+                    self.forward(dest, &orig, ch, note.trim());
+                    self.toast(tr("Forwarded"));
+                    close = true;
+                }
+            }
+            if ui.button(tr("Cancel")).clicked() {
+                close = true;
+            }
+        });
+        close
+    }
+
+    /// Post `orig` (of channel `from`) in channel `dest` with my `note`.
+    pub(super) fn forward(&mut self, dest: u64, orig: &Message, from: u64, note: &str) {
+        let me = self.data.me;
+        let id = self.data.new_id();
+        let mentions = self.chat_mentions(note, dest, &[]);
+        // a forwarded forward carries the first message
+        let carried = orig.forwarded.clone().unwrap_or(Forwarded {
+            channel: from,
+            message: orig.id,
+            author: orig.author,
+            ts: orig.ts,
+            text: orig.text.clone(),
+        });
+        let m = Message {
+            id,
+            author: me,
+            text: note.to_string(),
+            ts: now_ts(),
+            mentions,
+            forwarded: Some(carried),
+            ..serde_json::from_value(serde_json::json!({"id": 0, "author": 0, "text": "", "ts": 0}))
+                .expect("an empty message")
+        };
+        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == dest) {
+            c.messages.push(m);
+            c.last_read = c.last_read.max(now_ts());
+            self.dirty = true;
+        }
+    }
+
+    /// A forwarded message under a message's text: who wrote it, where and
+    /// when, and what it said. A click opens where it came from.
+    fn forwarded_card(&mut self, ui: &mut Ui, f: &Forwarded) {
+        let t = self.t();
+        let from = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == f.channel && self.can_see(c))
+            .map(|c| (c.id, self.channel_label(c)));
+        let inner = egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 10,
+                right: 8,
+                top: 4,
+                bottom: 4,
+            })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.who(f.author)).strong());
+                    let when = local(f.ts)
+                        .map(|x| x.text("%b %-d, %-I:%M %p"))
+                        .unwrap_or_default();
+                    ui.label(RichText::new(when).small().color(t.text3));
+                });
+                if let Some(link) = self.message_text(ui, &f.text, 14.0) {
+                    self.link_pending = Some(link);
+                }
+                if let Some((cid, label)) = &from {
+                    let b = ui.add(
+                        egui::Label::new(
+                            RichText::new(trf!("Forwarded from {}", label))
+                                .small()
+                                .color(t.text3),
+                        )
+                        .sense(Sense::click()),
+                    );
+                    name_it(&b, "Forwarded from");
+                    if b.clicked() {
+                        self.chat.open = Some(*cid);
+                        self.chat.thread_open = None;
+                    }
+                }
+            });
+        let r = inner.response.rect;
+        ui.painter().rect_filled(
+            Rect::from_min_size(r.min, vec2(3.0, r.height())),
+            1.5,
+            t.border,
+        );
+    }
+
+    /// Drafts: every message I started and haven't sent; a click opens its
+    /// conversation (or thread) with it in the box. True when it should close.
+    pub(super) fn drafts_body(&mut self, ui: &mut Ui) -> bool {
+        let t = self.t();
+        let drafts: Vec<ChatDraft> = self
+            .chat_drafts()
+            .into_iter()
+            .filter(|d| {
+                self.data
+                    .channels
+                    .iter()
+                    .any(|c| c.id == d.channel && self.can_see(c))
+            })
+            .collect();
+        if drafts.is_empty() {
+            ui.label(
+                RichText::new(tr("Messages you start and don't send show up here.")).color(t.text3),
+            );
+            return false;
+        }
+        let mut open = None;
+        egui::ScrollArea::vertical()
+            .max_height(420.0)
+            .show(ui, |ui| {
+                for d in &drafts {
+                    let Some(c) = self.data.channels.iter().find(|c| c.id == d.channel) else {
+                        continue;
+                    };
+                    let mut place = match c.kind {
+                        ChannelKind::Channel => format!("#{}", c.name),
+                        ChannelKind::Direct => self.channel_label(c),
+                    };
+                    if d.thread.is_some() {
+                        place = trf!("Thread in {}", place);
+                    }
+                    let r = egui::Frame::new()
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(RichText::new(&place).small().color(t.text2));
+                            ui.label(truncate(d.text.lines().next().unwrap_or(""), 80));
+                        })
+                        .response
+                        .interact(Sense::click());
+                    name_it(&r, &format!("Draft in {}", place));
+                    if r.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if r.clicked() {
+                        open = Some((d.channel, d.thread));
+                    }
+                }
+            });
+        if let Some((ch, thread)) = open {
+            self.section = Section::Chat;
+            self.chat.open = Some(ch);
+            self.chat.thread_open = thread;
+            return true;
+        }
+        false
+    }
+
     pub(super) fn saved_messages(&mut self, ui: &mut Ui) -> bool {
         let t = self.t();
         let mut found: Vec<(u64, String, Option<u64>, Message)> = vec![];
@@ -2500,6 +2813,14 @@ impl App {
                         }
                     }
                 }
+                ChatAction::Forward { ch, msg } => {
+                    self.modal = Some(Modal::Forward {
+                        ch,
+                        msg,
+                        to: None,
+                        note: String::new(),
+                    });
+                }
                 ChatAction::RemovePreview { ch, msg } => {
                     if let Some(m) = self
                         .data
@@ -2537,6 +2858,8 @@ impl App {
                         edited: None,
                         imported: None,
                         preview: None,
+                        forwarded: None,
+                        thread_of: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2820,6 +3143,8 @@ impl App {
                         edited: None,
                         imported: None,
                         preview: None,
+                        forwarded: None,
+                        thread_of: None,
                         mentions,
                         attachments: files,
                         id,
@@ -2836,6 +3161,13 @@ impl App {
                         call: None,
                     };
                     let sent = m.text.clone();
+                    // "Also send to the channel": a copy there, marked with its thread
+                    let copy = (parent.is_some() && std::mem::take(&mut self.chat.also_channel))
+                        .then(|| Message {
+                            id: self.data.new_id(),
+                            thread_of: parent,
+                            ..m.clone()
+                        });
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         match parent {
                             Some(pid) => {
@@ -2845,6 +3177,7 @@ impl App {
                             }
                             None => c.messages.push(m),
                         }
+                        c.messages.extend(copy);
                         c.last_read = c.last_read.max(now_ts());
                     }
                     self.dirty = true;

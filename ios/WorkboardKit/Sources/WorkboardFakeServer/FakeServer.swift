@@ -393,6 +393,9 @@ public final class FakeServer: @unchecked Sendable {
                 pushPrefs[d] = token.isEmpty ? nil : prefs
             }
             log("push token from \(p.device?.prefix(8) ?? "?") (\(platform), \(env))\(token.isEmpty ? ": removed" : "")")
+        case .schedule, .unschedule, .scheduledList:
+            // the fake server keeps no scheduled messages: an empty list
+            send(.scheduled([]), to: p)
         case .createInvite, .setRole, .revoke, .accessList, .backupList, .restore:
             request(m, from: p)
         case let .callJoin(ch):

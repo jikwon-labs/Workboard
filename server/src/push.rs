@@ -665,6 +665,10 @@ pub fn notes_in(
             if m.get("imported").is_some_and(|i| !i.is_null()) {
                 return;
             }
+            // the channel's copy of a thread reply: the reply itself notifies
+            if m.get("thread_of").is_some_and(|i| !i.is_null()) {
+                return;
+            }
             if now_secs - secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0)) > MAX_AGE_SECS {
                 return;
             }
@@ -964,6 +968,23 @@ mod tests {
         assert_eq!(b[1]["aps"]["alert"]["body"], "m5");
         assert_eq!(b[2]["aps"]["alert"]["body"], "m6");
         assert_eq!(batch(&refs[..2]).len(), 2);
+    }
+
+    #[test]
+    fn the_channels_copy_of_a_thread_reply_notifies_no_one() {
+        let mut root = msg(5, 1, "plan");
+        root["replies"] = json!([msg(6, 2, "@Cy done")]);
+        let mut copy = msg(7, 2, "@Cy done");
+        copy["thread_of"] = json!(5);
+        let c = ws(
+            json!([{"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [root, copy]}]),
+        );
+        let n = notes(&c, &[5].into_iter().collect(), &[], now());
+        assert_eq!(
+            who(&n),
+            vec![(1, 6), (3, 6)],
+            "the reply, once; not its copy"
+        );
     }
 
     #[test]

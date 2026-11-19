@@ -1938,3 +1938,181 @@ fn a_web_address_gets_a_preview_its_writer_can_remove() {
     assert!(h.has("Their page"));
     assert!(!h.has("Remove preview"));
 }
+
+/// More actions > Forward message: pick a conversation, add a note; the
+/// message arrives there carrying the original, which opens where it came from.
+#[test]
+fn forward_a_message_to_another_channel_with_a_note() {
+    let (mut h, cid) = general_with_my_message("the numbers are in");
+    let random = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && c.id != cid && h.app.listed(c))
+        .expect("another channel")
+        .clone();
+    h.click("More actions");
+    h.click("Forward message");
+    assert!(matches!(h.app.modal, Some(Modal::Forward { .. })));
+    h.click(&format!("# {}", random.name));
+    h.click("Forward note");
+    h.type_text("FYI");
+    h.click("Forward");
+    assert!(h.app.modal.is_none());
+    let got = last_in(&h, random.id);
+    assert_eq!(got.text, "FYI");
+    let f = got.forwarded.expect("carries the message");
+    assert_eq!(f.text, "the numbers are in");
+    assert_eq!(f.channel, cid);
+    // shown in that channel, and the link goes back to #general
+    h.app.chat.open = Some(random.id);
+    h.settle();
+    assert!(h.has("Forwarded from"));
+    h.click("Forwarded from");
+    assert_eq!(h.app.chat.open, Some(cid));
+}
+
+/// "Also send to #general" under a thread's box: the reply also goes in the
+/// channel, marked, with a link back to the thread; it isn't told twice.
+#[test]
+fn a_thread_reply_can_also_go_to_the_channel() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("1 reply");
+    let tid = h.app.chat.thread_open.unwrap();
+    h.click("Also send to the channel");
+    assert!(h.app.chat.also_channel);
+    h.click("Reply composer");
+    h.type_text("done, see the doc");
+    h.key(egui::Key::Enter);
+    let c = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    let parent = c.messages.iter().find(|m| m.id == tid).unwrap();
+    assert_eq!(parent.replies.last().unwrap().text, "done, see the doc");
+    let copy = c.messages.last().unwrap();
+    assert_eq!(copy.text, "done, see the doc");
+    assert_eq!(copy.thread_of, Some(tid));
+    assert!(!h.app.chat.also_channel, "unticked for the next reply");
+    // the next reply stays in the thread only
+    h.click("Reply composer");
+    h.type_text("one more");
+    h.key(egui::Key::Enter);
+    assert_eq!(last_in(&h, cid).text, "done, see the doc");
+    // the copy's link opens the thread
+    h.app.chat.thread_open = None;
+    h.settle();
+    h.click("View thread");
+    assert_eq!(h.app.chat.thread_open, Some(tid));
+}
+
+/// An unsent message is listed in Drafts, opens its conversation, and is
+/// kept with the workspace when it is saved.
+#[test]
+fn drafts_are_listed_and_saved_with_the_workspace() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Message composer");
+    h.type_text("half a thought");
+    // go elsewhere: the draft is put away
+    h.app.section = Section::Home;
+    h.app.chat.open = None;
+    h.settle();
+    let saved = h.app.data_to_save();
+    assert_eq!(
+        saved.extra.chat_drafts,
+        vec![ChatDraft {
+            channel: cid,
+            thread: None,
+            text: "half a thought".into()
+        }]
+    );
+    h.click("Drafts");
+    h.click("Draft in #general");
+    assert_eq!(h.app.chat.open, Some(cid));
+    h.settle();
+    assert_eq!(h.app.chat.text, "half a thought");
+    // a workspace saved with a draft brings it back
+    let mut h2 = Ui1::new();
+    h2.app.data.extra.chat_drafts = saved.extra.chat_drafts.clone();
+    h2.app.drafts.loaded_for = None;
+    h2.settle();
+    h2.click("general");
+    assert_eq!(h2.app.chat.text, "half a thought");
+}
+
+/// The clock next to Send keeps the message for later; Scheduled messages
+/// lists it with Send now, Edit and Cancel. Without a server this computer
+/// posts it when its time comes.
+#[test]
+fn schedule_a_message_and_send_edit_or_cancel_it() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let n = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .len();
+    h.click("Message composer");
+    h.type_text("standup notes");
+    h.click("Schedule message");
+    h.click("In 1 hour");
+    assert_eq!(h.app.chat.text, "", "the box is emptied");
+    let s = h.app.scheduled();
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].text, "standup notes");
+    assert!((s[0].at - now_ts() - 3600).abs() < 5);
+    assert_eq!(
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .messages
+            .len(),
+        n,
+        "not posted yet"
+    );
+    // listed; Edit puts it back in the box
+    h.click("Scheduled messages");
+    assert!(h.has("standup notes"));
+    let id = s[0].id;
+    h.click(&format!("Edit {}", id));
+    assert!(h.app.scheduled().is_empty());
+    h.settle();
+    assert_eq!(h.app.chat.text, "standup notes");
+    // schedule again, then Send now
+    h.click("Schedule message");
+    h.click("Tomorrow at 9:00 AM");
+    let id = h.app.scheduled()[0].id;
+    h.click("Scheduled messages");
+    h.click(&format!("Send now {}", id));
+    assert_eq!(last_in(&h, cid).text, "standup notes");
+    assert!(h.app.scheduled().is_empty());
+    // its time comes while the app runs
+    h.app.modal = None;
+    h.click("Message composer");
+    h.type_text("later on");
+    h.click("Schedule message");
+    h.click("In 1 hour");
+    h.app.data.extra.scheduled[0].at = now_ts() - 1;
+    h.settle();
+    assert_eq!(last_in(&h, cid).text, "later on");
+    assert!(h.app.data.extra.scheduled.is_empty());
+    // Cancel
+    h.click("Message composer");
+    h.type_text("not this");
+    h.click("Schedule message");
+    h.click("In 1 hour");
+    let id = h.app.scheduled()[0].id;
+    h.click("Scheduled messages");
+    h.click(&format!("Cancel {}", id));
+    assert!(h.app.scheduled().is_empty());
+}

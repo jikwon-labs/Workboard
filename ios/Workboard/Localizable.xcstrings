@@ -639,6 +639,16 @@
         }
       }
     },
+    "Add a message (optional)": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지 덧붙이기 (선택)"
+          }
+        }
+      }
+    },
     "Add automation": {
       "localizations": {
         "ko": {
@@ -837,6 +847,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이미 로그인됨"
+          }
+        }
+      }
+    },
+    "Also send to %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@에도 보내기"
           }
         }
       }
@@ -1715,6 +1735,16 @@
         }
       }
     },
+    "Custom time…": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "시간 직접 고르기…"
+          }
+        }
+      }
+    },
     "Daily": {
       "extractionState": "manual",
       "localizations": {
@@ -1976,6 +2006,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "완료"
+          }
+        }
+      }
+    },
+    "Drafts": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "임시 저장"
+          }
+        }
+      }
+    },
+    "Drafts and scheduled": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "임시 저장과 예약"
           }
         }
       }
@@ -2352,6 +2402,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "양식"
+          }
+        }
+      }
+    },
+    "Forward": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전달"
+          }
+        }
+      }
+    },
+    "Forward message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지 전달"
+          }
+        }
+      }
+    },
+    "Forward to": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전달할 곳"
+          }
+        }
+      }
+    },
+    "Forwarded from %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@에서 전달됨"
           }
         }
       }
@@ -3128,6 +3218,26 @@
         }
       }
     },
+    "Messages you schedule show up here until they are sent.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "예약한 메시지가 보내지기 전까지 여기에 나옵니다."
+          }
+        }
+      }
+    },
+    "Messages you start and don't send show up here.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "쓰다가 보내지 않은 메시지가 여기에 나옵니다."
+          }
+        }
+      }
+    },
     "Milestone": {
       "localizations": {
         "ko": {
@@ -3166,6 +3276,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "월"
+          }
+        }
+      }
+    },
+    "Monday at 9:00 AM": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "월요일 오전 9:00"
           }
         }
       }
@@ -4707,6 +4827,16 @@
         }
       }
     },
+    "Replied in a thread · View thread": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스레드에 답장함 · 스레드 보기"
+          }
+        }
+      }
+    },
     "Replies in my threads": {
       "localizations": {
         "ko": {
@@ -4859,6 +4989,36 @@
         }
       }
     },
+    "Schedule": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "예약"
+          }
+        }
+      }
+    },
+    "Schedule message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지 예약"
+          }
+        }
+      }
+    },
+    "Scheduled messages": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "예약된 메시지"
+          }
+        }
+      }
+    },
     "Search tasks, docs, messages, people": {
       "localizations": {
         "ko": {
@@ -4875,6 +5035,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "보내기"
+          }
+        }
+      }
+    },
+    "Send at": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보낼 시간"
+          }
+        }
+      }
+    },
+    "Send now": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 보내기"
           }
         }
       }
@@ -5803,6 +5983,16 @@
         }
       }
     },
+    "Thread in %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@의 스레드"
+          }
+        }
+      }
+    },
     "Thu": {
       "extractionState": "manual",
       "localizations": {
@@ -5936,6 +6126,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "내일 오전 9시"
+          }
+        }
+      }
+    },
+    "Tomorrow at 9:00 AM": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "내일 오전 9:00"
           }
         }
       }

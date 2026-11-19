@@ -48,6 +48,8 @@ struct App {
     online: Option<Vec<u64>>,
     /// (conversation, member) for each "typing" heard
     typing: Vec<(u64, u64)>,
+    /// my scheduled messages, from the last `scheduled` answer
+    scheduled: Option<Vec<wb_net::ScheduledMsg>>,
     /// account email from the welcome, then from `account` answers
     email: Option<String>,
     /// (member, emailed to, mail error) for each invite answer
@@ -138,6 +140,7 @@ impl App {
             restored: vec![],
             online: None,
             typing: vec![],
+            scheduled: None,
             email: None,
             mailed: vec![],
             updates: vec![],
@@ -287,6 +290,7 @@ impl App {
                 Event::Restored(n) => self.restored.push(n),
                 Event::Presence(o) => self.online = Some(o),
                 Event::Typing { channel, member } => self.typing.push((channel, member)),
+                Event::Scheduled(items) => self.scheduled = Some(items),
             }
         }
     }
@@ -373,6 +377,67 @@ fn two_apps(port: u16) -> (App, App) {
     });
     assert_eq!(b.member, Some(2), "the code signs B in as member 2");
     (a, b)
+}
+
+/// A scheduled message waits on the server, then goes out as its writer's
+/// (for everyone, even with the writer gone); one taken back never does.
+#[test]
+fn scheduled_messages_go_out_at_their_time_from_the_server() {
+    let home = temp_home("schedule");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let now = now() / 1000;
+    let item = |id: u64, text: &str, at: i64| wb_net::ScheduledMsg {
+        id,
+        channel: 10,
+        parent: None,
+        text: text.into(),
+        at,
+        mentions: vec![],
+    };
+    b.client.send(Msg::Schedule {
+        item: item(7001, "good morning", now + 2),
+    });
+    b.until("the list comes back", |b| {
+        b.scheduled.as_ref().is_some_and(|l| l.len() == 1)
+    });
+    b.client.send(Msg::Schedule {
+        item: item(7002, "never mind", now + 2),
+    });
+    b.until("two waiting", |b| {
+        b.scheduled.as_ref().is_some_and(|l| l.len() == 2)
+    });
+    b.client.send(Msg::Unschedule { id: 7002 });
+    b.until("one left", |b| {
+        b.scheduled.as_ref().is_some_and(|l| l.len() == 1)
+    });
+    // a conversation that isn't there is turned down
+    b.client.send(Msg::Schedule {
+        item: wb_net::ScheduledMsg {
+            channel: 999,
+            ..item(7003, "nowhere", now + 2)
+        },
+    });
+    b.until("turned down", |b| !b.denied.is_empty());
+    // the writer goes away; it still goes out, as theirs
+    drop(b);
+    a.wait("the scheduled message at A", |d| {
+        texts(d).contains(&"good morning".to_string())
+    });
+    let m = a.data["channels"][0]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == 7001)
+        .unwrap()
+        .clone();
+    assert_eq!(m["author"], 2);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!texts(&a.data).contains(&"never mind".to_string()));
+    assert!(workboard_server::load_saved(&home)
+        .unwrap()
+        .scheduled
+        .is_empty());
 }
 
 #[test]

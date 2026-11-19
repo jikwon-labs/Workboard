@@ -532,7 +532,11 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
 #[test]
 fn sidebar_header_plus_sits_in_the_middle_of_its_box() {
     let h = Ui1::new();
-    for name in ["Create Space", "Create a Channel", "New message"] {
+    for name in [
+        "Sidebar Create Space",
+        "Sidebar Create a Channel",
+        "Sidebar New message",
+    ] {
         let r = h.rect(name);
         // the "+" is two line segments; their ends span the cross
         let mut ends = vec![];

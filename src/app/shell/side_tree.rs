@@ -183,7 +183,7 @@ impl App {
             // sits in the exact middle of its box (the "+" character sat low);
             // "⋯" stays a character
             if boxed {
-                name_it(&resp, tip);
+                name_it(&resp, &format!("Sidebar {}", tip));
                 super::super::icons::line_icon_scaled(
                     ui.painter(),
                     "plus",

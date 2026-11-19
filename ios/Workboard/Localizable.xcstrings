@@ -4769,12 +4769,42 @@
         }
       }
     },
-    "Sent a photo or video": {
+    "Sent a file": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "사진이나 동영상을 보냈습니다"
+            "value": "파일을 보냈습니다"
+          }
+        }
+      }
+    },
+    "Sent a photo": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진을 보냈습니다"
+          }
+        }
+      }
+    },
+    "Sent a video": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "영상을 보냈습니다"
+          }
+        }
+      }
+    },
+    "Sent photos and videos": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진과 영상을 보냈습니다"
           }
         }
       }

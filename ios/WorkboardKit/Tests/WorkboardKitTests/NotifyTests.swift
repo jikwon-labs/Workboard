@@ -30,6 +30,15 @@ final class NotifyTests: XCTestCase {
         XCTAssertFalse(keys(d, noDM).contains("chat:303:900"))
     }
 
+    func testAttachmentOnlyMessagesSayWhatWasSent() {
+        let one = { (k: String) -> JSON in .object(["file": .string("ab"), "name": .string("a"), "kind": .string(k)]) }
+        XCTAssertEqual(Notify.sentWhat([]), "")
+        XCTAssertEqual(Notify.sentWhat([one("Image")]), "Sent a photo")
+        XCTAssertEqual(Notify.sentWhat([one("Video")]), "Sent a video")
+        XCTAssertEqual(Notify.sentWhat([one("Image"), one("Video")]), "Sent photos and videos")
+        XCTAssertEqual(Notify.sentWhat([one("Image"), one("File")]), "Sent a file")
+    }
+
     func testTaskNewsFollowTheChoices() {
         var d = SampleWorkspace.make()
         Edits.toggleAssignee(&d, task: 205, member: 1, me: 2, ts: 10)       // assigned to me

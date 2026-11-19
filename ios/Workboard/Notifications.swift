@@ -186,7 +186,14 @@ final class Notifier {
         case .taskChange: return History.line(who: n.who, text: n.subject)
         case .huddle: return String(localized: "Join from the conversation")
         case .member: return String(localized: "Say hello in a direct message")
-        default: return n.body == "Sent a photo or video" ? String(localized: "Sent a photo or video") : n.body
+        default:
+            switch n.body {
+            case "Sent a photo": return String(localized: "Sent a photo")
+            case "Sent a video": return String(localized: "Sent a video")
+            case "Sent photos and videos": return String(localized: "Sent photos and videos")
+            case "Sent a file": return String(localized: "Sent a file")
+            default: return n.body
+            }
         }
     }
 

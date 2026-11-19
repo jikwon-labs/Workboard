@@ -89,20 +89,32 @@ fn add(out: &mut Vec<(i64, Note)>, keys: &mut HashSet<String>, ts: i64, note: No
     }
 }
 
-/// A message's text cut to banner length (a picture or video says so).
+/// A message's text cut to banner length (a picture, video or file says
+/// which it is).
 fn preview(m: &Message) -> String {
     let shown = super::chat::shown_text(m);
     let text = shown.trim();
     let text = if text.is_empty() && !m.attachments.is_empty() {
-        if m.attachments.iter().any(|a| a.kind == MediaKind::File) {
-            tr("Sent a file").to_string()
-        } else {
-            tr("Sent a picture or video").to_string()
-        }
+        sent_what(&m.attachments).to_string()
     } else {
         text.to_string()
     };
     cut(&text, 140)
+}
+
+/// What a message with only attachments says in a banner: a picture, a
+/// video, both, or a file.
+fn sent_what(a: &[crate::model::Attachment]) -> &'static str {
+    let has = |k: MediaKind| a.iter().any(|x| x.kind == k);
+    if has(MediaKind::File) {
+        tr("Sent a file")
+    } else if has(MediaKind::Video) && has(MediaKind::Image) {
+        tr("Sent pictures and videos")
+    } else if has(MediaKind::Video) {
+        tr("Sent a video")
+    } else {
+        tr("Sent a picture")
+    }
 }
 
 fn cut(s: &str, n: usize) -> String {
@@ -851,5 +863,32 @@ impl App {
         if let Some(ctx) = ctx {
             ctx.request_repaint_after(std::time::Duration::from_secs(CLOCK_SECS as u64));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{set_lang, Lang};
+
+    #[test]
+    fn attachment_only_messages_say_what_was_sent() {
+        let one = |kind| crate::model::Attachment {
+            kind,
+            ..Default::default()
+        };
+        set_lang(Lang::Ko);
+        assert_eq!(sent_what(&[one(MediaKind::Image)]), "사진을 보냈습니다");
+        assert_eq!(sent_what(&[one(MediaKind::Video)]), "영상을 보냈습니다");
+        assert_eq!(
+            sent_what(&[one(MediaKind::Image), one(MediaKind::Video)]),
+            "사진과 영상을 보냈습니다"
+        );
+        assert_eq!(
+            sent_what(&[one(MediaKind::Video), one(MediaKind::File)]),
+            "파일을 보냈습니다"
+        );
+        set_lang(Lang::En);
+        assert_eq!(sent_what(&[one(MediaKind::Video)]), "Sent a video");
     }
 }

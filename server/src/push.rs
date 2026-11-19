@@ -455,11 +455,7 @@ fn body_of(m: &Value) -> String {
     let t = text_field(m, "text");
     let t = t.trim();
     if t.is_empty() {
-        return if array_at(m, "attachments").is_empty() {
-            "New message".into()
-        } else {
-            "Sent an attachment".into()
-        };
+        return sent_what(array_at(m, "attachments"));
     }
     if t.chars().count() > MAX_BODY {
         format!(
@@ -469,6 +465,31 @@ fn body_of(m: &Value) -> String {
     } else {
         t.to_string()
     }
+}
+
+/// What a message with no text says: a photo, a video, both, or a file
+/// (the same words as the iPhone's own banners, which it translates).
+fn sent_what(a: &[Value]) -> String {
+    let kind = |x: &Value| {
+        x.get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("Image")
+            .to_string()
+    };
+    let kinds: HashSet<String> = a.iter().map(kind).collect();
+    let has = |k: &str| kinds.contains(k);
+    if a.is_empty() {
+        "New message"
+    } else if kinds.iter().any(|k| k != "Image" && k != "Video") {
+        "Sent a file"
+    } else if has("Image") && has("Video") {
+        "Sent photos and videos"
+    } else if has("Video") {
+        "Sent a video"
+    } else {
+        "Sent a photo"
+    }
+    .into()
 }
 
 /// Seconds, also for a stamp that is in milliseconds.
@@ -796,7 +817,20 @@ mod tests {
                 .count(),
             MAX_BODY + 3
         );
-        assert_eq!(n[1].payload["aps"]["alert"]["body"], "Sent an attachment");
+        assert_eq!(n[1].payload["aps"]["alert"]["body"], "Sent a photo");
+    }
+
+    #[test]
+    fn attachment_only_messages_say_what_was_sent() {
+        let one = |k: &str| json!({"file": "ab", "name": "a", "kind": k});
+        assert_eq!(sent_what(&[]), "New message");
+        assert_eq!(sent_what(&[one("Image"), one("Image")]), "Sent a photo");
+        assert_eq!(sent_what(&[one("Video")]), "Sent a video");
+        assert_eq!(
+            sent_what(&[one("Image"), one("Video")]),
+            "Sent photos and videos"
+        );
+        assert_eq!(sent_what(&[one("Image"), one("File")]), "Sent a file");
     }
 
     #[test]

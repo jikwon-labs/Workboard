@@ -114,7 +114,17 @@ public enum Notify {
     static func preview(_ m: JSON) -> String {
         let t = m["text"]?.string ?? ""
         if !t.isEmpty { return String(t.prefix(140)) }
-        return (m["attachments"]?.array ?? []).isEmpty ? "" : "Sent a photo or video"
+        return sentWhat(m["attachments"]?.array ?? [])
+    }
+
+    /// What a message with only attachments says in a banner: a photo, a
+    /// video, both, or a file ("" for none). Notifications.swift translates it.
+    public static func sentWhat(_ a: [JSON]) -> String {
+        let kinds = Set(a.map { $0["kind"]?.string ?? "Image" })
+        if a.isEmpty { return "" }
+        if kinds.contains(where: { $0 != "Image" && $0 != "Video" }) { return "Sent a file" }
+        if kinds == ["Image", "Video"] { return "Sent photos and videos" }
+        return kinds == ["Video"] ? "Sent a video" : "Sent a photo"
     }
 
     /// notify_candidates: everything the choices ask to be told about.

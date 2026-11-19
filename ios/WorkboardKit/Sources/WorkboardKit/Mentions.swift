@@ -68,6 +68,90 @@ public enum Mentions {
         ids(in: text, members: members(of: data), picked: picked)
     }
 
+    // MARK: groups (wb_sync::mentions::chat_mentions)
+
+    /// The words that mention everyone in a conversation, and who is online.
+    public static let everyoneWords = ["channel", "everyone"]
+    public static let hereWord = "here"
+
+    /// Whether `text` says "@channel" / "@everyone", and whether it says
+    /// "@here", by the rule names follow.
+    public static func groupMentions(_ text: String) -> (all: Bool, here: Bool) {
+        let t = Array(text.utf8)
+        var all = false, here = false
+        for i in t.indices where t[i] == UInt8(ascii: "@") {
+            if i > 0 {
+                let before = String(decoding: t[..<i], as: UTF8.self)
+                guard before.unicodeScalars.last?.properties.isWhitespace == true else { continue }
+            }
+            let rest = Array(t[(i + 1)...])
+            if everyoneWords.contains(where: { fits(rest, Array($0.utf8)) }) { all = true }
+            if fits(rest, Array(hereWord.utf8)) { here = true }
+        }
+        return (all, here)
+    }
+
+    static func alnum(_ b: UInt8) -> Bool {
+        (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)
+    }
+
+    /// Whether `rest` (what follows an "@") starts with `name` by the mention rule.
+    static func fits(_ rest: [UInt8], _ name: [UInt8]) -> Bool {
+        guard !name.isEmpty, rest.starts(with: name) else { return false }
+        let runsOn = name.count < rest.count && alnum(rest[name.count])
+        return !(alnum(name[name.count - 1]) && runsOn)
+    }
+
+    /// The teams (extra.teams) by name, for "@Design".
+    public static func teams(of data: JSON) -> [(name: String, members: [UInt64])] {
+        (data.at("extra.teams")?.array ?? []).compactMap { t in
+            let n = (t["name"]?.string ?? "").trimmingCharacters(in: .whitespaces)
+            guard !n.isEmpty else { return nil }
+            return (name: n, members: (t["members"]?.array ?? []).compactMap(\.uint))
+        }
+    }
+
+    /// Everyone in a conversation: a public channel is everyone's (but those
+    /// still invited), a private channel or DM its members'.
+    public static func conversationPeople(_ data: JSON, channel: UInt64) -> [UInt64] {
+        guard let c = (data["channels"]?.array ?? []).first(where: { $0["id"]?.uint == channel }) else { return [] }
+        if c["kind"]?.string != "Direct" && c["private"]?.bool != true {
+            return (data["members"]?.array ?? []).filter { $0["invited"]?.bool != true }.compactMap { $0["id"]?.uint }
+        }
+        return (c["members"]?.array ?? []).compactMap(\.uint)
+    }
+
+    /// Who a chat message written by `author` in `channel` mentions: people
+    /// by name, team members for a team's name (a person's name of the same
+    /// length wins), everyone here for "@channel", those of them `online`
+    /// for "@here"; the writer left out of the groups. The same as the Mac
+    /// app's, so the server notifies the same people.
+    public static func chatIDs(in text: String, data: JSON, channel: UInt64, online: Set<UInt64>, author: UInt64, picked: [UInt64] = []) -> [UInt64] {
+        let people = members(of: data)
+        var out = ids(in: text, members: people, picked: picked)
+        func add(_ id: UInt64) { if id != author && !out.contains(id) { out.append(id) } }
+        let groups = teams(of: data)
+        let t = Array(text.utf8)
+        for i in t.indices where t[i] == UInt8(ascii: "@") {
+            if i > 0 {
+                let before = String(decoding: t[..<i], as: UTF8.self)
+                guard before.unicodeScalars.last?.properties.isWhitespace == true else { continue }
+            }
+            let rest = Array(t[(i + 1)...])
+            guard let best = groups.map({ Array($0.name.utf8) }).filter({ fits(rest, $0) }).map(\.count).max() else { continue }
+            let person = people.map { Array($0.name.utf8) }.filter { fits(rest, $0) }.map(\.count).max() ?? 0
+            if person >= best { continue }
+            for g in groups where g.name.utf8.count == best && fits(rest, Array(g.name.utf8)) {
+                g.members.forEach(add)
+            }
+        }
+        let (all, here) = groupMentions(text)
+        if all || here {
+            for id in conversationPeople(data, channel: channel) where all || online.contains(id) { add(id) }
+        }
+        return out
+    }
+
     // MARK: the @ list in the message box
 
     /// What is typed after an "@" that starts a word at the end of `text`
@@ -90,6 +174,13 @@ public enum Mentions {
         return members.filter { m in
             m.id != me && !m.invited && !m.name.isEmpty && (q.isEmpty || m.name.lowercased().hasPrefix(q))
         }
+    }
+
+    /// The groups the @ list offers for `query` after the people: "channel",
+    /// "here" and each team, whose name starts with it.
+    public static func groupCandidates(_ query: String, data: JSON) -> [String] {
+        let q = query.lowercased()
+        return (everyoneWords.prefix(1) + [hereWord] + teams(of: data).map(\.name)).filter { q.isEmpty || $0.lowercased().hasPrefix(q) }
     }
 
     /// `text` with the "@query" it ends in replaced by "@<name> ".

@@ -64,4 +64,9 @@ pub const T: &[(&str, &str)] = &[
     // channel bell
     ("Notifications for this channel", "이 채널의 알림"),
     ("Notify me about", "알려 줄 것"),
+    // keywords
+    ("{} said \"{}\" in {}", "{}님의 메시지에 \"{}\" 가 있습니다 ({})"),
+    ("Keywords", "키워드"),
+    ("deploy, launch", "배포, 출시"),
+    ("Tell me when a message in a channel has one of these words, like a mention. Separate them with commas.", "채널 메시지에 이 단어가 들어 있으면 멘션처럼 알려 줍니다. 쉼표로 나눠 적으세요."),
 ];

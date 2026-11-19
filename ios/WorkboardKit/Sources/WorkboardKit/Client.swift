@@ -214,6 +214,10 @@ public final class SyncClient {
     public private(set) var updatesReceived = 0
     /// Bumped every time a copy is pushed.
     public private(set) var pushesSent = 0
+    /// Who is connected to the server now (its `presence`), for "@here".
+    public internal(set) var online: Set<UInt64> = []
+    /// This phone's notification choices as the server wants them (Push.swift).
+    @ObservationIgnored public internal(set) var pushPrefs: JSON?
     /// This iPhone's Trash (personal, never shared; see Trash.swift).
     public internal(set) var trash: [TrashItem] = []
     /// Workspaces kept on this iPhone besides the open one, the one left
@@ -672,6 +676,8 @@ public final class SyncClient {
             finishCall(channel, .success(CallGrant(url: url, token: token, room: CallAPI.room(channel: channel, workspace: ServerAddress.workspaceID(settings.server)))))
         case .invite, .access, .backups, .restored:
             handleAdmin(m)
+        case let .presence(list):
+            online = Set(list)
         case .ping:
             send(.pong, on: ws)
         case .pong:

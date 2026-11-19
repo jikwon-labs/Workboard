@@ -183,6 +183,37 @@ fn dm_rank(c: &Channel) -> (bool, u64) {
     (c.messages.is_empty(), c.id)
 }
 
+/// The groups at the end of an @ list: "@channel" (everyone here), "@here"
+/// (who is online) and each team by name. The text to put in the box for
+/// the one clicked.
+fn group_mention_rows(ui: &mut Ui, t: &Theme, teams: &[String]) -> Option<String> {
+    let mut out = None;
+    ui.separator();
+    for (word, tip) in [
+        ("channel", "Everyone in this conversation"),
+        ("here", "Everyone here who is online"),
+    ] {
+        let r = menu_row(ui, t, &format!("@{}", word), false, |p, c| {
+            line_icon(p, "teams", c, t.text2);
+        })
+        .on_hover_text(tr(tip));
+        if r.clicked() {
+            out = Some(format!("@{} ", word));
+        }
+    }
+    for name in teams {
+        if menu_row(ui, t, &format!("@{}", name), false, |p, c| {
+            line_icon(p, "teams", c, t.text2);
+        })
+        .on_hover_text(tr("Everyone in this team"))
+        .clicked()
+        {
+            out = Some(format!("@{} ", name));
+        }
+    }
+    out
+}
+
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
@@ -424,6 +455,70 @@ impl App {
         self.dirty = true;
     }
 
+    /// The teams' names, for the @ lists.
+    pub(super) fn team_names(&self) -> Vec<String> {
+        self.data
+            .extra
+            .teams
+            .iter()
+            .map(|t| t.name.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .collect()
+    }
+
+    /// Everyone in a conversation: a public channel is everyone's, a private
+    /// channel or a direct message its members'.
+    pub(super) fn conversation_people(&self, c: &Channel) -> Vec<u64> {
+        if c.kind == ChannelKind::Channel && !c.private {
+            self.data
+                .members
+                .iter()
+                .filter(|m| !m.invited)
+                .map(|m| m.id)
+                .collect()
+        } else {
+            c.members.clone()
+        }
+    }
+
+    /// Who a message I write in channel `ch` mentions (wb_sync's
+    /// `chat_mentions`): people by name, teams by name ("@Design"),
+    /// everyone here for "@channel" / "@everyone", and those of them online
+    /// now for "@here".
+    pub(super) fn chat_mentions(&self, text: &str, ch: u64, picked: &[u64]) -> Vec<u64> {
+        let people: Vec<(u64, &str)> = self
+            .data
+            .members
+            .iter()
+            .flat_map(|m| m.names().into_iter().map(move |n| (m.id, n)))
+            .collect();
+        let groups: Vec<(&str, &[u64])> = self
+            .data
+            .extra
+            .teams
+            .iter()
+            .filter(|t| !t.name.trim().is_empty())
+            .map(|t| (t.name.trim(), t.members.as_slice()))
+            .collect();
+        let conv = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .map(|c| self.conversation_people(c))
+            .unwrap_or_default();
+        let online = |id: u64| self.is_online(id) == Some(true);
+        wb_sync::mentions::chat_mentions(
+            text,
+            &people,
+            &groups,
+            &conv,
+            &online,
+            self.data.me,
+            picked,
+        )
+    }
+
     /// Message text with mentions marked: "@" and a member's name (names
     /// may have spaces; the same rule as `mentioned_ids`), else "@" and the
     /// word after it.
@@ -446,6 +541,7 @@ impl App {
             .members
             .iter()
             .flat_map(|m| m.names())
+            .chain(self.data.extra.teams.iter().map(|t| t.name.trim()))
             .filter(|n| !n.is_empty())
             .collect();
         let (mut from, mut i) = (0, 0);
@@ -1117,6 +1213,7 @@ impl App {
                         .filter(|m| !m.invited && m.id != me)
                         .cloned()
                         .collect();
+                    let teams = self.team_names();
                     let mut picked = None;
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
@@ -1132,6 +1229,10 @@ impl App {
                                 picked = Some(m.id);
                                 close_popup(ui);
                             }
+                        }
+                        if let Some(g) = group_mention_rows(ui, &t, &teams) {
+                            insert = Some(g);
+                            close_popup(ui);
                         }
                     });
                     if let Some(id) = picked {
@@ -1261,6 +1362,7 @@ impl App {
                     .filter(|m| !m.invited && m.id != me)
                     .cloned()
                     .collect();
+                let teams = self.team_names();
                 let mut picked: Option<u64> = None;
                 let mut insert: Option<String> = None;
                 let text = if thread {
@@ -1328,6 +1430,10 @@ impl App {
                                 picked = Some(m.id);
                                 close_popup(ui);
                             }
+                        }
+                        if let Some(g) = group_mention_rows(ui, &t, &teams) {
+                            insert = Some(g);
+                            close_popup(ui);
                         }
                     });
                     ui.label(
@@ -2117,7 +2223,7 @@ impl App {
                     let id = self.data.new_id();
                     // the channel's box: the people picked from its @ list
                     let picked = std::mem::take(&mut self.chat.picked);
-                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
+                    let mentions = self.chat_mentions(&text, ch, &picked);
                     let m = Message {
                         edited: None,
                         imported: None,
@@ -2210,7 +2316,20 @@ impl App {
                     if text.is_empty() {
                         continue;
                     }
-                    let members = self.data.members.clone();
+                    let before = self
+                        .data
+                        .channels
+                        .iter()
+                        .find(|c| c.id == ch)
+                        .and_then(|c| {
+                            c.messages
+                                .iter()
+                                .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
+                                .find(|m| m.id == msg)
+                        })
+                        .map(|m| m.mentions.clone())
+                        .unwrap_or_default();
+                    let mentions = self.chat_mentions(&text, ch, &before);
                     if let Some(m) = self
                         .data
                         .channels
@@ -2219,7 +2338,7 @@ impl App {
                         .and_then(|c| find_msg(&mut c.messages, msg))
                     {
                         if m.author == me && m.text != text {
-                            m.mentions = crate::model::mentioned_ids(&text, &members, &m.mentions);
+                            m.mentions = mentions;
                             m.text = text;
                             m.edited = Some(now_ts());
                             self.dirty = true;
@@ -2376,7 +2495,7 @@ impl App {
                     } else {
                         std::mem::take(&mut self.chat.thread_picked)
                     };
-                    let mentions = crate::model::mentioned_ids(&text, &self.data.members, &picked);
+                    let mentions = self.chat_mentions(&text, ch, &picked);
                     let m = Message {
                         edited: None,
                         imported: None,

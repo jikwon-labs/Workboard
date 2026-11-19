@@ -712,4 +712,28 @@ final class MentionPickTests: XCTestCase {
         XCTAssertEqual(Mentions.complete("hi @al", with: "Alex"), "hi @Alex ")
         XCTAssertEqual(Mentions.complete("@", with: "Jamie Park"), "@Jamie Park ")
     }
+
+    /// "@channel", "@here" and a team's name keep everyone they stand for
+    /// (wb_sync::mentions::chat_mentions), the writer left out.
+    func testGroupMentionsKeepTheirPeople() {
+        var d = SampleWorkspace.make()
+        d.set("extra.teams", [["id": 900, "name": "Design Crew", "members": [1, 2, 3], "color": [1, 2, 3]]])
+        func sent(_ text: String, channel: UInt64 = 301, online: Set<UInt64> = [], id: UInt64) -> [UInt64] {
+            Edits.sendMessage(&d, channel: channel, text: text, online: online, me: 1, id: id, ts: 10)
+            let c = d["channels"]!.array!.first { $0["id"]?.uint == channel }!
+            let m = c["messages"]!.array!.first { $0["id"]?.uint == id }!
+            return (m["mentions"]?.array ?? []).compactMap(\.uint)
+        }
+        XCTAssertEqual(sent("@Design Crew review", id: 900), [2, 3])
+        XCTAssertEqual(Set(sent("@channel standup", id: 901)), [2, 3], "a public channel is everyone's")
+        XCTAssertEqual(sent("@everyone hi", channel: 303, id: 902), [2], "a DM's people")
+        XCTAssertEqual(sent("@here anyone?", online: [3], id: 903), [3])
+        XCTAssertEqual(sent("@herewego and mail@channel", id: 904), [])
+        XCTAssertEqual(Mentions.groupCandidates("", data: d), ["channel", "here", "Design Crew"])
+        XCTAssertEqual(Mentions.groupCandidates("de", data: d), ["Design Crew"])
+        // an edit keeps who "@here" meant when it was written
+        Edits.editMessage(&d, channel: 301, message: 903, text: "@here anyone at all?", me: 1, ts: 11)
+        let m = d["channels"]!.array!.first { $0["id"]?.uint == 301 }!["messages"]!.array!.first { $0["id"]?.uint == 903 }!
+        XCTAssertEqual((m["mentions"]?.array ?? []).compactMap(\.uint), [3])
+    }
 }

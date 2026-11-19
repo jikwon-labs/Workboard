@@ -3168,6 +3168,18 @@ fn phone(
     token: &str,
     home: &PathBuf,
 ) -> (String, Option<String>) {
+    phone_with(owner, port, member, token, home, None)
+}
+
+/// `phone`, with the notification choices the iPhone app sends with its token.
+fn phone_with(
+    owner: &mut App,
+    port: u16,
+    member: u64,
+    token: &str,
+    home: &PathBuf,
+    prefs: Option<wb_net::PushPrefs>,
+) -> (String, Option<String>) {
     let code = owner.invite(member, Role::Member);
     let mut p = App::join(port, &code);
     p.wait("the phone gets the team's copy", |_| true);
@@ -3176,6 +3188,7 @@ fn phone(
         platform: "ios".into(),
         env: "development".into(),
         workspace: None,
+        prefs,
     });
     let device = p.device.clone();
     wait_for("the token in server.json", || {
@@ -3195,6 +3208,49 @@ fn in_general(text: &str, id: u64, author: u64) -> impl FnOnce(&mut Value) + '_ 
             .unwrap()
             .push(json!({"id": id, "author": author, "text": text, "ts": now() / 1000}));
     }
+}
+
+/// A phone's choices (sent with its token) decide its pushes: a keyword
+/// notifies like a mention, a channel set to nothing stays quiet.
+#[test]
+fn iphones_follow_the_choices_sent_with_their_token() {
+    let home = temp_home("push-prefs");
+    let fake = Arc::new(FakePush::default());
+    let opts = || workboard_server::Options {
+        push: Some(fake.clone()),
+        ..Default::default()
+    };
+    let server = Server::start_with(&home, 0, opts());
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    let ann = "a1".repeat(32);
+    let prefs = wb_net::PushPrefs {
+        keywords: vec!["deploy".into()],
+        ..Default::default()
+    };
+    phone_with(&mut a, port, 1, &ann, &home, Some(prefs));
+    let kept = workboard_server::load_saved(&home)
+        .unwrap()
+        .push
+        .into_values()
+        .find(|t| t.token == ann)
+        .unwrap();
+    assert_eq!(
+        kept.prefs.unwrap().keywords,
+        vec!["deploy"],
+        "kept in server.json"
+    );
+    b.change(in_general("lunch at noon", 30, 2));
+    b.change(in_general("The Deploy is out", 31, 2));
+    wait_for("the keyword pushed to Ann's phone", || {
+        fake.to(&ann).len() == 1
+    });
+    assert_eq!(
+        fake.to(&ann)[0]["aps"]["alert"]["body"],
+        "The Deploy is out"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(fake.to(&ann).len(), 1, "the plain message stays quiet");
 }
 
 #[test]
@@ -3364,6 +3420,7 @@ fn a_computer_watching_a_workspace_hears_only_its_persons_new_messages() {
         platform: "ios".into(),
         env: "development".into(),
         workspace: Some("teamKey42".into()),
+        prefs: None,
     });
     let phone_device = p.device.clone();
     wait_for("the token in server.json", || {
@@ -3466,6 +3523,7 @@ fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
         platform: "ios".into(),
         env: "production".into(),
         workspace: None,
+        prefs: None,
     });
     a.change(|d| {
         d["channels"].as_array_mut().unwrap().push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 2], "messages": [{"id": 21, "author": 1, "text": "lunch?", "ts": now() / 1000}], "last_read": 0}));

@@ -105,4 +105,40 @@ final class NotifyTests: XCTestCase {
         Edits.addComment(&d, task: 201, text: "x", me: 2, ts: 5)
         XCTAssertEqual(Notify.badge(d, view: WorkspaceView(d), me: 1), 2, "one Inbox row and one unread DM")
     }
+
+    /// Keywords notify like a mention (NotifySettings::keywords), not in a
+    /// channel set to nothing, and once when the message also names me.
+    func testKeywordsNotifyLikeAMention() {
+        var d = SampleWorkspace.make()
+        Edits.sendMessage(&d, channel: 301, text: "lunch", me: 2, id: 900, ts: 10)
+        Edits.sendMessage(&d, channel: 301, text: "The Deploy is out", me: 2, id: 901, ts: 11)
+        Edits.sendReply(&d, channel: 301, to: 900, text: "배포 언제?", me: 3, id: 902, ts: 12)
+        Edits.sendMessage(&d, channel: 301, text: "@Jamie Park deploy", me: 2, id: 903, ts: 13)
+        var p = NotifyPrefs()
+        p.keywords = "deploy, 배포 ,"
+        XCTAssertEqual(p.keywordList, ["deploy", "배포"])
+        let notes = Notify.candidates(d, prefs: p, me: 1, manager: false)
+        let k = notes.map(\.key)
+        XCTAssertFalse(k.contains("chat:301:900"))
+        XCTAssertTrue(k.contains("chat:301:901"))
+        XCTAssertTrue(k.contains("chat:301:902"), "in a thread too")
+        XCTAssertEqual(notes.first { $0.key == "chat:301:901" }?.title, "Alex Kim said \"deploy\" in #general")
+        XCTAssertEqual(notes.filter { $0.key.hasSuffix(":903") }.count, 1)
+        XCTAssertFalse(keys(d).contains("chat:301:901"), "no keywords, no notice")
+        p.setChannelMode(301, "nothing")
+        XCTAssertFalse(keys(d, p).contains("chat:301:901"))
+    }
+
+    /// What the server gets with the push token (wb_net::PushPrefs).
+    func testChoicesForTheServer() {
+        var p = NotifyPrefs()
+        p.keywords = "deploy"
+        p.setChannelMode(301, "all")
+        p.mutedUntil = 99
+        p.replies = false
+        XCTAssertEqual(p.forServer, [
+            "direct": true, "mentions": true, "replies": false, "channel_default": "mentions",
+            "channel_modes": [["channel": 301, "mode": "all"]], "keywords": ["deploy"], "muted_until": 99,
+        ])
+    }
 }

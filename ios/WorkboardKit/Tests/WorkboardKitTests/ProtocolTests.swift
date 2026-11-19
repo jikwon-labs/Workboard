@@ -13,6 +13,7 @@ final class ProtocolTests: XCTestCase {
             .setPassword(email: "a@b.c", password: "12345678", oldPassword: "old-pass"),
             .pushToken(token: "ab12", platform: "ios", env: "development"),
             .pushToken(token: "ab12", platform: "ios", env: "production", workspace: "k1"), .callJoin(channel: 301), .ping, .pong,
+            .pushToken(token: "ab12", platform: "ios", env: "production", prefs: ["keywords": ["deploy"]]),
         ]
         for m in msgs { XCTAssertEqual(ClientMessage(text: m.text), m) }
     }
@@ -38,6 +39,7 @@ final class ProtocolTests: XCTestCase {
             .update(data: ["b": 2], rev: 10), .account(email: "a@b.c"), .ping, .pong,
             .error(code: "auth", message: "no"), .error(code: nil, message: "Say hello first."),
             .callToken(channel: 301, url: "ws://x:7880", token: "jwt"), .error(code: "denied", message: "no", channel: 301),
+            .presence([1, 3]),
         ]
         for m in msgs { XCTAssertEqual(ServerMessage(text: m.text), m) }
         // as the real server writes them (serde, Option as null, absent token)

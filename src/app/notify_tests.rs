@@ -763,3 +763,47 @@ fn the_dock_count_follows_the_sidebar_seen_rule() {
     a.mark_read(dm);
     assert_eq!(a.dock_count(), base);
 }
+
+#[test]
+fn keywords_notify_like_a_mention_but_not_in_quiet_channels() {
+    let mut a = app();
+    let g = general(&a);
+    a.data.extra.notify.keywords = "deploy, 배포 ,".into();
+    post(&mut a, g, 3, "Lunch at noon");
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+    post(&mut a, g, 3, "The Deploy is done");
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Mention]);
+    assert_eq!(
+        a.notify_rt.sent[0].title,
+        "Sam Lee said \"deploy\" in # general"
+    );
+    // in a thread too
+    let top = a.data.channels.iter().find(|c| c.id == g).unwrap().messages[0].id;
+    let rid = a.data.new_id();
+    let r = msg(rid, 2, "배포 언제 해요?", now_ts());
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == g)
+        .unwrap()
+        .messages
+        .iter_mut()
+        .find(|m| m.id == top)
+        .unwrap()
+        .replies
+        .push(r);
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Mention, Kind::Mention]);
+    // a message that also mentions me is told once, as the mention
+    post(&mut a, g, 3, "@Me deploy please");
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 3);
+    assert!(a.notify_rt.sent[2].title.contains("mentioned you"));
+    // a channel set to nothing stays quiet
+    a.data.extra.notify.set_channel_mode(g, "nothing");
+    post(&mut a, g, 3, "deploy again");
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 3);
+}

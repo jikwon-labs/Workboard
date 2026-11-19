@@ -117,4 +117,8 @@ pub const T: &[(&str, &str)] = &[
     ("Messages keep their dates and thread replies stay in their threads. Files come in as links to Slack. Old mentions and replies don't show up as new in anyone's Inbox.", "메시지는 원래 날짜를 그대로 갖고, 스레드 답글은 스레드 안에 들어갑니다. 파일은 Slack 링크로 들어옵니다. 예전 멘션과 답글은 누구의 받은 편지함에도 새 항목으로 뜨지 않습니다."),
     ("No one in these private channels is a member here, so only you are in them for now: {}", "이 비공개 채널의 사람 중 여기 멤버가 없어서, 지금은 나만 들어가 있습니다: {}"),
     ("Imported {} messages into {} channels.", "메시지 {}개를 채널 {}개로 가져왔습니다."),
+    // group mentions
+    ("Everyone in this conversation", "이 대화의 모든 사람"),
+    ("Everyone here who is online", "이 대화에서 지금 접속한 사람"),
+    ("Everyone in this team", "이 팀의 모든 사람"),
 ];

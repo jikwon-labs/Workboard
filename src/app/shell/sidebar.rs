@@ -664,7 +664,9 @@ impl App {
                 if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                     continue;
                 }
-                let unread = if muted { 0 } else { real_unread };
+                // a channel set to notify about nothing is quiet: dimmed, no count
+                let quiet = self.data.extra.notify.channel_mode(id) == "nothing";
+                let unread = if muted || quiet { 0 } else { real_unread };
                 let sel = self.section == Section::Chat && self.chat.open == Some(id);
                 let sub = if name == "general" {
                     Some(format!("- {}", ws))
@@ -687,7 +689,7 @@ impl App {
                     &name,
                     sub.as_deref(),
                     None,
-                    false,
+                    quiet,
                 );
                 self.unread_pill(ui, r.rect, unread);
                 let sr = Rect::from_center_size(
@@ -970,18 +972,23 @@ impl App {
         }
     }
 
+    /// A channel set to notify about nothing: dimmed, no count.
+    pub(in crate::app) fn quiet_channel(&self, c: &Channel) -> bool {
+        c.kind == ChannelKind::Channel && self.data.extra.notify.channel_mode(c.id) == "nothing"
+    }
+
     /// Unread messages in the channels and direct messages the sidebar
     /// lists, for the Chat badge on the rail.
     pub(in crate::app) fn chat_unread_total(&self) -> usize {
         self.data
             .channels
             .iter()
-            .filter(|c| self.listed(c))
+            .filter(|c| self.listed(c) && !self.quiet_channel(c))
             .map(|c| self.unread_count(c))
             .sum()
     }
 
-    fn unread_count(&self, c: &Channel) -> usize {
+    pub(in crate::app) fn unread_count(&self, c: &Channel) -> usize {
         if !self.data.extra.notify.chat {
             return 0;
         }

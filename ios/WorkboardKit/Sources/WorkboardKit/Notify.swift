@@ -41,6 +41,9 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
     public var channelModes: [UInt64: String] = [:]
     /// No notifications until then (seconds since 1970).
     public var mutedUntil: Int64 = 0
+    /// Words to be told about like a mention, separated by commas
+    /// (NotifySettings::keywords on the Mac).
+    public var keywords = ""
 
     public init() {}
 
@@ -61,6 +64,38 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
 
     public func muted(now: Int64) -> Bool { mutedUntil > now }
 
+    /// `keywords` one by one, trimmed, blanks left out.
+    public var keywordList: [String] {
+        keywords.split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// The keyword `text` has (ignoring case), if any (wb_sync::mentions::has_keyword).
+    public func keywordIn(_ text: String) -> String? {
+        let low = text.lowercased()
+        return keywordList.first { low.contains($0.lowercased()) }
+    }
+
+    /// What the server needs for this phone's pushes (wb_net::PushPrefs),
+    /// sent with the push token.
+    public var forServer: JSON {
+        let modes: [JSON] = channelModes.keys.sorted().map { id in
+            let mode: String = channelModes[id] ?? ""
+            return JSON.object(["channel": JSON.id(id), "mode": JSON.string(mode)])
+        }
+        let words: [JSON] = keywordList.map { JSON.string($0) }
+        var o: [String: JSON] = [:]
+        o["direct"] = .bool(direct)
+        o["mentions"] = .bool(mentions)
+        o["replies"] = .bool(replies)
+        o["channel_default"] = .string(channelDefault)
+        o["channel_modes"] = .array(modes)
+        o["keywords"] = .array(words)
+        o["muted_until"] = .int(mutedUntil)
+        return .object(o)
+    }
+
     // a file saved by an older build may lack newer fields
     public init(from decoder: Decoder) throws {
         self.init()
@@ -73,12 +108,13 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         goals = v(.goals, goals); forms = v(.forms, forms); team = v(.team, team); sound = v(.sound, sound)
         badge = v(.badge, badge); channelDefault = v(.channelDefault, channelDefault)
         channelModes = v(.channelModes, channelModes); mutedUntil = v(.mutedUntil, mutedUntil)
+        keywords = v(.keywords, keywords)
     }
 }
 
 /// One thing to tell the person about.
 public struct Note: Equatable, Sendable {
-    public enum Kind: Sendable { case direct, channel, huddle, reaction, mention, reply, assigned, comment, taskChange, form, member }
+    public enum Kind: Sendable { case direct, channel, huddle, reaction, mention, keyword, reply, assigned, comment, taskChange, form, member }
     public enum Target: Equatable, Sendable {
         case channel(UInt64, thread: UInt64?)
         case task(UInt64)
@@ -98,6 +134,8 @@ public struct Note: Equatable, Sendable {
     /// name), or for a reaction its emoji.
     public var who = ""
     public var subject = ""
+    /// For a keyword: the word.
+    public var word = ""
 
     public init(key: String, kind: Kind, title: String, body: String, target: Target, ts: Int64?, who: String = "", subject: String = "") {
         self.key = key; self.kind = kind; self.title = title; self.body = body; self.target = target; self.ts = ts; self.who = who; self.subject = subject
@@ -141,6 +179,14 @@ public enum Notify {
         var out: [Note] = []
         var keys = Set<String>()
         func add(_ note: Note) { if keys.insert(note.key).inserted { out.append(note) } }
+        // a keyword in a message that doesn't already mention me (told as a mention)
+        let named = Mentions.members(of: data)
+        func keywordHit(_ m: JSON) -> String? {
+            guard n.mentions, !n.keywordList.isEmpty else { return nil }
+            let saved = (m["mentions"]?.array ?? []).compactMap(\.uint)
+            let mentionsMe = saved.isEmpty ? Mentions.ids(in: m["text"]?.string ?? "", members: named).contains(me) : saved.contains(me)
+            return mentionsMe ? nil : n.keywordIn(m["text"]?.string ?? "")
+        }
 
         // chat: direct messages, channels set to everything, huddles, reactions
         for c in data["channels"]?.array ?? [] {
@@ -166,9 +212,23 @@ public enum Notify {
                         if n.direct { add(Note(key: key, kind: .direct, title: who(author), body: preview(m), target: .channel(cid, thread: nil), ts: ts, who: who(author))) }
                     } else if mode == "all" {
                         add(Note(key: key, kind: .channel, title: "\(who(author)) in \(place)", body: preview(m), target: .channel(cid, thread: nil), ts: ts, who: who(author), subject: place))
+                    } else if let word = keywordHit(m) {
+                        var note = Note(key: key, kind: .keyword, title: "\(who(author)) said \"\(word)\" in \(place)", body: preview(m), target: .channel(cid, thread: nil), ts: ts, who: who(author), subject: place)
+                        note.word = word
+                        add(note)
                     }
                 }
                 let replies = m["replies"]?.array ?? []
+                // keywords in a channel's threads
+                if !dm {
+                    for r in replies where (r["author"]?.uint ?? 0) != me && !MessageView.isImported(r) {
+                        guard let rid = r["id"]?.uint, let word = keywordHit(r) else { continue }
+                        let ra = r["author"]?.uint ?? 0
+                        var note = Note(key: "chat:\(cid):\(rid)", kind: .keyword, title: "\(who(ra)) said \"\(word)\" in \(place)", body: preview(r), target: .channel(cid, thread: mid), ts: r["ts"]?.int, who: who(ra), subject: place)
+                        note.word = word
+                        add(note)
+                    }
+                }
                 if dm && n.direct {
                     for r in replies where (r["author"]?.uint ?? 0) != me && !MessageView.isImported(r) {
                         guard let rid = r["id"]?.uint else { continue }

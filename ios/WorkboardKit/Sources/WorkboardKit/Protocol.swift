@@ -89,8 +89,9 @@ public enum ClientMessage: Equatable, Sendable {
     case push(data: JSON)
     case setPassword(email: String, password: String, oldPassword: String?)
     /// `workspace`: this iPhone's name for the workspace (`SyncClient.pushKey`),
-    /// which the server sends back as "ws" in each notification.
-    case pushToken(token: String, platform: String, env: String, workspace: String? = nil)
+    /// which the server sends back as "ws" in each notification. `prefs`:
+    /// this phone's notification choices (NotifyPrefs.forServer).
+    case pushToken(token: String, platform: String, env: String, workspace: String? = nil, prefs: JSON? = nil)
     case callJoin(channel: UInt64)
     /// This person is typing in a conversation (wb_net::Msg::Typing, sent
     /// without `member`; see Typing.swift).
@@ -128,9 +129,10 @@ public enum ClientMessage: Equatable, Sendable {
             var o: [String: JSON] = ["type": "set_password", "email": .string(email), "password": .string(password)]
             if let old, !old.isEmpty { o["old_password"] = .string(old) }
             return .object(o)
-        case let .pushToken(token, platform, env, workspace):
+        case let .pushToken(token, platform, env, workspace, prefs):
             var o: [String: JSON] = ["type": "push_token", "token": .string(token), "platform": .string(platform), "env": .string(env)]
             if let workspace, !workspace.isEmpty { o["workspace"] = .string(workspace) }
+            if let prefs { o["prefs"] = prefs }
             return .object(o)
         case let .callJoin(channel):
             return ["type": "call_join", "channel": .id(channel)]
@@ -172,7 +174,7 @@ public enum ClientMessage: Equatable, Sendable {
             guard let e = j["email"]?.string, let p = j["password"]?.string else { return nil }
             self = .setPassword(email: e, password: p, oldPassword: j["old_password"]?.string)
         case "push_token":
-            self = .pushToken(token: j["token"]?.string ?? "", platform: j["platform"]?.string ?? "", env: j["env"]?.string ?? "", workspace: j["workspace"]?.string)
+            self = .pushToken(token: j["token"]?.string ?? "", platform: j["platform"]?.string ?? "", env: j["env"]?.string ?? "", workspace: j["workspace"]?.string, prefs: j["prefs"])
         case "call_join":
             guard let ch = j["channel"]?.uint else { return nil }
             self = .callJoin(channel: ch)
@@ -258,6 +260,8 @@ public enum ServerMessage: Equatable, Sendable {
     case access(people: [Person], role: Role, answer: Bool? = nil)
     case backups([Backup])
     case restored(name: String)
+    /// Who is connected now (members), sent to everyone when it changes.
+    case presence([UInt64])
     case ping
     case pong
     /// `channel` is set when a call_join for it was turned down; `putBack`
@@ -304,6 +308,8 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "backups", "backups": .array(list.map(\.json))]
         case let .restored(name):
             return ["type": "restored", "name": .string(name)]
+        case let .presence(online):
+            return ["type": "presence", "online": .array(online.map(JSON.id))]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         case let .error(code, m, channel, putBack):
@@ -362,6 +368,8 @@ public enum ServerMessage: Equatable, Sendable {
             self = .backups((j["backups"]?.array ?? []).compactMap(Backup.init))
         case "restored":
             self = .restored(name: j["name"]?.string ?? "")
+        case "presence":
+            self = .presence((j["online"]?.array ?? []).compactMap(\.uint))
         case "ping": self = .ping
         case "pong": self = .pong
         case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint, putBack: j["put_back"]?.bool ?? false)

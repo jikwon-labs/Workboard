@@ -1713,3 +1713,134 @@ fn typing_in_the_message_box_tells_the_server_every_few_seconds() {
     assert!(h.app.sync_rt.typed.unwrap().1 > first.1);
     h.app.sync_rt.net = None;
 }
+
+/// "@channel", "@here" and a team's name in the @ list: the message keeps
+/// everyone they stand for in its mentions, so every app and the server
+/// notify them.
+#[test]
+fn group_mentions_from_the_list_keep_their_people() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let others: Vec<u64> = h
+        .app
+        .data
+        .members
+        .iter()
+        .filter(|m| !m.invited && m.id != me)
+        .map(|m| m.id)
+        .collect();
+    assert!(others.len() >= 2);
+    h.app.data.extra.teams.push(Team {
+        id: 900,
+        name: "Design Crew".into(),
+        members: vec![others[0], others[1], me],
+        color: [1, 2, 3],
+    });
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let last = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .messages
+            .last()
+            .unwrap()
+            .clone()
+    };
+    h.click("Mention someone");
+    h.click("@Design Crew");
+    assert_eq!(h.app.chat.text, "@Design Crew ");
+    h.type_text("review please");
+    h.key(egui::Key::Enter);
+    let m = last(&h);
+    assert_eq!(m.text, "@Design Crew review please");
+    assert_eq!(m.mentions, vec![others[0], others[1]], "not me, the writer");
+    h.click("Mention someone");
+    h.click("@channel");
+    // (the pick leaves the box focused with the cursor at the end)
+    h.type_text("standup");
+    h.key(egui::Key::Enter);
+    let mut got = last(&h).mentions;
+    got.sort();
+    let mut want = others.clone();
+    want.sort();
+    assert_eq!(got, want, "@channel is everyone in a public channel");
+    // without a server no one is known to be online: @here names no one
+    h.click("Mention someone");
+    h.click("@here");
+    h.type_text("anyone?");
+    h.key(egui::Key::Enter);
+    assert!(last(&h).mentions.is_empty());
+}
+
+/// A channel set to notify about nothing is dimmed in the sidebar and shows
+/// no unread count.
+#[test]
+fn a_channel_set_to_nothing_shows_no_unread_count() {
+    let mut h = Ui1::new();
+    let g = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.section = Section::Home;
+    let unread = h
+        .app
+        .unread_count(h.app.data.channels.iter().find(|c| c.id == g).unwrap());
+    if unread == 0 {
+        let id = h.app.data.new_id();
+        let c = h.app.data.channels.iter_mut().find(|c| c.id == g).unwrap();
+        let mut m = c.messages.last().unwrap().clone();
+        m.id = id;
+        m.author = 2;
+        m.ts = now_ts() + 5;
+        c.messages.push(m);
+    }
+    h.settle();
+    let n = h
+        .app
+        .unread_count(h.app.data.channels.iter().find(|c| c.id == g).unwrap());
+    assert!(n > 0);
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 5000.0));
+    let count_on_row = |h: &Ui1| {
+        let row = h.rect_in("general", side);
+        h.painted_text(&n.to_string())
+            .iter()
+            .any(|(r, _)| side.contains(r.center()) && (r.center().y - row.center().y).abs() < 8.0)
+    };
+    assert!(count_on_row(&h), "the count shows");
+    h.app.data.extra.notify.set_channel_mode(g, "nothing");
+    h.settle();
+    assert!(!count_on_row(&h), "a quiet channel shows no count");
+}
+
+/// Keywords are typed in the Notifications settings.
+#[test]
+fn notification_keywords_are_typed_in_settings() {
+    let mut h = Ui1::new();
+    h.click("Profile menu");
+    h.click("Notifications");
+    // the dialog scrolls: wheel down over it to reach the keywords
+    let over = h.find("Direct messages").unwrap();
+    for _ in 0..10 {
+        h.frame(vec![egui::Event::PointerMoved(over)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -120.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    h.click("Notification keywords");
+    h.type_text("deploy, 배포");
+    assert_eq!(
+        h.app.data.extra.notify.keyword_list(),
+        vec!["deploy", "배포"]
+    );
+}

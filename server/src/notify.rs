@@ -116,7 +116,12 @@ impl Hub {
             if online.get(device).is_some_and(|n| *n > 0) {
                 continue;
             }
-            let mine: Vec<&push::Note> = notes.iter().filter(|n| n.member == d.member).collect();
+            // what this phone asked to be told about
+            let now = now_ms() / 1000;
+            let mine: Vec<&push::Note> = notes
+                .iter()
+                .filter(|n| n.member == d.member && push::wanted(n, tok.prefs.as_ref(), now))
+                .collect();
             for mut p in push::batch(&mine) {
                 // the phone's name for this workspace: a tap opens it
                 if let Some(ws) = &tok.workspace {
@@ -161,10 +166,11 @@ impl Hub {
         platform: &str,
         env: &str,
         workspace: Option<&str>,
+        prefs: Option<wb_net::PushPrefs>,
     ) {
         let mut g = self.state();
         if g.saved
-            .set_push_token(device, token, platform, env, workspace)
+            .set_push_token(device, token, platform, env, workspace, prefs)
         {
             g.dirty = true;
         }

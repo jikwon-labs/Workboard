@@ -361,6 +361,9 @@ pub struct NotifySettings {
     pub channel_default: String,
     /// Channels set apart from `channel_default`.
     pub channel_modes: Vec<(u64, String)>,
+    /// Words to be told about in channels set to "Only @mentions" (and in
+    /// threads), separated by commas, like a mention ("deploy, 배포").
+    pub keywords: String,
     /// Notices on the clock (due tasks, meetings, goals) already given, so a
     /// restart doesn't repeat them. Newest last, kept short.
     pub fired: Vec<String>,
@@ -392,6 +395,7 @@ impl Default for NotifySettings {
             connection: true,
             channel_default: "mentions".into(),
             channel_modes: vec![],
+            keywords: String::new(),
             fired: vec![],
         }
     }
@@ -425,6 +429,15 @@ impl NotifySettings {
             .find(|(c, _)| *c == id)
             .map(|(_, m)| m.as_str())
             .unwrap_or(&self.channel_default)
+    }
+
+    /// `keywords` one by one, trimmed, blanks left out.
+    pub fn keyword_list(&self) -> Vec<String> {
+        self.keywords
+            .split([',', '\n'])
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .collect()
     }
 
     pub fn set_channel_mode(&mut self, id: u64, mode: &str) {

@@ -5,8 +5,12 @@
 // (Saved::push) and, when a push from an app brings chat messages the team's
 // copy didn't have, notifies:
 //   - in a DM: every member of it except the author, for every message;
-//   - in a channel: members it @mentions (wb_sync::mentions), and for a thread
-//     reply also whoever started or wrote in that thread;
+//   - in a channel: members it @mentions (wb_sync::mentions; the app saves
+//     team, @channel and @here mentions as ids too), and for a thread reply
+//     also whoever started or wrote in that thread;
+//   - and what each phone's choices add or take away (`prefs` on push_token,
+//     wb_net::PushPrefs, `wanted`): channels set to every message or to
+//     nothing, keywords, paused notifications, DMs, mentions or replies off;
 // never the author (nor the member whose app sent the copy), never someone a
 // private channel is closed to, never for messages that came back from
 // someone's Trash, and never a device that is connected right now (the app
@@ -74,6 +78,10 @@ pub struct PushToken {
     /// `workspace`), sent back as "ws" in each notification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// What the device wants to be told about (None: an app from before
+    /// choices, `wanted`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefs: Option<wb_net::PushPrefs>,
 }
 
 /// A workspace name from a phone worth keeping: short, letters and digits.
@@ -428,6 +436,21 @@ pub fn message_ids_in(copy: &Value, only: Option<&HashSet<u64>>) -> HashSet<u64>
     s
 }
 
+/// Why a member might be told about a message, strongest last: each
+/// device's choices (`wb_net::PushPrefs`, `wanted`) decide which reach it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Why {
+    /// a channel message that doesn't name them: only for channels set to
+    /// every message, or when it has one of their keywords
+    Channel,
+    /// a reply in a thread they started or wrote in
+    Thread,
+    /// it @mentions them (by name, team, @channel or @here)
+    Mention,
+    /// a direct message
+    Direct,
+}
+
 /// One notification for one member.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Note {
@@ -436,6 +459,34 @@ pub struct Note {
     /// the message or reply
     pub id: u64,
     pub payload: Value,
+    pub why: Why,
+    /// the message's text, for keywords
+    pub text: String,
+}
+
+/// Whether a device whose choices are `prefs` (None: an app that never sent
+/// any, which gets what every app got before choices came: direct messages,
+/// mentions and thread replies) wants `n`, at `now_secs`. The same rules as
+/// the apps' own notifications (notify_candidates in src/app/notify.rs).
+pub fn wanted(n: &Note, prefs: Option<&wb_net::PushPrefs>, now_secs: i64) -> bool {
+    let Some(p) = prefs else {
+        return n.why != Why::Channel;
+    };
+    if p.muted_until > now_secs {
+        return false;
+    }
+    if n.why == Why::Direct {
+        return p.direct;
+    }
+    match p.channel_mode(n.channel) {
+        "nothing" => false,
+        "all" => true,
+        _ => match n.why {
+            Why::Mention => p.mentions,
+            Why::Thread => p.replies,
+            _ => p.mentions && wb_sync::mentions::has_keyword(&n.text, &p.keywords).is_some(),
+        },
+    }
 }
 
 /// The notification the iPhone app understands (ios/Workboard/Notifications.swift).
@@ -585,7 +636,14 @@ pub fn notes_in(
                 format!("{} in #{}", name(author), text_field(ch, "name"))
             }
         };
-        let mut add = |author: u64, m: &Value, parent: Option<u64>, mut to: Vec<u64>| {
+        // everyone who may read it: a public channel is everyone's
+        let readers: Vec<u64> =
+            if direct || ch.get("private").and_then(|p| p.as_bool()) == Some(true) {
+                ch_members.clone()
+            } else {
+                people.iter().map(|p| p.0).collect()
+            };
+        let mut add = |author: u64, m: &Value, parent: Option<u64>, mut to: Vec<(u64, Why)>| {
             let Some(id) = u64_field(m, "id") else { return };
             // brought in by an import (Slack history, say): old history, not
             // news, however recent its time (Message::imported in the app)
@@ -595,10 +653,12 @@ pub fn notes_in(
             if now_secs - secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0)) > MAX_AGE_SECS {
                 return;
             }
-            to.sort_unstable();
-            to.dedup();
+            // the strongest reason for each member
+            to.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+            to.dedup_by_key(|x| x.0);
             let p = payload(&title(author), &body_of(m), cid, parent);
-            for member in to {
+            let text = text_field(m, "text");
+            for (member, why) in to {
                 if member == author || skip.contains(&member) || wb_sync::closed_to(ch, member) {
                     continue;
                 }
@@ -607,19 +667,24 @@ pub fn notes_in(
                     channel: cid,
                     id,
                     payload: p.clone(),
+                    why,
+                    text: text.clone(),
                 });
             }
         };
+        let with = |ids: Vec<u64>, why: Why| ids.into_iter().map(move |i| (i, why));
         for m in array_at(ch, "messages") {
             let Some(mid) = u64_field(m, "id") else {
                 continue;
             };
             let author = u64_field(m, "author").unwrap_or(0);
             if !before.contains(&mid) && !restored(m) {
-                let to = if direct {
-                    ch_members.clone()
+                let to: Vec<(u64, Why)> = if direct {
+                    with(ch_members.clone(), Why::Direct).collect()
                 } else {
-                    mentioned(m)
+                    with(mentioned(m), Why::Mention)
+                        .chain(with(readers.clone(), Why::Channel))
+                        .collect()
                 };
                 add(author, m, None, to);
             }
@@ -632,14 +697,16 @@ pub fn notes_in(
                     continue;
                 }
                 let ra = u64_field(r, "author").unwrap_or(0);
-                let to = if direct {
-                    ch_members.clone()
+                let to: Vec<(u64, Why)> = if direct {
+                    with(ch_members.clone(), Why::Direct).collect()
                 } else {
                     // the thread's people: who started it and who wrote in it
-                    let mut to = mentioned(r);
-                    to.push(author);
-                    to.extend(replies.iter().filter_map(|x| u64_field(x, "author")));
-                    to
+                    let mut thread = vec![author];
+                    thread.extend(replies.iter().filter_map(|x| u64_field(x, "author")));
+                    with(mentioned(r), Why::Mention)
+                        .chain(with(thread, Why::Thread))
+                        .chain(with(readers.clone(), Why::Channel))
+                        .collect()
                 };
                 add(ra, r, Some(mid), to);
             }
@@ -699,6 +766,88 @@ mod tests {
 
     fn who(n: &[Note]) -> Vec<(u64, u64)> {
         n.iter().map(|n| (n.member, n.id)).collect()
+    }
+
+    // what a phone that never sent choices gets (the tests from before
+    // choices came); `super::notes` also has the channel messages that only
+    // choices let through
+    fn notes(c: &Value, before: &HashSet<u64>, skip: &[u64], now: i64) -> Vec<Note> {
+        super::notes(c, before, skip, now)
+            .into_iter()
+            .filter(|n| wanted(n, None, now))
+            .collect()
+    }
+
+    fn notes_in(
+        c: &Value,
+        before: &HashSet<u64>,
+        only: Option<&HashSet<u64>>,
+        skip: &[u64],
+        now: i64,
+    ) -> Vec<Note> {
+        super::notes_in(c, before, only, skip, now)
+            .into_iter()
+            .filter(|n| wanted(n, None, now))
+            .collect()
+    }
+
+    #[test]
+    fn each_phone_gets_what_its_choices_ask_for() {
+        let mut root = msg(5, 1, "plan");
+        root["replies"] = json!([msg(6, 2, "the deploy is done")]);
+        let c = ws(json!([
+            {"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [root, msg(7, 2, "deploy tonight"), msg(8, 2, "@Cy lunch?")]},
+            {"id": 11, "name": "", "kind": "Direct", "members": [2, 3], "messages": [msg(9, 2, "hey")]}
+        ]));
+        let all = super::notes(&c, &HashSet::new(), &[], now());
+        let t = now();
+        let got = |member: u64, p: Option<&wb_net::PushPrefs>| -> Vec<u64> {
+            all.iter()
+                .filter(|n| n.member == member && wanted(n, p, t))
+                .map(|n| n.id)
+                .collect()
+        };
+        // no choices sent: DMs, mentions and threads, as before
+        assert_eq!(got(3, None), vec![8, 9]);
+        assert_eq!(got(1, None), vec![6], "Alex started the thread");
+        // keywords, like a mention
+        let mut p = wb_net::PushPrefs {
+            keywords: vec!["Deploy".into()],
+            ..Default::default()
+        };
+        assert_eq!(got(3, Some(&p)), vec![6, 7, 8, 9]);
+        // a channel set to every message, or to nothing
+        p.keywords.clear();
+        p.channel_modes = vec![wb_net::ChannelMode {
+            channel: 10,
+            mode: "all".into(),
+        }];
+        assert_eq!(got(4, Some(&p)), vec![5, 6, 7, 8]);
+        p.channel_modes[0].mode = "nothing".into();
+        assert_eq!(
+            got(3, Some(&p)),
+            vec![9],
+            "not even the mention; the DM still"
+        );
+        p.direct = false;
+        assert!(got(3, Some(&p)).is_empty());
+        // paused
+        let paused = wb_net::PushPrefs {
+            muted_until: t + 60,
+            ..Default::default()
+        };
+        assert!(got(3, Some(&paused)).is_empty());
+        // the author never, the strongest reason once
+        let loud = wb_net::PushPrefs {
+            channel_default: "all".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            got(2, Some(&loud)),
+            vec![5],
+            "only Alex's: Bo wrote the rest"
+        );
+        assert_eq!(all.iter().filter(|n| n.member == 3 && n.id == 8).count(), 1);
     }
 
     #[test]

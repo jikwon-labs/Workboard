@@ -350,8 +350,16 @@ impl Conn {
                 platform,
                 env,
                 workspace,
+                prefs,
             }) => {
-                hub.set_push_token(&self.device, &token, &platform, &env, workspace.as_deref());
+                hub.set_push_token(
+                    &self.device,
+                    &token,
+                    &platform,
+                    &env,
+                    workspace.as_deref(),
+                    prefs,
+                );
                 None
             }
             Some(Msg::CallJoin { channel }) => {
@@ -653,7 +661,12 @@ async fn watching(
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                let mine: Vec<&push::Note> = list.iter().filter(|n| n.member == member).collect();
+                // what an iPhone without choices gets: DMs, mentions, threads
+                let now = now_ms() / 1000;
+                let mine: Vec<&push::Note> = list
+                    .iter()
+                    .filter(|n| n.member == member && push::wanted(n, None, now))
+                    .collect();
                 for p in push::batch(&mine) {
                     if !send(&mut socket, &note_msg(&p).to_json()).await {
                         break 'conn;

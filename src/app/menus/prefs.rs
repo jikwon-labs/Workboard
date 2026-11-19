@@ -250,6 +250,12 @@ impl App {
                 }
             }
             ui.label(RichText::new(tr("Set one channel apart with the bell at the top of that channel. Direct messages follow \"Direct messages\" above.")).small().color(t.text2));
+            ui.add_space(8.0);
+            ui.label(RichText::new(tr("Keywords")).strong());
+            let kw = ui.add(field(&mut n.keywords).hint_text(tr("deploy, launch")).desired_width(300.0));
+            name_it(&kw, "Notification keywords");
+            ch |= kw.changed();
+            ui.label(RichText::new(tr("Tell me when a message in a channel has one of these words, like a mention. Separate them with commas.")).small().color(t.text2));
             ui.add_space(10.0);
             let test = ui.button(tr("Send a test notification"));
             if test.clicked() {

@@ -19,9 +19,17 @@ extension SyncClient {
         if state.isConnected, let ws = socket { sendPushToken(on: ws) }
     }
 
+    /// This phone's notification choices for the server's pushes
+    /// (NotifyPrefs.forServer): sent with the token, and again when they change.
+    public func setPushPrefs(_ prefs: JSON) {
+        guard prefs != pushPrefs else { return }
+        pushPrefs = prefs
+        if state.isConnected, let ws = socket { sendPushToken(on: ws) }
+    }
+
     func sendPushToken(on ws: URLSessionWebSocketTask) {
         guard let t = settings.pushToken else { return }
-        send(.pushToken(token: t, platform: "ios", env: settings.pushEnv, workspace: pushKey), on: ws)
+        send(.pushToken(token: t, platform: "ios", env: settings.pushEnv, workspace: pushKey, prefs: pushPrefs), on: ws)
         settings.pushSentTo = settings.server
         storage.save(settings)
     }

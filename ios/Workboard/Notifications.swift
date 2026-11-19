@@ -105,8 +105,15 @@ final class Notifier {
     // MARK: choices (each person's own, kept on this iPhone like the Mac's)
 
     var prefs: NotifyPrefs = Notifier.loadPrefs() {
-        didSet { if let d = try? JSONEncoder().encode(prefs) { UserDefaults.standard.set(d, forKey: "notifyPrefs") } }
+        didSet {
+            if let d = try? JSONEncoder().encode(prefs) { UserDefaults.standard.set(d, forKey: "notifyPrefs") }
+            // the server's pushes follow them too
+            client?.setPushPrefs(prefs.forServer)
+        }
     }
+
+    /// The connection the choices go to (set by `scan`).
+    @ObservationIgnored private weak var client: SyncClient?
 
     static func loadPrefs() -> NotifyPrefs {
         guard let d = UserDefaults.standard.data(forKey: "notifyPrefs"), let p = try? JSONDecoder().decode(NotifyPrefs.self, from: d) else { return NotifyPrefs() }
@@ -120,6 +127,8 @@ final class Notifier {
     /// After the team's changes came in (notify_scan): tell what is new, keep
     /// the icon's number and the clock notices up to date.
     func scan(client: SyncClient, nav: Nav) {
+        self.client = client
+        client.setPushPrefs(prefs.forServer)
         guard let data = client.data, let me = client.me else { return }
         let manager = ["owner", "admin"].contains(client.settings.role ?? "")
         // worked out once for both lists and the icon's number
@@ -172,6 +181,7 @@ final class Notifier {
         case .huddle: return n.subject.isEmpty ? String(localized: "\(n.who) is calling you") : String(localized: "\(n.who) started a huddle in \(n.subject)")
         case .reaction: return String(localized: "\(n.who) reacted \(n.subject) to your message")
         case .mention: return String(localized: "\(n.who) mentioned you in \(n.subject)")
+        case .keyword: return String(localized: "\(n.who) said \"\(n.word)\" in \(n.subject)")
         case .reply: return String(localized: "\(n.who) replied in \(n.subject)")
         case .assigned: return String(localized: "\(n.who) assigned you a task")
         case .comment: return String(localized: "\(n.who) commented on \(n.subject)")

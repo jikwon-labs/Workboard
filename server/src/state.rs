@@ -175,6 +175,7 @@ impl Saved {
         platform: &str,
         env: &str,
         workspace: Option<&str>,
+        prefs: Option<wb_net::PushPrefs>,
     ) -> bool {
         let token = token.trim().to_ascii_lowercase();
         let workspace = workspace
@@ -191,11 +192,9 @@ impl Saved {
             return false;
         }
         let env = push::norm_env(env);
-        if self
-            .push
-            .get(device)
-            .is_some_and(|t| t.token == token && t.env == env && t.workspace == workspace)
-        {
+        if self.push.get(device).is_some_and(|t| {
+            t.token == token && t.env == env && t.workspace == workspace && t.prefs == prefs
+        }) {
             return false;
         }
         // one phone, one entry: a token that moved to a new device id (the app
@@ -209,6 +208,7 @@ impl Saved {
                 env: env.into(),
                 updated: now_ms(),
                 workspace,
+                prefs,
             },
         );
         true

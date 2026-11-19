@@ -122,7 +122,7 @@ extension Edits {
         let t = title.trimmed
         let body = text.trimmed
         guard !t.isEmpty || !body.isEmpty else { return false }
-        let mentions = Mentions.ids(in: body, data: data, picked: picked)
+        let mentions = Mentions.chatIDs(in: body, data: data, channel: channel, online: [], author: me, picked: picked)
         return data.updateItem(at: "channels", id: channel) { c in
             var m = message(id: id, author: me, text: body, ts: ts)
             m["post_title"] = .string(t)

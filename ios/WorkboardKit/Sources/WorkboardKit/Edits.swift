@@ -48,10 +48,10 @@ public enum Edits {
     /// people chosen from the @ list, so a name several people share
     /// mentions the one picked (kept in `mentions`, as the Mac app does).
     @discardableResult
-    public static func sendMessage(_ data: inout JSON, channel: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
+    public static func sendMessage(_ data: inout JSON, channel: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], online: Set<UInt64> = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
         let text = text.trimmed
         guard !text.isEmpty || !attachments.isEmpty else { return false }
-        let mentions = Mentions.ids(in: text, data: data, picked: picked)
+        let mentions = Mentions.chatIDs(in: text, data: data, channel: channel, online: online, author: me, picked: picked)
         return data.updateItem(at: "channels", id: channel) { c in
             var msgs = c["messages"]?.array ?? []
             var m = message(id: id, author: me, text: text, ts: ts)
@@ -64,10 +64,10 @@ public enum Edits {
     }
 
     @discardableResult
-    public static func sendReply(_ data: inout JSON, channel: UInt64, to parent: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
+    public static func sendReply(_ data: inout JSON, channel: UInt64, to parent: UInt64, text: String, attachments: [JSON] = [], picked: [UInt64] = [], online: Set<UInt64> = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
         let text = text.trimmed
         guard !text.isEmpty || !attachments.isEmpty else { return false }
-        let mentions = Mentions.ids(in: text, data: data, picked: picked)
+        let mentions = Mentions.chatIDs(in: text, data: data, channel: channel, online: online, author: me, picked: picked)
         var done = false
         data.updateItem(at: "channels", id: channel) { c in
             done = c.updateItem(at: "messages", id: parent) { m in
@@ -513,13 +513,13 @@ public enum Edits {
     public static func editMessage(_ data: inout JSON, channel: UInt64, message: UInt64, text: String, me: UInt64, ts: Int64) -> Bool {
         let text = text.trimmed
         guard !text.isEmpty else { return false }
-        let members = Mentions.members(of: data)
+        let snapshot = data
         var done = false
         func change(_ m: inout JSON) {
             // a huddle or call card isn't edited (the Mac app offers no Edit for it)
             guard m["author"]?.uint == me, m["text"]?.string != text, m["call"]?.string == nil else { return }
             let picked = (m["mentions"]?.array ?? []).compactMap(\.uint)
-            Mentions.put(Mentions.ids(in: text, members: members, picked: picked), on: &m)
+            Mentions.put(Mentions.chatIDs(in: text, data: snapshot, channel: channel, online: Set(picked), author: me, picked: picked), on: &m)
             m["text"] = .string(text)
             m["edited"] = .int(ts)
             done = true

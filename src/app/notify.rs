@@ -128,6 +128,7 @@ impl App {
         let me = self.data.me;
         let mut out = vec![];
         let mut keys = HashSet::new();
+        let keywords = if n.mentions { n.keyword_list() } else { vec![] };
         // ---- chat: direct messages, channels set to everything, huddles, reactions
         for c in &self.data.channels {
             if !self.can_see(c) {
@@ -192,6 +193,47 @@ impl App {
                                 target,
                             },
                         );
+                    } else if let Some(word) = self.keyword_hit(m, &keywords) {
+                        add(
+                            &mut out,
+                            &mut keys,
+                            m.ts,
+                            Note {
+                                key,
+                                kind: Kind::Mention,
+                                title: trf!("{} said \"{}\" in {}", who, word, place),
+                                body: preview(m),
+                                target,
+                            },
+                        );
+                    }
+                }
+                // keywords in a channel's threads
+                if !dm && mode != "nothing" {
+                    for r in m
+                        .replies
+                        .iter()
+                        .filter(|r| r.author != me && r.imported.is_none())
+                    {
+                        if let Some(word) = self.keyword_hit(r, &keywords) {
+                            add(
+                                &mut out,
+                                &mut keys,
+                                r.ts,
+                                Note {
+                                    key: format!("chat:{}:{}", c.id, r.id),
+                                    kind: Kind::Mention,
+                                    title: trf!(
+                                        "{} said \"{}\" in {}",
+                                        self.who(r.author),
+                                        word,
+                                        place
+                                    ),
+                                    body: preview(r),
+                                    target: format!("chat:{}:{}", c.id, m.id),
+                                },
+                            );
+                        }
                     }
                 }
                 if dm && n.direct {
@@ -415,6 +457,24 @@ impl App {
 
     /// Looks for news after the team's changes came in. The first look only
     /// remembers what is there.
+    /// The keyword (of mine, `NotifySettings::keywords`) a message has when
+    /// it doesn't already mention me (that is told as a mention).
+    fn keyword_hit(&self, m: &Message, keywords: &[String]) -> Option<String> {
+        if keywords.is_empty() {
+            return None;
+        }
+        let me = self.data.me;
+        let mentions_me = if m.mentions.is_empty() {
+            crate::model::mentioned_ids(&m.text, &self.data.members, &[]).contains(&me)
+        } else {
+            m.mentions.contains(&me)
+        };
+        if mentions_me {
+            return None;
+        }
+        wb_sync::mentions::has_keyword(&m.text, keywords)
+    }
+
     pub(super) fn notify_scan(&mut self) {
         let now = now_ts();
         let mine = self.data.extra.notify.clone();

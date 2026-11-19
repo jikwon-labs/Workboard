@@ -228,6 +228,16 @@
         }
       }
     },
+    "%@ said \"%@\" in %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@님의 메시지에 \"%2$@\" 가 있습니다 (%3$@)"
+          }
+        }
+      }
+    },
     "%@ started a huddle in %@": {
       "localizations": {
         "ko": {
@@ -2185,12 +2195,42 @@
         }
       }
     },
+    "Everyone here who is online": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 대화에서 지금 접속한 사람"
+          }
+        }
+      }
+    },
     "Everyone in the workspace is in it.": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "워크스페이스의 모든 사람이 들어 있습니다."
+          }
+        }
+      }
+    },
+    "Everyone in this conversation": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 대화의 모든 사람"
+          }
+        }
+      }
+    },
+    "Everyone in this team": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 팀의 모든 사람"
           }
         }
       }
@@ -2728,6 +2768,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "로그인 유지"
+          }
+        }
+      }
+    },
+    "Keywords": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키워드"
           }
         }
       }
@@ -3877,6 +3927,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "알림"
+          }
+        }
+      }
+    },
+    "Notifications off": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "알림 꺼짐"
           }
         }
       }
@@ -5442,6 +5502,16 @@
         }
       }
     },
+    "Tell me when a message in a channel has one of these words, like a mention. Separate them with commas.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "채널 메시지에 이 단어가 들어 있으면 멘션처럼 알려 줍니다. 쉼표로 나눠 적으세요."
+          }
+        }
+      }
+    },
     "Templates": {
       "extractionState": "manual",
       "localizations": {
@@ -6509,6 +6579,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "축소"
+          }
+        }
+      }
+    },
+    "deploy, launch": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "배포, 출시"
           }
         }
       }

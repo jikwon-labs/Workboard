@@ -75,6 +75,8 @@ public final class FakeServer: @unchecked Sendable {
     var pushTokens: [String: String] = [:]
     /// device -> the phone's name for this workspace that came with its token
     var pushWorkspaces: [String: String] = [:]
+    /// The notification choices each device sent with its token.
+    var pushPrefs: [String: JSON] = [:]
     /// member -> account
     var accounts: [UInt64: Account] = [:]
     /// normalized reset code -> (email, made at)
@@ -383,11 +385,12 @@ public final class FakeServer: @unchecked Sendable {
             if let snap = snapshot { send(.update(data: snap, rev: rev), to: p) }
         case let .setPassword(email, password, old):
             setPassword(email: email, password: password, old: old, from: p)
-        case let .pushToken(token, platform, env, workspace):
+        case let .pushToken(token, platform, env, workspace, prefs):
             // an empty token stops notifications to this device (set_push_token)
             if let d = p.device {
                 pushTokens[d] = token.isEmpty ? nil : token
                 pushWorkspaces[d] = token.isEmpty ? nil : workspace
+                pushPrefs[d] = token.isEmpty ? nil : prefs
             }
             log("push token from \(p.device?.prefix(8) ?? "?") (\(platform), \(env))\(token.isEmpty ? ": removed" : "")")
         case .createInvite, .setRole, .revoke, .accessList, .backupList, .restore:

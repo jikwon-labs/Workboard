@@ -163,12 +163,15 @@ struct NewChannelSheet: View {
 
 struct ChannelRow: View {
     @Environment(SyncClient.self) private var client
+    @Environment(Notifier.self) private var notifier
     let channel: ChannelView
 
     var body: some View {
         let me = client.me ?? 0
         let v = client.view
-        let unread = channel.unread(me: me)
+        // a channel set to notify about nothing is quiet: dimmed, no count
+        let quiet = channel.kind == .channel && notifier.prefs.channelMode(channel.id) == "nothing"
+        let unread = quiet ? 0 : channel.unread(me: me)
         HStack(spacing: 12) {
             if channel.kind == .direct {
                 Avatar(member: v.member(channel.members.first { $0 != me } ?? me), size: 36)
@@ -182,7 +185,12 @@ struct ChannelRow: View {
                 HStack {
                     Text(v.title(of: channel, me: me))
                         .fontWeight(unread > 0 ? .semibold : .regular)
+                        .foregroundStyle(quiet ? .secondary : .primary)
                         .lineLimit(1)
+                    if quiet {
+                        Image(systemName: "bell.slash").font(.caption).foregroundStyle(.secondary)
+                            .accessibilityLabel("Notifications off")
+                    }
                     Spacer()
                     if let last = channel.messages.last {
                         Text(Fmt.time(last.ts)).font(.caption).foregroundStyle(.secondary)
@@ -272,7 +280,7 @@ struct ConversationView: View {
                     TypingLine(channelId: c.id)
                     Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
                         client.edit { d, me in
-                            Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, me: me, id: client.newId(), ts: nowTs())
+                            Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: client.newId(), ts: nowTs())
                         }
                     }
                     .onTyping { client.typingNow(channel: c.id) }
@@ -354,7 +362,7 @@ struct ThreadView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
                     client.edit { d, me in
-                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, me: me, id: client.newId(), ts: nowTs())
+                        Edits.sendReply(&d, channel: c.id, to: m.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: client.newId(), ts: nowTs())
                     }
                 }
             }
@@ -650,6 +658,14 @@ struct Composer: View {
         return Mentions.candidates(q, members: client.view.members, me: client.me)
     }
 
+    /// The groups the @ list shows after the people: "@channel", "@here", teams.
+    var groupChoices: [String] {
+        guard let q = Mentions.query(in: text), let at = text.lastIndex(of: "@"), let d = client.data else { return [] }
+        if let c = completed, text.hasPrefix(c), let cAt = c.lastIndex(of: "@"),
+           text.distance(from: text.startIndex, to: at) == c.distance(from: c.startIndex, to: cAt) { return [] }
+        return Mentions.groupCandidates(q, data: d)
+    }
+
     var ready: [JSON] { pending.compactMap(\.attachment) }
     var uploading: Bool { pending.contains { $0.attachment == nil && $0.error == nil } }
 
@@ -657,7 +673,8 @@ struct Composer: View {
         let can = client.canEdit
         VStack(spacing: 6) {
             let choices = mentionChoices
-            if !choices.isEmpty {
+            let groups = groupChoices
+            if !choices.isEmpty || !groups.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(choices) { m in
@@ -682,6 +699,28 @@ struct Composer: View {
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("Mention \(m.name)" + (m.email.isEmpty ? "" : ", \(m.email)"))
                             .accessibilityIdentifier("mention-\(m.id)")
+                        }
+                        ForEach(groups, id: \.self) { g in
+                            Button {
+                                text = Mentions.complete(text, with: g)
+                                completed = text
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "person.3").font(.caption)
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text("@" + g).font(.subheadline.weight(.medium))
+                                        Text(g == "channel" ? L("Everyone in this conversation") : g == "here" ? L("Everyone here who is online") : L("Everyone in this team"))
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color(.secondarySystemBackground)))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Mention @\(g)")
+                            .accessibilityIdentifier("mention-group-\(g)")
                         }
                     }
                     .padding(.horizontal, 4)

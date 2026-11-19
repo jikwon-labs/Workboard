@@ -60,6 +60,17 @@ struct NotificationSettingsView: View {
                 .accessibilityIdentifier("channelDefault")
             }
 
+            Section {
+                TextField("deploy, launch", text: $n.prefs.keywords)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("notifyKeywords")
+            } header: {
+                Text("Keywords")
+            } footer: {
+                Text("Tell me when a message in a channel has one of these words, like a mention. Separate them with commas.")
+            }
+
             let set = client.view.visibleChannels(me: client.me ?? 0).filter { $0.kind == .channel }
             if !set.isEmpty {
                 Section {

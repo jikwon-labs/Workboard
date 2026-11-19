@@ -259,6 +259,70 @@ pub const CODE_DENIED: &str = "denied";
 /// Said when the workspace an app connects to was deleted from the server.
 pub const WORKSPACE_GONE: &str = "This workspace was deleted from the server by its owner.";
 
+/// A device's notification choices, as its app keeps them (NotifySettings
+/// on the Mac, NotifyPrefs on the iPhone), for the server's pushes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PushPrefs {
+    #[serde(default = "yes")]
+    pub direct: bool,
+    #[serde(default = "yes")]
+    pub mentions: bool,
+    /// replies in threads I started or wrote in
+    #[serde(default = "yes")]
+    pub replies: bool,
+    /// channel messages: "all", "mentions" or "nothing"
+    #[serde(default = "mentions_mode")]
+    pub channel_default: String,
+    /// channels set apart from `channel_default`
+    #[serde(default)]
+    pub channel_modes: Vec<ChannelMode>,
+    /// words to be told about like a mention
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// "Pause notifications" until this time (seconds)
+    #[serde(default)]
+    pub muted_until: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ChannelMode {
+    pub channel: u64,
+    pub mode: String,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn mentions_mode() -> String {
+    "mentions".into()
+}
+
+impl Default for PushPrefs {
+    fn default() -> Self {
+        PushPrefs {
+            direct: true,
+            mentions: true,
+            replies: true,
+            channel_default: mentions_mode(),
+            channel_modes: vec![],
+            keywords: vec![],
+            muted_until: 0,
+        }
+    }
+}
+
+impl PushPrefs {
+    /// "all", "mentions" or "nothing" for a channel.
+    pub fn channel_mode(&self, channel: u64) -> &str {
+        self.channel_modes
+            .iter()
+            .find(|c| c.channel == channel)
+            .map(|c| c.mode.as_str())
+            .unwrap_or(&self.channel_default)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
@@ -373,6 +437,11 @@ pub enum Msg {
         /// workspace is open. Servers from before it leave "ws" out.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
+        /// What this device wants to be told about (sent again whenever it
+        /// changes). Without it the device gets direct messages, mentions
+        /// and thread replies, as before choices came.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefs: Option<PushPrefs>,
     },
     /// The answer to a `watch` hello: signed in, notes follow.
     Watching,
@@ -1590,6 +1659,7 @@ mod tests {
             platform: "ios".into(),
             env: "development".into(),
             workspace: None,
+            prefs: None,
         };
         assert_eq!(
             Msg::parse(
@@ -1608,6 +1678,7 @@ mod tests {
                 platform: "ios".into(),
                 env: "production".into(),
                 workspace: Some("k1".into()),
+                prefs: None,
             })
         );
         // a watch connection: the hello says so, the server answers watching and notes
@@ -1632,6 +1703,17 @@ mod tests {
                 parent: Some(11),
             })
         );
+        // with the device's choices; missing ones take their defaults
+        let Some(Msg::PushToken { prefs: Some(p), .. }) = Msg::parse(
+            r#"{"type":"push_token","token":"ab12","prefs":{"channel_modes":[{"channel":7,"mode":"all"}],"keywords":["deploy"],"muted_until":5}}"#,
+        ) else {
+            panic!("prefs read")
+        };
+        assert!(p.direct && p.mentions && p.replies);
+        assert_eq!(p.channel_mode(7), "all");
+        assert_eq!(p.channel_mode(8), "mentions");
+        assert_eq!(p.keywords, vec!["deploy"]);
+        assert_eq!(p.muted_until, 5);
     }
 
     #[test]

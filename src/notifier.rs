@@ -1,6 +1,7 @@
-// macOS side of notifications: Notification Center banners, the Dock badge,
-// bouncing the Dock icon and a short sound.
+// Notifications: banners, the count on the app's icon, asking for attention
+// and a short sound.
 //
+// macOS: Notification Center banners, the Dock badge, bouncing the Dock icon.
 // Banners go through UNUserNotificationCenter when the app runs as the
 // installed Workboard.app: they show the app's icon and name, and a click
 // brings the app forward and opens what the banner is about (`take_clicked`).
@@ -8,13 +9,18 @@
 // back to `osascript`; those show under Script Editor and a click does not
 // open anything.
 //
+// Windows: toast notifications, a count drawn over the taskbar button and
+// flashing the taskbar button (`win` below).
+//
 // Everything here must be called from the main thread (the egui frame).
 
 /// Banners ask for permission once, the first time one is needed.
 pub fn post(title: &str, body: &str, target: &str, sound: bool) {
     #[cfg(target_os = "macos")]
     mac::post(title, body, target, sound);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    win::post(title, body, target, sound);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (title, body, target, sound);
 }
 
@@ -22,23 +28,30 @@ pub fn post(title: &str, body: &str, target: &str, sound: bool) {
 pub fn take_clicked() -> Vec<String> {
     #[cfg(target_os = "macos")]
     return mac::take_clicked();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return win::take_clicked();
+    #[cfg(not(any(target_os = "macos", windows)))]
     vec![]
 }
 
-/// The red number on the Dock icon ("" for none).
+/// The red number on the Dock icon, or over the taskbar button ("" for none).
 pub fn set_badge(label: &str) {
     #[cfg(target_os = "macos")]
     mac::set_badge(label);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    win::set_badge(label);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = label;
 }
 
-/// Bounce the Dock icon: once, or until the app is brought forward.
+/// Bounce the Dock icon (flash the taskbar button): once, or until the app
+/// is brought forward.
 pub fn bounce(until_seen: bool) {
     #[cfg(target_os = "macos")]
     mac::bounce(until_seen);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    win::bounce(until_seen);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = until_seen;
 }
 
@@ -46,6 +59,25 @@ pub fn bounce(until_seen: bool) {
 pub fn play_sound() {
     #[cfg(target_os = "macos")]
     mac::play_sound();
+    #[cfg(windows)]
+    win::play_sound();
+}
+
+/// Remember the app's window (Windows needs it for the taskbar button and
+/// to bring the app forward). Nothing to do on macOS.
+pub fn attach(cc: &eframe::CreationContext<'_>) {
+    #[cfg(windows)]
+    win::attach(cc);
+    #[cfg(not(windows))]
+    let _ = cc;
+}
+
+/// Bring the window forward, restored if it was minimized: a copy started
+/// later handed its link here (src/single.rs). macOS does this itself.
+/// May be called from any thread.
+pub fn bring_forward() {
+    #[cfg(windows)]
+    win::bring_forward();
 }
 
 #[cfg(target_os = "macos")]
@@ -288,5 +320,347 @@ mod mac {
             return None;
         }
         Some(CStr::from_ptr(p).to_string_lossy().into_owned())
+    }
+}
+
+/// A toast's XML: title and body as plain text, silent unless `sound`.
+#[cfg(any(windows, test))]
+fn toast_xml(title: &str, body: &str, sound: bool) -> String {
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    };
+    format!(
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual>{}</toast>",
+        esc(title),
+        esc(body),
+        if sound { "" } else { "<audio silent=\"true\"/>" }
+    )
+}
+
+/// The taskbar overlay: a red dot `size` pixels wide with the count in white
+/// ("9+" past nine: the icon is tiny), as RGBA. None for no count.
+#[cfg(any(windows, test))]
+fn badge_pixels(label: &str, size: usize) -> Option<Vec<u8>> {
+    const GLYPHS: [(char, [u8; 5]); 11] = [
+        ('0', [7, 5, 5, 5, 7]),
+        ('1', [2, 6, 2, 2, 7]),
+        ('2', [7, 1, 7, 4, 7]),
+        ('3', [7, 1, 7, 1, 7]),
+        ('4', [5, 5, 7, 1, 1]),
+        ('5', [7, 4, 7, 1, 7]),
+        ('6', [7, 4, 7, 5, 7]),
+        ('7', [7, 1, 1, 1, 1]),
+        ('8', [7, 5, 7, 5, 7]),
+        ('9', [7, 5, 7, 1, 7]),
+        ('+', [0, 2, 7, 2, 0]),
+    ];
+    let text = match label.trim() {
+        "" => return None,
+        l if l.len() == 1 && l.chars().all(|c| c.is_ascii_digit()) => l.to_string(),
+        _ => "9+".to_string(),
+    };
+    let mut px = vec![0u8; size * size * 4];
+    // the dot, with a soft edge
+    let c = (size as f32 - 1.0) / 2.0;
+    let r = size as f32 / 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
+            let a = (r - d + 0.5).clamp(0.0, 1.0);
+            let i = (y * size + x) * 4;
+            px[i..i + 4].copy_from_slice(&[220, 38, 38, (a * 255.0) as u8]);
+        }
+    }
+    // the digits: 3x5 cells, one cell apart, as large as two of them fit
+    let s = ((size.saturating_sub(2)) / 7).max(1);
+    let n = text.chars().count();
+    let w = n * 3 * s + (n - 1) * s;
+    let (x0, y0) = (size.saturating_sub(w) / 2, size.saturating_sub(5 * s) / 2);
+    for (k, ch) in text.chars().enumerate() {
+        let rows = GLYPHS.iter().find(|g| g.0 == ch).map(|g| g.1)?;
+        for (row, bits) in rows.iter().enumerate() {
+            for col in 0..3 {
+                if bits & (4 >> col) == 0 {
+                    continue;
+                }
+                for dy in 0..s {
+                    for dx in 0..s {
+                        let x = x0 + k * 4 * s + col * s + dx;
+                        let y = y0 + row * s + dy;
+                        if x < size && y < size {
+                            let i = (y * size + x) * 4;
+                            px[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Some(px)
+}
+
+#[cfg(windows)]
+mod win {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    use std::sync::{mpsc, Mutex, OnceLock};
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
+    use windows::Win32::Foundation::{BOOL, HWND};
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+    use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateIconFromResourceEx, DestroyIcon, FlashWindowEx, GetForegroundWindow,
+        GetSystemMetrics, IsIconic, SetForegroundWindow, ShowWindow, FLASHWINFO, FLASHW_TIMERNOFG,
+        FLASHW_TRAY, HICON, LR_DEFAULTCOLOR, SM_CXSMICON, SW_RESTORE,
+    };
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+
+    /// Who the toasts are from. Registered for this person under
+    /// HKEY_CURRENT_USER with the app's name and icon, so no installer is needed.
+    const AUMID: &str = "Workboard.Desktop";
+
+    static WINDOW: AtomicIsize = AtomicIsize::new(0);
+    static CTX: OnceLock<egui::Context> = OnceLock::new();
+    static CLICKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    /// Shown toasts: a click only reaches the app while its toast is kept.
+    static SHOWN: Mutex<Vec<ToastNotification>> = Mutex::new(Vec::new());
+    static BADGE: Mutex<String> = Mutex::new(String::new());
+
+    type Job = Box<dyn FnOnce() + Send>;
+
+    /// Toasts and the taskbar talk to Windows through COM, which can be slow
+    /// the first time: they run on a thread of their own, not in the frame.
+    fn run(job: impl FnOnce() + Send + 'static) {
+        static WORKER: OnceLock<Mutex<mpsc::Sender<Job>>> = OnceLock::new();
+        let tx = WORKER.get_or_init(|| {
+            let (tx, rx) = mpsc::channel::<Job>();
+            let _ = std::thread::Builder::new()
+                .name("notifier".into())
+                .spawn(move || {
+                    unsafe {
+                        let _ = RoInitialize(RO_INIT_MULTITHREADED);
+                    }
+                    register();
+                    for job in rx {
+                        job();
+                    }
+                });
+            Mutex::new(tx)
+        });
+        let _ = tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send(Box::new(job));
+    }
+
+    fn window() -> HWND {
+        HWND(WINDOW.load(Ordering::Relaxed) as _)
+    }
+
+    pub fn attach(cc: &eframe::CreationContext<'_>) {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(h) = cc.window_handle() {
+            if let RawWindowHandle::Win32(w) = h.as_raw() {
+                WINDOW.store(w.hwnd.get(), Ordering::Relaxed);
+            }
+        }
+        let _ = CTX.set(cc.egui_ctx.clone());
+    }
+
+    /// The app's name and icon for its toasts (HKCU\Software\Classes\AppUserModelId).
+    fn register() {
+        let key = format!(r"HKCU\Software\Classes\AppUserModelId\{}", AUMID);
+        let icon = crate::model::Data::dir().join("notification-icon.png");
+        if !icon.exists() {
+            let _ = std::fs::create_dir_all(crate::model::Data::dir());
+            let _ = std::fs::write(&icon, include_bytes!("../Resources/AppIcon-256.png"));
+        }
+        let icon = icon.display().to_string();
+        for args in [
+            vec![key.as_str(), "/v", "DisplayName", "/d", "Workboard", "/f"],
+            vec![key.as_str(), "/v", "IconUri", "/d", icon.as_str(), "/f"],
+        ] {
+            let _ = crate::os::quiet_command("reg")
+                .arg("add")
+                .args(args)
+                .status();
+        }
+    }
+
+    pub fn post(title: &str, body: &str, target: &str, sound: bool) {
+        let xml = super::toast_xml(title, body, sound);
+        let target = target.to_string();
+        run(move || {
+            if let Err(e) = show(&xml, target) {
+                eprintln!("notification: {}", e);
+            }
+        });
+    }
+
+    fn show(xml: &str, target: String) -> windows::core::Result<()> {
+        let doc = XmlDocument::new()?;
+        doc.LoadXml(&HSTRING::from(xml))?;
+        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        toast.Activated(&TypedEventHandler::new(move |_, _| {
+            CLICKED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(target.clone());
+            bring_forward();
+            if let Some(ctx) = CTX.get() {
+                ctx.request_repaint();
+            }
+            Ok(())
+        }))?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
+        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        shown.push(toast);
+        let extra = shown.len().saturating_sub(30);
+        shown.drain(..extra);
+        Ok(())
+    }
+
+    pub fn take_clicked() -> Vec<String> {
+        std::mem::take(&mut *CLICKED.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    pub fn set_badge(label: &str) {
+        {
+            let mut b = BADGE.lock().unwrap_or_else(|e| e.into_inner());
+            if *b == label {
+                return;
+            }
+            *b = label.to_string();
+        }
+        let label = label.to_string();
+        run(move || {
+            if let Err(e) = overlay(&label) {
+                eprintln!("taskbar badge: {}", e);
+            }
+        });
+    }
+
+    fn overlay(label: &str) -> windows::core::Result<()> {
+        let hwnd = window();
+        if hwnd.0.is_null() {
+            return Ok(());
+        }
+        unsafe {
+            let bar: ITaskbarList3 = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)?;
+            bar.HrInit()?;
+            let size = GetSystemMetrics(SM_CXSMICON).clamp(16, 64) as usize;
+            let Some(px) = super::badge_pixels(label, size) else {
+                return bar.SetOverlayIcon(hwnd, HICON::default(), PCWSTR::null());
+            };
+            let mut png = vec![];
+            let encoded =
+                image::RgbaImage::from_raw(size as u32, size as u32, px).and_then(|img| {
+                    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                        .ok()
+                });
+            if encoded.is_none() {
+                return Ok(());
+            }
+            // icon resources may be PNG; 0x00030000 is the icon format version
+            let icon = CreateIconFromResourceEx(
+                &png,
+                BOOL(1),
+                0x0003_0000,
+                size as i32,
+                size as i32,
+                LR_DEFAULTCOLOR,
+            )?;
+            let r = bar.SetOverlayIcon(hwnd, icon, &HSTRING::from(label));
+            let _ = DestroyIcon(icon);
+            r
+        }
+    }
+
+    pub fn bounce(until_seen: bool) {
+        let hwnd = window();
+        if hwnd.0.is_null() || unsafe { GetForegroundWindow() } == hwnd {
+            return;
+        }
+        let info = FLASHWINFO {
+            cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+            hwnd,
+            dwFlags: if until_seen {
+                FLASHW_TRAY | FLASHW_TIMERNOFG
+            } else {
+                FLASHW_TRAY
+            },
+            uCount: if until_seen { 0 } else { 2 },
+            dwTimeout: 0,
+        };
+        unsafe {
+            let _ = FlashWindowEx(&info);
+        }
+    }
+
+    pub fn play_sound() {
+        unsafe {
+            let _ = PlaySoundW(
+                &HSTRING::from("Notification.Default"),
+                None,
+                SND_ALIAS | SND_ASYNC | SND_NODEFAULT,
+            );
+        }
+    }
+
+    pub fn bring_forward() {
+        let hwnd = window();
+        if hwnd.0.is_null() {
+            return;
+        }
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toast_text_is_plain_text_in_the_xml() {
+        let x = toast_xml("Kim <dev>", "Tom & \"Jerry\"", false);
+        assert!(x.contains("<text>Kim &lt;dev&gt;</text>"));
+        assert!(x.contains("<text>Tom &amp; &quot;Jerry&quot;</text>"));
+        assert!(x.contains("silent=\"true\""));
+        assert!(!toast_xml("a", "b", true).contains("silent"));
+    }
+
+    #[test]
+    fn the_taskbar_count_is_a_red_dot_with_white_digits() {
+        assert!(badge_pixels("", 16).is_none());
+        for size in [16, 20, 24, 32] {
+            for label in ["3", "12", "99+"] {
+                let px = badge_pixels(label, size).unwrap();
+                assert_eq!(px.len(), size * size * 4);
+                let at = |x: usize, y: usize| &px[(y * size + x) * 4..(y * size + x) * 4 + 4];
+                assert_eq!(at(0, 0)[3], 0, "the corners are clear");
+                assert_eq!(at(size / 2, 1), [220, 38, 38, 255], "the dot is red");
+                assert!(
+                    px.chunks(4).any(|p| p == [255, 255, 255, 255]),
+                    "{} at {}px shows digits",
+                    label,
+                    size
+                );
+            }
+        }
+        // more than nine reads "9+": the same pixels for any big count
+        assert_eq!(badge_pixels("12", 16), badge_pixels("99+", 16));
+        assert_ne!(badge_pixels("3", 16), badge_pixels("8", 16));
     }
 }

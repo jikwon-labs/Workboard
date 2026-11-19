@@ -708,6 +708,7 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, screenshot: Option<PathBuf>) -> Self {
         setup_fonts(&cc.egui_ctx);
         crate::links::wake(&cc.egui_ctx);
+        crate::notifier::attach(cc);
         Self::build(screenshot, None)
     }
 

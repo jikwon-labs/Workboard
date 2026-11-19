@@ -18,8 +18,10 @@ pub const T: &[(&str, &str)] = &[
     ("  {} of {}", "  {}/{}"),
     ("Save to Downloads", "다운로드 폴더에 저장"),
     ("Show in Finder", "Finder에서 보기"),
+    ("Show in File Explorer", "파일 탐색기에서 보기"),
     ("Loading the video {}%", "동영상 불러오는 중 {}%"),
     ("This video can't be played on this Mac.", "이 Mac에서는 이 동영상을 재생할 수 없습니다."),
+    ("This video can't be played on this PC.", "이 PC에서는 이 동영상을 재생할 수 없습니다."),
     ("Loading the video...", "동영상 불러오는 중..."),
     // errors made on the files / media threads, translated where they are shown
     ("Nothing to send.", "보낼 항목이 없습니다."),

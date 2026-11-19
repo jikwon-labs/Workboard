@@ -27,6 +27,8 @@ pub const T: &[(&str, &str)] = &[
     ("Set up a server for my team", "팀 서버 만들기"),
     ("Use it on this Mac without an account", "계정 없이 이 Mac에서 쓰기"),
     ("Use it on this Mac", "이 Mac에서 쓰기"),
+    ("Use it on this PC without an account", "계정 없이 이 PC에서 쓰기"),
+    ("Use it on this PC", "이 PC에서 쓰기"),
     ("Start your own workspace without an account. You can share it with your team later.", "계정 없이 내 워크스페이스로 시작합니다. 나중에 팀과 공유할 수 있습니다."),
     ("What should we call you?", "이름을 어떻게 표시할까요?"),
     ("Your name", "내 이름"),

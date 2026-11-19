@@ -163,7 +163,12 @@ fn drop_a_picture_send_it_and_open_it_large() {
     );
     h.click("Picture beach.png");
     assert!(h.app.viewer.is_some());
-    assert!(h.has("Large beach.png") && h.has("Show in Finder") && h.has("Save to Downloads"));
+    let reveal = if cfg!(windows) {
+        "Show in File Explorer"
+    } else {
+        "Show in Finder"
+    };
+    assert!(h.has("Large beach.png") && h.has(reveal) && h.has("Save to Downloads"));
     h.key(egui::Key::Escape);
     assert!(h.app.viewer.is_none());
     // a file that isn't a picture or video goes too, shown by its name

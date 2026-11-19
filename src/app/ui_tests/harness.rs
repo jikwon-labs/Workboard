@@ -684,3 +684,12 @@ pub(super) fn teammate_change(data: &Data, change: impl FnOnce(&mut Data)) -> se
     v["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
     v
 }
+
+/// The sign-in screen's way in without an account: it names the computer.
+pub(super) fn alone_button() -> &'static str {
+    if cfg!(windows) {
+        "Use it on this PC without an account"
+    } else {
+        "Use it on this Mac without an account"
+    }
+}

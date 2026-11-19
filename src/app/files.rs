@@ -2341,7 +2341,12 @@ impl App {
                                         }
                                     }
                                 }
-                                if b(ui, tr("Show in Finder")).clicked() {
+                                let reveal = if cfg!(windows) {
+                                    tr("Show in File Explorer")
+                                } else {
+                                    tr("Show in Finder")
+                                };
+                                if b(ui, reveal).clicked() {
                                     crate::os::reveal_path(path);
                                 }
                             }
@@ -2508,7 +2513,11 @@ impl App {
                             _ if local.is_some()
                                 || v.unplayable.as_deref() == Some(a.file.as_str()) =>
                             {
-                                tr("This video can't be played on this Mac.").into()
+                                if cfg!(windows) {
+                                    tr("This video can't be played on this PC.").into()
+                                } else {
+                                    tr("This video can't be played on this Mac.").into()
+                                }
                             }
                             _ => tr("Loading the video...").into(),
                         };

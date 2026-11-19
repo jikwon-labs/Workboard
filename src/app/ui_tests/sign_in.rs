@@ -80,7 +80,7 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
             && h.has("Server address entry")
             && h.has("Continue")
             && h.has("Set up a server for my team")
-            && h.has("Use it on this Mac without an account")
+            && h.has(alone_button())
             && !h.has("Email entry")
     );
     assert!(!h.has("Workspace menu") && !h.has("Profile menu"));
@@ -123,7 +123,7 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
     );
     assert!(h.has("Looking up your workspaces..."));
     assert!(
-        !h.has("Use it on this Mac without an account") && !h.has("Set up a server for my team"),
+        !h.has(alone_button()) && !h.has("Set up a server for my team"),
         "the other ways wait while it connects"
     );
     h.click("Cancel");
@@ -161,7 +161,7 @@ fn the_first_start_shows_the_sign_in_screen_with_working_alone_as_a_choice() {
     assert_eq!(login_page(&h), Some(LoginPage::SignIn));
 
     // alone on this Mac: just a name, then the app
-    h.click("Use it on this Mac without an account");
+    h.click(alone_button());
     assert!(h.has("What should we call you?") && h.has("Your name entry"));
     let me = h.app.data.me;
     h.app.login.as_mut().unwrap().name = "Jiwon".into();

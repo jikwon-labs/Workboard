@@ -340,7 +340,11 @@ impl App {
                 Some("Type the address of your workboard-server (for example https://wb.example.com)."),
             ),
             LoginPage::OnThisMac => (
-                "Use it on this Mac",
+                if cfg!(windows) {
+                    "Use it on this PC"
+                } else {
+                    "Use it on this Mac"
+                },
                 Some("Start your own workspace without an account. You can share it with your team later."),
             ),
         };
@@ -495,7 +499,12 @@ impl App {
             ui.add_space(28.0);
             or_line(ui, t);
             ui.add_space(28.0);
-            if outline_button(ui, t, tr("Use it on this Mac without an account")).clicked() {
+            let alone = if cfg!(windows) {
+                tr("Use it on this PC without an account")
+            } else {
+                tr("Use it on this Mac without an account")
+            };
+            if outline_button(ui, t, alone).clicked() {
                 self.go_to(login, LoginPage::OnThisMac);
             }
         }

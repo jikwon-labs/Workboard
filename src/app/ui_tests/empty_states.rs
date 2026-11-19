@@ -396,7 +396,7 @@ fn welcome_on_this_mac_asks_for_a_name_without_a_team() {
     let mut h = with(Data::fresh(), 1440.0, 900.0);
     h.app.login = Some(crate::app::login::LoginScreen::start(""));
     h.settle();
-    h.click("Use it on this Mac without an account");
+    h.click(alone_button());
     assert!(h.has("What should we call you?"));
     assert!(!h.has("What should your team call you?"));
 }

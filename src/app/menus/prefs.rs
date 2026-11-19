@@ -212,7 +212,8 @@ impl App {
             ui.label(RichText::new(tr("Desktop notifications")).strong());
             ch |= check(ui, &mut n.desktop, tr("Show banners when Workboard isn't in front")).changed();
             ch |= check(ui, &mut n.sound, tr("Play a sound")).changed();
-            ch |= check(ui, &mut n.dock_badge, tr("Show a count on the Dock icon")).changed();
+            let badge = if cfg!(windows) { tr("Show a count on the taskbar icon") } else { tr("Show a count on the Dock icon") };
+            ch |= check(ui, &mut n.dock_badge, badge).changed();
             ui.add_space(6.0);
             ui.label(RichText::new(tr("Mentions, assignments, comments and reminders follow the Inbox choices above. Also tell me about:")).small().color(t.text2));
             ch |= check(ui, &mut n.direct, tr("Direct messages")).changed();
@@ -255,7 +256,11 @@ impl App {
                 if persist {
                     crate::notifier::post("Workboard", &tr("Notifications are working."), "inbox", n.sound);
                 }
-                self.toast(tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications."));
+                self.toast(if cfg!(windows) {
+                    tr("Sent a test notification. If no banner shows, turn on notifications for Workboard in Windows Settings > System > Notifications.")
+                } else {
+                    tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.")
+                });
             }
             if ch {
                 self.dirty = true;

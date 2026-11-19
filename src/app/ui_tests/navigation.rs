@@ -783,12 +783,25 @@ fn click_notification_settings_turn_kinds_off_and_set_channels() {
     h.settle();
     h.click("Every new message");
     assert_eq!(h.app.data.extra.notify.channel_default, "all");
+    // the count and the help name this system's places
+    let (badge, settings) = if cfg!(windows) {
+        (
+            "Show a count on the taskbar icon",
+            "Windows Settings > System > Notifications",
+        )
+    } else {
+        (
+            "Show a count on the Dock icon",
+            "System Settings > Notifications",
+        )
+    };
+    assert!(h.has(badge));
     h.click("Send a test notification");
     assert!(h
         .app
         .toast
         .as_ref()
-        .is_some_and(|t| t.0.starts_with("Sent a test notification")));
+        .is_some_and(|t| t.0.starts_with("Sent a test notification") && t.0.contains(settings)));
 }
 
 #[test]

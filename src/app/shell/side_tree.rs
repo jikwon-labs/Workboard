@@ -179,8 +179,19 @@ impl App {
             } else if resp.hovered() {
                 ui.painter().rect_filled(br, 5.0, t.row_selected);
             }
-            // a line icon by its kind; "+" and "⋯" stay characters
-            if (boxed || hovered || resp.hovered())
+            // a line icon by its kind; the boxed "+" is drawn as lines so it
+            // sits in the exact middle of its box (the "+" character sat low);
+            // "⋯" stays a character
+            if boxed {
+                name_it(&resp, tip);
+                super::super::icons::line_icon_scaled(
+                    ui.painter(),
+                    "plus",
+                    br.center(),
+                    t.text2,
+                    0.75,
+                );
+            } else if (hovered || resp.hovered())
                 && !line_icon(ui.painter(), glyph, br.center(), t.text2)
             {
                 ui.painter().text(

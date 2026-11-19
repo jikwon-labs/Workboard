@@ -528,3 +528,29 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
     assert_eq!(t.on_primary, Color32::WHITE);
     assert!(contrast(t.on_primary, t.primary) >= 4.5);
 }
+
+#[test]
+fn sidebar_header_plus_sits_in_the_middle_of_its_box() {
+    let h = Ui1::new();
+    for name in ["Create Space", "Create a Channel", "New message"] {
+        let r = h.rect(name);
+        // the "+" is two line segments; their ends span the cross
+        let mut ends = vec![];
+        for s in &h.shapes {
+            if let egui::Shape::LineSegment { points, .. } = &s.shape {
+                if points.iter().all(|p| r.contains(*p)) {
+                    ends.extend_from_slice(points);
+                }
+            }
+        }
+        assert_eq!(ends.len(), 4, "{}: no + drawn in its box", name);
+        let cross = Rect::from_points(&ends);
+        let off = cross.center() - r.center();
+        assert!(
+            off.length() < 0.5,
+            "{}: + is {:?} off the middle of its box",
+            name,
+            off
+        );
+    }
+}

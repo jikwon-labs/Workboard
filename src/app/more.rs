@@ -234,8 +234,9 @@ impl App {
     pub(super) fn meetings_page(&mut self, ui: &mut Ui) {
         let t = self.t();
         egui::SidePanel::left("meet_list")
-            .exact_width(260.0)
-            .resizable(false)
+            .resizable(true)
+            .default_width(260.0)
+            .width_range(200.0..=400.0)
             .frame(side_panel_frame(&t, egui::Margin::symmetric(10, 12)))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {

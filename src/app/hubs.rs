@@ -144,9 +144,12 @@ impl App {
         let t = self.t();
         let mut clicked = None;
         let mut plus = false;
-        egui::SidePanel::left(egui::Id::new(("hub", id)))
-            .exact_width(255.0)
-            .resizable(false)
+        // One id for every hub, so a width dragged in Docs carries over to
+        // Dashboards, Whiteboards and the rest.
+        egui::SidePanel::left("hub_sidebar")
+            .resizable(true)
+            .default_width(255.0)
+            .width_range(200.0..=400.0)
             .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
             .show_inside(ui, |ui| {
                 let w = ui.available_width();

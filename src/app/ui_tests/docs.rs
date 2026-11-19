@@ -799,3 +799,48 @@ fn docs_hub_leaves_out_docs_in_archived_or_other_peoples_spaces() {
     h.settle();
     assert!(h.has("Doc Project brief"));
 }
+
+#[test]
+fn hub_sidebar_can_be_dragged_wider_and_keeps_its_width_across_hubs() {
+    let mut h = Ui1::new();
+    h.click("Rail More");
+    h.click("Docs");
+    let before = h.rect("Create in Docs");
+    // the panel's edge sits just right of the Create button (8 px margin)
+    let edge = pos2(before.right() + 8.0, before.center().y + 200.0);
+    h.drag_by(edge, edge + vec2(100.0, 0.0));
+    let after = h.rect("Create in Docs");
+    assert!(
+        (after.right() - before.right() - 100.0).abs() < 4.0,
+        "the sidebar got wider: {:?} -> {:?}",
+        before,
+        after
+    );
+    h.click("Rail More");
+    h.click("Dashboards");
+    assert_eq!(h.app.section, Section::Dashboards);
+    let dash = h.rect("Create in Dashboards");
+    assert!(
+        (dash.right() - after.right()).abs() < 1.0,
+        "Dashboards uses the same width: {:?} vs {:?}",
+        dash,
+        after
+    );
+}
+
+#[test]
+fn meetings_list_can_be_dragged_wider() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Meetings;
+    h.settle();
+    let before = h.rect("+ Meeting");
+    let edge = pos2(before.right() + 10.0, before.center().y + 200.0);
+    h.drag_by(edge, edge + vec2(80.0, 0.0));
+    let after = h.rect("+ Meeting");
+    assert!(
+        (after.right() - before.right() - 80.0).abs() < 4.0,
+        "the list got wider: {:?} -> {:?}",
+        before,
+        after
+    );
+}

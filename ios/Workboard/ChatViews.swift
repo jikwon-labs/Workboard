@@ -406,9 +406,11 @@ struct ConversationView: View {
 /// The red "New" line above the first message I hadn't read.
 struct ReadLine: View {
     var body: some View {
+        // the word in the middle, the line on both sides of it
         HStack(spacing: 8) {
             Rectangle().fill(Color.red).frame(height: 1)
-            Text("New").font(.caption2.weight(.medium)).foregroundStyle(.red)
+            Text("New").font(.caption2.weight(.medium)).foregroundStyle(.red).fixedSize()
+            Rectangle().fill(Color.red).frame(height: 1)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)

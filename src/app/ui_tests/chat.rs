@@ -2452,12 +2452,18 @@ fn opening_a_channel_draws_a_red_line_above_the_first_unread_message() {
         line.bottom() <= first.y,
         "the line is above the first unread"
     );
-    let (_, color) = h
+    let (word, color) = h
         .painted_text("New")
         .into_iter()
         .find(|(r, _)| r.intersects(line))
         .expect("labelled New");
     assert_eq!(color, h.app.t().danger, "drawn in red");
+    assert!(
+        (word.center().x - line.center().x).abs() < 2.0,
+        "the word sits in the middle of the line: {:?} {:?}",
+        word,
+        line
+    );
     // they're read now: leaving and coming back draws no line
     h.click("website-redesign");
     h.click("general");

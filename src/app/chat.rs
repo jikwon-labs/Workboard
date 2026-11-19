@@ -3434,14 +3434,15 @@ fn read_line(ui: &mut Ui, t: &Theme) {
     let g = ui
         .painter()
         .layout_no_wrap(tr("New").into(), FontId::proportional(11.0), t.danger);
-    let tx = r.right() - g.size().x - 2.0;
-    ui.painter().hline(
-        r.left()..=tx - 8.0,
-        r.center().y,
-        Stroke::new(1.0_f32, t.danger),
-    );
+    // the word in the middle, the line on both sides of it
+    let half = g.size().x / 2.0 + 8.0;
+    let s = Stroke::new(1.0_f32, t.danger);
     ui.painter()
-        .galley(pos2(tx, r.center().y - g.size().y / 2.0), g, t.danger);
+        .hline(r.left()..=r.center().x - half, r.center().y, s);
+    ui.painter()
+        .hline(r.center().x + half..=r.right(), r.center().y, s);
+    ui.painter()
+        .galley(r.center() - g.size() / 2.0, g, t.danger);
 }
 
 /// "N new messages" in grey at the foot of the message list `list`, for

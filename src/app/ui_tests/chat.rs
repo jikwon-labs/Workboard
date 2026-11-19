@@ -1685,6 +1685,51 @@ fn who_else_is_typing_shows_under_the_message_box_for_a_moment() {
 }
 
 #[test]
+fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name() {
+    let mut h = Ui1::new();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .id;
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(dm);
+    h.settle();
+    let name = h.app.data.member(2).unwrap().shown().to_string();
+    let line = format!("{} is typing...", name);
+    let title = h.rect(&name);
+    let box_at = h.rect("Message composer");
+    assert!(!h.has(&line));
+
+    h.app.take_net_events(vec![wb_net::Event::Typing {
+        channel: dm,
+        member: 2,
+    }]);
+    h.settle();
+    let dots = h.rect(&line);
+    assert!(
+        dots.top() < box_at.top() && dots.left() >= title.right(),
+        "the dots sit right after their name at the top, not under the message box"
+    );
+    assert_eq!(
+        h.tree.iter().filter(|(n, _)| n == &line).count(),
+        1,
+        "only by the name"
+    );
+    assert_eq!(h.rect("Message composer"), box_at);
+
+    // nothing heard for a few seconds: gone
+    for t in h.app.sync_rt.typing.iter_mut() {
+        t.heard -= crate::app::typing::TYPING_SHOWS;
+    }
+    h.settle();
+    assert!(!h.has(&line));
+}
+
+#[test]
 fn typing_in_the_message_box_tells_the_server_every_few_seconds() {
     let mut h = Ui1::new();
     h.click("general");

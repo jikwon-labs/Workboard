@@ -1,6 +1,7 @@
 // "Someone is typing..." in a conversation on a team server: the app tells
 // the server every few seconds while its person writes in the message box,
-// and shows, under the box, who else the server says is writing there.
+// and shows, under the box, who else the server says is writing there (in a
+// direct message, moving dots by the other person's name at the top instead).
 // Nothing is saved; it lasts a few seconds after the last word from the
 // server, or until that person's message arrives.
 
@@ -117,12 +118,35 @@ impl App {
         }
     }
 
+    /// Three dots going up and down after the other person's name at the top
+    /// of a direct message while they write. The line under the message box
+    /// stays empty there: whose conversation it is says who is typing.
+    pub(super) fn typing_dots(&self, ui: &mut Ui, c: &Channel) {
+        let Some(line) = self.typing_line(c) else {
+            return;
+        };
+        let t = self.t();
+        let (r, resp) = ui.allocate_exact_size(vec2(26.0, 16.0), Sense::hover());
+        let time = ui.input(|i| i.time) as f32;
+        for k in 0..3 {
+            let phase = time * 6.0 - k as f32 * 0.9;
+            let lift = phase.sin().max(0.0) * 3.0;
+            let p = pos2(r.left() + 6.0 + k as f32 * 7.0, r.center().y + 2.0 - lift);
+            ui.painter().circle_filled(p, 2.2, t.text2);
+        }
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &line));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
+    }
+
     /// Draw the typing line (a row kept the same height whether or not
     /// someone is typing, so the message box doesn't jump), and redraw once
     /// it should go away.
     pub(super) fn typing_row(&mut self, ui: &mut Ui, c: &Channel) {
         let t = self.t();
-        let line = self.typing_line(c);
+        let line = self
+            .typing_line(c)
+            .filter(|_| c.kind != ChannelKind::Direct);
         let w = ui.available_width();
         let (r, resp) = ui.allocate_exact_size(vec2(w, 16.0), Sense::hover());
         if let Some(line) = line {

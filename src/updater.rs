@@ -118,6 +118,14 @@ pub fn relaunch_if_updated() {
     }
 }
 
+/// Called first thing when the app starts: if a Windows update started this
+/// copy, wait until the copy that installed it has ended.
+pub fn wait_for_old_copy() {
+    if std::env::args().any(|a| a == own::UPDATED_ARG) {
+        own::wait_for_old_copy();
+    }
+}
+
 /// How the Windows update is going, with what can be done next: the body of
 /// the "Check for updates" window (`in_window`, with buttons to close it)
 /// or a few lines in another form. True when the window should close.
@@ -144,7 +152,8 @@ pub mod own {
     //! with Windows' own tar.exe, renames the running workboard.exe to
     //! workboard.old.exe (Windows lets a running program be renamed, not
     //! overwritten), puts the new one in its place and closes; the app's
-    //! exit starts the new one, which removes the old file.
+    //! exit starts the new one (with --updated), which waits for the old
+    //! copy to end and removes the old file.
     //!
     //! State lives per thread like the rest of the interface (each UI test
     //! has its own); the background work reports through `Shared`.
@@ -634,11 +643,39 @@ pub mod own {
             let Some(exe) = o.shared.lock().unwrap().installed.take() else {
                 return;
             };
-            let args: Vec<_> = std::env::args_os().skip(1).collect();
-            if let Err(e) = std::process::Command::new(&exe).args(args).spawn() {
+            // not this copy's arguments: a link it was opened with is done
+            if let Err(e) = std::process::Command::new(&exe).arg(UPDATED_ARG).spawn() {
                 eprintln!("workboard: starting {}: {}", exe.display(), e);
             }
         });
+    }
+
+    /// What the new version is started with after an update.
+    pub const UPDATED_ARG: &str = "--updated";
+
+    /// The copy that installed the update is still closing when it starts
+    /// the new one, and Windows keeps one copy per data folder
+    /// (src/single.rs): started too early, the new copy would hand itself
+    /// over to the closing one and end. A running program's file can't be
+    /// removed, so workboard.old.exe going away says the old copy has ended.
+    pub fn wait_for_old_copy() {
+        if let Ok(exe) = std::env::current_exe() {
+            remove_when_free(&exe.with_extension("old.exe"), Duration::from_secs(20));
+        }
+    }
+
+    /// Try to remove `file` until it works or `wait` has passed; whether
+    /// it is gone.
+    pub fn remove_when_free(file: &Path, wait: Duration) -> bool {
+        let end = Instant::now() + wait;
+        loop {
+            match std::fs::remove_file(file) {
+                Ok(()) => return true,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
+                Err(_) if Instant::now() >= end => return false,
+                Err(_) => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
     }
 
     pub fn status_ui(ui: &mut egui::Ui, t: &Theme, in_window: bool) -> bool {
@@ -816,6 +853,13 @@ pub mod own {
                 std::fs::read(dir.join("app/workboard.old.exe")).unwrap(),
                 b"old program"
             );
+
+            // the new version, once the old one has ended, removes it
+            assert!(remove_when_free(
+                &dir.join("app/workboard.old.exe"),
+                Duration::from_secs(1)
+            ));
+            assert!(!dir.join("app/workboard.old.exe").exists());
 
             // a zip without workboard.exe changes nothing
             std::fs::write(dir.join("build/readme.txt"), b"hi").unwrap();

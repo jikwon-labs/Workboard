@@ -63,6 +63,9 @@ fn main() -> eframe::Result<()> {
         }));
     }
 
+    // started by a Windows update: the copy that installed it ends first,
+    // or the one-copy rule below would hand this one over to it
+    updater::wait_for_old_copy();
     // Windows: one copy per data folder; a later one hands its link over and ends
     if !shot && single::start() == single::Start::Handed {
         return Ok(());

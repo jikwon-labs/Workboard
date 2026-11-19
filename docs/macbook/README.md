@@ -11,7 +11,7 @@
 
 - [ ] **일반 파일 첨부가 든 새 버전 배포 (Mac 과 iPhone)**: 채팅·작업에 PDF, md 등 아무 파일이나 보낼 수 있게 됐다(2026-11-19). 첨부 종류 "File" 은 0.1.14 이하 Mac 앱이 읽지 못해, 누가 파일을 보내면 그 앱은 업데이트할 때까지 팀 변경을 받지 못한다. 그래서 배포 뒤 팀원이 모두 업데이트한 것을 확인하고 나서 파일을 보내기 시작한다. iPhone 은 구 버전에서 깨진 사진 칸으로만 보인다(동기화는 계속됨).
 
-- [ ] **Windows 판 처음 올리기**: 다음 배포 때 Mac 판을 올린 뒤 `scripts/publish-windows.sh` 로 Windows zip 과 `appcast-windows.xml` 을 Mac mini `updates/` 에 올린다(`docs/release/README.md` "Windows 판"). 앱 안 업데이트가 들어간 첫 Windows 판은 팀원이 직접 받아야 하고, 그다음 버전부터 앱이 스스로 바꾼다. Windows PC 에서 확인할 것: 옛 버전을 열어 서버에 연결 → 프로필 빨간 점 → Check for updates → "설치하고 다시 시작" → 새 버전으로 다시 열리는지, 같은 폴더의 `workboard.old.exe` 가 다음 실행 때 지워지는지.
+- [ ] **Windows 판 처음 올리기**: 다음 배포 때 Mac 판을 올린 뒤 `scripts/publish-windows.sh` 로 Windows zip 과 `appcast-windows.xml` 을 Mac mini `updates/` 에 올린다(`docs/release/README.md` "Windows 판"). 앱 안 업데이트가 들어간 첫 Windows 판은 팀원이 직접 받아야 하고, 그다음 버전부터 앱이 스스로 바꾼다. Windows PC 에서 확인할 것: 옛 버전을 열어 서버에 연결 → 프로필 빨간 점 → Check for updates → "설치하고 다시 시작" → 새 버전으로 다시 열리는지, 같은 폴더의 `workboard.old.exe` 가 새 버전이 열린 뒤 지워지는지, 다시 열린 창이 하나뿐인지.
 
 ## 끝난 일
 

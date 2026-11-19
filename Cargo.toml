@@ -77,8 +77,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 arboard = "3"
 
 # one-line fix in nokhwa's macOS camera bindings (see third_party/nokhwa-bindings-macos/README.md)
+# and Mac text-editing keys in egui (see third_party/egui/PATCHES.md)
 [patch.crates-io]
 nokhwa-bindings-macos = { path = "third_party/nokhwa-bindings-macos" }
+egui = { path = "third_party/egui" }
 
 # objc 0.2's msg_send! expands to `cfg(feature = "cargo-clippy")`, which
 # buried real warnings (dead code) under hundreds of these

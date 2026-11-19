@@ -1410,3 +1410,86 @@ fn korean_typing_keeps_backspace_cmd_backspace_and_fast_keys() {
     h.settle();
     assert_eq!(h.app.chat.text, "가 나");
 }
+
+#[test]
+fn delete_keys_in_the_message_box_work_as_on_the_mac() {
+    use egui::{Key, Modifiers};
+    let mut h = Ui1::new();
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    h.click("general");
+    h.click("Message composer");
+    let cmd = Modifiers {
+        mac_cmd: true,
+        command: true,
+        ..Default::default()
+    };
+    let opt = Modifiers {
+        alt: true,
+        ..Default::default()
+    };
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Default::default()
+    };
+
+    // Option+Backspace takes one Korean word, not the whole sentence
+    h.type_text("안녕하세요, 반갑습니다");
+    h.key_with(Key::Backspace, opt);
+    assert_eq!(h.app.chat.text, "안녕하세요, ");
+    // spaces and punctuation go with the word before them
+    h.key_with(Key::Backspace, opt);
+    assert_eq!(h.app.chat.text, "");
+    h.type_text("hello world ");
+    h.key_with(Key::Backspace, opt);
+    assert_eq!(h.app.chat.text, "hello ");
+
+    // Option+Delete takes the next word; Option+Left stops at a Korean word
+    h.type_text("회의 메모");
+    h.key_with(Key::ArrowLeft, opt);
+    h.key_with(Key::ArrowLeft, opt);
+    h.key_with(Key::Delete, opt);
+    assert_eq!(h.app.chat.text, "hello  메모");
+
+    // Cmd+Backspace takes the line up to the cursor; at the start of a line
+    // it joins it to the line before
+    h.key_with(Key::ArrowRight, cmd);
+    h.key_with(Key::Backspace, cmd);
+    assert_eq!(h.app.chat.text, "");
+    h.type_text("first line\nsecond line");
+    h.key_with(Key::Backspace, cmd);
+    assert_eq!(h.app.chat.text, "first line\n");
+    h.key_with(Key::Backspace, cmd);
+    assert_eq!(h.app.chat.text, "first line");
+
+    // with a selection, Cmd+Backspace takes only the selection
+    h.key_with(Key::ArrowLeft, opt | Modifiers::SHIFT);
+    h.key_with(Key::Backspace, cmd);
+    assert_eq!(h.app.chat.text, "first ");
+
+    // Cmd+Delete takes the rest of the line
+    h.type_text("one two");
+    h.key_with(Key::ArrowLeft, opt);
+    h.key_with(Key::Delete, cmd);
+    assert_eq!(h.app.chat.text, "first one ");
+
+    // Ctrl+Backspace and Ctrl+D take one letter each
+    h.type_text("xyz");
+    h.key_with(Key::Backspace, ctrl);
+    assert_eq!(h.app.chat.text, "first one xy");
+    h.key_with(Key::ArrowLeft, Modifiers::NONE);
+    h.key_with(Key::D, ctrl);
+    assert_eq!(h.app.chat.text, "first one x");
+
+    // a long line wraps: Cmd+Backspace takes only the row the cursor is on
+    h.key_with(Key::ArrowRight, cmd);
+    h.key_with(Key::Backspace, cmd);
+    assert_eq!(h.app.chat.text, "");
+    let long = "word ".repeat(80);
+    h.type_text(&long);
+    h.key_with(Key::Backspace, cmd);
+    let left = h.app.chat.text.clone();
+    assert!(
+        !left.is_empty() && left.len() < long.len() && long.starts_with(&left),
+        "only the last row went: {left:?}"
+    );
+}

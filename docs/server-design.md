@@ -63,6 +63,7 @@
 | `src/app/files.rs` | 채팅 사진·영상: 캐시, 올리기·받기 스레드, 입력창 칸, 메시지 칸, 크게 보기·재생 창 |
 | `src/media.rs` | macOS 기본 기능(ImageIO, AVFoundation, AppKit)으로 사진 크기·축소, 영상 길이·첫 장면·재생, 파일 선택 창, 클립보드 |
 | `third_party/nokhwa-bindings-macos` | 카메라 잠금 버그를 고친 사본(`[patch.crates-io]`) |
+| `third_party/egui` | 입력 창 삭제·단어 이동 키를 맥처럼 고친 egui 0.31.1 사본(`[patch.crates-io]`, 바꾼 곳은 `PATCHES.md`). egui 를 올릴 때 다시 옮겨야 한다 |
 | `deploy/` | LaunchAgent 설치, 전원 설정, 재부팅 점검 스크립트 |
 | `.cargo/config.toml` | macOS `-ObjC` 링크 옵션(libwebrtc 에 필요) |
 

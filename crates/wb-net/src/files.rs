@@ -489,6 +489,104 @@ pub fn download(
     Ok(())
 }
 
+/// A file name the server's /updates route serves: plain (no folders, not
+/// hidden), letters, digits and `._-` only.
+fn update_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+}
+
+/// Ask for a file in the server's /updates folder (open to anyone, outside
+/// any workspace). None when the server hasn't got it.
+fn get_update(addr: &str, name: &str) -> Result<Option<(BufReader<Conn>, Head)>, FileError> {
+    if !update_name_ok(name) {
+        return Err(FileError::Other(format!("{} isn't an update file.", name)));
+    }
+    let (mut s, host, _) = open(addr)?;
+    let req = format!(
+        "GET /updates/{} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        name, host
+    );
+    s.write_all(req.as_bytes())
+        .map_err(|e| FileError::Net(e.to_string()))?;
+    let mut r = BufReader::with_capacity(256 << 10, s);
+    let head = read_head(&mut r)?;
+    match head.status {
+        200 => Ok(Some((r, head))),
+        404 => Ok(None),
+        c => {
+            let body = read_text(&mut r, &head);
+            Err(fail(c, &body))
+        }
+    }
+}
+
+/// A small text file from the server's /updates folder (at most 64 KB), as
+/// the Windows app reads appcast-windows.xml. None when it isn't there.
+pub fn update_text(addr: &str, name: &str) -> Result<Option<String>, FileError> {
+    let Some((mut r, head)) = get_update(addr, name)? else {
+        return Ok(None);
+    };
+    let mut text = String::new();
+    body(&mut r, &head)
+        .take(64 << 10)
+        .read_to_string(&mut text)
+        .map_err(|e| FileError::Net(e.to_string()))?;
+    Ok(Some(text))
+}
+
+/// Fetch a file from the server's /updates folder into `dest` (through
+/// `dest` + ".part", which takes the name once all of it is here).
+/// `progress` hears bytes so far and the whole size (0 when unknown) and
+/// stops the download by answering false.
+pub fn download_update(
+    addr: &str,
+    name: &str,
+    dest: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<(), FileError> {
+    let Some((mut r, head)) = get_update(addr, name)? else {
+        return Err(FileError::Missing);
+    };
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| FileError::Other(e.to_string()))?;
+    }
+    let part = dest.with_extension("part");
+    let mut out = File::create(&part).map_err(|e| FileError::Other(e.to_string()))?;
+    let total = head.len.unwrap_or(0);
+    let mut got = 0u64;
+    let mut buf = vec![0u8; 256 << 10];
+    let mut b = body(&mut r, &head);
+    loop {
+        let k = b
+            .read(&mut buf)
+            .map_err(|e| FileError::Net(e.to_string()))?;
+        if k == 0 {
+            break;
+        }
+        out.write_all(&buf[..k])
+            .map_err(|e| FileError::Other(e.to_string()))?;
+        got += k as u64;
+        if !progress(got, total) {
+            drop(out);
+            let _ = std::fs::remove_file(&part);
+            return Err(FileError::Cancelled);
+        }
+    }
+    drop(b);
+    out.flush().map_err(|e| FileError::Other(e.to_string()))?;
+    drop(out);
+    if head.len.is_some_and(|n| got < n) {
+        let _ = std::fs::remove_file(&part);
+        return Err(FileError::Net("the download broke off".into()));
+    }
+    std::fs::rename(&part, dest).map_err(|e| FileError::Other(e.to_string()))?;
+    Ok(())
+}
+
 /// Ask the server to email a password-reset code (POST /auth/forgot).
 /// Ok(true): a code is on its way if that email has an account. Ok(false):
 /// this server can't send email.

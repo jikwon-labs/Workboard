@@ -197,6 +197,20 @@ pub const T: &[(&str, &str)] = &[
     // updater
     ("Workboard {} can only update itself when it runs as the installed app.", "Workboard {}은(는) 설치된 앱으로 실행할 때만 업데이트할 수 있습니다."),
     ("Workboard {} gets its updates from your team's server. Connect to it in Settings > Work together, then try again.", "Workboard {}은(는) 팀 서버에서 업데이트를 받습니다. 설정 > 함께 작업하기에서 서버에 연결한 뒤 다시 시도하세요."),
+    ("Workboard {} can't update itself on this system. Get the new version from whoever set up your team's server.", "Workboard {}은(는) 이 시스템에서 스스로 업데이트할 수 없습니다. 팀 서버를 설정한 사람에게 새 버전을 받으세요."),
+    // updater: Windows
+    ("Couldn't reach your team's server. Check the connection and try again.", "팀 서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도하세요."),
+    ("Your team's server has no Windows version to update to yet.", "팀 서버에 아직 업데이트할 Windows 버전이 없습니다."),
+    ("Your team's server has update information this version can't read.", "팀 서버의 업데이트 정보를 이 버전에서 읽을 수 없습니다."),
+    ("The update arrived damaged. Try again.", "업데이트 파일이 손상되어 도착했습니다. 다시 시도하세요."),
+    ("Workboard couldn't replace itself in {}. Move workboard.exe to a folder you can change (like Desktop or Documents), or download the new version from your team's server.", "{}에서 Workboard를 바꾸지 못했습니다. workboard.exe를 바탕 화면이나 문서처럼 바꿀 수 있는 폴더로 옮기거나, 팀 서버에서 새 버전을 내려받으세요."),
+    ("Looking for a newer Workboard on your team's server...", "팀 서버에서 새 Workboard를 찾는 중..."),
+    ("Workboard {} is the newest version.", "Workboard {}이(가) 최신 버전입니다."),
+    ("Workboard {} is ready to install. You have {}.", "Workboard {}을(를) 설치할 수 있습니다. 지금 버전은 {}입니다."),
+    ("Workboard saves your work, closes, replaces itself and opens again.", "Workboard가 작업을 저장하고 닫은 뒤, 새 버전으로 바꿔 다시 엽니다."),
+    ("Install and restart", "설치하고 다시 시작"),
+    ("Downloading Workboard {}...", "Workboard {} 내려받는 중..."),
+    ("Opening the new version...", "새 버전을 여는 중..."),
     // settings.rs: Settings > Spaces
     ("{} Spaces", "스페이스 {}개"),
     ("+ New Space", "+ 새 스페이스"),

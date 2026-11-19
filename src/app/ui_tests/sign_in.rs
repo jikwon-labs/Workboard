@@ -277,10 +277,16 @@ fn joining_a_server_that_does_not_answer_offers_to_update_the_app() {
     assert!(h.has("An older Workboard may not work with this server."));
     h.click("Update Workboard");
     h.settle();
-    // tests don't run inside Workboard.app, so it says why it can't update
-    let note = h.app.sync_rt.form.update_note.clone();
-    assert!(note.contains(env!("CARGO_PKG_VERSION")), "{}", note);
-    assert!(h.has(&note), "shown under the button");
+    if crate::updater::own::enabled() {
+        // Windows: the app's own updater says how it goes under the button
+        assert!(h.app.sync_rt.form.app_updates);
+        assert!(h.app.sync_rt.form.update_note.is_empty());
+    } else {
+        // tests don't run inside Workboard.app, so it says why it can't update
+        let note = h.app.sync_rt.form.update_note.clone();
+        assert!(note.contains(env!("CARGO_PKG_VERSION")), "{}", note);
+        assert!(h.has(&note), "shown under the button");
+    }
     assert!(h.app.sync_rt.joining.is_some(), "still trying to join");
 }
 

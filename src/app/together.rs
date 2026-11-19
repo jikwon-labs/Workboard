@@ -143,6 +143,9 @@ pub struct Form {
     pub note: String,
     /// Why "Update Workboard" couldn't run, under the button.
     pub update_note: String,
+    /// "Update Workboard" was pressed on Windows: the app's own updater
+    /// shows how it goes under the button.
+    pub app_updates: bool,
 }
 
 /// Why a new password won't do, if it won't.

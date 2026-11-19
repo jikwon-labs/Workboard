@@ -261,12 +261,22 @@ impl App {
                             crate::updater::set_server(&j.addr);
                         }
                         // Sparkle shows its own window; only explain when it can't run
-                        self.sync_rt.form.update_note = match crate::updater::check_now() {
-                            Ok(()) => String::new(),
-                            Err(why) => why.explain(),
-                        };
+                        self.sync_rt.form.update_note = String::new();
+                        self.sync_rt.form.app_updates = false;
+                        match crate::updater::check_now() {
+                            Ok(crate::updater::Shown::BySparkle) => {}
+                            // Windows: how it goes shows here
+                            Ok(crate::updater::Shown::ByApp) => {
+                                self.sync_rt.form.app_updates = true
+                            }
+                            Err(why) => self.sync_rt.form.update_note = why.explain(),
+                        }
                     }
                 });
+                if self.sync_rt.form.app_updates {
+                    ui.add_space(4.0);
+                    crate::updater::status_ui(ui, t, false);
+                }
                 if !self.sync_rt.form.update_note.is_empty() {
                     ui.add(
                         egui::Label::new(

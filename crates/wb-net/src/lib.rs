@@ -39,8 +39,8 @@ mod conn;
 mod files;
 pub use conn::{trust_certificate, Conn};
 pub use files::{
-    create_workspace, delete_workspace, download, forgot_password, list_workspaces, name_ok,
-    remote_size, sha256_file, upload, Auth, FileError,
+    create_workspace, delete_workspace, download, download_update, forgot_password,
+    list_workspaces, name_ok, remote_size, sha256_file, update_text, upload, Auth, FileError,
 };
 
 pub const DEFAULT_PORT: u16 = 8787;

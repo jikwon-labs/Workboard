@@ -96,6 +96,9 @@ pub(super) enum Modal {
         title: String,
         body: String,
     },
+    /// Check for updates on Windows, where the app updates itself
+    /// (`updater::status_ui`; Sparkle has its own window on macOS).
+    Update,
     /// A Slack export read and waiting for Import (slack.rs).
     SlackImport(Box<super::slack::SlackPlan>),
     Bookmark {
@@ -751,11 +754,15 @@ impl App {
                 }
                 if label == "Check for updates" {
                     // Sparkle shows its own window; only explain when it can't run
-                    if let Err(why) = crate::updater::check_now() {
-                        self.modal = Some(Modal::Unavailable {
-                            title: "Check for updates".into(),
-                            body: why.explain(),
-                        });
+                    match crate::updater::check_now() {
+                        Ok(crate::updater::Shown::BySparkle) => {}
+                        Ok(crate::updater::Shown::ByApp) => self.modal = Some(Modal::Update),
+                        Err(why) => {
+                            self.modal = Some(Modal::Unavailable {
+                                title: "Check for updates".into(),
+                                body: why.explain(),
+                            })
+                        }
                     }
                     close_popup(ui);
                     continue;
@@ -1297,6 +1304,7 @@ impl App {
             Modal::Reminder { .. } => tr("Create Reminder").into(),
             Modal::Trash => tr("Trash").into(),
             Modal::Unavailable { title, .. } => tr(title).to_string(),
+            Modal::Update => tr("Check for updates").into(),
             Modal::SlackImport(_) => tr("Import from Slack").into(),
             Modal::Bookmark { .. } => tr("Add bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
@@ -1521,6 +1529,7 @@ impl App {
                     close = true;
                 }
             }
+            Modal::Update => close = crate::updater::status_ui(ui, t, true),
             Modal::Bookmark { title, url } => close = self.bookmark_body(ui, t, title, url),
             Modal::SwitchUser if self.on_server() => close = self.switch_user_on_server_body(ui, t),
             Modal::SwitchUser => close = self.switch_user_body(ui, t),

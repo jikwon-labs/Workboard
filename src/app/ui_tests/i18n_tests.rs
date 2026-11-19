@@ -581,6 +581,41 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.modal = Some(a.together_modal());
         }),
     ));
+    {
+        // the Windows updater's window, in each state it can be in
+        use crate::updater::own::{Problem, Release, Status};
+        let r = Release {
+            version: "99.0.0".into(),
+            file: "Workboard-99.0.0-windows-x64.zip".into(),
+            length: 10,
+            sha256: "ab".repeat(32),
+        };
+        let states = [
+            Status::Checking,
+            Status::UpToDate,
+            Status::Available(r.clone()),
+            Status::Downloading {
+                version: "99.0.0".into(),
+                done: 5,
+                total: 10,
+            },
+            Status::Failed(Problem::Unreachable),
+            Status::Failed(Problem::NotOnServer),
+            Status::Failed(Problem::BadFeed),
+            Status::Failed(Problem::Damaged),
+            Status::Failed(Problem::CantReplace("C:\\Workboard".into())),
+            Status::Restarting,
+        ];
+        for st in states {
+            v.push((
+                format!("update {:?}", st),
+                Box::new(move |a: &mut App| {
+                    crate::updater::own::pretend_status(st.clone(), None);
+                    a.modal = Some(Modal::Update);
+                }),
+            ));
+        }
+    }
     v.push((
         "log out".into(),
         Box::new(move |a: &mut App| {

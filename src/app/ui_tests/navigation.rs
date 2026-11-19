@@ -149,6 +149,109 @@ fn a_waiting_update_puts_a_red_dot_on_the_profile_and_check_for_updates() {
     crate::updater::pretend_update_available(false);
 }
 
+/// A team server with a Windows build 99.0.0 put up the way
+/// scripts/publish-windows.sh does it: the zip (holding a workboard.exe
+/// that says `program`) and appcast-windows.xml naming it.
+fn server_with_windows_build(program: &[u8]) -> workboard_server::testing::TestServer {
+    use crate::updater::own;
+    let server = workboard_server::testing::TestServer::start();
+    let updates = server.home.join(workboard_server::UPDATES_DIR);
+    let build = server.home.join("build");
+    std::fs::create_dir_all(&updates).unwrap();
+    std::fs::create_dir_all(&build).unwrap();
+    std::fs::write(build.join("workboard.exe"), program).unwrap();
+    let zip = updates.join("Workboard-99.0.0-windows-x64.zip");
+    let made = std::process::Command::new(own::tar())
+        .current_dir(&build)
+        .args(["-a", "-cf"])
+        .arg(&zip)
+        .arg("workboard.exe")
+        .status()
+        .unwrap();
+    assert!(made.success(), "tar made the zip");
+    let (sha, len) = wb_net::sha256_file(&zip).unwrap();
+    std::fs::write(
+        updates.join(own::FEED),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<update>\n  <version>99.0.0</version>\n  <file>Workboard-99.0.0-windows-x64.zip</file>\n  <length>{}</length>\n  <sha256>{}</sha256>\n</update>\n",
+            len, sha
+        ),
+    )
+    .unwrap();
+    server
+}
+
+/// Frames until `name` is on screen, for at most 20 seconds (the updater
+/// works on a background thread).
+fn settle_until(h: &mut Ui1, name: &str) {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !h.has(name) {
+        assert!(
+            std::time::Instant::now() < end,
+            "waited for {:?}; the updater says {:?}",
+            name,
+            crate::updater::own::status()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        h.settle();
+    }
+}
+
+#[test]
+fn on_windows_check_for_updates_finds_installs_and_swaps_the_program() {
+    let server = server_with_windows_build(b"new program");
+    let dir = temp_home("winupdate");
+    let target = dir.join("workboard.exe");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&target, b"old program").unwrap();
+    let mut h = Ui1::new();
+    crate::updater::own::pretend_windows(&format!("127.0.0.1:{}", server.port), &target);
+
+    h.click("Profile menu");
+    h.click("Check for updates");
+    assert!(
+        matches!(h.app.modal, Some(Modal::Update)),
+        "the app's own window"
+    );
+    let ready = format!(
+        "Workboard 99.0.0 is ready to install. You have {}.",
+        env!("CARGO_PKG_VERSION")
+    );
+    settle_until(&mut h, &ready);
+    assert!(crate::updater::update_available(), "the red dot comes on");
+    assert!(h.has("Later"));
+
+    h.click("Install and restart");
+    settle_until(&mut h, "Opening the new version...");
+    assert_eq!(std::fs::read(&target).unwrap(), b"new program");
+    assert_eq!(
+        std::fs::read(dir.join("workboard.old.exe")).unwrap(),
+        b"old program",
+        "the running program is moved aside, not overwritten"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn on_windows_check_for_updates_says_when_the_server_has_no_windows_build() {
+    let server = workboard_server::testing::TestServer::start();
+    let dir = temp_home("winupdate-none");
+    let mut h = Ui1::new();
+    crate::updater::own::pretend_windows(
+        &format!("127.0.0.1:{}", server.port),
+        &dir.join("workboard.exe"),
+    );
+    h.click("Profile menu");
+    h.click("Check for updates");
+    settle_until(
+        &mut h,
+        "Your team's server has no Windows version to update to yet.",
+    );
+    assert!(!crate::updater::update_available());
+    h.click("Close");
+    assert!(h.app.modal.is_none());
+}
+
 #[test]
 fn an_online_only_tool_says_workboard_has_no_such_service() {
     let mut h = Ui1::new();

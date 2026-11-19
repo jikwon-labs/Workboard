@@ -5503,6 +5503,8 @@ impl eframe::App for App {
             self.finish_before_quit();
             self.save_now();
         }
+        // after saving: a Windows update waits for this to start the new version
+        crate::updater::relaunch_if_updated();
     }
 }
 

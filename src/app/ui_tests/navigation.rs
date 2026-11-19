@@ -219,6 +219,60 @@ fn unseen_notifications_show_a_red_count_on_the_rail_and_sidebar() {
 }
 
 #[test]
+fn messages_in_an_open_conversation_stay_unread_while_the_window_is_behind() {
+    let mut h = Ui1::new();
+    let name = two_unread_dms(&mut h);
+    h.settle();
+    h.click(&name);
+    h.settle();
+    let (base, chat) = (h.app.dock_count(), h.app.chat_unread_total());
+
+    // another app comes to the front; the conversation stays open
+    h.focused = false;
+    h.frame(vec![egui::Event::WindowFocused(false)]);
+    two_unread_dms_again(&mut h, &name);
+    h.settle();
+    assert_eq!(h.app.dock_count(), base + 2, "counted on the Dock");
+    assert_eq!(h.app.chat_unread_total(), chat + 2, "and in Chat");
+
+    // coming back to the window reads them
+    h.focused = true;
+    h.frame(vec![egui::Event::WindowFocused(true)]);
+    h.settle();
+    assert_eq!(h.app.dock_count(), base);
+    assert_eq!(h.app.chat_unread_total(), chat);
+}
+
+/// Two more messages from the person `name` in the conversation with them,
+/// without marking anything read first.
+fn two_unread_dms_again(h: &mut Ui1, name: &str) {
+    let me = h.app.data.me;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| {
+            c.kind == ChannelKind::Direct
+                && c.members.len() == 2
+                && c.members
+                    .iter()
+                    .any(|m| *m != me && h.app.data.member(*m).is_some_and(|p| p.shown() == name))
+        })
+        .unwrap();
+    let (dm, other) = (c.id, *c.members.iter().find(|m| **m != me).unwrap());
+    for text in ["three", "four"] {
+        let id = h.app.data.new_id();
+        let m: Message = serde_json::from_value(serde_json::json!(
+            {"id": id, "author": other, "text": text, "ts": now_ts() + 10}
+        ))
+        .unwrap();
+        let ch = h.app.data.channels.iter_mut().find(|c| c.id == dm).unwrap();
+        ch.messages.push(m);
+    }
+}
+
+#[test]
 fn a_big_unread_count_reads_99_plus() {
     let mut h = Ui1::new();
     h.app.data.extra.rail_items.push("Chat".into());

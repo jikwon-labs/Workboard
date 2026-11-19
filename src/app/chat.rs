@@ -1400,8 +1400,10 @@ impl App {
             );
         }
 
-        // mark as read (unless the person just marked it unread and is still here)
-        if self.chat.keep_unread == Some(cid) {
+        // mark as read (unless the person just marked it unread and is still
+        // here, or the window is behind another app: what comes in meanwhile
+        // isn't seen yet and counts on the Dock until they come back)
+        if self.chat.keep_unread == Some(cid) || self.notify_rt.away {
             self.apply_chat(acts);
             return;
         }

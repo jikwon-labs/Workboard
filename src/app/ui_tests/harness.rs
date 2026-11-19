@@ -15,6 +15,8 @@ pub(super) struct Ui1 {
     pub(super) dropped: Vec<egui::DroppedFile>,
     /// the mouse cursor the last frame asked for
     pub(super) cursor: egui::CursorIcon,
+    /// whether the window is in front (false: another app is)
+    pub(super) focused: bool,
 }
 
 impl Ui1 {
@@ -35,6 +37,7 @@ impl Ui1 {
             shapes: vec![],
             dropped: vec![],
             cursor: egui::CursorIcon::Default,
+            focused: true,
         };
         // no notices on the wall clock: after 09:00 the seed's tasks due
         // today put a toast over the bottom of the window, so a test would
@@ -52,8 +55,15 @@ impl Ui1 {
             time: Some(self.time),
             events,
             dropped_files: std::mem::take(&mut self.dropped),
+            focused: self.focused,
             ..Default::default()
         };
+        // as eframe reports it, read by the app through viewport().focused
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(self.focused);
         // as eframe's raw_input_hook does
         self.app.fix_input(&self.ctx, &mut input);
         let app = &mut self.app;

@@ -152,10 +152,6 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
     );
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
     let server = TestServer::start();
@@ -259,6 +255,10 @@ fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
     let _ = std::fs::remove_file(&saved);
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn attachments_wait_with_their_channel_and_only_media_goes() {
     let mut a = app();

@@ -259,10 +259,6 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     assert!(h.app.task(id).unwrap().attachments.is_empty());
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
-)]
 #[test]
 fn a_pdf_dropped_on_a_task_attaches_and_a_click_saves_it() {
     let mut h = Ui1::new();
@@ -294,6 +290,10 @@ fn a_pdf_dropped_on_a_task_attaches_and_a_click_saves_it() {
     let _ = std::fs::remove_file(&saved);
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "pictures and Slack zips need macOS until the Windows media work (src/media.rs)"
+)]
 #[test]
 fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
     let mut h = Ui1::new();

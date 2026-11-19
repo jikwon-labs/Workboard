@@ -15,6 +15,7 @@
 
 ## 끝난 일
 
+- [x] **0.1.20 배포 (Mac, Windows, iPhone)** (2026-11-20, `9886b58`, 빌드 603): Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 44562911672 의 zip 을 `appcast-windows.xml` 로, iPhone 은 TestFlight 에 올렸다. GitHub Release v0.1.20 에 Mac·Windows zip 을 붙였다. 스레드를 열면 읽음 처리, 스레드 안 입력 중 표시(서버는 자동 업데이트로 `b37cae9` 설치됨), 답장 줄 정렬이 들어 있다.
 - [x] **0.1.19 배포 (Mac, Windows, iPhone)** (2026-11-20, `0d23cd5`, 빌드 596): Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 44551605423 의 zip 을 `appcast-windows.xml` 로, iPhone 은 TestFlight 에 올렸다. GitHub Release v0.1.19 에 Mac·Windows zip 을 붙였다. 채팅의 "New" 줄과 새 메시지 안내, DM 입력 중 점이 들어 있다.
 
 - [x] **0.1.18 배포 (Mac, Windows, iPhone)** (2026-11-19, `4099763`, 빌드 584): Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 44539487407 의 zip 을 `appcast-windows.xml` 로, iPhone 은 TestFlight 에 올렸다. GitHub Release v0.1.18 에 Mac·Windows zip 을 붙였다. 휴대폰 QR 로그인이 들어 있다.

@@ -1696,17 +1696,36 @@ impl App {
         let more_id = egui::Id::new(("msg_more", cid, m.id, top_level));
         let emoji_id = egui::Id::new(("msg_emoji", cid, m.id, top_level));
         let menu_open = ui.memory(|mm| mm.is_popup_open(more_id) || mm.is_popup_open(emoji_id));
-        if !editing && (ui.rect_contains_pointer(rect) || menu_open) {
+        // The toolbar reaches up over the row above, so the pointer on its way
+        // to a button leaves this row and enters that one. The toolbar shown
+        // last pass is remembered: while the pointer is on it, it stays and no
+        // other row shows its own.
+        let bar_key = egui::Id::new(("msg_bar", cid, m.id, top_level));
+        let bar_mem = egui::Id::new("chat_msg_bar");
+        let pass = ui.ctx().cumulative_pass_nr();
+        let on_bar = ui
+            .data(|d| d.get_temp::<(egui::Id, Rect, u64)>(bar_mem))
+            .filter(|(_, r, p)| p + 1 >= pass && ui.rect_contains_pointer(*r))
+            .map(|(k, _, _)| k);
+        let hovered = match on_bar {
+            Some(k) => k == bar_key,
+            None => ui.rect_contains_pointer(rect),
+        };
+        if !editing && (hovered || menu_open) {
             ui.painter().set(
                 bg,
                 egui::Shape::rect_filled(rect.expand2(vec2(6.0, 2.0)), 6.0, t.hover),
             );
             let n = QUICK_REACTIONS.len() + 2 + if top_level { 4 } else { 1 };
             let bw = 30.0;
+            // it floats over the row's top edge so it hides little of the
+            // row; on a one-line row it used to sit right on the text
+            let bar_top = (rect.top() - 20.0).max(ui.clip_rect().top() + 2.0);
             let bar = Rect::from_min_size(
-                pos2(rect.right() - bw * n as f32 - 8.0, rect.top() - 10.0),
+                pos2(rect.right() - bw * n as f32 - 8.0, bar_top),
                 vec2(bw * n as f32 + 4.0, 28.0),
             );
+            ui.data_mut(|d| d.insert_temp(bar_mem, (bar_key, bar, pass)));
             ui.painter().rect_filled(bar, 7.0, t.card);
             ui.painter().rect_stroke(
                 bar,

@@ -924,3 +924,26 @@ fn small_window_sidebar_scrolls_without_a_scroll_bar() {
     );
     assert_eq!(bars(&h), 0, "no scroll bar after scrolling");
 }
+
+#[test]
+fn toast_keeps_its_text_on_one_line_after_a_short_one() {
+    // the toast's area remembers its last size and offered only that much
+    // room, so a long message after a short one wrapped every few letters
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.toast("Copied");
+    h.settle();
+    let msg = "Connected. This workspace is now on the server for your team.";
+    h.app.toast(msg);
+    h.settle();
+    let painted = h.painted_text(msg);
+    assert_eq!(painted.len(), 1, "the toast is drawn once");
+    let r = painted[0].0;
+    let font = egui::TextStyle::Body.resolve(&h.ctx.style());
+    let line = h
+        .ctx
+        .fonts(|f| f.layout_no_wrap(msg.into(), font, Color32::WHITE).size());
+    assert!(
+        r.height() < line.y * 1.5,
+        "the toast wrapped onto more lines: {r:?} for one line of {line:?}"
+    );
+}

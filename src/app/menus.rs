@@ -2438,6 +2438,13 @@ impl App {
             .filter(|(text, _)| *text == msg)
             .map(|(_, target)| target.clone());
         let mut open = false;
+        // The text keeps to one line while the window has room and wraps at
+        // the window's width otherwise. Left to itself, the area offers only
+        // its last frame's size, so a long message after a short one wrapped
+        // every few letters.
+        let font = egui::TextStyle::Body.resolve(&ctx.style());
+        let one_line = ctx.fonts(|f| f.layout_no_wrap(msg.clone(), font, Color32::WHITE).size().x);
+        let text_w = one_line.min((ctx.screen_rect().width() - 32.0 - 32.0).max(120.0));
         egui::Area::new(egui::Id::new("toast"))
             .order(egui::Order::Foreground)
             .anchor(Align2::CENTER_BOTTOM, [0.0, -24.0])
@@ -2447,7 +2454,8 @@ impl App {
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(16, 10))
                     .show(ui, |ui| {
-                        ui.label(RichText::new(&msg).color(Color32::WHITE));
+                        ui.set_width(text_w.ceil() + 1.0);
+                        ui.add(egui::Label::new(RichText::new(&msg).color(Color32::WHITE)).wrap());
                     });
                 if target.is_some() {
                     let resp = ui

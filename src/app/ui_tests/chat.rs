@@ -1288,3 +1288,30 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
     h.key(egui::Key::Enter);
     assert_eq!(reply(&h).mentions, vec![sam]);
 }
+
+#[test]
+fn hover_toolbar_floats_above_a_one_line_message() {
+    // a follow-up message is one short row; the toolbar sits over its top
+    // edge instead of on top of the row
+    let (mut h, _) = general_with_my_message("first of two");
+    h.click("Message composer");
+    h.type_text("ok then");
+    h.key(egui::Key::Enter);
+    let p = h.find("ok then").unwrap();
+    h.hover(p);
+    h.settle();
+    let text = h.painted_text("ok then")[0].0;
+    let more = h.rect("More actions");
+    assert!(
+        more.bottom() < text.center().y,
+        "the toolbar covers the row: buttons end at {} below the text's middle {}",
+        more.bottom(),
+        text.center().y
+    );
+    // on its way up to the toolbar the pointer crosses into the row above;
+    // the toolbar stays, and that row doesn't show a second one
+    h.hover(pos2(more.center().x, more.top() + 2.0));
+    h.settle();
+    assert_eq!(h.count_named("More actions"), 1);
+    assert_eq!(h.rect("More actions"), more, "the same toolbar stays put");
+}

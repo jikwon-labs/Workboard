@@ -9,6 +9,7 @@ mod links;
 mod model;
 mod notifier;
 mod os;
+mod single;
 use wb_sync as sync;
 mod media;
 mod theme;
@@ -62,6 +63,10 @@ fn main() -> eframe::Result<()> {
         }));
     }
 
+    // Windows: one copy per data folder; a later one hands its link over and ends
+    if !shot && single::start() == single::Start::Handed {
+        return Ok(());
+    }
     links::listen();
     eframe::run_native(
         "Workboard",

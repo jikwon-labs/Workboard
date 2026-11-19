@@ -16,7 +16,8 @@
 // (KEY marks it as brought in from Slack),
 // /admin/reset-code?email=E, /admin/drop-account?member=N,
 // /admin/offline?secs=N (drop the app connections and turn new ones away),
-// /admin/online, /admin/find?text=T, /admin/late-answer?secs=N (the next
+// /admin/online, /admin/workspaces?list=ID:NAME,... (what POST
+// /auth/workspaces lists; ID "" is the first), /admin/find?text=T, /admin/late-answer?secs=N (the next
 // access or backup request is answered N seconds late) and
 // /admin/typing?channel=C&member=M (M is typing there) over HTTP, for UI
 // tests running in the simulator.

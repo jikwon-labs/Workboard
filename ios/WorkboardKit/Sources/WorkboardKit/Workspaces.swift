@@ -152,3 +152,81 @@ extension SyncClient {
         return true
     }
 }
+
+/// A workspace an account signs in to on a server, as POST /auth/workspaces
+/// lists it (server/src/registry.rs).
+public struct FoundWorkspace: Equatable, Sendable, Identifiable {
+    /// Its address: the server's, plus /w/<id> for any but the first.
+    public var address: String
+    /// Its name ("" when the server doesn't say).
+    public var name: String
+
+    public var id: String { address }
+
+    public init(address: String, name: String) {
+        self.address = address
+        self.name = name
+    }
+}
+
+extension ServerAddress {
+    /// The server an address is on, without the workspace below it
+    /// (wb_net::server_part); nil when it can't be an address.
+    public static func serverPart(_ address: String) -> String? {
+        guard let ws = websocket(address), var c = URLComponents(url: ws, resolvingAgainstBaseURL: false) else { return nil }
+        c.path = ""
+        c.query = nil
+        return c.string
+    }
+
+    /// The address of workspace `id` on the server `address` is on; "" is
+    /// the server's first workspace (wb_net::workspace_addr).
+    public static func workspaceAddress(_ address: String, id: String) -> String? {
+        serverPart(address).map { id.isEmpty ? $0 : $0 + "/w/" + id }
+    }
+}
+
+extension WorkspaceAPI {
+    /// Every workspace an email and password sign in to on the server
+    /// `server` is on (POST /auth/workspaces), like the Mac's
+    /// wb_net::list_workspaces. An older server that keeps one workspace
+    /// answers with just that one.
+    public static func list(server: String, email: String, password: String, session: URLSession = .shared) async throws -> [FoundWorkspace] {
+        guard let base = ServerAddress.serverPart(server), let url = ServerAddress.http(base, path: "/auth/workspaces") else {
+            throw AuthError.badAddress
+        }
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = JSON.object(["email": .string(email.trimmed), "password": .string(password)]).data()
+        let (data, resp): (Data, URLResponse)
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch {
+            throw AuthError.failed(error.localizedDescription)
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let j = try? JSON(parsing: data)
+        if status == 404 || status == 405 {
+            return [FoundWorkspace(address: server.trimmed, name: "")]
+        }
+        guard status == 200, let j else {
+            throw AuthError.failed(j?["error"]?.string ?? "The server answered \(status).")
+        }
+        return (j["workspaces"]?.array ?? []).compactMap { w in
+            guard let id = w["id"]?.string, let address = ServerAddress.workspaceAddress(base, id: id) else { return nil }
+            return FoundWorkspace(address: address, name: w["name"]?.string ?? "")
+        }
+    }
+}
+
+extension SyncClient {
+    /// Open a workspace found on this server (WorkspaceAPI.list). The one
+    /// open now is kept on this iPhone; one signed in to here before opens
+    /// as it was left, any other signs in with the same email and password.
+    public func open(_ found: FoundWorkspace, email: String, password: String) {
+        guard !ServerAddress.same(found.address, settings.server) else { return }
+        setServer(found.address, freshCopy: true)
+        if !hasToken { signIn(.password(email: email, password: password)) }
+    }
+}

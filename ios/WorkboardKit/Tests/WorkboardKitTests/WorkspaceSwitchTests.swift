@@ -162,4 +162,77 @@ final class WorkspaceSwitchTests: FakeServerTestCase {
         c.setServer(ub)
         XCTAssertTrue(c.savedWorkspaces.isEmpty)
     }
+
+    // MARK: other workspaces on the same server (POST /auth/workspaces)
+
+    func testTheServersWorkspacesAreListedForTheAccount() async throws {
+        let a = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let ua = try await start(a)
+        defer { a.stop() }
+        let c = device(ua)
+        await until("sign-in screen") { c.needsSignIn }
+        c.signIn(.invite(code: a.invite(member: 3), email: nil, newPassword: "sam-password-1"))
+        await until("signed in") { c.canEdit }
+        let email = try XCTUnwrap(c.settings.accountEmail)
+
+        // an older server keeps one workspace: just this one
+        var found = try await WorkspaceAPI.list(server: ua, email: email, password: "sam-password-1")
+        XCTAssertEqual(found, [FoundWorkspace(address: ua, name: "")])
+
+        a.workspaceList = [("", "Acme"), ("k3x9", "Design")]
+        found = try await WorkspaceAPI.list(server: ua, email: " \(email.uppercased()) ", password: "sam-password-1")
+        XCTAssertEqual(found.map(\.name), ["Acme", "Design"])
+        XCTAssertTrue(ServerAddress.same(found[0].address, ua), "the first is the server's own address")
+        XCTAssertEqual(found[1].address, ua + "/w/k3x9")
+        XCTAssertEqual(ServerAddress.workspaceID(found[1].address), "k3x9")
+        // asked from a workspace below the server: the same list
+        let below = try await WorkspaceAPI.list(server: ua + "/w/k3x9", email: email, password: "sam-password-1")
+        XCTAssertEqual(below, found)
+
+        do {
+            _ = try await WorkspaceAPI.list(server: ua, email: email, password: "wrong-password")
+            XCTFail("a wrong password lists nothing")
+        } catch AuthError.failed(let why) {
+            XCTAssertEqual(why, "That email and password don't match.")
+        }
+    }
+
+    func testOpeningAnotherWorkspaceSignsInWithTheSamePassword() async throws {
+        let a = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let b = FakeServer(snapshot: other("Other Team"), requireSignIn: true)
+        let ua = try await start(a), ub = try await start(b)
+        defer { a.stop(); b.stop() }
+        let c = device(ua)
+        await until("sign-in screen") { c.needsSignIn }
+        c.signIn(.invite(code: a.invite(member: 3), email: nil, newPassword: "sam-password-1"))
+        await until("signed in") { c.canEdit }
+        let email = try XCTUnwrap(c.settings.accountEmail)
+        // the same person has an account in the other workspace
+        let mac = device(ub)
+        await until("other sign-in screen") { mac.needsSignIn }
+        mac.signIn(.invite(code: b.invite(member: 3), email: email, newPassword: "sam-password-1"))
+        await until("account in the other workspace") { b.accountEmail(member: 3) == email }
+        mac.disconnect()
+
+        let there = FoundWorkspace(address: ub, name: "Other Team")
+        c.open(there, email: email, password: "sam-password-1")
+        await until("other workspace open") { c.view.name == "Other Team" && c.canEdit && c.state.isConnected }
+        XCTAssertEqual(c.me, 3)
+        XCTAssertFalse(c.needsSignIn)
+        XCTAssertEqual(c.savedWorkspaces.map(\.server), [ua], "the one left is kept to switch back to")
+
+        // back and forth: each opens with its own sign-in, no password
+        c.switchTo(try XCTUnwrap(c.savedWorkspaces.first))
+        await until("first workspace again") { c.state.isConnected && c.canEdit }
+        XCTAssertFalse(c.needsSignIn)
+        c.open(there, email: email, password: "not-asked")
+        await until("other workspace again") { c.view.name == "Other Team" && c.state.isConnected }
+        XCTAssertFalse(c.needsSignIn)
+        XCTAssertEqual(c.me, 3)
+
+        // opening the one already open does nothing
+        let before = c.savedWorkspaces
+        c.open(there, email: email, password: "sam-password-1")
+        XCTAssertEqual(c.savedWorkspaces, before)
+    }
 }

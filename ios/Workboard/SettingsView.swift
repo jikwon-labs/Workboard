@@ -220,10 +220,16 @@ struct SettingsView: View {
                         .accessibilityIdentifier("forgetWorkspace")
                 }
             }
+            NavigationLink {
+                FindWorkspacesView(onOpened: { dismiss() })
+            } label: {
+                Label("Find workspaces on this server", systemImage: "magnifyingglass")
+            }
+            .accessibilityIdentifier("findWorkspacesLink")
         } header: {
             Text("Workspaces")
         } footer: {
-            Text("To add one, connect to another server's address below. Each workspace stays on this iPhone with its sign-in and the changes it hasn't sent yet.")
+            Text("Find the other workspaces you have on this server, or connect to another server's address below. Each workspace stays on this iPhone with its sign-in and the changes it hasn't sent yet.")
         }
     }
 
@@ -232,6 +238,100 @@ struct SettingsView: View {
     func apply() {
         client.setServer(address)
         if client.state == .idle { client.connect() }
+    }
+}
+
+/// Settings > Workspaces > Find workspaces on this server: every workspace
+/// the account signs in to on this server (POST /auth/workspaces), as the
+/// Mac lists them when signing in. Tapping one opens it, signing in there
+/// with the same email and password; the one open now is kept on this iPhone.
+struct FindWorkspacesView: View {
+    @Environment(SyncClient.self) private var client
+    let onOpened: () -> Void
+    @State private var email = ""
+    @State private var password = ""
+    @State private var asking = false
+    @State private var found: [FoundWorkspace]?
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Email", text: $email)
+                    .keyboardType(.emailAddress)
+                    .usernameField()
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("findEmailField")
+                PasswordField("Password", text: $password, kind: .current, id: "findPasswordField")
+                    .onSubmit(find)
+                Button(action: find) {
+                    if asking { ProgressView() } else { Text("Find workspaces") }
+                }
+                .disabled(asking || email.trimmed.isEmpty || password.isEmpty)
+                .accessibilityIdentifier("findWorkspacesButton")
+            } header: {
+                Text("Account")
+            } footer: {
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("findWorkspacesError")
+                } else {
+                    Text("Your email and password on this server. They list your workspaces here and sign you in to the one you open.")
+                }
+            }
+            if let found {
+                Section {
+                    ForEach(found) { w in
+                        let here = ServerAddress.same(w.address, client.settings.server)
+                        Button {
+                            client.open(w, email: email, password: password)
+                            onOpened()
+                        } label: {
+                            HStack(spacing: 12) {
+                                WorkspaceRow(title: w.name.isEmpty ? w.address : w.name, detail: w.address)
+                                Spacer()
+                                if here { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                        .disabled(here)
+                        .accessibilityAddTraits(here ? .isSelected : [])
+                        .accessibilityIdentifier("foundWorkspace-\(ServerAddress.workspaceID(w.address) ?? "first")")
+                    }
+                } header: {
+                    Text("Workspaces on this server")
+                } footer: {
+                    if found.allSatisfy({ ServerAddress.same($0.address, client.settings.server) }) {
+                        Text("This account has no other workspace on this server.")
+                            .accessibilityIdentifier("noOtherWorkspaces")
+                    }
+                }
+            }
+        }
+        .navigationTitle("Find workspaces")
+        .onAppear { if email.isEmpty { email = client.settings.accountEmail ?? "" } }
+    }
+
+    func find() {
+        guard !asking, !email.trimmed.isEmpty, !password.isEmpty else { return }
+        asking = true
+        error = nil
+        let (server, mail, pw) = (client.settings.server, email, password)
+        Task {
+            defer { asking = false }
+            do {
+                found = try await WorkspaceAPI.list(server: server, email: mail, password: pw)
+            } catch AuthError.failed(let why) {
+                found = nil
+                error = why
+            } catch {
+                found = nil
+                self.error = "That server address doesn't look right."
+            }
+        }
     }
 }
 

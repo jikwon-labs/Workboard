@@ -138,11 +138,16 @@ public final class FakeServer: @unchecked Sendable {
     /// Test-only HTTP admin endpoints (POST /admin/invite?member=N,
     /// /admin/revoke?member=N, /admin/backup?name=FILE, /admin/say?channel=C&author=A&text=T[&imported=KEY],
     /// /admin/reset-code?email=E, /admin/drop-account?member=N,
-    /// /admin/offline?secs=N, /admin/online, /admin/find?text=T,
+    /// /admin/offline?secs=N, /admin/online, /admin/workspaces?list=ID:NAME,...,
+    /// /admin/find?text=T,
     /// /admin/late-answer?secs=N, /admin/typing?channel=C&member=M), so UI
     /// tests in the simulator can drive sign-in, incoming messages and the
     /// server going away.
     public var adminHTTP = false
+    /// The workspaces POST /auth/workspaces lists for an account here
+    /// (id "" is the server's first, as in registry.rs); nil answers 404,
+    /// as an older server that keeps one workspace does.
+    public var workspaceList: [(id: String, name: String)]?
     /// Until when the server acts as gone: its WebSocket connections were
     /// dropped and new ones are turned away (HTTP still answers, so a test
     /// can bring it back). The address stays the same.

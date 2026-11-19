@@ -46,6 +46,8 @@ extension FakeServer {
             respond(p, 200, ["ok": true, "rev": .int(rev), "workspace": .bool(snapshot != nil), "devices": .int(Int64(tokens.count))])
         case ("POST", "/auth/forgot"):
             forgot(p, body: body)
+        case ("POST", "/auth/workspaces"):
+            listWorkspaces(p, body: body)
         case ("DELETE", _) where path.hasPrefix("/w/"):
             deleteWorkspace(p, headers: headers)
         case (_, _) where path.hasPrefix("/files/"):
@@ -108,6 +110,18 @@ extension FakeServer {
                 let secs = comps?.queryItems?.first { $0.name == "secs" }?.value.flatMap { Double($0) } ?? 30
                 offlineOnQueue(secs)
                 respond(p, 200, ["ok": true])
+            case "/admin/workspaces":
+                // what POST /auth/workspaces lists: list=ID:NAME,ID:NAME (ID
+                // "" is the server's first); no list goes back to answering 404
+                let list = comps?.queryItems?.first { $0.name == "list" }?.value
+                workspaceList = list.map { l in
+                    l.split(separator: ",").map { e in
+                        let parts = e.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                        return (id: parts[0], name: parts.count > 1 ? parts[1] : "")
+                    }
+                }
+                log("admin: workspaces \(list ?? "none")")
+                respond(p, 200, ["ok": true])
             case "/admin/online":
                 offlineUntil = nil
                 log("online")
@@ -155,6 +169,19 @@ extension FakeServer {
             refuse(peer, WorkspaceAPI.goneMessage)
         }
         respond(p, 200, ["deleted": "fake"])
+    }
+
+    /// POST /auth/workspaces: every workspace on this server, for an
+    /// account whose email and password match (registry.rs list_route).
+    func listWorkspaces(_ p: Peer, body: Data) {
+        guard let list = workspaceList else { return respond(p, 404, ["error": "not_found"]) }
+        let j = try? JSON(parsing: body)
+        let email = (j?["email"]?.string ?? "").trimmed.lowercased()
+        let password = j?["password"]?.string ?? ""
+        guard accounts.values.contains(where: { $0.email == email && $0.password == password }) else {
+            return respond(p, 401, ["error": "That email and password don't match."])
+        }
+        respond(p, 200, ["workspaces": .array(list.map { ["id": .string($0.id), "name": .string($0.name)] })])
     }
 
     /// POST /auth/forgot: always ok; a code only when the account exists.

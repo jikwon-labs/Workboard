@@ -123,6 +123,82 @@ fn doc_edit_mode_draws_formatting_while_typing() {
 }
 
 #[test]
+fn doc_edit_mode_hides_markers_off_the_cursor_line() {
+    use crate::app::docs::{cursor_lines, doc_layout_job_live};
+    let text = "# Title\n**bold** and [site](https://a.b)\n---\n# ";
+    let t = theme::theme_accent(false, "");
+    let fmt = |job: &egui::text::LayoutJob, b: usize| {
+        job.sections
+            .iter()
+            .find(|s| s.byte_range.contains(&b))
+            .unwrap()
+            .format
+            .clone()
+    };
+    // the cursor is on the first line: its "# " shows, the rest are gone
+    let job = doc_layout_job_live(text, &t, 600.0, cursor_lines(text, 3, 3));
+    assert_eq!(job.text, text, "the stored Markdown is laid out unchanged");
+    assert_eq!(
+        fmt(&job, 0).font_id.size,
+        28.0,
+        "the cursor's heading marker shows"
+    );
+    let bold = text.find("**").unwrap();
+    assert!(
+        fmt(&job, bold).font_id.size < 1.0,
+        "bold markers off the cursor line shrink away"
+    );
+    let url = text.find("https").unwrap();
+    assert!(
+        fmt(&job, url).font_id.size < 1.0,
+        "a link's address is hidden"
+    );
+    let site = text.find("site").unwrap();
+    assert_eq!(fmt(&job, site).font_id.size, 16.0, "the link text stays");
+    let rule = text.find("---").unwrap();
+    assert_eq!(
+        fmt(&job, rule).color,
+        Color32::TRANSPARENT,
+        "a divider is only the painted line"
+    );
+    let empty_heading = text.rfind("# ").unwrap();
+    assert!(
+        fmt(&job, empty_heading).font_id.size > 1.0,
+        "an empty heading keeps its marker so the line keeps its height"
+    );
+    // move the cursor to the second line: now its markers show
+    let second = text.find("**").unwrap() + 3;
+    let job = doc_layout_job_live(text, &t, 600.0, cursor_lines(text, second, second));
+    assert!(fmt(&job, 0).font_id.size < 1.0, "the heading marker hides");
+    assert!(
+        fmt(&job, bold).font_id.size > 1.0,
+        "the cursor line's markers come back"
+    );
+    assert!(fmt(&job, url).font_id.size > 1.0);
+    // a selection over two lines shows both
+    assert_eq!(cursor_lines(text, 2, second), 0..2);
+}
+
+#[test]
+fn doc_typing_formatting_keeps_the_text() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    h.settle();
+    let id = h.app.doc_open.unwrap();
+    h.ctx
+        .memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+    h.settle();
+    h.type_text("# Plan");
+    h.click("B");
+    h.type_text("x");
+    h.settle();
+    assert_eq!(
+        h.app.data.docs.iter().find(|d| d.id == id).unwrap().body,
+        "# Plan**x**"
+    );
+}
+
+#[test]
 fn doc_checkbox_toggles_and_new_page_opens_in_edit() {
     let mut h = Ui1::new();
     h.app.new_doc(None);

@@ -543,8 +543,21 @@ impl App {
                         }
                         let d = &mut self.data.docs[idx];
                         let empty = d.body.is_empty();
+                        // Markdown markers show only on the cursor's lines
+                        let shown = if focused {
+                            let n = d.body.chars().count();
+                            let a: usize =
+                                ui.data(|m| m.get_temp(body_id.with("cursor"))).unwrap_or(n);
+                            let b: usize =
+                                ui.data(|m| m.get_temp(body_id.with("sel"))).unwrap_or(a);
+                            cursor_lines(&d.body, a, b)
+                        } else {
+                            0..0
+                        };
                         let mut layouter = |ui: &Ui, s: &str, wrap: f32| {
-                            ui.fonts(|f| f.layout_job(doc_layout_job(s, &t, wrap)))
+                            ui.fonts(|f| {
+                                f.layout_job(doc_layout_job_live(s, &t, wrap, shown.clone()))
+                            })
                         };
                         let out = egui::TextEdit::multiline(&mut d.body)
                             .id(body_id)
@@ -739,6 +752,16 @@ impl App {
                             }
                         }
                         let d = &mut self.data.docs[idx];
+                        // the cursor moved to other lines (or the field gained or
+                        // lost focus): draw again so the markers follow it
+                        let shown_next = match cursor_now {
+                            Some((a, b)) if out.response.has_focus() => cursor_lines(&d.body, a, b),
+                            _ if out.response.has_focus() => shown.clone(),
+                            _ => 0..0,
+                        };
+                        if shown_next != shown {
+                            ui.ctx().request_repaint();
+                        }
                         if let Some((a, b)) = cursor_now {
                             ui.data_mut(|m| {
                                 m.insert_temp(body_id.with("cursor"), a);
@@ -1312,13 +1335,42 @@ pub(super) fn line_kinds(text: &str) -> Vec<(LineKind, usize, usize)> {
 /// unchanged) but are drawn faint, or hidden where a painted mark replaces
 /// them (bullets, checkboxes, quote bars).
 pub(super) fn doc_layout_job(text: &str, t: &Theme, wrap: f32) -> egui::text::LayoutJob {
+    doc_layout_job_live(text, t, wrap, 0..usize::MAX)
+}
+
+/// The lines (by index) holding the cursor or selection, from character
+/// positions `a` and `b`: the lines whose Markdown markers stay visible.
+pub(super) fn cursor_lines(text: &str, a: usize, b: usize) -> std::ops::Range<usize> {
+    let line_of = |c: usize| text.chars().take(c).filter(|&ch| ch == '\n').count();
+    let (la, lb) = (line_of(a.min(b)), line_of(a.max(b)));
+    la..lb + 1
+}
+
+/// As [`doc_layout_job`], but the Markdown markers (`# `, `**`, `*`, `~~`,
+/// backticks, a link's brackets and address, `---`) are drawn only on the
+/// lines in `shown`, where the cursor is. Everywhere else they shrink to
+/// nothing, so the page reads as it will look, and they come back as soon
+/// as the cursor moves onto their line to edit them.
+pub(super) fn doc_layout_job_live(
+    text: &str,
+    t: &Theme,
+    wrap: f32,
+    shown: std::ops::Range<usize>,
+) -> egui::text::LayoutJob {
     use egui::text::{LayoutJob, TextFormat};
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap;
     let kinds = line_kinds(text);
     let lines: Vec<&str> = text.split('\n').collect();
+    // the smallest size the fonts allow: the marker takes no visible room
+    let gone = TextFormat {
+        font_id: FontId::proportional(0.1),
+        color: Color32::TRANSPARENT,
+        ..Default::default()
+    };
     for (i, line) in lines.iter().enumerate() {
         let (kind, _, pre) = kinds[i];
+        let live = shown.contains(&i);
         let size = match kind {
             LineKind::Heading(1) => 28.0,
             LineKind::Heading(2) => 22.0,
@@ -1369,15 +1421,21 @@ pub(super) fn doc_layout_job(text: &str, t: &Theme, wrap: f32) -> egui::text::La
                     ..Default::default()
                 },
             ),
+            // the painted line stands in for "---" off the cursor's line
+            LineKind::Divider if !live => job.append(line, 0.0, hidden),
             LineKind::Divider => job.append(line, 0.0, faint),
             _ => {
+                let has_text = !line[pb..].trim().is_empty();
                 let marker = match kind {
                     LineKind::Bullet | LineKind::Check(_) | LineKind::Quote => hidden,
                     LineKind::Numbered => base.clone(),
+                    // an empty heading keeps its "# " so the line keeps its height
+                    LineKind::Heading(_) if !live && has_text => gone.clone(),
                     _ => faint.clone(),
                 };
                 job.append(&line[..pb], 0.0, marker);
-                append_inline(&mut job, &line[pb..], &base, &faint, t);
+                let inline_marker = if live { &faint } else { &gone };
+                append_inline(&mut job, &line[pb..], &base, inline_marker, t);
             }
         }
         if i + 1 < lines.len() {

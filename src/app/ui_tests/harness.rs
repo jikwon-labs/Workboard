@@ -370,6 +370,47 @@ impl Ui1 {
         out
     }
 
+    /// The "+" drawn as two crossing lines (`paint_plus`) inside `area`:
+    /// the box the lines span and their colour.
+    pub(super) fn plus_in(&self, area: Rect) -> Option<(Rect, Color32)> {
+        let (mut across, mut down) = (None, None);
+        for s in &self.shapes {
+            if let egui::Shape::LineSegment {
+                points: [a, b],
+                stroke,
+            } = &s.shape
+            {
+                if !(area.contains(*a) && area.contains(*b)) {
+                    continue;
+                }
+                if (a.y - b.y).abs() < 0.01 {
+                    across = Some((*a, *b, stroke.color));
+                } else if (a.x - b.x).abs() < 0.01 {
+                    down = Some((*a, *b));
+                }
+            }
+        }
+        let ((a, b, color), (c, d)) = (across?, down?);
+        let cross = Rect::from_points(&[a, b, c, d]);
+        // the lines cross at their middles
+        (cross.center().distance(a.lerp(b, 0.5)) < 0.01).then_some((cross, color))
+    }
+
+    /// Panics unless the control named `name` shows a "+" in its middle.
+    pub(super) fn assert_plus_centered(&self, name: &str) {
+        let r = self.rect(name);
+        let (cross, _) = self
+            .plus_in(r)
+            .unwrap_or_else(|| panic!("{}: no + drawn in it", name));
+        let off = cross.center() - r.center();
+        assert!(
+            off.length() < 0.5,
+            "{}: + is {:?} off its middle",
+            name,
+            off
+        );
+    }
+
     pub(super) fn circle_fill_at(&self, p: Pos2) -> Option<Color32> {
         self.shapes.iter().rev().find_map(|s| match &s.shape {
             egui::Shape::Circle(c) if c.center.distance(p) < 3.0 && c.radius > 5.0 => Some(c.fill),

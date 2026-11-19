@@ -3044,13 +3044,7 @@ impl App {
                     Rect::from_center_size(cell.right_top() + vec2(-14.0, 12.0), vec2(20.0, 20.0));
                 let b = ui.interact(br, ui.id().with(("caladd", i)), Sense::click());
                 p.rect_filled(br, 4.0, if b.hovered() { t.selected_bg } else { t.hover });
-                p.text(
-                    br.center(),
-                    Align2::CENTER_CENTER,
-                    "+",
-                    FontId::proportional(14.0),
-                    t.text2,
-                );
+                icons::paint_plus(&p, br.center(), 14.0, t.text2);
                 if b.clicked() {
                     self.open_quick_add(Some(d));
                 }
@@ -3765,11 +3759,10 @@ impl App {
                 name_it(&pr, "Table columns");
                 ui.painter()
                     .vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
-                ui.painter().text(
+                icons::paint_plus(
+                    ui.painter(),
                     plus.center(),
-                    Align2::CENTER_CENTER,
-                    "+",
-                    FontId::proportional(15.0),
+                    15.0,
                     if pr.hovered() { t.text } else { t.text3 },
                 );
                 let mut choices: Vec<(String, String, String)> = TableCol::FIXED

@@ -125,15 +125,7 @@ impl App {
             ui,
             0.0,
             false,
-            |p, c| {
-                p.text(
-                    c,
-                    Align2::CENTER_CENTER,
-                    "+",
-                    FontId::proportional(16.0),
-                    tc,
-                );
-            },
+            |p, c| crate::app::icons::paint_plus(p, c, 16.0, tc),
             label,
             None,
             None,
@@ -179,28 +171,24 @@ impl App {
             } else if resp.hovered() {
                 ui.painter().rect_filled(br, 5.0, t.row_selected);
             }
-            // a line icon by its kind; the boxed "+" is drawn as lines so it
-            // sits in the exact middle of its box (the "+" character sat low);
-            // "⋯" stays a character
             if boxed {
                 name_it(&resp, &format!("Sidebar {}", tip));
-                super::super::icons::line_icon_scaled(
-                    ui.painter(),
-                    "plus",
-                    br.center(),
-                    t.text2,
-                    0.75,
-                );
-            } else if (hovered || resp.hovered())
-                && !line_icon(ui.painter(), glyph, br.center(), t.text2)
-            {
-                ui.painter().text(
-                    br.center(),
-                    Align2::CENTER_CENTER,
-                    *glyph,
-                    FontId::proportional(if *glyph == "+" { 15.0 } else { 13.0 }),
-                    t.text2,
-                );
+            }
+            // a line icon by its kind; "+" is drawn as lines so it sits in
+            // the middle of its box (the character sat low); "⋯" stays a
+            // character
+            if boxed || hovered || resp.hovered() {
+                if *glyph == "+" {
+                    crate::app::icons::paint_plus(ui.painter(), br.center(), 15.0, t.text2);
+                } else if !line_icon(ui.painter(), glyph, br.center(), t.text2) {
+                    ui.painter().text(
+                        br.center(),
+                        Align2::CENTER_CENTER,
+                        *glyph,
+                        FontId::proportional(13.0),
+                        t.text2,
+                    );
+                }
             }
             out.push(resp.on_hover_text(tr(tip)));
             x -= 26.0;
@@ -287,13 +275,7 @@ impl App {
         let pr = ui.interact(plus, ui.id().with(("splus", s.id)), Sense::click());
         name_it(&pr, &format!("Create in {}", s.name));
         if r.hovered() || pr.hovered() || sel {
-            ui.painter().text(
-                plus.center(),
-                Align2::CENTER_CENTER,
-                "+",
-                FontId::proportional(16.0),
-                t.text2,
-            );
+            crate::app::icons::paint_plus(ui.painter(), plus.center(), 16.0, t.text2);
         }
         let sid = s.id;
         popup(ui, &pr, ui.id().with(("splus_pop", s.id)), 220.0, |ui| {
@@ -432,13 +414,17 @@ impl App {
                 {
                     ui.painter()
                         .rect_filled(rr, 5.0, if hov { t.border } else { t.hover });
-                    ui.painter().text(
-                        rr.center(),
-                        Align2::CENTER_CENTER,
-                        glyph,
-                        FontId::proportional(14.0),
-                        t.text2,
-                    );
+                    if glyph == "+" {
+                        crate::app::icons::paint_plus(ui.painter(), rr.center(), 14.0, t.text2);
+                    } else {
+                        ui.painter().text(
+                            rr.center(),
+                            Align2::CENTER_CENTER,
+                            glyph,
+                            FontId::proportional(14.0),
+                            t.text2,
+                        );
+                    }
                 }
             }
             click_menu(&dr, |ui| self.folder_menu(ui, fid));
@@ -614,13 +600,7 @@ impl App {
         if r.hovered() || pr.hovered() || dr.hovered() {
             ui.painter()
                 .rect_filled(plus, 5.0, if pr.hovered() { t.border } else { t.hover });
-            ui.painter().text(
-                plus.center(),
-                Align2::CENTER_CENTER,
-                "+",
-                FontId::proportional(15.0),
-                t.text2,
-            );
+            crate::app::icons::paint_plus(ui.painter(), plus.center(), 15.0, t.text2);
         }
         // the same "Create" menu as the original's list "+"
         click_menu(&pr, |ui| self.list_create_menu(ui, lid));

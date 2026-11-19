@@ -279,6 +279,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     assert_eq!(view(&h), crate::app::more::WbView::default());
     assert!(!h.has("Delete note 0"));
     // the buttons zoom around the canvas centre
+    h.assert_plus_centered("Zoom in");
     h.click("Zoom in");
     assert!((view(&h).zoom - 1.25).abs() < 1e-3);
     h.click("Zoom out");

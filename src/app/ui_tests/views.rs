@@ -1009,6 +1009,7 @@ fn table_sorts_renames_and_chooses_columns() {
     });
     h.settle();
     assert!(h.has("Sort by Budget"));
+    h.assert_plus_centered("Table columns");
     h.click("Table columns");
     h.click("Column Tags");
     assert!(!h.has("Sort by Tags"));

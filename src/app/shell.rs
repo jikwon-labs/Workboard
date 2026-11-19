@@ -711,13 +711,7 @@ impl App {
                     }
                     if label == "Invite" {
                         paint_person_icon(&p, ibox.center() + vec2(-1.0, -1.0), white);
-                        p.text(
-                            ibox.center() + vec2(6.0, 4.0),
-                            Align2::CENTER_CENTER,
-                            "+",
-                            FontId::proportional(10.0),
-                            white,
-                        );
+                        super::icons::paint_plus(&p, ibox.center() + vec2(6.0, 4.0), 10.0, white);
                     } else if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
                         p.text(
                             ibox.center(),

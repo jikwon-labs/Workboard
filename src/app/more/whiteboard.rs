@@ -158,7 +158,9 @@ impl App {
                         self.wb_undo(wid);
                     }
                     ui.separator();
-                    let zr = ui.button("\u{2212}").on_hover_text(tr("Zoom out"));
+                    let zr = ui.button(crate::app::icons::sign_text(true));
+                    crate::app::icons::paint_sign(ui, &zr, true, None);
+                    let zr = zr.on_hover_text(tr("Zoom out"));
                     name_it(&zr, "Zoom out");
                     if zr.clicked() {
                         btn_zoom = Some(1.0 / 1.25);
@@ -169,7 +171,9 @@ impl App {
                             .color(t.text2)
                             .small(),
                     );
-                    let zr = ui.button("+").on_hover_text(tr("Zoom in"));
+                    let zr = ui.button(crate::app::icons::sign_text(false));
+                    crate::app::icons::paint_sign(ui, &zr, false, None);
+                    let zr = zr.on_hover_text(tr("Zoom in"));
                     name_it(&zr, "Zoom in");
                     if zr.clicked() {
                         btn_zoom = Some(1.25);

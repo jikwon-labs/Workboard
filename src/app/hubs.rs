@@ -34,13 +34,7 @@ fn gallery_card(
     let c = r.left_top() + vec2(38.0, 36.0);
     if glyph == "+" {
         ui.painter().circle_filled(c, 18.0, t.hover);
-        ui.painter().text(
-            c,
-            Align2::CENTER_CENTER,
-            "+",
-            FontId::proportional(22.0),
-            t.text2,
-        );
+        crate::app::icons::paint_plus(ui.painter(), c, 22.0, t.text2);
     } else {
         // a pale tile of the colour with the icon in the full colour (the
         // emoji sat on a tile of nearly its own colour and hardly showed)
@@ -200,13 +194,7 @@ impl App {
                         Stroke::new(1.0_f32, t.border),
                         egui::StrokeKind::Inside,
                     );
-                    ui.painter().text(
-                        br.center(),
-                        Align2::CENTER_CENTER,
-                        "+",
-                        FontId::proportional(18.0),
-                        t.text,
-                    );
+                    crate::app::icons::paint_plus(ui.painter(), br.center(), 18.0, t.text);
                     plus |= b.clicked();
                 }
                 let cr = Rect::from_center_size(

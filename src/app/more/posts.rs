@@ -98,14 +98,27 @@ impl App {
                                         .desired_width(f32::INFINITY),
                                 );
                                 ui.horizontal(|ui| {
-                                    // "+" and "@" are characters; the others line icons
+                                    // "@" is a character, "+" two lines; the others line icons
                                     for (g, tip) in [
                                         ("+", "Create task"),
                                         ("@", "Mention someone"),
                                         ("smile", "Emoji"),
                                         ("task", "Create task"),
                                     ] {
-                                        let b = if g.len() == 1 {
+                                        let b = if g == "+" {
+                                            // drawn as lines so it sits in
+                                            // the middle (the character sat low)
+                                            let b = ui.add(ghost(egui::Button::new(
+                                                crate::app::icons::sign_text(false),
+                                            )));
+                                            crate::app::icons::paint_sign(
+                                                ui,
+                                                &b,
+                                                false,
+                                                Some(t.text2),
+                                            );
+                                            b
+                                        } else if g.len() == 1 {
                                             ui.add(ghost(egui::Button::new(
                                                 RichText::new(g).color(t.text2),
                                             )))

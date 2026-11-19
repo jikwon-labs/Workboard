@@ -254,6 +254,51 @@ pub(super) fn icon_button_ex(
 
 /// Thin outline icons in the style of the original (1.5 px strokes), drawn
 /// in a 16 pt square around `c`. Returns false for a kind it does not know.
+/// A "+" drawn as two lines centred on `c`, about as big as the "+"
+/// character of a `size` px font. The character sits below the middle of
+/// its line (by about a tenth of the size in the system font), so in a box,
+/// a circle or a button it looked low.
+pub(super) fn paint_plus(p: &egui::Painter, c: Pos2, size: f32, color: Color32) {
+    let (arm, s) = sign_metrics(size, color);
+    p.line_segment([c - vec2(arm, 0.0), c + vec2(arm, 0.0)], s);
+    p.line_segment([c - vec2(0.0, arm), c + vec2(0.0, arm)], s);
+}
+
+/// The "-" that goes with `paint_plus` (a zoom out beside a zoom in).
+pub(super) fn paint_minus(p: &egui::Painter, c: Pos2, size: f32, color: Color32) {
+    let (arm, s) = sign_metrics(size, color);
+    p.line_segment([c - vec2(arm, 0.0), c + vec2(arm, 0.0)], s);
+}
+
+fn sign_metrics(size: f32, color: Color32) -> (f32, Stroke) {
+    let arm = (size * 0.32).round().max(3.0);
+    (arm, Stroke::new((size * 0.1).clamp(1.2, 2.0), color))
+}
+
+/// The text of a button that shows a "+" (or "-") in its middle: the
+/// character keeps the button's size and frame but is not seen, and
+/// `paint_sign` draws the sign over it.
+pub(super) fn sign_text(minus: bool) -> egui::RichText {
+    egui::RichText::new(if minus { "\u{2212}" } else { "+" }).color(Color32::TRANSPARENT)
+}
+
+/// Draws the sign of a `sign_text` button in its middle, in `color` or the
+/// colour the button's text would have.
+pub(super) fn paint_sign(ui: &Ui, resp: &Response, minus: bool, color: Option<Color32>) {
+    let color = color.unwrap_or_else(|| ui.style().interact(resp).text_color());
+    let color = if resp.enabled() {
+        color
+    } else {
+        color.gamma_multiply(0.5)
+    };
+    let size = egui::TextStyle::Body.resolve(ui.style()).size;
+    if minus {
+        paint_minus(ui.painter(), resp.rect.center(), size, color);
+    } else {
+        paint_plus(ui.painter(), resp.rect.center(), size, color);
+    }
+}
+
 pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) -> bool {
     let s = Stroke::new(1.5_f32, color);
     let line = |a: egui::Vec2, b: egui::Vec2| p.line_segment([c + a, c + b], s);

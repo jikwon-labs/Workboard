@@ -170,13 +170,7 @@ impl App {
             let plus = Rect::from_center_size(r.right_center() - vec2(12.0, 0.0), vec2(18.0, 18.0));
             let pr = ui.interact(plus, ui.id().with(("subpage", id)), Sense::click());
             if resp.hovered() || pr.hovered() {
-                ui.painter().text(
-                    plus.center(),
-                    Align2::CENTER_CENTER,
-                    "+",
-                    FontId::proportional(14.0),
-                    t.text2,
-                );
+                crate::app::icons::paint_plus(ui.painter(), plus.center(), 14.0, t.text2);
             }
             if pr.on_hover_text(tr("Add sub page")).clicked() {
                 self.add_page(id);
@@ -215,7 +209,9 @@ impl App {
         pui.horizontal(|ui| {
             ui.label(RichText::new(tr("Pages")).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.small_button("+").on_hover_text(tr("Add page")).clicked() {
+                let add = ui.add(egui::Button::new(crate::app::icons::sign_text(false)).small());
+                crate::app::icons::paint_sign(ui, &add, false, None);
+                if add.on_hover_text(tr("Add page")).clicked() {
                     self.add_page(root);
                 }
             });

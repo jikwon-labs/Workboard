@@ -800,13 +800,7 @@ impl App {
         let plus = Rect::from_center_size(pos2(hr.right() - 20.0, hr.center().y), vec2(16.0, 16.0));
         p.circle_filled(plus.center(), 8.0, t.text);
         // the background color reads on the circle in both themes
-        p.text(
-            plus.center(),
-            Align2::CENTER_CENTER,
-            "+",
-            FontId::proportional(13.0),
-            t.bg,
-        );
+        crate::app::icons::paint_plus(p, plus.center(), 13.0, t.bg);
         p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
         let add_col = ui.interact(plus.expand(4.0), ui.id().with("add_column"), Sense::click());
         hover_bg(ui, &add_col, add_col.rect, 5.0);

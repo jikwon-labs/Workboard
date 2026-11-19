@@ -125,13 +125,23 @@ fn add_column_plus_and_reply_link_read_in_both_themes() {
         h.app.data.dark = dark;
         h.settle();
         let t = h.app.t();
-        // the "+" at the right end of the list column header
-        let plus = h
-            .painted_text("+")
-            .into_iter()
-            .find(|(r, _)| h.circle_fill_at(r.center()).is_some())
+        // the "+" at the right end of the list column header, in the middle
+        // of its circle
+        let circles: Vec<Pos2> = h
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Circle(c) if c.radius > 5.0 => Some(c.center),
+                _ => None,
+            })
+            .collect();
+        let plus = circles
+            .iter()
+            .find_map(|c| h.plus_in(Rect::from_center_size(*c, vec2(16.0, 16.0))))
             .unwrap_or_else(|| panic!("dark {}: no + on a circle", dark));
-        let fill = h.circle_fill_at(plus.0.center()).unwrap();
+        let fill = h
+            .circle_fill_at(plus.0.center())
+            .unwrap_or_else(|| panic!("dark {}: + is off the middle of its circle", dark));
         assert_ne!(
             plus.1, fill,
             "dark {}: + is not drawn in the circle's color",
@@ -530,31 +540,23 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
 }
 
 #[test]
-fn sidebar_header_plus_sits_in_the_middle_of_its_box() {
-    let h = Ui1::new();
+fn plus_buttons_draw_the_plus_in_their_middle() {
+    // the "+" character sits low in its line, so these are drawn as lines
+    let mut h = Ui1::new();
     for name in [
         "Sidebar Create Space",
         "Sidebar Create a Channel",
         "Sidebar New message",
     ] {
-        let r = h.rect(name);
-        // the "+" is two line segments; their ends span the cross
-        let mut ends = vec![];
-        for s in &h.shapes {
-            if let egui::Shape::LineSegment { points, .. } = &s.shape {
-                if points.iter().all(|p| r.contains(*p)) {
-                    ends.extend_from_slice(points);
-                }
-            }
-        }
-        assert_eq!(ends.len(), 4, "{}: no + drawn in its box", name);
-        let cross = Rect::from_points(&ends);
-        let off = cross.center() - r.center();
-        assert!(
-            off.length() < 0.5,
-            "{}: + is {:?} off the middle of its box",
-            name,
-            off
-        );
+        h.assert_plus_centered(name);
     }
+    // the "+" on a Space and a List row shows on hover
+    for name in ["Create in Team Space", "Create in Marketing"] {
+        let c = h.rect(name).center();
+        h.hover(c);
+        h.assert_plus_centered(name);
+    }
+    // the reply box's attach button
+    h.click("general");
+    h.assert_plus_centered("Add files");
 }

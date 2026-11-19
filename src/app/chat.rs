@@ -1561,9 +1561,17 @@ impl App {
                 let mut insert: Option<String> = None;
                 ui.horizontal(|ui| {
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
-                        let b = ui
-                            .add(ghost(egui::Button::new(RichText::new(g).color(t.text2))))
-                            .on_hover_text(tr(tip));
+                        let plus = g == "+";
+                        let text = if plus {
+                            crate::app::icons::sign_text(false)
+                        } else {
+                            RichText::new(g).color(t.text2)
+                        };
+                        let b = ui.add(ghost(egui::Button::new(text)));
+                        if plus {
+                            crate::app::icons::paint_sign(ui, &b, false, Some(t.text2));
+                        }
+                        let b = b.on_hover_text(tr(tip));
                         name_it(&b, tip);
                         b
                     };
@@ -1827,9 +1835,11 @@ impl App {
                 }
                 let mut pick = false;
                 ui.horizontal(|ui| {
-                    let b = ui
-                        .add(ghost(egui::Button::new(RichText::new("+").color(t.text2))))
-                        .on_hover_text(tr("Add files"));
+                    let b = ui.add(ghost(egui::Button::new(crate::app::icons::sign_text(
+                        false,
+                    ))));
+                    crate::app::icons::paint_sign(ui, &b, false, Some(t.text2));
+                    let b = b.on_hover_text(tr("Add files"));
                     b.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,

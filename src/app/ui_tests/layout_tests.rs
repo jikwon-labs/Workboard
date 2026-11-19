@@ -867,3 +867,60 @@ fn small_window_doc_template_cards_fit_and_shorten() {
     let cut = h.cut_texts(page);
     assert!(cut.is_empty(), "cut: {:?}", cut);
 }
+
+#[test]
+fn small_window_sidebar_scrolls_without_a_scroll_bar() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.settle();
+    let side = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sidebar"))
+        .expect("the sidebar is open")
+        .rect;
+    // the "+ New message" row at the bottom of the sidebar list
+    let last_row = |h: &Ui1| {
+        h.painted_text(&tr("New message"))
+            .into_iter()
+            .map(|(r, _)| r)
+            .filter(|r| side.x_range().contains(r.left()))
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+    };
+    let start = last_row(&h).expect("the sidebar lists New message");
+    assert!(
+        start.bottom() > h.size.y - 20.0,
+        "the sidebar overflows a small window: {:?}",
+        start
+    );
+    // a scroll bar is a narrow, tall bar along the sidebar's right edge
+    let bars = |h: &Ui1| {
+        h.shapes
+            .iter()
+            .filter(|s| match &s.shape {
+                egui::Shape::Rect(r) => {
+                    r.rect.width() <= 12.0
+                        && r.rect.height() >= 40.0
+                        && r.rect.left() > side.right() - 30.0
+                        && r.rect.right() <= side.right()
+                }
+                _ => false,
+            })
+            .count()
+    };
+    assert_eq!(bars(&h), 0, "no scroll bar at rest");
+    let at = pos2(side.center().x, 300.0);
+    for _ in 0..6 {
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -200.0),
+            modifiers: Default::default(),
+        }]);
+        assert_eq!(bars(&h), 0, "no scroll bar while scrolling");
+    }
+    h.settle();
+    let end = last_row(&h).expect("New message is still listed");
+    assert!(
+        end.bottom() <= h.size.y,
+        "the wheel brings the bottom row into view: {:?}",
+        end
+    );
+    assert_eq!(bars(&h), 0, "no scroll bar after scrolling");
+}

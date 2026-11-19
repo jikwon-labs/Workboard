@@ -62,21 +62,23 @@ impl App {
         if resp.drag_started() && self.row.rename.is_none() {
             self.row.drag = Some(task.id);
         }
+        // the highlight also covers the selection box drawn just left of the row
+        let band = rect.with_min_x(rect.left() - 10.0);
+        let band_hover = ui.rect_contains_pointer(band) && self.row.drag.is_none();
         if self.selected.contains(&task.id) {
-            ui.painter().rect_filled(rect, 0.0, t.selected_bg);
-        } else if resp.hovered() || self.row.drag == Some(task.id) {
-            ui.painter().rect_filled(rect, 0.0, t.hover);
+            ui.painter().rect_filled(band, 0.0, t.selected_bg);
+        } else if resp.hovered() || band_hover || self.row.drag == Some(task.id) {
+            ui.painter().rect_filled(band, 0.0, t.hover);
         }
         if self.row.focus == Some(task.id) {
             ui.painter().rect_stroke(
-                rect.shrink(1.0),
+                band.shrink(1.0),
                 3.0,
                 Stroke::new(1.5_f32, t.primary),
                 egui::StrokeKind::Inside,
             );
         }
-        let row_hover = (ui.rect_contains_pointer(rect) && self.row.drag.is_none())
-            || Self::quick_tags_open(ui, task.id);
+        let row_hover = band_hover || Self::quick_tags_open(ui, task.id);
         let renaming = self.row.rename.as_ref().is_some_and(|(r, _)| *r == task.id);
         ui.painter().hline(
             rect.left() + 28.0..=rect.right(),
@@ -466,7 +468,7 @@ impl App {
             );
         }
         click_menu(&dr, |ui| self.task_menu(ui, tid));
-        let ticked = self.row_checkbox(ui, rect, tid, resp.hovered());
+        let ticked = self.row_checkbox(ui, rect, tid, resp.hovered() || band_hover);
         resp.context_menu(|ui| self.task_menu(ui, tid));
         if resp.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.shift) {
             // Cmd click toggles the row; Shift click selects the range from

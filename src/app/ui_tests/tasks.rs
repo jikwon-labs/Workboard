@@ -208,6 +208,37 @@ fn tick_two_rows_and_archive_them_from_the_bar() {
 }
 
 #[test]
+fn row_highlight_covers_the_selection_box_and_quick_buttons_are_drawn() {
+    let mut h = Ui1::new();
+    let name = "Write copy for landing page";
+    h.hover(h.find(&format!("Task {}", name)).unwrap());
+    // the box drawn inside its click area
+    let boxr = h.rect(&format!("Select {}", name)).shrink(3.0);
+    let sel = boxr.left_center() + egui::vec2(1.0, 0.0);
+    // pointer on the left of the selection box: the row stays highlighted and
+    // the grey band covers the whole box (it used to start halfway through it)
+    h.hover(sel);
+    let hover = h.app.t().hover;
+    let row = h.rect(&format!("Task {}", name));
+    let band = h.shapes.iter().find_map(|c| match &c.shape {
+        egui::Shape::Rect(r)
+            if r.fill == hover && r.rect.contains_rect(boxr) && r.rect.contains(row.center()) =>
+        {
+            Some((r.rect, c.clip_rect))
+        }
+        _ => None,
+    });
+    let (band, clip) = band.expect("the row highlight covers the selection box");
+    assert!(
+        clip.contains(band.left_center()),
+        "the highlight is not clipped"
+    );
+    // the quick buttons are painted icons, not a pencil glyph a font may lack
+    assert!(h.has(&format!("Rename {}", name)));
+    assert!(h.painted_text("\u{270E}").is_empty());
+}
+
+#[test]
 fn row_dots_menu_duplicates_a_task() {
     let mut h = Ui1::new();
     let n = h.app.data.tasks.len();

@@ -520,12 +520,14 @@ impl App {
         let t = self.t();
         let id = Self::quick_id(ui, task.id);
         let mut x = x;
+        // painted line icons: a font glyph such as a pencil may be missing
+        // and show as an empty box
         let items: [(&str, &str); 3] = [
-            ("+", "Add subtask"),
-            ("\u{270E}", "Rename"),
-            ("#", "Add tag"),
+            ("plus", "Add subtask"),
+            ("pen", "Rename"),
+            ("tag", "Add tag"),
         ];
-        for (glyph, what) in items {
+        for (icon, what) in items {
             let r = Rect::from_min_size(pos2(x, row.center().y - 10.0), vec2(20.0, 20.0));
             if r.right() > limit {
                 break;
@@ -541,13 +543,7 @@ impl App {
             if resp.hovered() {
                 ui.painter().rect_filled(r.shrink(1.0), 4.0, t.hover);
             }
-            ui.painter().text(
-                r.center(),
-                Align2::CENTER_CENTER,
-                glyph,
-                FontId::proportional(12.0),
-                t.text2,
-            );
+            super::icons::line_icon_scaled(ui.painter(), icon, r.center(), t.text2, 0.65);
             let resp = resp.on_hover_text(tr(what));
             match what {
                 "Add subtask" => {

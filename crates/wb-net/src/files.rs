@@ -334,8 +334,32 @@ pub fn upload(
         &[
             ("Content-Type", content_type.to_string()),
             ("Content-Length", total.to_string()),
+            ("Expect", "100-continue".to_string()),
         ],
     )?;
+    // Wait for the server's go-ahead before the body. A refusal (too large,
+    // signed out) then arrives before anything is sent: on Windows a server
+    // closing mid-body resets the connection and its answer is lost. A proxy
+    // that doesn't pass the question on just gets the body after a moment.
+    let _ = s.tcp().set_read_timeout(Some(Duration::from_millis(1500)));
+    let early = {
+        let mut r = BufReader::new(&mut s);
+        match read_head(&mut r) {
+            Ok(head) if head.status >= 400 => {
+                Some(Err(fail(head.status, &read_text(&mut r, &head))))
+            }
+            Ok(head) if head.status != 100 => Some(Err(FileError::Other(format!(
+                "The server said {} before the file was sent",
+                head.status
+            )))),
+            // 100 Continue, or no answer in time: send the file
+            _ => None,
+        }
+    };
+    if let Some(res) = early {
+        return res;
+    }
+    let _ = s.tcp().set_read_timeout(Some(Duration::from_secs(60)));
     let mut buf = vec![0u8; 256 << 10];
     let mut done = 0u64;
     loop {
@@ -359,7 +383,11 @@ pub fn upload(
         }
     }
     let mut r = BufReader::new(s);
-    let head = read_head(&mut r)?;
+    let mut head = read_head(&mut r)?;
+    // a go-ahead that came after the moment we waited
+    while head.status == 100 {
+        head = read_head(&mut r)?;
+    }
     let body = read_text(&mut r, &head);
     match head.status {
         200 | 201 => Ok(()),

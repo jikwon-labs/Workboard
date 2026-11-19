@@ -128,6 +128,10 @@ impl App {
         let mut remove = None;
         let rules = self.data.extra.automations.clone();
         for (i, a) in rules.iter().enumerate() {
+            // workflows (from chat) are in their own window
+            if a.trigger == "message" {
+                continue;
+            }
             ui.horizontal(|ui| {
                 let mut en = a.enabled;
                 if check(ui, &mut en, "").changed() {
@@ -160,8 +164,18 @@ impl App {
             self.data.extra.automations.remove(i);
             self.dirty = true;
         }
-        if rules.is_empty() {
+        if rules.iter().all(|a| a.trigger == "message") {
             ui.label(RichText::new(tr("No automations yet.")).color(t.text3));
+        }
+        let wf = ui.add(ghost(egui::Button::new(
+            RichText::new(tr("Workflows from chat messages...")).color(t.primary),
+        )));
+        name_it(&wf, "Workflows from chat messages");
+        if wf.clicked() {
+            self.modal = Some(Modal::Workflows {
+                form: Default::default(),
+            });
+            return false;
         }
         ui.separator();
         ui.label(RichText::new(tr("New automation")).strong());
@@ -288,6 +302,7 @@ impl App {
                 action: action.clone(),
                 value: value.trim().to_string(),
                 list: scope_id,
+                ..Default::default()
             });
             value.clear();
             self.dirty = true;

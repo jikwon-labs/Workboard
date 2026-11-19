@@ -2116,3 +2116,234 @@ fn schedule_a_message_and_send_edit_or_cancel_it() {
     h.click(&format!("Cancel {}", id));
     assert!(h.app.scheduled().is_empty());
 }
+
+/// Built-in slash commands, the "/" list, and plain text that only starts
+/// with a slash.
+#[test]
+fn slash_commands_work_in_the_message_box() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let send = |h: &mut Ui1, text: &str| {
+        h.click("Message composer");
+        h.type_text(text);
+        h.key(egui::Key::Enter);
+    };
+    // the list: "/sh" offers /shrug
+    h.click("Message composer");
+    h.type_text("/sh");
+    h.click("Command /shrug");
+    assert_eq!(h.app.chat.text, "/shrug ");
+    h.type_text("oh well");
+    h.key(egui::Key::Enter);
+    assert_eq!(
+        last_in(&h, cid).text,
+        "oh well \u{00AF}\\_(\u{30C4})_/\u{00AF}"
+    );
+    send(&mut h, "/me waves");
+    assert_eq!(last_in(&h, cid).text, "*waves*");
+    let n = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .len();
+    send(&mut h, "/topic Launch week");
+    assert_eq!(
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .topic,
+        "Launch week"
+    );
+    send(&mut h, "/mute");
+    assert_eq!(h.app.data.extra.notify.channel_mode(cid), "nothing");
+    send(&mut h, "/unmute");
+    assert_eq!(h.app.data.extra.notify.channel_mode(cid), "mentions");
+    let r = h.app.data.extra.reminders.len();
+    send(&mut h, "/remind me to call Sam in 30 minutes");
+    let rem = h.app.data.extra.reminders.last().unwrap();
+    assert_eq!(h.app.data.extra.reminders.len(), r + 1);
+    assert_eq!(rem.text, "to call Sam");
+    assert!((rem.due_ts - now_ts() - 1800).abs() < 5);
+    assert_eq!(
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .messages
+            .len(),
+        n,
+        "none of those posted anything"
+    );
+    // an unknown one goes back in the box; a path is just text
+    send(&mut h, "/nope now");
+    assert_eq!(h.app.chat.text, "/nope now");
+    h.app.chat.text.clear();
+    send(&mut h, "/usr/bin is full");
+    assert_eq!(last_in(&h, cid).text, "/usr/bin is full");
+}
+
+/// Workflows: a message posted in #general posts in another channel,
+/// replies in its thread and makes a task; what they post starts nothing.
+#[test]
+fn workflows_run_when_a_message_is_posted() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let other = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && c.id != cid && h.app.listed(c))
+        .unwrap()
+        .clone();
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Workflows");
+    assert!(matches!(h.app.modal, Some(Modal::Workflows { .. })));
+    // post in the other channel when a message mentions "outage"
+    h.click("Workflow keyword");
+    h.type_text("outage");
+    h.click("Workflow target");
+    h.click(&format!("#{}", other.name));
+    h.click("Workflow message");
+    h.type_text("{user} reported: {text}");
+    h.click("Add workflow");
+    // and reply in the thread for every message
+    let list = h.app.data.first_list().unwrap();
+    h.app.data.extra.automations.push(Automation {
+        id: 77_001,
+        enabled: true,
+        trigger: "message".into(),
+        channel: Some(cid),
+        action: "reply".into(),
+        value: "Thanks, {user}!".into(),
+        ..Default::default()
+    });
+    h.app.data.extra.automations.push(Automation {
+        id: 77_002,
+        enabled: true,
+        trigger: "message".into(),
+        channel: Some(cid),
+        keyword: "bug".into(),
+        action: "task".into(),
+        value: list.to_string(),
+        ..Default::default()
+    });
+    h.app.modal = None;
+    h.settle();
+    let wf = h
+        .app
+        .data
+        .extra
+        .automations
+        .iter()
+        .filter(|a| a.trigger == "message")
+        .count();
+    assert_eq!(wf, 3);
+    h.click("Message composer");
+    h.type_text("Big outage in the bug tracker");
+    h.key(egui::Key::Enter);
+    let me = h.app.who(h.app.data.me);
+    let posted = last_in(&h, other.id);
+    assert_eq!(
+        posted.text,
+        format!("{} reported: Big outage in the bug tracker", me)
+    );
+    assert_eq!(posted.bot.as_deref(), Some("Workflow"));
+    let mine = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .iter()
+        .find(|m| m.text == "Big outage in the bug tracker")
+        .unwrap()
+        .clone();
+    assert_eq!(mine.replies.len(), 1);
+    assert_eq!(mine.replies[0].text, format!("Thanks, {}!", me));
+    assert!(h
+        .app
+        .data
+        .tasks
+        .iter()
+        .any(|t| t.name == "Big outage in the bug tracker"));
+    // a message without the words: only the reply
+    h.click("Message composer");
+    h.type_text("all good");
+    h.key(egui::Key::Enter);
+    assert_eq!(last_in(&h, other.id).text, posted.text, "no second post");
+    // shown under the workflow's name
+    h.app.chat.open = Some(other.id);
+    h.settle();
+    assert!(h.has("APP") || !h.painted_text("APP").is_empty());
+}
+
+/// Owners and admins on a server see a channel's webhooks with their
+/// address and the slash commands in Integrations; the "/" list offers the
+/// server's commands.
+#[test]
+fn integrations_show_webhook_addresses_and_commands() {
+    let mut h = Ui1::new();
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 1,
+        server: Some("https://wb.example.com/w/ab12".into()),
+    });
+    let me = h.app.data.me;
+    if let Some(m) = h.app.data.members.iter_mut().find(|m| m.id == me) {
+        m.role = "Owner".into();
+    }
+    let cid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.sync_rt.integrations = Some((
+        vec![wb_net::HookInfo {
+            token: "tok123".into(),
+            kind: "in".into(),
+            channel: cid,
+            name: "CI".into(),
+            ..Default::default()
+        }],
+        vec![wb_net::CommandInfo {
+            name: "deploy".into(),
+            description: "Ship it".into(),
+            url: "https://bots.example/deploy".into(),
+        }],
+    ));
+    assert_eq!(
+        h.app.hook_address("tok123"),
+        "https://wb.example.com/w/ab12/hooks/tok123"
+    );
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Integrations");
+    assert!(matches!(h.app.modal, Some(Modal::Integrations { .. })));
+    assert!(h.has("Copy address CI"));
+    assert!(h.has("Add incoming webhook") && h.has("Add command"));
+    // the server's command is in the "/" list
+    assert!(h
+        .app
+        .slash_choices("/dep")
+        .iter()
+        .any(|(n, d)| n == "deploy" && d == "Ship it"));
+}

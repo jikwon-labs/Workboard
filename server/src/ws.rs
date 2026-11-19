@@ -304,6 +304,12 @@ struct Conn {
 }
 
 impl Conn {
+    /// The `integrations` answer for `member`.
+    fn integrations(&self, hub: &Arc<Hub>, member: u64) -> String {
+        let (hooks, commands) = hub.integrations(member);
+        Msg::IntegrationList { hooks, commands }.to_json()
+    }
+
     /// What to answer a message from the app with, if anything.
     async fn answer(&mut self, msg: Option<Msg>) -> Option<String> {
         let (hub, member, conn) = (&self.hub, self.member, self.conn);
@@ -340,6 +346,32 @@ impl Conn {
                 }
                 .to_json(),
             ),
+            Some(Msg::Integrations) => Some(self.integrations(hub, member)),
+            Some(Msg::HookAdd { hook }) => Some(match hub.add_hook(member, hook) {
+                Ok(()) => self.integrations(hub, member),
+                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+            }),
+            Some(Msg::HookRemove { token }) => Some(match hub.remove_hook(member, &token) {
+                Ok(()) => self.integrations(hub, member),
+                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+            }),
+            Some(Msg::CommandAdd { command }) => Some(match hub.add_command(member, command) {
+                Ok(()) => self.integrations(hub, member),
+                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+            }),
+            Some(Msg::CommandRemove { name }) => Some(match hub.remove_command(member, &name) {
+                Ok(()) => self.integrations(hub, member),
+                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+            }),
+            Some(Msg::Command {
+                channel,
+                parent,
+                name,
+                text,
+            }) => match hub.run_command(member, channel, parent, &name, &text) {
+                Ok(()) => None,
+                Err(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
+            },
             Some(Msg::ScheduledList) => Some(
                 Msg::Scheduled {
                     items: hub.scheduled_of(member),

@@ -664,6 +664,7 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
             preview: None,
             forwarded: None,
             thread_of: None,
+            bot: None,
             mentions: vec![],
         }],
         ..Default::default()

@@ -91,6 +91,12 @@ pub struct Saved {
     /// Messages waiting to be posted (schedule.rs).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub scheduled: Vec<crate::schedule::Waiting>,
+    /// Webhooks owners and admins set up (hooks.rs).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hooks: Vec<wb_net::HookInfo>,
+    /// Slash commands owners and admins added (hooks.rs).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<crate::hooks::Slash>,
 }
 
 impl Saved {

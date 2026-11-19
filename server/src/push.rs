@@ -451,6 +451,35 @@ pub enum Why {
     Direct,
 }
 
+/// The messages and replies of `canon` (in the conversations of `only`)
+/// whose ids aren't in `before`: (conversation, message).
+pub fn new_messages(
+    canon: &Value,
+    before: &HashSet<u64>,
+    only: Option<&HashSet<u64>>,
+) -> Vec<(u64, Value)> {
+    let mut out = vec![];
+    for ch in array_at(canon, "channels") {
+        let Some(cid) = u64_field(ch, "id") else {
+            continue;
+        };
+        if only.is_some_and(|o| !o.contains(&cid)) {
+            continue;
+        }
+        for m in array_at(ch, "messages") {
+            if u64_field(m, "id").is_some_and(|i| !before.contains(&i)) {
+                out.push((cid, m.clone()));
+            }
+            for r in array_at(m, "replies") {
+                if u64_field(r, "id").is_some_and(|i| !before.contains(&i)) {
+                    out.push((cid, r.clone()));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// One notification for one member.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Note {

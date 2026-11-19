@@ -218,6 +218,9 @@ public final class SyncClient {
     public internal(set) var online: Set<UInt64> = []
     /// My messages the server keeps to post later (nil until it answered).
     public internal(set) var scheduled: [ScheduledItem]?
+    /// The server's webhooks (owners and admins) and slash commands.
+    public internal(set) var hooks: [HookItem] = []
+    public internal(set) var commands: [CommandItem] = []
     /// This phone's notification choices as the server wants them (Push.swift).
     @ObservationIgnored public internal(set) var pushPrefs: JSON?
     /// This iPhone's Trash (personal, never shared; see Trash.swift).
@@ -653,6 +656,7 @@ public final class SyncClient {
             }
             sendPushToken(on: ws)
             send(.scheduledList, on: ws)
+            send(.integrations, on: ws)
             flushReuploads()
             // after (re)connecting our copy goes up (only what the server
             // doesn't have, when it takes deltas)
@@ -681,6 +685,9 @@ public final class SyncClient {
             handleAdmin(m)
         case let .presence(list):
             online = Set(list)
+        case let .integrationList(h, c):
+            hooks = h.compactMap(HookItem.init)
+            commands = c.compactMap(CommandItem.init)
         case let .scheduled(items):
             scheduled = items.compactMap(ScheduledItem.init).sorted { ($0.at, $0.id) < ($1.at, $1.id) }
         case .ping:

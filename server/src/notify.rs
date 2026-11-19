@@ -25,8 +25,9 @@ impl Hub {
         // the messages already there, to tell which ones are new (only when
         // someone could be notified: an iPhone, or a computer watching)
         let pushes = self.pusher.is_some() && !g.saved.push.is_empty();
+        let outgoing = g.saved.hooks.iter().any(|h| h.kind == "out");
         let before = match &g.canon {
-            Some(c) if pushes || self.notes.receiver_count() > 0 => {
+            Some(c) if pushes || outgoing || self.notes.receiver_count() > 0 => {
                 Some(push::message_ids_in(c, Some(&chans)))
             }
             _ => None,
@@ -87,6 +88,12 @@ impl Hub {
                     let _ = self.notes.send(Arc::new(notes.clone()));
                 }
                 self.notify(&g.saved, notes);
+                if outgoing {
+                    let new = push::new_messages(canon, before, Some(&chans));
+                    let hub = self.clone();
+                    // (not under the lock: posting an answer merges again)
+                    std::thread::spawn(move || hub.hooks_out(new));
+                }
             }
             self.broadcast_canon(&mut g, false);
             // someone added or removed people: owners and admins see the new list

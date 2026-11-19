@@ -107,6 +107,7 @@ pub const MAX_HELLO: usize = 64 << 10;
 mod admin;
 mod auth;
 mod canon;
+pub mod hooks;
 mod livekit;
 mod notify;
 mod routes;
@@ -385,6 +386,8 @@ struct Hub {
     claim_wait: Duration,
     /// sends iPhone notifications; None when push isn't set up
     pusher: Option<Arc<dyn push::Sender>>,
+    /// sends outgoing webhooks and slash commands (hooks.rs)
+    poster: Arc<dyn hooks::Poster>,
     /// device id -> its open connections (connected devices get no pushes)
     online: Mutex<std::collections::HashMap<String, usize>>,
     /// member id -> their open connections; `presence` holds its keys
@@ -438,6 +441,10 @@ impl Hub {
             max_file: options.max_file,
             claim_wait: options.claim_wait,
             pusher,
+            poster: options
+                .poster
+                .clone()
+                .unwrap_or_else(|| Arc::new(hooks::Curl)),
             online: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
@@ -613,6 +620,8 @@ pub struct Options {
     /// What sends iPhone notifications. None: APNs as apns.json or WB_APNS_*
     /// say (or nothing when they don't).
     pub push: Option<Arc<dyn push::Sender>>,
+    /// What sends outgoing webhooks and slash commands. None: curl.
+    pub poster: Option<Arc<dyn hooks::Poster>>,
 }
 
 impl Default for Options {
@@ -621,6 +630,7 @@ impl Default for Options {
             max_file: MAX_FILE,
             claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
             push: None,
+            poster: None,
         }
     }
 }
@@ -722,6 +732,7 @@ pub async fn serve_on(
         // body limit doesn't cover; put_file enforces max_file itself.
         .route("/files/{file}", get(files::get_file).put(files::put_file))
         .route("/auth/forgot", axum::routing::post(forgot_route))
+        .route("/hooks/{token}", axum::routing::post(hook_route))
         .route("/join", get(join_route))
         .route("/privacy", get(privacy_route))
         .with_state(hub.clone())

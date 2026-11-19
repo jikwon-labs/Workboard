@@ -612,6 +612,7 @@ pub(super) fn new_message(id: u64, author: u64, text: String, ts: i64) -> Messag
         preview: None,
         forwarded: None,
         thread_of: None,
+        bot: None,
     }
 }
 

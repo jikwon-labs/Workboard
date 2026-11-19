@@ -322,6 +322,52 @@ impl App {
     }
 }
 
+/// The commands that start with what's typed after "/", under a message
+/// box; the one clicked.
+fn slash_list(ui: &mut Ui, t: &Theme, choices: &[(String, String)]) -> Option<String> {
+    if choices.is_empty() {
+        return None;
+    }
+    let mut out = None;
+    egui::Frame::new()
+        .fill(t.card)
+        .stroke(Stroke::new(1.0_f32, t.border))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(6, 4))
+        .show(ui, |ui| {
+            for (name, about) in choices.iter().take(8) {
+                let r = ui
+                    .horizontal(|ui| {
+                        let b = ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("/{}", name)).monospace().strong(),
+                            )
+                            .sense(Sense::click()),
+                        );
+                        ui.label(RichText::new(about).small().color(t.text2));
+                        b
+                    })
+                    .inner;
+                name_it(&r, &format!("Command /{}", name));
+                if r.clicked() {
+                    out = Some(name.clone());
+                }
+            }
+        });
+    out
+}
+
+/// The text cursor of box `id` after the last character of `text`.
+fn move_cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    let n = text.chars().count();
+    let mut st = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+        egui::text::CCursor::new(n),
+    )));
+    st.store(ctx, id);
+    ctx.memory_mut(|m| m.request_focus(id));
+}
+
 /// The formatting marks the message boxes offer: (mark, name, key, with Shift).
 const FORMATS: [(&str, &str, egui::Key, bool); 4] = [
     ("**", "Bold", egui::Key::B, false),
@@ -1471,6 +1517,11 @@ impl App {
                         self.typing_now(cid);
                     }
                 }
+                // "/" at the start lists the commands (integrations.rs)
+                if let Some(pick) = slash_list(ui, &t, &self.slash_choices(&self.chat.text)) {
+                    self.chat.text = format!("/{} ", pick);
+                    move_cursor_to_end(ui.ctx(), text_id, &self.chat.text);
+                }
                 // typing "@" at the start of a word offers the people to mention
                 let mention_popup = egui::Id::new("chat_mention_popup");
                 if r.changed() && self.chat.text.ends_with('@') {
@@ -1714,6 +1765,7 @@ impl App {
                     .cloned()
                     .collect();
                 let teams = self.team_names();
+                let slash_names = self.slash_choices("/");
                 let mut picked: Option<u64> = None;
                 let mut insert: Option<String> = None;
                 let text = if thread {
@@ -1742,6 +1794,26 @@ impl App {
                         },
                     )
                 });
+                // "/" at the start lists the commands, as in the channel's box
+                let choices = {
+                    let typed: &str = text;
+                    let mut out = vec![];
+                    if typed.starts_with('/') {
+                        out = slash_names
+                            .iter()
+                            .filter(|(n, _)| {
+                                typed[1..].chars().all(|c| !c.is_whitespace())
+                                    && n.starts_with(&typed[1..].to_lowercase())
+                            })
+                            .cloned()
+                            .collect();
+                    }
+                    out
+                };
+                if let Some(pick) = slash_list(ui, &t, &choices) {
+                    *text = format!("/{} ", pick);
+                    move_cursor_to_end(ui.ctx(), id, text);
+                }
                 // typing "@" at the start of a word offers the people to
                 // mention, as in the channel's box
                 let mention_popup = egui::Id::new(("reply_mention_popup", thread));
@@ -1896,8 +1968,18 @@ impl App {
                 ui.set_width(w - 50.0);
                 if !compact {
                     ui.horizontal(|ui| {
-                        let name = self.who(m.author);
+                        // a webhook's or command's message shows its name
+                        let name = m.bot.clone().unwrap_or_else(|| self.who(m.author));
                         ui.label(RichText::new(name).strong());
+                        if m.bot.is_some() {
+                            egui::Frame::new()
+                                .fill(t.column_bg)
+                                .corner_radius(3)
+                                .inner_margin(egui::Margin::symmetric(4, 0))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(tr("APP")).small().color(t.text2));
+                                });
+                        }
                         let time = local(m.ts).map(|x| x.text("%-I:%M %p")).unwrap_or_default();
                         ui.label(RichText::new(time).small().color(t.text3));
                         if m.edited.is_some() {
@@ -2860,6 +2942,7 @@ impl App {
                         preview: None,
                         forwarded: None,
                         thread_of: None,
+                        bot: None,
                         mentions,
                         attachments: files,
                         id,
@@ -3121,6 +3204,24 @@ impl App {
                     parent,
                     files,
                 } => {
+                    // "/name ...": a command (integrations.rs)
+                    let mut text = text;
+                    if text.starts_with('/') && files.is_empty() {
+                        use super::integrations::Slash;
+                        match self.slash(ch, parent, &text) {
+                            Slash::Plain => {}
+                            Slash::Done => continue,
+                            Slash::Post(t) => text = t,
+                            Slash::Unknown(t) => {
+                                if parent.is_none() {
+                                    self.chat.text = t;
+                                } else {
+                                    self.chat.thread_text = t;
+                                }
+                                continue;
+                            }
+                        }
+                    }
                     if self.chat.keep_unread == Some(ch) {
                         self.chat.keep_unread = None;
                     }
@@ -3145,6 +3246,7 @@ impl App {
                         preview: None,
                         forwarded: None,
                         thread_of: None,
+                        bot: None,
                         mentions,
                         attachments: files,
                         id,
@@ -3182,6 +3284,10 @@ impl App {
                     }
                     self.dirty = true;
                     self.fetch_preview(ch, id, &sent);
+                    // workflows this channel's new message starts (workflows.rs)
+                    if parent.is_none() {
+                        self.run_workflows(ch, id);
+                    }
                 }
                 ChatAction::NewChannel(name) => {
                     let id = self.data.new_id();

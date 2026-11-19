@@ -395,6 +395,9 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     public let forwarded: ForwardedView?
     /// The channel's copy of a reply in this thread ("Also send to the channel").
     public let threadOf: UInt64?
+    /// Posted by a webhook, slash command or workflow: its name, shown in
+    /// place of the person who set it up.
+    public let bot: String?
 
     /// Message::imported: set once by the import and never cleared; the
     /// field itself stays in the JSON as it came.
@@ -407,6 +410,7 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         preview = j["preview"].flatMap(LinkPreviewView.init)
         forwarded = j["forwarded"].flatMap(ForwardedView.init)
         threadOf = j["thread_of"]?.uint
+        bot = j["bot"]?.string
         attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }

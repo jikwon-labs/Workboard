@@ -768,6 +768,7 @@ fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
             preview: None,
             forwarded: None,
             thread_of: None,
+            bot: None,
             mentions: vec![],
         });
     let mut team = serde_json::to_value(&a.data).unwrap();

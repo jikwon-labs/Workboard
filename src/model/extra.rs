@@ -195,18 +195,33 @@ pub struct CustomField {
     pub options: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Automation {
     pub id: u64,
     pub enabled: bool,
     /// When a task's status changes to this status...
     pub trigger_status: String,
-    /// ...then: assign, priority, comment or move
+    /// ...then: assign, priority, comment or move. For a workflow (`trigger`
+    /// "message"): post (a message in `target`), reply (in its thread) or
+    /// task (made in the List `value`).
     pub action: String,
     pub value: String,
     /// The List or Space (by id; ids are unique across both) it runs in;
     /// None runs it everywhere.
     pub list: Option<u64>,
+    /// What starts it: "" for a task's status (`trigger_status`), or
+    /// "message" (a workflow): a message posted in `channel`, with
+    /// `keyword` in it when set (app/workflows.rs). Older apps never match
+    /// a workflow, since its `trigger_status` is empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trigger: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u64>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub keyword: String,
+    /// Where a workflow posts ("post").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<u64>,
 }
 
 /// A team template (Template Center). The fields from before `kind` was

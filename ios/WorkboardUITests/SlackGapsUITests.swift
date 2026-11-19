@@ -142,3 +142,52 @@ final class ChatSendingUITests: WorkboardUITestCase {
         XCTAssertFalse(a.staticTexts["Half a thought \(tag)"].exists, "not posted now")
     }
 }
+
+final class ChatCommandsUITests: WorkboardUITestCase {
+    /// "/" lists the commands; /shrug posts with the shrug added.
+    func testSlashListAndShrug() {
+        let a = launchFresh(["-wbOpen", "channel:301"])
+        let box = a.textFields["composer"]
+        waitEnabled(box)
+        box.tap()
+        box.typeText("/sh")
+        let chip = a.buttons["command-shrug"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), "typing / lists the commands")
+        chip.tap()
+        XCTAssertEqual(box.value as? String, "/shrug ")
+        let tag = "\(Int.random(in: 1000...9999))"
+        box.typeText("fine \(tag)")
+        a.buttons["sendButton"].tap()
+        XCTAssertTrue(a.staticTexts["fine \(tag) ¯\\_(ツ)_/¯"].waitForExistence(timeout: 5))
+    }
+
+    /// A workflow set up in the channel's settings replies in the thread of
+    /// the next message.
+    func testAWorkflowRepliesToTheNextMessage() {
+        let a = launchFresh(["-wbOpen", "channel:302"])
+        let box = a.textFields["composer"]
+        waitEnabled(box)
+        a.buttons["channelSettingsButton"].tap()
+        let link = a.buttons["workflowsLink"]
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        let tag = "\(Int.random(in: 1000...9999))"
+        let kw = a.textFields["workflowKeyword"]
+        kw.tap()
+        kw.typeText("ping\(tag)")
+        a.buttons["workflowAction"].tap()
+        a.buttons["Reply in its thread"].tap()
+        let text = a.textFields["workflowText"]
+        text.tap()
+        text.typeText("pong")
+        a.buttons["addWorkflow"].tap()
+        XCTAssertTrue(a.staticTexts["Reply in its thread: pong"].waitForExistence(timeout: 5))
+        a.navigationBars.buttons.element(boundBy: 0).tap()
+        a.buttons["channelSettingsDone"].tap()
+        box.tap()
+        box.typeText("ping\(tag) are you there")
+        a.buttons["sendButton"].tap()
+        XCTAssertTrue(a.staticTexts["ping\(tag) are you there"].waitForExistence(timeout: 5))
+        XCTAssertTrue(a.staticTexts["1 reply"].firstMatch.waitForExistence(timeout: 5), "the workflow replied")
+    }
+}

@@ -284,6 +284,39 @@ pub struct PushPrefs {
     pub muted_until: i64,
 }
 
+/// A webhook an owner or admin set up (server/src/hooks.rs): "in" posts
+/// what is sent to the server's /hooks/<token> address in `channel` under
+/// `name`; "out" sends each new message of `channel` (starting with
+/// `trigger`, when set) to `url`, and posts what that answers.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct HookInfo {
+    /// made by the server (the secret part of an "in" hook's address)
+    #[serde(default)]
+    pub token: String,
+    pub kind: String,
+    pub channel: u64,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trigger: String,
+    #[serde(default)]
+    pub creator: u64,
+}
+
+/// A slash command an owner or admin added: "/name text" in a message box
+/// sends the text to `url` (only owners and admins are told it), and what
+/// it answers is posted in the conversation.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct CommandInfo {
+    /// without the slash
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+}
+
 /// A chat message the server keeps until `at` (seconds) and then posts as
 /// its writer's ("Schedule message").
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -484,6 +517,38 @@ pub enum Msg {
     },
     /// My scheduled messages, please.
     ScheduledList,
+    /// The webhooks and slash commands, please (answered with `integrations`;
+    /// webhooks only for owners and admins).
+    Integrations,
+    IntegrationList {
+        #[serde(default)]
+        hooks: Vec<HookInfo>,
+        #[serde(default)]
+        commands: Vec<CommandInfo>,
+    },
+    /// Owner or admin: set up a webhook (the server makes its token).
+    HookAdd {
+        hook: HookInfo,
+    },
+    HookRemove {
+        token: String,
+    },
+    /// Owner or admin: add (or change) a slash command.
+    CommandAdd {
+        command: CommandInfo,
+    },
+    CommandRemove {
+        name: String,
+    },
+    /// Run slash command `name` with `text` in `channel` (thread `parent`).
+    Command {
+        channel: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<u64>,
+        name: String,
+        #[serde(default)]
+        text: String,
+    },
     /// The asker's scheduled messages, soonest first.
     Scheduled {
         items: Vec<ScheduledMsg>,
@@ -673,6 +738,18 @@ impl Msg {
                 Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::Restore { .. }
             )
     }
+}
+
+/// The web address of `path` ("/hooks/<token>") on the server (or the
+/// server's workspace) the address a person typed points to.
+pub fn http_address(addr: &str, path: &str) -> Option<String> {
+    let (_, _, url) = server_url(addr).ok()?;
+    let url = url
+        .strip_prefix("wss://")
+        .map(|r| format!("https://{}", r))
+        .or_else(|| url.strip_prefix("ws://").map(|r| format!("http://{}", r)))?;
+    let base = url.strip_suffix(PATH).unwrap_or(&url);
+    Some(format!("{}{}", base, path))
 }
 
 /// Turn what a person typed ("macmini", "100.1.2.3", "host:9000",
@@ -891,6 +968,11 @@ pub enum Event {
     /// My scheduled messages (the answer to schedule, unschedule and
     /// scheduled_list).
     Scheduled(Vec<ScheduledMsg>),
+    /// The webhooks (owners and admins) and slash commands.
+    Integrations {
+        hooks: Vec<HookInfo>,
+        commands: Vec<CommandInfo>,
+    },
 }
 
 /// How this computer signs in.
@@ -1437,6 +1519,9 @@ fn on_server_msg(
         Some(Msg::Restored { name }) => emit(Event::Restored(name)),
         Some(Msg::Presence { online }) => emit(Event::Presence(online)),
         Some(Msg::Scheduled { items }) => emit(Event::Scheduled(items)),
+        Some(Msg::IntegrationList { hooks, commands }) => {
+            emit(Event::Integrations { hooks, commands })
+        }
         Some(Msg::Typing {
             channel,
             member: Some(member),
@@ -1468,6 +1553,18 @@ fn on_server_msg(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_addresses_on_the_server() {
+        assert_eq!(
+            http_address("https://wb.example.com/w/ab12", "/hooks/t1").as_deref(),
+            Some("https://wb.example.com/w/ab12/hooks/t1")
+        );
+        assert_eq!(
+            http_address("macmini", "/hooks/t1").as_deref(),
+            Some("http://macmini:8787/hooks/t1")
+        );
+    }
 
     #[test]
     fn a_workspace_below_the_server_has_its_own_paths() {

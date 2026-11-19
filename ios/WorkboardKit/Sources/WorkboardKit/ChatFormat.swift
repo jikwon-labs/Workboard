@@ -73,7 +73,8 @@ public enum ChatFormat {
     }
 
     /// Bare http(s) addresses at the start of a word wrapped in <...>
-    /// (Markdown's autolinks), outside `code` and [text](url).
+    /// (Markdown's autolinks), outside `code`; \ and _ escaped, since the
+    /// Mac shows them as typed (no escapes, italic only with *).
     static func autolinked(_ s: String) -> String {
         var out = ""
         var i = s.startIndex
@@ -94,6 +95,10 @@ public enum ChatFormat {
                 out += "<\(url)>" + tail
                 i = end
                 continue
+            }
+            // the Mac reads no \ escapes and no _italic_: shown as typed
+            if !inCode && (c == "\\" || c == "_") {
+                out.append("\\")
             }
             out.append(c)
             i = s.index(after: i)

@@ -50,6 +50,8 @@ struct App {
     typing: Vec<(u64, u64)>,
     /// my scheduled messages, from the last `scheduled` answer
     scheduled: Option<Vec<wb_net::ScheduledMsg>>,
+    /// the webhooks and commands, from the last `integrations` answer
+    integrations: Option<(Vec<wb_net::HookInfo>, Vec<wb_net::CommandInfo>)>,
     /// account email from the welcome, then from `account` answers
     email: Option<String>,
     /// (member, emailed to, mail error) for each invite answer
@@ -141,6 +143,7 @@ impl App {
             online: None,
             typing: vec![],
             scheduled: None,
+            integrations: None,
             email: None,
             mailed: vec![],
             updates: vec![],
@@ -291,6 +294,9 @@ impl App {
                 Event::Presence(o) => self.online = Some(o),
                 Event::Typing { channel, member } => self.typing.push((channel, member)),
                 Event::Scheduled(items) => self.scheduled = Some(items),
+                Event::Integrations { hooks, commands } => {
+                    self.integrations = Some((hooks, commands))
+                }
             }
         }
     }
@@ -3163,6 +3169,154 @@ fn a_server_whose_workspace_file_went_missing_is_not_up_for_grabs() {
 }
 
 // ------------------------------------------------------------ iPhone pushes
+
+/// Stands in for the webhooks' and commands' addresses: notes each request
+/// and answers with `answer`.
+#[derive(Debug, Default)]
+struct FakePoster {
+    got: std::sync::Mutex<Vec<(String, Value)>>,
+    answer: std::sync::Mutex<String>,
+}
+
+impl workboard_server::hooks::Poster for FakePoster {
+    fn post(&self, url: &str, body: &Value) -> Result<String, String> {
+        self.got
+            .lock()
+            .unwrap()
+            .push((url.to_string(), body.clone()));
+        Ok(self.answer.lock().unwrap().clone())
+    }
+}
+
+fn message_with<'a>(d: &'a Value, text: &str) -> Option<&'a Value> {
+    d["channels"][0]["messages"]
+        .as_array()?
+        .iter()
+        .find(|m| m["text"] == text)
+}
+
+/// Webhooks and slash commands: an owner sets them up; a POST to an
+/// incoming webhook's address posts under its name; a channel's new
+/// messages go to its outgoing webhook, whose answer is posted; a slash
+/// command's answer is posted too. A member can't set them up.
+#[test]
+fn webhooks_and_slash_commands_post_under_their_names() {
+    let home = temp_home("hooks");
+    let fake = Arc::new(FakePoster::default());
+    let opts = workboard_server::Options {
+        poster: Some(fake.clone()),
+        ..Default::default()
+    };
+    let server = Server::start_with(&home, 0, opts);
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    // a member may not
+    b.client.send(Msg::HookAdd {
+        hook: wb_net::HookInfo {
+            kind: "in".into(),
+            channel: 10,
+            name: "Sneaky".into(),
+            ..Default::default()
+        },
+    });
+    b.until("turned down", |b| !b.denied.is_empty());
+    // incoming
+    a.client.send(Msg::HookAdd {
+        hook: wb_net::HookInfo {
+            kind: "in".into(),
+            channel: 10,
+            name: "CI".into(),
+            ..Default::default()
+        },
+    });
+    a.until("the webhook listed", |a| {
+        a.integrations.as_ref().is_some_and(|(h, _)| h.len() == 1)
+    });
+    let token = a.integrations.as_ref().unwrap().0[0].token.clone();
+    assert_eq!(token.len(), 36);
+    let (head, _) = http_post(
+        port,
+        &format!("/hooks/{}", token),
+        r#"{"text": "Build passed"}"#,
+    );
+    assert!(head.starts_with("HTTP/1.1 200"), "{}", head);
+    let (head, _) = http_post(port, "/hooks/nope", r#"{"text": "x"}"#);
+    assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
+    b.wait("the webhook's message at B", |d| {
+        message_with(d, "Build passed").is_some()
+    });
+    let m = message_with(&b.data, "Build passed").unwrap();
+    assert_eq!(m["bot"], "CI");
+    assert_eq!(m["author"], 1, "its setter's");
+    // outgoing, with a trigger word; the answer comes back under its name
+    *fake.answer.lock().unwrap() = r#"{"text": "pong"}"#.into();
+    a.client.send(Msg::HookAdd {
+        hook: wb_net::HookInfo {
+            kind: "out".into(),
+            channel: 10,
+            name: "Pinger".into(),
+            url: "https://bots.example/ping".into(),
+            trigger: "!ping".into(),
+            ..Default::default()
+        },
+    });
+    a.until("two webhooks", |a| {
+        a.integrations.as_ref().is_some_and(|(h, _)| h.len() == 2)
+    });
+    b.change(in_general("no trigger here", 4001, 2));
+    b.change(in_general("!ping are you there", 4002, 2));
+    a.wait("the answer at A", |d| message_with(d, "pong").is_some());
+    assert_eq!(message_with(&a.data, "pong").unwrap()["bot"], "Pinger");
+    {
+        let got = fake.got.lock().unwrap();
+        assert_eq!(got.len(), 1, "only the message with the trigger word");
+        assert_eq!(got[0].0, "https://bots.example/ping");
+        assert_eq!(got[0].1["text"], "!ping are you there");
+        assert_eq!(got[0].1["user_id"], 2);
+        assert_eq!(got[0].1["channel_name"], "general");
+    }
+    // a slash command
+    *fake.answer.lock().unwrap() = r#"{"text": "Deployed v2"}"#.into();
+    a.client.send(Msg::CommandAdd {
+        command: wb_net::CommandInfo {
+            name: "/Deploy".into(),
+            description: "Ship it".into(),
+            url: "https://bots.example/deploy".into(),
+        },
+    });
+    a.until("the command listed", |a| {
+        a.integrations.as_ref().is_some_and(|(_, c)| c.len() == 1)
+    });
+    // a member sees the command but not its address
+    b.client.send(Msg::Integrations);
+    b.until("B's list", |b| b.integrations.is_some());
+    let (hooks, cmds) = b.integrations.clone().unwrap();
+    assert!(hooks.is_empty(), "webhooks are for owners and admins");
+    assert_eq!(cmds[0].name, "deploy");
+    assert!(cmds[0].url.is_empty());
+    b.client.send(Msg::Command {
+        channel: 10,
+        parent: None,
+        name: "deploy".into(),
+        text: "v2".into(),
+    });
+    a.wait("the command's answer", |d| {
+        message_with(d, "Deployed v2").is_some()
+    });
+    assert_eq!(
+        message_with(&a.data, "Deployed v2").unwrap()["bot"],
+        "/deploy"
+    );
+    assert_eq!(fake.got.lock().unwrap().last().unwrap().1["text"], "v2");
+    // a command that isn't there
+    b.client.send(Msg::Command {
+        channel: 10,
+        parent: None,
+        name: "nope".into(),
+        text: String::new(),
+    });
+    b.until("turned down", |b| b.denied.len() == 2);
+}
 
 /// Stands in for APNs: notes what would have gone out, and answers "gone"
 /// for the tokens in `gone`.

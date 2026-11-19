@@ -1383,6 +1383,7 @@ fn status_editor_retargets_automations_only_when_a_rename_is_done() {
         action: "priority".into(),
         value: "1".into(),
         list: None,
+        ..Default::default()
     };
     h.app.data.extra.automations = vec![rule(1, "review"), rule(2, "triage")];
     h.app.edit_statuses = Some(sid);
@@ -1617,6 +1618,7 @@ fn switching_the_status_editor_to_another_space_or_quitting_finishes_the_edits()
         action: "priority".into(),
         value: "1".into(),
         list: Some(list),
+        ..Default::default()
     }];
     let status_ok = |h: &Ui1, si: usize, t: u64| {
         let st = h.app.task(t).unwrap().status.clone();

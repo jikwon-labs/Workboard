@@ -198,6 +198,15 @@ pub(super) enum Modal {
     /// (`updater::status_ui`; Sparkle has its own window on macOS). Last, so
     /// the other dialogs keep their window ids.
     Update,
+    /// Automations that start from chat messages.
+    Workflows {
+        form: Box<super::workflows::WorkflowForm>,
+    },
+    /// A channel's webhooks and the workspace's slash commands.
+    Integrations {
+        channel: u64,
+        form: Box<super::integrations::IntegrationForm>,
+    },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -1316,6 +1325,8 @@ impl App {
             Modal::SavedMessages => tr("Saved messages").into(),
             Modal::Drafts => tr("Drafts").into(),
             Modal::Scheduled => tr("Scheduled messages").into(),
+            Modal::Integrations { .. } => tr("Integrations").into(),
+            Modal::Workflows { .. } => tr("Workflows").into(),
             Modal::ScheduleAt { .. } => tr("Schedule message").into(),
             Modal::Forward { .. } => tr("Forward message").into(),
             Modal::Share { .. } => tr("Share").into(),
@@ -1539,6 +1550,10 @@ impl App {
             }
             Modal::Drafts => close = self.drafts_body(ui),
             Modal::Scheduled => close = self.scheduled_body(ui),
+            Modal::Workflows { form } => close = self.workflows_body(ui, t, form),
+            Modal::Integrations { channel, form } => {
+                close = self.integrations_body(ui, t, *channel, form)
+            }
             Modal::ScheduleAt { date, time } => close = self.schedule_at_body(ui, t, date, time),
             Modal::Forward { ch, msg, to, note } => {
                 close = self.forward_body(ui, *ch, *msg, to, note);

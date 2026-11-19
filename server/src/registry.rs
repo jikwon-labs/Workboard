@@ -579,6 +579,17 @@ async fn w_join(
     }
 }
 
+async fn w_hook(
+    State(r): State<Arc<Registry>>,
+    UrlPath((id, token)): UrlPath<(String, String)>,
+    body: axum::body::Bytes,
+) -> Response {
+    match r.hub(&id) {
+        Some(h) => hook_route(State(h), UrlPath(token), body).await,
+        None => r.missing(&id),
+    }
+}
+
 async fn w_health(
     State(r): State<Arc<Registry>>,
     UrlPath(id): UrlPath<String>,
@@ -601,5 +612,6 @@ pub(crate) fn routes(r: Arc<Registry>) -> Router {
         .route("/w/{id}/auth/forgot", axum::routing::post(w_forgot))
         .route("/w/{id}/join", get(w_join))
         .route("/w/{id}/health", get(w_health))
+        .route("/w/{id}/hooks/{token}", axum::routing::post(w_hook))
         .with_state(r)
 }

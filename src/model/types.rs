@@ -414,6 +414,10 @@ pub struct Message {
     /// the channel"): the reply itself notifies, not this copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_of: Option<u64>,
+    /// Posted by a webhook or slash command (server/src/hooks.rs): its name,
+    /// shown in place of the person who set it up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot: Option<String>,
 }
 
 /// The message a forwarded one carries: what it said, who wrote it, when

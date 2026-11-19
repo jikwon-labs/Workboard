@@ -212,6 +212,7 @@ impl App {
                 preview: None,
                 forwarded: None,
                 thread_of: None,
+                bot: None,
                 mentions: vec![],
                 attachments: vec![],
                 id,

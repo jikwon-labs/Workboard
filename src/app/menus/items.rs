@@ -93,6 +93,39 @@ impl App {
             });
         }
         ui.add_space(8.0);
+        // workflows that start from this channel
+        if is_channel {
+            let w = ui.button(tr("Workflows..."));
+            name_it(&w, "Workflows");
+            if w.clicked() {
+                self.modal = Some(Modal::Workflows {
+                    form: Box::new(super::workflows::WorkflowForm {
+                        channel: Some(cid),
+                        ..Default::default()
+                    }),
+                });
+                return false;
+            }
+        }
+        // webhooks and slash commands: owners and admins on a server
+        let mut integrations = false;
+        if is_channel && self.on_server() && self.i_manage() {
+            let b = ui.button(tr("Integrations..."));
+            name_it(&b, "Integrations");
+            integrations = b.clicked();
+            if integrations {
+                if let Some(net) = &self.sync_rt.net {
+                    net.send(wb_net::Msg::Integrations);
+                }
+            }
+        }
+        if integrations {
+            self.modal = Some(Modal::Integrations {
+                channel: cid,
+                form: Default::default(),
+            });
+            return false;
+        }
         ui.horizontal(|ui| {
             if ui.button(tr("Mark as read")).clicked() {
                 self.mark_read(cid);

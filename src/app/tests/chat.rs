@@ -569,6 +569,7 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         preview: None,
         forwarded: None,
         thread_of: None,
+        bot: None,
     }
 }
 
@@ -712,6 +713,7 @@ fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
         preview: None,
         forwarded: None,
         thread_of: None,
+        bot: None,
     }
 }
 
@@ -1368,6 +1370,7 @@ fn automation_assignments_reach_the_inbox() {
         action: "assign".into(),
         value: "1".into(),
         list: None,
+        ..Default::default()
     });
     let id = add_task(&mut a, list, "Finish me");
     a.data

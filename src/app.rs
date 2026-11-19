@@ -28,6 +28,7 @@ mod hubs;
 mod huddle;
 mod icons;
 mod ime;
+mod integrations;
 mod listview;
 mod login;
 mod menus;
@@ -56,6 +57,7 @@ mod typing;
 #[cfg(test)]
 mod ui_tests;
 mod watch;
+mod workflows;
 use menus::Modal;
 pub use pages::Section;
 use parity::TaskFilter;

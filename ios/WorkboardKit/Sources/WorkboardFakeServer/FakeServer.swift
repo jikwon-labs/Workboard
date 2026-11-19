@@ -396,6 +396,9 @@ public final class FakeServer: @unchecked Sendable {
         case .schedule, .unschedule, .scheduledList:
             // the fake server keeps no scheduled messages: an empty list
             send(.scheduled([]), to: p)
+        case .integrations, .hookAdd, .hookRemove, .commandAdd, .commandRemove, .command:
+            // nor webhooks or commands
+            send(.integrationList(hooks: [], commands: []), to: p)
         case .createInvite, .setRole, .revoke, .accessList, .backupList, .restore:
             request(m, from: p)
         case let .callJoin(ch):

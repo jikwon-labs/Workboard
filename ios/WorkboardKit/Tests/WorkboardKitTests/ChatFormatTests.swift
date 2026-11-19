@@ -17,6 +17,10 @@ final class ChatFormatTests: XCTestCase {
         XCTAssertTrue(a.runs.contains { $0.inlinePresentationIntent?.contains(.code) == true })
         XCTAssertEqual(a.runs.compactMap(\.link).first?.absoluteString, "https://example.com/x")
         XCTAssertEqual(String(ChatFormat.inline("2 * 3 * 4").characters), "2 * 3 * 4", "marks with spaces inside stay")
+        XCTAssertEqual(String(ChatFormat.inline("fine ¯\\_(ツ)_/¯ and snake_case_name").characters), "fine ¯\\_(ツ)_/¯ and snake_case_name",
+                       "no \\ escapes or _italic_, as on the Mac")
+        XCTAssertEqual(String(ChatFormat.inline("`a_b\\c` x").characters), "a_b\\c x")
+        XCTAssertEqual(ChatFormat.inline("see https://ex.example/a_b").runs.compactMap(\.link).first?.absoluteString, "https://ex.example/a_b")
         XCTAssertEqual(ChatFormat.firstURL("see `https://no.example` and [doc](https://d.example/a)"), "https://d.example/a")
         XCTAssertEqual(ChatFormat.firstURL("```\nhttps://code.example\n```\nplain"), nil)
     }

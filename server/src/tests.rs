@@ -473,6 +473,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         max_file: MAX_FILE,
         claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
         pusher: None,
+        poster: Arc::new(hooks::Curl),
         online: Mutex::new(Default::default()),
         members_online: Mutex::new(Default::default()),
         presence: watch::channel(vec![]).0,

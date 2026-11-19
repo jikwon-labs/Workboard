@@ -193,6 +193,8 @@ pub struct SyncRt {
     pub(super) choices: Option<(Vec<(String, String)>, How)>,
     /// A workspace on this computer to open (the one chosen is here already).
     pub(super) open_local: Option<String>,
+    /// The server's webhooks (owners and admins) and slash commands.
+    pub(super) integrations: Option<(Vec<wb_net::HookInfo>, Vec<wb_net::CommandInfo>)>,
     /// My scheduled messages the server keeps (None until it answered).
     pub(super) scheduled: Option<Vec<wb_net::ScheduledMsg>>,
     /// The owner's view of the server's backups (None until asked for).
@@ -332,6 +334,7 @@ impl App {
                 preview: None,
                 forwarded: None,
                 thread_of: None,
+                bot: None,
                 mentions: vec![],
                 attachments: vec![],
                 id,

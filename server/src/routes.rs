@@ -369,3 +369,21 @@ pub(crate) async fn health(
     }))
     .into_response()
 }
+
+/// POST /hooks/<token>: an incoming webhook (hooks.rs).
+pub(crate) async fn hook_route(
+    State(hub): State<Arc<Hub>>,
+    axum::extract::Path(token): axum::extract::Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    let res = tokio::task::spawn_blocking(move || hub.hook_in(&token, &body)).await;
+    match res {
+        Ok(Ok(())) => (axum::http::StatusCode::OK, "ok").into_response(),
+        Ok(Err((code, why))) => (
+            axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::BAD_REQUEST),
+            why,
+        )
+            .into_response(),
+        Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}

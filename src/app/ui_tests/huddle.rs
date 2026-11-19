@@ -97,6 +97,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
         preview: None,
         forwarded: None,
         thread_of: None,
+        bot: None,
         mentions: vec![],
         attachments: vec![],
         id,

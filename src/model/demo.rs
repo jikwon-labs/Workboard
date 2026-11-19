@@ -568,6 +568,7 @@ impl Data {
             preview: None,
             forwarded: None,
             thread_of: None,
+            bot: None,
         };
         let c1 = d.new_id();
         let mut m1 = msg(

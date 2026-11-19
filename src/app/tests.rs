@@ -341,6 +341,7 @@ fn automations_run_on_status_change() {
         action: "assign".into(),
         value: "3".into(),
         list: None,
+        ..Default::default()
     });
     a.data.extra.automations.push(Automation {
         id: 2,
@@ -349,6 +350,7 @@ fn automations_run_on_status_change() {
         action: "priority".into(),
         value: "4".into(),
         list: None,
+        ..Default::default()
     });
     a.data.extra.automations.push(Automation {
         id: 3,
@@ -357,6 +359,7 @@ fn automations_run_on_status_change() {
         action: "comment".into(),
         value: "Nice work".into(),
         list: None,
+        ..Default::default()
     });
     a.data.extra.automations.push(Automation {
         id: 4,
@@ -365,6 +368,7 @@ fn automations_run_on_status_change() {
         action: "move".into(),
         value: other.to_string(),
         list: None,
+        ..Default::default()
     });
     a.data.extra.automations.push(Automation {
         id: 5,
@@ -373,6 +377,7 @@ fn automations_run_on_status_change() {
         action: "priority".into(),
         value: "1".into(),
         list: None,
+        ..Default::default()
     });
     let id = add_task(&mut a, list, "Automate me");
     let mut t = a.task(id).unwrap().clone();
@@ -1549,6 +1554,7 @@ fn renaming_or_deleting_a_status_carries_its_tasks() {
         action: "priority".into(),
         value: "1".into(),
         list: None,
+        ..Default::default()
     });
     let si = 0;
     let mut orig: Vec<Option<String>> = a.data.spaces[si]
@@ -1859,6 +1865,7 @@ fn scoped_automation_runs_only_in_its_list_and_moves_subtasks() {
         action: "priority".into(),
         value: "4".into(),
         list: Some(other),
+        ..Default::default()
     });
     a.data.extra.automations.push(Automation {
         id: 2,
@@ -1867,6 +1874,7 @@ fn scoped_automation_runs_only_in_its_list_and_moves_subtasks() {
         action: "move".into(),
         value: other.to_string(),
         list: Some(list),
+        ..Default::default()
     });
     let id = add_task(&mut a, list, "Scoped");
     a.apply(Action::Add {
@@ -2341,6 +2349,7 @@ fn status_renames_and_deletes_carry_automations_of_that_space() {
         action: "priority".into(),
         value: "1".into(),
         list,
+        ..Default::default()
     };
     a.data.extra.automations = vec![
         rule(1, Some(list)),
@@ -2398,6 +2407,7 @@ fn single_assignee_setting_replaces_instead_of_adding() {
         action: "assign".into(),
         value: "2".into(),
         list: None,
+        ..Default::default()
     });
     let mut t = a.task(id).unwrap().clone();
     t.status = "in progress".into();

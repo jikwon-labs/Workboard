@@ -312,6 +312,7 @@ impl App {
                     // what I scheduled (servers from before scheduling don't answer)
                     if let Some(net) = &self.sync_rt.net {
                         net.send(wb_net::Msg::ScheduledList);
+                        net.send(wb_net::Msg::Integrations);
                     }
                 }
                 NetEvent::Update { .. } => unreachable!("taken in above"),
@@ -372,6 +373,9 @@ impl App {
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
                 NetEvent::Presence(online) => self.sync_rt.online = Some(online),
                 NetEvent::Scheduled(items) => self.sync_rt.scheduled = Some(items),
+                NetEvent::Integrations { hooks, commands } => {
+                    self.sync_rt.integrations = Some((hooks, commands))
+                }
                 NetEvent::Typing { channel, member } => self.heard_typing(channel, member),
                 NetEvent::Restored(name) => {
                     let label = wb_net::Backup { name, bytes: 0 }.label();

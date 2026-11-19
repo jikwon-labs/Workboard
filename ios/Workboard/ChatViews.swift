@@ -246,6 +246,7 @@ struct ChannelRow: View {
 
 struct ConversationView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(Notifier.self) private var notifier
     @Environment(CallManager.self) private var calls
     @Environment(\.openURL) private var openURL
     let channelId: UInt64
@@ -291,9 +292,18 @@ struct ConversationView: View {
                 VStack(spacing: 0) {
                     TypingLine(channelId: c.id)
                     Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
+                        var text = text
+                        switch runSlash(client, notifier: notifier, text: text, channel: c.id, parent: nil, hasFiles: !files.isEmpty) {
+                        case .notCommand: break
+                        case .done: return true
+                        case .keep: return false
+                        case .post(let t): text = t
+                        }
                         let id = client.newId()
                         let sent = client.edit { d, me in
                             Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
+                            // workflows this message starts (ChatCommands.swift)
+                            Edits.runWorkflows(&d, channel: c.id, message: id, me: me, ts: nowTs()) { client.newId() }
                         }
                         if sent { fetchPreview(client, channel: c.id, message: id, text: text) }
                         return sent
@@ -354,6 +364,7 @@ struct ConversationView: View {
 
 struct ThreadView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(Notifier.self) private var notifier
     let channelId: UInt64
     let messageId: UInt64
     /// "Also send to #channel" is on for the next reply.
@@ -388,6 +399,13 @@ struct ThreadView: View {
                     .background(.bar)
                     .accessibilityIdentifier("alsoToChannel")
                     Composer(placeholder: "Reply…", attachments: true) { text, files, picked in
+                        var text = text
+                        switch runSlash(client, notifier: notifier, text: text, channel: c.id, parent: m.id, hasFiles: !files.isEmpty) {
+                        case .notCommand: break
+                        case .done: return true
+                        case .keep: return false
+                        case .post(let t): text = t
+                        }
                         let id = client.newId()
                         let copy = alsoToChannel ? client.newId() : nil
                         let sent = client.edit { d, me in
@@ -470,7 +488,11 @@ struct MessageRow: View {
         VStack(alignment: .leading, spacing: 2) {
             if !compact {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(author?.name ?? String(localized: "Someone")).font(.subheadline.weight(.semibold))
+                    Text(message.bot ?? author?.name ?? String(localized: "Someone")).font(.subheadline.weight(.semibold))
+                    if message.bot != nil {
+                        Text("APP").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 4).background(RoundedRectangle(cornerRadius: 3).fill(Color(.secondarySystemFill)))
+                    }
                     Text(Fmt.time(message.ts)).font(.caption).foregroundStyle(.secondary)
                     if message.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
                     if message.saved { Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Saved") }
@@ -742,6 +764,29 @@ struct Composer: View {
     var body: some View {
         let can = client.canEdit
         VStack(spacing: 6) {
+            let slash = SlashCommands.choices(text, commands: client.commands)
+            if !slash.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(slash, id: \.0) { name, about in
+                            Button {
+                                text = "/\(name) "
+                            } label: {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("/" + name).font(.subheadline.weight(.medium).monospaced())
+                                    if !about.isEmpty { Text(L(about)).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color(.secondarySystemBackground)))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("command-\(name)")
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
             let choices = mentionChoices
             let groups = groupChoices
             if !choices.isEmpty || !groups.isEmpty {
@@ -1025,6 +1070,14 @@ struct ChannelSettingsView: View {
                         }
                     }
                     if c.kind == .channel {
+                        Section("Automate") {
+                            NavigationLink { WorkflowsView(channelId: c.id) } label: { Label("Workflows", systemImage: "arrow.triangle.branch") }
+                                .accessibilityIdentifier("workflowsLink")
+                            if ["owner", "admin"].contains(client.settings.role ?? "") {
+                                NavigationLink { IntegrationsView(channelId: c.id) } label: { Label("Integrations", systemImage: "link") }
+                                    .accessibilityIdentifier("integrationsLink")
+                            }
+                        }
                         Section("Notify me about") {
                             Picker("Messages", selection: Binding(get: { notifier.prefs.channelMode(c.id) }, set: { notifier.prefs.setChannelMode(c.id, $0) })) {
                                 ForEach(NotificationSettingsView.modes, id: \.0) { Text(L($0.1)).tag($0.0) }
@@ -1470,5 +1523,185 @@ struct ForwardedCard: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, 4)
+    }
+}
+
+
+/// What a "/" message came to (SlashCommands, as on the Mac).
+enum SlashOutcome { case notCommand, done, keep, post(String) }
+
+/// Run a "/" message written in `channel` (thread `parent`): the app's own
+/// commands here, the server's sent to it; an unknown one stays in the box.
+@MainActor
+func runSlash(_ client: SyncClient, notifier: Notifier, text: String, channel: UInt64, parent: UInt64?, hasFiles: Bool) -> SlashOutcome {
+    guard text.hasPrefix("/"), !hasFiles else { return .notCommand }
+    switch SlashCommands.parse(text.trimmed, commands: client.commands) {
+    case .plain: return .notCommand
+    case .shrug(let t), .me(let t): return .post(t)
+    case .topic(let t):
+        client.edit { d, _ in Edits.setChannelTopic(&d, channel: channel, to: t) }
+        return .done
+    case .mute:
+        notifier.prefs.setChannelMode(channel, "nothing")
+        return .done
+    case .unmute:
+        notifier.prefs.setChannelMode(channel, notifier.prefs.channelDefault == "nothing" ? "mentions" : notifier.prefs.channelDefault)
+        return .done
+    case let .remind(what, secs):
+        let id = client.newId(), me = client.me ?? 0, at = nowTs() + secs
+        client.editLocal { d in Edits.addReminder(&d, text: what, dueTs: at, me: me, id: id) }
+        ReminderAlerts.schedule(id: id, text: what, at: at)
+        return .done
+    case .remindHelp:
+        client.showNotice(String(localized: "Try: /remind call Sam in 30 minutes"))
+        return .keep
+    case let .server(name, rest, known):
+        guard known else {
+            client.showNotice(String(localized: "There's no /\(name) command."))
+            return .keep
+        }
+        return client.runCommand(name, text: rest, channel: channel, parent: parent) ? .done : .keep
+    }
+}
+
+/// Workflows that start from this channel's messages, and a new one.
+struct WorkflowsView: View {
+    @Environment(SyncClient.self) private var client
+    let channelId: UInt64
+    @State private var keyword = ""
+    @State private var action = "post"
+    @State private var text = ""
+    @State private var target: UInt64?
+    @State private var list: UInt64?
+
+    var body: some View {
+        let v = client.view, me = client.me ?? 0
+        let rules = (client.data?.at("extra.automations")?.array ?? []).filter { $0["trigger"]?.string == "message" && $0["channel"]?.uint == channelId }
+        let channels = v.visibleChannels(me: me).filter { $0.kind == .channel }
+        Form {
+            Section {
+                if rules.isEmpty { Text("No workflows yet.").foregroundStyle(.secondary) }
+                ForEach(rules.indices, id: \.self) { i in
+                    let r = rules[i]
+                    let id = r["id"]?.uint ?? 0
+                    VStack(alignment: .leading, spacing: 2) {
+                        let k = r["keyword"]?.string ?? ""
+                        Text(k.isEmpty ? String(localized: "Any message") : String(localized: "Messages with \"\(k)\"")).font(.caption).foregroundStyle(.secondary)
+                        switch r["action"]?.string {
+                        case "reply": Text("Reply in its thread: \(r["value"]?.string ?? "")")
+                        case "task": Text("Make a task in \(v.list(UInt64(r["value"]?.string ?? "") ?? 0)?.name ?? "")")
+                        default:
+                            let to = channels.first { $0.id == r["target"]?.uint }?.name ?? ""
+                            Text("Post in #\(to): \(r["value"]?.string ?? "")")
+                        }
+                    }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) {
+                            client.edit { d, _ in Edits.deleteAutomation(&d, automation: id) }
+                        }
+                    }
+                }
+            } header: { Text("Workflows") }
+            Section {
+                TextField("With this word in it (optional)", text: $keyword).accessibilityIdentifier("workflowKeyword")
+                Picker("Then", selection: $action) {
+                    Text("Post a message in").tag("post")
+                    Text("Reply in its thread").tag("reply")
+                    Text("Make a task in").tag("task")
+                }
+                .accessibilityIdentifier("workflowAction")
+                if action == "post" {
+                    Picker("Channel", selection: $target) {
+                        Text("Choose").tag(UInt64?.none)
+                        ForEach(channels) { c in Text("#" + c.name).tag(UInt64?.some(c.id)) }
+                    }
+                    .accessibilityIdentifier("workflowTarget")
+                }
+                if action == "task" {
+                    Picker("List", selection: $list) {
+                        Text("Choose").tag(UInt64?.none)
+                        ForEach(v.visibleSpaces(me: me).flatMap(\.allListIds), id: \.self) { l in Text(v.list(l)?.name ?? "").tag(UInt64?.some(l)) }
+                    }
+                }
+                if action != "task" {
+                    TextField("Message, like: {user} said {text}", text: $text, axis: .vertical).accessibilityIdentifier("workflowText")
+                }
+                Button("Add workflow") {
+                    let id = client.newId()
+                    client.edit { d, _ in
+                        Edits.addWorkflow(&d, channel: channelId, keyword: keyword, action: action, text: text, target: target, list: list, id: id)
+                    }
+                    keyword = ""; text = ""
+                }
+                .disabled(action == "post" ? (target == nil || text.isBlank) : action == "reply" ? text.isBlank : list == nil)
+                .accessibilityIdentifier("addWorkflow")
+            } header: { Text("When a message is posted here") }
+        }
+        .navigationTitle("Workflows")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A channel's webhooks and the workspace's slash commands (owners and admins).
+struct IntegrationsView: View {
+    @Environment(SyncClient.self) private var client
+    let channelId: UInt64
+    @State private var inName = ""
+    @State private var outName = ""
+    @State private var outURL = ""
+    @State private var outTrigger = ""
+    @State private var cmdName = ""
+    @State private var cmdURL = ""
+    @State private var cmdAbout = ""
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(client.hooks.filter { $0.channel == channelId && $0.kind == "in" }) { h in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(h.name).font(.subheadline.weight(.semibold))
+                        Text(client.hookAddress(h.token)).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    .swipeActions { Button("Remove", role: .destructive) { client.removeHook(h.token) } }
+                    .contextMenu { Button("Copy") { UIPasteboard.general.string = client.hookAddress(h.token) } }
+                }
+                HStack {
+                    TextField("Name, like CI", text: $inName).accessibilityIdentifier("incomingName")
+                    Button("Add") { client.addHook(kind: "in", channel: channelId, name: inName); inName = "" }
+                        .accessibilityIdentifier("addIncoming")
+                }
+            } header: { Text("Incoming webhooks") } footer: { Text("Other services post to this channel by sending {\"text\": \"...\"} to the address.") }
+            Section {
+                ForEach(client.hooks.filter { $0.channel == channelId && $0.kind == "out" }) { h in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(h.name).font(.subheadline.weight(.semibold))
+                        Text(h.url + (h.trigger.isEmpty ? "" : " · " + h.trigger)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .swipeActions { Button("Remove", role: .destructive) { client.removeHook(h.token) } }
+                }
+                TextField("Name", text: $outName)
+                TextField("https://...", text: $outURL).textInputAutocapitalization(.never).keyboardType(.URL)
+                TextField("Trigger word", text: $outTrigger).textInputAutocapitalization(.never)
+                Button("Add") { client.addHook(kind: "out", channel: channelId, name: outName, url: outURL, trigger: outTrigger); outName = ""; outURL = ""; outTrigger = "" }
+                    .disabled(outURL.isBlank)
+            } header: { Text("Outgoing webhooks") } footer: { Text("Each new message here (starting with the trigger word, if there is one) is sent to the address; an answer {\"text\": \"...\"} is posted back.") }
+            Section {
+                ForEach(client.commands) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("/" + c.name).font(.subheadline.weight(.semibold).monospaced())
+                        if !c.description.isEmpty { Text(c.description).font(.caption).foregroundStyle(.secondary) }
+                    }
+                    .swipeActions { Button("Remove", role: .destructive) { client.removeCommand(c.name) } }
+                }
+                TextField("/deploy", text: $cmdName).textInputAutocapitalization(.never)
+                TextField("https://...", text: $cmdURL).textInputAutocapitalization(.never).keyboardType(.URL)
+                TextField("What it does", text: $cmdAbout)
+                Button("Add") { client.addCommand(name: cmdName, url: cmdURL, description: cmdAbout); cmdName = ""; cmdURL = ""; cmdAbout = "" }
+                    .disabled(cmdName.isBlank || cmdURL.isBlank)
+            } header: { Text("Slash commands (whole workspace)") }
+        }
+        .navigationTitle("Integrations")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { client.askIntegrations() }
     }
 }

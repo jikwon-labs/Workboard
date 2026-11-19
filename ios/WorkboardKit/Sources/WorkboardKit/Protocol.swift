@@ -106,6 +106,13 @@ public enum ClientMessage: Equatable, Sendable {
     case schedule(item: JSON)
     case unschedule(id: UInt64)
     case scheduledList
+    /// Webhooks and slash commands (wb_net::HookInfo, wb_net::CommandInfo as JSON).
+    case integrations
+    case hookAdd(hook: JSON)
+    case hookRemove(token: String)
+    case commandAdd(command: JSON)
+    case commandRemove(name: String)
+    case command(channel: UInt64, parent: UInt64?, name: String, text: String)
     case restore(name: String)
     case ping
     case pong
@@ -154,6 +161,15 @@ public enum ClientMessage: Equatable, Sendable {
         case let .schedule(item): return ["type": "schedule", "item": item]
         case let .unschedule(id): return ["type": "unschedule", "id": .id(id)]
         case .scheduledList: return ["type": "scheduled_list"]
+        case .integrations: return ["type": "integrations"]
+        case let .hookAdd(hook): return ["type": "hook_add", "hook": hook]
+        case let .hookRemove(token): return ["type": "hook_remove", "token": .string(token)]
+        case let .commandAdd(command): return ["type": "command_add", "command": command]
+        case let .commandRemove(name): return ["type": "command_remove", "name": .string(name)]
+        case let .command(channel, parent, name, text):
+            var o: [String: JSON] = ["type": "command", "channel": .id(channel), "name": .string(name), "text": .string(text)]
+            if let parent { o["parent"] = .id(parent) }
+            return .object(o)
         case let .restore(name):
             return ["type": "restore", "name": .string(name)]
         case .ping: return ["type": "ping"]
@@ -203,6 +219,12 @@ public enum ClientMessage: Equatable, Sendable {
         case "schedule": self = .schedule(item: j["item"] ?? .null)
         case "unschedule": self = .unschedule(id: j["id"]?.uint ?? 0)
         case "scheduled_list": self = .scheduledList
+        case "integrations": self = .integrations
+        case "hook_add": self = .hookAdd(hook: j["hook"] ?? .null)
+        case "hook_remove": self = .hookRemove(token: j["token"]?.string ?? "")
+        case "command_add": self = .commandAdd(command: j["command"] ?? .null)
+        case "command_remove": self = .commandRemove(name: j["name"]?.string ?? "")
+        case "command": self = .command(channel: j["channel"]?.uint ?? 0, parent: j["parent"]?.uint, name: j["name"]?.string ?? "", text: j["text"]?.string ?? "")
         case "restore":
             guard let n = j["name"]?.string else { return nil }
             self = .restore(name: n)
@@ -274,6 +296,8 @@ public enum ServerMessage: Equatable, Sendable {
     case presence([UInt64])
     /// My scheduled messages (wb_net::ScheduledMsg as JSON), soonest first.
     case scheduled([JSON])
+    /// The webhooks (owners and admins) and slash commands.
+    case integrationList(hooks: [JSON], commands: [JSON])
     case ping
     case pong
     /// `channel` is set when a call_join for it was turned down; `putBack`
@@ -324,6 +348,8 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "presence", "online": .array(online.map(JSON.id))]
         case let .scheduled(items):
             return ["type": "scheduled", "items": .array(items)]
+        case let .integrationList(hooks, commands):
+            return ["type": "integration_list", "hooks": .array(hooks), "commands": .array(commands)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
         case let .error(code, m, channel, putBack):
@@ -386,6 +412,8 @@ public enum ServerMessage: Equatable, Sendable {
             self = .presence((j["online"]?.array ?? []).compactMap(\.uint))
         case "scheduled":
             self = .scheduled(j["items"]?.array ?? [])
+        case "integration_list":
+            self = .integrationList(hooks: j["hooks"]?.array ?? [], commands: j["commands"]?.array ?? [])
         case "ping": self = .ping
         case "pong": self = .pong
         case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint, putBack: j["put_back"]?.bool ?? false)

@@ -2086,7 +2086,7 @@ impl App {
                             let text = self.chat.text.trim().to_string();
                             let title = if self.composer_mode == 1 {
                                 Some(if self.post.title.trim().is_empty() {
-                                    "Update".to_string()
+                                    DEFAULT_POST_TITLE.to_string()
                                 } else {
                                     self.post.title.trim().to_string()
                                 })
@@ -2418,7 +2418,7 @@ impl App {
                         }
                     });
                 }
-                if let Some(pt) = &m.post_title {
+                if let Some(pt) = shown_post_title(m) {
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
                         line_icon(ui.painter(), "megaphone", r.center(), t.text2);
@@ -3228,9 +3228,7 @@ impl App {
             .show(ui, |ui| {
                 for (ch, label, parent, m) in &found {
                     let who = self.who(m.author);
-                    let body = m
-                        .post_title
-                        .clone()
+                    let body = shown_post_title(m)
                         .filter(|x| !x.is_empty())
                         .unwrap_or_else(|| m.text.clone());
                     let body = if body.is_empty() && !m.attachments.is_empty() {
@@ -3657,7 +3655,7 @@ impl App {
                         .iter_mut()
                         .find(|c| c.id == ch)
                         .and_then(|c| find_msg(&mut c.messages, msg))
-                        .map(|m| (m.author, m.text.clone(), m.post_title.clone()));
+                        .map(|m| (m.author, m.text.clone(), shown_post_title(m)));
                     let Some((author, text, title)) = found else {
                         continue;
                     };
@@ -3937,6 +3935,19 @@ fn new_below(ui: &mut Ui, t: &Theme, list: Rect, n: usize) -> bool {
     p.line_segment([c + vec2(-3.5, 0.5), c + vec2(0.0, 4.0)], s);
     p.line_segment([c + vec2(3.5, 0.5), c + vec2(0.0, 4.0)], s);
     resp.clicked()
+}
+
+/// The title the app gives a post sent without one. It is stored in English
+/// like typed text, so it is put in the reader's language where it is shown.
+pub(super) const DEFAULT_POST_TITLE: &str = "Update";
+
+/// A post's title as shown: the app's own default title in the reader's
+/// language, anything typed as it was typed.
+pub(super) fn shown_post_title(m: &Message) -> Option<String> {
+    m.post_title.as_deref().map(|t| match t {
+        DEFAULT_POST_TITLE => tr(DEFAULT_POST_TITLE).to_string(),
+        t => t.to_string(),
+    })
 }
 
 pub(super) fn shown_text(m: &Message) -> String {

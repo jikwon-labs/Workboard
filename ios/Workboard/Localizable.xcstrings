@@ -6973,6 +6973,16 @@
         }
       }
     },
+    "Update": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "업데이트"
+          }
+        }
+      }
+    },
     "Uploading": {
       "localizations": {
         "ko": {

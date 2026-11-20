@@ -23,7 +23,7 @@ struct MessageListView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("\(v.member(m.author)?.name ?? String(localized: "Someone")) in \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me)) · \(Fmt.time(m.ts))")
                             .font(.caption).foregroundStyle(.secondary)
-                        if let t = m.postTitle, !t.isEmpty { Text(t).font(.headline) }
+                        if let t = shownPostTitle(m) { Text(verbatim: t).font(.headline) }
                         if !m.text.isEmpty { Text(m.text).lineLimit(4) }
                     }
                 }

@@ -3234,6 +3234,63 @@ fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
         .any(|x| x.contains("in #  ") || x.contains("in  ")));
 }
 
+/// A post sent without a title is saved as "Update" for everyone, and each
+/// reader sees that default in their own language: in the channel and on the
+/// Posts page. A title someone typed is shown as typed.
+#[test]
+fn the_default_post_title_is_shown_in_the_readers_language() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Post");
+    h.click("Message composer");
+    h.type_text("Office closed on Friday");
+    h.key(egui::Key::Enter);
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    let mut typed = ch.messages.last().unwrap().clone();
+    assert_eq!(
+        typed.post_title.as_deref(),
+        Some("Update"),
+        "saved in English"
+    );
+    typed.id += 1_000_000;
+    typed.post_title = Some("Update on the move".into());
+    typed.text = "Boxes go out Monday".into();
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap();
+    ch.messages.push(typed);
+
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    h.settle();
+    let in_chat = h.painted_text("업데이트").len();
+    let english_in_chat = h.painted_text("Update").len();
+    let typed_in_chat = h.painted_text("Update on the move").len();
+    h.app.section = Section::Posts;
+    h.settle();
+    let on_posts = h.painted_text("업데이트").len();
+    let english_on_posts = h.painted_text("Update").len();
+    let typed_on_posts = h.painted_text("Update on the move").len();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+
+    assert!(
+        in_chat > 0 && english_in_chat == 0,
+        "the channel shows 업데이트"
+    );
+    assert!(
+        on_posts > 0 && english_on_posts == 0,
+        "the Posts page shows 업데이트"
+    );
+    assert!(
+        typed_in_chat > 0 && typed_on_posts > 0,
+        "a typed title stays as typed"
+    );
+}
+
 #[test]
 fn a_message_that_comes_in_while_reading_at_the_bottom_takes_the_red_line_away() {
     let mut h = Ui1::new();

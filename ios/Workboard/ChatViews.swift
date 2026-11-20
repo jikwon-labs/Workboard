@@ -593,8 +593,8 @@ struct MessageRow: View {
                 }
                 .font(.caption2).foregroundStyle(.secondary)
             }
-            if let title = message.postTitle, !title.isEmpty {
-                Text(title).font(.headline)
+            if let title = shownPostTitle(message) {
+                Text(verbatim: title).font(.headline)
             }
             if let tid = message.threadOf {
                 NavigationLink(value: Nav.Route.thread(channel: channelId, message: tid)) {

@@ -433,8 +433,11 @@ impl App {
                                         );
                                     });
                                     ui.label(
-                                        RichText::new(m.post_title.clone().unwrap_or_default())
-                                            .size(17.0),
+                                        RichText::new(
+                                            crate::app::chat::shown_post_title(&m)
+                                                .unwrap_or_default(),
+                                        )
+                                        .size(17.0),
                                     );
                                     if !m.text.is_empty() {
                                         ui.add(egui::Label::new(&m.text).wrap());

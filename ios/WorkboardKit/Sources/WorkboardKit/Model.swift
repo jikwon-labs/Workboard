@@ -370,6 +370,11 @@ public struct AttachmentView: Hashable, Sendable {
 }
 
 public struct MessageView: Identifiable, Hashable, Sendable {
+    /// The title the desktop app gives a post sent without one. It is saved
+    /// in English like typed text, so screens show it in the phone's language.
+    public static let defaultPostTitle = "Update"
+    public var hasDefaultPostTitle: Bool { postTitle == Self.defaultPostTitle }
+
     public let id: UInt64
     public let author: UInt64
     public let text: String

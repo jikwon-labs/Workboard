@@ -104,3 +104,10 @@ struct MemberToggleRow: View {
         }
     }
 }
+
+/// A post's title as shown: the desktop's default title in the phone's
+/// language, a title someone typed as it was typed. None when there is none.
+func shownPostTitle(_ m: MessageView) -> String? {
+    guard let t = m.postTitle, !t.isEmpty else { return nil }
+    return m.hasDefaultPostTitle ? String(localized: "Update") : t
+}

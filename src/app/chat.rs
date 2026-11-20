@@ -1265,7 +1265,7 @@ impl App {
             let line = ui.available_rect_before_wrap();
             ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5_f32, t.border));
             ui.add_space(2.0);
-            let composer_h = 140.0 + if self.chat.files.is_empty() { 0.0 } else { 76.0 };
+            let composer_h = (140.0_f32 + if self.chat.files.is_empty() { 0.0 } else { 76.0 }).max(composer_seen(ui, ("chat_composer_h", cid)));
             let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
             let panel = self.channel_panel;
             let matching: Vec<&Message> = at
@@ -1400,6 +1400,7 @@ impl App {
                     self.chat.to_bottom = true;
                 }
             }
+            let composer_top = ui.cursor().top();
             egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 2 }).show(ui, |ui| {
                 let target = match channel.kind {
                     ChannelKind::Channel => channel.name.clone(),
@@ -1413,6 +1414,7 @@ impl App {
                 }
                 self.typing_row(ui, &channel, None);
             });
+            composer_took(ui, ("chat_composer_h", cid), composer_top);
         });
         if dragging {
             let r = ui.max_rect();
@@ -1591,12 +1593,13 @@ impl App {
         // the box, the typing line under it and "Also send to",
         // all inside the window; one row of tiles when pictures
         // wait in the box
-        let composer_h = 140.0
+        let composer_h = (140.0_f32
             + if self.chat.thread_files.is_empty() {
                 0.0
             } else {
                 76.0
-            };
+            })
+        .max(composer_seen(ui, ("thread_composer_h", tid)));
         egui::ScrollArea::vertical()
             .id_salt("thread_scroll")
             .max_height(ui.available_height() - composer_h)
@@ -1625,6 +1628,7 @@ impl App {
                     ui.scroll_to_cursor(Some(Align::BOTTOM));
                 }
             });
+        let composer_top = ui.cursor().top();
         if let Some((text, files)) = self.composer(ui, tr("Reply..."), true) {
             acts.push(ChatAction::Send {
                 ch: cid,
@@ -1649,6 +1653,7 @@ impl App {
             trf!("Also send to {}", place),
         );
         name_it(&also, "Also send to the channel");
+        composer_took(ui, ("thread_composer_h", tid), composer_top);
     }
 
     /// The thread moved out to its own window: a separate window of the
@@ -1849,14 +1854,16 @@ impl App {
                 };
                 let enter = take_enter(ui, text_id);
                 format_keys(ui, text_id, &mut self.chat.text);
-                let r = ui.add(
-                    egui::TextEdit::multiline(&mut self.chat.text)
-                        .id(text_id)
-                        .hint_text(hint)
-                        .frame(false)
-                        .desired_rows(1)
-                        .desired_width(f32::INFINITY),
-                );
+                let r = capped(ui, text_id, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.chat.text)
+                            .id(text_id)
+                            .hint_text(hint)
+                            .frame(false)
+                            .desired_rows(1)
+                            .desired_width(f32::INFINITY),
+                    )
+                });
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer")
                 });
@@ -2140,14 +2147,16 @@ impl App {
                 };
                 let enter = take_enter(ui, id);
                 format_keys(ui, id, text);
-                let r = ui.add(
-                    egui::TextEdit::multiline(text)
-                        .id(id)
-                        .hint_text(hint)
-                        .frame(false)
-                        .desired_rows(2)
-                        .desired_width(f32::INFINITY),
-                );
+                let r = capped(ui, id, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(text)
+                            .id(id)
+                            .hint_text(hint)
+                            .frame(false)
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY),
+                    )
+                });
                 r.widget_info(move || {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::TextEdit,
@@ -3841,4 +3850,36 @@ pub(super) fn shown_text(m: &Message) -> String {
 fn small_icon(ui: &mut Ui, kind: &str, color: Color32) {
     let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
     line_icon(ui.painter(), kind, r.center(), color);
+}
+
+/// The tallest a message box grows; a longer message scrolls inside it, so
+/// the box never pushes the conversation and its own buttons off the window.
+pub(super) const COMPOSER_MAX_H: f32 = 200.0;
+
+/// A message box that grows with its text up to `COMPOSER_MAX_H`, then scrolls.
+fn capped<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::ScrollArea::vertical()
+        .id_salt(id.with("cap"))
+        .max_height(COMPOSER_MAX_H)
+        .auto_shrink([false, true])
+        .show(ui, add)
+        .inner
+}
+
+/// How tall the message box and what's under it were last frame, so the
+/// list above leaves exactly that much room.
+fn composer_seen(ui: &Ui, key: impl std::hash::Hash) -> f32 {
+    ui.ctx()
+        .data(|d| d.get_temp::<f32>(egui::Id::new(key)))
+        .unwrap_or(0.0)
+}
+
+fn composer_took(ui: &Ui, key: impl std::hash::Hash, top: f32) {
+    let id = egui::Id::new(key);
+    let h = ui.cursor().top() - top + ui.spacing().item_spacing.y;
+    let before = ui.ctx().data(|d| d.get_temp::<f32>(id));
+    if before.map_or(true, |b| (b - h).abs() > 0.5) {
+        ui.ctx().data_mut(|d| d.insert_temp(id, h));
+        ui.ctx().request_repaint();
+    }
 }

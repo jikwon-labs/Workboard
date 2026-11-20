@@ -3023,3 +3023,48 @@ fn a_message_that_comes_in_while_reading_at_the_bottom_takes_the_red_line_away()
         .clone();
     assert_eq!(h.app.unread(&c), 0);
 }
+
+/// A long message grows the box only so far, then scrolls inside it: the
+/// buttons under the box stay in the window and the conversation keeps its
+/// room above it, in the channel and in a thread.
+#[test]
+fn a_long_message_scrolls_inside_the_box_and_keeps_what_is_under_it() {
+    let long = "a long line of words that wraps in the message box ".repeat(80);
+    let mut h = Ui1::new();
+    h.click("general");
+    let tabs_before = h.rect("Message").top();
+    h.click("Message composer");
+    h.type_text(&long);
+    h.settle();
+    let emoji = h.rect("Emoji");
+    assert!(
+        emoji.bottom() <= 900.0,
+        "the box's buttons stay in the window: {:?}",
+        emoji
+    );
+    let tabs = h.rect("Message").top();
+    assert!(
+        tabs_before - tabs <= crate::app::chat::COMPOSER_MAX_H,
+        "the box grows only so far: {} -> {}",
+        tabs_before,
+        tabs
+    );
+    assert!(tabs > 400.0, "the conversation keeps its room: {}", tabs);
+    // still sent whole
+    h.key(egui::Key::Enter);
+    let cid = h.app.chat.open.unwrap();
+    assert!(general_msg(&h, cid, long.trim()).is_some());
+
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    h.click("Reply composer");
+    h.type_text(&long);
+    h.settle();
+    let also = h.rect("Also send to the channel");
+    assert!(
+        also.bottom() <= 900.0,
+        "the thread's check stays in the window: {:?}",
+        also
+    );
+}

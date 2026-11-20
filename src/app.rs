@@ -620,6 +620,14 @@ pub struct App {
 }
 
 /// The open channel and thread: what is being written, edited or deleted.
+/// A message sent with only files still being checked and copied.
+struct HeldMessage {
+    ch: u64,
+    parent: Option<u64>,
+    also_channel: bool,
+    coming: Vec<files::Pending>,
+}
+
 #[derive(Default)]
 struct ChatUi {
     open: Option<u64>,
@@ -635,6 +643,18 @@ struct ChatUi {
     keep_unread: Option<u64>,
     /// Pictures and videos waiting in the channel and thread message boxes.
     files: Vec<files::Pending>,
+    /// Attachments still being checked and copied when the channel's /
+    /// thread's box was sent: the message that goes out next takes them
+    /// into `following`.
+    coming: Vec<files::Pending>,
+    thread_coming: Vec<files::Pending>,
+    /// Attachments a sent message waits for (conversation, the message and
+    /// its "also sent to the channel" copy, the file): put on it once
+    /// they're ready, shown as tiles on their way until then.
+    following: Vec<(u64, Vec<u64>, files::Pending)>,
+    /// Messages of nothing but files not ready yet: they go out with the
+    /// first that is (never empty to the others).
+    held: Vec<HeldMessage>,
     /// People picked from the @mention list in the channel's message box
     /// (kept with its draft), so a name two people share means the one
     /// picked.

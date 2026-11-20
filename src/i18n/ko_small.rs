@@ -17,6 +17,8 @@ pub const T: &[(&str, &str)] = &[
     ("Loading {}%", "불러오는 중 {}%"),
     ("Can't show this file", "이 파일을 표시할 수 없습니다"),
     ("Loading...", "불러오는 중..."),
+    ("Sending {}%", "보내는 중 {}%"),
+    ("Getting ready...", "준비하는 중..."),
     ("  {} of {}", "  {}/{}"),
     ("Save to Downloads", "다운로드 폴더에 저장"),
     ("Show in Finder", "Finder에서 보기"),

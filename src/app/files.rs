@@ -51,6 +51,11 @@ pub(super) const MAX_PER_MESSAGE: usize = 10;
 /// Waits before fetching a missing file again: after the first failure, the
 /// second, the third, and from then on.
 const RETRY_SECS: [u64; 4] = [5, 15, 60, 300];
+/// A file a message names that isn't on the server (or in the shared
+/// folder) yet is looked for this often, this many times, before the
+/// waits above: a message goes out while its files are still going up.
+const SOON_SECS: u64 = 3;
+const SOON_TRIES: usize = 60;
 /// Why an attachment waits when the workspace is on a server this computer
 /// isn't signed in to (it goes up by itself once it is).
 pub(super) const NOT_SIGNED_IN: &str =
@@ -87,6 +92,11 @@ pub(super) struct Pending {
     pub error: Option<String>,
 }
 
+/// A fetch found the file not there (yet).
+fn not_there_yet(e: &str) -> bool {
+    e == "The server doesn't have this file." || e == "The file isn't in the shared folder yet."
+}
+
 /// A file waits for the server rather than failed for good: the server
 /// can't be reached, or this computer isn't signed in to it. It goes up by
 /// itself once it can.
@@ -106,20 +116,27 @@ impl Pending {
             })
     }
 
-    /// A message may go with it: ready, or in the cache while the server
-    /// can't be reached; then the file follows (`send_files` puts it in the
-    /// backlog).
+    /// A message may go with it: ready, or in the cache while it's still
+    /// going up or the server can't be reached; then the file follows
+    /// (`send_files` puts it in the backlog).
     pub fn sendable(&self, files: &Files) -> bool {
         self.error.is_none()
             && self.att.as_ref().is_some_and(|a| {
                 parts(a).iter().all(|p| match files.state(&p.file) {
                     Some(Transfer::Done) => true,
+                    Some(Transfer::Up(_)) => files.local(&p.file).is_some(),
                     Some(Transfer::Failed(e)) => {
                         waits_for_server(&e) && files.local(&p.file).is_some()
                     }
                     _ => false,
                 })
             })
+    }
+
+    /// Still being checked and copied: a message may go before it, and it's
+    /// put on the message once it's ready (`ChatUi::following`).
+    pub fn getting_ready(&self) -> bool {
+        self.att.is_none() && self.error.is_none()
     }
 
     /// Where it is: getting ready, going up (0..1), failed (why), or done.
@@ -309,6 +326,10 @@ pub(super) struct Files {
     ok: HashSet<String>,
     /// prepared attachments, by the Pending they belong to
     prepared: Vec<(u64, Result<Attachment, String>)>,
+    /// Keep prepared files back from the message boxes (tests: a file
+    /// still getting ready).
+    #[cfg(test)]
+    pub hold_prepared: bool,
     next_local: u64,
     ctx: Arc<Mutex<Option<egui::Context>>>,
 }
@@ -435,6 +456,8 @@ impl Files {
             textures: Default::default(),
             ok: Default::default(),
             prepared: vec![],
+            #[cfg(test)]
+            hold_prepared: false,
             next_local: 1,
             ctx,
         }
@@ -797,9 +820,17 @@ impl Files {
                 continue;
             }
             let now = Instant::now();
+            // not there yet: the sender may still be putting it up (a
+            // message goes before its files), so look again soon for a while
+            let on_its_way =
+                matches!(self.state(&sha), Some(Transfer::Failed(e)) if not_there_yet(&e));
             if let Some(f) = self.fetches.get_mut(&sha) {
                 let at = *f.next.get_or_insert_with(|| {
-                    now + Duration::from_secs(RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)])
+                    now + Duration::from_secs(if on_its_way && f.tries < SOON_TRIES {
+                        SOON_SECS
+                    } else {
+                        RETRY_SECS[(f.tries - 1).min(RETRY_SECS.len() - 1)]
+                    })
                 });
                 if now < at {
                     if let Some(c) = ctx {
@@ -938,8 +969,19 @@ impl Files {
         }
     }
 
+    /// Not found where it's fetched from, and still looked for every few
+    /// seconds: it may be on its way (see SOON_SECS).
+    pub fn on_its_way(&self, sha: &str) -> bool {
+        matches!(self.state(sha), Some(Transfer::Failed(e)) if not_there_yet(&e))
+            && self.fetches.get(sha).is_some_and(|f| f.tries < SOON_TRIES)
+    }
+
     /// Prepared results for the message boxes to pick up.
     pub fn take_prepared(&mut self) -> Vec<(u64, Result<Attachment, String>)> {
+        #[cfg(test)]
+        if self.hold_prepared {
+            return vec![];
+        }
         std::mem::take(&mut self.prepared)
     }
 
@@ -991,6 +1033,12 @@ impl Files {
                 b.fetch.next.is_some_and(|n| n > Instant::now()),
             )
         })
+    }
+
+    /// Say where a transfer is (tests: one still going up).
+    #[cfg(test)]
+    pub fn set_state(&self, sha: &str, t: Transfer) {
+        self.states.lock().unwrap().insert(sha.to_string(), t);
     }
 
     /// Whether a file waits in the backlog (tests).
@@ -1415,6 +1463,7 @@ impl App {
                     }
                 }
             }
+            self.follow_prepared(local, &result, &remote);
             if let Some((_, p)) = self.task_files.iter_mut().find(|(_, p)| p.local == local) {
                 match &result {
                     Ok(a) => {
@@ -1555,6 +1604,99 @@ impl App {
         for a in atts {
             self.files.reupload(a, &remote);
         }
+    }
+
+    /// A file a sent message waited for is ready: on the message it goes,
+    /// and up to the server after it. A message of nothing but files that
+    /// weren't ready goes out with the first that is. One that can't be
+    /// sent is said so.
+    fn follow_prepared(
+        &mut self,
+        local: u64,
+        result: &Result<Attachment, String>,
+        remote: &Remote,
+    ) {
+        if let Some(i) = self
+            .chat
+            .held
+            .iter()
+            .position(|h| h.coming.iter().any(|p| p.local == local))
+        {
+            let mut h = self.chat.held.remove(i);
+            let p = h.coming.iter().position(|p| p.local == local).unwrap();
+            let p = h.coming.remove(p);
+            match result {
+                Ok(a) => {
+                    self.files.upload(a, remote);
+                    // the box's own state stays as it is for what's written next
+                    let also = std::mem::replace(&mut self.chat.also_channel, h.also_channel);
+                    let coming = std::mem::replace(
+                        if h.parent.is_none() {
+                            &mut self.chat.coming
+                        } else {
+                            &mut self.chat.thread_coming
+                        },
+                        h.coming,
+                    );
+                    self.apply_chat(vec![super::chat::ChatAction::Send {
+                        ch: h.ch,
+                        text: String::new(),
+                        parent: h.parent,
+                        files: vec![a.clone()],
+                    }]);
+                    self.chat.also_channel = also;
+                    if h.parent.is_none() {
+                        self.chat.coming = coming;
+                    } else {
+                        self.chat.thread_coming = coming;
+                    }
+                }
+                Err(e) => {
+                    self.toast(format!("{}: {}", p.name, App::error_text(e)));
+                    if !h.coming.is_empty() {
+                        self.chat.held.insert(i, h);
+                    }
+                }
+            }
+            return;
+        }
+        let Some(i) = self
+            .chat
+            .following
+            .iter()
+            .position(|(_, _, p)| p.local == local)
+        else {
+            return;
+        };
+        let (ch, ids, p) = self.chat.following.remove(i);
+        let a = match result {
+            Ok(a) => a,
+            Err(e) => {
+                // the message has its words or another file: it stays
+                self.toast(format!("{}: {}", p.name, App::error_text(e)));
+                return;
+            }
+        };
+        self.files.upload(a, remote);
+        self.files.upload_soon(a, remote);
+        let put = |m: &mut Message| {
+            if ids.contains(&m.id) && !m.attachments.iter().any(|x| x.file == a.file) {
+                m.attachments.push(a.clone());
+                true
+            } else {
+                false
+            }
+        };
+        let mut changed = false;
+        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+            for m in c.messages.iter_mut() {
+                changed |= put(m);
+                for r in m.replies.iter_mut() {
+                    changed |= put(r);
+                }
+            }
+        }
+        self.dirty |= changed;
     }
 
     /// A message is going out: make sure its pictures and videos are where
@@ -1832,16 +1974,7 @@ impl App {
                     play_badge(&painter, rect.center(), 12.0);
                 }
                 if let Some(Transfer::Up(f)) = state {
-                    let bar = Rect::from_min_size(
-                        pos2(rect.left() + 6.0, rect.bottom() - 10.0),
-                        vec2(rect.width() - 12.0, 4.0),
-                    );
-                    painter.rect_filled(bar, 2.0, Color32::from_black_alpha(120));
-                    painter.rect_filled(
-                        Rect::from_min_size(bar.min, vec2(bar.width() * f, bar.height())),
-                        2.0,
-                        Color32::WHITE,
-                    );
+                    upload_bar(&painter, rect, f);
                 }
                 if let Some(why) = &failed {
                     // waiting for the server isn't a failure: the message can go
@@ -1938,13 +2071,17 @@ impl App {
     }
 
     /// Whether a message box may send, and the attachments it would send.
+    /// Ones still being checked and copied don't hold it up: they follow
+    /// the message (`pending_coming`).
     pub(super) fn pending_ready(&self, thread: bool) -> (bool, Vec<Attachment>) {
         let list = if thread {
             &self.chat.thread_files
         } else {
             &self.chat.files
         };
-        let ok = list.iter().all(|p| p.sendable(&self.files));
+        let ok = list
+            .iter()
+            .all(|p| p.sendable(&self.files) || p.getting_ready());
         (
             ok,
             if ok {
@@ -1955,14 +2092,33 @@ impl App {
         )
     }
 
+    /// The attachments in a message box still being checked and copied:
+    /// they're put on the message once they're ready.
+    pub(super) fn pending_coming(&self, thread: bool) -> Vec<Pending> {
+        let list = if thread {
+            &self.chat.thread_files
+        } else {
+            &self.chat.files
+        };
+        list.iter().filter(|p| p.getting_ready()).cloned().collect()
+    }
+
     /// A message's pictures and videos. Returns the one clicked.
     pub(super) fn attachment_tiles(&self, ui: &mut Ui, m: &Message) -> Option<usize> {
-        if m.attachments.is_empty() {
+        // files sent before they were ready, still being copied
+        let coming: Vec<&Pending> = self
+            .chat
+            .following
+            .iter()
+            .filter(|(_, ids, _)| ids.contains(&m.id))
+            .map(|(_, _, p)| p)
+            .collect();
+        if m.attachments.is_empty() && coming.is_empty() {
             return None;
         }
         let t = self.t();
         let mut clicked = None;
-        let one = m.attachments.len() == 1;
+        let one = m.attachments.len() + coming.len() == 1;
         let avail = ui.available_width();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
@@ -2018,6 +2174,7 @@ impl App {
                         painter.rect_filled(rect, 8.0, t.hover);
                         let status = match self.files.state(&s.file) {
                             Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
+                            _ if self.files.on_its_way(&s.file) => tr("Loading...").into(),
                             Some(Transfer::Failed(e)) => {
                                 format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
                             }
@@ -2057,9 +2214,47 @@ impl App {
                         painter.galley(r.min + vec2(4.0, 2.0), g, Color32::WHITE);
                     }
                 }
+                // mine, still going up: how far
+                if let Some(Transfer::Up(f)) = self.files.state(&a.file) {
+                    upload_bar(&painter, rect, f);
+                }
                 if resp.clicked() {
                     clicked = Some(i);
                 }
+            }
+            for p in coming {
+                let plain = media::kind_of(Path::new(&p.name)) == MediaKind::File;
+                let size = if plain {
+                    vec2(260.0_f32.min(avail).max(160.0), 52.0)
+                } else if one {
+                    vec2(240.0_f32.min(avail).max(80.0), 180.0)
+                } else {
+                    vec2(200.0, 150.0)
+                };
+                let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Image,
+                        true,
+                        format!("Sending {}", p.name),
+                    )
+                });
+                if !ui.is_rect_visible(rect) {
+                    continue;
+                }
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 8.0, t.hover);
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    format!(
+                        "{}\n{}",
+                        crate::widgets::truncate_chars(&p.name, 28),
+                        tr("Getting ready...")
+                    ),
+                    FontId::proportional(12.0),
+                    t.text3,
+                );
             }
         });
         clicked
@@ -2111,6 +2306,8 @@ impl App {
         let saving = self.file_saves.iter().any(|s| s.file == a.file);
         let (status, bad) = match self.files.state(&a.file) {
             Some(Transfer::Down(f)) => (trf!("Loading {}%", (f * 100.0) as u32), false),
+            Some(Transfer::Up(f)) => (trf!("Sending {}%", (f * 100.0) as u32), false),
+            _ if self.files.on_its_way(&a.file) => (tr("Loading...").to_string(), false),
             Some(Transfer::Failed(e)) => (
                 format!("{} {}", App::error_text(&e), tr("Click to try again")),
                 true,
@@ -2346,6 +2543,7 @@ impl App {
                         }
                         let status = match self.files.state(&a.file) {
                             Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
+                            _ if self.files.on_its_way(&a.file) => tr("Loading...").into(),
                             Some(Transfer::Failed(e)) => {
                                 format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
                             }
@@ -3125,4 +3323,18 @@ pub(super) fn drag_pointer(ctx: &egui::Context) -> Option<egui::Pos2> {
         (Some((x, y)), Some(r)) => Some(pos2(x, y) - r.min.to_vec2()),
         _ => last,
     }
+}
+
+/// How far an upload is, as a thin bar along a tile's bottom.
+fn upload_bar(painter: &egui::Painter, rect: Rect, f: f32) {
+    let bar = Rect::from_min_size(
+        pos2(rect.left() + 6.0, rect.bottom() - 10.0),
+        vec2(rect.width() - 12.0, 4.0),
+    );
+    painter.rect_filled(bar, 2.0, Color32::from_black_alpha(120));
+    painter.rect_filled(
+        Rect::from_min_size(bar.min, vec2(bar.width() * f, bar.height())),
+        2.0,
+        Color32::WHITE,
+    );
 }

@@ -393,7 +393,9 @@ fn v_released(cmd: bool) -> egui::Event {
 
 fn wait_for_tiles(h: &mut Ui1, n: usize) {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !(h.app.chat.files.len() >= n && h.app.pending_ready(false).0)
+    while !(h.app.chat.files.len() >= n
+        && h.app.pending_ready(false).0
+        && h.app.chat.files.iter().all(|p| !p.getting_ready()))
         && std::time::Instant::now() < until
     {
         h.frame(vec![]);
@@ -603,4 +605,151 @@ fn files_dragged_over_an_open_thread_light_up_only_the_thread() {
         hint_x(&h, "Drop files to reply").is_empty(),
         "gone once dropped"
     );
+}
+
+fn last_message(h: &Ui1, cid: u64) -> Message {
+    h.app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn a_picture_still_getting_ready_follows_the_message_it_was_sent_with() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    // the picture is still being checked and copied when Enter is pressed
+    h.app.files.hold_prepared = true;
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("slow.png", 300, 200)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    h.settle();
+    assert!(h.app.chat.files[0].getting_ready());
+    h.click("Message composer");
+    h.type_text("on its way");
+    h.key(egui::Key::Enter);
+    // the message goes at once, the box is empty, the picture shows as coming
+    let m = last_message(&h, cid);
+    assert_eq!(m.text, "on its way");
+    assert!(m.attachments.is_empty());
+    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    h.settle();
+    assert!(
+        h.has("Sending slow.png"),
+        "a tile on its way in the message"
+    );
+    // once it's ready it's on the message
+    h.app.files.hold_prepared = false;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while last_message(&h, cid).attachments.is_empty() && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let m = last_message(&h, cid);
+    assert_eq!(m.text, "on its way");
+    assert_eq!(m.attachments.len(), 1);
+    assert_eq!(m.attachments[0].name, "slow.png");
+    h.settle();
+    assert!(!h.has("Sending slow.png"));
+    assert!(h.has("Picture slow.png"));
+}
+
+#[test]
+fn a_picture_alone_still_getting_ready_goes_once_it_is() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let count = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .messages
+            .len()
+    };
+    let n = count(&h);
+    h.app.files.hold_prepared = true;
+    // a folder can't be sent (found while it's checked), a picture can
+    let dir = temp_home("ui-folder").join("Holiday");
+    std::fs::create_dir_all(&dir).unwrap();
+    h.dropped = vec![
+        egui::DroppedFile {
+            path: Some(dir),
+            ..Default::default()
+        },
+        egui::DroppedFile {
+            path: Some(test_picture("alone.png", 300, 200)),
+            ..Default::default()
+        },
+    ];
+    h.frame(vec![]);
+    h.settle();
+    assert_eq!(h.app.chat.files.len(), 2);
+    h.click("Message composer");
+    h.key(egui::Key::Enter);
+    // the box empties at once; an empty message never goes to the others
+    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    assert_eq!(count(&h), n, "nothing to show yet");
+    h.app.files.hold_prepared = false;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while count(&h) == n && std::time::Instant::now() < until {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    for _ in 0..20 {
+        h.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(count(&h), n + 1, "sent with the picture");
+    let m = last_message(&h, cid);
+    assert_eq!(m.text, "");
+    assert_eq!(m.attachments.len(), 1);
+    assert_eq!(m.attachments[0].name, "alone.png");
+    assert!(
+        h.app
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.0.contains("Holiday")),
+        "the folder is said: {:?}",
+        h.app.toast
+    );
+    assert!(h.app.chat.held.is_empty() && h.app.chat.following.is_empty());
+}
+
+#[test]
+fn a_picture_still_going_up_can_be_sent() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture("big.png", 300, 200)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    wait_for_tiles(&mut h, 1);
+    let att = h.app.chat.files[0].att.clone().unwrap();
+    // halfway to the server
+    h.app
+        .files
+        .set_state(&att.file, crate::app::files::Transfer::Up(0.5));
+    h.click("Message composer");
+    h.type_text("big one");
+    h.click("Send");
+    let m = last_message(&h, cid);
+    assert_eq!(m.text, "big one");
+    assert_eq!(m.attachments, vec![att]);
+    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    h.settle();
+    assert!(h.has("Picture big.png"));
 }

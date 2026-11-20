@@ -31,7 +31,16 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
         if let Some(e) = list.iter().find_map(|p| p.error.clone()) {
             panic!("attachment refused: {}", e);
         }
-        if ok && !files.is_empty() {
+        // sendable already while going up; these tests want it there
+        let up = list.iter().any(|p| {
+            p.att.as_ref().is_some_and(|x| {
+                matches!(
+                    a.files.state(&x.file),
+                    Some(crate::app::files::Transfer::Up(_))
+                )
+            })
+        });
+        if ok && !up && !files.is_empty() && files.len() == list.len() {
             return files;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -489,12 +498,16 @@ fn a_missing_file_is_fetched_again_later() {
         matches!(f.state(&sha), Some(crate::app::files::Transfer::Failed(_)))
             && f.fetch_tries(&sha) == Some((1, true))
     });
+    // the sender may still be putting it there (a message goes before its
+    // files): it's looked for again within seconds, and shown as loading
+    assert!(f.on_its_way(&sha));
     std::fs::copy(&pic, folder.join("files").join(&sha)).unwrap();
-    f.retry_due(&sha);
+    let start = std::time::Instant::now();
     f.settle(&remote, |f| {
         f.want(&att, crate::app::files::THUMB);
         f.local(&sha).is_some()
     });
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
 }
 
 #[test]

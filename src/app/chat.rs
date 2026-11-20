@@ -2034,10 +2034,12 @@ impl App {
                         } else {
                             ""
                         };
+                        // pictures still going up, or still being copied,
+                        // don't hold the message: they follow it
                         let (files_ok, files) = self.pending_ready(false);
                         let ready = files_ok
                             && (!self.chat.text.trim().is_empty()
-                                || !files.is_empty()
+                                || !self.chat.files.is_empty()
                                 || (self.composer_mode == 1 && !self.post.title.trim().is_empty()));
                         let b = Tint(
                             egui::Button::new(RichText::new(label).color(if ready {
@@ -2094,6 +2096,7 @@ impl App {
                                 None
                             };
                             out = Some((text, title, files));
+                            self.chat.coming = self.pending_coming(false);
                             // after a post the box goes back to plain messages
                             self.composer_mode = 0;
                             self.chat.text.clear();
@@ -2286,7 +2289,7 @@ impl App {
                     });
                     format_buttons(ui, &t, id, text, "reply ");
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let ready = files_ok && (!text.trim().is_empty() || !files.is_empty());
+                        let ready = files_ok && (!text.trim().is_empty() || has_files);
                         if (primary_button(ui, &t, tr("Send")).clicked() || enter) && ready {
                             out = Some((text.trim().to_string(), files));
                             text.clear();
@@ -2318,9 +2321,12 @@ impl App {
                     }
                 }
                 if out.is_some() {
+                    let coming = self.pending_coming(thread);
                     if thread {
+                        self.chat.thread_coming = coming;
                         self.chat.thread_files.clear();
                     } else {
+                        self.chat.coming = coming;
                         self.chat.files.clear();
                     }
                 }
@@ -3425,6 +3431,9 @@ impl App {
                     self.chat.to_bottom = true;
                     self.send_files(&files);
                     let id = self.data.new_id();
+                    for p in std::mem::take(&mut self.chat.coming) {
+                        self.chat.following.push((ch, vec![id], p));
+                    }
                     // the channel's box: the people picked from its @ list
                     let picked = std::mem::take(&mut self.chat.picked);
                     let mentions = self.chat_mentions(&text, ch, &picked);
@@ -3722,9 +3731,15 @@ impl App {
                     parent,
                     files,
                 } => {
+                    // files the box was sent with before they were ready
+                    let coming = std::mem::take(if parent.is_none() {
+                        &mut self.chat.coming
+                    } else {
+                        &mut self.chat.thread_coming
+                    });
                     // "/name ...": a command (integrations.rs)
                     let mut text = text;
-                    if text.starts_with('/') && files.is_empty() {
+                    if text.starts_with('/') && files.is_empty() && coming.is_empty() {
                         use super::integrations::Slash;
                         match self.slash(ch, parent, &text) {
                             Slash::Plain => {}
@@ -3742,6 +3757,25 @@ impl App {
                     }
                     if self.chat.keep_unread == Some(ch) {
                         self.chat.keep_unread = None;
+                    }
+                    // nothing to show yet: it goes with the first file ready
+                    // (files.rs follow_prepared), so the others never get an
+                    // empty message
+                    if text.trim().is_empty() && files.is_empty() && !coming.is_empty() {
+                        let also_channel =
+                            parent.is_some() && std::mem::take(&mut self.chat.also_channel);
+                        self.chat.held.push(super::HeldMessage {
+                            ch,
+                            parent,
+                            also_channel,
+                            coming,
+                        });
+                        if parent.is_none() {
+                            self.chat.picked.clear();
+                        } else {
+                            self.chat.thread_picked.clear();
+                        }
+                        continue;
                     }
                     if parent.is_none() {
                         self.chat.to_bottom = true;
@@ -3788,6 +3822,12 @@ impl App {
                             thread_of: parent,
                             ..m.clone()
                         });
+                    let ids: Vec<u64> = std::iter::once(id)
+                        .chain(copy.as_ref().map(|c| c.id))
+                        .collect();
+                    for p in coming {
+                        self.chat.following.push((ch, ids.clone(), p));
+                    }
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         match parent {
                             Some(pid) => {

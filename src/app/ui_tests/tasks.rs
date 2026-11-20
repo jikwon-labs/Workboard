@@ -114,6 +114,11 @@ fn click_task_row_opens_it_then_complete_and_timer() {
     let mut h = Ui1::new();
     h.click_left("Task Write copy for landing page", 120.0);
     let id = h.app.open_task.expect("task window opens");
+    let play = h.rect("Start timer");
+    assert!(
+        (play.width() - play.height()).abs() < 0.5,
+        "the play button is a circle, not taller than wide: {play:?}"
+    );
     h.click("Start timer");
     assert!(
         h.app.task(id).unwrap().timer_started.is_some(),

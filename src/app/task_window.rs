@@ -579,8 +579,10 @@ impl App {
                         let tb = ui.add(Tint(
                             egui::Button::new("")
                                 .fill(fill)
-                                .corner_radius(12)
-                                .min_size(vec2(24.0, 24.0)),
+                                // as wide as the row's control height, or the
+                                // button is taller than wide and not a circle
+                                .corner_radius(CONTROL_H / 2.0)
+                                .min_size(vec2(CONTROL_H, CONTROL_H)),
                         ));
                         name_it(&tb, name);
                         // play and stop drawn small inside the round button

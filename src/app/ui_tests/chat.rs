@@ -282,6 +282,32 @@ fn sidebar_channels_have_one_add_button() {
 }
 
 #[test]
+fn sidebar_shows_each_button_once() {
+    // every section adds from its own row only, and a row's "..." leaves
+    // creating to the "+" beside it
+    let mut h = Ui1::new();
+    assert!(!h.has("Sidebar Create Space"));
+    assert_eq!(h.count_named("New Space"), 1);
+    assert!(!h.has("Assigned to me"), "that is My Tasks itself");
+    h.click("My Tasks");
+    assert_eq!(h.app.loc, Location::MyTasks);
+    h.hover(h.find("Team Space").unwrap());
+    h.click("Space options Team Space");
+    assert!(!h.has("Create new"));
+    h.key(egui::Key::Escape);
+    h.click("Create in Team Space");
+    assert!(h.has("Folder") && h.has("From a template"));
+    h.key(egui::Key::Escape);
+    // the Spaces "..." keeps folding all of them, not another New Space
+    h.click("Spaces settings");
+    assert!(h.has("Expand all") && !h.has("Create Space"));
+    h.key(egui::Key::Escape);
+    // the AI row is the one way to the AI page from the sidebar
+    h.click_side("Ask, Build, Create", false);
+    assert_eq!(h.app.section, Section::Ai);
+}
+
+#[test]
 fn sidebar_direct_messages_have_one_add_button() {
     // same for Direct Messages: the "New message" row, no "+" on the heading
     let mut h = Ui1::new();

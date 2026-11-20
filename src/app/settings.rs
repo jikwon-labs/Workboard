@@ -295,7 +295,7 @@ impl App {
                     ui.label(nl.to_string());
                     ui.label(nt.to_string());
                     let r = ui.button("\u{22EF}");
-                    click_menu(&r, |ui| self.space_menu(ui, id));
+                    click_menu(&r, |ui| self.space_menu(ui, id, true));
                     let hidden = self
                         .data
                         .spaces

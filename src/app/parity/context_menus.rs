@@ -275,7 +275,9 @@ impl App {
     }
 
     /// The list menu (right click, or the "..." button on a sidebar list).
-    pub(crate) fn list_menu(&mut self, ui: &mut Ui, lid: u64) {
+    /// `create` adds "Create new"; a sidebar row leaves it out because its
+    /// own "+" does the same (Favorites and Settings have no "+").
+    pub(crate) fn list_menu(&mut self, ui: &mut Ui, lid: u64, create: bool) {
         let t = self.t();
         let loc = Location::List(lid);
         ui.set_min_width(200.0);
@@ -335,7 +337,9 @@ impl App {
             }
         });
         ui.separator();
-        ui.menu_button(tr("Create new"), |ui| self.list_create_menu(ui, lid));
+        if create {
+            ui.menu_button(tr("Create new"), |ui| self.list_create_menu(ui, lid));
+        }
         if let Some(sid) = self.data.space_of_list(lid).map(|s| s.id) {
             if ui.button(tr("Task statuses")).clicked() {
                 self.actions.push(Action::EditStatuses(sid));
@@ -383,7 +387,9 @@ impl App {
     }
 
     /// The folder menu (right click, or the "..." button on a sidebar folder).
-    pub(crate) fn folder_menu(&mut self, ui: &mut Ui, fid: u64) {
+    /// `create` adds "Create new"; a sidebar row leaves it out because its
+    /// own "+" does the same (Favorites and Settings have no "+").
+    pub(crate) fn folder_menu(&mut self, ui: &mut Ui, fid: u64, create: bool) {
         let t = self.t();
         let floc = Location::Folder(fid);
         let Some(sid) = self
@@ -414,16 +420,18 @@ impl App {
             close_any(ui);
         }
         ui.separator();
-        ui.menu_button(tr("Create new"), |ui| {
-            if ui.button(tr("List")).clicked() {
-                self.open_new_list(Some(sid), Some(fid));
-                close_any(ui);
-            }
-            if ui.button(tr("Doc")).clicked() {
-                self.new_doc(Some(sid));
-                close_any(ui);
-            }
-        });
+        if create {
+            ui.menu_button(tr("Create new"), |ui| {
+                if ui.button(tr("List")).clicked() {
+                    self.open_new_list(Some(sid), Some(fid));
+                    close_any(ui);
+                }
+                if ui.button(tr("Doc")).clicked() {
+                    self.new_doc(Some(sid));
+                    close_any(ui);
+                }
+            });
+        }
         let others: Vec<(u64, String)> = self
             .open_spaces()
             .iter()
@@ -521,7 +529,9 @@ impl App {
     }
 
     /// The space menu (right click, or the "..." button on a sidebar space).
-    pub(crate) fn space_menu(&mut self, ui: &mut Ui, sid: u64) {
+    /// `create` adds "Create new"; a sidebar row leaves it out because its
+    /// own "+" does the same (Favorites and Settings have no "+").
+    pub(crate) fn space_menu(&mut self, ui: &mut Ui, sid: u64, create: bool) {
         let level = self.space_level(sid);
         if level < crate::sync::Level::Full {
             self.limited_space_menu(ui, sid, level);
@@ -556,24 +566,26 @@ impl App {
             self.open_sharing(sid);
             close_any(ui);
         }
-        ui.menu_button(tr("Create new"), |ui| {
-            if ui.button(tr("List")).clicked() {
-                self.open_new_list(Some(sid), None);
-                close_any(ui);
-            }
-            if ui.button(tr("Folder")).clicked() {
-                self.actions.push(Action::NewFolder(sid));
-                close_any(ui);
-            }
-            if ui.button(tr("Doc")).clicked() {
-                self.new_doc(Some(sid));
-                close_any(ui);
-            }
-            if ui.button(tr("From a template")).clicked() {
-                self.open_templates(super::templates::Category::Lists, Some(sid));
-                close_any(ui);
-            }
-        });
+        if create {
+            ui.menu_button(tr("Create new"), |ui| {
+                if ui.button(tr("List")).clicked() {
+                    self.open_new_list(Some(sid), None);
+                    close_any(ui);
+                }
+                if ui.button(tr("Folder")).clicked() {
+                    self.actions.push(Action::NewFolder(sid));
+                    close_any(ui);
+                }
+                if ui.button(tr("Doc")).clicked() {
+                    self.new_doc(Some(sid));
+                    close_any(ui);
+                }
+                if ui.button(tr("From a template")).clicked() {
+                    self.open_templates(super::templates::Category::Lists, Some(sid));
+                    close_any(ui);
+                }
+            });
+        }
         ui.menu_button(tr("Color & Icon"), |ui| {
             ui.label(RichText::new(tr("Space color")).small().color(t.text3));
             ui.horizontal_wrapped(|ui| {

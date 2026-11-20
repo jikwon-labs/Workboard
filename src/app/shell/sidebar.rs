@@ -66,15 +66,9 @@ impl App {
                         );
 
                         if !self.hidden("AI Chats") {
-                            let (folded, hs) = self.side_header(
-                                ui,
-                                "AI Chats",
-                                &[("\u{22EF}", "More actions")],
-                                0,
-                            );
-                            if hs[0].clicked() {
-                                self.section = Section::Ai;
-                            }
+                            // the row is the one way in (a "..." on the
+                            // heading opened the same page)
+                            let (folded, _) = self.side_header(ui, "AI Chats", &[], 0);
                             if !folded && self.add_row(ui, "Ask, Build, Create").clicked() {
                                 self.section = Section::Ai;
                             }
@@ -319,11 +313,7 @@ impl App {
                 "Assigned Comments" => {
                     self.section == Section::Home && self.loc == Location::Assigned
                 }
-                "My Tasks" => {
-                    self.section == Section::Home
-                        && self.loc == Location::MyTasks
-                        && !self.my_tasks_open
-                }
+                "My Tasks" => self.section == Section::Home && self.loc == Location::MyTasks,
                 "Posts" => self.section == Section::Posts,
                 "Meetings" => self.section == Section::Meetings,
                 _ => false,
@@ -403,7 +393,8 @@ impl App {
                     });
                 }
                 "My Tasks" if self.my_tasks_open => {
-                    // its three items stay open, as in the original
+                    // its two items stay open; the row itself is the
+                    // "Assigned to me" page, so there is no row for that
                     if r.clicked() {
                         self.actions.push(Action::Go(Location::MyTasks));
                     }
@@ -420,8 +411,7 @@ impl App {
                         })
                         .count();
                     let pl = self.personal_list_id();
-                    let subs: [(&str, Location, Option<String>); 3] = [
-                        ("Assigned to me", Location::MyTasks, None),
+                    let subs: [(&str, Location, Option<String>); 2] = [
                         (
                             "Today & Overdue",
                             Location::TodayOverdue,
@@ -441,18 +431,11 @@ impl App {
                         let sel = self.section == Section::Home
                             && self.loc == loc
                             && !(sl == "Personal List" && pl.is_none());
-                        let mm = self.data.member(me).cloned();
-                        let bg = t.sidebar;
                         let r2 = self.side_row_tr(
                             ui,
                             14.0,
                             sel,
                             |p, c| match sl {
-                                "Assigned to me" => {
-                                    if let Some(m) = &mm {
-                                        paint_avatar(p, c, 8.0, m, bg);
-                                    }
-                                }
                                 "Today & Overdue" => paint_calendar_icon(p, c, tc),
                                 _ => paint_person_icon(p, c, tc),
                             },
@@ -545,9 +528,9 @@ impl App {
                 }
                 // the same menu as the item has where it lives
                 r.context_menu(|ui| match f {
-                    Location::List(id) => self.list_menu(ui, id),
-                    Location::Folder(id) => self.folder_menu(ui, id),
-                    Location::Space(id) => self.space_menu(ui, id),
+                    Location::List(id) => self.list_menu(ui, id, true),
+                    Location::Folder(id) => self.folder_menu(ui, id, true),
+                    Location::Space(id) => self.space_menu(ui, id, true),
                     _ => {
                         if ui.button(tr("Remove from Favorites")).clicked() {
                             self.actions.push(Action::ToggleFavorite(f));
@@ -591,20 +574,11 @@ impl App {
     /// New Space.
     fn sidebar_spaces(&mut self, ui: &mut Ui, tc: Color32, filter: &str, ws: &str) {
         if filter.is_empty() || filter == "space" {
-            let (folded, hs) = self.side_header(
-                ui,
-                "Spaces",
-                &[("\u{22EF}", "Spaces settings"), ("+", "Create Space")],
-                0,
-            );
+            let (folded, hs) =
+                self.side_header(ui, "Spaces", &[("\u{22EF}", "Spaces settings")], 0);
+            // "New Space" at the end is the one add button here
+            name_it(&hs[0], "Spaces settings");
             popup(ui, &hs[0], ui.id().with("spaces_settings"), 200.0, |ui| {
-                if ui.button(tr("Create Space")).clicked() {
-                    self.modal = Some(Modal::NewSpace {
-                        name: String::new(),
-                        color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
-                    });
-                    close_popup(ui);
-                }
                 if ui.button(tr("Expand all")).clicked() {
                     for s in &mut self.data.spaces {
                         s.expanded = true;
@@ -620,12 +594,6 @@ impl App {
                     close_popup(ui);
                 }
             });
-            if hs[1].clicked() {
-                self.modal = Some(Modal::NewSpace {
-                    name: String::new(),
-                    color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
-                });
-            }
             if !self.fold_shows(folded, filter) {
                 return;
             }

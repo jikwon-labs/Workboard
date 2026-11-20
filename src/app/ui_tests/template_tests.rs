@@ -173,8 +173,7 @@ fn project_tracker_makes_a_space_with_its_statuses_and_tasks() {
 fn bug_tracker_in_an_existing_space_adds_the_statuses_it_needs() {
     let mut h = Ui1::new();
     let side = space_id(&h, "Side Projects");
-    h.click("Space options Side Projects");
-    h.click("Create new");
+    h.click("Create in Side Projects");
     h.click("From a template");
     assert_eq!(center(&h).space, side);
     h.click("Pick template Bug tracker");
@@ -277,7 +276,12 @@ fn doc_template_makes_a_doc_in_the_chosen_space() {
     h.click("Pick template Meeting Notes");
     assert!(h.has("Doc title"));
     h.click("Template destination");
-    h.click("Side Projects");
+    // the drop-down's item, not the Space's own row in the sidebar
+    let pick = h.rect_in(
+        "Side Projects",
+        Rect::from_min_max(pos2(320.0, 0.0), pos2(f32::INFINITY, f32::INFINITY)),
+    );
+    h.click_at(pick.center());
     h.click("Use template");
     let id = h.app.doc_open.expect("the new Doc opens");
     let d = h.app.data.docs.iter().find(|d| d.id == id).unwrap();
@@ -316,7 +320,12 @@ fn saved_list_template_is_used_renamed_and_deleted() {
 
     // use it in another Space
     h.click("Template destination");
-    h.click("Side Projects");
+    // the drop-down's item, not the Space's own row in the sidebar
+    let pick = h.rect_in(
+        "Side Projects",
+        Rect::from_min_max(pos2(320.0, 0.0), pos2(f32::INFINITY, f32::INFINITY)),
+    );
+    h.click_at(pick.center());
     h.click("Use template");
     let side = space_id(&h, "Side Projects");
     let Location::List(made) = h.app.loc else {

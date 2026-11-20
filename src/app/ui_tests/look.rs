@@ -7,15 +7,15 @@ use super::*;
 #[test]
 fn dots_menus_open_submenus_beside_the_parent() {
     let mut h = Ui1::new();
-    // sidebar space "..." > Create new
+    // sidebar space "..." > Color & Icon
     h.hover(h.find("Team Space").unwrap());
     h.click("Space options Team Space");
-    let parent = h.rect("Create new");
+    let parent = h.rect("Color & Icon");
     h.hover(parent.center());
-    let sub = h.rect("Folder");
+    let sub = h.rect("Space color 5f55ee");
     assert!(
         sub.left() >= parent.right() - 2.0,
-        "Create new opens to the right: parent {:?} sub {:?}",
+        "Color & Icon opens to the right: parent {:?} sub {:?}",
         parent,
         sub
     );
@@ -593,7 +593,6 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
 fn plus_buttons_draw_the_plus_in_their_middle() {
     // the "+" character sits low in its line, so these are drawn as lines
     let mut h = Ui1::new();
-    h.assert_plus_centered("Sidebar Create Space");
     // the "+" on a Space and a List row shows on hover
     for name in ["Create in Team Space", "Create in Marketing"] {
         let c = h.rect(name).center();

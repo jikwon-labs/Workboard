@@ -454,8 +454,10 @@ fn space_overview_customize_and_lists_card_columns() {
 #[test]
 fn personal_list_looks_like_the_original_and_my_tasks_stays_open() {
     let mut h = Ui1::new();
-    // the three My Tasks items show without clicking My Tasks
-    assert!(h.has("Assigned to me") && h.has("Today & Overdue") && h.has("Personal List"));
+    // the My Tasks items show without clicking My Tasks; My Tasks itself
+    // is "Assigned to me", so that has no row of its own
+    assert!(h.has("Today & Overdue") && h.has("Personal List"));
+    assert!(!h.has("Assigned to me"));
     assert!(h.app.group_by == GroupBy::Status);
     h.click("Personal List");
     let pl = h.app.personal_list_id().unwrap();
@@ -486,7 +488,8 @@ fn personal_list_looks_like_the_original_and_my_tasks_stays_open() {
         .iter()
         .any(|t| t.list_id == pl && t.name == "Buy milk"));
     // leaving brings the earlier settings back
-    h.click("Assigned to me");
+    h.click("My Tasks");
+    assert_eq!(h.app.loc, Location::MyTasks);
     assert!(h.app.group_by == GroupBy::Status);
     assert!(!h.app.col_on("Date created"));
     assert!(h.has("Personal List"), "still open after moving away");

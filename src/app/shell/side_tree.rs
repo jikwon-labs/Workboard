@@ -395,7 +395,8 @@ impl App {
                 self.actions.push(Action::ToggleSpace(s.id));
             }
         }
-        // "..." on hover opens the same menu as a right click
+        // "..." on hover opens the same menu as a right click; its "Create
+        // new" is left out because the "+" beside it does that
         let dots =
             Rect::from_center_size(r.rect.right_center() - vec2(36.0, 0.0), vec2(20.0, 20.0));
         let dr = ui.interact(dots, ui.id().with(("sdots", s.id)), Sense::click());
@@ -412,8 +413,8 @@ impl App {
                 t.text2,
             );
         }
-        click_menu(&dr, |ui| self.space_menu(ui, sid));
-        r.context_menu(|ui| self.space_menu(ui, sid));
+        click_menu(&dr, |ui| self.space_menu(ui, sid, false));
+        r.context_menu(|ui| self.space_menu(ui, sid, false));
         // drag a space onto another to reorder; drop a list on it to move it here
         let r = r.interact(Sense::click_and_drag());
         if r.drag_started() {
@@ -491,7 +492,7 @@ impl App {
                     }
                 }
             }
-            click_menu(&dr, |ui| self.folder_menu(ui, fid));
+            click_menu(&dr, |ui| self.folder_menu(ui, fid, false));
             click_menu(&pr, |ui| {
                 ui.set_min_width(180.0);
                 ui.label(RichText::new(tr("Create")).small().color(t.text3));
@@ -532,7 +533,7 @@ impl App {
                     self.actions.push(Action::ToggleFolder(f.id));
                 }
             }
-            fr.context_menu(|ui| self.folder_menu(ui, fid));
+            fr.context_menu(|ui| self.folder_menu(ui, fid, false));
             // a list dropped on a folder moves into it
             let fr = fr.interact(Sense::click_and_drag());
             if let Some(SideDrag::List(l)) = self.side_drop(ui, fr.rect) {
@@ -655,7 +656,7 @@ impl App {
                 t.text2,
             );
         }
-        click_menu(&dr, |ui| self.list_menu(ui, lid));
+        click_menu(&dr, |ui| self.list_menu(ui, lid, false));
         // "+" next to it creates a task in this list
         let plus =
             Rect::from_center_size(r.rect.right_center() - vec2(36.0, 0.0), vec2(20.0, 20.0));
@@ -668,7 +669,7 @@ impl App {
         }
         // the same "Create" menu as the original's list "+"
         click_menu(&pr, |ui| self.list_create_menu(ui, lid));
-        r.context_menu(|ui| self.list_menu(ui, lid));
+        r.context_menu(|ui| self.list_menu(ui, lid, false));
         // drag a list onto another list to put it there; drop a task card on
         // a list to move the task into it
         let r = r.interact(Sense::click_and_drag());

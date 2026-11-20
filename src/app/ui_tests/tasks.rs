@@ -566,11 +566,9 @@ fn list_menu_info_archive_and_restore_from_settings() {
         "Campaign work"
     );
     h.key(egui::Key::Escape);
-    // Create new is a side menu with the same items as "+"
+    // the "..." leaves creating to the "+" beside it
     h.click("List options Marketing");
-    h.click("Create new");
-    assert!(h.has("Create Doc"));
-    h.key(egui::Key::Escape);
+    assert!(!h.has("Create new"));
     h.key(egui::Key::Escape);
     // Archive: gone from the sidebar and from All Tasks
     h.click("List options Marketing");
@@ -1575,7 +1573,12 @@ fn planner_add_without_a_list_keeps_the_name_and_says_why() {
 fn create_list_or_channel_list_without_a_space_says_so() {
     let mut h = no_list_workspace(false);
     h.click("Create");
-    h.click("List");
+    // the Create menu's List, not a sidebar List row of that name
+    let item = h.rect_in(
+        "List",
+        Rect::from_min_max(pos2(200.0, 0.0), pos2(f32::INFINITY, f32::INFINITY)),
+    );
+    h.click_at(item.center());
     assert!(
         matches!(h.app.modal, Some(Modal::NewSpace { .. })),
         "no Space to pick: New Space instead of a List dialog with nothing to pick"

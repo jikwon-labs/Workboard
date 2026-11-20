@@ -182,11 +182,16 @@ fn green_dots_show_who_is_really_connected() {
     }
     h.app.section = Section::Chat;
     h.settle();
-    let row = other.name.clone();
-    assert!(h.has(&row), "the DM is listed");
+    let name = other.name.clone();
+    assert!(h.has(&name), "the DM is listed");
+    // the DM's row in the sidebar (the page lists the name too, without a dot)
+    let row = h.rect_in(
+        &name,
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, f32::INFINITY)),
+    );
     // alone: no "online" at all, so no dots
     assert_eq!(dots_in(&h, "Profile menu", ONLINE), 0);
-    assert_eq!(dots_in(&h, &row, ONLINE) + rings_in(&h, &row), 0);
+    assert_eq!(dots_in_rect(&h, row, ONLINE) + rings_in_rect(&h, row), 0);
     h.click("Profile menu");
     assert!(!h.has("Online"), "no claim of being online");
     h.key(egui::Key::Escape);
@@ -202,8 +207,8 @@ fn green_dots_show_who_is_really_connected() {
     h.app.sync_rt.online = Some(vec![me]);
     h.settle();
     assert_eq!(dots_in(&h, "Profile menu", ONLINE), 1, "I am connected");
-    assert_eq!(dots_in(&h, &row, ONLINE), 0, "they aren't");
-    assert_eq!(rings_in(&h, &row), 1, "a grey ring says so");
+    assert_eq!(dots_in_rect(&h, row, ONLINE), 0, "they aren't");
+    assert_eq!(rings_in_rect(&h, row), 1, "a grey ring says so");
     h.click("Profile menu");
     assert!(h.has("Online"));
     h.key(egui::Key::Escape);
@@ -211,15 +216,15 @@ fn green_dots_show_who_is_really_connected() {
     // they open Workboard
     h.app.sync_rt.online = Some(vec![me, other.id]);
     h.settle();
-    assert_eq!(dots_in(&h, &row, ONLINE), 1);
-    assert_eq!(rings_in(&h, &row), 0);
+    assert_eq!(dots_in_rect(&h, row, ONLINE), 1);
+    assert_eq!(rings_in_rect(&h, row), 0);
 
     // the connection drops: who is online isn't known, and I am offline
     h.app.sync_rt.net_status = Some(wb_net::Status::Reconnecting("gone".into()));
     h.settle();
     assert_eq!(dots_in(&h, "Profile menu", ONLINE), 0);
     assert_eq!(rings_in(&h, "Profile menu"), 1);
-    assert_eq!(dots_in(&h, &row, ONLINE) + rings_in(&h, &row), 0);
+    assert_eq!(dots_in_rect(&h, row, ONLINE) + rings_in_rect(&h, row), 0);
     h.click("Profile menu");
     assert!(h.has("Offline") && !h.has("Online"));
     h.key(egui::Key::Escape);

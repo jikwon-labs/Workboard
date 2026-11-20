@@ -616,6 +616,11 @@ pub(super) fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
     let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
         return 0;
     };
+    dots_in_rect(h, *rect, color)
+}
+
+/// Filled dots of `color` painted inside `rect`.
+pub(super) fn dots_in_rect(h: &Ui1, rect: egui::Rect, color: Color32) -> usize {
     fn count(s: &egui::Shape, rect: egui::Rect, color: Color32) -> usize {
         match s {
             egui::Shape::Circle(c) if c.fill == color && rect.contains(c.center) => 1,
@@ -623,15 +628,20 @@ pub(super) fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
             _ => 0,
         }
     }
-    h.shapes.iter().map(|c| count(&c.shape, *rect, color)).sum()
+    h.shapes.iter().map(|c| count(&c.shape, rect, color)).sum()
 }
 
 /// Grey presence rings ("not online") painted inside the control named `name`.
 pub(super) fn rings_in(h: &Ui1, name: &str) -> usize {
-    let grey = h.app.t().text3;
     let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
         return 0;
     };
+    rings_in_rect(h, *rect)
+}
+
+/// Grey presence rings painted inside `rect`.
+pub(super) fn rings_in_rect(h: &Ui1, rect: egui::Rect) -> usize {
+    let grey = h.app.t().text3;
     fn count(s: &egui::Shape, rect: egui::Rect, grey: Color32) -> usize {
         match s {
             egui::Shape::Circle(c)
@@ -643,7 +653,7 @@ pub(super) fn rings_in(h: &Ui1, name: &str) -> usize {
             _ => 0,
         }
     }
-    h.shapes.iter().map(|c| count(&c.shape, *rect, grey)).sum()
+    h.shapes.iter().map(|c| count(&c.shape, rect, grey)).sum()
 }
 
 // WCAG contrast ratio of two colors

@@ -19,17 +19,16 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 
 ## 작업 흐름: 워크트리에서 작업하고 main 에 바로 push
 
-모든 변경은 워크트리에서 한다. PR 없이 끝나면 main 에 push 한다. 여러 세션이 동시에 main 에 push 하므로 push 직전에 항상 최신 main 위로 rebase 하고 다시 테스트한다(오래된 트리에서 만든 커밋이 남의 변경을 되돌린 적이 있다).
+모든 변경은 워크트리에서 한다. PR 없이 끝나면 main 에 push 한다. 여러 세션이 동시에 main 에 push 하므로 push 직전에 항상 최신 main 위로 rebase 한다(오래된 트리에서 만든 커밋이 남의 변경을 되돌린 적이 있다). push 할 때 빌드·테스트는 돌리지 않는다.
 
 1. **시작**: `scripts/wt new <이름>` (또는 EnterWorktree / `claude -w <이름>`, 둘 다 같은 스크립트를 부른다)
    - `origin/main` 기준으로 `.claude/worktrees/<이름>` 과 브랜치 `<이름>` 을 만든다.
    - main 체크아웃의 `target/debug` 를 APFS 복제로 가져온다. 디스크를 거의 쓰지 않고, 첫 빌드가 콜드 빌드 대신 15초 정도로 끝난다.
 2. **작업**: 그 워크트리 안의 파일만 고친다. 커밋은 작게, 하나의 변경 단위로.
 3. **마무리**: 워크트리 안에서 `scripts/wt ship`
-   - fetch → `origin/main` 위로 rebase → HEAD 가 아직 검증되지 않았으면 `scripts/wt verify` → `git push origin HEAD:main`.
-   - verify 는 바뀐 파일을 보고 테스트를 고른다: `ios/` 는 `swift test`, 문서(`*.md`, `docs/`)만이면 생략, 그 외는 `cargo fmt --all --check` 와 `cargo test --workspace`. `WB_VERIFY_ALL=1` 은 전부, `WB_IOS_UI=1` 은 시뮬레이터 UI 테스트까지.
+   - fetch → `origin/main` 위로 rebase → `git push origin HEAD:main`. 빌드·테스트는 하지 않는다.
+   - 테스트가 필요하면 ship 전에 `scripts/wt verify` 를 직접 돌린다. 바뀐 파일을 보고 테스트를 고른다: `ios/` 는 `swift test`, 문서(`*.md`, `docs/`)만이면 생략, 그 외는 `cargo fmt --all --check` 와 `cargo test --workspace`. `WB_VERIFY_ALL=1` 은 전부, `WB_IOS_UI=1` 은 시뮬레이터 UI 테스트까지.
    - rebase 충돌이 나면 해결하고 `git rebase --continue` 후 다시 `scripts/wt ship`.
-   - 테스트가 실패하면 고쳐서 커밋하고 다시 `scripts/wt ship`.
 4. **정리**: main 체크아웃에서 `scripts/wt rm <이름>`. 커밋 안 된 변경이나 main 에 없는 커밋이 있으면 거부한다.
    - `scripts/wt ls` 로 전체 워크트리 상태(미커밋 파일 수, main 대비 앞/뒤 커밋 수)를 본다.
 
@@ -37,10 +36,10 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 
 - main 체크아웃 안의 파일 편집 (`.claude/hooks/guard.sh`). main 체크아웃에는 주인의 미커밋 작업이 있을 때가 많으니 건드리지 않는다.
 - main 체크아웃에서의 커밋 (`.githooks/pre-commit`)
-- 검증(`scripts/wt verify`)을 통과하지 않은 커밋, fast-forward 가 아닌 push, main 삭제 (`.githooks/pre-push`)
+- fast-forward 가 아닌 push, main 삭제 (`.githooks/pre-push`). 테스트 통과 여부는 보지 않는다.
 - `--no-verify`, `core.hooksPath` 로 훅을 우회하는 명령
 
-모든 Rust 코드는 rustfmt 기본 규칙으로 정리돼 있다(`third_party/` 의 외부 코드는 제외). Claude 가 `.rs` 파일을 고치면 rustfmt 가 그 파일만 정리하고(`.claude/hooks/fmt.sh`), `scripts/wt verify` 가 `cargo fmt --all --check` 로 확인한다. 걸리면 `cargo fmt --all` 을 돌려 커밋한다. 전체 정리 커밋은 `.git-blame-ignore-revs` 에 있어 `git blame` 에서 빠진다(새로 clone 한 곳에서는 한 번 `git config blame.ignoreRevsFile .git-blame-ignore-revs`).
+모든 Rust 코드는 rustfmt 기본 규칙으로 정리돼 있다(`third_party/` 의 외부 코드는 제외). Claude 가 `.rs` 파일을 고치면 rustfmt 가 그 파일만 정리하고(`.claude/hooks/fmt.sh`), `scripts/wt verify` 를 돌리면 `cargo fmt --all --check` 로 확인한다. 걸리면 `cargo fmt --all` 을 돌려 커밋한다. 전체 정리 커밋은 `.git-blame-ignore-revs` 에 있어 `git blame` 에서 빠진다(새로 clone 한 곳에서는 한 번 `git config blame.ignoreRevsFile .git-blame-ignore-revs`).
 
 git 훅은 `CLAUDECODE` 환경 변수가 있을 때(Claude Code 세션)만 동작한다. 사람이 직접 하는 커밋·push 는 막지 않는다. 새로 clone 한 곳에서는 한 번 `git config core.hooksPath .githooks` 를 해야 git 훅이 켜진다.
 

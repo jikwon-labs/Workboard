@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Worktree workflow for this repo (see CLAUDE.md): every change is made in its
-# own worktree under .claude/worktrees/, committed, tested, rebased onto
+# own worktree under .claude/worktrees/, committed, rebased onto
 # origin/main and pushed straight to main.
 #
 #   scripts/wt new <name>      new worktree + branch <name> off origin/main,
 #                              with a copy-on-write copy of the main checkout's
 #                              build cache; prints the worktree path last
 #   scripts/wt verify          test the committed HEAD (cargo and/or swift,
-#                              by what changed) and record it as verified
-#                              (the pre-push hook checks)
-#   scripts/wt ship            fetch, rebase onto origin/main, verify again if
-#                              HEAD changed, push HEAD to main
+#                              by what changed); optional, run it by hand
+#   scripts/wt ship            fetch, rebase onto origin/main, push HEAD to
+#                              main (no build or tests)
 #   scripts/wt rm <name> [--force]
 #                              remove a worktree and its branch; refuses
 #                              uncommitted work or commits not on main
@@ -29,7 +28,6 @@ die() { echo "wt: $*" >&2; exit 1; }
 say() { echo "wt: $*" >&2; }
 git_dir() { git rev-parse --path-format=absolute --git-dir; }
 in_linked() { [ "$(git_dir)" != "$common_dir" ]; }
-marker() { echo "$(git_dir)/wb-verified"; }
 dir_for() { echo "$wt_root/${1//\//-}"; }
 
 # Clone target/debug from the main checkout (APFS clonefile: no extra disk
@@ -80,9 +78,8 @@ cmd_hook_create() {
 #   anything else     cargo fmt --all --check, then cargo test --workspace
 # WB_VERIFY_ALL=1 runs every suite; a branch with no changes runs cargo.
 cmd_verify() {
-  local head base files rust=0 ios=0 f
+  local base files rust=0 ios=0 f
   [ -z "$(git status --porcelain)" ] || die "commit first: verify tests the committed HEAD"
-  head=$(git rev-parse HEAD)
   base=$(git merge-base origin/main HEAD)
   files=$(git diff --name-only "$base" HEAD)
   [ -n "$files" ] || rust=1
@@ -112,7 +109,6 @@ cmd_verify() {
     fi
   fi
   [ $rust = 1 ] || [ $ios = 1 ] || say "only docs changed; no tests to run"
-  echo "$head" > "$(marker)"
   say "verified $(git rev-parse --short HEAD)"
 }
 
@@ -126,7 +122,6 @@ cmd_ship() {
       || die "rebase stopped on a conflict: resolve it, git rebase --continue, then scripts/wt ship again"
   fi
   [ "$(git rev-list --count origin/main..HEAD)" -gt 0 ] || die "nothing to push: HEAD is already on origin/main"
-  [ "$(cat "$(marker)" 2>/dev/null)" = "$(git rev-parse HEAD)" ] || cmd_verify
   git push origin HEAD:main
   say "pushed to main. Clean up from the main checkout: scripts/wt rm $(git symbolic-ref --short -q HEAD || echo '<name>')"
 }

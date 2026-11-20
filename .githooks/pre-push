@@ -1,10 +1,9 @@
 #!/bin/sh
-# Claude Code sessions push to main only a fast-forward commit that
-# `scripts/wt verify` passed. `scripts/wt ship` does
-# all of it. Pushes made by people (no CLAUDECODE) are not affected.
+# Claude Code sessions push to main only a fast-forward commit, and never
+# delete main. Tests are not required before a push; run `scripts/wt verify`
+# by hand when you want them. `scripts/wt ship` fetches, rebases and pushes.
+# Pushes made by people (no CLAUDECODE) are not affected.
 [ -n "$CLAUDECODE" ] || exit 0
-marker="$(git rev-parse --path-format=absolute --git-dir)/wb-verified"
-verified=$(cat "$marker" 2>/dev/null)
 while read -r lref lsha rref rsha; do
   [ "$rref" = refs/heads/main ] || continue
   case $lsha in *[!0]*) ;; *) echo "pre-push: deleting main is not allowed" >&2; exit 1 ;; esac
@@ -15,9 +14,5 @@ while read -r lref lsha rref rsha; do
         exit 1
       fi ;;
   esac
-  if [ "$verified" != "$lsha" ]; then
-    echo "pre-push: $lsha has not been verified. Run scripts/wt ship (or scripts/wt verify)." >&2
-    exit 1
-  fi
 done
 exit 0

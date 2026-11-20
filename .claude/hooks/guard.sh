@@ -28,7 +28,7 @@ case $tool in
   Bash)
     cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
     if grep -Eq -- '--no-verify|core\.hooksPath' <<<"$cmd"; then
-      block "Blocked: the git hooks (.githooks) must not be skipped. Use scripts/wt verify / scripts/wt ship."
+      block "Blocked: the git hooks (.githooks) must not be skipped. Use scripts/wt ship."
     fi
     ;;
 esac

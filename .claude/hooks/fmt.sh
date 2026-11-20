@@ -1,7 +1,7 @@
 #!/bin/bash
 # PostToolUse: rustfmt a Rust file Claude just edited, but only when the
 # committed version of that file was already rustfmt-clean (or the file is
-# new). The whole workspace is formatted (scripts/wt verify checks it); the
+# new). The whole workspace is formatted (scripts/wt verify checks it when run); the
 # check keeps vendored code under third_party/ from being reformatted by a
 # small edit. Formats only this file (stdin mode does not follow `mod x;`).
 # Never blocks.

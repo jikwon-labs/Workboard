@@ -19,9 +19,9 @@
 - 2026-11-16 기준 139개. 합치기 규칙, 서버 클라이언트, 로그인, 통화 토큰 같은 iPhone 앱의 로직을 가짜 서버로 확인한다.
 - 시뮬레이터에서 앱을 직접 누르는 UI 테스트 26개는 따로 돌린다. 가짜 서버를 먼저 띄우는 순서와 명령은 [`docs/ios-design.md`](ios-design.md) "실행 방법" 의 테스트.
 
-### push 전 검증 (`scripts/wt verify`)
+### 검증 (`scripts/wt verify`)
 
-`scripts/wt ship` 이 push 전에 부른다. 바뀐 파일을 보고 돌릴 테스트를 고른다.
+필요할 때 직접 돌린다. `scripts/wt ship` 은 부르지 않으므로 push 에 테스트가 필요하지 않다. 바뀐 파일을 보고 돌릴 테스트를 고른다.
 
 - `ios/` 아래: `swift test`. `WB_IOS_UI=1` 이면 시뮬레이터 UI 테스트까지(`WB_IOS_SIM` 으로 시뮬레이터 이름을 바꾼다. 기본 `iPhone 17`).
 - 문서(`*.md`, `docs/`)만: 아무것도 돌리지 않는다.

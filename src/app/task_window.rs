@@ -119,7 +119,10 @@ impl App {
                         self.attachments_section(ui, &t, &mut task);
                         ui.add_space(30.0);
                     });
-                self.task_activity(ui, t, tid, &mut task, win_id, level, right);
+                // sending a post finishes with the task, so the window closes
+                if self.task_activity(ui, t, tid, &mut task, win_id, level, right) {
+                    close = true;
+                }
             });
         // a dialog opened from the window (picker, Move to) must stay above
         // it: egui keeps the old order between two layers that both ask
@@ -997,6 +1000,7 @@ impl App {
     }
 
     /// The right column: comments and activity, search, and the comment box.
+    /// Returns true when a post was sent this frame.
     fn task_activity(
         &mut self,
         ui: &mut Ui,
@@ -1006,7 +1010,7 @@ impl App {
         win_id: egui::Id,
         level: crate::sync::Level,
         right: Rect,
-    ) {
+    ) -> bool {
         // ---- right: activity
         let mut right_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -1184,6 +1188,7 @@ impl App {
             right_ui.data_mut(|d| d.insert_temp(mention_id, true));
         }
         let mut insert: Option<String> = None;
+        let mut posted = false;
         right_ui.horizontal(|ui| {
             let at = ui.add(ghost(egui::Button::new("@").min_size(vec2(24.0, 24.0))));
             name_it(&at, "Mention someone");
@@ -1267,6 +1272,7 @@ impl App {
                     self.comment.text.clear();
                     self.comment.picked.clear();
                     close_popup(ui);
+                    posted = post;
                 }
             });
         });
@@ -1287,6 +1293,7 @@ impl App {
             )));
             st.store(right_ui.ctx(), comment_id);
         }
+        posted
     }
 
     /// Keys while the window is open: Escape and Cmd+digit priority.

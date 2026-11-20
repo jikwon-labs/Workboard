@@ -47,7 +47,13 @@ fn task_window_comment_post_tabs_tools_and_search() {
         .activity
         .iter()
         .any(|a| a.post && a.text == "Release notes"));
+    assert!(
+        h.app.open_task.is_none(),
+        "sending a post closes the task window"
+    );
+    assert!(!h.has("Comment box"));
     // search narrows the comments
+    h.click_left("Task Write copy for landing page", 120.0);
     h.click("Search comments button");
     h.type_text("release");
     assert!(h.has("Release notes"));

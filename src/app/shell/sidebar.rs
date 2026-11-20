@@ -672,7 +672,8 @@ impl App {
     }
 
     /// Channels: each channel I can see, with its unread count and settings
-    /// button, and the field for a new channel.
+    /// button, and the field for a new channel. "Add Channel" is the only add
+    /// button here (a "+" in the header too showed the same thing twice).
     fn sidebar_channels(
         &mut self,
         ui: &mut Ui,
@@ -690,7 +691,6 @@ impl App {
                     ("edit", "Drafts"),
                     ("clock", "Scheduled messages"),
                     ("bookmark", "Saved messages"),
-                    ("+", "Create a Channel"),
                 ],
             );
             name_it(&hs[0], "Drafts");
@@ -707,13 +707,6 @@ impl App {
             name_it(&hs[2], "Saved messages");
             if hs[2].clicked() {
                 self.modal = Some(Modal::SavedMessages);
-            }
-            if hs[3].clicked() {
-                self.modal = Some(Modal::NewChannel {
-                    name: String::new(),
-                    private: false,
-                    add_list: false,
-                });
             }
             // the Unread filter uses the real count; muting only hides the badge
             let chans: Vec<(u64, String, usize)> = self

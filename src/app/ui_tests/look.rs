@@ -564,11 +564,7 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
 fn plus_buttons_draw_the_plus_in_their_middle() {
     // the "+" character sits low in its line, so these are drawn as lines
     let mut h = Ui1::new();
-    for name in [
-        "Sidebar Create Space",
-        "Sidebar Create a Channel",
-        "Sidebar New message",
-    ] {
+    for name in ["Sidebar Create Space", "Sidebar New message"] {
         h.assert_plus_centered(name);
     }
     // the "+" on a Space and a List row shows on hover

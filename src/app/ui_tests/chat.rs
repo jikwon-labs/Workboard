@@ -269,6 +269,19 @@ fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
 }
 
 #[test]
+fn sidebar_channels_have_one_add_button() {
+    // the header used to have a "+" next to the "Add Channel" row: two
+    // buttons for the same thing
+    let mut h = Ui1::new();
+    assert!(!h.has("Sidebar Create a Channel"));
+    let n = h.app.data.channels.len();
+    h.click_side("Add Channel", false);
+    h.type_text("one button");
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.data.channels.len(), n + 1);
+}
+
+#[test]
 fn sidebar_add_channel_takes_enter_and_lets_go_on_escape() {
     let mut h = Ui1::new();
     let n = h.app.data.channels.len();

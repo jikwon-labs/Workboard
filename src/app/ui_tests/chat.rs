@@ -173,6 +173,69 @@ fn thread_moves_to_its_own_window_and_back() {
 }
 
 #[test]
+fn escape_closes_the_thread() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let tid = h.app.chat.thread_open.unwrap();
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.chat.thread_open, None, "the panel closes");
+    assert!(!h.has("Close thread"));
+
+    // from its reply box too, and the half-written reply waits for it
+    h.click("1 reply");
+    h.click("Reply composer");
+    h.type_text("half a reply");
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.chat.thread_open, None);
+    h.click("1 reply");
+    assert_eq!(h.app.chat.thread_open, Some(tid));
+    assert_eq!(h.app.chat.thread_text, "half a reply", "the draft is kept");
+
+    // a menu over the thread closes first, the thread stays
+    h.click("More actions");
+    assert!(h.has("Remind me in 1 hour"), "the menu is open");
+    h.key(egui::Key::Escape);
+    assert!(!h.has("Remind me in 1 hour"), "Escape closes the menu");
+    assert_eq!(h.app.chat.thread_open, Some(tid), "not the thread");
+
+    // in its own window as well
+    h.click("Open in new window");
+    assert!(h.app.chat.thread_window.is_some());
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.chat.thread_open, None);
+    assert_eq!(h.app.chat.thread_window, None);
+    assert!(!h.has("Back to the sidebar"));
+}
+
+#[test]
+fn escape_while_changing_a_message_in_a_thread_only_cancels_it() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let tid = h.app.chat.thread_open.unwrap();
+    h.click("Reply composer");
+    h.type_text("mine");
+    h.key(egui::Key::Enter);
+    // my reply's menu, on its toolbar when the pointer is over it
+    let mine = h.find("mine").unwrap();
+    h.hover(mine);
+    let more = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "More actions")
+        .map(|(_, r)| r.center())
+        .max_by(|a, b| (a.x + a.y).total_cmp(&(b.x + b.y)))
+        .unwrap();
+    h.click_at(more);
+    h.click("Edit message");
+    assert!(h.app.chat.edit.is_some(), "my reply turns into a text box");
+    h.key(egui::Key::Escape);
+    assert!(h.app.chat.edit.is_none(), "Escape cancels the change");
+    assert_eq!(h.app.chat.thread_open, Some(tid), "the thread stays open");
+}
+
+#[test]
 fn thread_header_drags_out_to_a_new_window() {
     let mut h = Ui1::new();
     h.click("general");

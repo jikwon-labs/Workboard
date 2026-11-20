@@ -1138,6 +1138,9 @@ impl App {
                     });
                 thread_rect = Some(panel.response.rect);
                 self.chat.thread_panel_pass = ui.ctx().cumulative_pass_nr();
+                if self.escape_closes_thread(ui.ctx(), false) {
+                    acts.push(ChatAction::CloseThread);
+                }
             }
         }
         // pictures and videos dragged in from Finder
@@ -1480,6 +1483,31 @@ impl App {
         }
     }
 
+    /// Escape closes the thread, unless something else takes the key first:
+    /// a menu, a dialog, a picture being viewed, a message being changed, or
+    /// a text field other than the message boxes (the thread's draft stays).
+    /// `in_window`: the key went to the thread's own window, where only the
+    /// thread's fields are.
+    fn escape_closes_thread(&self, ctx: &egui::Context, in_window: bool) -> bool {
+        let boxes = [
+            egui::Id::new(super::files::CHAT_BOX),
+            egui::Id::new(super::files::THREAD_BOX),
+        ];
+        let typing_elsewhere =
+            !in_window && self.typing_was_on && !self.focus_was.is_some_and(|f| boxes.contains(&f));
+        ctx.input(|i| i.key_pressed(egui::Key::Escape))
+            && !self.menu_was_open
+            && !typing_elsewhere
+            && self.chat.edit.is_none()
+            && self.modal.is_none()
+            && self.viewer.is_none()
+            && self.open_task.is_none()
+            && self.palette.is_none()
+            && self.quick_add.is_none()
+            && self.rename.is_none()
+            && !self.new_message_open
+    }
+
     /// Opens a thread of conversation `ch` (None: leaves the open one, as
     /// [`Self::leave_thread`]). With the thread window open it shows there.
     pub(super) fn show_thread(&mut self, ch: u64, thread: Option<u64>) {
@@ -1746,6 +1774,7 @@ impl App {
                             ui.set_min_height(560.0);
                             self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
                         });
+                    closed = self.escape_closes_thread(ctx, false);
                     return;
                 }
                 let win = egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
@@ -1769,7 +1798,7 @@ impl App {
                 for f in dropped {
                     self.add_media(true, Some(f), None);
                 }
-                closed = close;
+                closed = close || (front && self.escape_closes_thread(ctx, true));
                 focused = front;
             },
         );

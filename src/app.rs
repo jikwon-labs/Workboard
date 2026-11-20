@@ -425,6 +425,8 @@ pub struct App {
     menu_was_open: bool,
     /// A text field had keyboard focus at the end of the previous pass.
     typing_was_on: bool,
+    /// What had keyboard focus at the end of the previous pass.
+    focus_was: Option<egui::Id>,
     /// Link previews being fetched for messages I sent (chat.rs).
     previews: chat::Previews,
     data: Data,
@@ -1027,6 +1029,7 @@ impl App {
             selected: HashSet::new(),
             menu_was_open: false,
             typing_was_on: false,
+            focus_was: None,
             previews: Default::default(),
             filter: TaskFilter::default(),
             hidden_cols: std::iter::once("Date created")
@@ -5462,8 +5465,9 @@ impl App {
         self.chat.shown = self.chat.drawn_pass == ctx.cumulative_pass_nr();
         // read at the end of the pass: egui drops the focus on Escape before
         // the next pass reaches our code
-        self.typing_was_on = ctx
-            .memory(|m| m.focused())
+        self.focus_was = ctx.memory(|m| m.focused());
+        self.typing_was_on = self
+            .focus_was
             .is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
     }
 

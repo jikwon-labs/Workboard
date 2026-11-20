@@ -6,8 +6,6 @@
 
 ## 할 일
 
-- [ ] **App Store Connect API 키 만들기 (TestFlight 자동 배포용)**: App Store Connect > 사용자 및 액세스 > 통합 > App Store Connect API 에서 팀 키를 "앱 관리" 역할로 만든다. `.p8` 은 한 번만 받을 수 있으니 바로 `~/.appstoreconnect/private_keys/AuthKey_<키 ID>.p8` 에 두고, `~/.appstoreconnect/workboard.env` 에 `ASC_KEY_ID=<키 ID>`, `ASC_ISSUER_ID=<발급자 ID>` 를 적는다. `ios/scripts/testflight.sh check` 가 앱 이름과 그룹 `Team` 을 보여 주면 끝. 그다음 0.1.20 을 Team 에 넣으려면 `ios/scripts/testflight.sh distribute` (`docs/ios-design.md` "TestFlight").
-
 - [ ] **내 앱 주소 바꾸기**: Mac 과 iPhone 에서 서버 주소를 `https://wb.wlrnjs.xyz` 로 (`docs/cloudflare-tunnel.md` "앱에서 주소 바꾸기"). 팀원에게도 알린다.
 - [ ] **데스크톱 알림 직접 확인 (설치된 앱에서)**: 알림 배너는 서명된 `Workboard.app` 으로 실행해야 앱 아이콘으로 뜨고, 눌렀을 때 해당 대화·작업이 열린다(`cargo run` 으로는 스크립트 편집기 이름으로 뜨고 눌러도 안 열린다). 새 버전 배포 뒤 확인: 첫 알림 때 권한 창이 뜨는지, 설정 > 알림의 "테스트 알림 보내기", 다른 계정에서 DM을 보내 창이 뒤에 있을 때 배너·소리·Dock 튀기기·Dock 숫자가 나오는지, 배너를 누르면 그 DM이 열리는지.
 
@@ -17,6 +15,7 @@
 
 ## 끝난 일
 
+- [x] **App Store Connect API 키 만들기 (TestFlight 자동 배포용)** (2026-11-21, `b0acba4`): 팀 키 "Workboard TestFlight"(키 ID `63P26JH467`, 앱 관리)를 만들어 `~/.appstoreconnect/` 에 두었다. `ios/scripts/testflight.sh check` 가 앱과 그룹 `Team` 을 보여 줬고, `distribute` 로 0.1.20 (1) 을 Team 에 넣어 베타 심사에 냈다.
 - [x] **0.1.20 배포 (Mac, Windows, iPhone)** (2026-11-20, `9886b58`, 빌드 603): Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 44562911672 의 zip 을 `appcast-windows.xml` 로, iPhone 은 TestFlight 에 올렸다. GitHub Release v0.1.20 에 Mac·Windows zip 을 붙였다. 스레드를 열면 읽음 처리, 스레드 안 입력 중 표시(서버는 자동 업데이트로 `b37cae9` 설치됨), 답장 줄 정렬이 들어 있다.
 - [x] **0.1.19 배포 (Mac, Windows, iPhone)** (2026-11-20, `0d23cd5`, 빌드 596): Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 44551605423 의 zip 을 `appcast-windows.xml` 로, iPhone 은 TestFlight 에 올렸다. GitHub Release v0.1.19 에 Mac·Windows zip 을 붙였다. 채팅의 "New" 줄과 새 메시지 안내, DM 입력 중 점이 들어 있다.
 

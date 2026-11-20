@@ -2882,3 +2882,31 @@ fn unread_pill_at_the_sidebar_bottom_scrolls_to_an_unread_dm_below() {
     h.settle();
     assert!(!h.has(pill));
 }
+
+/// The Post tab puts a megaphone in the message box so it is plain this goes
+/// out as a post, and once the post is sent the box is back to messages.
+#[test]
+fn a_post_shows_its_icon_in_the_box_and_then_goes_back_to_messages() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    assert!(!h.has("Post mode"), "a plain message box has no megaphone");
+    h.click("Post");
+    assert!(h.has("Post mode"), "the post box shows the megaphone");
+    h.click("Message composer");
+    h.type_text("Office closed on Friday");
+    h.key(egui::Key::Enter);
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    let last = ch.messages.last().unwrap();
+    assert_eq!(last.text, "Office closed on Friday");
+    assert!(last.post_title.is_some(), "it went out as a post");
+    h.settle();
+    assert_eq!(h.app.composer_mode, 0, "the box is back to messages");
+    assert!(!h.has("Post mode"));
+    // the next thing typed is a plain message
+    h.click("Message composer");
+    h.type_text("thanks");
+    h.key(egui::Key::Enter);
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    assert!(ch.messages.last().unwrap().post_title.is_none());
+}

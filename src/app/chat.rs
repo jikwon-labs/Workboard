@@ -1811,13 +1811,20 @@ impl App {
                 }
                 self.pending_strip(ui, false);
                 if self.composer_mode == 1 {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.post.title)
-                            .hint_text(tr("Title"))
-                            .font(FontId::proportional(15.0))
-                            .frame(false)
-                            .desired_width(f32::INFINITY),
-                    );
+                    // the megaphone in the box says this goes out as a post, not a message
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (r, icon) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                        line_icon(ui.painter(), "megaphone", r.center(), t.primary);
+                        name_it(&icon, "Post mode");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.post.title)
+                                .hint_text(tr("Title"))
+                                .font(FontId::proportional(15.0))
+                                .frame(false)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
                 }
                 let hint = if self.composer_mode == 1 {
                     tr("Share an announcement...").to_string()
@@ -2015,6 +2022,8 @@ impl App {
                                 None
                             };
                             out = Some((text, title, files));
+                            // after a post the box goes back to plain messages
+                            self.composer_mode = 0;
                             self.chat.text.clear();
                             // the picks go with the message (see apply_chat)
                             self.post.title.clear();

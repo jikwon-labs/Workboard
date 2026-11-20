@@ -53,7 +53,11 @@ fn click_hide_recent_tasks_row_and_turn_it_back_on_in_themes() {
     h.click("Profile menu");
     h.click("Settings");
     h.click("Settings Themes");
-    h.click("Show recently opened tasks at the bottom");
+    assert!(
+        !h.painted_text("Tasks you open line up along the bottom of the window, so you can open them again in one click.").is_empty(),
+        "the box says what the row is"
+    );
+    h.click("Show the recent tasks row");
     assert!(!h.app.data.extra.hide_tray);
     h.click("\u{2190}  Back to Workspace");
     h.settle();

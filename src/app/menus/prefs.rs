@@ -65,16 +65,25 @@ impl App {
         });
         ui.add_space(6.0);
         let mut show = !self.data.extra.hide_tray;
-        if check(
-            ui,
-            &mut show,
-            tr("Show recently opened tasks at the bottom"),
-        )
-        .changed()
-        {
+        if check(ui, &mut show, tr("Show the recent tasks row")).changed() {
             self.data.extra.hide_tray = !show;
             self.dirty = true;
         }
+        // what the row is, right under the box's words
+        ui.add_space(-ui.spacing().item_spacing.y);
+        ui.horizontal(|ui| {
+            ui.add_space(21.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(tr(
+                        "Tasks you open line up along the bottom of the window, so you can open them again in one click.",
+                    ))
+                    .small()
+                    .color(t.text3),
+                )
+                .wrap(),
+            );
+        });
         ui.add_space(6.0);
         ui.label(tr("Theme color"));
         ui.horizontal_wrapped(|ui| {

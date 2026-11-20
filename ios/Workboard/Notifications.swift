@@ -50,31 +50,46 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         print("remote notifications not available: \(error.localizedDescription)")
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    // The completion-handler forms, with the handler called on the main
+    // thread. The `async` forms return on a background thread, and after a
+    // tap that brought the app forward UIKit then updates its snapshot off
+    // the main thread and stops the app (tapping a notification while the
+    // app was in the background or not running crashed it).
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let info = notification.request.content.userInfo
         let ch = Notifier.channel(in: info)
         let ws = info["ws"] as? String
-        // UIApplication is main-thread only; this delegate method is not
-        let (current, active, other) = await MainActor.run {
-            (currentChannel(), UIApplication.shared.applicationState == .active, otherWorkspace(ws))
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                let current = self.currentChannel()
+                let active = UIApplication.shared.applicationState == .active
+                // the same channel number in another workspace is another conversation
+                if let ch, ch == current, active, !self.otherWorkspace(ws) {
+                    completionHandler([])
+                } else {
+                    completionHandler([.banner, .list, .sound])
+                }
+            }
         }
-        // the same channel number in another workspace is another conversation
-        if let ch, ch == current, active, !other { return [] }
-        return [.banner, .list, .sound]
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        if let task = Notifier.number(info["task"]) {
-            await MainActor.run { onOpenTask(task) }
-            return
-        }
-        guard let ch = Notifier.channel(in: info) else { return }
+        let task = Notifier.number(info["task"])
+        let ch = Notifier.channel(in: info)
         let parent = Notifier.number(info["parent"])
         let ws = info["ws"] as? String
-        await MainActor.run {
-            pendingOpen = (ch, parent, ws)
-            onOpen(ch, parent, ws)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                if let task {
+                    self.onOpenTask(task)
+                } else if let ch {
+                    self.pendingOpen = (ch, parent, ws)
+                    self.onOpen(ch, parent, ws)
+                }
+            }
+            completionHandler()
         }
     }
 }

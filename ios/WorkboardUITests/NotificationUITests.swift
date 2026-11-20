@@ -29,6 +29,30 @@ final class NotificationUITests: WorkboardUITestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists)
     }
 
+    /// Tapping a notification while the app is in the background brings it
+    /// forward on the conversation (this used to stop the app).
+    func testTappingABannerFromTheBackgroundOpensConversation() {
+        let app = launchFresh(["-wbTab", "chat"], server: adminServer)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let card = app.buttons["notifyCardButton"]
+        if card.waitForExistence(timeout: 8) {
+            card.tap()
+            let allow = springboard.buttons["Allow"]
+            if allow.waitForExistence(timeout: 5) { allow.tap() }
+        }
+        XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        let text = "Away check \(Int(Date().timeIntervalSince1970) % 100000)"
+        say("@Jamie Park " + text, channel: 301)
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 10), "banner shown while away")
+        banner.tap()
+        XCTAssertTrue(app.navigationBars["#general"].waitForExistence(timeout: 8), "tapping opens the conversation")
+        sleep(3)
+        XCTAssertEqual(app.state, .runningForeground, "the app is still running after the tap")
+    }
+
     func testAChannelSetToAllMessagesNotifiesWithoutAMention() {
         let app = launchFresh(["-wbOpen", "settings"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")

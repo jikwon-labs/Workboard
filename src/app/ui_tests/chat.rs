@@ -2988,6 +2988,70 @@ fn a_post_shows_its_icon_in_the_box_and_then_goes_back_to_messages() {
     assert!(ch.messages.last().unwrap().post_title.is_none());
 }
 
+/// On the Posts page each post is a card that reads top to bottom: the
+/// author line, the title under it and the text under that across the card
+/// (the text once came out one letter per line beside the title). A post in a
+/// direct message names the person, not an empty "# ".
+#[test]
+fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Post");
+    h.click("Message composer");
+    h.type_text("Office closed on Friday for the move");
+    h.key(egui::Key::Enter);
+    let me = h.app.data.me;
+    let post = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find_map(|c| c.messages.iter().find(|m| m.post_title.is_some()))
+        .unwrap()
+        .clone();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.kind == ChannelKind::Direct && c.members.contains(&me) && c.members.len() > 1)
+        .unwrap();
+    let mut in_dm = post.clone();
+    in_dm.id += 1_000_000;
+    in_dm.text = "Lunch is on me".into();
+    dm.messages.push(in_dm);
+    let dm = dm.clone();
+    let who = h.app.channel_label(&dm);
+    h.app.section = Section::Posts;
+    h.settle();
+
+    let title = h.painted_text("Update");
+    let body = h.painted_text("Office closed on Friday for the move");
+    assert!(!title.is_empty() && !body.is_empty(), "the post is listed");
+    let (t, b) = (title[0].0, body[0].0);
+    assert!(
+        b.top() >= t.bottom() - 1.0,
+        "the text is under the title: {t:?} {b:?}"
+    );
+    assert!(b.height() < 40.0, "the text stays on one line: {b:?}");
+    let open = h.rect("Open in channel");
+    assert!(
+        t.right() < open.left(),
+        "the title is not beside the link: {t:?} {open:?}"
+    );
+
+    let texts = drawn_texts(&h.shapes);
+    assert!(
+        texts
+            .iter()
+            .any(|x| x.starts_with(&format!("Announcement in {who} "))),
+        "the DM post names {who}: {texts:?}"
+    );
+    assert!(!texts
+        .iter()
+        .any(|x| x.contains("in #  ") || x.contains("in  ")));
+}
+
 #[test]
 fn a_message_that_comes_in_while_reading_at_the_bottom_takes_the_red_line_away() {
     let mut h = Ui1::new();

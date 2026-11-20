@@ -335,7 +335,7 @@ impl App {
                 for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
                     for m in &c.messages {
                         if m.post_title.is_some() {
-                            posts.push((c.name.clone(), c.id, m.clone()));
+                            posts.push((self.channel_label(c), c.id, m.clone()));
                         }
                     }
                 }
@@ -397,41 +397,49 @@ impl App {
                             .inner_margin(egui::Margin::same(14))
                             .show(ui, |ui| {
                                 ui.set_width(cw - 28.0);
-                                ui.horizontal(|ui| {
-                                    if let Some(a) = self.data.member(m.author) {
-                                        let (r, _) = ui
-                                            .allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-                                        paint_avatar(ui.painter(), r.center(), 12.0, a, t.card);
-                                        ui.label(RichText::new(a.shown()).strong());
-                                    }
-                                    ui.label(
-                                        RichText::new(trf!(
-                                            "{} in # {} \u{2022} {}",
-                                            tr(if m.post_type.is_empty() {
-                                                "Announcement"
-                                            } else {
-                                                &m.post_type
-                                            }),
-                                            cname,
-                                            fmt_ago(m.ts)
-                                        ))
-                                        .small()
-                                        .color(t.text3),
-                                    );
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        if ui.link(tr("Open in channel")).clicked() {
-                                            self.section = Section::Chat;
-                                            self.chat.open = Some(cid);
+                                // the frame sits in a horizontal row; stack its contents top to bottom
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        if let Some(a) = self.data.member(m.author) {
+                                            let (r, _) = ui.allocate_exact_size(
+                                                vec2(26.0, 26.0),
+                                                Sense::hover(),
+                                            );
+                                            paint_avatar(ui.painter(), r.center(), 12.0, a, t.card);
+                                            ui.label(RichText::new(a.shown()).strong());
                                         }
+                                        ui.label(
+                                            RichText::new(trf!(
+                                                "{} in {} \u{2022} {}",
+                                                tr(if m.post_type.is_empty() {
+                                                    "Announcement"
+                                                } else {
+                                                    &m.post_type
+                                                }),
+                                                cname,
+                                                fmt_ago(m.ts)
+                                            ))
+                                            .small()
+                                            .color(t.text3),
+                                        );
+                                        ui.with_layout(
+                                            Layout::right_to_left(Align::Center),
+                                            |ui| {
+                                                if ui.link(tr("Open in channel")).clicked() {
+                                                    self.section = Section::Chat;
+                                                    self.chat.open = Some(cid);
+                                                }
+                                            },
+                                        );
                                     });
+                                    ui.label(
+                                        RichText::new(m.post_title.clone().unwrap_or_default())
+                                            .size(17.0),
+                                    );
+                                    if !m.text.is_empty() {
+                                        ui.add(egui::Label::new(&m.text).wrap());
+                                    }
                                 });
-                                ui.label(
-                                    RichText::new(m.post_title.clone().unwrap_or_default())
-                                        .size(17.0),
-                                );
-                                if !m.text.is_empty() {
-                                    ui.add(egui::Label::new(&m.text).wrap());
-                                }
                             });
                     });
                     ui.add_space(8.0);

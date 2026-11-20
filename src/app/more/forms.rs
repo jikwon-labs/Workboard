@@ -150,12 +150,12 @@ impl App {
                         let rq = check(ui, &mut fld.required, tr("Required"));
                         name_it(&rq, &format!("Required {}", i + 1));
                         ch |= rq.changed();
-                        let up = ui.add_enabled(i > 0, ghost(egui::Button::new("\u{2191}")));
+                        let up = ui.add_enabled(i > 0, ghost(egui::Button::new("\u{2191}").min_size(vec2(CONTROL_H, CONTROL_H))));
                         name_it(&up, &format!("Move question {} up", i + 1));
                         if up.clicked() {
                             swap = Some((i, i - 1));
                         }
-                        let down = ui.add_enabled(i + 1 < count, ghost(egui::Button::new("\u{2193}")));
+                        let down = ui.add_enabled(i + 1 < count, ghost(egui::Button::new("\u{2193}").min_size(vec2(CONTROL_H, CONTROL_H))));
                         name_it(&down, &format!("Move question {} down", i + 1));
                         if down.clicked() {
                             swap = Some((i, i + 1));

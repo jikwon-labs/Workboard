@@ -253,6 +253,23 @@ fn thread_header_drags_out_to_a_new_window() {
 }
 
 #[test]
+fn thread_close_button_is_square_like_its_neighbours() {
+    // a bare "\u{00D7}" was as narrow as the glyph but 28 tall, so its hover
+    // fill was a tall pill
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let close = h.rect("Close thread");
+    let out = h.rect("Open in new window");
+    assert!(close.width() >= close.height(), "{close:?}");
+    assert_eq!(
+        close.size(),
+        out.size(),
+        "same size as the button beside it"
+    );
+}
+
+#[test]
 fn thread_panel_is_wider_by_dragging_its_edge() {
     let mut h = Ui1::new();
     h.click("general");

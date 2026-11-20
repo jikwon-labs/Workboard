@@ -168,7 +168,12 @@ impl App {
                     // previous / next task in the current view
                     let (prev, next) = self.neighbours(tid);
                     if ui
-                        .add_enabled(prev.is_some(), ghost(egui::Button::new("\u{2191}")))
+                        .add_enabled(
+                            prev.is_some(),
+                            ghost(
+                                egui::Button::new("\u{2191}").min_size(vec2(CONTROL_H, CONTROL_H)),
+                            ),
+                        )
                         .on_hover_text(tr("Previous task"))
                         .clicked()
                     {
@@ -177,7 +182,12 @@ impl App {
                         }
                     }
                     if ui
-                        .add_enabled(next.is_some(), ghost(egui::Button::new("\u{2193}")))
+                        .add_enabled(
+                            next.is_some(),
+                            ghost(
+                                egui::Button::new("\u{2193}").min_size(vec2(CONTROL_H, CONTROL_H)),
+                            ),
+                        )
                         .on_hover_text(tr("Next task"))
                         .clicked()
                     {

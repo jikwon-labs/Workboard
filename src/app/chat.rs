@@ -1555,8 +1555,7 @@ impl App {
             let title = ui.label(RichText::new(tr("Thread")).size(15.0).strong());
             let place = ui.label(RichText::new(self.channel_label(channel)).color(t.text3));
             let buttons = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let close = ui.add(ghost(egui::Button::new("\u{00D7}")));
-                name_it(&close, "Close thread");
+                let close = icon_button(ui, &t, "close", "", "Close thread", false);
                 if close.clicked() {
                     acts.push(ChatAction::CloseThread);
                 }

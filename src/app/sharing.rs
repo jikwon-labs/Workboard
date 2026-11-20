@@ -329,10 +329,15 @@ impl App {
                             p.level = l.as_str().into();
                         }
                     }
-                    let r = ui
-                        .add(ghost(egui::Button::new("\u{00D7}")))
-                        .on_hover_text(tr("Remove"));
-                    name_it(&r, &format!("Remove {}", name));
+                    let r = super::icons::icon_button(
+                        ui,
+                        t,
+                        "close",
+                        "",
+                        &format!("Remove {}", name),
+                        false,
+                    )
+                    .on_hover_text(tr("Remove"));
                     if r.clicked() {
                         drop = Some(p.member);
                     }

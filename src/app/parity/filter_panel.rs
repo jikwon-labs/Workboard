@@ -350,8 +350,14 @@ impl App {
                         });
                     name_it(&vr.response, &format!("{} {} values", prefix, n));
                 });
-                let x = ui.add(ghost(egui::Button::new("\u{00D7}")));
-                name_it(&x, &format!("Remove {} {}", prefix.to_lowercase(), n));
+                let x = crate::app::icons::icon_button(
+                    ui,
+                    t,
+                    "close",
+                    "",
+                    &format!("Remove {} {}", prefix.to_lowercase(), n),
+                    false,
+                );
                 if x.clicked() {
                     drop = Some(i);
                 }

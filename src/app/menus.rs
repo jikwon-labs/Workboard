@@ -13,6 +13,7 @@ use egui::Response;
 
 mod fields;
 mod items;
+mod notify_page;
 mod prefs;
 mod workspace;
 

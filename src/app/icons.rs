@@ -105,7 +105,26 @@ pub(super) const KINDS: &[&str] = &[
     "login",
     "undo",
     "fit",
+    "at",
+    "volume",
+    "badge",
+    "wifi",
+    "person_plus",
+    "external",
+    "chevron_down",
 ];
+
+/// Points on a circle around `c` of radius `r`, from angle `a0` to `a1`
+/// (radians, clockwise on screen when `a1 > a0`).
+fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
+    let n = ((a1 - a0).abs() * r / 1.5).ceil().max(4.0) as usize;
+    (0..=n)
+        .map(|i| {
+            let a = a0 + (a1 - a0) * i as f32 / n as f32;
+            c + vec2(a.cos(), a.sin()) * r
+        })
+        .collect()
+}
 
 /// `line_icon` drawn `scale` times larger around `c` (the big icon of an
 /// empty page), with the stroke kept at about the usual weight.
@@ -1343,6 +1362,71 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
+        "at" => {
+            use std::f32::consts::PI;
+            p.circle_stroke(c, 2.7, s);
+            line(vec2(2.7, -2.7), vec2(2.7, 0.7));
+            // the small hook back up, then the big ring round to the bottom
+            p.add(egui::Shape::line(
+                arc_points(c + vec2(4.7, 0.7), 2.0, PI, 0.0),
+                s,
+            ));
+            line(vec2(6.7, 0.7), vec2(6.7, 0.0));
+            p.add(egui::Shape::line(
+                arc_points(c, 6.7, 0.0, 52.6_f32.to_radians() - 2.0 * PI),
+                s,
+            ));
+        }
+        "volume" => {
+            let pts = vec![
+                c + vec2(-7.0, -2.5),
+                c + vec2(-4.0, -2.5),
+                c + vec2(0.0, -6.0),
+                c + vec2(0.0, 6.0),
+                c + vec2(-4.0, 2.5),
+                c + vec2(-7.0, 2.5),
+            ];
+            p.add(egui::Shape::closed_line(pts, s));
+            let (a, b) = (-50_f32.to_radians(), 50_f32.to_radians());
+            p.add(egui::Shape::line(arc_points(c, 3.6, a, b), s));
+            p.add(egui::Shape::line(arc_points(c, 6.8, a, b), s));
+        }
+        "badge" => {
+            use std::f32::consts::{FRAC_PI_2, PI};
+            // an app icon with a dot on its corner: the outline stops short
+            // of the dot
+            let mut pts = vec![c + vec2(1.0, -5.0)];
+            pts.extend(arc_points(c + vec2(-4.0, -2.0), 3.0, -FRAC_PI_2, -PI));
+            pts.extend(arc_points(c + vec2(-4.0, 4.0), 3.0, PI, FRAC_PI_2));
+            pts.extend(arc_points(c + vec2(2.0, 4.0), 3.0, FRAC_PI_2, 0.0));
+            pts.push(c + vec2(5.0, 0.0));
+            p.add(egui::Shape::line(pts, s));
+            p.circle_stroke(c + vec2(5.0, -4.5), 2.6, s);
+        }
+        "wifi" => {
+            let (a, b) = (-130_f32.to_radians(), -50_f32.to_radians());
+            let o = c + vec2(0.0, 6.5);
+            for r in [4.0, 8.0, 12.0] {
+                p.add(egui::Shape::line(arc_points(o, r, a, b), s));
+            }
+            p.circle_filled(o, 1.1, color);
+        }
+        "person_plus" => {
+            p.circle_stroke(c + vec2(-2.5, -3.5), 3.0, s);
+            let mut arc = vec![];
+            for i in 0..=10 {
+                let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
+                arc.push(c + vec2(-2.5, 7.0) + vec2(a.cos() * 5.5, a.sin() * 5.0));
+            }
+            p.add(egui::Shape::line(arc, s));
+            line(vec2(5.5, -4.0), vec2(5.5, 2.0));
+            line(vec2(2.5, -1.0), vec2(8.5, -1.0));
+        }
+        "external" => {
+            line(vec2(-4.5, 4.5), vec2(5.0, -5.0));
+            line(vec2(-0.5, -5.0), vec2(5.0, -5.0));
+            line(vec2(5.0, -5.0), vec2(5.0, 0.5));
+        }
         "warning" => {
             let pts = vec![c + vec2(0.0, -7.0), c + vec2(7.5, 6.5), c + vec2(-7.5, 6.5)];
             p.add(egui::Shape::closed_line(pts, s));
@@ -1361,6 +1445,10 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
         "chevron_right" => {
             line(vec2(-2.5, -5.0), vec2(2.5, 0.0));
             line(vec2(2.5, 0.0), vec2(-2.5, 5.0));
+        }
+        "chevron_down" => {
+            line(vec2(-5.0, -2.5), vec2(0.0, 2.5));
+            line(vec2(0.0, 2.5), vec2(5.0, -2.5));
         }
         _ => return false,
     }

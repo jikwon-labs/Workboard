@@ -55,8 +55,10 @@ fn english_left(shown: &str, data: &[String]) -> bool {
     }
     let low = s.to_lowercase();
     // names, key names and examples that are the same in Korean
-    const KEEP: [&str; 14] = [
+    const KEEP: [&str; 15] = [
         "workboard",
+        // the Mac's name for it in Korean too (the notification preview)
+        "dock",
         "english",
         "jitsi",
         "markdown",

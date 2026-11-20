@@ -1,5 +1,6 @@
 // Dialogs for how the app looks and behaves for me: themes, shortcuts,
-// help, Labs, notifications, ClickApps and customizing the nav and sidebar.
+// help, Labs, ClickApps and customizing the nav and sidebar (notifications
+// are in notify_page.rs).
 
 use super::*;
 
@@ -206,93 +207,6 @@ impl App {
                 self.dirty = true;
             }
         }
-        false
-    }
-
-    /// The Notifications dialog. Returns true when it should close.
-    pub(super) fn notifications_body(&mut self, ui: &mut Ui, t: &Theme) -> bool {
-        // in Settings the page scrolls; in the dialog the list does.
-        // (A list scrolling inside the scrolling page cut off its last button.)
-        let max_h = if App::in_settings_page(ui) {
-            f32::INFINITY
-        } else {
-            (ui.ctx().screen_rect().height() - 200.0).max(240.0)
-        };
-        egui::ScrollArea::vertical().id_salt("notify_settings").max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
-            let persist = self.persist;
-            let manages = self.i_manage();
-            let n = &mut self.data.extra.notify;
-            let mut ch = false;
-            ui.label(RichText::new(tr("Show in your Inbox when...")).strong());
-            ch |= check(ui, &mut n.comments, tr("Someone comments on my tasks")).changed();
-            ch |= check(ui, &mut n.mentions, tr("Someone @mentions me")).changed();
-            ch |= check(ui, &mut n.assigned, tr("A task is assigned to me")).changed();
-            ch |= check(ui, &mut n.reminders, tr("A reminder is due")).changed();
-            ch |= check(ui, &mut n.chat, tr("New chat messages (unread counts)")).changed();
-            ui.add_space(12.0);
-            ui.label(RichText::new(tr("Desktop notifications")).strong());
-            ch |= check(ui, &mut n.desktop, tr("Show banners when Workboard isn't in front")).changed();
-            ch |= check(ui, &mut n.sound, tr("Play a sound")).changed();
-            let badge = if cfg!(windows) { tr("Show a count on the taskbar icon") } else { tr("Show a count on the Dock icon") };
-            ch |= check(ui, &mut n.dock_badge, badge).changed();
-            ui.add_space(6.0);
-            ui.label(RichText::new(tr("Mentions, assignments, comments and reminders follow the Inbox choices above. Also tell me about:")).small().color(t.text2));
-            ch |= check(ui, &mut n.direct, tr("Direct messages")).changed();
-            ch |= check(ui, &mut n.replies, tr("Replies in threads I'm in")).changed();
-            ch |= check(ui, &mut n.huddles, tr("Huddles and calls")).changed();
-            ch |= check(ui, &mut n.reactions, tr("Reactions to my messages")).changed();
-            ch |= check(ui, &mut n.task_changes, tr("Changes to my tasks (status, due date, priority)")).changed();
-            ui.horizontal(|ui| {
-                ch |= check(ui, &mut n.due, tr("My tasks due today, each day at")).changed();
-                let te = ui.add_enabled(n.due, field(&mut n.due_time).hint_text("09:00").desired_width(54.0));
-                name_it(&te, "Due notice time");
-                ch |= te.changed();
-            });
-            ui.horizontal(|ui| {
-                ch |= check(ui, &mut n.meetings, tr("Meetings, this many minutes before:")).changed();
-                let dv = ui.add_enabled(n.meetings, egui::DragValue::new(&mut n.meeting_minutes).range(1..=120));
-                name_it(&dv, "Minutes before a meeting");
-                ch |= dv.changed();
-            });
-            ch |= check(ui, &mut n.goals, tr("My goals due tomorrow or today")).changed();
-            if manages {
-                ch |= check(ui, &mut n.team, tr("Someone joins the workspace")).changed();
-            }
-            ch |= check(ui, &mut n.forms, tr("Answers to my forms")).changed();
-            ch |= check(ui, &mut n.connection, tr("The team server connection drops and comes back")).changed();
-            ui.add_space(12.0);
-            ui.label(RichText::new(tr("Channel messages")).strong());
-            for (mode, label) in [("all", "Every new message"), ("mentions", "Only @mentions and my threads"), ("nothing", "Nothing")] {
-                if radio(ui, n.channel_default == mode, tr(label)).clicked() && n.channel_default != mode {
-                    n.channel_default = mode.into();
-                    // channels set the same way as the new default no longer stand apart
-                    n.channel_modes.retain(|(_, m)| m != mode);
-                    ch = true;
-                }
-            }
-            ui.label(RichText::new(tr("Set one channel apart with the bell at the top of that channel. Direct messages follow \"Direct messages\" above.")).small().color(t.text2));
-            ui.add_space(8.0);
-            ui.label(RichText::new(tr("Keywords")).strong());
-            let kw = ui.add(field(&mut n.keywords).hint_text(tr("deploy, launch")).desired_width(300.0));
-            name_it(&kw, "Notification keywords");
-            ch |= kw.changed();
-            ui.label(RichText::new(tr("Tell me when a message in a channel has one of these words, like a mention. Separate them with commas.")).small().color(t.text2));
-            ui.add_space(10.0);
-            let test = ui.button(tr("Send a test notification"));
-            if test.clicked() {
-                if persist {
-                    crate::notifier::post("Workboard", &tr("Notifications are working."), "inbox", n.sound);
-                }
-                self.toast(if cfg!(windows) {
-                    tr("Sent a test notification. If no banner shows, turn on notifications for Workboard in Windows Settings > System > Notifications.")
-                } else {
-                    tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.")
-                });
-            }
-            if ch {
-                self.dirty = true;
-            }
-        });
         false
     }
 

@@ -203,22 +203,43 @@ pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
 
 /// A small switch (on/off) with a label, named for tests and screen readers.
 pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
-    let (r, resp) = ui.allocate_exact_size(vec2(34.0, 20.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(SWITCH_SIZE, Sense::click());
     name_it(&resp, label);
     if resp.clicked() {
         *on = !*on;
     }
-    let bg = if *on { t.primary } else { t.border };
+    paint_switch(ui, t, &resp, r, *on);
+    resp
+}
+
+/// The size `switch` draws at.
+pub const SWITCH_SIZE: egui::Vec2 = vec2(34.0, 20.0);
+
+/// Draws a `switch` in `r` (SWITCH_SIZE) for a control whose response is
+/// `resp`: a settings row that turns on and off as a whole draws one.
+pub fn paint_switch(ui: &Ui, t: &Theme, resp: &Response, r: Rect, on: bool) {
+    // off: a grey that still stands out on a white card (the border grey
+    // all but vanished there)
+    let off = if t.dark {
+        Color32::from_gray(80)
+    } else {
+        Color32::from_gray(212)
+    };
+    let bg = if on { t.primary } else { off };
+    let bg = if resp.enabled() {
+        bg
+    } else {
+        bg.gamma_multiply(0.5)
+    };
     ui.painter().rect_filled(r, 10.0, bg);
-    hover_bg(ui, &resp, r, 10.0);
-    let x = if *on {
+    hover_bg(ui, resp, r, 10.0);
+    let x = if on {
         r.right() - 10.0
     } else {
         r.left() + 10.0
     };
-    let knob = if *on { t.on_primary } else { Color32::WHITE };
+    let knob = if on { t.on_primary } else { Color32::WHITE };
     ui.painter().circle_filled(pos2(x, r.center().y), 7.0, knob);
-    resp
 }
 
 /// Where `theme::apply` leaves the accent colour for widgets that are not

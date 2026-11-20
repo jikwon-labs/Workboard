@@ -80,6 +80,16 @@ pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
     let _ = std::process::Command::new("xdg-open").arg(p).spawn();
 }
 
+/// Open the system's notification settings, where Workboard's banners are
+/// allowed or turned off: System Settings > Notifications on macOS, Settings
+/// > System > Notifications on Windows. Elsewhere nothing opens.
+pub fn open_notification_settings() {
+    #[cfg(target_os = "macos")]
+    open_path("x-apple.systempreferences:com.apple.Notifications-Settings.extension");
+    #[cfg(windows)]
+    open_path("ms-settings:notifications");
+}
+
 /// Show a file selected in Finder (macOS) or File Explorer (Windows); on
 /// other systems open its folder.
 pub fn reveal_path(p: &Path) {

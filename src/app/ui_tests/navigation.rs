@@ -1286,12 +1286,12 @@ fn click_notification_settings_turn_kinds_off_and_set_channels() {
     // the count and the help name this system's places
     let (badge, settings) = if cfg!(windows) {
         (
-            "Show a count on the taskbar icon",
+            "Show the unread count on the taskbar icon",
             "Windows Settings > System > Notifications",
         )
     } else {
         (
-            "Show a count on the Dock icon",
+            "Show the unread count on the Dock icon",
             "System Settings > Notifications",
         )
     };

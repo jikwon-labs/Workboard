@@ -2332,6 +2332,7 @@ fn notification_keywords_are_typed_in_settings() {
     h.settle();
     h.click("Notification keywords");
     h.type_text("deploy, 배포");
+    h.key(egui::Key::Enter);
     assert_eq!(
         h.app.data.extra.notify.keyword_list(),
         vec!["deploy", "배포"]

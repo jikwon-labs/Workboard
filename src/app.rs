@@ -908,6 +908,7 @@ impl App {
             Some("automations") => Some(Modal::automations(None)),
             Some("fields") => Some(Modal::custom_fields()),
             Some("themes") => Some(Modal::Themes),
+            Some("notifications") => Some(Modal::Notifications),
             Some("together") => Some(Modal::Together {
                 path: String::new(),
                 addr: String::new(),

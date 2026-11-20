@@ -20,6 +20,7 @@ mod layout_tests;
 mod look;
 mod media;
 mod navigation;
+mod notify_settings;
 mod people;
 mod profile;
 mod quit;

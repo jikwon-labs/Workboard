@@ -309,6 +309,35 @@ fn filled_buttons_tint_on_hover() {
     );
 }
 
+/// The channel composer's send button is a circle, not a rounded square.
+#[test]
+fn send_button_is_a_circle() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    h.type_text("ready to send");
+    let send = h.rect("Send");
+    assert!(
+        (send.width() - send.height()).abs() < 0.5,
+        "send button {send:?} should be as wide as it is tall"
+    );
+    let primary = h.app.t().primary;
+    let fill = h
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Rect(r) if r.fill == primary && r.rect.contains(send.center()) => Some(r),
+            _ => None,
+        })
+        .expect("the send button's solid fill");
+    let radius = fill.corner_radius.nw as f32;
+    assert!(
+        radius >= fill.rect.height() / 2.0 - 0.5,
+        "corner radius {radius} on a {} pt button is not round",
+        fill.rect.height()
+    );
+}
+
 /// A text field, the buttons and drop-downs beside it are one height, and
 /// sit on one line (the fields used to be 20 pt next to 28 pt buttons).
 #[test]

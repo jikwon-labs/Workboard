@@ -1992,8 +1992,13 @@ impl App {
                                 t.text3
                             }))
                             .fill(if ready { t.primary } else { t.hover })
-                            .corner_radius(6)
-                            .min_size(vec2(34.0, 28.0)),
+                            // round: a circle around the paper plane, a pill around "Post"
+                            .corner_radius(15)
+                            .min_size(if label.is_empty() {
+                                vec2(30.0, 30.0)
+                            } else {
+                                vec2(34.0, 30.0)
+                            }),
                         );
                         let sent = ui.add(b);
                         // the clock: send it later (schedule.rs), plain messages only

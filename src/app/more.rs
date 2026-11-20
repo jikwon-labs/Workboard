@@ -733,7 +733,7 @@ impl App {
             ui.add_space(16.0);
             // read-only rather than disabled: a disabled field fades its hint
             // to an unreadable grey on the dark theme
-            ui.add(egui::TextEdit::multiline(&mut String::new()).interactive(false).hint_text(RichText::new(tr("Ask anything... (available with the server)")).color(t.text3)).desired_rows(3).desired_width(600.0));
+            ui.add(field_multi(&mut String::new()).interactive(false).hint_text(RichText::new(tr("Ask anything... (available with the server)")).color(t.text3)).desired_rows(3).desired_width(600.0));
         });
         close |= self.modal.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape));
         if close {

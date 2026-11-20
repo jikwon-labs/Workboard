@@ -200,9 +200,28 @@ fn dark_theme_post_chip_and_ai_hint_read() {
     h.click("Rail AI");
     let hint = h.painted_text("Ask anything... (available with the server)");
     assert!(!hint.is_empty(), "the hint is shown");
-    for (_, c) in hint {
-        assert!(best(c) >= 3.0, "AI hint contrast {:.1}", best(c));
+    for (_, c) in &hint {
+        assert!(best(*c) >= 3.0, "AI hint contrast {:.1}", best(*c));
     }
+    // the hint has room inside its box rather than sitting in the corner
+    let (hr, _) = hint[0];
+    let frame = h
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.stroke.width > 0.0 && r.rect.contains_rect(hr) => {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the hint's box");
+    assert!(
+        hr.left() - frame.left() >= 8.0 && hr.top() - frame.top() >= 6.0,
+        "AI hint at {:?} is in the corner of its box {:?}",
+        hr,
+        frame
+    );
 }
 
 #[test]

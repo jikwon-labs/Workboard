@@ -46,6 +46,19 @@ pub const IMAGE_EXTS: [&str; 10] = [
     "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp",
 ];
 pub const VIDEO_EXTS: [&str; 4] = ["mov", "mp4", "m4v", "3gp"];
+/// File name endings a profile photo can have: the photo picker offers only
+/// these, and both ImageIO (macOS) and the `image` crate (elsewhere) open them.
+pub const PHOTO_EXTS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
+
+/// Whether the file at `path` can be used as a profile photo, from its name.
+pub fn photo_file(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    PHOTO_EXTS.contains(&ext.as_str())
+}
 
 /// What a file is, from its name: a picture or a video AVFoundation can
 /// play, else a plain file.
@@ -250,7 +263,7 @@ mod other {
     pub fn pick_picture() -> Option<PathBuf> {
         rfd::FileDialog::new()
             .set_title(crate::i18n::tr("Choose a profile photo"))
-            .add_filter(crate::i18n::tr("Pictures"), &IMAGE_EXTS)
+            .add_filter(crate::i18n::tr("Pictures"), &PHOTO_EXTS)
             .pick_file()
     }
     #[cfg(not(windows))]
@@ -792,6 +805,14 @@ mod mac {
             let _: () = msg_send![panel, setCanChooseDirectories: NO];
             let _: () = msg_send![panel, setCanChooseFiles: YES];
             let _: () = msg_send![panel, setMessage: ns(crate::i18n::tr("Choose a profile photo"))];
+            let types: Vec<*mut Object> = PHOTO_EXTS
+                .iter()
+                .map(|e| msg_send![class!(UTType), typeWithFilenameExtension: ns(e)])
+                .filter(|t: &*mut Object| !t.is_null())
+                .collect();
+            if !types.is_empty() {
+                let _: () = msg_send![panel, setAllowedContentTypes: array(&types)];
+            }
             let r: isize = msg_send![panel, runModal];
             if r != 1 {
                 return None;

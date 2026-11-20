@@ -123,6 +123,8 @@ pub const T: &[(&str, &str)] = &[
     ("Profile photo", "프로필 사진"),
     ("Upload photo", "사진 업로드"),
     ("Remove photo", "사진 삭제"),
+    ("JPG, PNG or WebP only", "JPG, PNG, WebP만 가능"),
+    ("Choose a JPG, PNG or WebP picture.", "JPG, PNG, WebP 사진을 골라 주세요."),
     ("Shown when there's no photo.", "사진이 없을 때 보입니다."),
     ("Choose a profile photo", "프로필 사진을 고르세요"),
     ("That file isn't a picture this app can open.", "이 앱에서 열 수 없는 그림 파일입니다."),

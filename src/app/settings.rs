@@ -62,10 +62,7 @@ impl App {
             "Templates" => self.template_center(super::templates::Category::All, None),
             "Automations" => Modal::automations(None),
             "Work together" => self.together_modal(),
-            "My settings" => {
-                let m = self.data.member(self.data.me).cloned().unwrap_or_default();
-                Modal::profile(&m)
-            }
+            "My settings" => self.profile_modal(),
             "Notifications" => Modal::Notifications,
             "Themes" => Modal::Themes,
             "Keyboard shortcuts" => Modal::Shortcuts,

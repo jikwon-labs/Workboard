@@ -108,6 +108,132 @@ fn edit_profile_saves_the_names_title_and_a_square_photo() {
 }
 
 #[test]
+fn edit_profile_shows_the_photo_left_of_the_names() {
+    let mut h = Ui1::new();
+    open_edit_profile(&mut h);
+    let photo = h.rect("Profile photo");
+    let name = h.rect("Profile full name");
+    assert!(
+        photo.right() < name.left(),
+        "the photo {:?} is left of the full name {:?}",
+        photo,
+        name
+    );
+    assert!(h.rect("Upload photo").right() < name.left());
+}
+
+#[test]
+fn edit_profile_fills_in_the_email_i_sign_in_with() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let set_email = |h: &mut Ui1, e: &str| {
+        h.app
+            .data
+            .members
+            .iter_mut()
+            .find(|m| m.id == me)
+            .unwrap()
+            .email = e.into();
+    };
+    set_email(&mut h, "");
+    h.app.sync_rt.account = Some("me@team.io".into());
+    open_edit_profile(&mut h);
+    assert!(
+        matches!(&h.app.modal, Some(Modal::Profile { email, .. }) if email == "me@team.io"),
+        "an empty email starts as the sign-in email"
+    );
+    assert!(
+        !h.painted_text("me@team.io").is_empty(),
+        "shown in the field"
+    );
+    assert!(
+        h.app.data.member(me).unwrap().email.is_empty(),
+        "nothing changes before Save"
+    );
+    h.click("Save changes");
+    assert_eq!(h.app.data.member(me).unwrap().email, "me@team.io");
+    // an email of my own stays
+    set_email(&mut h, "work@team.io");
+    open_edit_profile(&mut h);
+    assert!(matches!(&h.app.modal, Some(Modal::Profile { email, .. }) if email == "work@team.io"));
+    h.click("Cancel");
+    // Settings > My settings starts with it too
+    set_email(&mut h, "");
+    h.app.open_settings("My settings");
+    h.settle();
+    assert!(!h.painted_text("me@team.io").is_empty());
+}
+
+#[test]
+fn a_photo_only_takes_jpg_png_or_webp() {
+    let mut h = Ui1::new();
+    open_edit_profile(&mut h);
+    assert!(!h.painted_text("JPG, PNG or WebP only").is_empty());
+    // (the name alone decides, so the file needn't really be a GIF)
+    let png = test_picture("not-gif.png", 40, 40);
+    let gif = png.with_file_name("me.gif");
+    std::fs::copy(&png, &gif).unwrap();
+    crate::media::PICKED_PICTURE.with(|p| *p.borrow_mut() = Some(gif));
+    h.click("Upload photo");
+    h.settle();
+    assert!(h.app.profile_photo.is_none(), "a GIF isn't used");
+    assert_eq!(
+        h.app.toast.as_ref().map(|t| t.0.as_str()),
+        Some("Choose a JPG, PNG or WebP picture.")
+    );
+    assert!(!h.has("Remove photo"));
+    // a name ending in capitals is fine
+    crate::media::PICKED_PICTURE.with(|p| *p.borrow_mut() = Some(test_picture("ME.PNG", 40, 40)));
+    h.click("Upload photo");
+    assert!(h.app.profile_photo.is_some());
+}
+
+#[test]
+fn choosing_a_photo_moves_nothing_in_the_dialog() {
+    use crate::i18n::{set_lang, Lang};
+    for lang in [Lang::En, Lang::Ko] {
+        let mut h = Ui1::new();
+        set_lang(lang);
+        // (the buttons are named by their words, in Korean too)
+        let upload = crate::i18n::tr("Upload photo");
+        let remove = crate::i18n::tr("Remove photo");
+        h.app.open_profile();
+        h.settle();
+        let before = (
+            h.modal_rect(),
+            h.rect("Profile email"),
+            h.rect("Avatar color 1"),
+            h.rect(upload),
+        );
+        crate::media::PICKED_PICTURE
+            .with(|p| *p.borrow_mut() = Some(test_picture("me.png", 60, 60)));
+        h.click(upload);
+        frames_until(&mut h, "the photo is ready", |h| {
+            h.app
+                .profile_photo
+                .as_ref()
+                .is_some_and(|p| p.att.is_some())
+        });
+        h.settle();
+        assert!(h.has(remove));
+        let after = (
+            h.modal_rect(),
+            h.rect("Profile email"),
+            h.rect("Avatar color 1"),
+            h.rect(upload),
+        );
+        let help = h.painted_text(crate::i18n::tr("JPG, PNG or WebP only"));
+        assert!(
+            help.len() == 1 && help[0].0.height() < 16.0,
+            "the formats fit one line under the button: {:?}",
+            help
+        );
+        set_lang(Lang::En);
+        assert_eq!(before, after, "Remove photo shows in room kept for it");
+    }
+}
+
+#[test]
 fn a_photo_chosen_then_cancelled_changes_nothing() {
     let mut h = Ui1::new();
     let me = h.app.data.me;

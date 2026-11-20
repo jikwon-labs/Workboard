@@ -19,8 +19,8 @@ pub(super) const PHOTO_PX: u32 = 512;
 /// Size the photos are decoded at for avatars.
 pub(super) const AVATAR_PX: u32 = 256;
 /// Side of the photo in the Edit profile dialog.
-const PREVIEW: f32 = 168.0;
-/// Width of the name and title fields beside it.
+const PREVIEW: f32 = 128.0;
+/// Width of the name and title fields to its right.
 const FIELDS_W: f32 = 340.0;
 
 /// The picture at `path` cut to its middle square and shrunk to PHOTO_PX
@@ -80,11 +80,22 @@ impl Modal {
 }
 
 impl App {
+    /// Edit profile (My settings) for me. Without an email of my own it
+    /// starts with the one I sign in with to the team server.
+    pub(super) fn profile_modal(&self) -> Modal {
+        let mut m = self.data.member(self.data.me).cloned().unwrap_or_default();
+        if m.email.trim().is_empty() {
+            if let Some(a) = &self.sync_rt.account {
+                m.email = a.clone();
+            }
+        }
+        Modal::profile(&m)
+    }
+
     /// Open Edit profile for me.
     pub(super) fn open_profile(&mut self) {
-        let m = self.data.member(self.data.me).cloned().unwrap_or_default();
         self.profile_photo = None;
-        self.modal = Some(Modal::profile(&m));
+        self.modal = Some(self.profile_modal());
     }
 
     /// Upload photo: choose a picture and start getting it ready.
@@ -97,6 +108,10 @@ impl App {
     /// Start getting the picture at `path` ready as my new photo: cropped
     /// and shrunk here, then checked, cached and sent like a chat picture.
     pub(super) fn use_profile_photo(&mut self, path: &Path) {
+        if !media::photo_file(path) {
+            self.toast(tr("Choose a JPG, PNG or WebP picture."));
+            return;
+        }
         match square_png(path) {
             Ok(png) => {
                 let remote = self.media_remote();
@@ -197,40 +212,6 @@ impl App {
             ui.label(RichText::new(s).strong().color(t.text));
         };
         ui.horizontal_top(|ui| {
-            // fixed: a width taken from what's left would grow the dialog
-            // a little every frame (the spacing between the columns)
-            let left = FIELDS_W;
-            ui.vertical(|ui| {
-                ui.set_width(left);
-                heading(ui, tr("Full name"));
-                let r = ui.add(field(name).desired_width(f32::INFINITY));
-                name_field(&r, "Profile full name");
-                ui.add_space(10.0);
-                heading(ui, tr("Display name"));
-                let r = ui.add(
-                    field(display)
-                        .hint_text(tr("Display name"))
-                        .desired_width(f32::INFINITY),
-                );
-                name_field(&r, "Profile display name");
-                help(
-                    ui,
-                    tr("This could be your first name or a nickname: what you'd like people to call you. Others see it before your full name."),
-                );
-                ui.add_space(10.0);
-                let job = crate::i18n::tr_ctx("Title (job)", "Title");
-                heading(ui, job);
-                let r = ui.add(field(title).hint_text(job).desired_width(f32::INFINITY));
-                name_field(&r, "Profile title");
-                help(
-                    ui,
-                    &crate::i18n::particles(&trf!(
-                        "Let people know what you do at {}.",
-                        self.data.workspace
-                    )),
-                );
-            });
-            ui.add_space(20.0);
             ui.vertical(|ui| {
                 ui.set_width(PREVIEW);
                 heading(ui, tr("Profile photo"));
@@ -279,19 +260,57 @@ impl App {
                 {
                     self.pick_profile_photo();
                 }
-                if photo.is_some()
-                    && ui
-                        .add_sized(
-                            vec2(PREVIEW, CONTROL_H),
-                            ghost(egui::Button::new(
-                                RichText::new(tr("Remove photo")).color(t.text2),
-                            )),
-                        )
-                        .clicked()
+                help(ui, tr("JPG, PNG or WebP only"));
+                // its room is kept without a photo, so choosing one doesn't
+                // push Email and the rest down
+                let remove = vec2(PREVIEW, CONTROL_H);
+                if photo.is_none() {
+                    ui.allocate_space(remove);
+                } else if ui
+                    .add_sized(
+                        remove,
+                        ghost(egui::Button::new(
+                            RichText::new(tr("Remove photo")).color(t.text2),
+                        )),
+                    )
+                    .clicked()
                 {
                     *photo = None;
                     self.profile_photo = None;
                 }
+            });
+            ui.add_space(20.0);
+            // fixed: a width taken from what's left would grow the dialog
+            // a little every frame (the spacing between the columns)
+            ui.vertical(|ui| {
+                ui.set_width(FIELDS_W);
+                heading(ui, tr("Full name"));
+                let r = ui.add(field(name).desired_width(f32::INFINITY));
+                name_field(&r, "Profile full name");
+                ui.add_space(10.0);
+                heading(ui, tr("Display name"));
+                let r = ui.add(
+                    field(display)
+                        .hint_text(tr("Display name"))
+                        .desired_width(f32::INFINITY),
+                );
+                name_field(&r, "Profile display name");
+                help(
+                    ui,
+                    tr("This could be your first name or a nickname: what you'd like people to call you. Others see it before your full name."),
+                );
+                ui.add_space(10.0);
+                let job = crate::i18n::tr_ctx("Title (job)", "Title");
+                heading(ui, job);
+                let r = ui.add(field(title).hint_text(job).desired_width(f32::INFINITY));
+                name_field(&r, "Profile title");
+                help(
+                    ui,
+                    &crate::i18n::particles(&trf!(
+                        "Let people know what you do at {}.",
+                        self.data.workspace
+                    )),
+                );
             });
         });
         ui.add_space(12.0);

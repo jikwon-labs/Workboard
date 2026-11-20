@@ -245,6 +245,56 @@ fn unseen_notifications_show_a_red_count_on_the_rail_and_sidebar() {
 }
 
 #[test]
+fn clicking_the_direct_messages_heading_folds_them_and_shows_the_count_on_it() {
+    let mut h = Ui1::new();
+    let name = two_unread_dms(&mut h);
+    h.settle();
+    h.scroll_into_view("Direct Messages");
+    assert!(h.has(&name));
+    assert_eq!(red_badge_in(&h, &name), Some("2".into()));
+    assert_eq!(red_badge_in(&h, "Direct Messages"), None, "rows carry it");
+
+    h.click("Direct Messages");
+    h.settle();
+    assert!(!h.has(&name), "the conversations fold away");
+    assert!(!h.has("New message"));
+    assert!(h
+        .app
+        .data
+        .extra
+        .folded_nav
+        .iter()
+        .any(|x| x == "Direct Messages"));
+    let me = h.app.data.me;
+    let total: usize = h
+        .app
+        .data
+        .channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Direct && h.app.listed(c))
+        .map(|c| h.app.unread_count(c))
+        .sum();
+    assert!(total >= 2, "{} unread for {}", total, me);
+    assert_eq!(
+        red_badge_in(&h, "Direct Messages"),
+        Some(total.to_string()),
+        "the heading carries the count while folded"
+    );
+
+    // the + on the heading still starts a message
+    h.click("Sidebar New message");
+    assert!(h.app.new_message_open);
+    h.app.new_message_open = false;
+    h.settle();
+
+    h.click("Direct Messages");
+    h.settle();
+    assert!(h.has(&name), "unfolded again");
+    assert!(h.app.data.extra.folded_nav.is_empty());
+    assert_eq!(red_badge_in(&h, "Direct Messages"), None);
+}
+
+#[test]
 fn messages_in_an_open_conversation_stay_unread_while_the_window_is_behind() {
     let mut h = Ui1::new();
     let name = two_unread_dms(&mut h);

@@ -854,10 +854,6 @@ impl App {
         if (filter.is_empty() || filter == "dms" || filter == "unread")
             && !self.hidden("Direct Messages")
         {
-            let hs = self.side_header(ui, "Direct Messages", &[("+", "New message")]);
-            if hs[0].clicked() {
-                self.new_message_open = true;
-            }
             let me = self.data.me;
             let dms: Vec<(u64, Option<Member>, usize)> = self
                 .data
@@ -876,6 +872,20 @@ impl App {
                     )
                 })
                 .collect();
+            let total = if muted {
+                0
+            } else {
+                dms.iter().map(|d| d.2).sum()
+            };
+            let (folded, hs) =
+                self.side_header_folding(ui, "Direct Messages", &[("+", "New message")], total);
+            if hs[0].clicked() {
+                self.new_message_open = true;
+            }
+            // a search or a filter still shows what's in a folded section
+            if folded && filter.is_empty() && !self.side_searching() {
+                return;
+            }
             for (id, other, real_unread) in dms {
                 let unread = if muted { 0 } else { real_unread };
                 let (name, sub) = match &other {

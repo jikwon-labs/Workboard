@@ -140,11 +140,51 @@ impl App {
         title: &str,
         icons: &[(&str, &str)],
     ) -> Vec<Response> {
+        self.side_header_ex(ui, title, icons, None).1
+    }
+
+    /// A section heading that folds its rows away when clicked (the arrow
+    /// beside the title shows which way). Folded, the section's unread count
+    /// sits on the heading instead. Gives whether the section is folded now,
+    /// and the icon buttons as `side_header` does.
+    pub(super) fn side_header_folding(
+        &mut self,
+        ui: &mut Ui,
+        title: &str,
+        icons: &[(&str, &str)],
+        unread: usize,
+    ) -> (bool, Vec<Response>) {
+        let folded = self.folded(title);
+        let (head, out) = self.side_header_ex(ui, title, icons, Some((folded, unread)));
+        if head.is_some_and(|h| h.clicked()) {
+            let f = &mut self.data.extra.folded_nav;
+            if folded {
+                f.retain(|x| x != title);
+            } else {
+                f.push(title.to_string());
+            }
+            self.dirty = true;
+            return (!folded, out);
+        }
+        (folded, out)
+    }
+
+    pub(super) fn folded(&self, title: &str) -> bool {
+        self.data.extra.folded_nav.iter().any(|x| x == title)
+    }
+
+    fn side_header_ex(
+        &self,
+        ui: &mut Ui,
+        title: &str,
+        icons: &[(&str, &str)],
+        fold: Option<(bool, usize)>,
+    ) -> (Option<Response>, Vec<Response>) {
         let t = self.t();
         ui.add_space(10.0);
         let w = ui.available_width();
         let (r, hresp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
-        ui.painter().text(
+        let tr_rect = ui.painter().text(
             r.left_center() + vec2(8.0, 0.0),
             Align2::LEFT_CENTER,
             tr(title),
@@ -152,6 +192,34 @@ impl App {
             t.text2,
         );
         let hovered = hresp.hovered() || ui.rect_contains_pointer(r);
+        // the whole heading folds the section; the icon buttons, made after
+        // it, sit on top and keep their own clicks
+        let head = fold.map(|(folded, unread)| {
+            let resp = ui
+                .interact(r, ui.id().with(("shdr_fold", title)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            name_it(&resp, title);
+            if hovered || folded {
+                crate::widgets::paint_triangle(
+                    ui.painter(),
+                    pos2(tr_rect.right() + 9.0, r.center().y),
+                    !folded,
+                    t.text3,
+                );
+            }
+            if folded && unread > 0 {
+                // just left of the icon buttons
+                let x = r.right() - 13.0 - 26.0 * icons.len() as f32 + 8.0;
+                super::paint_unread_badge(
+                    ui.painter(),
+                    t.danger,
+                    pos2(x, r.center().y),
+                    Align2::RIGHT_CENTER,
+                    unread,
+                );
+            }
+            resp
+        });
         let mut out = vec![];
         let mut x = r.right() - 13.0;
         for (i, (glyph, tip)) in icons.iter().enumerate().rev() {
@@ -194,7 +262,7 @@ impl App {
             x -= 26.0;
         }
         out.reverse();
-        out
+        (head, out)
     }
 
     pub(super) fn hidden(&self, item: &str) -> bool {
@@ -212,7 +280,7 @@ impl App {
         }
     }
 
-    fn side_searching(&self) -> bool {
+    pub(super) fn side_searching(&self) -> bool {
         self.side
             .search
             .as_ref()

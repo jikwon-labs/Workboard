@@ -493,6 +493,8 @@ pub struct Extra {
     pub rail_items: Vec<String>,
     /// Sidebar items the person hid.
     pub hidden_nav: Vec<String>,
+    /// Sidebar sections folded shut by clicking their heading.
+    pub folded_nav: Vec<String>,
     pub hidden_views: Vec<String>,
     /// Theme colour: black, purple, blue, pink, violet, indigo, orange, teal, bronze, mint.
     pub accent: String,
@@ -612,6 +614,7 @@ impl Default for Extra {
             pinned_tools: vec!["create_task".into(), "clip".into(), "stt".into()],
             rail_items: vec!["Planner".into(), "AI".into(), "Teams".into()],
             hidden_nav: vec![],
+            folded_nav: vec![],
             hidden_views: vec![],
             accent: "black".into(),
             auto_theme: false,
